@@ -61,7 +61,7 @@ numpy = ["numpy"]
 # the verdict. Measured on 8 cores: `-n 4` runs the suite in 2:41 fully
 # green, `-n auto` in 3:10 with one drifted verdict, and one process in
 # 8:15. Leave the machine headroom rather than claiming every core.
-test = ["pytest>=7", "pytest-xdist>=3", "mathema[numpy]",
+test = ["pytest>=7", "pytest-xdist>=3", "mathema[numpy,coverage]",
         # tomllib is stdlib only from 3.11, and the packaging-metadata
         # test reads pyproject directly, so it needs the backport on
         # the declared floor
