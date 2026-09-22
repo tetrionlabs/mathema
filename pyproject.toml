@@ -61,7 +61,11 @@ numpy = ["numpy"]
 # the verdict. Measured on 8 cores: `-n 4` runs the suite in 2:41 fully
 # green, `-n auto` in 3:10 with one drifted verdict, and one process in
 # 8:15. Leave the machine headroom rather than claiming every core.
-test = ["pytest>=7", "pytest-xdist>=3", "mathema[numpy]"]
+test = ["pytest>=7", "pytest-xdist>=3", "mathema[numpy]",
+        # tomllib is stdlib only from 3.11, and the packaging-metadata
+        # test reads pyproject directly, so it needs the backport on
+        # the declared floor
+        "tomli>=2; python_version < '3.11'"]
 # Local development and release tooling: the gates `.pre-commit-config
 # .yaml` runs, and the two commands the release workflow needs. Not a
 # runtime capability, so it stays out of `all`.
