@@ -57,7 +57,7 @@ public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behaviour
-may be reported to the maintainers at **conduct@tetrion.co**. All
+may be reported to the maintainers at **engineering@tetrion.co**. All
 complaints will be reviewed and investigated promptly and fairly.
 
 All maintainers are obligated to respect the privacy and security of

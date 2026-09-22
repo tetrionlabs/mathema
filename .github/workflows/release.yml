@@ -49,7 +49,15 @@ jobs:
   # any supported interpreter is not a release.
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    env:
+      # A GitHub standard runner is 2 vCPU and shared. Proof attempts
+      # are capped on the WALL CLOCK, so a slow or contended runner
+      # turns a `proven` into a `holds` and fails an assertion about
+      # the verdict rather than about the code. The defaults (3s/15s)
+      # are tuned for a fast developer machine; CI needs headroom.
+      MATHEMA_FAST_TIMEOUT: "15"
+      MATHEMA_EXTENSIVE_TIMEOUT: "60"
     strategy:
       fail-fast: false
       matrix:
@@ -60,7 +68,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e '.[test]'
-      - run: python -m pytest -q -n 4
+      - run: python -m pytest -q
 
   lint:
     runs-on: ubuntu-latest

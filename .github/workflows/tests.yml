@@ -19,7 +19,15 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    env:
+      # A GitHub standard runner is 2 vCPU and shared. Proof attempts
+      # are capped on the WALL CLOCK, so a slow or contended runner
+      # turns a `proven` into a `holds` and fails an assertion about
+      # the verdict rather than about the code. The defaults (3s/15s)
+      # are tuned for a fast developer machine; CI needs headroom.
+      MATHEMA_FAST_TIMEOUT: "15"
+      MATHEMA_EXTENSIVE_TIMEOUT: "60"
     strategy:
       fail-fast: false
       matrix:
@@ -35,7 +43,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e '.[test]'
-      - run: python -m pytest -q -n 4
+      - run: python -m pytest -q
 
   # `requires-python` is deliberately unbounded above (capping it
   # would strand users on a new interpreter until we cut a release),
@@ -45,7 +53,15 @@ jobs:
   # never a reason to block a pull request.
   test-prerelease:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    env:
+      # A GitHub standard runner is 2 vCPU and shared. Proof attempts
+      # are capped on the WALL CLOCK, so a slow or contended runner
+      # turns a `proven` into a `holds` and fails an assertion about
+      # the verdict rather than about the code. The defaults (3s/15s)
+      # are tuned for a fast developer machine; CI needs headroom.
+      MATHEMA_FAST_TIMEOUT: "15"
+      MATHEMA_EXTENSIVE_TIMEOUT: "60"
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +70,7 @@ jobs:
           python-version: "3.14"
           allow-prereleases: true
       - run: pip install -e '.[test]'
-      - run: python -m pytest -q -n 4
+      - run: python -m pytest -q
 
   lint:
     runs-on: ubuntu-latest
