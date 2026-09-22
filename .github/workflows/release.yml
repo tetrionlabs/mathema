@@ -31,6 +31,17 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # A rehearsal. Runs the whole pipeline (suite, lint, version guard,
+  # licence check, build, artefact verification) and STOPS before
+  # either publish, so the release can be proven end to end without a
+  # tag and without anything reaching an index. A release-candidate
+  # tag cannot serve this purpose: the version guard compares the tag
+  # against `__version__`, so `v0.6.0rc1` would fail it by design.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to rehearse; must equal mathema.__version__"
+        required: true
 
 permissions:
   contents: read
@@ -90,7 +101,11 @@ jobs:
       - name: Version from tag matches the package
         id: ver
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_VERSION="${{ inputs.version }}"
+          else
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+          fi
           PKG_VERSION="$(python -c 'import re,pathlib;print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("mathema/__init__.py").read_text()).group(1))')"
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
             echo "tag $TAG_VERSION != package $PKG_VERSION" >&2; exit 1
@@ -145,6 +160,8 @@ jobs:
           path: dist/
 
   publish-testpypi:
+    # never on a rehearsal
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     environment: testpypi
@@ -164,6 +181,7 @@ jobs:
     # Gated by the "pypi" environment's required reviewer: the real
     # publish happens only after an explicit approval in the GitHub UI,
     # ideally after a clean-venv install from TestPyPI has been tried.
+    if: github.event_name == 'push'
     needs: publish-testpypi
     runs-on: ubuntu-latest
     environment: pypi

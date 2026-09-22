@@ -1,0 +1,39 @@
+# Documentation changes get their own gate. Building the site with
+# --strict catches a broken link, a nav orphan or a bad reference in
+# about a minute, where the full test suite is slow and could not
+# fail for a prose edit anyway.
+name: docs-check
+
+on:
+  push:
+    branches: [main]
+    paths: &docs-paths
+      - "docs/**"
+      - "**.md"
+      - "mkdocs.yml"
+      - ".github/workflows/docs-check.yml"
+  pull_request:
+    paths: *docs-paths
+
+concurrency:
+  group: docs-check-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e '.[docs]'
+      # --strict promotes warnings to errors, so an orphaned page or a
+      # dangling anchor fails here rather than at deploy time
+      - run: mkdocs build --strict
