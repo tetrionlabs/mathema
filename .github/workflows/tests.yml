@@ -3,7 +3,18 @@ name: tests
 on:
   push:
     branches: [main]
+    # A prose change cannot break the suite, and the suite is slow.
+    # Documentation-only pushes are handled by docs-check.yml instead,
+    # which builds the site in about a minute.
+    paths-ignore: &docs-paths
+      - "docs/**"
+      - "**.md"
+      - "mkdocs.yml"
+      - "LICENSE.md"
+      - "NOTICE"
+      - "CITATION.cff"
   pull_request:
+    paths-ignore: *docs-paths
   # The full interpreter matrix weekly, so drift on an interpreter the
   # per-push tier does not exercise still surfaces within days.
   schedule:
