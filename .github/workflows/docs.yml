@@ -38,10 +38,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # release event: this is the tag's tree; dispatch: current main
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
 
       - name: Build the site (strict)
         run: |
@@ -50,7 +50,7 @@ jobs:
           uv run mkdocs build --strict
 
       - name: Deploy to Cloudflare Workers static assets
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
