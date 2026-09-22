@@ -1,0 +1,45 @@
+# Claim set: partial Fourier sum  S_N(x) = a0/2 + Σ_k a_k·cos(kx) + b_k·sin(kx)
+# Implementation: examples/claims/functions.py::fourier_sum
+#
+# ILLUSTRATIVE, NOT LOADABLE. This is a sketch in a mathematician's
+# notation, not a claims file mathema reads, see examples/README.md.
+# `when:`, `status:`, and `refined_to:` are notation for this document;
+# a real claims file states its region inside the law, and verdicts are
+# written by mathema, never authored.
+fourier.fourier_sum:
+  intent: Partial Fourier sum from cosine coefficients a and sine coefficients b
+  signature: "(real, sequence[real], sequence[real], real) → real"
+  claims:
+    - name: periodic
+      concepts: [symmetry]  # f(T x) = f(x), T = shift by 2π
+      law: "S(a0, a, b, x + 2*pi) == S(a0, a, b, x)"
+      route: derive               # periodicity of sin/cos, termwise
+    - name: linear-in-coefficients
+      concepts: [compositional, linearity, superposition]  # superposition
+      law: "S(c*a0 + d*a0', c*a + d*a', c*b + d*b', x) == c*S(a0,a,b,x) + d*S(a0',a',b',x)"
+      route: derive
+    - name: even-when-sine-free
+      concepts: [symmetry]  # T = negate input, S = identity
+      law: "S(a0, a, 0, -x) == S(a0, a, 0, x)"
+      when: "all b_k == 0"        # parity is conditional on coefficient structure
+      route: derive               # cos is even
+    - name: odd-when-cosine-free
+      concepts: [symmetry]  # T = negate input, S = negate output
+      law: "S(0, 0, b, -x) == -S(0, 0, b, x)"
+      when: "a0 == 0 and all a_k == 0"
+      route: derive               # sin is odd
+    - name: bessel-bound
+      concepts: [aggregate, orthogonality, bessel-inequality]  # energy of the partial sum ≤ energy of the signal
+      law: "mean(S_N(x)^2 over a period) <= mean(f(x)^2 over a period)"
+      route: probe
+    - name: uniform-convergence
+      concepts: [asymptotic]
+      law: "sup_x |S_N(x) - f(x)| -> 0 as N -> inf"
+      status: falsified           # counterexample: the square wave
+      counterexample: "square wave: overshoot near the jump tends to ~8.95% (Gibbs)"
+      refined_to:
+        law: "S_N(x) -> f(x) pointwise wherever f is continuous"
+        note: >
+          Canonical claim-refinement story: the falsification did not kill the
+          claim, it produced its true domain; the Gibbs phenomenon is a
+          discovery recorded as a refined claim plus a permanent counterexample.

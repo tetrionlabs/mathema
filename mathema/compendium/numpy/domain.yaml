@@ -1,0 +1,61 @@
+# numpy functions that return nan (silently, with a RuntimeWarning) when
+# the argument leaves the function's mathematical domain. The boundary of
+# each nan_when region is offered as a sampling hint, and is_compendium_
+# safe(numpy) falsifies when one of these nan values reaches the output.
+package: numpy
+versions: ">=1.24,<3"
+functions:
+  numpy.sqrt:
+    params: [x]
+    nan_when:
+      - 'x < 0'
+    limitations:
+      - 'negative input returns nan with a RuntimeWarning, never raises'
+  numpy.log:
+    params: [x]
+    nan_when:
+      - 'x < 0'
+    limitations:
+      - 'x = 0 returns -inf, not an error; x < 0 returns nan'
+  numpy.log2:
+    params: [x]
+    nan_when:
+      - 'x < 0'
+    limitations:
+      - 'x = 0 returns -inf; x < 0 returns nan'
+  numpy.log10:
+    params: [x]
+    nan_when:
+      - 'x < 0'
+    limitations:
+      - 'x = 0 returns -inf; x < 0 returns nan'
+  numpy.log1p:
+    params: [x]
+    nan_when:
+      - 'x < -1'
+    limitations:
+      - 'x = -1 returns -inf; x < -1 returns nan'
+  numpy.arcsin:
+    params: [x]
+    nan_when:
+      - 'abs(x) > 1'
+    limitations:
+      - 'out-of-range input returns nan with a RuntimeWarning'
+  numpy.arccos:
+    params: [x]
+    nan_when:
+      - 'abs(x) > 1'
+    limitations:
+      - 'out-of-range input returns nan with a RuntimeWarning'
+  numpy.arccosh:
+    params: [x]
+    nan_when:
+      - 'x < 1'
+    limitations:
+      - 'x < 1 returns nan with a RuntimeWarning'
+  numpy.arctanh:
+    params: [x]
+    nan_when:
+      - 'abs(x) > 1'
+    limitations:
+      - 'abs(x) = 1 returns +/-inf; abs(x) > 1 returns nan'

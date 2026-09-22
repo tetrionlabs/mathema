@@ -1,0 +1,37 @@
+# numpy functions with a known, always-finite output RANGE. These are not
+# hazards, they carry bound CLAIMS a caller can rest a premise on (the
+# same role math.sqrt's sqrt_nonneg plays), and being covered means
+# is_compendium_safe(numpy) sees a caller uses numpy and confirms the
+# output stays finite.
+package: numpy
+versions: ">=1.24,<3"
+functions:
+  numpy.tanh:
+    params: [x]
+    claims:
+      - name: tanh_bounded
+        statement: 'for x in [-1e6, 1e6], -1 <= f(x) <= 1'
+  numpy.sin:
+    params: [x]
+    claims:
+      - name: sin_bounded
+        statement: 'for x in [-1e6, 1e6], -1 <= f(x) <= 1'
+  numpy.cos:
+    params: [x]
+    claims:
+      - name: cos_bounded
+        statement: 'for x in [-1e6, 1e6], -1 <= f(x) <= 1'
+  numpy.abs:
+    params: [x]
+    claims:
+      - name: abs_nonneg
+        statement: 'for x in [-1e6, 1e6], f(x) >= 0'
+  numpy.clip:
+    params: [x, lo, hi]
+    claims:
+      - name: clip_lower
+        statement: 'assuming lo <= hi, for x in [-1e6, 1e6], lo <= f(x, lo, hi)'
+      - name: clip_upper
+        statement: 'assuming lo <= hi, for x in [-1e6, 1e6], f(x, lo, hi) <= hi'
+    limitations:
+      - 'reversed bounds (lo > hi) are not checked; the result is hi'

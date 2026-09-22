@@ -1,0 +1,34 @@
+# .github/workflows/mathema.yml
+# Claim coverage and transformation lineage as first-class CI artifacts.
+name: mathema
+on: [push, pull_request]
+
+jobs:
+  claims:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install mathema
+
+      # Annotations appear inline on the PR; exit 1 fails the job under --strict
+      - name: Claim check (annotated)
+        run: mathema check src/models.py --format github --domain alpha=0:1 --strict
+
+      # Artifacts: machine-readable claim coverage + badge
+      - name: Claim coverage report
+        if: always()
+        run: |
+          mathema check src/models.py --format json --output claim-coverage.json \
+            --badge claim-badge.json
+      - name: Step summary
+        if: always()
+        run: mathema check src/models.py --format md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mathema-artifacts
+          path: |
+            claim-coverage.json
+            claim-badge.json

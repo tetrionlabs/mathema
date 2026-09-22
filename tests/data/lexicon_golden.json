@@ -1,0 +1,542 @@
+{
+ "relation_eq": {
+  "input": "f(x) == x",
+  "unicode": "f(x) = x",
+  "ascii": "f(x) = x"
+ },
+ "relation_le_unicode": {
+  "input": "f(x) ≤ 1",
+  "unicode": "f(x) ≤ 1",
+  "ascii": "f(x) <= 1"
+ },
+ "equivalence_canonical": {
+  "input": "f =:= g",
+  "unicode": "f ≡ g",
+  "ascii": "f =:= g"
+ },
+ "equivalence_word_alias": {
+  "input": "f equiv g",
+  "unicode": "f ≡ g",
+  "ascii": "f =:= g"
+ },
+ "equivalence_with_let": {
+  "input": "let g = numpy.sum, f =:= g",
+  "unicode": "let g = numpy.sum, f ≡ g",
+  "ascii": "let g = numpy.sum, f =:= g"
+ },
+ "power_caret": {
+  "input": "f(x)^2 >= 0",
+  "unicode": "f(x)^2 ≥ 0",
+  "ascii": "f(x)^2 >= 0"
+ },
+ "abs_bars": {
+  "input": "|f(x)| <= 1",
+  "unicode": "|f(x)| ≤ 1",
+  "ascii": "|f(x)| <= 1"
+ },
+ "factorial_postfix": {
+  "input": "for n in [1, 5] subset Z, f(n) <= n!",
+  "unicode": "∀ n ∈ [1, 5] ⊂ ℤ ∪ {∅}, f(n) ≤ factorial(n)",
+  "ascii": "for n in [1, 5]:int|missing, f(n) <= factorial(n)"
+ },
+ "dim_length_premise": {
+  "input": "assuming len(x) == len(y), f(x, y) == f(y, x)",
+  "unicode": "assuming dim(x, 0) == dim(y, 0), f(x, y) = f(y, x)",
+  "ascii": "assuming dim(x, 0) == dim(y, 0), f(x, y) = f(y, x)"
+ },
+ "dim_conformability": {
+  "input": "assuming cols(A) == rows(B), f(A, B) == f(A, B)",
+  "unicode": "assuming dim(A, 1) == dim(B, 0), f(A, B) = f(A, B)",
+  "ascii": "assuming dim(A, 1) == dim(B, 0), f(A, B) = f(A, B)"
+ },
+ "dim_marker_premise": {
+  "input": "assuming n >= 2, f(a) >= 0",
+  "unicode": "assuming n >= 2, f(a) ≥ 0",
+  "ascii": "assuming n >= 2, f(a) >= 0"
+ },
+ "space_vector_real": {
+  "input": "for v in R^n, f(v) >= 0",
+  "unicode": "∀ v ∈ ℝⁿ ∪ {∅}, f(v) ≥ 0",
+  "ascii": "for v in R^n|missing, f(v) >= 0"
+ },
+ "space_vector_bounded": {
+  "input": "for xs in [0, 1]^n, f(xs) <= 1",
+  "unicode": "∀ xs ∈ [0.0, 1.0]ⁿ ⊂ ℝ ∪ {∅}, f(xs) ≤ 1",
+  "ascii": "for xs in [0.0, 1.0]^n:float|missing, f(xs) <= 1"
+ },
+ "space_matrix": {
+  "input": "for A in R^(m*n), f(A) == f(A)",
+  "unicode": "∀ A ∈ ℝᵐˣⁿ ∪ {∅}, f(A) = f(A)",
+  "ascii": "for A in R^(m*n)|missing, f(A) = f(A)"
+ },
+ "space_shared_dim": {
+  "input": "for x in R^n, y in R^n, f(x, y) == f(y, x)",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, y ∈ ℝⁿ ∪ {∅}, f(x, y) = f(y, x)",
+  "ascii": "for x in R^n|missing, y in R^n|missing, f(x, y) = f(y, x)"
+ },
+ "domain_closed_interval": {
+  "input": "for x in [0, 1], f(x) >= 0",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in [0.0, 1.0]:float|missing, f(x) >= 0"
+ },
+ "domain_open_interval": {
+  "input": "for x in (0, 1), f(x) >= 0",
+  "unicode": "∀ x ∈ (0.0, 1.0) ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in (0.0, 1.0):float|missing, f(x) >= 0"
+ },
+ "domain_subset_integer": {
+  "input": "for n in [0, 100] subset Z, f(n) >= 0",
+  "unicode": "∀ n ∈ [0, 100] ⊂ ℤ ∪ {∅}, f(n) ≥ 0",
+  "ascii": "for n in [0, 100]:int|missing, f(n) >= 0"
+ },
+ "relation_indexing": {
+  "input": "f(x, 1.0) == x[-1]",
+  "unicode": "f(x, 1.0) = x[-1]",
+  "ascii": "f(x, 1.0) = x[-1]"
+ },
+ "relation_boolean_rhs": {
+  "input": "f(mi, chance) == (mi <= chance)",
+  "unicode": "f(mi, chance) = (mi <= chance)",
+  "ascii": "f(mi, chance) = (mi <= chance)"
+ },
+ "outcome_reference": {
+  "input": "f(x) > 0 => self.stays_positive",
+  "unicode": "f(x) > 0 ⟹ self.stays_positive",
+  "ascii": "f(x) > 0 => self.stays_positive"
+ },
+ "raises_typed": {
+  "input": "raises(f(x), ValueError)",
+  "unicode": "let y = ValueError, raises(f(x), ValueError)",
+  "ascii": "raises(f(x), ValueError)"
+ },
+ "is_pole_safe": {
+  "input": "is_pole_safe(x)",
+  "unicode": "x is pole safe",
+  "ascii": "is_pole_safe(x)"
+ },
+ "negated_predicate": {
+  "input": "not is_pole_safe(x)",
+  "unicode": "not x is pole safe",
+  "ascii": "not is_pole_safe(x)"
+ },
+ "is_extremity_safe": {
+  "input": "is_extremity_safe(x)",
+  "unicode": "x is extremity safe",
+  "ascii": "is_extremity_safe(x)"
+ },
+ "is_representation_safe": {
+  "input": "is_representation_safe(x)",
+  "unicode": "x is representation safe",
+  "ascii": "is_representation_safe(x)"
+ },
+ "is_empty_safe": {
+  "input": "is_empty_safe(xs)",
+  "unicode": "xs is empty safe",
+  "ascii": "is_empty_safe(xs)"
+ },
+ "is_arbitrary_input_safe": {
+  "input": "is_arbitrary_input_safe(s)",
+  "unicode": "s is arbitrary input safe",
+  "ascii": "is_arbitrary_input_safe(s)"
+ },
+ "is_compendium_safe": {
+  "input": "is_compendium_safe(numpy)",
+  "unicode": "numpy is compendium safe",
+  "ascii": "is_compendium_safe(numpy)"
+ },
+ "is_compendium_safe_scoped": {
+  "input": "for x in [0, 1e6], is_compendium_safe(numpy)",
+  "unicode": "∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, numpy is compendium safe",
+  "ascii": "for x in [0.0, 1000000.0]:float|missing, is_compendium_safe(numpy)"
+ },
+ "is_arbitrary_input_safe_postfix": {
+  "input": "s is arbitrary input safe",
+  "unicode": "s is arbitrary input safe",
+  "ascii": "is_arbitrary_input_safe(s)"
+ },
+ "safety_predicate_function_wide": {
+  "input": "is_missing_safe(f)",
+  "unicode": "f is missing safe",
+  "ascii": "is_missing_safe(f)"
+ },
+ "matrix_symmetric": {
+  "input": "is_symmetric(A)",
+  "unicode": "A is symmetric",
+  "ascii": "is_symmetric(A)"
+ },
+ "matrix_symmetric_postfix": {
+  "input": "A is symmetric",
+  "unicode": "A is symmetric",
+  "ascii": "is_symmetric(A)"
+ },
+ "matrix_symmetric_output": {
+  "input": "is_symmetric(f(A))",
+  "unicode": "is_symmetric(f(A))",
+  "ascii": "is_symmetric(f(A))"
+ },
+ "is_sorted_output": {
+  "input": "is_sorted_output(f(xs))",
+  "unicode": "is_sorted_output(f(xs))",
+  "ascii": "is_sorted_output(f(xs))"
+ },
+ "output_never_none": {
+  "input": "output_never_none(f(x))",
+  "unicode": "output_never_none(f(x))",
+  "ascii": "output_never_none(f(x))"
+ },
+ "matrix_positive_definite": {
+  "input": "is_positive_definite(A)",
+  "unicode": "A is positive definite",
+  "ascii": "is_positive_definite(A)"
+ },
+ "matrix_finite": {
+  "input": "is_finite(A)",
+  "unicode": "A is finite",
+  "ascii": "is_finite(A)"
+ },
+ "matrix_determinant_product": {
+  "input": "for A in R^(n*n), B in R^(n*n), det(A @ B) == det(A) * det(B)",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, det(A @ B) = det(A)*det(B)",
+  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, det(A @ B) = det(A)*det(B)"
+ },
+ "matrix_transpose_product": {
+  "input": "for A in R^(n*n), B in R^(n*n), (A @ B).T == B.T @ A.T",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, (A @ B).T = B.T @ A.T",
+  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, (A @ B).T = B.T @ A.T"
+ },
+ "matrix_trace_additive": {
+  "input": "for A in R^(n*n), B in R^(n*n), trace(A + B) == trace(A) + trace(B)",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, trace(A + B) = trace(A) + trace(B)",
+  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, trace(A + B) = trace(A) + trace(B)"
+ },
+ "matrix_inverse_identity": {
+  "input": "for A in R^(n*n), inv(A) @ A == I(n)",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, inv(A) @ A = I(n)",
+  "ascii": "for A in R^(n*n)|missing, inv(A) @ A = I(n)"
+ },
+ "matrix_output_symmetric_postfix": {
+  "input": "for A in R^(n*n), f(A) is symmetric",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, is_symmetric(f(A))",
+  "ascii": "for A in R^(n*n)|missing, is_symmetric(f(A))"
+ },
+ "matrix_transpose_sugar": {
+  "input": "let A be R^(n*n), A^T == A",
+  "unicode": "let A be ℝⁿˣⁿ ∪ {∅}, A.T = A",
+  "ascii": "let A be R^(n*n)|missing, A.T = A"
+ },
+ "matrix_determinant_sugar": {
+  "input": "for A in R^(n*n), |A| >= 0",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, det(A) ≥ 0",
+  "ascii": "for A in R^(n*n)|missing, det(A) >= 0"
+ },
+ "inferred_literal_domain": {
+  "input": "raises(f(50, 0), ValueError)",
+  "unicode": "let x = ValueError, raises(f(50, 0), ValueError)",
+  "ascii": "raises(f(50, 0), ValueError)"
+ },
+ "let_alias": {
+  "input": "let m = m1, for m1 in [0.1,1000], x1 in [-100,100], x2 in [-100,100], f(m,x1,m,x2) == (x1+x2)/2",
+  "unicode": "∀ m1 ∈ [0.1, 1000.0] ⊂ ℝ ∪ {∅}, x1 ∈ [-100.0, 100.0] ⊂ ℝ ∪ {∅}, x2 ∈ [-100.0, 100.0] ⊂ ℝ ∪ {∅}, f(m1, x1, m1, x2) = x1/2 + x2/2",
+  "ascii": "for m1 in [0.1, 1000.0]:float|missing, x1 in [-100.0, 100.0]:float|missing, x2 in [-100.0, 100.0]:float|missing, f(m1, x1, m1, x2) = x1/2 + x2/2"
+ },
+ "let_function_dotted": {
+  "input": "let g = math.sqrt, for x in (0,100], g(x) >= 0",
+  "unicode": "let g = math.sqrt, ∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {∅}, g(x) ≥ 0",
+  "ascii": "let g = math.sqrt, for x in (0.0, 100.0]:float|missing, g(x) >= 0"
+ },
+ "let_free_var_closed": {
+  "input": "let c be [-1e6,1e6], for x in [0,10], f(x) + c >= 0",
+  "unicode": "let c be [-1000000.0, 1000000.0] ⊂ ℝ ∪ {∅}, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, c + f(x) ≥ 0",
+  "ascii": "let c be [-1000000.0, 1000000.0]:float|missing, for x in [0.0, 10.0]:float|missing, c + f(x) >= 0"
+ },
+ "let_free_var_typed": {
+  "input": "let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0",
+  "unicode": "let c be [1, 100] ⊂ ℤ ∪ {∅}, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, c + f(x) ≥ 0",
+  "ascii": "let c be [1, 100]:int|missing, for x in [0.0, 10.0]:float|missing, c + f(x) >= 0"
+ },
+ "let_pseudo_infinity": {
+  "input": "let |inf| be 1e12, for x in [0, oo], f(x) >= 0",
+  "unicode": "let |∞| be 1e+12, ∀ x ∈ [0.0, inf] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "let |inf| be 1e+12, for x in [0.0, inf]:float|missing, f(x) >= 0"
+ },
+ "stress_gauge_invariance": {
+  "input": "let c be [-1e6,1e6], for dh in [-1e6,1e6], t in [0,1000], ds in [-1e6,1e6], d(f(dh+c,t,ds), t) == d(f(dh,t,ds), t)",
+  "unicode": "let c be [-1000000.0, 1000000.0] ⊂ ℝ ∪ {∅}, ∀ dh ∈ [-1000000.0, 1000000.0] ⊂ ℝ ∪ {∅}, t ∈ [0.0, 1000.0] ⊂ ℝ ∪ {∅}, ds ∈ [-1000000.0, 1000000.0] ⊂ ℝ ∪ {∅}, ∂(f(c + dh, t, ds)/∂t) = ∂(f(dh, t, ds)/∂t)",
+  "ascii": "let c be [-1000000.0, 1000000.0]:float|missing, for dh in [-1000000.0, 1000000.0]:float|missing, t in [0.0, 1000.0]:float|missing, ds in [-1000000.0, 1000000.0]:float|missing, d(f(c + dh, t, ds), t) = d(f(dh, t, ds), t)"
+ },
+ "stress_mixed_let_and_types": {
+  "input": "let g = math.sqrt, let c be [1,100] subset integer, for x in (0, 100], g(x) + c >= 0",
+  "unicode": "let g = math.sqrt, let c be [1, 100] ⊂ ℤ ∪ {∅}, ∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {∅}, c + g(x) ≥ 0",
+  "ascii": "let g = math.sqrt, let c be [1, 100]:int|missing, for x in (0.0, 100.0]:float|missing, c + g(x) >= 0"
+ },
+ "auto_let_greek_param": {
+  "input": "for theta in [0, 1], f(theta) >= 0",
+  "unicode": "let θ = theta, ∀ θ ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(θ) ≥ 0",
+  "ascii": "for theta in [0.0, 1.0]:float|missing, f(theta) >= 0"
+ },
+ "auto_let_long_param": {
+  "input": "for acceleration in [0, 100], f(acceleration) >= 0",
+  "unicode": "let x = acceleration, ∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for acceleration in [0.0, 100.0]:float|missing, f(acceleration) >= 0"
+ },
+ "auto_let_long_func": {
+  "input": "let compute_square_root = numpy.sqrt, for x in [0, 100], compute_square_root(x) >= 0",
+  "unicode": "let g = numpy.sqrt, ∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, g(x) ≥ 0",
+  "ascii": "let g = numpy.sqrt, for x in [0.0, 100.0]:float|missing, g(x) >= 0"
+ },
+ "mixed_membership_and_relation": {
+  "input": "for x ∈ [0, 1], f(x) <= 1",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≤ 1",
+  "ascii": "for x in [0.0, 1.0]:float|missing, f(x) <= 1"
+ },
+ "mixed_ascii_for_unicode_relation": {
+  "input": "for x in (0,100], f(x) ≥ 0",
+  "unicode": "∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in (0.0, 100.0]:float|missing, f(x) >= 0"
+ },
+ "mixed_backslash_greek_and_unicode_relation": {
+  "input": "f(\\alpha) ≤ 1",
+  "unicode": "f(α) ≤ 1",
+  "ascii": "f(\\alpha) <= 1"
+ },
+ "domain_excluded_point": {
+  "input": "for x in [-1, 1] \\ {1}, f(x) >= 0",
+  "unicode": "∀ x ∈ [-1.0, 1.0] \\ {1} ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in [-1.0, 1.0] \\ {1}:float|missing, f(x) >= 0"
+ },
+ "domain_discrete_strings": {
+  "input": "for scale in {\"info\", \"linear\"}, f(r, scale) >= 0",
+  "unicode": "∀ scale ∈ {\"info\", \"linear\"}, f(r, scale) ≥ 0",
+  "ascii": "for scale in {\"info\", \"linear\"}, f(r, scale) >= 0"
+ },
+ "domain_natural_numbers": {
+  "input": "for n in N, f(n) >= 0",
+  "unicode": "∀ n ∈ ℕ ∪ {∅}, f(n) ≥ 0",
+  "ascii": "for n in N|missing, f(n) >= 0"
+ },
+ "domain_complex": {
+  "input": "for z in C, f(z) == z",
+  "unicode": "∀ z ∈ ℂ ∪ {∅}, f(z) = z",
+  "ascii": "for z in C|missing, f(z) = z"
+ },
+ "relation_approx": {
+  "input": "f(x) ~= x",
+  "unicode": "f(x) ≈ x",
+  "ascii": "f(x) ~= x"
+ },
+ "derivative_call": {
+  "input": "d(f(x), x) >= 0",
+  "unicode": "f'(x) ≥ 0",
+  "ascii": "d(f(x), x) >= 0"
+ },
+ "derivative_prime": {
+  "input": "f'(x) >= 0",
+  "unicode": "f'(x) ≥ 0",
+  "ascii": "d(f(x), x) >= 0"
+ },
+ "derivative_partial_symbol": {
+  "input": "∂(f(x, y), x) == y",
+  "unicode": "∂(f(x, y)/∂x) = y",
+  "ascii": "d(f(x, y), x) = y"
+ },
+ "derivative_second_mixed": {
+  "input": "d(f(x, y), x, y) == 0",
+  "unicode": "∂²(f(x, y)/∂x∂y) = 0",
+  "ascii": "d(f(x, y), x, y) = 0"
+ },
+ "derivative_at_point": {
+  "input": "d(f(x), x) @ {x = 1} == 2",
+  "unicode": "f'(x) at {x=1} = 2",
+  "ascii": "d(f(x), x) @ {x=1} = 2"
+ },
+ "derivative_at_word": {
+  "input": "d(f(x), x) at {x = 1} == 2",
+  "unicode": "f'(x) at {x=1} = 2",
+  "ascii": "d(f(x), x) @ {x=1} = 2"
+ },
+ "limit_call": {
+  "input": "lim(f(x), x, oo) == 0",
+  "unicode": "lim(f(x), x, ∞) = 0",
+  "ascii": "lim(f(x), x, oo) = 0"
+ },
+ "limit_arrow": {
+  "input": "lim(f(x), x -> 0) == 0",
+  "unicode": "lim(f(x), x, 0) = 0",
+  "ascii": "lim(f(x), x, 0) = 0"
+ },
+ "integrate_definite": {
+  "input": "integrate(f(x), x, 0, 1) == 1",
+  "unicode": "∫₀¹(f(x), x, 0, 1) = 1",
+  "ascii": "integrate(f(x), x, 0, 1) = 1"
+ },
+ "integral_symbol": {
+  "input": "∫(f(x), x, 0, 1) == 1",
+  "unicode": "∫₀¹(f(x), x, 0, 1) = 1",
+  "ascii": "integrate(f(x), x, 0, 1) = 1"
+ },
+ "integrate_evaluation_bar": {
+  "input": "integrate(f(x), x)|_{0}^{1} == 1",
+  "unicode": "∫₀¹(f(x), x, 0, 1) = 1",
+  "ascii": "integrate(f(x), x, 0, 1) = 1"
+ },
+ "sum_subscript": {
+  "input": "Sum(f(i))_{i=1}^n == n*(n+1)",
+  "unicode": "Sum(f(i), i, 1, n) = n*(n + 1)",
+  "ascii": "Sum(f(i), i, 1, n) = n*(n + 1)"
+ },
+ "prod_call": {
+  "input": "Prod(f(i), i, 1, n) >= 0",
+  "unicode": "Prod(f(i), i, 1, n) ≥ 0",
+  "ascii": "Prod(f(i), i, 1, n) >= 0"
+ },
+ "principal_value": {
+  "input": "P.V.(integrate(1/(x - c), x, -1, 1)) == f(c)",
+  "unicode": "P.V.(∫₋₁¹(1/(-c + x), x, -1, 1)) = f(c)",
+  "ascii": "P.V.(integrate(1/(-c + x), x, -1, 1)) = f(c)"
+ },
+ "assuming_inequality": {
+  "input": "assuming b^2 - 4*a*c >= 0.01, for a in [1,10], b in [-10,10], c in [-10,10], d(f(a,b,c), c) <= 0",
+  "unicode": "assuming b^2 - 4*a*c >= 0.01, ∀ a ∈ [1.0, 10.0] ⊂ ℝ ∪ {∅}, b ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, c ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, ∂(f(a, b, c)/∂c) ≤ 0",
+  "ascii": "assuming b^2 - 4*a*c >= 0.01, for a in [1.0, 10.0]:float|missing, b in [-10.0, 10.0]:float|missing, c in [-10.0, 10.0]:float|missing, d(f(a, b, c), c) <= 0"
+ },
+ "assuming_nonzero": {
+  "input": "assuming k != 0, f(x, k) == x/k",
+  "unicode": "assuming k != 0, f(x, k) = x/k",
+  "ascii": "assuming k != 0, f(x, k) = x/k"
+ },
+ "assuming_named_claim": {
+  "input": "assuming real_roots, for a in [1,10], b in [-10,10], c in [-10,10], d(f(a,b,c), c) <= 0",
+  "unicode": "assuming real_roots, ∀ a ∈ [1.0, 10.0] ⊂ ℝ ∪ {∅}, b ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, c ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, ∂(f(a, b, c)/∂c) ≤ 0",
+  "ascii": "assuming real_roots, for a in [1.0, 10.0]:float|missing, b in [-10.0, 10.0]:float|missing, c in [-10.0, 10.0]:float|missing, d(f(a, b, c), c) <= 0"
+ },
+ "assuming_prerequisite_holds": {
+  "input": "assuming grows holds, for x in [0,10], f(x) == 2*x",
+  "unicode": "assuming grows holds, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, f(x) = 2*x",
+  "ascii": "assuming grows holds, for x in [0.0, 10.0]:float|missing, f(x) = 2*x"
+ },
+ "assuming_qualified_prerequisite": {
+  "input": "assuming numpy.clip.clip_lower holds, for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)",
+  "unicode": "assuming numpy.clip.clip_lower holds, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+  "ascii": "assuming numpy.clip.clip_lower holds, for w in [-50.0, 50.0]:float|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
+ },
+ "assuming_prerequisite_proven": {
+  "input": "assuming base_case is proven, for n in [2, 30] subset Z, f(n) == f(n-1) + f(n-2)",
+  "unicode": "assuming base_case is proven, ∀ n ∈ [2, 30] ⊂ ℤ ∪ {∅}, f(n) = f(n - 2) + f(n - 1)",
+  "ascii": "assuming base_case is proven, for n in [2, 30]:int|missing, f(n) = f(n - 2) + f(n - 1)"
+ },
+ "assuming_is_defined": {
+  "input": "assuming is_defined(f), for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)",
+  "unicode": "assuming f is defined, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+  "ascii": "assuming f is defined, for w in [-50.0, 50.0]:float|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
+ },
+ "assuming_is_defined_postfix": {
+  "input": "assuming f is defined, for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)",
+  "unicode": "assuming f is defined, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+  "ascii": "assuming f is defined, for w in [-50.0, 50.0]:float|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
+ },
+ "assuming_is_defined_pinned": {
+  "input": "assuming is_defined(f) --> sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)",
+  "unicode": "assuming f is defined => sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+  "ascii": "assuming f is defined => sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, for w in [-50.0, 50.0]:float|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
+ },
+ "second_function_by_name": {
+  "input": "d(budget_line(x, I, px, py), x) == -px/py",
+  "unicode": "let g = budget_line, ∂(g(x, I, px, py)/∂x) = -px/py",
+  "ascii": "let g = budget_line, d(g(x, I, px, py), x) = -px/py"
+ },
+ "let_function_bare_name": {
+  "input": "let g = budget_line, d(g(x, I, px, py), x) == -px/py",
+  "unicode": "let g = budget_line, ∂(g(x, I, px, py)/∂x) = -px/py",
+  "ascii": "let g = budget_line, d(g(x, I, px, py), x) = -px/py"
+ },
+ "two_function_equality": {
+  "input": "f(x) == g(x)",
+  "unicode": "f(x) = g(x)",
+  "ascii": "f(x) = g(x)"
+ },
+ "bound_function_nested_in_f": {
+  "input": "let I be [10,1000], let px be [0.5,20], let py be [0.5,20], for a in [0.1,0.9], d(f(x, budget_line(x,I,px,py), a), x) @ {x = a*I/px} == 0",
+  "unicode": "let g = budget_line, let I be [10.0, 1000.0] ⊂ ℝ ∪ {∅}, let px be [0.5, 20.0] ⊂ ℝ ∪ {∅}, let py be [0.5, 20.0] ⊂ ℝ ∪ {∅}, ∀ a ∈ [0.1, 0.9] ⊂ ℝ ∪ {∅}, ∂(f(x, g(x, I, px, py), a)/∂x) at {x=I*a/px} = 0",
+  "ascii": "let g = budget_line, let I be [10.0, 1000.0]:float|missing, let px be [0.5, 20.0]:float|missing, let py be [0.5, 20.0]:float|missing, for a in [0.1, 0.9]:float|missing, d(f(x, g(x, I, px, py), a), x) @ {x=I*a/px} = 0"
+ },
+ "recurrence_identity": {
+  "input": "for n in [2, 30] subset Z, f(n) == f(n-1) + f(n-2)",
+  "unicode": "∀ n ∈ [2, 30] ⊂ ℤ ∪ {∅}, f(n) = f(n - 2) + f(n - 1)",
+  "ascii": "for n in [2, 30]:int|missing, f(n) = f(n - 2) + f(n - 1)"
+ },
+ "chained_comparison": {
+  "input": "for a in [0.1,10], b in [0.1,10], 2/(1/a+1/b) <= f(a,b) <= (a+b)/2",
+  "unicode": "∀ a ∈ [0.1, 10.0] ⊂ ℝ ∪ {∅}, b ∈ [0.1, 10.0] ⊂ ℝ ∪ {∅}, 2/(1/b + 1/a) ≤ f(a, b) ≤ a/2 + b/2",
+  "ascii": "for a in [0.1, 10.0]:float|missing, b in [0.1, 10.0]:float|missing, 2/(1/b + 1/a) <= f(a, b) <= a/2 + b/2"
+ },
+ "euler_via_exp": {
+  "input": "for x in [1, 5], f(x) == exp(1)",
+  "unicode": "∀ x ∈ [1.0, 5.0] ⊂ ℝ ∪ {∅}, f(x) = e",
+  "ascii": "for x in [1.0, 5.0]:float|missing, f(x) = e"
+ },
+ "finite_domain_pinned": {
+  "input": "for n in [30,30] subset Z, f(n) == 8",
+  "unicode": "∀ n ∈ [30, 30] ⊂ ℤ ∪ {∅}, f(n) = 8",
+  "ascii": "for n in [30, 30]:int|missing, f(n) = 8"
+ },
+ "finite_domain_small_range": {
+  "input": "for n in [2,30] subset Z, f(n) >= 2",
+  "unicode": "∀ n ∈ [2, 30] ⊂ ℤ ∪ {∅}, f(n) ≥ 2",
+  "ascii": "for n in [2, 30]:int|missing, f(n) >= 2"
+ },
+ "finite_domain_discrete_set": {
+  "input": "for n in {6, 28, 496}, f(n) >= 4",
+  "unicode": "∀ n ∈ {6, 28, 496}, f(n) ≥ 4",
+  "ascii": "for n in {6, 28, 496}, f(n) >= 4"
+ },
+ "real_domain_is_not_finite": {
+  "input": "for n in [2,30], f(n) >= 2",
+  "unicode": "∀ n ∈ [2.0, 30.0] ⊂ ℝ ∪ {∅}, f(n) ≥ 2",
+  "ascii": "for n in [2.0, 30.0]:float|missing, f(n) >= 2"
+ },
+ "floor_below_argument": {
+  "input": "for x in [-20, 20], floor(x) <= x",
+  "unicode": "∀ x ∈ [-20.0, 20.0] ⊂ ℝ ∪ {∅}, floor(x) ≤ x",
+  "ascii": "for x in [-20.0, 20.0]:float|missing, floor(x) <= x"
+ },
+ "ceiling_above_argument": {
+  "input": "for x in [-20, 20], ceil(x) >= x",
+  "unicode": "∀ x ∈ [-20.0, 20.0] ⊂ ℝ ∪ {∅}, ceil(x) ≥ x",
+  "ascii": "for x in [-20.0, 20.0]:float|missing, ceil(x) >= x"
+ },
+ "floor_div_sugar": {
+  "input": "for n in [1,100] subset Z, f(n) == n // 2",
+  "unicode": "∀ n ∈ [1, 100] ⊂ ℤ ∪ {∅}, f(n) = floor(n/2)",
+  "ascii": "for n in [1, 100]:int|missing, f(n) = floor(n/2)"
+ },
+ "floor_div_evaluable": {
+  "input": "for n in [1,100] subset Z, f(n) == floor(n/2)",
+  "unicode": "∀ n ∈ [1, 100] ⊂ ℤ ∪ {∅}, f(n) = floor(n/2)",
+  "ascii": "for n in [1, 100]:int|missing, f(n) = floor(n/2)"
+ },
+ "remainder_below_modulus": {
+  "input": "for n in [0,1000] subset Z, n % 24 <= 23",
+  "unicode": "∀ n ∈ [0, 1000] ⊂ ℤ ∪ {∅}, Mod(n, 24) ≤ 23",
+  "ascii": "for n in [0, 1000]:int|missing, Mod(n, 24) <= 23"
+ },
+ "ceil_div_lower_bound": {
+  "input": "for a in [1,500] subset Z, b in [1,30] subset Z, f(a,b) >= a/b",
+  "unicode": "∀ a ∈ [1, 500] ⊂ ℤ ∪ {∅}, b ∈ [1, 30] ⊂ ℤ ∪ {∅}, f(a, b) ≥ a/b",
+  "ascii": "for a in [1, 500]:int|missing, b in [1, 30]:int|missing, f(a, b) >= a/b"
+ },
+ "dim_premise_pins_length": {
+  "input": "assuming len(x) == 2, f(x) == x[0]^2 + x[1]^2",
+  "unicode": "assuming dim(x, 0) == 2, f(x) = x[0]^2 + x[1]^2",
+  "ascii": "assuming dim(x, 0) == 2, f(x) = x[0]^2 + x[1]^2"
+ },
+ "dim_premise_ties_two_lengths": {
+  "input": "assuming len(x) == len(y), f(x, y) == f(y, x)",
+  "unicode": "assuming dim(x, 0) == dim(y, 0), f(x, y) = f(y, x)",
+  "ascii": "assuming dim(x, 0) == dim(y, 0), f(x, y) = f(y, x)"
+ },
+ "premise_relates_two_params": {
+  "input": "assuming hi >= lo, f(xs, lo, hi) >= 0",
+  "unicode": "assuming hi >= lo, f(xs, lo, hi) ≥ 0",
+  "ascii": "assuming hi >= lo, f(xs, lo, hi) >= 0"
+ }
+}

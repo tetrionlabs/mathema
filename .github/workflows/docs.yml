@@ -1,0 +1,57 @@
+# .github/workflows/docs.yml
+#
+# Docs deploy is an EXPLICIT step, not a side effect of commits: it
+# fires when a GitHub Release is published (which you create from a
+# version tag), or when triggered by hand from the Actions tab
+# (workflow_dispatch) for an out-of-band docs fix. Ordinary pushes to
+# main never build or deploy docs, so frequent code commits cost
+# nothing on Cloudflare.
+#
+# On the release event, checkout resolves to the release's tag, so the
+# published docs always match the released code exactly.
+#
+# One-time setup this workflow assumes:
+#   Cloudflare dashboard:
+#     - an API token with Workers Scripts:Edit on the account, stored
+#       as the repo secret CLOUDFLARE_API_TOKEN
+#     - the account id, stored as CLOUDFLARE_ACCOUNT_ID
+#     - after the first deploy: attach the custom domain
+#       mathema.tetrionlabs.com to the "mathema-docs" Worker
+#       (Workers -> mathema-docs -> Domains). Do this a day before any
+#       announcement so TLS is settled.
+#   Repo root: the wrangler.jsonc below.
+#
+# --strict is the quality gate: a broken link, a missing reference, or
+# a mkdocstrings failure fails the deploy rather than shipping.
+
+name: docs
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}   # manual deploy for docs-only fixes
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # release event: this is the tag's tree; dispatch: current main
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Build the site (strict)
+        run: |
+          uv venv
+          uv pip install -e ".[docs]"
+          uv run mkdocs build --strict
+
+      - name: Deploy to Cloudflare Workers static assets
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy

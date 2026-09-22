@@ -1,0 +1,43 @@
+repos:
+  - repo: local
+    hooks:
+      - id: check-license-headers
+        name: check SPDX license headers
+        entry: python mathema/_devtools/check_headers.py
+        language: system
+        types: [python]
+
+      - id: check-prose
+        name: check house prose style (no em-dash, no private notes)
+        entry: python mathema/_devtools/check_prose.py
+        language: system
+        files: \.(py|md|toml|yml|yaml|cfg|css)$
+        exclude: ^(LICENSE\.md|CLA\.md)$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.4
+    hooks:
+      - id: ruff-check
+        # check only, no --fix: this codebase has re-export patterns
+        # (import X as X, a name in __all__ unused in its own module
+        # body) that ruff's unused-import check can't distinguish from
+        # a genuine dead import; --fix has silently deleted one of
+        # these before. A hook that runs unreviewed on every commit
+        # must never auto-fix here; a human runs ruff --fix by hand and
+        # reviews every change instead.
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.3.1
+    hooks:
+      - id: mypy
+        # Package mode over mathema/, matching the documented gate
+        # `mypy mathema` exactly. Passing changed filenames instead
+        # analyzes per-file, which follows imports in a different
+        # order and reports errors package mode does not; the gate
+        # and the hook must be the same check or one of them lies.
+        # tests/ has no __init__.py, so mypy sees test_x.py both as a
+        # top-level module and as tests.test_x and refuses either.
+        files: ^mathema/
+        pass_filenames: false
+        additional_dependencies: [sympy, pyyaml, types-PyYAML]
+        args: ["--ignore-missing-imports", "mathema"]

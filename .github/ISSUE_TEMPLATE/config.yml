@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://mathema.tetrionlabs.com
+    about: Quick start, the claim grammar, the derive route, and the full command reference.
+  - name: Security vulnerability
+    url: https://github.com/tetrionlabs/mathema/blob/main/SECURITY.md
+    about: Please report vulnerabilities privately, never as a public issue.
+  - name: Commercial licensing
+    url: https://github.com/tetrionlabs/mathema/blob/main/LICENSING.md
+    about: Production use beyond the free thresholds, or support arrangements.

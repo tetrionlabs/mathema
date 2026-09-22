@@ -1,0 +1,35 @@
+# numpy functions that overflow to inf (silently, with a RuntimeWarning)
+# for large-magnitude input. No clean single-variable nan boundary, the
+# hazard is caught empirically by is_compendium_safe(numpy) sampling the
+# large specials; the limitations record the approximate overflow point.
+package: numpy
+versions: ">=1.24,<3"
+functions:
+  numpy.exp:
+    params: [x]
+    limitations:
+      - 'overflows to inf above roughly x = 709.78, with a RuntimeWarning'
+  numpy.exp2:
+    params: [x]
+    limitations:
+      - 'overflows to inf above roughly x = 1024'
+  numpy.expm1:
+    params: [x]
+    limitations:
+      - 'overflows to inf for large x'
+  numpy.cosh:
+    params: [x]
+    limitations:
+      - 'overflows to inf for abs(x) above roughly 710'
+  numpy.sinh:
+    params: [x]
+    limitations:
+      - 'overflows to +/-inf for large abs(x)'
+  numpy.power:
+    params: [x, p]
+    limitations:
+      - 'a negative base with a non-integer exponent returns nan; large results overflow to inf'
+  numpy.float_power:
+    params: [x, p]
+    limitations:
+      - 'same nan/overflow behaviour as power, always in floating point'

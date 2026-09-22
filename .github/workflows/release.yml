@@ -1,0 +1,177 @@
+# .github/workflows/release.yml
+#
+# Tag-triggered release: stamp the licence, build, verify, publish.
+# Publishing uses PyPI Trusted Publishing (OIDC): GitHub proves the
+# workflow's identity to PyPI, so no API token is stored anywhere.
+#
+# One-time setup this workflow assumes:
+#   TestPyPI first (required before any real publish): create the
+#     account, then Publishing -> add a pending trusted publisher for
+#     project "mathema": owner tetrionlabs, repo mathema, workflow
+#     release.yml, environment testpypi.
+#   PyPI: same steps under whichever account owns the project. Aaron's
+#     personal account is fine to start; trusted publishing is
+#     identical either way, and a Tetrion company account can be added
+#     as an owner later without republishing.
+#   GitHub repo -> Settings -> Environments:
+#     create "testpypi" (no protection) and "pypi" with a required
+#     reviewer, so the final publish is an explicit click.
+#
+# Release procedure: run scripts/stamp_license.py locally, commit the
+# stamped LICENSE in your own voice, tag vX.Y.Z, push the tag (this
+# workflow runs), then create the GitHub Release from the tag with
+# real notes, which is what triggers the docs deploy (docs.yml).
+# Stamping before the tag means the tag's tree, the public export and
+# the built artefacts all carry the same concrete Change Date. This
+# workflow only VERIFIES that stamp; it never writes one, so the date
+# that ships is always the date a person committed and reviewed.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+# One release per tag, never cancelled: a half-cancelled publish is
+# worse than a slow one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # A tag must never publish code the suite has not passed. tests.yml
+  # runs on push-to-main and pull requests, which does NOT cover the
+  # tagged commit, so the gate is re-run here and `build` depends on
+  # it. The matrix mirrors requires-python; a release that fails on
+  # any supported interpreter is not a release.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e '.[test]'
+      - run: python -m pytest -q -n 4
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: ruff check .
+      - run: mypy mathema
+      - run: python mathema/_devtools/check_headers.py $(git ls-files -- '*.py')
+      - run: python mathema/_devtools/check_prose.py
+
+  build:
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version from tag matches the package
+        id: ver
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(python -c 'import re,pathlib;print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("mathema/__init__.py").read_text()).group(1))')"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "tag $TAG_VERSION != package $PKG_VERSION" >&2; exit 1
+          fi
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+
+      # Deliberately a CHECK, not a stamp. The licence is stamped and
+      # committed by a person before the tag, so the tag's tree, the
+      # public export and the artefacts all carry the same reviewed
+      # Change Date. Re-stamping here would silently rewrite that date
+      # to whenever CI happened to run, which is a different legal
+      # statement from the one that was reviewed.
+      - name: LICENSE is stamped for this version
+        run: |
+          python scripts/stamp_license.py \
+            --version "${{ steps.ver.outputs.version }}" --check \
+            || { echo "::error::LICENSE.md is not stamped for ${{ steps.ver.outputs.version }}. Run scripts/stamp_license.py --version ${{ steps.ver.outputs.version }} locally, commit it, and re-tag."; exit 1; }
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --quiet build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Verify the stamp landed in the artefacts
+        run: |
+          # The stamped LICENSE must be inside both artefacts, not only in the tree.
+          python - <<'EOF'
+          import glob, sys, tarfile, zipfile
+          version = "${{ steps.ver.outputs.version }}"
+          needle = f"mathema {version}".encode()
+
+          sdist = glob.glob("dist/*.tar.gz")[0]
+          with tarfile.open(sdist) as tar:
+              names = [n for n in tar.getnames() if n.endswith("LICENSE.md")]
+              assert names, "no LICENSE.md in the sdist"
+              assert needle in tar.extractfile(names[0]).read(), \
+                  "the sdist's LICENSE.md is not stamped"
+
+          wheel = glob.glob("dist/*.whl")[0]
+          with zipfile.ZipFile(wheel) as z:
+              names = [n for n in z.namelist() if n.endswith("LICENSE.md")]
+              assert names, "no LICENSE.md in the wheel"
+              assert needle in z.read(names[0]), \
+                  "the wheel's LICENSE.md is not stamped"
+          print(f"both artefacts carry the stamped LICENSE for {version}")
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-testpypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write   # OIDC: this is what replaces an API token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  publish-pypi:
+    # Gated by the "pypi" environment's required reviewer: the real
+    # publish happens only after an explicit approval in the GitHub UI,
+    # ideally after a clean-venv install from TestPyPI has been tried.
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,31 @@
+# numpy reductions over an empty (or all-nan) array. mean/std/var return
+# nan silently; average raises instead. is_compendium_safe(numpy) catches
+# the silent nan when the reduced sequence can be empty.
+package: numpy
+versions: ">=1.24,<3"
+functions:
+  numpy.mean:
+    params: [a]
+    nan_when:
+      - 'len(a) == 0'
+    limitations:
+      - 'the mean of an empty array is nan with a RuntimeWarning, never raises'
+  numpy.std:
+    params: [a]
+    nan_when:
+      - 'len(a) == 0'
+    limitations:
+      - 'the standard deviation of an empty array is nan with a RuntimeWarning'
+  numpy.var:
+    params: [a]
+    nan_when:
+      - 'len(a) == 0'
+    limitations:
+      - 'the variance of an empty array is nan with a RuntimeWarning'
+  numpy.average:
+    params: [a]
+    raises_when:
+      - condition: 'len(a) == 0'
+        exception: ZeroDivisionError
+    limitations:
+      - 'unlike mean, average of an empty array raises ZeroDivisionError'

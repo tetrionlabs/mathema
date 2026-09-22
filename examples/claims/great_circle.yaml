@@ -1,0 +1,46 @@
+# Claim set: great-circle (geodesic) distance on the unit sphere, radians
+# Implementation: examples/claims/functions.py::gc_distance  (haversine formula)
+#
+# ILLUSTRATIVE, NOT LOADABLE. This is a sketch in a mathematician's
+# notation, not a claims file mathema reads, see examples/README.md.
+# In particular `d(p, q)` here is a distance, while `d(...)` in the real
+# grammar is differentiation.
+geo.gc_distance:
+  intent: Length of the great-circle arc between two points on the unit sphere
+  signature: "(real, real, real, real) → real"   # (φ1, λ1, φ2, λ2)
+  claims:
+    # --- the metric-space axioms, as claims -------------------------------
+    - name: identity
+      concepts: [compositional]
+      law: "d(p, p) == 0"
+      route: derive               # h = 0 ⇒ 2·asin(0) = 0
+    - name: symmetric
+      concepts: [symmetry]  # T = swap the two points, S = identity
+      law: "d(p, q) == d(q, p)"
+      route: derive               # sin² of differences is even in the swap
+    - name: nonnegative
+      concepts: [order]
+      law: "d(p, q) >= 0"
+      route: derive               # asin ∘ sqrt maps [0,1] into [0, π/2]
+    - name: triangle-inequality
+      concepts: [order, metric-space, triangle-inequality]  # the heart of being a metric
+      law: "d(p, r) <= d(p, q) + d(q, r)"
+      route: probe                # provable via spherical trig; probed in v1
+    # --- sphere geometry ---------------------------------------------------
+    - name: antipodal-bound
+      concepts: [order]
+      law: "d(p, q) <= pi"        # π·R on a radius-R sphere
+      when: "phi in [-pi/2, pi/2]"
+      route: derive
+    - name: longitude-shift-invariant
+      concepts: [symmetry, invariance, isometry]  # invariance under the sphere's isometry group
+      law: "d((phi1, lam1 + c), (phi2, lam2 + c)) == d((phi1, lam1), (phi2, lam2))"
+      route: derive               # only λ2−λ1 appears in the formula
+    - name: geodesic-minimality
+      concepts: [order, geodesic, calculus-of-variations]  # what "geodesic" means, operationally
+      law: "d(p, q) <= length(gamma) for any sampled path gamma from p to q on the sphere"
+      route: probe                # e.g. against rhumb-line and random polyline paths
+    - name: degenerate-poles
+      concepts: [structural]  # honest edge: λ is meaningless at the poles
+      law: "d((pi/2, lam1), (pi/2, lam2)) == 0 for all lam1, lam2"
+      route: probe

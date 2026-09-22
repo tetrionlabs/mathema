@@ -1,0 +1,153 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mathema"
+dynamic = ["version"]
+description = "A Python verification engine for Claim-Driven Development: state explicit mathematical claims about code and adjudicate them against symbolic and empirical evidence."
+readme = "README.md"
+requires-python = ">=3.10"
+# BUSL-1.1 is a known SPDX identifier (a recognized non-OSI,
+# source-available license), so metadata and headers classify cleanly.
+license = "BUSL-1.1"
+license-files = ["LICENSE.md"]
+authors = [{ name = "Tetrion Ltd", email = "contact@tetrion.co" }]
+# sympy is bounded below the next major: a derive-route verdict
+# depends on sympy's own simplification and canonical ordering, so a
+# major release can change what proves without any change here.
+dependencies = ["sympy>=1.12,<2", "pyyaml>=6"]
+keywords = ["claims", "verification", "property-based-testing",
+            "symbolic-mathematics", "sympy", "proof",
+            "static-analysis", "specification", "testing"]
+classifiers = [
+    # source-available under BUSL 1.1, converting to AGPL-3.0-or-later
+    # four years after each release: deliberately NOT an OSI licence,
+    # and PEP 639 forbids a License:: classifier beside the `license`
+    # expression above, so none is given
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://mathema.tetrionlabs.com"
+Documentation = "https://mathema.tetrionlabs.com"
+Repository = "https://github.com/tetrionlabs/mathema"
+Issues = "https://github.com/tetrionlabs/mathema/issues"
+Changelog = "https://github.com/tetrionlabs/mathema/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+# Documentation site tooling only, not needed to use mathema itself.
+docs = ["mkdocs>=1.6", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.25"]
+# numpy is not a runtime dependency of mathema itself; installed, it
+# turns on the array fast paths (matrix structure checks, array-shaped
+# parameter synthesis) and is exercised unconditionally by the tests.
+numpy = ["numpy"]
+# Needed to run the test suite. pytest-xdist parallelises it, which
+# matters here because proof attempts are capped on the WALL clock:
+# oversubscribing the machine starves a proof of CPU and turns a
+# `proven` into a `holds`, a spurious failure in a test that asserts
+# the verdict. Measured on 8 cores: `-n 4` runs the suite in 2:41 fully
+# green, `-n auto` in 3:10 with one drifted verdict, and one process in
+# 8:15. Leave the machine headroom rather than claiming every core.
+test = ["pytest>=7", "pytest-xdist>=3", "mathema[numpy]"]
+# Local development and release tooling: the gates `.pre-commit-config
+# .yaml` runs, and the two commands the release workflow needs. Not a
+# runtime capability, so it stays out of `all`.
+dev = ["build>=1", "twine>=5", "pre-commit>=3", "ruff>=0.6", "mypy>=1.8"]
+# The MCP interface (mathema mcp serve), the official MCP SDK, only
+# needed to actually serve; the tool functions themselves are SDK-free.
+# Upper bound deliberately: `mcp>=1.2` unbounded resolves to 2.x,
+# where FastMCP was renamed to MCPServer. server.py handles both, but
+# an unbounded major is a fresh-install hazard.
+mcp = ["mcp>=1.2,<3"]
+# The nlsat extensive rung, z3's nonlinear-real-arithmetic decision
+# procedure as an optional proof backend (a ~100 MB native library;
+# the ladder silently skips the rung without it).
+smt = ["z3-solver>=4.12"]
+# Reading a NATIVE `.coverage` report for the test source of `mathema
+# coverage` (Apache-2.0, no transitive deps). The pass itself needs no
+# third-party dependency: it traces with the stdlib `sys.settrace` and
+# reads a `coverage.json` export with plain json; this extra only adds
+# support for the binary `.coverage` format.
+coverage = ["coverage>=7"]
+# A "symbology" capability provider (see docs/symbology.md),
+# optional: this project's own convention names for common
+# parameters, installed separately.
+symbology = ["mathema-symbology"]
+# Every runtime CAPABILITY at once (not the docs/test dev tooling):
+# `pip install "mathema[all]"`. smt pulls z3-solver (~100 MB native).
+all = ["mathema[numpy,smt,mcp,coverage]"]
+
+[project.scripts]
+mathema = "mathema.cli:main"
+
+[tool.setuptools.packages.find]
+# Automatic discovery, not a hand-maintained package list: mathema has
+# subpackages (mathema.symbolic, mathema._devtools), and a fixed list
+# is the kind of thing that silently stops matching reality the next
+# time one is added.
+include = ["mathema*"]
+# repo tooling, not consumer surface: these shell out to `git ls-files`
+# and are meaningless inside an installed wheel
+exclude = ["mathema._devtools*"]
+
+[tool.setuptools.package-data]
+# the bundled compendium (mathema/compendium/*.yaml) ships with the
+# package; the loader reads the files beside its own source
+"mathema.compendium" = ["*.yaml"]
+# PEP 561: without this marker a type checker ignores the annotations
+# in the installed package and every imported name resolves to Any,
+# however carefully the source is typed
+"mathema" = ["py.typed"]
+
+[tool.setuptools.dynamic]
+version = { attr = "mathema.__version__" }
+
+[tool.pytest.ini_options]
+# `-n 4`, not `-n auto`: proof attempts are capped on the wall clock,
+# so oversubscribing the machine turns a `proven` into a `holds` and
+# fails an assertion about the verdict rather than about the code.
+# It is deliberately not forced through addopts, since xdist lives
+# only in the `test` extra and one test file is slower under four
+# workers than one. CI passes it explicitly.
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+# pyflakes plus a handful of pycodestyle error checks, ruff's own
+# documented default selection, not its full plugin universe (bandit,
+# pylint, refurb, ...), several of which flag patterns this project
+# uses on purpose (a broad `except Exception:` for graceful
+# degradation, for one).
+select = ["E4", "E7", "E9", "F"]
+
+[tool.mypy]
+# 3.12: the version the dev environment and CI actually run. numpy's
+# stubs use PEP 695 `type` statements (numpy 2.5+), which are a fatal
+# parse error under an earlier python_version, and a stub syntax error
+# cannot be excluded or skipped. The declared 3.10 floor in
+# requires-python is unchanged; note it has no checking gate anywhere
+# (CI tests one version), so this setting does not remove one.
+python_version = "3.12"
+ignore_missing_imports = true
+# The AST-walking and sympy-expression-building modules (symbolic/,
+# grammar.py, audit.py, inventory.py) narrow an ast.AST/sympy.Basic
+# node's type through isinstance checks and duck typing in ways mypy's
+# static analysis doesn't follow. These codes are disabled repo-wide
+# rather than per-module so real regressions of every other kind still
+# fail CI.
+disable_error_code = ["attr-defined", "index", "arg-type", "assignment", "misc", "union-attr"]

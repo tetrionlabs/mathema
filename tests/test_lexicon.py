@@ -1,0 +1,347 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+"""Coverage over `mathema.lexicon`: every entry parses and renders
+without raising, and both rendered forms match a golden snapshot
+(`data/lexicon_golden.json`). The snapshot is a characterization net;
+it pins current behavior so refactors can't shift rendered output
+unnoticed, not a sign-off of the spellings, which are still under
+review; a deliberate rendering change regenerates it (see
+`test_rendered_output_matches_golden_snapshot`) with the diff reviewed
+as part of that change."""
+import pytest
+
+from mathema.conjecture import claim
+from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON, get, render_both, show
+from mathema.spec import render_claim_text
+
+
+@pytest.mark.parametrize("key", list(LEXICON))
+def test_every_entry_parses(key):
+    claim(get(key))
+
+
+@pytest.mark.parametrize("key", list(LEXICON))
+def test_every_entry_renders_in_both_forms(key):
+    cj = claim(get(key))
+    render_claim_text(cj, unicode=True)
+    render_claim_text(cj, unicode=False)
+
+
+def test_get_accepts_name_or_index():
+    assert get("relation_eq") == get(0)
+
+
+def test_render_both_returns_input_and_both_rendered_forms():
+    text, unicode_form, ascii_form = render_both("relation_eq")
+    assert text == LEXICON["relation_eq"]
+    assert isinstance(unicode_form, str) and isinstance(ascii_form, str)
+
+
+def test_render_both_include_internal_adds_conjecture_fields():
+    *_, internal = render_both("let_free_var_typed", include_internal=True)
+    assert set(internal) == {"lhs", "relation", "rhs", "domain", "funcs", "free_vars"}
+    assert internal["free_vars"] == frozenset({"c"})
+
+
+def test_show_does_not_raise(capsys):
+    show("relation_eq")
+    show("let_free_var_typed", include_internal=True)
+    assert "input:" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("key", list(LEXICON))
+def test_rendered_output_matches_golden_snapshot(key):
+    """Characterization net for refactoring, not a sign-off of the
+    spellings: both rendered forms of every entry must match
+    `tests/data/lexicon_golden.json` exactly, so any change to the
+    parse/render pipeline that shifts output is caught deliberately.
+    When a rendering choice changes on purpose, regenerate the snapshot:
+
+        python -c "import json; from mathema.lexicon import LEXICON, \\
+            render_both; json.dump({k: dict(zip(('input', 'unicode', \\
+            'ascii'), render_both(k))) for k in LEXICON}, \\
+            open('tests/data/lexicon_golden.json', 'w'), \\
+            ensure_ascii=False, indent=1)"
+
+    and review the diff as part of the change."""
+    import json
+    import os
+
+    path = os.path.join(os.path.dirname(__file__), "data", "lexicon_golden.json")
+    with open(path) as fh:
+        golden = json.load(fh)
+    text, unicode_form, ascii_form = render_both(key)
+    assert text == golden[key]["input"]
+    assert unicode_form == golden[key]["unicode"]
+    assert ascii_form == golden[key]["ascii"]
+
+
+def test_example_functions_are_checkable_against_their_own_lexicon_keys():
+    from mathema.conjecture import check_conjectures
+
+    for fn, keys in EXAMPLE_FUNCTIONS.values():
+        for key in keys:
+            cj = claim(get(key), route="probe")
+            check_conjectures(fn, [cj], extensive=False)
+
+
+def test_every_spelling_is_a_render_parse_render_fixed_point():
+    """The rendered claim is the canonical form, so rendering it,
+    reparsing it and rendering again must land on the same text, in
+    both modes. Without this a record drifts every time it passes
+    through the store, and a statement stops denoting its claim.
+
+    Three spellings failed this when it was written: a domain with an
+    excluded point would not reparse at all, and the bare `N`/`C`
+    domains gained a spurious `⊂ ℝ` on the second pass (false for ℂ
+    besides). All three were one cause, the trailing `∪ {∅}`
+    missing-value clause being absorbed by whatever preceded it.
+    """
+    from mathema.conjecture import claim
+    from mathema.lexicon import LEXICON
+    from mathema.spec import render_claim_text
+
+    drifted = []
+    for name, law in LEXICON.items():
+        try:
+            conjecture = claim(law)
+        except Exception:
+            continue          # a spelling the grammar declines by design
+        for unicode_mode in (True, False):
+            once = render_claim_text(conjecture, unicode=unicode_mode)
+            try:
+                twice = render_claim_text(claim(once), unicode=unicode_mode)
+            except Exception as exc:
+                drifted.append(f"{name}: rendered text will not reparse "
+                               f"({type(exc).__name__}): {once}")
+                continue
+            if once != twice:
+                drifted.append(f"{name}:\n    {once}\n    {twice}")
+    assert not drifted, "rendered claims drift on reparse:\n" + "\n".join(drifted)
+
+
+def test_a_rendered_domain_always_states_its_missing_policy():
+    """Terse input, explicit output: nothing has to say anything about
+    missing values, and a rendered domain always does."""
+    from mathema.conjecture import claim
+    from mathema.spec import render_claim_text
+
+    allowed = claim("for x in [0,10], f(x) >= 0")
+    assert "∪ {∅}" in render_claim_text(allowed, unicode=True)
+    assert "|missing" in render_claim_text(allowed, unicode=False)
+
+    excluded = claim("for x in [0,10] \\ {missing}, f(x) >= 0")
+    assert "\\ {∅}" in render_claim_text(excluded, unicode=True)
+    assert "|missing" not in render_claim_text(excluded, unicode=False)
+
+
+def test_every_spelling_survives_the_declared_store():
+    """The render round trip is not enough on its own: a claim also
+    goes out to `claims.yaml` through `declare()` and comes back
+    through `entry_claims()`, and that path lost four different things
+    before anyone noticed; an `assuming` premise, a `let g = <path>`
+    binding, a `let c be [...]` free variable, and the second half of a
+    chained comparison. Each loss made the store hold a weaker claim
+    than the one written, and two of them made `adjudicate_target` and
+    `verify_project` disagree about the same function.
+
+    Every spelling the lexicon documents is checked here, so a section
+    added to the grammar later cannot quietly skip the store."""
+    from mathema.conjecture import claim
+    from mathema.lexicon import LEXICON
+    from mathema.spec import declare, entry_claims
+
+    lost = []
+    for name, law in LEXICON.items():
+        try:
+            original = claim(law)
+        except Exception:
+            continue          # a spelling the grammar declines by design
+        try:
+            restored = entry_claims({"claims": [declare(original)]})[0]
+        except Exception as exc:
+            lost.append(f"{name}: will not reparse ({type(exc).__name__}: {exc})")
+            continue
+        for what, before, after in (
+            ("statement", (original.lhs, original.relation, original.rhs),
+                          (restored.lhs, restored.relation, restored.rhs)),
+            ("links", original.links, restored.links),
+            ("free_vars", set(original.free_vars), set(restored.free_vars)),
+            ("funcs", set(original.funcs), set(restored.funcs)),
+            ("assuming", original.assuming, restored.assuming),
+            ("tolerance", original.tolerance, restored.tolerance),
+        ):
+            if before != after:
+                lost.append(f"{name}: {what} {before!r} -> {after!r}")
+    assert not lost, "the declared store loses part of the claim:\n" + "\n".join(lost)
+
+
+def test_the_renderer_is_total_by_verbatim_preservation():
+    """A subtree with no sympy model (a subscript, a string literal, an
+    unknown call) renders as its exact source spelling and re-parses to
+    itself, in both output modes; the renderer's job is spelling,
+    never validation, so no claim that parses is refused a rendering."""
+    from mathema.conjecture import claim
+    from mathema.spec import render_claim_text
+
+    for law in ("f(x, 1.0) == x[-1]",
+                'f(r, "linear") == 1 - r',
+                "for xs in [1, 5], f(xs) >= xs[-1]"):
+        cj = claim(law)
+        for unicode in (False, True):
+            text = render_claim_text(cj, unicode=unicode)
+            again = render_claim_text(claim(text), unicode=unicode)
+            assert text == again, (law, unicode, text, again)
+
+
+def test_a_malformed_outcome_arrow_errors_instead_of_joining_the_rhs():
+    """`f(x) > 0 => f(2*x) > 0` is not outcome grammar (that takes
+    `=> self.<claim>`), and before this check the arrow and everything
+    after it silently became part of `rhs`, a different claim than
+    the author wrote, discovered only as a SyntaxError at render or
+    adjudication time."""
+    import pytest
+
+    from mathema.conjecture import InvalidConjecture, claim
+
+    for law in ("f(x) > 0 => f(2*x) > 0", "f(x) > 0 --> f(2*x) > 0"):
+        with pytest.raises(InvalidConjecture, match="outcome clause"):
+            claim(law)
+    # the two legitimate arrow shapes are untouched
+    assert claim("f(x) > 0 => self.ok").outcome == "self.ok"
+    assert claim(
+        "assuming f is defined --> b != 0, f(a, b) * b == a"
+    ).assuming.startswith("assuming")
+
+
+def test_sections_partition_the_lexicon():
+    """`SECTIONS` is the lexicon's exact table of contents: every key
+    in exactly one section, no key invented, so `entries("domains")`
+    can never silently under-cover the grammar it names."""
+    from mathema.lexicon import LEXICON, SECTIONS, entries
+
+    seen: list[str] = []
+    for keys in SECTIONS.values():
+        seen.extend(keys)
+    assert sorted(seen) == sorted(set(seen)), "a key appears twice"
+    assert set(seen) == set(LEXICON)
+    assert entries() == dict(LEXICON)
+    import pytest as _pytest
+    with _pytest.raises(KeyError, match="unknown lexicon section"):
+        entries("no-such-section")
+
+
+@pytest.mark.needs_full_proof_budget
+def test_every_paired_spelling_survives_the_verified_record():
+    """The verified-layer half of the store round trip: adjudicate,
+    take exactly what the record row would carry (canonical statement
+    plus the structured fields), reconstruct a declared claim from it
+    the way `verify` repopulates one, and re-adjudicate. The verdict
+    must not move. The absence of this invariant is how a committed
+    store could contradict itself on the second run: the record held a
+    weaker claim than the one adjudicated, and nothing noticed until a
+    field run did."""
+    from mathema.conjecture import check_conjectures, claim
+    from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON
+    from mathema.spec import entry_claims
+
+    _ROW_LOSES_THE_BINDING = {"bound_function_nested_in_f"}
+    drift = []
+    for fname, (fn, keys) in EXAMPLE_FUNCTIONS.items():
+        laws = [claim(LEXICON[k], name=k) for k in keys]
+        probes = check_conjectures(fn, laws)
+        for p in probes:
+            row = {"name": p.name, "statement": p.statement,
+                   "route": (p.route or "best").split(":", 1)[0]}
+            if row["route"] not in ("derive", "probe"):
+                row["route"] = "best"
+            for field_name in ("domain", "grammar", "tolerance"):
+                if getattr(p, field_name, None) is not None:
+                    row[field_name] = getattr(p, field_name)
+            try:
+                (rebuilt,) = entry_claims({"claims": [row]})
+            except Exception as exc:
+                drift.append(f"{fname}/{p.name}: row will not reconstruct "
+                             f"({type(exc).__name__}: {exc})")
+                continue
+            (p2,) = check_conjectures(fn, [rebuilt])
+            if p.name in _ROW_LOSES_THE_BINDING:
+                # the one known, tracked loss: a scope-bound second
+                # function (`g(...)` resolved from f's module at check
+                # time) has no `let g = <path>` spelling and the row
+                # carries no `funcs` field, so the reconstruction
+                # cannot bind g and skips. Closing this is R007
+                # (a typed dependencies field on the row), gated on
+                # the spec-divergence review. When R007 lands this pin
+                # fails and the key rejoins the invariant proper.
+                assert p2.verdict == "skipped", (
+                    f"{p.name} reconstructs now; remove it from "
+                    f"_ROW_LOSES_THE_BINDING")
+                continue
+            if p2.verdict != p.verdict:
+                drift.append(f"{fname}/{p.name}: {p.verdict} -> {p2.verdict}"
+                             f" (statement {p.statement!r})")
+    assert not drift, ("a record row adjudicates differently than the "
+                       "claim it recorded:\n" + "\n".join(drift))
+
+
+# --- finding an example without knowing its key -----------------------------
+
+def test_tags_only_name_real_entries():
+    """A tag on a key that no longer exists is a silent dead end in the
+    search index, so the table is pinned as a subset of the lexicon."""
+    from mathema.lexicon import LEXICON, TAGS
+    unknown = sorted(set(TAGS) - set(LEXICON))
+    assert not unknown, f"TAGS names entries that do not exist: {unknown}"
+
+
+def test_search_finds_an_entry_by_a_word_it_does_not_contain():
+    """The point of the tags: a reader searches for the spoken name of a
+    symbol or an everyday synonym, not the key."""
+    from mathema.lexicon import search
+    cases = {
+        "modulo": "remainder_below_modulus",
+        "round down": "floor_below_argument",
+        "divide by zero": "is_pole_safe",
+        "same length": "dim_premise_ties_two_lengths",
+        "brute force": "finite_domain_pinned",
+        "absolute value": "abs_bars",
+        "fibonacci": "recurrence_identity",
+    }
+    for query, expected in cases.items():
+        hits = [key for key, _law in search(query, limit=5)]
+        assert expected in hits, (query, expected, hits)
+
+
+def test_search_tolerates_a_typo():
+    from mathema.lexicon import search
+    assert "recurrence_identity" in [k for k, _ in search("fibonaci")]
+    assert any(k.startswith("finite_domain")
+               for k, _ in search("evry point"))
+
+
+def test_search_returns_laws_that_are_really_in_the_lexicon():
+    from mathema.lexicon import LEXICON, search
+    for key, law in search("domain", limit=20):
+        assert LEXICON[key] == law, key
+
+
+def test_search_is_empty_for_a_query_that_matches_nothing():
+    from mathema.lexicon import search
+    assert search("") == []
+    assert search("   ") == []
+    assert search("zzzzqqqqxxxx") == []
+
+
+def test_search_respects_its_limit():
+    from mathema.lexicon import search
+    assert len(search("domain", limit=3)) <= 3
+
+
+def test_find_prints_the_hits(capsys):
+    from mathema.lexicon import find
+    find("modulo")
+    out = capsys.readouterr().out
+    assert "remainder_below_modulus" in out
+    find("zzzzqqqqxxxx")
+    assert "no lexicon entry matches" in capsys.readouterr().out

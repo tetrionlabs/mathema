@@ -1,0 +1,18 @@
+# numpy division: never raises on a zero divisor, it returns inf or nan
+# with a RuntimeWarning. is_compendium_safe(numpy) catches the resulting
+# non-finite output.
+package: numpy
+versions: ">=1.24,<3"
+functions:
+  numpy.divide:
+    params: [x, y]
+    limitations:
+      - 'x / 0 returns +/-inf and 0 / 0 returns nan, with a RuntimeWarning, never raises'
+  numpy.true_divide:
+    params: [x, y]
+    limitations:
+      - 'x / 0 returns +/-inf and 0 / 0 returns nan, with a RuntimeWarning, never raises'
+  numpy.reciprocal:
+    params: [x]
+    limitations:
+      - 'the reciprocal of 0 returns inf, never raises; integer input reciprocals truncate'

@@ -1,0 +1,27 @@
+# Bundled compendium entry for the standard math module. The raise-region rows for
+# sqrt/log/asin/acos ship in code (symbolic/_partiality.py) and are not
+# repeated here; this file carries claims and known limitations.
+package: math
+versions: "*"
+functions:
+  math.sqrt:
+    params: [x]
+    claims:
+      - name: sqrt_nonneg
+        statement: 'for x in [0, inf], f(x) >= 0'
+    limitations:
+      - 'raises ValueError for x < 0; never returns a complex result'
+  math.exp:
+    params: [x]
+    claims:
+      - name: exp_positive
+        statement: 'for x in [-700, 700], f(x) > 0'
+    limitations:
+      - 'overflows to OverflowError above roughly x = 709.78'
+  math.log:
+    params: [x]
+    claims:
+      - name: log_monotone
+        statement: 'for x in (0, inf], d(f(x), x) > 0'
+    limitations:
+      - 'raises ValueError at x <= 0; math.log(0) does not return -inf'

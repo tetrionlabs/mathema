@@ -1,0 +1,92 @@
+site_name: mathema
+site_description: "Claim-driven development: state a claim, verify it against the real function, keep the record."
+site_url: https://mathema.tetrionlabs.com
+repo_name: tetrionlabs/mathema
+repo_url: https://github.com/tetrionlabs/mathema
+copyright: "Copyright 2026 Tetrion Ltd. Source-available under BUSL 1.1."
+theme:
+  name: material
+  logo: assets/mathema-mark.svg
+  favicon: assets/favicon.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            docstring_style: google
+
+nav:
+  - Home: index.md
+  - Quick start: quickstart.md
+  - The CDD loop, end to end: tutorial.md
+  - Claim-driven development: cdd.md
+  - Writing claims:
+      - Authoring claims: authoring.md
+      - The claim grammar: grammar.md
+      - The mathema docstring: mathema-docstring.md
+      - Conditional claims and lemmas: conditional-claims.md
+      - Matrix structure and linear algebra: matrix-structure.md
+      - Multi-function claims: multi-function-claims.md
+      - Claims transfer: claims-transfer.md
+  - Evidence:
+      - The derive route: derive-route.md
+      - Reason codes: reason-codes.md
+  - Command reference:
+      - mathema check: modes/check.md
+      - mathema verify: modes/verify.md
+      - mathema claims: modes/claims.md
+      - mathema accept: modes/accept.md
+      - mathema audit: modes/audit.md
+      - mathema badges: modes/badges.md
+      - mathema describe: modes/describe.md
+      - mathema docsync: modes/docsync.md
+      - mathema lock and unlock: modes/lock.md
+      - mathema pin: modes/pin.md
+      - mathema review: modes/review.md
+      - mathema init: modes/init.md
+  - Using mathema from code:
+      - Library usage: modes/library.md
+      - API reference: api.md
+      - The MCP interface: modes/mcp.md
+  - Customising:
+      - Symbology and rendering: symbology.md
+      - Extending mathema: extending.md
+  - Project:
+      - Versioning and stability: stability.md
+      - Licensing policy: licensing-policy.md

@@ -1,0 +1,11 @@
+{
+  // Assets-only Worker: no server code, Cloudflare serves the
+  // `mkdocs build` output in ./site. Deployed by
+  // .github/workflows/docs.yml on a published GitHub Release.
+  "name": "mathema-docs",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./site",
+    "not_found_handling": "404-page"
+  }
+}

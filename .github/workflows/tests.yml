@@ -1,0 +1,95 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same branch cancels the run it superseded. Never
+# on main: a push there is a release candidate and its run should
+# complete rather than be cancelled by the next one.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Least privilege by default: no job here writes anything.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every stable CPython that the declared `requires-python
+        # >=3.10` admits. Newer interpreters are still pre-release and
+        # are covered by the early-warning job below, not here.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e '.[test]'
+      - run: python -m pytest -q -n 4
+
+  # `requires-python` is deliberately unbounded above (capping it
+  # would strand users on a new interpreter until we cut a release),
+  # so pip WILL install mathema on a Python newer than anything
+  # tested. This job is how we find out before a user does. It may
+  # fail: a red here is information about an unreleased interpreter,
+  # never a reason to block a pull request.
+  test-prerelease:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+      - run: pip install -e '.[test]'
+      - run: python -m pytest -q -n 4
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # the declared dev extra, so CI and a contributor's machine run
+      # the same tool versions instead of drifting apart
+      - run: pip install -e '.[dev]' types-PyYAML
+      - run: ruff check .
+      - run: mypy mathema
+      - run: python mathema/_devtools/check_headers.py $(git ls-files -- '*.py')
+      - run: python mathema/_devtools/check_prose.py
+      # report-only: applying the mathema-docstring convention to our
+      # own public surface, a visible number, never a gate.
+      - run: python -m mathema._devtools.docs_report
+
+  # The runtime dependency surface is two packages, so an audit is
+  # cheap and a finding is actionable rather than noise.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e . pip-audit
+      # --skip-editable passes over mathema itself, which is not on
+      # PyPI to be audited against. NOT --strict: strict treats that
+      # deliberate skip as an error, so the two contradict each other
+      # and the job would fail on every run.
+      - run: pip-audit --desc --skip-editable

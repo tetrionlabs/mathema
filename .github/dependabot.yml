@@ -1,0 +1,22 @@
+# Dependency and action updates. Grouped and monthly rather than
+# per-package and weekly: this project has a deliberately small
+# dependency surface (sympy and PyYAML at runtime), so a flood of
+# individual pull requests would be noise, not signal.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      actions:
+        patterns: ["*"]

@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use mathema in your research, please cite it as below."
+title: mathema
+abstract: >-
+  A claim-driven development engine: state a claim about a function,
+  have it adjudicated against the real implementation by symbolic
+  proof or by executed sampling, and keep the record of what was
+  established and how.
+type: software
+authors:
+  - family-names: Byrne
+    given-names: Aaron
+    affiliation: Tetrion Ltd
+repository-code: "https://github.com/tetrionlabs/mathema"
+url: "https://mathema.tetrionlabs.com"
+license-url: "https://github.com/tetrionlabs/mathema/blob/main/LICENSE.md"
+version: 0.6.0
+keywords:
+  - claim-driven development
+  - verification
+  - property-based testing
+  - symbolic mathematics

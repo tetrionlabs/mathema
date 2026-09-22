@@ -1,0 +1,13 @@
+# .gitlab-ci.yml fragment: junit output surfaces claims in the MR test widget
+mathema-claims:
+  image: python:3.12
+  script:
+    - pip install mathema
+    - mathema check src/models.py --format junit --output claims-junit.xml --strict
+    - mathema check src/models.py --format json --output claim-coverage.json
+  artifacts:
+    when: always
+    reports:
+      junit: claims-junit.xml
+    paths:
+      - claim-coverage.json
