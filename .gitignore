@@ -1,4 +1,4 @@
-# secret markdown: private notes, never committed
+# stateful markdown, never committed
 .smd/
 *.smd
 
