@@ -52,6 +52,12 @@ jobs:
       - name: Deploy to Cloudflare Workers static assets
         uses: cloudflare/wrangler-action@v3
         with:
+          # Pinned to 4: this is an assets-only Worker, which has no
+          # `main` script because Cloudflare serves ./site directly.
+          # The action's bundled 3.90 predates that and reports a
+          # missing entry point instead, since it expects every deploy
+          # to name a script.
+          wranglerVersion: "4"
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
