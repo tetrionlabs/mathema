@@ -3,9 +3,11 @@ name: tests
 on:
   push:
     branches: [main]
-    # A prose change cannot break the suite, and the suite is slow.
-    # Documentation-only pushes are handled by docs-check.yml instead,
-    # which builds the site in about a minute.
+    # A prose or repo-metadata change cannot break the suite, and the
+    # suite is slow. Documentation-only pushes are handled by
+    # docs-check.yml instead, which builds the site in about a minute.
+    # Keep this list to files that CANNOT affect a test outcome: a
+    # skipped run is a commit with no verdict.
     paths-ignore: &docs-paths
       - "docs/**"
       - "**.md"
@@ -13,6 +15,8 @@ on:
       - "LICENSE.md"
       - "NOTICE"
       - "CITATION.cff"
+      - ".gitignore"
+      - ".gitattributes"
   pull_request:
     paths-ignore: *docs-paths
   # The full interpreter matrix weekly, so drift on an interpreter the
