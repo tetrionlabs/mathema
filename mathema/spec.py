@@ -1436,8 +1436,16 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
                     func_renames[name] = symbol
                     taken.add(symbol)
 
-    long_funcs = [n for n in cj.funcs if len(n) > long_func_threshold
-                 and n not in func_renames]
+    # A function rename is a DISPLAY choice, and it only survives a round
+    # trip where the claim has a `let <alias> = <target>` binding site for
+    # the shortened name to be written back at. A bare call resolved out of
+    # the target's own module scope has no such site, so renaming it in the
+    # stored spelling would emit an orphan `g` that reparses to nothing and
+    # rebinds to nothing. Canonical text therefore keeps real function
+    # names, which is what its own contract already promises.
+    long_funcs = [] if canonical else [
+        n for n in cj.funcs if len(n) > long_func_threshold
+        and n not in func_renames]
     pool_renames = auto_short_names(long_params, long_funcs, unicode=unicode, taken=taken)
     param_renames.update({n: pool_renames[n] for n in long_params})
     func_renames.update({n: pool_renames[n] for n in long_funcs})

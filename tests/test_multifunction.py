@@ -159,3 +159,64 @@ def test_probe_route_uses_the_same_resolved_binding():
     r = _verdict(halve, "f(x) == budget_line(x, 1, 0, 1) * 0 + x/2")
     assert r.verdict == "proven"   # best route lifts both sides
     assert "bound budget_line" in r.note
+
+
+def test_a_claim_naming_the_function_under_test_survives_its_own_record():
+    """`f` is shorthand, so a claim may call the function under test by
+    its own name. The stored spelling has to KEEP that name: a function
+    rename only round trips where the claim has a `let <alias> = <target>`
+    binding site to write the short name back at, and a bare call
+    resolved from f's module has none, so shortening it to `g` produced a
+    record that reparsed to nothing and rebound to nothing.
+    """
+    from mathema.conjecture import claim
+    from mathema.spec import canonical_claim_text
+
+    law = "for x in [0, 10], halve(x) <= x"
+    r = _verdict(halve, law)
+    assert r.verdict == "proven"
+    # the real name is what the record carries, never an orphan short one
+    assert "halve(x)" in r.statement
+    assert "g(" not in r.statement
+    assert "halve(x)" in canonical_claim_text(claim(law))
+
+
+def test_a_second_function_is_still_bound_as_one():
+    """The counterpart: a name that is genuinely another function keeps
+    being bound, so the rule above cannot swallow a real multi-function
+    claim."""
+    r = _verdict(halve, "f(x) == budget_line(x, 1, 0, 1) * 0 + x/2")
+    assert r.verdict == "proven"
+    assert "bound budget_line" in r.note
+
+
+def test_a_domain_in_the_claim_bounds_the_builtin_battery_too():
+    """A `for` quantifier states where a claim applies, and the built-in
+    battery has to respect it as well, not just the claim it was written
+    on. Sampling a parameter outside the declared region and reporting
+    that the function raised there manufactures a gap that is an
+    artefact of the battery rather than a fact about the code.
+
+    The suite missed this for a while because it produces no wrong
+    verdict: the stated claim still proved, and the spurious entry sat
+    beside it where a test looking up one claim's verdict never saw it.
+    So this asserts the SHAPE of the result, not a verdict.
+    """
+    import math
+
+    import mathema
+
+    def bounded(x: float) -> float:
+        """Raises on anything outside (0, 1], so an unbounded draw
+        cannot call it at all."""
+        return math.log(x)
+
+    law = "for x in [0.1, 1], f(x) <= 0"
+    r = mathema.check(bounded, claims=[law])
+    gaps = [p for p in r.probes
+            if (p.meta or {}).get("mathema.probe_gap") == "input-synthesis"]
+    assert not gaps, (
+        "the claim declared x in [0.1, 1]; the built-in battery sampled "
+        f"outside it and reported {[p.note for p in gaps]}")
+    stated = [p for p in r.probes if p.statement]
+    assert stated and stated[0].verdict in ("proven", "holds")

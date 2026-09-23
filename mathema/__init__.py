@@ -400,6 +400,33 @@ def _disambiguate_claim_names(entries: list) -> list:
     return out
 
 
+def _domains_from_claims(claims) -> dict:
+    """Intent:
+        The parameter domains declared by the `for` quantifiers of the
+        claims being checked, so the built-in battery samples inside the
+        region their author actually declared.
+
+    Notes:
+        A claim that will not parse is ignored here and reported by the
+        ordinary path instead, so this never changes which errors a
+        caller sees. Where two claims bound the same parameter, the
+        first stands: the battery only needs one legal region to
+        synthesise a call in, and each claim is still adjudicated
+        against its own domain regardless.
+    """
+    from .conjecture import claim as _claim
+
+    out: dict = {}
+    for c in claims or ():
+        try:
+            parsed = _claim(c) if isinstance(c, str) else c
+        except Exception:
+            continue
+        for name, bound in (getattr(parsed, "domain", None) or {}).items():
+            out.setdefault(name, bound)
+    return out
+
+
 def check(fn, claims: list | None = None, domain: dict | None = None,
          trials: int | None = None,
          trials_scale: float = 1.0, extensive: bool = False,
@@ -488,8 +515,14 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     facts = analyze(fn)
     # a claim's own quantifier is where a domain is stated; the
     # signature markers are the only other source, and an explicit
-    # domain= wins over both
-    merged_domain = {**domain_from_signature(fn), **(domain or {})}
+    # domain= wins over both. The quantifier has to reach the built-in
+    # battery too, not only the claim it was written on: sampling a
+    # parameter outside the region the author declared and then
+    # reporting that the function raised there manufactures a gap that
+    # is an artefact of the battery rather than a fact about the code.
+    merged_domain = {**domain_from_signature(fn),
+                     **_domains_from_claims(claims),
+                     **(domain or {})}
 
     from .inventory import function_dependencies
     deps = function_dependencies(fn, facts)

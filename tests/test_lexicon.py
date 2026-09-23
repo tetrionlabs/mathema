@@ -245,7 +245,7 @@ def test_every_paired_spelling_survives_the_verified_record():
     from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON
     from mathema.spec import entry_claims
 
-    _ROW_LOSES_THE_BINDING = {"bound_function_nested_in_f"}
+    _ROW_STILL_DRIFTS = {"bound_function_nested_in_f"}
     drift = []
     for fname, (fn, keys) in EXAMPLE_FUNCTIONS.items():
         laws = [claim(LEXICON[k], name=k) for k in keys]
@@ -265,18 +265,24 @@ def test_every_paired_spelling_survives_the_verified_record():
                              f"({type(exc).__name__}: {exc})")
                 continue
             (p2,) = check_conjectures(fn, [rebuilt])
-            if p.name in _ROW_LOSES_THE_BINDING:
-                # the one known, tracked loss: a scope-bound second
-                # function (`g(...)` resolved from f's module at check
-                # time) has no `let g = <path>` spelling and the row
-                # carries no `funcs` field, so the reconstruction
-                # cannot bind g and skips. Closing this is R007
-                # (a typed dependencies field on the row), gated on
-                # the spec-divergence review. When R007 lands this pin
-                # fails and the key rejoins the invariant proper.
-                assert p2.verdict == "skipped", (
-                    f"{p.name} reconstructs now; remove it from "
-                    f"_ROW_LOSES_THE_BINDING")
+            if p.name in _ROW_STILL_DRIFTS:
+                # the one known, tracked drift. Its BINDING half is
+                # now closed: canonical text keeps real function names,
+                # so a scope-bound second function rebinds from f's
+                # module on reconstruction rather than arriving as an
+                # orphan short name that resolves to nothing. What is
+                # left is narrower and is not a lost reference: the
+                # reconstructed expression is a harder one for the
+                # derive route, which returns `undecided` where the
+                # original proved. Pinned exactly, not tolerated.
+                assert p2.verdict == "unknown", (
+                    f"{p.name} now reaches {p2.verdict!r}; the tracked "
+                    f"drift changed, re-examine it rather than editing "
+                    f"this pin")
+                assert p2.meta.get("mathema.derive_status") == "undecided", (
+                    f"{p.name} is unknown for a NEW reason ({p2.meta}); "
+                    f"an uncorroborated disproof here would be a "
+                    f"different and more serious problem")
                 continue
             if p2.verdict != p.verdict:
                 drift.append(f"{fname}/{p.name}: {p.verdict} -> {p2.verdict}"
