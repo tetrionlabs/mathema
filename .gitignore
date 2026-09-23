@@ -17,7 +17,6 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
-.testmondata*
 .coverage
 .mypy_cache/
 .ruff_cache/
