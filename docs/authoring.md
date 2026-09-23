@@ -513,7 +513,7 @@ zero manual wiring:
 
 ```
 >>> mathema.write_spec(softmax, root='.')
-mathema.Record(softmax) · tier 2 · form 7302d34f1904
+mathema.Record(softmax) · source, no side effects · form 7302d34f1904
   holds   deterministic: softmax(args) always returns the same value (n=...)
   holds   numerically_stable: no division by zero, overflow, or NaN on sampled inputs (n=...)
   holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (n=30)
