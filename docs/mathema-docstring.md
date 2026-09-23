@@ -225,7 +225,7 @@ What each dimension checks:
 | Dimension | Scored? | What it compares |
 |---|---|---|
 | Intent / Claims / symbol coverage | yes | same as `parse_mathema_docstring()`, folded in as-is |
-| claims `{floor \| actual \| expected}` | **no** | the floor is one claim per relevant claim family per target (`inventory.claim_floor()`), the actual is what the function carries, and the expected, how many a function of this shape typically carries; needs a corpus and reads `-`. Informational only, never subtracted from `score` |
+| claims <code>{floor &#124; actual &#124; expected}</code> | **no** | the floor is one claim per relevant claim family per target (`inventory.claim_floor()`), the actual is what the function carries, and the expected, how many a function of this shape typically carries; needs a corpus and reads `-`. Informational only, never subtracted from `score` |
 | domain declared / enforced | yes | declared: a bound exists (in `Domain:` or a signature `Annotated` marker) for each real scalar/int parameter; enforced: the function is wrapped in `authoring.enforce_domain()`, checked at runtime, not just documented |
 | raises declared | yes | each exception the function's body can actually raise, covered by a `raises(f(x), ExcType)` claim, a prose `Raises:` mention, or a guard raise ENFORCING a declared domain (the declaration plus its own boundary check states the raise condition formally), counted once however many apply |
 | params / return typed | yes | every real parameter and the return value, each backed by *some* type information (annotation, `Annotated`, or `Domain:`) |

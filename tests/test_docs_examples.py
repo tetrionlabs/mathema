@@ -13,6 +13,7 @@ The grammar page's examples are additionally required to come from
 `lexicon.LEXICON`, which is itself exercised by `test_lexicon.py`, so
 the page, the curated set and the parser cannot drift apart in pairs.
 """
+import html
 import os
 import re
 
@@ -62,6 +63,14 @@ def _claims_in(path):
         text = text.replace(f"```{fence}\n{body}```", "")
     for span in re.findall(r"`([^`\n]+)`", text):
         found.append(span.replace("\\|", "|").strip())
+    # A claim containing a bar cannot be written as a backtick span
+    # inside a table: the escape a table needs (`\|`) survives into the
+    # rendered page, and an HTML entity inside a code span is escaped
+    # too. Such a row is written as a literal <code> element with
+    # &#124;, which renders correctly and is scanned here so the row
+    # keeps earning its place in this check.
+    for span in re.findall(r"<code>([^<\n]+)</code>", text):
+        found.append(html.unescape(span).strip())
     out = []
     for s in found:
         s = re.split(r"\s+#", s)[0].strip()          # drop a trailing aside
