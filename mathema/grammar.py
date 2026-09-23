@@ -425,7 +425,10 @@ _UNICODE = {
 
 RELATIONS = ("<=", ">=", "!=", "~=", "=:=", "==", "<", ">")
 _REL_LATEX = {"==": "=", "<=": r"\leq", ">=": r"\geq", "!=": r"\neq",
-             "~=": r"\approx", "=:=": r"\equiv"}
+             "~=": r"\approx", "=:=": r"\equiv",
+             # the strict pair render as themselves: `<` and `>` are
+             # already LaTeX math-mode operators
+             "<": "<", ">": ">"}
 
 # Every name this grammar's own special call-forms (`d`/`lim`/
 # `integrate`/`Sum`/`Prod`) or the derive route's own function

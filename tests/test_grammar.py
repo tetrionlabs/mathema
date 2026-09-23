@@ -14,7 +14,7 @@ from mathema.grammar import (MISSING, Domain, Interval, NoRelation,
                              is_missing, _node_to_sympy, normalize,
                              parse_raises, render_domain_bound,
                              split_quantifier, split_relation,
-                             to_canonical, to_latex)
+                             to_canonical, to_latex, RELATIONS)
 
 
 def clamp01(x: float) -> float:
@@ -110,6 +110,16 @@ def test_funcs_binding_relates_two_implementations():
 def test_to_latex_renders_relations_and_raises():
     assert to_latex("f(x) <= 1") == r"f{\left(x \right)} \leq 1"
     assert r"\uparrow_{\mathrm{ValueError}}" in to_latex("raises(f(x), ValueError)")
+
+
+def test_every_relation_the_grammar_accepts_also_renders_to_latex():
+    # RELATIONS is the set a claim may be written with, so a member
+    # missing from the LaTeX map is a KeyError on input the grammar
+    # itself calls valid. `<` and `>` were absent once.
+    for rel in RELATIONS:
+        rendered = to_latex(f"f(x) {rel} 1")
+        assert rendered.startswith(r"f{\left(x \right)}"), rel
+        assert rendered.endswith("1"), rel
 
 
 def test_to_latex_renders_matrix_vocabulary():
