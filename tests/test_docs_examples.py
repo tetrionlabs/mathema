@@ -56,13 +56,29 @@ def _claims_in(path):
     """
     text = open(path, encoding="utf-8").read()
     found = []
+    # A shell fence is code, not claims, except for the claim it passes
+    # to `--claim`, which is the very thing a reader copies. Shell line
+    # continuations are joined first so a wrapped claim arrives whole,
+    # and runs of whitespace collapse, since wrapping a claim across
+    # lines does not make it a different claim.
+    joined = re.sub(r"\\\n\s*", " ", text)
+    for fence, body in re.findall(r"```(\w*)\n(.*?)```", joined, re.S):
+        if not fence:
+            continue
+        found += [re.sub(r"\s+", " ", c).strip()
+                  for c in re.findall(r'--claim\s+"([^"]+)"', body)]
     for fence, body in re.findall(r"```(\w*)\n(.*?)```", text, re.S):
         if fence:
             continue
         found += [ln.strip() for ln in body.splitlines() if ln.strip()]
         text = text.replace(f"```{fence}\n{body}```", "")
     for span in re.findall(r"`([^`\n]+)`", text):
-        found.append(span.replace("\\|", "|").strip())
+        span = span.replace("\\|", "|").strip()
+        # a claim shown as the Python string literal it would be passed
+        # as is still that claim; the quotes are the call, not the claim
+        if len(span) > 1 and span[0] == span[-1] and span[0] in "\"'":
+            span = span[1:-1]
+        found.append(span)
     # A claim containing a bar cannot be written as a backtick span
     # inside a table: the escape a table needs (`\|`) survives into the
     # rendered page, and an HTML entity inside a code span is escaped
@@ -84,9 +100,15 @@ def _claims_in(path):
     return out
 
 
+_README = os.path.join(os.path.dirname(_DOCS), "README.md")
+
+
 def _doc_files():
+    """Every page that shows a reader a claim, which includes the
+    README: it is the most-read surface of the project and carries the
+    worked examples, so it is held to the same standard as the docs."""
     return sorted(os.path.join(_DOCS, f) for f in os.listdir(_DOCS)
-                  if f.endswith(".md"))
+                  if f.endswith(".md")) + [_README]
 
 
 @pytest.mark.parametrize("path", _doc_files(), ids=os.path.basename)
@@ -128,6 +150,68 @@ def test_the_grammar_page_teaches_only_curated_claims():
         "docs/grammar.md shows claims that are not in lexicon.LEXICON; add "
         "them there (so they are parsed and rendered by the test suite) or "
         "use an entry that already exists:\n  " + "\n  ".join(stray))
+
+
+def test_the_readme_shows_only_curated_claims():
+    """The README's worked examples are the first thing anyone runs, so
+    every claim in them comes from LEXICON and is therefore executed by
+    the suite rather than merely written down once and trusted."""
+    known = set(LEXICON.values())
+    stray = [s for s in _claims_in(_README) if s not in known]
+    assert not stray, (
+        "README.md shows claims that are not in lexicon.LEXICON; add them "
+        "there so they are parsed, rendered and adjudicated by the test "
+        "suite:\n  " + "\n  ".join(stray))
+
+
+def _notation_rows():
+    """The (symbol, code points) pairs from the grammar page's notation
+    table, which is the only place the project writes code points down
+    by hand."""
+    text = _grammar_page()
+    start = text.index("## Mathematical notation")
+    table = text[start:text.index("\n### ", start)]
+    rows = []
+    for line in table.splitlines():
+        m = re.match(r"^\| (?:`(.+?)`|<code>(.+?)</code>) \| (U\+[0-9A-F ,+U]+) \|",
+                     line)
+        if not m:
+            continue
+        symbol = html.unescape(m.group(1) or m.group(2))
+        points = [int(p.strip()[2:], 16) for p in m.group(3).split(",")]
+        rows.append((symbol, points))
+    return rows
+
+
+def test_the_notation_table_is_documented_for_every_symbol_it_shows():
+    rows = _notation_rows()
+    assert len(rows) > 20, f"the notation table was not found or shrank: {rows}"
+
+
+def test_every_documented_code_point_is_the_symbol_it_claims_to_be():
+    """A hand-written code point is exactly the sort of thing that rots
+    silently, and the table exists specifically so a reader can tell two
+    look-alike glyphs apart. If it is wrong it is worse than absent."""
+    wrong = []
+    for symbol, points in _notation_rows():
+        distinct = sorted({ord(c) for c in symbol if not c.isspace()})
+        if distinct != sorted(set(points)):
+            wrong.append(
+                f"{symbol!r}: documented "
+                + ", ".join(f"U+{p:04X}" for p in points)
+                + " but is "
+                + ", ".join(f"U+{c:04X}" for c in distinct))
+    assert not wrong, ("docs/grammar.md's notation table misstates a code "
+                       "point:\n  " + "\n  ".join(wrong))
+
+
+def test_the_rejected_subset_symbol_really_is_rejected():
+    """The page tells a reader that U+2286 is refused rather than
+    silently read as U+2282, because the two are different claims. That
+    promise has to hold."""
+    assert claim("for n in [0,100] ⊂ ℤ, f(n) >= 0").domain
+    with pytest.raises(Exception):
+        claim("for n in [0,100] ⊆ ℤ, f(n) >= 0")
 
 
 def test_documented_equivalent_spellings_are_equivalent():

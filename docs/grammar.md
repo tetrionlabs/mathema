@@ -29,12 +29,88 @@ claim:
 | `for n in [0, 100] subset Z, f(n) >= 0` and `for n in [0, 100] ⊂ ℤ, f(n) >= 0` |
 | `d(f(x), x) >= 0` and `f'(x) >= 0` |
 | `integrate(f(x), x, 0, 1) == 1` and `∫(f(x), x, 0, 1) == 1` |
+| `for x in [0, 1], f(x) >= 0` and `∀ x ∈ [0, 1], f(x) ≥ 0` |
+| `for n in [0, 100] subset Z, f(n) >= 0` and `∀ n ∈ [0, 100] ⊂ ℤ, f(n) ≥ 0` |
+| `f(x)^2 >= 0` and `f(x)² ≥ 0` |
+| `for x in [0, 1], sqrt(f(x)) >= 0` and `∀ x ∈ [0, 1], √(f(x)) ≥ 0` |
+| `for x in [0, 1], f(x) * 2 == 4*x` and `∀ x ∈ [0, 1], f(x) · 2 == 4*x` |
+| `for x in [0, oo), f(x) >= 0` and `∀ x ∈ [0, ∞), f(x) ≥ 0` |
+| `for x in [0, 1], f(x) >= 0` and `\forall x \in [0, 1], f(x) \geq 0` |
 
 What you get back is never terse. Whatever mathema resolved your input
 to is rendered explicitly in the record, the error message and the
 proof condition, so a shorthand never quietly becomes something you did
 not mean. Setting `MATHEMA_UNICODE=0` switches output to ASCII; see
 [symbology and rendering](symbology.md).
+
+## Mathematical notation, and how to read it
+
+Every symbol below is accepted by the parser and means exactly what its
+ASCII spelling means, so a claim can be written the way the mathematics is
+written without becoming a different claim. Code points are given because
+several of these have visually identical neighbours that are *not* the same
+symbol, and a claim pasted out of a PDF is a common way to meet one.
+
+| Symbol | Code point | Read it as | ASCII |
+|---|---|---|---|
+| `∀` | U+2200 | for all | `for` |
+| `∈` | U+2208 | in, an element of | `in` |
+| `⊂` | U+2282 | a subset of | `subset` |
+| `ℝ` | U+211D | the reals | `R` |
+| `ℤ` | U+2124 | the integers | `Z` |
+| `ℕ` | U+2115 | the naturals | `N` |
+| `ℂ` | U+2102 | the complex numbers | `C` |
+| `≤` | U+2264 | less than or equal to | `<=` |
+| `≥` | U+2265 | greater than or equal to | `>=` |
+| `≠` | U+2260 | not equal to | `!=` |
+| `≈` | U+2248 | approximately equal to, within a tolerance | `~=` |
+| `≡` | U+2261 | equivalent to, as a whole function | `=:=` |
+| `⟹` | U+27F9 | implies | `=>` |
+| `·` | U+00B7 | times | `*` |
+| `×` | U+00D7 | times | `*` |
+| `−` | U+2212 | minus | `-` |
+| `√` | U+221A | the square root of | `sqrt` |
+| `∞` | U+221E | infinity | `oo` |
+| `∂` | U+2202 | the partial derivative of | `d(` |
+| `∫` | U+222B | the integral of | `integrate(` |
+| `→` | U+2192 | tends to, inside a limit | `->` |
+| `⌊ ⌋` | U+230A, U+230B | the floor of | `floor(` |
+| `⌈ ⌉` | U+2308, U+2309 | the ceiling of | `ceil(` |
+| <code>&#124; &#124;</code> | U+007C | the absolute value of | `abs(` |
+| <code>&#124;&#124; &#124;&#124;</code> | U+007C | the norm of | `norm(` |
+| `²` | U+00B2 | squared, and likewise `³` and the rest | `^2` |
+
+Greek letters are accepted as themselves (`α`, `σ`, `Δ`), and so are the
+mathematical-italic Greek letters in U+1D6E2 to U+1D7FF, which is what many
+PDF and LaTeX renders paste instead. Both spell the same parameter. Where a
+symbol has a plain LaTeX command with no braces, that is accepted typed
+literally too, so `\forall x \in [0,1], f(x) \geq 0` is the same claim as
+its Unicode and ASCII forms.
+
+### The look-alikes worth knowing about
+
+`⊂` (U+2282) is the subset operator the grammar accepts. **`⊆` (U+2286) is
+deliberately rejected**, with an error rather than a silent reinterpretation,
+because a proper subset and a subset-or-equal are different mathematical
+statements and treating them as spellings of one another would quietly change
+what you claimed.
+
+Two pairs go the other way and *are* merged, since they are typesetting
+variants of one symbol rather than distinct ones: `⩽`/`⩾` (U+2A7D, U+2A7E) are
+the ISO-style slanted forms of `≤`/`≥`, and `𝜋` (U+1D70B, mathematical italic)
+is the same constant as `π` (U+03C0).
+
+And keep `≡` and `≈` apart, since they sit next to each other on this page and
+mean very different things. `≡` claims two implementations are the same
+function, adjudicated on its own ladder. `≈` claims equality within a
+tolerance.
+
+### Symbols beyond this set
+
+This table is the notation the core grammar knows. For domain-conventional
+symbols, the notation a particular field expects for its own quantities, see
+[mathema-symbology](symbology.md), which supplies those names and renders
+claims in them.
 
 ## Relations
 

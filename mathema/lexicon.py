@@ -34,6 +34,7 @@ from __future__ import annotations
 LEXICON: dict[str, str] = {
     # one construct at a time -----------------------------------
     "relation_eq": "f(x) == x",
+    "odd_function": "f(-x) == -f(x)",
     "relation_le_unicode": "f(x) ≤ 1",
     # function equivalence: two implementations of the same
     # mathematics (g bound via funcs= at adjudication time), the
@@ -128,6 +129,28 @@ LEXICON: dict[str, str] = {
     "let_alias": ("let m = m1, for m1 in [0.1,1000], x1 in [-100,100], "
                  "x2 in [-100,100], f(m,x1,m,x2) == (x1+x2)/2"),
     "let_function_dotted": "let g = math.sqrt, for x in (0,100], g(x) >= 0",
+    # notation: the mathematical spelling of forms already curated in
+    # ASCII above. Each is the SAME claim as its ASCII twin (the grammar
+    # page's equivalence table pins that), kept here so the symbol set
+    # the parser accepts is exercised rather than only described.
+    "forall_symbol": "∀ x ∈ [0, 1], f(x) ≥ 0",
+    "domain_subset_symbol": "∀ n ∈ [0, 100] ⊂ ℤ, f(n) ≥ 0",
+    "domain_blackboard_reals": "∀ x ∈ ℝ, f(x) == 2*x",
+    "relation_approx_unicode": "f(x) ≈ 2*x",
+    "power_superscript": "f(x)² ≥ 0",
+    "sqrt_symbol": "∀ x ∈ [0, 1], √(f(x)) ≥ 0",
+    "multiply_dot": "∀ x ∈ [0, 1], f(x) · 2 == 4*x",
+    "infinity_symbol": "∀ x ∈ [0, ∞), f(x) ≥ 0",
+    "floor_brackets_unicode": "∀ x ∈ [0, 1], ⌊f(x)⌋ ≥ 0",
+    "latex_command_forall": "\\forall x \\in [0, 1], f(x) \\geq 0",
+
+    # `f` is shorthand, never a requirement: the function under test
+    # answers to its own name, and `let` renames it to whatever reads
+    # best in the claim
+    "named_under_test": ("for price in [0,1000], rate in [0,1], "
+                        "discounted_price(price, rate) <= price"),
+    "let_alias_for_under_test": ("let net = f, for price in [0,1000], "
+                                "rate in [0,1], net(price, rate) <= price"),
     "let_free_var_closed": "let c be [-1e6,1e6], for x in [0,10], f(x) + c >= 0",
     "let_free_var_typed": ("let c be [1,100] subset integer, for x in [0,10], "
                           "f(x) + c >= 0"),
@@ -314,6 +337,7 @@ LEXICON: dict[str, str] = {
 # LEXICON, so a new entry that forgets its section fails loudly.
 SECTIONS: dict[str, tuple[str, ...]] = {
     "relations": (
+        "odd_function",
         "relation_eq", "relation_le_unicode", "equivalence_canonical",
         "equivalence_word_alias", "equivalence_with_let",
         "power_caret", "abs_bars",
@@ -340,9 +364,16 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "inferred_literal_domain"),
     "lets": (
         "let_alias", "let_function_dotted", "let_free_var_closed",
+        "named_under_test", "let_alias_for_under_test",
         "let_free_var_typed", "let_pseudo_infinity",
         "auto_let_greek_param", "auto_let_long_param",
         "auto_let_long_func"),
+    "notation": (
+        "forall_symbol", "domain_subset_symbol",
+        "domain_blackboard_reals", "relation_approx_unicode",
+        "power_superscript", "sqrt_symbol", "multiply_dot",
+        "infinity_symbol", "floor_brackets_unicode",
+        "latex_command_forall"),
     "domains": (
         "domain_excluded_point", "domain_discrete_strings",
         "domain_natural_numbers", "domain_complex", "relation_approx",
@@ -652,6 +683,23 @@ def geometric_mean_two(a: float, b: float) -> float:
     return math.sqrt(a * b)
 
 
+def discounted_price(price: float, rate: float) -> float:
+    """A price with a discount rate applied. Never exceeds the original
+    price for a rate in [0, 1], which is what "named_under_test" and
+    "let_alias_for_under_test" state: the first calls the function by
+    its own name, the second renames it with `let`, and `f` is only ever
+    a shorthand for the same thing."""
+    return price * (1.0 - rate)
+
+
+def cubed(x: float) -> float:
+    """f(x) = x^3, an odd function: negating the input negates the
+    result, which is what "odd_function" states. The plainest example of
+    a symmetry claim, and the one most of this project's documentation
+    reaches for."""
+    return x ** 3
+
+
 def unit_sqrt(x: float) -> float:
     """numpy.sqrt returns nan for x < 0 without raising, so
     "is_compendium_safe_scoped" holds only because the domain [0, 1e6]
@@ -825,6 +873,11 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "relation_eq", "relation_le_unicode", "power_caret", "abs_bars",
         "domain_closed_interval", "domain_open_interval",
         "domain_subset_integer",
+        "forall_symbol", "domain_subset_symbol",
+        "domain_blackboard_reals", "relation_approx_unicode",
+        "power_superscript", "sqrt_symbol", "multiply_dot",
+        "infinity_symbol", "floor_brackets_unicode",
+        "latex_command_forall",
     ]),
     "discount": (discount, ["raises_typed", "inferred_literal_domain"]),
     "center_of_mass_two_body": (center_of_mass_two_body, ["let_alias"]),
@@ -857,6 +910,10 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     ]),
     "gd_convergence_factor": (gd_convergence_factor, ["descent_converges"]),
     "geometric_mean_two": (geometric_mean_two, ["chained_comparison"]),
+    "discounted_price": (discounted_price, [
+        "named_under_test", "let_alias_for_under_test",
+    ]),
+    "cubed": (cubed, ["odd_function"]),
     "unit_sqrt": (unit_sqrt, ["is_compendium_safe_scoped"]),
     "clipped_ratio": (clipped_ratio, ["is_compendium_safe"]),
     "unguarded_arcsin": (unguarded_arcsin, ["is_compendium_safe"]),
