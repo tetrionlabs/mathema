@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 # BUSL-1.1 is a known SPDX identifier (a recognized non-OSI,
 # source-available license), so metadata and headers classify cleanly.
 license = "BUSL-1.1"
-license-files = ["LICENSE.md"]
+license-files = ["LICENSE.md", "LICENSING.md"]
 authors = [{ name = "Tetrion Ltd", email = "contact@tetrion.co" }]
 # sympy is bounded below the next major: a derive-route verdict
 # depends on sympy's own simplification and canonical ordering, so a

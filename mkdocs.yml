@@ -3,7 +3,7 @@ site_description: "Claim-driven development: state a claim, verify it against th
 site_url: https://mathema.tetrionlabs.com
 repo_name: tetrionlabs/mathema
 repo_url: https://github.com/tetrionlabs/mathema
-copyright: "Copyright 2026 Tetrion Ltd. Source-available under BUSL 1.1."
+copyright: "Copyright 2026 Tetrion Ltd. Source-available under BUSL 1.1; documentation prose and examples are CC BY 4.0."
 theme:
   name: material
   logo: assets/mathema-mark.svg

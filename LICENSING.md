@@ -7,6 +7,10 @@ restatement plus Tetrion's licensing policy; the license text in
 Use Grant, where the free-use permissions below actually live) and
 wins if the two ever disagree.
 
+That covers the software. The **documentation prose and examples are
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)**: quote them,
+adapt them and republish them, commercially or not, with attribution.
+
 ## Free production use: who qualifies
 
 The Additional Use Grant in LICENSE.md permits production use without
