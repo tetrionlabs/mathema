@@ -386,3 +386,64 @@ def test_floor_ceil_always_render_as_the_plain_call_never_brackets():
         text = normalize(spelling)
         assert render_law_expr(text, unicode=True) == "ceil(f(x)) - 1"
         assert render_law_expr(text, unicode=False) == "ceil(f(x)) - 1"
+
+
+def test_a_sequence_aggregate_survives_canonicalisation():
+    """`min(xs)`/`max(xs)` over a SEQUENCE is an aggregation, a fold
+    over the elements, not sympy's n-ary scalar `Min(a, b, c)`. Lowering
+    it to the latter collapses at arity one (`Min(x)` IS `x`), and the
+    canonical form then states something different from the claim that
+    was adjudicated: `min(x) <= f(x)` becomes `x <= f(x)`, which reads
+    elementwise and is a strictly stronger, usually false, assertion.
+
+    A record stores the canonical text, so this is not cosmetic: it is
+    a record asserting a proposition nobody adjudicated."""
+    from mathema.claims import claim
+    from mathema.spec import canonical_claim_text
+
+    for law in ("for alpha in [0, 1], min(x) <= f(x, alpha)",
+                "for alpha in [0, 1], f(x, alpha) <= max(x)"):
+        canonical = canonical_claim_text(claim(law))
+        assert "min(x)" in canonical or "max(x)" in canonical, canonical
+
+
+def test_the_canonical_form_reaches_the_same_verdict():
+    """Round-trip FIDELITY, not merely stability. The existing
+    fixed-point test proves the canonical text re-renders to itself,
+    which a meaning-changing canonicalisation also satisfies. This one
+    re-adjudicates it: the stored statement must mean what was
+    proven."""
+    from mathema.claims import check_conjectures, claim
+    from mathema.lexicon import weighted_average
+    from mathema.spec import canonical_claim_text
+
+    law = "for alpha in [0, 1], min(x) <= f(x, alpha)"
+    (original,) = check_conjectures(weighted_average,
+                                    [claim(law, route="derive")])
+    (restored,) = check_conjectures(
+        weighted_average,
+        [claim(canonical_claim_text(claim(law)), route="derive")])
+    assert original.verdict == restored.verdict, (
+        original.verdict, restored.verdict)
+
+
+def test_a_greek_differentiation_variable_round_trips():
+    """The grammar auto-renames `sigma` to the Greek letter, so it must
+    be able to READ BACK what it writes. The differentiation-fraction
+    unit (`d(f/dx)`, `∂(f/∂x)`) matched an ASCII-only identifier, so
+    `∂σ` was not recognised as the denominator and `f/∂σ` degraded to
+    an ordinary quotient: a proven claim came back `unknown` after two
+    passes through the store."""
+    from mathema.claims import claim
+    from mathema.spec import canonical_claim_text, render_claim_text
+
+    law = "for x in [1,5], sigma in [1,3], d(f(x, sigma), sigma) > 0"
+    once = render_claim_text(claim(law), unicode=True)
+    twice = render_claim_text(claim(once), unicode=True)
+    assert once == twice, (once, twice)
+
+    # and the canonical form, which is what a record stores and what
+    # the claims fingerprint hashes, must be stable too
+    first = canonical_claim_text(claim(law))
+    second = canonical_claim_text(claim(first))
+    assert first == second, (first, second)

@@ -212,6 +212,34 @@ LEXICON: dict[str, str] = {
     "assuming_is_defined_pinned": (
         "assuming is_defined(f) --> sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, "
         "for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)"),
+    # certificates: a proof that names the sound rule that closed it
+    "certificate_convex_lower": ("for alpha in [0, 1], "
+                                "min(x) <= f(x, alpha)"),
+    "certificate_convex_upper": ("for alpha in [0, 1], "
+                                "f(x, alpha) <= max(x)"),
+    "certificate_quadratic": ("for s1 in [0.05,0.5], s2 in [0.05,0.5], "
+                             "rho in [-0.9,0.9], "
+                             "d(f(w,s1,s2,rho), w, w) >= 0"),
+    # case studies: real formulae from openly licensed references,
+    # each claim executed by the lexicon tests
+    "parity_identity": ("for s in [50,150], k in [50,150], r in [0.0,0.1], "
+                 "t in [0.1,2], sigma in [0.05,0.8], "
+                 "f(s,k,r,t,sigma) == s - k*exp(-r*t)"),
+    "greek_delta_lower": ("for s in [50,150], k in [50,150], r in [0.0,0.1], "
+                 "t in [0.1,2], sigma in [0.05,0.8], "
+                 "∂(f(s,k,r,t,sigma), s) >= 0"),
+    "greek_delta_upper": ("for s in [50,150], k in [50,150], r in [0.0,0.1], "
+                 "t in [0.1,2], sigma in [0.05,0.8], "
+                 "∂(f(s,k,r,t,sigma), s) <= 1"),
+    "sigmoid_derivative": "d(f(x), x) == f(x)*(1 - f(x))",
+    "sigmoid_symmetry": "f(-x) == 1 - f(x)",
+    "sigmoid_limit_upper": "lim(f(x), x -> oo) == 1",
+    "sigmoid_limit_lower": "lim(f(x), x -> -oo) == 0",
+    "sigmoid_density_integrates": "∫(d(f(x), x), x, -oo, oo) == 1",
+    "sigmoid_bounded_below": "for x in [-30, 30], f(x) > 0",
+    "sigmoid_bounded_above": "for x in [-30, 30], f(x) < 1",
+    "descent_converges": ("for alpha in [0.01,1.9], q in [0.5,1.0], "
+                         "|f(alpha,q)| < 1"),
     # several functions in one claim -------------------------------
     # a bare call name binds from f's module or the calling scope at
     # check time; `let g = <name>` aliases it; `funcs=` on claim() is
@@ -332,6 +360,14 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "limit_arrow", "integrate_definite", "integral_symbol",
         "integrate_evaluation_bar", "sum_subscript", "prod_call",
         "principal_value", "recurrence_identity"),
+    "case_studies": (
+        "parity_identity", "greek_delta_lower", "greek_delta_upper",
+        "sigmoid_derivative", "sigmoid_symmetry",
+        "sigmoid_limit_upper", "sigmoid_limit_lower",
+        "sigmoid_density_integrates", "sigmoid_bounded_below",
+        "sigmoid_bounded_above", "descent_converges",
+        "certificate_quadratic", "certificate_convex_lower",
+        "certificate_convex_upper"),
     "assuming": (
         "assuming_inequality", "assuming_nonzero",
         "assuming_named_claim", "assuming_prerequisite_holds",
@@ -699,6 +735,91 @@ def spread_total(xs: list, lo: float, hi: float) -> float:
     return total
 
 
+def weighted_average(x: list, alpha: float) -> float:
+    """An exponentially weighted moving average: each step is a convex
+    combination of the new element and the accumulator. What the
+    "certificate_convex_*" entries demonstrate: the fold's bounds are
+    proven by induction, not sampled, because both weights are
+    nonnegative and sum to one on the declared domain."""
+    y = x[0]
+    for v in x[1:]:
+        y = alpha * v + (1 - alpha) * y
+    return y
+
+
+def portfolio_variance(w: float, s1: float, s2: float, rho: float) -> float:
+    """Two-asset portfolio variance. What "certificate_quadratic" shows:
+    read as a quadratic in w, the second derivative is nonnegative
+    because the leading coefficient is nonnegative and the discriminant
+    settles the sign, which is a certificate rather than a sample."""
+    return (w ** 2 * s1 ** 2 + (1 - w) ** 2 * s2 ** 2
+            + 2 * w * (1 - w) * rho * s1 * s2)
+
+
+def black_scholes_call(s: float, k: float, r: float, t: float,
+                       sigma: float) -> float:
+    """A European call priced by Black-Scholes. The Greeks ARE its
+    partial derivatives, which is what the "greek_*" entries state in
+    the grammar's own notation: delta is the partial in the spot price
+    and lies in [0, 1], vega is the partial in volatility and is
+    positive. Source: Black-Scholes model and Greeks (finance),
+    Wikipedia (CC BY-SA 4.0)."""
+    import math
+    root_t = math.sqrt(t)
+    d1 = (math.log(s / k) + (r + 0.5 * sigma * sigma) * t) / (sigma * root_t)
+    d2 = d1 - sigma * root_t
+    phi = lambda z: 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))   # noqa: E731
+    return s * phi(d1) - k * math.exp(-r * t) * phi(d2)
+
+
+def put_call_parity_gap(s: float, k: float, r: float, t: float,
+                        sigma: float) -> float:
+    """A European call minus a European put on the same strike, both
+    legs priced by Black-Scholes. Put-call parity says the difference
+    collapses to S - K*exp(-r*T), independent of volatility, which is
+    what "parity_identity" proves. Source: Put-call parity and
+    Black-Scholes model, Wikipedia (CC BY-SA 4.0)."""
+    import math
+    root_t = math.sqrt(t)
+    d1 = (math.log(s / k) + (r + 0.5 * sigma * sigma) * t) / (sigma * root_t)
+    d2 = d1 - sigma * root_t
+    phi = lambda z: 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))   # noqa: E731
+    call = s * phi(d1) - k * math.exp(-r * t) * phi(d2)
+    put = k * math.exp(-r * t) * phi(-d2) - s * phi(-d1)
+    return call - put
+
+
+def black_scholes_vega(s: float, k: float, r: float, t: float,
+                       sigma: float) -> float:
+    """Vega: the sensitivity of a European option's price to its
+    volatility, one of the Greeks. Strictly positive wherever the
+    option has time left, which is what "vega_positive" states.
+    Source: Greeks (finance), Wikipedia (CC BY-SA 4.0)."""
+    import math
+    root_t = math.sqrt(t)
+    d1 = (math.log(s / k) + (r + 0.5 * sigma * sigma) * t) / (sigma * root_t)
+    return s * root_t * math.exp(-0.5 * d1 * d1) / math.sqrt(2.0 * math.pi)
+
+
+def logistic_standard(x: float) -> float:
+    """The standard logistic function, the sigmoid of machine learning.
+    Its calculus is what the "sigmoid_*" entries demonstrate: a
+    derivative expressible in the function itself, limits at both
+    infinities, and a derivative that integrates to one over the line.
+    Source: Logistic function, Wikipedia (CC BY-SA 4.0)."""
+    import math
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def gd_convergence_factor(alpha: float, q: float) -> float:
+    """r = 1 - alpha*q, the per-step convergence factor of fixed-step
+    gradient descent on the quadratic bowl f(t) = 0.5*q*t^2: successive
+    iterates satisfy x_(n+1) = r*x_n, so the method converges exactly
+    when |r| < 1. Source: Scientific Python Lectures (CC BY 4.0),
+    "Mathematical optimization: finding minima of functions"."""
+    return 1.0 - alpha * q
+
+
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "double": (double, [
         "relation_eq", "relation_le_unicode", "power_caret", "abs_bars",
@@ -721,6 +842,20 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "assuming_is_defined", "assuming_is_defined_postfix",
         "assuming_is_defined_pinned",
     ]),
+    "weighted_average": (weighted_average, [
+        "certificate_convex_lower", "certificate_convex_upper",
+    ]),
+    "portfolio_variance": (portfolio_variance, ["certificate_quadratic"]),
+    "black_scholes_call": (black_scholes_call, [
+        "greek_delta_lower", "greek_delta_upper",
+    ]),
+    "put_call_parity_gap": (put_call_parity_gap, ["parity_identity"]),
+    "logistic_standard": (logistic_standard, [
+        "sigmoid_derivative", "sigmoid_symmetry", "sigmoid_limit_upper",
+        "sigmoid_limit_lower", "sigmoid_density_integrates",
+        "sigmoid_bounded_below", "sigmoid_bounded_above",
+    ]),
+    "gd_convergence_factor": (gd_convergence_factor, ["descent_converges"]),
     "geometric_mean_two": (geometric_mean_two, ["chained_comparison"]),
     "unit_sqrt": (unit_sqrt, ["is_compendium_safe_scoped"]),
     "clipped_ratio": (clipped_ratio, ["is_compendium_safe"]),

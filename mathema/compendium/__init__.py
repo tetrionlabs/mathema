@@ -12,7 +12,7 @@ mathema bundles light starters for `math` and `numpy` under
 Three consumption paths:
 
 - `raises_when` regions register into the partiality-lemma registry
-  (`mathema.lemmas.register_raises_when`), so claims about CALLERS of
+  (`mathema.partiality.register_raises_when`), so claims about CALLERS of
   a compendium-covered function adjudicate against its raise region exactly as
   they do against `math.sqrt`'s today.
 - `nan_when` regions and raise regions feed a hazard generator:

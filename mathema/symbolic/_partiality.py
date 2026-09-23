@@ -12,7 +12,7 @@ raise-region verdict machinery treats both identically.
 
 The registry works for any function, not just the standard library's:
 the math-module rows ship out of the box, and `register_raises_when`
-(public as `mathema.lemmas.register_raises_when`) adds a lemma about
+(public as `mathema.partiality.register_raises_when`) declares
 an arbitrary function, a third-party kernel, the user's own helper,
 so claims about its CALLERS adjudicate against its raising region too.
 True division contributes a ZeroDivisionError guard with no registry
@@ -37,7 +37,7 @@ from ._base import NotSymbolic, _bind_params, _expr_to_sympy, strip_docstring
 # (condition builder, exception name). A condition builder takes the
 # call's lifted arguments (sympy expressions) and returns the region
 # where the call RAISES. The math-module rows ship out of the box;
-# `register_raises_when` (public via mathema.lemmas) adds rows for
+# `register_raises_when` (public via mathema.partiality) adds rows for
 # arbitrary functions, a caller's claims then falsify over a
 # registered function's raising region exactly as they do over
 # math.sqrt's.
