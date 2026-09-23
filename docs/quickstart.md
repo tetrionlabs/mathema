@@ -38,7 +38,7 @@ mathema check pricing.py:discounted --claim "for rate in [0, 1], f(price, rate) 
 ```
 
 ```text
-FAIL pricing.discounted: tier 2, claims 1/1 adjudicated (0 hold, 1 refuted)  <- 1 falsified claim(s)
+FAIL pricing.discounted: source, no side effects; claims 1/1 adjudicated (0 hold, 1 refuted)  <- 1 falsified claim(s)
 ```
 
 Falsified, on the first try. That is not a bad start, it is the point.
@@ -113,7 +113,7 @@ mathema check pricing.py
 ```
 
 ```text
-ok   pricing.discounted: tier 2, claims 1/1 adjudicated (1 proven, 0 hold, 0 refuted)
+ok   pricing.discounted: source, no side effects; claims 1/1 adjudicated (1 proven, 0 hold, 0 refuted)
 ```
 
 The docstring is one of four places a claim can live, alongside a

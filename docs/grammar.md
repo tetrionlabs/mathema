@@ -52,7 +52,7 @@ not mean. Setting `MATHEMA_UNICODE=0` switches output to ASCII; see
 | Spelling | Meaning |
 |---|---|
 | `f(x)^2 >= 0` | powers with a caret |
-| `\|f(x)\| <= 1` | absolute value with bars |
+| <code>&#124;f(x)&#124; &lt;= 1</code> | absolute value with bars |
 | `for n in [1, 5] subset Z, f(n) <= n!` | postfix factorial |
 | `f(x, 1.0) == x[-1]` | indexing into a sequence parameter |
 | `f(\alpha) ≤ 1` | a Greek name written as a LaTeX escape |
@@ -92,7 +92,7 @@ check every case rather than guessing.
 | `lim(f(x), x -> 0) == 0` | the arrow form |
 | `integrate(f(x), x, 0, 1) == 1` | a definite integral |
 | `∫(f(x), x, 0, 1) == 1` | the symbol form |
-| `integrate(f(x), x)\|_{0}^{1} == 1` | with an evaluation bar |
+| <code>integrate(f(x), x)&#124;_{0}^{1} == 1</code> | with an evaluation bar |
 | `Sum(f(i))_{i=1}^n == n*(n+1)` | a sum, subscript form |
 | `Prod(f(i), i, 1, n) >= 0` | a product |
 | `P.V.(integrate(1/(x - c), x, -1, 1)) == f(c)` | a Cauchy principal value |
@@ -135,12 +135,22 @@ readable and lets you talk about things that are not parameters:
 | `let g = budget_line, d(g(x, I, px, py), x) == -px/py` | another function in the same module, by bare name |
 | `let c be [-1e6,1e6], for x in [0,10], f(x) + c >= 0` | a free variable over a range |
 | `let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0` | a typed free variable |
-| `let \|inf\| be 1e12, for x in [0, oo], f(x) >= 0` | a finite stand-in for infinity |
 | `let compute_square_root = numpy.sqrt, for x in [0, 100], compute_square_root(x) >= 0` | a long name, kept readable |
 
 A free variable is the difference between "this holds for the inputs"
 and "this holds for the inputs and any constant you care to add", which
 is often the claim you actually meant.
+
+One more binding uses bars around the name, and sets the finite
+magnitude that stands in for `oo` when a domain is unbounded, so a
+claim quantified over the whole half-line can still be probed:
+
+```
+let |inf| be 1e12, for x in [0, oo], f(x) >= 0
+```
+
+It is not an ordinary name binding: nothing in the claim refers to
+`|inf|`, it only changes how far out the probe route samples.
 
 ## `assuming`: stating a premise
 

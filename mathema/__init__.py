@@ -155,7 +155,8 @@ class Record:
     meta: dict = field(default_factory=dict, repr=False)
 
     def __repr__(self) -> str:
-        lines = [f"mathema.Record({self.facts.name}) · tier {self.facts.tier} "
+        from .analysis import tier_word
+        lines = [f"mathema.Record({self.facts.name}) · {tier_word(self.facts.tier)} "
                 f"· form {self.facts.form}"]
         for p in self.probes:
             mark = {"holds": "holds  ", "falsified": "FALSIFY", "proven": "proven ",

@@ -108,7 +108,7 @@ ordinary one.
 | sugar | on a matrix | on a scalar |
 |---|---|---|
 | `A^T` | `A.T` (transpose) | `A ** T` (power) |
-| `\|A\|` | `det(A)` | `abs(A)` |
+| <code>&#124;A&#124;</code> | `det(A)` | `abs(A)` |
 | `A^-1` | `inv(A)` | `1 / A` (reciprocal) |
 
 The type is known from a signature marker, an `R^(m*n)` domain, or a

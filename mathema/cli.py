@@ -114,6 +114,7 @@ def _check_rows(args) -> list[dict]:
 
 def _format_check(rows: list[dict], fmt: str) -> str:
     from . import SPEC_VERSION, __version__
+    from .analysis import tier_word
 
     if fmt == "compact":
         # the adjudication agent shape: stance/source/gates per row,
@@ -176,7 +177,8 @@ def _format_check(rows: list[dict], fmt: str) -> str:
     lines = []
     for r in rows:
         state = "FAIL" if r["problems"] else "ok"
-        line = (f'{state:4} {r["name"]}: tier {r["tier"]}, claims {r["coverage"]} '
+        line = (f'{state:4} {r["name"]}: {tier_word(r["tier"])}; '
+                f'claims {r["coverage"]} '
                 'adjudicated ('
                 + (f'{r["proven"]} proven, ' if r["proven"] else "")
                 + f'{r["holds"]} hold, {r["refuted"]} refuted'

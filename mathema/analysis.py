@@ -881,6 +881,27 @@ def _parse_inline_notes(src: str) -> list[dict]:
     return out
 
 
+_TIER_WORDS = {0: "no source",
+               2: "source, no side effects",
+               3: "source, side effects"}
+
+
+def tier_word(tier: int) -> str:
+    """The word a record shows in place of its tier number.
+
+    Intent:
+        A tier encodes two facts that the record also stores separately
+        in `identity`: whether real Python source was available, and
+        whether the function is side-effect free. `doc-only` is the
+        case where no source could be read, so the documented intent is
+        the only evidence there is; `pure` and `impure` both mean the
+        source was read, and say whether effects were found. An
+        unrecognised value renders as the bare number rather than
+        guessing at a word for it.
+    """
+    return _TIER_WORDS.get(tier, f"tier {tier}")
+
+
 def looks_like_wrapper(facts) -> bool:
     """A documented function whose Python source is thin dispatch; external
     calls, no loops/comprehensions/lift, is a wrapper around a compiled core
