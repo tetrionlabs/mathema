@@ -706,10 +706,19 @@ _LET_FUNC_VALUE = re.compile(r"^\w+(?:\.\w+)+$")
 # exponents sum to, in which case the whole call is left unexpanded as
 # malformed (a real typo worth catching, not silently trusting one
 # source of truth over the other).
+# `[^\W\d]` is "a word character that is not a digit", which is every
+# Unicode letter plus underscore. ASCII-only here would be wrong in
+# both directions: the grammar auto-renames `sigma` to the Greek
+# letter when rendering, so `∂σ` is a spelling mathema itself WRITES
+# and must therefore read back. When the unit failed to match, the
+# denominator was not recognised and `f/∂σ` degraded into an ordinary
+# quotient, turning a proven claim into an unknown one after a round
+# trip through the store.
+_DIFF_IDENT = r"[^\W\d]\w*"
 _DIFF_FRAC_OPEN = re.compile(r"(?<![A-Za-z0-9_])([d∂])(?:\^(\d+))?\(")
-_DIFF_FRACTION_UNIT = r"[d∂][A-Za-z_]\w*(?:\^\d+)?"
+_DIFF_FRACTION_UNIT = rf"[d∂]{_DIFF_IDENT}(?:\^\d+)?"
 _DIFF_FRACTION_TRAILING = re.compile(rf"/((?:{_DIFF_FRACTION_UNIT})+)$")
-_DIFF_FRACTION_UNIT_PARSE = re.compile(r"([d∂])([A-Za-z_]\w*)(?:\^(\d+))?")
+_DIFF_FRACTION_UNIT_PARSE = re.compile(rf"([d∂])({_DIFF_IDENT})(?:\^(\d+))?")
 
 
 def extract_diff_fraction_sugar(text: str) -> tuple[str, frozenset[str]]:
@@ -2149,6 +2158,16 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         if fname in funcs:
             return sympy.Function(fname)(*args)
         name = _call_name(node)
+        if name in ("min", "max") and len(args) == 1:
+            # `min(xs)` over a SEQUENCE is an aggregation, a fold over
+            # the elements. sympy's Min/Max are the n-ary SCALAR
+            # versions and collapse at arity one (`Min(x)` is `x`),
+            # which would canonicalise the claim into `x <= f(x)`: a
+            # different, elementwise, usually false assertion. The
+            # record stores the canonical text, so the collapse would
+            # make a record state something nobody adjudicated. Held
+            # uninterpreted instead, which prints back as written.
+            return sympy.Function(name)(*args)
         if name in _SYMPY_FUNCS:
             return _SYMPY_FUNCS[name](*args)
     return _verbatim_atom(node)
@@ -2544,10 +2563,15 @@ class _CanonicalPrinter(StrPrinter):
         # bound-function vocabulary) needs the funcs membership check.
         if isinstance(expr, sympy.core.function.AppliedUndef):
             name = expr.func.__name__
-            if name != "P.V." and name not in self._funcs:
+            if (name not in ("P.V.", "min", "max")
+                    and name not in self._funcs):
                 # "P.V." is the grammar's own principal-value operator
                 # (an uninterpreted sympy.Function internally, but a
-                # reserved call form, never a user binding)
+                # reserved call form, never a user binding). `min`/`max`
+                # over a sequence are held uninterpreted for the same
+                # reason: they are reserved aggregation forms, not
+                # bindings, and sympy's scalar Min/Max would collapse
+                # them (see _node_to_sympy).
                 raise ValueError(f"unrenderable syntax: bound function {name!r} "
                                  f"not in funcs={self._funcs!r}")
         return super()._print_Function(expr)

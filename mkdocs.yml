@@ -60,7 +60,8 @@ nav:
       - Authoring claims: authoring.md
       - The claim grammar: grammar.md
       - The mathema docstring: mathema-docstring.md
-      - Conditional claims and lemmas: conditional-claims.md
+      - Conditional claims: conditional-claims.md
+      - Lemmas: lemmas.md
       - Matrix structure and linear algebra: matrix-structure.md
       - Multi-function claims: multi-function-claims.md
       - Claims transfer: claims-transfer.md
@@ -87,6 +88,7 @@ nav:
   - Customising:
       - Symbology and rendering: symbology.md
       - Extending mathema: extending.md
+  - Case studies: case-studies.md
   - Project:
       - Versioning and stability: stability.md
       - Licensing policy: licensing-policy.md

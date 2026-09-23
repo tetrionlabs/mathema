@@ -193,12 +193,12 @@ body, and, for functions it calls, from registered lemmas:
 
 ```python
 import sympy
-import mathema.lemmas
+import mathema.partiality
 
 def stable_kernel(u, tol):
     ...   # raises for u <= tol
 
-mathema.lemmas.register_raises_when(
+mathema.partiality.register_raises_when(
     stable_kernel, lambda u, tol: sympy.Le(u, tol), "ValueError")
 ```
 

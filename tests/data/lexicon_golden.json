@@ -439,6 +439,76 @@
   "unicode": "assuming f is defined => sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
   "ascii": "assuming f is defined => sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, for w in [-50.0, 50.0]:float|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
  },
+ "certificate_convex_lower": {
+  "input": "for alpha in [0, 1], min(x) <= f(x, alpha)",
+  "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, min(x) ≤ f(x, α)",
+  "ascii": "for alpha in [0.0, 1.0]:float|missing, min(x) <= f(x, alpha)"
+ },
+ "certificate_convex_upper": {
+  "input": "for alpha in [0, 1], f(x, alpha) <= max(x)",
+  "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x, α) ≤ max(x)",
+  "ascii": "for alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= max(x)"
+ },
+ "certificate_quadratic": {
+  "input": "for s1 in [0.05,0.5], s2 in [0.05,0.5], rho in [-0.9,0.9], d(f(w,s1,s2,rho), w, w) >= 0",
+  "unicode": "let ρ = rho, ∀ s1 ∈ [0.05, 0.5] ⊂ ℝ ∪ {∅}, s2 ∈ [0.05, 0.5] ⊂ ℝ ∪ {∅}, ρ ∈ [-0.9, 0.9] ⊂ ℝ ∪ {∅}, ∂²(f(w, s1, s2, ρ)/∂w²) ≥ 0",
+  "ascii": "for s1 in [0.05, 0.5]:float|missing, s2 in [0.05, 0.5]:float|missing, rho in [-0.9, 0.9]:float|missing, d(f(w, s1, s2, rho), w, w) >= 0"
+ },
+ "parity_identity": {
+  "input": "for s in [50,150], k in [50,150], r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], f(s,k,r,t,sigma) == s - k*exp(-r*t)",
+  "unicode": "let σ = sigma, ∀ s ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, k ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, r ∈ [0.0, 0.1] ⊂ ℝ ∪ {∅}, t ∈ [0.1, 2.0] ⊂ ℝ ∪ {∅}, σ ∈ [0.05, 0.8] ⊂ ℝ ∪ {∅}, f(s, k, r, t, σ) = -k*exp(-r*t) + s",
+  "ascii": "for s in [50.0, 150.0]:float|missing, k in [50.0, 150.0]:float|missing, r in [0.0, 0.1]:float|missing, t in [0.1, 2.0]:float|missing, sigma in [0.05, 0.8]:float|missing, f(s, k, r, t, sigma) = -k*exp(-r*t) + s"
+ },
+ "greek_delta_lower": {
+  "input": "for s in [50,150], k in [50,150], r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], ∂(f(s,k,r,t,sigma), s) >= 0",
+  "unicode": "let σ = sigma, ∀ s ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, k ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, r ∈ [0.0, 0.1] ⊂ ℝ ∪ {∅}, t ∈ [0.1, 2.0] ⊂ ℝ ∪ {∅}, σ ∈ [0.05, 0.8] ⊂ ℝ ∪ {∅}, ∂(f(s, k, r, t, σ)/∂s) ≥ 0",
+  "ascii": "for s in [50.0, 150.0]:float|missing, k in [50.0, 150.0]:float|missing, r in [0.0, 0.1]:float|missing, t in [0.1, 2.0]:float|missing, sigma in [0.05, 0.8]:float|missing, d(f(s, k, r, t, sigma), s) >= 0"
+ },
+ "greek_delta_upper": {
+  "input": "for s in [50,150], k in [50,150], r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], ∂(f(s,k,r,t,sigma), s) <= 1",
+  "unicode": "let σ = sigma, ∀ s ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, k ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, r ∈ [0.0, 0.1] ⊂ ℝ ∪ {∅}, t ∈ [0.1, 2.0] ⊂ ℝ ∪ {∅}, σ ∈ [0.05, 0.8] ⊂ ℝ ∪ {∅}, ∂(f(s, k, r, t, σ)/∂s) ≤ 1",
+  "ascii": "for s in [50.0, 150.0]:float|missing, k in [50.0, 150.0]:float|missing, r in [0.0, 0.1]:float|missing, t in [0.1, 2.0]:float|missing, sigma in [0.05, 0.8]:float|missing, d(f(s, k, r, t, sigma), s) <= 1"
+ },
+ "sigmoid_derivative": {
+  "input": "d(f(x), x) == f(x)*(1 - f(x))",
+  "unicode": "f'(x) = (1 - f(x))*f(x)",
+  "ascii": "d(f(x), x) = (1 - f(x))*f(x)"
+ },
+ "sigmoid_symmetry": {
+  "input": "f(-x) == 1 - f(x)",
+  "unicode": "f(-x) = 1 - f(x)",
+  "ascii": "f(-x) = 1 - f(x)"
+ },
+ "sigmoid_limit_upper": {
+  "input": "lim(f(x), x -> oo) == 1",
+  "unicode": "lim(f(x), x, ∞) = 1",
+  "ascii": "lim(f(x), x, oo) = 1"
+ },
+ "sigmoid_limit_lower": {
+  "input": "lim(f(x), x -> -oo) == 0",
+  "unicode": "lim(f(x), x, -∞) = 0",
+  "ascii": "lim(f(x), x, -oo) = 0"
+ },
+ "sigmoid_density_integrates": {
+  "input": "∫(d(f(x), x), x, -oo, oo) == 1",
+  "unicode": "∫(f'(x), x, -∞, ∞) = 1",
+  "ascii": "integrate(d(f(x), x), x, -oo, oo) = 1"
+ },
+ "sigmoid_bounded_below": {
+  "input": "for x in [-30, 30], f(x) > 0",
+  "unicode": "∀ x ∈ [-30.0, 30.0] ⊂ ℝ ∪ {∅}, f(x) > 0",
+  "ascii": "for x in [-30.0, 30.0]:float|missing, f(x) > 0"
+ },
+ "sigmoid_bounded_above": {
+  "input": "for x in [-30, 30], f(x) < 1",
+  "unicode": "∀ x ∈ [-30.0, 30.0] ⊂ ℝ ∪ {∅}, f(x) < 1",
+  "ascii": "for x in [-30.0, 30.0]:float|missing, f(x) < 1"
+ },
+ "descent_converges": {
+  "input": "for alpha in [0.01,1.9], q in [0.5,1.0], |f(alpha,q)| < 1",
+  "unicode": "let α = alpha, ∀ α ∈ [0.01, 1.9] ⊂ ℝ ∪ {∅}, q ∈ [0.5, 1.0] ⊂ ℝ ∪ {∅}, |f(α, q)| < 1",
+  "ascii": "for alpha in [0.01, 1.9]:float|missing, q in [0.5, 1.0]:float|missing, |f(alpha, q)| < 1"
+ },
  "second_function_by_name": {
   "input": "d(budget_line(x, I, px, py), x) == -px/py",
   "unicode": "let g = budget_line, ∂(g(x, I, px, py)/∂x) = -px/py",

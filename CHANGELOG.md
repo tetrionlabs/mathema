@@ -6,7 +6,14 @@ dated on the day they are tagged and published.
 
 ## Unreleased
 
-Nothing yet.
+### Changed
+
+- `mathema.lemmas` is now `mathema.partiality`. The module declares
+  where a function raises so that claims about its callers can reason
+  about it, which is an asserted fact rather than an established one,
+  and "lemma" reads as established. It also collided with the claim
+  sense of the word: a lemma is a named claim another claim rests on
+  through an `assuming` premise. `register_raises_when` is unchanged.
 
 ## 0.6.0
 
@@ -285,7 +292,7 @@ First public release. Highlights:
 - **Partiality lemmas.** Where a function raises is a consumable fact:
   `math.sqrt`'s negative axis, `log`'s nonpositive region, and
   division by zero ship built in, and
-  `mathema.lemmas.register_raises_when` states the raising region of
+  `mathema.partiality.register_raises_when` states the raising region of
   any function, callers' claims then falsify over it exactly as over
   an explicit `raise` guard, or prove once their domain (or `assuming`
   clause) provably avoids it.

@@ -345,3 +345,72 @@ def test_find_prints_the_hits(capsys):
     assert "remainder_below_modulus" in out
     find("zzzzqqqqxxxx")
     assert "no lexicon entry matches" in capsys.readouterr().out
+
+
+def test_every_spelling_has_a_stable_canonical_form():
+    """The canonical rendering is a THIRD mode, distinct from the two
+    display renderings, and it is the one that matters most: a record
+    stores it and `claims_fingerprint` hashes it. If it is not a fixed
+    point then a claim's identity changes merely by passing through the
+    store, which reads as an edited claim and forces re-adjudication.
+
+    The display-mode fixed-point test above does not cover this mode,
+    which is how two lossy canonicalisations reached the store: `min(x)`
+    collapsing to `x` (a strictly different, usually false assertion)
+    and `∂σ` degrading into an ordinary quotient (a proven claim coming
+    back unknown)."""
+    from mathema.conjecture import claim
+    from mathema.lexicon import LEXICON
+    from mathema.spec import canonical_claim_text
+
+    drifted = []
+    for name, law in LEXICON.items():
+        try:
+            once = canonical_claim_text(claim(law))
+        except Exception:
+            continue          # a spelling the grammar declines by design
+        try:
+            twice = canonical_claim_text(claim(once))
+        except Exception as exc:
+            drifted.append(f"{name}: canonical text will not reparse "
+                           f"({type(exc).__name__}): {once}")
+            continue
+        if once != twice:
+            drifted.append(f"{name}:\n    {once}\n    {twice}")
+    assert not drifted, ("canonical claim text drifts on reparse:\n"
+                         + "\n".join(drifted))
+
+
+def test_the_canonical_form_reaches_the_same_verdict_everywhere():
+    """Text fidelity is necessary but not sufficient. A canonicalisation
+    can be perfectly stable and still mean something else: `min(x) <=
+    f(x)` collapsed to `x <= f(x)`, which re-rendered to itself forever
+    while asserting something stronger and false.
+
+    So for every spelling that has a function to be checked against,
+    adjudicate the original and its canonical form and require the same
+    verdict. This is the guard that catches a meaning-changing
+    canonicalisation, which the fixed-point tests cannot see."""
+    from mathema.conjecture import check_conjectures, claim
+    from mathema.lexicon import EXAMPLE_FUNCTIONS, get
+    from mathema.spec import canonical_claim_text
+
+    diverged = []
+    for fn, keys in EXAMPLE_FUNCTIONS.values():
+        for key in keys:
+            law = get(key)
+            try:
+                original = claim(law, route="probe")
+                restored = claim(canonical_claim_text(original), route="probe")
+            except Exception as exc:
+                diverged.append(f"{key}: canonical form will not reparse "
+                                f"({type(exc).__name__})")
+                continue
+            (before,) = check_conjectures(fn, [original], extensive=False)
+            (after,) = check_conjectures(fn, [restored], extensive=False)
+            if before.verdict != after.verdict:
+                diverged.append(f"{key}: {before.verdict} -> {after.verdict}"
+                                f"\n    {law}"
+                                f"\n    {canonical_claim_text(original)}")
+    assert not diverged, ("a canonical form changed the verdict:\n"
+                          + "\n".join(diverged))
