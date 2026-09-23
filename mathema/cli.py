@@ -2363,9 +2363,9 @@ def main(argv: list[str] | None = None) -> int:
     testing/programmatic invocation."""
     from . import badges as _badges
     ap = argparse.ArgumentParser(prog="mathema",
-                                 description="Claim-driven development: state a "
-                                             "claim, verify it against the real "
-                                             "function, keep the record.")
+                                 description="Claim-Driven Development: turn "
+                                             "software intent into verifiable "
+                                             "evidence.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     pc = sub.add_parser("check", help="interactive: adjudicate one file, "

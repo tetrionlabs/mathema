@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""mathema: claim-driven development.
+"""mathema: Claim-Driven Development, turning software intent into
+verifiable evidence.
 
     import mathema
     r = mathema.check(my_function, claims=["f(-x) == -f(x)"])

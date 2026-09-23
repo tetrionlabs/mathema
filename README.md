@@ -1,7 +1,6 @@
 # mathema
 
-*Claim-driven development: state a claim, verify it against the real
-function, keep the record.*
+*Claim-Driven Development: turn software intent into verifiable evidence.*
 
 
 More code is being written by AI than ever, faster than any human can
