@@ -381,7 +381,7 @@ def install(root: str = ".") -> None:
     if marker in _INSTALLED_FOR:
         return
     _INSTALLED_FOR.add(marker)
-    from ..lemmas import register_raises_when
+    from ..partiality import register_raises_when
     functions = compendium_functions(root)
     for key, sf in functions.items():
         for condition, exc in sf.raises_when:
