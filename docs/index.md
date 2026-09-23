@@ -59,7 +59,7 @@ one sequence parameter feeding a numeric result, so the bounds,
 scalar parameter. This is the real, unedited result:
 
 ```text
-mathema.Record(ema) · tier 2 · form 1dda3a0d5a72
+mathema.Record(ema) · source, no side effects · form 1dda3a0d5a72
   FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
            counterexample alpha=1 -> 0.45118195841070374, alpha=3.09918 -> -349.0594689144083 (not increasing)
   FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
@@ -164,7 +164,7 @@ mathema.check(ema, claims=[
 ```
 
 ```text
-mathema.Record(ema) · tier 2 · form 1dda3a0d5a72
+mathema.Record(ema) · source, no side effects · form 1dda3a0d5a72
   ...
   holds   collapses_probed: f(x, 1.0) == x[-1] (n=128)
   proven  collapses_derived: f(x, 1.0) = x[-1]
@@ -263,7 +263,8 @@ have gone stale against the code as it stands now.
   structure, never a flat constant, and `falsified` comes with the
   counterexample, permanently.
 - **Symbolic proof (the derive route)**: lifts a function's body to a
-  `sympy` expression and decides a claim algebraically. `proven` is
+  symbolic expression and decides a claim algebraically, over several
+  mathematics engines (principally sympy) and mathema's own solving. `proven` is
   strictly stronger than `holds`: not "n samples agreed," but "the two
   sides are the same expression." See [The derive route](derive-route.md)
   for exactly what is liftable.
@@ -316,7 +317,7 @@ Run these inside an active virtual environment (`python3 -m venv .venv && source
 global Python.
 
 ```bash
-pip install -e .              # core: sympy (derive route) + pyyaml (the spec store)
+pip install -e .              # core: the derive route and the spec store
 ```
 
 ## Network policy

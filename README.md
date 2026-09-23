@@ -55,7 +55,7 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 ```
 
 ```text
-ok   options.put_call_parity_gap: tier 2, claims 1/2 adjudicated (1 proven, 0 hold, 0 refuted, 1 unverifiable)
+ok   options.put_call_parity_gap: source, no side effects; claims 1/2 adjudicated (1 proven, 0 hold, 0 refuted, 1 unverifiable)
 ```
 
 `proven`, not `holds`. mathema lifted the body to a symbolic expression, at
@@ -92,7 +92,7 @@ mathema check sigmoid.py \
 ```
 
 ```text
-ok   sigmoid.logistic: tier 2, claims 4/4 adjudicated (4 proven, 0 hold, 0 refuted)
+ok   sigmoid.logistic: source, no side effects; claims 4/4 adjudicated (4 proven, 0 hold, 0 refuted)
 ```
 
 All four proven, including a limit at infinity and an improper integral over
@@ -117,7 +117,7 @@ print(mathema.check(discount_factor))
 ```
 
 ```text
-mathema.Record(discount_factor) · tier 2 · form 8b1b8ec14a11
+mathema.Record(discount_factor) · source, no side effects · form 8b1b8ec14a11
   FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
            counterexample x = 1
   FALSIFY convex[x]: d(f(x), x, x) >= 0
@@ -264,9 +264,11 @@ its own homework stay on your side of the line.
   other laws checked against the same function in the same call have come back
   clean, resetting the moment any of them is falsified. A `falsified` verdict
   keeps its counterexample permanently.
-- **The derive route**: where a function lifts to a closed-form sympy
+- **The derive route**: where a function lifts to a closed-form symbolic
   expression, a claim is proven rather than sampled, including a case-split
-  fallback across a pole or domain boundary sympy cannot resolve in one shot.
+  fallback across a pole or domain boundary the first attempt cannot resolve.
+  Several mathematics engines sit under this, principally sympy, alongside
+  mathema's own solving, with z3 available as an optional extra.
   `extensive=True` widens the search at real, opt-in cost and is off by default
   everywhere.
 - **The conjecture pipeline**: state a claim as one string (`"f(-x) == -f(x)"`)
@@ -307,8 +309,8 @@ of what Claim-Driven Development is for.
   implementation and can be re-verified against a regeneration of it.
 - **Symbolic and formal proving** (Coq, Dafny, an SMT solver) proves a claim
   outright, but usually asks for a dedicated specification language and real
-  upfront investment. mathema's derive route does real symbolic proof through
-  sympy, automatically, for whatever subset of an ordinary Python function's
+  upfront investment. mathema's derive route does real symbolic proof
+  automatically, for whatever subset of an ordinary Python function's
   shape actually lifts, and says `skipped` the moment it cannot, rather than
   pretending probing is a proof or refusing to run at all.
 
@@ -418,7 +420,7 @@ environment (`python3 -m venv .venv && source .venv/bin/activate`, or your
 usual equivalent) rather than against a system or global Python.
 
 ```bash
-pip install mathema           # core: sympy (derive route) + pyyaml (spec store)
+pip install mathema           # core: the derive route and the spec store
 ```
 
 The core install is deliberately small. Optional extras add capabilities
