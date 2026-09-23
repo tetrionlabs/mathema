@@ -5,7 +5,10 @@ repos:
         name: check SPDX license headers
         entry: python mathema/_devtools/check_headers.py
         language: system
-        types: [python]
+        # source in any language the BUSL covers, not just Python.
+        # Prose and stylesheets are CC BY 4.0 and stay out of it; the
+        # authoritative list is _COMMENT_PREFIX in the checker itself.
+        files: \.(py|sh|bash|c|h|cpp|hpp|cc|hh|js|mjs|cjs|ts|tsx|jsx|rs|go|java|kt|scala|swift)$
 
       - id: check-prose
         name: check house prose style (no em-dash, no private notes)

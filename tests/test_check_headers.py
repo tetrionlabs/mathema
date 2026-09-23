@@ -43,6 +43,32 @@ def test_a_wrong_licence_is_reported(tmp_path):
     assert check_headers([path]) == [path]
 
 
+def test_a_slash_comment_language_uses_slash_comments(tmp_path):
+    """C++, and every other runtime the adaptors target, carries the
+    same header in its own comment syntax."""
+    path = _write(tmp_path, "ok.cpp",
+                  "// SPDX-License-Identifier: BUSL-1.1\n"
+                  "// Copyright 2026 Tetrion Ltd\n"
+                  "int main() { return 0; }\n")
+    assert check_headers([path]) == []
+
+
+def test_a_slash_comment_language_with_a_hash_header_is_reported(tmp_path):
+    path = _write(tmp_path, "wrong.rs",
+                  "# SPDX-License-Identifier: BUSL-1.1\n"
+                  "# Copyright 2026 Tetrion Ltd\n")
+    assert check_headers([path]) == [path]
+
+
+def test_documentation_and_stylesheets_are_not_this_check_s_business(tmp_path):
+    """Prose and the docs stylesheets are CC BY 4.0, not BUSL, so a
+    missing SPDX header in one is correct rather than a failure."""
+    css = _write(tmp_path, "extra.css", "body { margin: 0; }\n")
+    md = _write(tmp_path, "guide.md", "# A heading\n")
+    toml = _write(tmp_path, "pyproject.toml", "[project]\n")
+    assert check_headers([css, md, toml]) == []
+
+
 def test_a_header_buried_below_other_code_is_reported(tmp_path):
     """The header must be at the top, not merely present somewhere."""
     path = _write(tmp_path, "buried.py", "import os\n" + HEADER)
