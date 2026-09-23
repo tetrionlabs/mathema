@@ -1,8 +1,6 @@
 # mathema
 
-*Claim-driven development: state a claim, verify it against the real
-function, and keep the record, as evidence of correctness, or as a
-new discovery.*
+*Claim-Driven Development: turn software intent into verifiable evidence.*
 
 ## The problem this addresses
 

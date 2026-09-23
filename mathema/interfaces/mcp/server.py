@@ -86,7 +86,8 @@ def build_server():
 
     server = _Server(
         "mathema",
-        instructions="Claim-driven development: state a claim, mathema "
+        instructions="Claim-Driven Development: turn software intent into "
+                     "verifiable evidence. You state a claim, mathema "
                      "adjudicates it against the real function, the "
                      "record keeps the evidence. No tool accepts a "
                      "verdict from you; acceptance is a human act done "

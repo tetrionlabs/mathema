@@ -1,5 +1,5 @@
 site_name: mathema
-site_description: "Claim-driven development: state a claim, verify it against the real function, keep the record."
+site_description: "Claim-Driven Development: turn software intent into verifiable evidence."
 site_url: https://mathema.tetrionlabs.com
 repo_name: tetrionlabs/mathema
 repo_url: https://github.com/tetrionlabs/mathema
