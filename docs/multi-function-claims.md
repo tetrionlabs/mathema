@@ -69,7 +69,10 @@ ladder, strongest rung first, and each rung may decline:
 2. **Symbolic difference.** The two lifts, positionally aligned,
    subtract to zero under the declared domain. A symbolic
    falsification here must reproduce code-versus-code before it
-   stands, like every other disproof.
+   stands, like every other disproof. Where both sides raise, this
+   rung proves the equivalence when they raise the same exception on
+   exactly the same region and their lifts agree everywhere else (for
+   a function of one parameter; with more, sampling decides).
 3. **Closed forms.** Where both bodies provably never raise, their
    closed forms are compared directly.
 4. **Code-versus-code sampling.** Both real functions run on the same
@@ -77,9 +80,10 @@ ladder, strongest rung first, and each rung may decline:
    must agree before the verdict is `holds`. Two results agree within
    the claim's own [tolerance](grammar.md#how-close-counts-as-equal),
    so an equivalence between a float and a fixed-point implementation
-   is stated, not guessed. A draw where either side raises, returns a
-   non-finite value, or returns something non-numeric is not compared,
-   and every such draw is counted in the record rather than dropped.
+   is stated, not guessed. A draw where both sides raise the same
+   exception agrees. A draw where either side returns a non-finite
+   value or something non-numeric is not compared. Both kinds of draw
+   are counted in the record rather than dropped.
    Evidence ceiling `holds`: sampling never proves.
 
 `f =:= g` claims `f(x) == g(x)` at every point of the domain, so a
@@ -106,10 +110,15 @@ print(p.verdict, p.counterexample)
 falsified x=0: f raised ZeroDivisionError, g returned 1
 ```
 
-A point where both sides raise is not compared, and is counted in the
-record's sampling meta. A complex result from one side counts as a
-raise, unless that side is annotated `complex` or the claim is over
-`C`. A declared tolerance is the whole allowance the two values get;
+`=:=` compares behaviour, so a point where both sides raise the same
+exception type is a point where they agree: `1 / x` and `2 / (2 * x)`
+are proven equivalent over `[-1, 1]`, both raising `ZeroDivisionError`
+at `x = 0`. Different exception types at the same point are a
+disagreement, and the executed pair is the witness: against a version
+that raises `ValueError` at zero, the claim is falsified with
+`x=0: f raised ZeroDivisionError, g raised ValueError`. A complex
+result from one side counts as a raise, unless that side is annotated
+`complex` or the claim is over `C`. A declared tolerance is the whole allowance the two values get;
 with none declared, they may differ by 1e-9 plus 1e-9 times the
 larger magnitude.
 

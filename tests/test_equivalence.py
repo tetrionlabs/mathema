@@ -122,10 +122,10 @@ def test_check_keeps_a_live_funcs_binding_through_the_declared_merge():
 # --- the honest sampling tallies (verdicts unchanged) -----------------------
 
 def test_discarded_points_are_tallied_never_silent():
-    """Points where both sides raise are not compared: neither side has
-    a value there to disagree with. They do not vanish from the record:
-    the sampling meta counts every point that could not be compared and
-    the note says so."""
+    """Points where both sides raise the same exception agree: the two
+    behave the same there. They do not vanish into the agreement count
+    unseen: the sampling meta counts them separately and the note says
+    so."""
     from dataclasses import replace
 
     from mathema.analysis import analyze_source
@@ -140,7 +140,7 @@ def test_discarded_points_are_tallied_never_silent():
             raise ValueError("half the domain refused")
         return (1 * args[0] + 2 * args[1] + 3 * args[2]) / 6.0
     # opaque facts: nothing lifts, so only the sampling rung sees the
-    # refusals and must count them without letting them decide
+    # refusals and must count them
     partial_twin.__mathema_facts__ = replace(analyze_source(tri_naive),
                                              tree=None, form="doc:ffee0011")
 
@@ -149,9 +149,10 @@ def test_discarded_points_are_tallied_never_silent():
         funcs={"g": partial_twin}, route="probe")])
     assert p.verdict == "holds", (p.verdict, p.note)
     sampling = p.meta["mathema.equivalence.sampling"]
-    assert sampling["discarded"]["not_compared"] > 0
+    assert sampling["both_raised"] > 0
+    assert "not_compared" not in sampling.get("discarded", {})
     assert sampling["checked"] >= 24
-    assert "not comparable" in (p.note or "")
+    assert "raised the same exception" in (p.note or "")
 
 
 def test_one_side_raising_where_the_other_returns_falsifies():
