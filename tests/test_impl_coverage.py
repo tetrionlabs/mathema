@@ -227,6 +227,15 @@ def test_regenerate_keeps_the_report_when_a_test_fails(tmp_path):
     assert (tmp_path / "coverage.json").exists()
 
 
+def test_mathema_own_functions_get_no_probe_credit():
+    # checking one of mathema's own functions runs mathema's machinery,
+    # which calls that same function while parsing the claim; those lines
+    # are indistinguishable from probe execution, so they are not credited.
+    from mathema.grammar import normalize
+    fc = function_coverage(normalize, coverage_data={})
+    assert "probe" not in fc.by_source
+
+
 def test_derive_coverage_uses_per_branch_attribution(tmp_path):
     # a domain-restricted proof records the lines it covers (excluding
     # the branch its domain prunes) in the probe meta; the coverage pass

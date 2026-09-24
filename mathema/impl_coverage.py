@@ -234,7 +234,7 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
             test_stale = os.path.getmtime(rng[0]) > report_mtime
 
     by_source: dict = {}
-    if probe_executed:
+    if probe_executed and not _is_mathema_own(fn):
         by_source["probe"] = probe_executed & statements
     derive_lines = _derive_covered_lines(record, statements)
     if derive_lines:
@@ -264,6 +264,20 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
                             covered=covered, by_source=by_source,
                             traced=traced, test_stale=test_stale,
                             reclaimable=reclaimable, derivable=derivable)
+
+
+def _is_mathema_own(fn) -> bool:
+    """Whether `fn` is defined inside the mathema package itself. Checking
+    such a function runs mathema's own machinery, which may call the same
+    function while parsing or adjudicating the claim, so its traced lines
+    cannot be told apart from probe execution and earn no probe credit.
+    Derive and test lines are unaffected."""
+    try:
+        path = os.path.abspath(inspect.getsourcefile(fn) or "")
+    except TypeError:
+        return False
+    package = os.path.dirname(os.path.abspath(__file__))
+    return path.startswith(package + os.sep)
 
 
 def _statement_lines(fn) -> set:
