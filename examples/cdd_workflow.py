@@ -14,8 +14,10 @@ The workflow this demonstrates:
      adjudicates every one.
   5. Falsifications catch the bug; the counterexamples go back into the
      (mocked) regeneration prompt; version two passes.
-  6. The accepted version is recorded; the two versions are provably not
-     the same function, and the record says why the second one is right.
+  6. The accepted version is recorded. The counterexamples prove the two
+     versions behave differently, the form hashes show the change is
+     structural rather than a rename, and the record says why the second
+     one is right.
 
 Every LLM response here is a hard-coded mock, so the example is
 deterministic, offline, and honest about which parts are machine judgment
@@ -91,7 +93,7 @@ def adjudicate(fn, label: str):
                     domain={"alpha": (0.0, 1.0)})
     print(f"\n── adjudication: {label}")
     for p in results:
-        mark = {"holds": "✓", "falsified": "✗", "skipped": "–"}[p.verdict]
+        mark = {"proven": "✓", "holds": "✓", "falsified": "✗"}.get(p.verdict, "–")
         line = f"  {mark} {p.verdict:9} {p.name}: {p.statement}"
         if p.counterexample:
             line += f"\n      counterexample {p.counterexample}"
@@ -116,7 +118,8 @@ if __name__ == "__main__":
     form1 = mathema.analyze(ema_v1).form
     form2 = mathema.analyze(ema_v2).form
     print(f"\nform hash v1: {form1}\nform hash v2: {form2}")
-    print("different: the seeding fix is a real behavioral change, not a rename.")
+    print("different: a structural change, not a rename; the counterexamples "
+          "above are what show it changes behavior.")
 
     accepted = mathema.write_spec(ema_v2, claims=HUMAN_CLAIMS + MOCK_AI_CLAIMS,
                             key="pricing.ema", root=GEN_DIR,

@@ -515,8 +515,8 @@ says so the first time a claim falsifies on its first adjudication.
 
 ## All four funnel into the same shape
 
-`declared-schema.md`/`spec.declare()`, nothing downstream cares which
-surface a claim came from. `mathema.write_spec()`'s worked example below
+Every surface resolves through `spec.declare()`, so nothing downstream
+cares which surface a claim came from. `mathema.write_spec()`'s worked example below
 shows claims from three different sources adjudicated together with
 zero manual wiring:
 

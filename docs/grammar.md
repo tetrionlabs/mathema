@@ -358,9 +358,12 @@ reasoned about like `f` rather than treated as an opaque call.
 f(x) > 0 => self.stays_positive
 ```
 
-This links a condition to a named outcome, which is how a claim
-connects to the vocabulary your codebase already uses rather than
-living in its own world.
+This names a sibling claim that should follow when this one holds, so
+a claim can point at the vocabulary your codebase already uses. The
+clause is parsed and kept verbatim in the record, but it is not
+adjudicated: nothing derives the named outcome from it yet. When one
+claim must actually rest on another, use an `assuming` premise, as
+[Conditional claims and lemmas](lemmas.md) describes.
 
 ## Recurrences
 

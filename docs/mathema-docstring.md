@@ -7,6 +7,11 @@ authoring surface for intent, domain, and claims, no separate YAML
 file or decorator required to get real, checked evidence.
 
 ```python
+from typing import Annotated
+
+from mathema.types import Probability
+
+
 def ema(x: list, alpha: Annotated[float, Probability]) -> float:
     """Exponentially weighted moving average.
 
@@ -14,12 +19,21 @@ def ema(x: list, alpha: Annotated[float, Probability]) -> float:
         Blends each new value with the running mean.
 
     Claims:
-        bounded: for x in [0, 1], alpha in [0, 1], f(x, alpha) <= 1
+        bounded: for x in [0, 1]^n, alpha in [0, 1], f(x, alpha) <= 1
     """
     y = x[0]
     for v in x[1:]:
         y = alpha * v + (1 - alpha) * y
     return y
+```
+
+`mathema.check(ema, claims=[])` checks exactly the claims the docstring
+declares, and `x in [0, 1]^n` samples lists of any length whose entries
+lie in the unit interval:
+
+```text
+mathema.Record(ema) · source, no side effects · form 650f21ff832d
+  holds   bounded: for x in [0.0, 1.0]^n:float|missing, alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= 1 (n=160)
 ```
 
 This is additive, a docstring with none of these sections behaves
