@@ -112,7 +112,7 @@ mathema is the engine. These sit alongside it:
   record format are not mathema's to change unilaterally. Anything
   that reads or writes that shape interoperates with mathema's records
   without importing mathema.
-- **[mathema-symbology](https://github.com/tetrionlabs/mathema-symbology)**:
+- **[mathema-symbology](https://github.com/aaronbyrnephd/mathema-symbology)**:
   conventional notation. A claim written in the reader's own symbols
   is a claim the reader will actually check, so this supplies
   domain-conventional symbols for parameter and function names when

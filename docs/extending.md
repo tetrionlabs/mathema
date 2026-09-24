@@ -141,8 +141,9 @@ claim text in your own notation:
 |---|---|---|
 | `symbol_for_param` | `symbol_for_param(name)`, once for each real parameter in the claim | the symbol, or `None` to decline |
 | `symbol_for_func` | `symbol_for_func(name)`, once for each bound function name | the symbol, or `None` to decline |
+| `show_missing` | `show_missing(claim)`, once per rendered claim | whether an unbounded domain prints its missing-values side, or `None` to keep the default |
 
-Both members are optional, and the name is passed positionally. mathema
+All three members are optional, and the name is passed positionally. mathema
 calls them on the object the entry point loads, so a module, a class
 with static methods, or an instance all work. If either hook raises,
 the provider is skipped for that render with a warning naming your

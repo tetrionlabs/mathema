@@ -146,6 +146,7 @@ same function under the same name, so the display is the same claim.
 |---|---|---|
 | `symbol_for_param(name)` | each real parameter of the function | the symbol, or `None` to decline |
 | `symbol_for_func(name)` | each bound function name | the symbol, or `None` to decline |
+| `show_missing(claim)` | once per rendered claim | whether an unbounded domain prints its missing-values side, or `None` to keep mathema's default (it does) |
 
 Return `None` for anything you have no opinion about and mathema falls
 back to its own choice, so a provider only needs to know about the

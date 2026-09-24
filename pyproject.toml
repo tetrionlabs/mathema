@@ -17,9 +17,10 @@ authors = [{ name = "Tetrion Ltd", email = "contact@tetrion.co" }]
 # depends on sympy's own simplification and canonical ordering, so a
 # major release can change what proves without any change here.
 dependencies = ["sympy>=1.12,<2", "pyyaml>=6"]
-keywords = ["claims", "verification", "property-based-testing",
-            "symbolic-mathematics", "sympy", "proof",
-            "static-analysis", "specification", "testing"]
+keywords = ["claim-driven-development", "spec-driven-development",
+            "test-driven-development", "software-verification",
+            "property-based-testing", "design-by-contract",
+            "specification", "proof", "ai-assisted-development", "mcp"]
 classifiers = [
     # source-available under BUSL 1.1, converting to AGPL-3.0-or-later
     # four years after each release: deliberately NOT an OSI licence,
@@ -89,7 +90,7 @@ coverage = ["coverage>=7"]
 # A "symbology" capability provider (see docs/symbology.md),
 # optional: this project's own convention names for common
 # parameters, installed separately.
-symbology = ["mathema-symbology"]
+symbology = ["mathema-symbology>=0.3"]
 # Every runtime CAPABILITY at once (not the docs/test dev tooling):
 # `pip install "mathema[all]"`. smt pulls z3-solver (~100 MB native).
 all = ["mathema[numpy,smt,mcp,coverage]"]
