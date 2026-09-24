@@ -1444,8 +1444,13 @@ def cmd_review(args) -> int:
 
     from .review import render, review
 
+    from .review import UnknownRef
     root = os.path.abspath(args.root)
-    result = review(root, ref=args.ref)
+    try:
+        result = review(root, ref=args.ref)
+    except UnknownRef as e:
+        print(f"mathema: {e}", file=sys.stderr)
+        return 2
     if getattr(args, "format", "text") == "json":
         _emit_json(result, getattr(args, "output", None))
         return 0

@@ -29,7 +29,15 @@ Keyed by function (`module.qualname`), and within each, by claim name:
 - **newly falsified** claims (a flip into `falsified`, or an added claim
   that lands `falsified`),
 - **reconciled** records (a human blessed the current contents with
-  [`mathema accept --as reconciled`](accept.md#-as-reconciled-after-a-merge-rebase-or-a-declared-claim-edit)).
+  [`mathema accept --as reconciled`](accept.md#-as-reconciled-after-a-merge-rebase-or-a-declared-claim-edit)),
+- **restated** claims (the same name, a different statement),
+- **retirement rows** added to or dropped from a record's `discoveries`,
+  `historical` and `superseded` sections. A dropped row is marked `!!`:
+  it is the usual trace of a merge conflict resolved to one side, and
+  it puts a retired claim back in play.
+
+The summary names restated claims and retirement rows only when there
+are some. A `ref` that does not name a commit exits 2.
 
 The closing summary counts each movement across the whole store.
 
