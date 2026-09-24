@@ -391,17 +391,10 @@ go on to the Greeks, stated as the partial derivatives they are.
 
 ### One claim, every implementation
 
-A claim is a statement about mathematics, not about Python, and mathema
-already treats it that way: [claims transfer](claims-transfer.md) checks a C++
-port of a function against its Python original by sampling shared inputs,
-today. The direction is to make every language a first-class citizen, so the
-claims written once about a pricing function or a signal filter hold the
-Python prototype, the C++ or Rust engine and the TypeScript front end to the
-same statement, and a port that drifts is caught the day it drifts rather than
-the day a number looks wrong. Each implementation would also record the number
-representation it actually computes in, a 64-bit integer, a 32-bit float,
-with the machine hazards that come with it, so a claim proven over the reals
-is checked against the arithmetic each language really does.
+A claim is a statement about mathematics, not about Python, and
+[claims transfer](claims-transfer.md) already checks an implementation in
+another language against its Python original. The direction is for a claim
+written once to hold wherever the behaviour it describes is implemented.
 
 ### Implementations generated from proofs
 
