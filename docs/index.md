@@ -324,8 +324,18 @@ something that cannot be persuaded decide which of them are true.
 - **If you review changes**, [`mathema review`](modes/review.md) shows the
   claim-level difference since any git ref: which verdicts flipped, which
   claims appeared or went away.
-- **If you answer to an auditor**, every acceptance, unlock and lock is in the
-  record with who made it and when, PIN-stamped when a PIN is set.
+- **If you answer to an auditor or a model validator**, every acceptance,
+  unlock and lock is in the record with who made it and when, PIN-stamped when
+  a PIN is set, under an integrity checksum that catches edits made outside
+  mathema. [Governance and audit](governance.md) sets out who can decide what,
+  and [Security and execution](security.md) states exactly what runs when a
+  claim is checked.
+- **If you set engineering standards across teams**, mathema gives
+  AI-assisted development an enterprise-grade gate: claims live beside the
+  code they describe, every verdict is reproducible and bound to the exact
+  code that earned it, and [Guarantees and limits](guarantees.md) states what
+  each verdict is worth, so a team's evidence means the same thing in every
+  repository.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Case study</span><span class="brk r"></span></span>
 
@@ -386,9 +396,30 @@ already treats it that way: [claims transfer](claims-transfer.md) checks a C++
 port of a function against its Python original by sampling shared inputs,
 today. The direction is to make every language a first-class citizen, so the
 claims written once about a pricing function or a signal filter hold the
-Python prototype, the C++ engine and the TypeScript front end to the same
-statement, and a port that drifts is caught the day it drifts rather than the
-day a number looks wrong.
+Python prototype, the C++ or Rust engine and the TypeScript front end to the
+same statement, and a port that drifts is caught the day it drifts rather than
+the day a number looks wrong. Each implementation would also record the number
+representation it actually computes in, a 64-bit integer, a 32-bit float,
+with the machine hazards that come with it, so a claim proven over the reals
+is checked against the arithmetic each language really does.
+
+### Implementations generated from proofs
+
+Once a behaviour is proven, the proof is a precise statement of what the
+code must compute. The direction is to derive a reference implementation in
+another language from that proven form, and then hold it to the same claims
+through the same equivalence machinery, so generated code arrives with its
+evidence attached rather than asking to be trusted.
+
+### A ledger for whole systems
+
+Today the record is per function and per repository: every verdict bound to
+the code that earned it, every acceptance with its author and reason, nothing
+deleted when a belief turns out wrong. The direction is the same ledger at the
+scale of a codebase and the systems it runs in, the sign-offs, acceptances
+and behavioural claims across many repositories and services, over years, so
+an organisation can answer what it has established about its software, on
+what evidence, and who agreed, without reconstructing it from commit logs.
 
 ### Linear algebra as a first-class subject
 

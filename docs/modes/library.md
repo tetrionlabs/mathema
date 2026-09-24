@@ -86,6 +86,22 @@ mathema.Record(ema) · source, no side effects · form 1dda3a0d5a72
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
 ```
 
+Read the `FALSIFY` rows as facts about `ema`, not as bugs in it. The
+suggestions ask standard questions of any function, and a falsified
+suggestion is an answer, with the witness to prove it: an exponential
+average really is neither monotone nor order-independent in its inputs.
+Two of the answers change once the function's real domain is stated.
+Checked with `domain={"alpha": (0, 1)}`, the bounds that failed for an
+unbounded `alpha` are proven outright:
+
+```text
+  proven  bounded_lower: min(x) ≤ f(x, alpha)
+  proven  bounded_upper: f(x, alpha) ≤ max(x)
+```
+
+That is the loop in miniature: the suggestion found the assumption the
+code relies on, and stating it turned a counterexample into a proof.
+
 ## `write_spec(fn, claims=None, root=".", key=None, **kwargs)`
 
 The one-call IO workflow: retrieve the declared layer from the project

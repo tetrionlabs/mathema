@@ -153,4 +153,5 @@ nav:
   - Project:
       - Licensing: licensing-policy.md
       - Versioning and stability: stability.md
+      - Security policy: https://github.com/tetrionlabs/mathema/blob/main/SECURITY.md
       - Changelog: https://github.com/tetrionlabs/mathema/blob/main/CHANGELOG.md
