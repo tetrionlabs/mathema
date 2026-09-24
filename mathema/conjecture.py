@@ -3908,16 +3908,19 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   "the raising region as its own raises(...) claim")
             cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args)))
             break
-        if is_missing(lv) or is_missing(rv):
+        if (is_missing(lv) or is_missing(rv)) and not (
+                not any(is_missing(v) for v in args)
+                and any(isinstance(v, float) and v != v for v in (lv, rv))):
             # a domain that includes missing by default (see
             # grammar.parse_binding's own policy) can sample the
             # missing sentinel itself as a candidate value; a
-            # function that rejects it outright already lands in
-            # the except above, but one that returns it unchanged
-            # (identity, say) leaves lv/rv genuinely non-comparable,
-            # neither confirms nor denies the claim, so this
-            # sample is inconclusive, the same as a raised
-            # exception already is, not a crash.
+            # function that returns it unchanged (identity, say)
+            # leaves lv/rv genuinely non-comparable, neither
+            # confirming nor denying the claim, so this sample is
+            # inconclusive. A NaN computed from non-missing inputs is
+            # different: it is the function's value at an in-domain
+            # point, and the comparison below reads it as IEEE does
+            # (no ordering holds, and it equals no number).
             continue
         checked += 1
         # a declared tolerance governs the comparison outright; the
