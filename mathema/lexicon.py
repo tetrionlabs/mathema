@@ -67,7 +67,7 @@ LEXICON: dict[str, str] = {
     # dimension name across two parameters draws them to one length
     "space_vector_real": "for v in R^n, f(v) >= 0",
     "space_vector_bounded": "for xs in [0, 1]^n, f(xs) <= 1",
-    "space_matrix": "for A in R^(m*n), f(A) == f(A)",
+    "space_matrix": "for A in R^(m,n), f(A) == f(A)",
     "space_shared_dim": "for x in R^n, y in R^n, f(x, y) == f(y, x)",
     "domain_closed_interval": "for x in [0, 1], f(x) >= 0",
     "domain_open_interval": "for x in (0, 1), f(x) >= 0",
@@ -111,26 +111,26 @@ LEXICON: dict[str, str] = {
     # `.T`, `det`/`inv`/`trace`, `I(n)`) over matrix parameters, proven
     # in sympy's matrix algebra on the derive route
     "matrix_determinant_product":
-        "for A in R^(n*n), B in R^(n*n), det(A @ B) == det(A) * det(B)",
+        "for A in R^(n,n), B in R^(n,n), det(A @ B) == det(A) * det(B)",
     "matrix_transpose_product":
-        "for A in R^(n*n), B in R^(n*n), (A @ B).T == B.T @ A.T",
+        "for A in R^(n,n), B in R^(n,n), (A @ B).T == B.T @ A.T",
     "matrix_trace_additive":
-        "for A in R^(n*n), B in R^(n*n), trace(A + B) == trace(A) + trace(B)",
+        "for A in R^(n,n), B in R^(n,n), trace(A + B) == trace(A) + trace(B)",
     # an inverse needs its premise: inv raises on a singular matrix
     "matrix_inverse_identity":
-        "assuming det(A) != 0, for A in R^(n*n), inv(A) @ A == I(n)",
+        "assuming det(A) != 0, for A in R^(n,n), inv(A) @ A == I(n)",
     # the postfix reading of an OUTPUT structure claim: `f(A) is
     # symmetric` folds to `is_symmetric(f(A))`
-    "matrix_output_symmetric_postfix": "for A in R^(n*n), f(A) is symmetric",
+    "matrix_output_symmetric_postfix": "for A in R^(n,n), f(A) is symmetric",
     # the math-paper sugar, resolved from whether the operand is a
     # declared matrix: `A^T` -> `A.T` (transpose), `|A|` -> `det(A)`. A
     # scalar operand keeps power / absolute value. The record's grammar
     # is tagged `mathema/linalg` for these
-    "matrix_transpose_sugar": "let A be R^(n*n), A^T == A",
-    "matrix_determinant_sugar": "for A in R^(n*n), |A| >= 0",
+    "matrix_transpose_sugar": "let A be R^(n,n), A^T == A",
+    "matrix_determinant_sugar": "for A in R^(n,n), |A| >= 0",
     # the same bars around a matrix expression are its determinant
     "matrix_determinant_bars_compound":
-        "for A in R^(n*n), B in R^(n*n), |A @ B| == |A| * |B|",
+        "for A in R^(n,n), B in R^(n,n), |A @ B| == |A| * |B|",
     "inferred_literal_domain": "raises(f(50, 0), ValueError)",
     # let: alias, function binding, free variable -----------------
     "let_alias": ("let m = m1, for m1 in [0.1,1000], x1 in [-100,100], "
@@ -150,6 +150,18 @@ LEXICON: dict[str, str] = {
     "infinity_symbol": "∀ x ∈ [0, ∞), f(x) ≥ 0",
     "floor_brackets_unicode": "∀ x ∈ [0, 1], ⌊f(x)⌋ ≥ 0",
     "latex_command_forall": "\\forall x \\in [0, 1], f(x) \\geq 0",
+    # more accepted input spellings, each the same claim as its ascii
+    # form: a radical without parentheses takes the atom after it, a
+    # superscript minus is a negative power, and these LaTeX commands
+    # read as their symbols
+    "sqrt_bare_radical": "∀ x ∈ [1, 4], f(x) ≥ √x",
+    "power_superscript_negative": "∀ x ∈ [1, 2], f(x) ≥ x⁻¹",
+    "latex_equiv": "let g = mathema.lexicon.double, f \\equiv g",
+    "latex_leqslant": "\\forall x \\in [0, 1], f(x) \\leqslant 2",
+    "latex_geqslant": "\\forall x \\in [0, 1], f(x) \\geqslant 0",
+    "latex_varepsilon": "for x in [0, 1], abs(f(x) - x) \\leq \\varepsilon",
+    "latex_varphi": "for \\varphi in [0, 1], f(\\varphi) \\leq 1",
+    "latex_left_right_bars": "for x in [-1, 1], \\left| f(x) \\right| \\leq 2",
 
     # `f` is shorthand, never a requirement: the function under test
     # answers to its own name, and `let` renames it to whatever reads
@@ -217,8 +229,10 @@ LEXICON: dict[str, str] = {
     "integrate_definite": "integrate(f(x), x, 0, 1) == 1",
     "integral_symbol": "∫(f(x), x, 0, 1) == 1",
     "integrate_evaluation_bar": "integrate(f(x), x)|_{0}^{1} == 1",
-    "sum_subscript": "Sum(f(i))_{i=1}^n == n*(n+1)",
-    "prod_call": "Prod(f(i), i, 1, n) >= 0",
+    # the bound `n` is not a parameter of the summand, so it is
+    # declared; the index `i` is bound by the sum itself
+    "sum_subscript": "let n be [1, 20] subset Z, Sum(f(i))_{i=1}^n == n*(n+1)",
+    "prod_call": "let n be [1, 20] subset Z, Prod(f(i), i, 1, n) >= 0",
     "principal_value": "P.V.(integrate(1/(x - c), x, -1, 1)) == f(c)",
     # assuming: a claim states its own precondition ----------------
     "assuming_inequality": ("assuming b^2 - 4*a*c >= 0.01, for a in [1,10], "
@@ -281,9 +295,12 @@ LEXICON: dict[str, str] = {
     # a bare call name binds from f's module or the calling scope at
     # check time; `let g = <name>` aliases it; `funcs=` on claim() is
     # the explicit spelling (not expressible in claim text alone)
-    "second_function_by_name": "d(budget_line(x, I, px, py), x) == -px/py",
-    "let_function_bare_name": ("let g = budget_line, "
-                              "d(g(x, I, px, py), x) == -px/py"),
+    "second_function_by_name": (
+        "let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], "
+        "d(budget_line(x, I, px, py), x) == -px/py"),
+    "let_function_bare_name": (
+        "let g = budget_line, let I be [10, 1000], let px be [0.5, 20], "
+        "let py be [0.5, 20], d(g(x, I, px, py), x) == -px/py"),
     "two_function_equality": "f(x) == g(x)",
     "bound_function_nested_in_f": (
         "let I be [10,1000], let px be [0.5,20], let py be [0.5,20], "
@@ -340,6 +357,14 @@ LEXICON: dict[str, str] = {
     # a premise relating two PARAMETERS is not a box at all, so it
     # reaches the prover as an assumption rather than by narrowing
     "premise_relates_two_params": "assuming hi >= lo, f(xs, lo, hi) >= 0",
+    # a dimension bound as a premise. `R^n` already means at least one
+    # element; anything beyond that is stated, and names the space's
+    # own dimensions. A rectangular bound on both axes is `min(m, n)`
+    "dim_premise_vector_bound": "assuming n >= 5, for xs in R^n, f(xs) == xs[4]",
+    "dim_premise_square_matrix": ("assuming n >= 3, for a in R^(n,n), "
+                                  "f(a) == a[2][2]"),
+    "dim_premise_rectangular_matrix": ("assuming min(m, n) >= 3, "
+                                       "for a in R^(m,n), f(a) == a[2][2]"),
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -384,7 +409,10 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "domain_blackboard_reals", "relation_approx_unicode",
         "power_superscript", "sqrt_symbol", "multiply_dot",
         "infinity_symbol", "floor_brackets_unicode",
-        "latex_command_forall"),
+        "latex_command_forall", "sqrt_bare_radical",
+        "power_superscript_negative", "latex_equiv", "latex_leqslant",
+        "latex_geqslant", "latex_varepsilon", "latex_varphi",
+        "latex_left_right_bars"),
     "domains": (
         "domain_excluded_point", "domain_discrete_strings",
         "domain_natural_numbers", "domain_complex", "relation_approx",
@@ -419,7 +447,8 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "assuming_is_defined",
         "assuming_is_defined_postfix", "assuming_is_defined_pinned",
         "dim_premise_pins_length", "dim_premise_ties_two_lengths",
-        "premise_relates_two_params"),
+        "premise_relates_two_params", "dim_premise_vector_bound",
+        "dim_premise_square_matrix", "dim_premise_rectangular_matrix"),
     "functions": (
         "second_function_by_name", "let_function_bare_name",
         "two_function_equality", "bound_function_nested_in_f"),
@@ -455,7 +484,11 @@ TAGS: dict[str, tuple[str, ...]] = {
     "dim_length_premise": ("length", "shape", "conformable", "size"),
     "dim_conformability": ("shape", "conformable", "matching lengths"),
     "space_vector_real": ("vector space", "free dimension", "R^n"),
-    "space_matrix": ("matrix space", "shape", "R^(m*n)"),
+    "space_matrix": ("matrix space", "shape", "R^(m,n)"),
+    "dim_premise_vector_bound": ("minimum length", "at least", "vector size"),
+    "dim_premise_square_matrix": ("square matrix", "minimum size", "at least"),
+    "dim_premise_rectangular_matrix": ("rectangular matrix", "rows", "columns",
+                                       "minimum size"),
     "let_alias": ("alias", "abbreviation", "shorthand", "naming"),
     "let_pseudo_infinity": ("infinity", "unbounded", "limit of the range"),
     "derivative_call": ("derivative", "differentiate", "gradient", "slope"),
@@ -618,6 +651,14 @@ def add_two(x: float, y: float) -> float:
 def matmul(A, B):
     """The matrix product."""
     return A @ B
+
+
+def cosine_phase(φ: float) -> float:
+    """The cosine of a phase angle, written with the Greek letter as its
+    parameter name, what "latex_varphi" demonstrates: `\\varphi` in a
+    claim is that same parameter."""
+    import math
+    return math.cos(φ)
 
 
 def nearly_identity(x: float) -> float:
@@ -813,6 +854,20 @@ def spread_total(xs: list, lo: float, hi: float) -> float:
     return total
 
 
+def fifth_element(xs: list) -> float:
+    """The fifth element of a vector. It raises on anything shorter, so
+    "dim_premise_vector_bound" holds only under its premise `n >= 5`."""
+    return xs[4]
+
+
+def third_diagonal(a: list) -> float:
+    """The third diagonal entry of a matrix. It raises unless the matrix
+    has at least three rows and three columns, which is the premise
+    "dim_premise_square_matrix" and "dim_premise_rectangular_matrix"
+    state."""
+    return a[2][2]
+
+
 def weighted_average(x: list, alpha: float) -> float:
     """An exponentially weighted moving average: each step is a convex
     combination of the new element and the accumulator. What the
@@ -903,7 +958,7 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
     "nearly_identity": (nearly_identity, [
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
-        "tolerance_epsilon_latex",
+        "tolerance_epsilon_latex", "latex_varepsilon",
     ]),
     "double": (double, [
         "relation_eq", "relation_le_unicode", "power_caret", "abs_bars",
@@ -913,8 +968,11 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "domain_blackboard_reals", "relation_approx_unicode",
         "power_superscript", "sqrt_symbol", "multiply_dot",
         "infinity_symbol", "floor_brackets_unicode",
-        "latex_command_forall",
+        "latex_command_forall", "sqrt_bare_radical",
+        "power_superscript_negative", "latex_equiv", "latex_leqslant",
+        "latex_geqslant", "latex_left_right_bars",
     ]),
+    "cosine_phase": (cosine_phase, ["latex_varphi"]),
     "discount": (discount, ["raises_typed", "inferred_literal_domain"]),
     "center_of_mass_two_body": (center_of_mass_two_body, ["let_alias"]),
     "gibbs_free_energy": (gibbs_free_energy, [
@@ -962,6 +1020,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "sum_of_squares": (sum_of_squares, ["dim_premise_pins_length"]),
     "dot_product": (dot_product, ["dim_premise_ties_two_lengths"]),
     "spread_total": (spread_total, ["premise_relates_two_params"]),
+    "fifth_element": (fifth_element, ["dim_premise_vector_bound"]),
+    "third_diagonal": (third_diagonal, ["dim_premise_square_matrix",
+                                        "dim_premise_rectangular_matrix"]),
 }
 
 

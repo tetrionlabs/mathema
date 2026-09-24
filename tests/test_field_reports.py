@@ -275,9 +275,10 @@ def test_call_site_claims_accept_the_claims_file_row_shape():
 
 
 def test_domain_variants_of_one_law_keep_distinct_rows(tmp_path):
-    # L5: four domain-variants of one law auto-name alike (f_mi_0, the
-    # name is built from the domain-stripped statement); they must not
-    # collapse to one row under the name-keyed merge.
+    # L5: four domain-variants of one law auto-name alike (f_mi_ge_0,
+    # the name is built from the domain-stripped statement); they must
+    # not collapse to one row under the name-keyed merge, so unnamed
+    # they are refused, and named they are four rows.
     import importlib.util
     import textwrap
 
@@ -299,7 +300,12 @@ def test_domain_variants_of_one_law_keep_distinct_rows(tmp_path):
         "for mi in [-1,0], f(mi) >= 0",
         "for mi in [2,3], f(mi) >= 0",
     ]
-    rec = mathema.check(mod.f, claims=variants)
+    # identical auto-names are refused, asking for explicit names
+    from mathema.conjecture import InvalidConjecture, claim
+    with pytest.raises(InvalidConjecture, match="explicit name"):
+        mathema.check(mod.f, claims=variants)
+    named = [claim(v, name=f"v{i}") for i, v in enumerate(variants)]
+    rec = mathema.check(mod.f, claims=named)
     assert len(rec.probes) == 4                    # four distinct rows kept
     assert len({p.name for p in rec.probes}) == 4  # each with its own name
 
@@ -307,4 +313,4 @@ def test_domain_variants_of_one_law_keep_distinct_rows(tmp_path):
     assert len(mathema.check(mod.f, claims=["f(mi) >= 0", "f(mi) >= 0"]).probes) == 1
     # a single domain claim keeps its plain auto-name (no suffix)
     (only,) = mathema.check(mod.f, claims=["for mi in [0,1], f(mi) >= 0"]).probes
-    assert only.name == "f_mi_0"
+    assert only.name == "f_mi_ge_0"

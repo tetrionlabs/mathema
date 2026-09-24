@@ -135,3 +135,27 @@ def test_a_provider_renaming_onto_another_parameter_is_refused(install):
     assert "'rate'" in messages[0] and "strike" in messages[0]
     reparsed = claim(text)
     assert set(reparsed.domain) == {"spot", "strike", "rate"}
+
+
+class _FuncSymbols:
+    _MAP = {"g": "E", "budget_line": "B"}
+
+    @staticmethod
+    def symbol_for_func(name):
+        return _FuncSymbols._MAP.get(name)
+
+
+@pytest.mark.parametrize("law, shown", [
+    ("let g = numpy.exp, for spot in [0, 1], g(spot) >= 1",
+     "let g = numpy.exp, let E = g"),
+    ("for x in [0, 1], budget_line(x, 1, 1, 1) >= 0", "let B = budget_line"),
+])
+def test_a_renamed_function_is_introduced_by_let_and_reparses_the_same(
+        install, law, shown):
+    from mathema.spec import canonical_claim_text
+    install(_FuncSymbols)
+    cj = claim(law)
+    for unicode in (False, True):
+        text = render_claim_text(cj, unicode=unicode)
+        assert shown in text, text
+        assert canonical_claim_text(claim(text)) == canonical_claim_text(cj)

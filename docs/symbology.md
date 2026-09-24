@@ -128,6 +128,13 @@ The `let` bindings come for free. mathema states every rename it made,
 so a reader who does not know your notation can still follow the claim,
 and the rendered text still round-trips through the parser.
 
+A function symbol is introduced the same way, as an alias of the name
+the claim already uses: with `symbol_for_func` returning `E` for `g`,
+the claim `let g = numpy.exp, ...` shows as `let g = numpy.exp, let E =
+g, ..., E(spot) ≥ 1`, and a scope-resolved function `budget_line` shows
+as `let B = budget_line, ...`. Read back, the alias resolves to the
+same function under the same name, so the display is the same claim.
+
 ### Both hooks are optional
 
 | Method | Asked for | Return |

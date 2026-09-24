@@ -75,9 +75,9 @@
   "ascii": "for xs in [0.0, 1.0]^n:float|missing, f(xs) <= 1"
  },
  "space_matrix": {
-  "input": "for A in R^(m*n), f(A) == f(A)",
+  "input": "for A in R^(m,n), f(A) == f(A)",
   "unicode": "∀ A ∈ ℝᵐˣⁿ ∪ {∅}, f(A) = f(A)",
-  "ascii": "for A in R^(m*n)|missing, f(A) = f(A)"
+  "ascii": "for A in R^(m,n)|missing, f(A) = f(A)"
  },
  "space_shared_dim": {
   "input": "for x in R^n, y in R^n, f(x, y) == f(y, x)",
@@ -205,44 +205,44 @@
   "ascii": "is_finite(A)"
  },
  "matrix_determinant_product": {
-  "input": "for A in R^(n*n), B in R^(n*n), det(A @ B) == det(A) * det(B)",
+  "input": "for A in R^(n,n), B in R^(n,n), det(A @ B) == det(A) * det(B)",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, det(A @ B) = det(A)*det(B)",
-  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, det(A @ B) = det(A)*det(B)"
+  "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, det(A @ B) = det(A)*det(B)"
  },
  "matrix_transpose_product": {
-  "input": "for A in R^(n*n), B in R^(n*n), (A @ B).T == B.T @ A.T",
+  "input": "for A in R^(n,n), B in R^(n,n), (A @ B).T == B.T @ A.T",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, (A @ B).T = B.T @ A.T",
-  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, (A @ B).T = B.T @ A.T"
+  "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, (A @ B).T = B.T @ A.T"
  },
  "matrix_trace_additive": {
-  "input": "for A in R^(n*n), B in R^(n*n), trace(A + B) == trace(A) + trace(B)",
+  "input": "for A in R^(n,n), B in R^(n,n), trace(A + B) == trace(A) + trace(B)",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, trace(A + B) = trace(A) + trace(B)",
-  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, trace(A + B) = trace(A) + trace(B)"
+  "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, trace(A + B) = trace(A) + trace(B)"
  },
  "matrix_inverse_identity": {
-  "input": "assuming det(A) != 0, for A in R^(n*n), inv(A) @ A == I(n)",
+  "input": "assuming det(A) != 0, for A in R^(n,n), inv(A) @ A == I(n)",
   "unicode": "assuming det(A) != 0, ∀ A ∈ ℝⁿˣⁿ ∪ {∅}, inv(A) @ A = I(n)",
-  "ascii": "assuming det(A) != 0, for A in R^(n*n)|missing, inv(A) @ A = I(n)"
+  "ascii": "assuming det(A) != 0, for A in R^(n,n)|missing, inv(A) @ A = I(n)"
  },
  "matrix_output_symmetric_postfix": {
-  "input": "for A in R^(n*n), f(A) is symmetric",
+  "input": "for A in R^(n,n), f(A) is symmetric",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, is_symmetric(f(A))",
-  "ascii": "for A in R^(n*n)|missing, is_symmetric(f(A))"
+  "ascii": "for A in R^(n,n)|missing, is_symmetric(f(A))"
  },
  "matrix_transpose_sugar": {
-  "input": "let A be R^(n*n), A^T == A",
+  "input": "let A be R^(n,n), A^T == A",
   "unicode": "let A be ℝⁿˣⁿ ∪ {∅}, A.T = A",
-  "ascii": "let A be R^(n*n)|missing, A.T = A"
+  "ascii": "let A be R^(n,n)|missing, A.T = A"
  },
  "matrix_determinant_sugar": {
-  "input": "for A in R^(n*n), |A| >= 0",
+  "input": "for A in R^(n,n), |A| >= 0",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, det(A) ≥ 0",
-  "ascii": "for A in R^(n*n)|missing, det(A) >= 0"
+  "ascii": "for A in R^(n,n)|missing, det(A) >= 0"
  },
  "matrix_determinant_bars_compound": {
-  "input": "for A in R^(n*n), B in R^(n*n), |A @ B| == |A| * |B|",
+  "input": "for A in R^(n,n), B in R^(n,n), |A @ B| == |A| * |B|",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, det(A @ B) = det(A)*det(B)",
-  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, det(A @ B) = det(A)*det(B)"
+  "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, det(A @ B) = det(A)*det(B)"
  },
  "inferred_literal_domain": {
   "input": "raises(f(50, 0), ValueError)",
@@ -308,6 +308,46 @@
   "input": "\\forall x \\in [0, 1], f(x) \\geq 0",
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
   "ascii": "for x in [0.0, 1.0]:float|missing, f(x) >= 0"
+ },
+ "sqrt_bare_radical": {
+  "input": "∀ x ∈ [1, 4], f(x) ≥ √x",
+  "unicode": "∀ x ∈ [1.0, 4.0] ⊂ ℝ ∪ {∅}, f(x) ≥ sqrt(x)",
+  "ascii": "for x in [1.0, 4.0]:float|missing, f(x) >= sqrt(x)"
+ },
+ "power_superscript_negative": {
+  "input": "∀ x ∈ [1, 2], f(x) ≥ x⁻¹",
+  "unicode": "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 1/x",
+  "ascii": "for x in [1.0, 2.0]:float|missing, f(x) >= 1/x"
+ },
+ "latex_equiv": {
+  "input": "let g = mathema.lexicon.double, f \\equiv g",
+  "unicode": "let g = mathema.lexicon.double, f ≡ g",
+  "ascii": "let g = mathema.lexicon.double, f =:= g"
+ },
+ "latex_leqslant": {
+  "input": "\\forall x \\in [0, 1], f(x) \\leqslant 2",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≤ 2",
+  "ascii": "for x in [0.0, 1.0]:float|missing, f(x) <= 2"
+ },
+ "latex_geqslant": {
+  "input": "\\forall x \\in [0, 1], f(x) \\geqslant 0",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in [0.0, 1.0]:float|missing, f(x) >= 0"
+ },
+ "latex_varepsilon": {
+  "input": "for x in [0, 1], abs(f(x) - x) \\leq \\varepsilon",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ ε",
+  "ascii": "for x in [0.0, 1.0]:float|missing, abs(x - f(x)) <= \\epsilon"
+ },
+ "latex_varphi": {
+  "input": "for \\varphi in [0, 1], f(\\varphi) \\leq 1",
+  "unicode": "∀ φ ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(φ) ≤ 1",
+  "ascii": "for φ in [0.0, 1.0]:float|missing, f(\\phi) <= 1"
+ },
+ "latex_left_right_bars": {
+  "input": "for x in [-1, 1], \\left| f(x) \\right| \\leq 2",
+  "unicode": "∀ x ∈ [-1.0, 1.0] ⊂ ℝ ∪ {∅}, |f(x)| ≤ 2",
+  "ascii": "for x in [-1.0, 1.0]:float|missing, |f(x)| <= 2"
  },
  "named_under_test": {
   "input": "for price in [0,1000], rate in [0,1], discounted_price(price, rate) <= price",
@@ -475,14 +515,14 @@
   "ascii": "integrate(f(x), x, 0, 1) = 1"
  },
  "sum_subscript": {
-  "input": "Sum(f(i))_{i=1}^n == n*(n+1)",
-  "unicode": "Sum(f(i), i, 1, n) = n*(n + 1)",
-  "ascii": "Sum(f(i), i, 1, n) = n*(n + 1)"
+  "input": "let n be [1, 20] subset Z, Sum(f(i))_{i=1}^n == n*(n+1)",
+  "unicode": "let n be [1, 20] ⊂ ℤ ∪ {∅}, Sum(f(i), i, 1, n) = n*(n + 1)",
+  "ascii": "let n be [1, 20]:int|missing, Sum(f(i), i, 1, n) = n*(n + 1)"
  },
  "prod_call": {
-  "input": "Prod(f(i), i, 1, n) >= 0",
-  "unicode": "Prod(f(i), i, 1, n) ≥ 0",
-  "ascii": "Prod(f(i), i, 1, n) >= 0"
+  "input": "let n be [1, 20] subset Z, Prod(f(i), i, 1, n) >= 0",
+  "unicode": "let n be [1, 20] ⊂ ℤ ∪ {∅}, Prod(f(i), i, 1, n) ≥ 0",
+  "ascii": "let n be [1, 20]:int|missing, Prod(f(i), i, 1, n) >= 0"
  },
  "principal_value": {
   "input": "P.V.(integrate(1/(x - c), x, -1, 1)) == f(c)",
@@ -605,14 +645,14 @@
   "ascii": "for alpha in [0.01, 1.9]:float|missing, q in [0.5, 1.0]:float|missing, |f(alpha, q)| < 1"
  },
  "second_function_by_name": {
-  "input": "d(budget_line(x, I, px, py), x) == -px/py",
-  "unicode": "∂(budget_line(x, I, px, py)/∂x) = -px/py",
-  "ascii": "d(budget_line(x, I, px, py), x) = -px/py"
+  "input": "let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(budget_line(x, I, px, py), x) == -px/py",
+  "unicode": "let I be [10.0, 1000.0] ⊂ ℝ ∪ {∅}, let px be [0.5, 20.0] ⊂ ℝ ∪ {∅}, let py be [0.5, 20.0] ⊂ ℝ ∪ {∅}, ∂(budget_line(x, I, px, py)/∂x) = -px/py",
+  "ascii": "let I be [10.0, 1000.0]:float|missing, let px be [0.5, 20.0]:float|missing, let py be [0.5, 20.0]:float|missing, d(budget_line(x, I, px, py), x) = -px/py"
  },
  "let_function_bare_name": {
-  "input": "let g = budget_line, d(g(x, I, px, py), x) == -px/py",
-  "unicode": "∂(budget_line(x, I, px, py)/∂x) = -px/py",
-  "ascii": "d(budget_line(x, I, px, py), x) = -px/py"
+  "input": "let g = budget_line, let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(g(x, I, px, py), x) == -px/py",
+  "unicode": "let I be [10.0, 1000.0] ⊂ ℝ ∪ {∅}, let px be [0.5, 20.0] ⊂ ℝ ∪ {∅}, let py be [0.5, 20.0] ⊂ ℝ ∪ {∅}, ∂(budget_line(x, I, px, py)/∂x) = -px/py",
+  "ascii": "let I be [10.0, 1000.0]:float|missing, let px be [0.5, 20.0]:float|missing, let py be [0.5, 20.0]:float|missing, d(budget_line(x, I, px, py), x) = -px/py"
  },
  "two_function_equality": {
   "input": "f(x) == g(x)",
@@ -703,5 +743,20 @@
   "input": "assuming hi >= lo, f(xs, lo, hi) >= 0",
   "unicode": "assuming hi >= lo, f(xs, lo, hi) ≥ 0",
   "ascii": "assuming hi >= lo, f(xs, lo, hi) >= 0"
+ },
+ "dim_premise_vector_bound": {
+  "input": "assuming n >= 5, for xs in R^n, f(xs) == xs[4]",
+  "unicode": "assuming n >= 5, ∀ xs ∈ ℝⁿ ∪ {∅}, f(xs) = xs[4]",
+  "ascii": "assuming n >= 5, for xs in R^n|missing, f(xs) = xs[4]"
+ },
+ "dim_premise_square_matrix": {
+  "input": "assuming n >= 3, for a in R^(n,n), f(a) == a[2][2]",
+  "unicode": "assuming n >= 3, ∀ a ∈ ℝⁿˣⁿ ∪ {∅}, f(a) = a[2][2]",
+  "ascii": "assuming n >= 3, for a in R^(n,n)|missing, f(a) = a[2][2]"
+ },
+ "dim_premise_rectangular_matrix": {
+  "input": "assuming min(m, n) >= 3, for a in R^(m,n), f(a) == a[2][2]",
+  "unicode": "assuming min(m, n) >= 3, ∀ a ∈ ℝᵐˣⁿ ∪ {∅}, f(a) = a[2][2]",
+  "ascii": "assuming min(m, n) >= 3, for a in R^(m,n)|missing, f(a) = a[2][2]"
  }
 }

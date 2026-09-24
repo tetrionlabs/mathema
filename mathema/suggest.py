@@ -471,7 +471,8 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         out.append(claim(f"f({p1}, {p2}) == f({p2}, {p1})", name="commutative",
                          source="mathema", route="best"))
         aux = "c" if "c" not in facts.params else "aux_c"
-        out.append(claim(f"f(f({p1}, {p2}), {aux}) == f({p1}, f({p2}, {aux}))",
+        out.append(claim(f"let {aux} be [-5, 5], "
+                         f"f(f({p1}, {p2}), {aux}) == f({p1}, f({p2}, {aux}))",
                          name="associative", source="mathema", route="best"))
 
     # f(...) == f(...) genuinely re-evaluates fn twice with the same
@@ -627,11 +628,13 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         # route best: the derive route composes these elementwise
         # transforms through a recognized fold's closed form, so a
         # linear fold's equivariance is proven rather than sampled
-        out.append(claim(f"{aux}*{call} == f(g({xs}, {aux}){rest_str})",
+        out.append(claim(f"let {aux} be [-5, 5], "
+                         f"{aux}*{call} == f(g({xs}, {aux}){rest_str})",
                          name="scale_equivariant", source="mathema", route="best",
                          funcs={"g": "mathema.f.scale_seq"}))
 
-        out.append(claim(f"{call} + {aux} == f(g({xs}, {aux}){rest_str})",
+        out.append(claim(f"let {aux} be [-5, 5], "
+                         f"{call} + {aux} == f(g({xs}, {aux}){rest_str})",
                          name="translation_equivariant", source="mathema", route="best",
                          funcs={"g": "mathema.f.shift_seq"}))
 

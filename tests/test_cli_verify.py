@@ -303,7 +303,7 @@ def test_decorator_declared_claim_is_picked_up_by_verify(tmp_path):
     # add's commutativity lifts, pinned exactly, so a silent route
     # change shows up here. The suggestion that shares this law no
     # longer rides along, suggestions never enter the verified layer
-    assert "f_a_b_f_b_a" in recorded
+    assert "f_a_b_eq_f_b_a" in recorded
     assert 'verdict: "proven"' in recorded
 
     r1 = _run(tmp_path)

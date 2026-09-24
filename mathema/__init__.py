@@ -358,46 +358,45 @@ def _expand_claim_keywords(claims: list, fn, facts, merged_domain: dict,
     return out
 
 
-def _disambiguate_claim_names(entries: list) -> list:
-    """Keep distinct claims that auto-named alike from collapsing under a
-    name-keyed merge. Four domain-variants of one law (`for mi in [0,1],
-    f(mi) >= 0`, ... `[2,3]`, ...) all auto-name `f_mi_0` because the
-    name is built from the domain-stripped statement; a name-keyed merge
-    would then keep only the last. Exact duplicates (same name AND
-    statement) still collapse to one; a genuine same-name/different-
-    statement set is suffixed (`f_mi_0__1`, `f_mi_0__2`, ...) so each
-    keeps its own row. A claim with an explicit author-given name is
-    left untouched (a real name conflict must still surface)."""
+def _refuse_name_collisions(entries: list) -> list:
+    """Intent:
+        The claims a check adjudicates, keyed by name: an exact
+        duplicate (same name, statement and domain) is one claim, and
+        two distinct claims under one name are refused.
+
+    Raises:
+        InvalidConjecture: when two distinct claims take the same name
+            (four domain variants of one law all auto-name `f_mi_ge_0`,
+            say), since a name keys the claim's pins, locks and
+            verified row and cannot stand for two claims.
+    """
     import json
-    from collections import Counter
+
+    from .conjecture import InvalidConjecture
 
     def _stmt(c):
         return c.get("statement") or c.get("law")
 
     def _identity(c):
-        # the FULL identity, statement AND domain: a domain lives in its
-        # own field, not the (domain-stripped) statement, so two domain-
-        # variants share a statement but differ here.
+        # the full identity, statement and domain: a domain lives in its
+        # own field, not the (domain-stripped) statement
         return (c.get("name"), _stmt(c),
-                json.dumps(c.get("domain") or {}, sort_keys=True))
+                json.dumps(c.get("domain") or {}, sort_keys=True,
+                           default=str))
 
-    # drop exact duplicates (identical statement AND domain), first-seen
     seen: dict = {}
     for c in entries:
         seen.setdefault(_identity(c), c)
-    unique = list(seen.values())
-
-    name_counts = Counter(c.get("name") for c in unique)
-    idx: Counter = Counter()
-    out = []
-    for c in unique:
-        name = c.get("name")
-        # only suffix an auto-named collision, never an authored name
-        if name_counts[name] > 1 and (c.get("authored") is None):
-            idx[name] += 1
-            c = {**c, "name": f"{name}__{idx[name]}"}
-        out.append(c)
-    return out
+    by_name: dict = {}
+    for c in seen.values():
+        prior = by_name.setdefault(c.get("name"), c)
+        if prior is not c:
+            raise InvalidConjecture(
+                f"two claims take the name {c.get('name')!r} "
+                f"({_stmt(prior)!r} and {_stmt(c)!r}); give each an "
+                f"explicit name (claim(..., name=...), or `name:` in a "
+                f"claims file)")
+    return list(seen.values())
 
 
 def _domains_from_claims(claims) -> dict:
@@ -571,9 +570,9 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         if live:
             entry["__live_funcs__"] = live
         explicit.append(entry)
-    # distinct claims that auto-named alike (four domain-variants of one
-    # law) must not collapse under the name-keyed merge below.
-    explicit = _disambiguate_claim_names(explicit)
+    # distinct claims that name alike (four domain variants of one law)
+    # cannot share the name-keyed merge below
+    explicit = _refuse_name_collisions(explicit)
     from .spec import merge_entries
     # a retrieved entry already carries the function surfaces merged
     # with the file store at the documented precedence; without one,

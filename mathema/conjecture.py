@@ -720,7 +720,8 @@ def claim(law: str, name: str | None = None, source: str = "user",
                     f"`assuming` has no premise before its comma: state "
                     f"one (`assuming x > 0, ...`) or drop the keyword: "
                     f"{law.strip()!r}")
-            assuming = new_assuming
+            assuming = (_conjoin_assuming(assuming, new_assuming, law)
+                        if assuming else new_assuming)
         try:
             (new_funcs, new_free_domain, text, new_aliases,
              new_pseudo_inf) = extract_let_bindings(text)
@@ -895,8 +896,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
         # gets its own name, never the positive row's
         name = f"{'not_' if negated else ''}{rel}[{lhs}]"
     if name is None:
-        import re
-        name = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:40] or "claim"
+        name = auto_claim_name(text)
     bound_funcs = {**let_funcs, **(funcs or {})}
     for unbound in _unbound_call_names(lhs, rhs, set(bound_funcs)):
         # a bare call name (`budget_line(...)`) is a function reference
@@ -1119,6 +1119,53 @@ def _parse_assuming_relation(part: str):
     return None
 
 
+#: the word an auto-generated claim name spells each relation with
+_RELATION_WORDS = {"=:=": "equiv", "==": "eq", "~=": "approx", "!=": "ne",
+                   "<=": "le", ">=": "ge", "<": "lt", ">": "gt", "=": "eq"}
+_RELATION_TOKEN = re.compile(r"=:=|==|~=|!=|<=|>=|<|>|=")
+
+
+def auto_claim_name(statement: str) -> str:
+    """Intent:
+        The name a claim takes when none is given: its normalized
+        statement as a lowercase identifier, each relation spelled as a
+        word (`f(x) >= 0` -> `f_x_ge_0`, `f(x) <= 0` -> `f_x_le_0`), cut
+        at 40 characters.
+
+    Notes:
+        The name depends on the statement alone, never on the claim's
+        position among others, so two distinct claims can name alike;
+        the callers that key claims by name refuse that collision.
+    """
+    worded = _RELATION_TOKEN.sub(
+        lambda m: f" {_RELATION_WORDS[m.group(0)]} ", statement)
+    return re.sub(r"[^a-z0-9]+", "_", worded.lower()).strip("_")[:40] or "claim"
+
+
+def _conjoin_assuming(first: str, second: str, law: str) -> str:
+    """Intent:
+        Two `assuming` clauses of one claim as the single clause that is
+        their conjunction, in the order written:
+        `assuming m >= 3`, `assuming n >= 3` -> `assuming m >= 3 and n >= 3`.
+
+    Raises:
+        InvalidConjecture: when either clause is not a relation (or an
+            `and` of relations), since a definedness, lemma or structure
+            premise has its own clause shape and joining it to another
+            with `and` would change what it says.
+    """
+    bodies = [re.sub(r"^assuming\s+", "", c.strip()) for c in (first, second)]
+    for body in bodies:
+        if "-->" in body or any(_parse_assuming_relation(part) is None
+                                for part in _split_top_and(body)):
+            raise InvalidConjecture(
+                f"two `assuming` clauses are joined only when both are "
+                f"relations; state the premises in one `assuming` clause, "
+                f"joined with `and` (a bound on two dimensions can be "
+                f"`assuming min(m, n) >= 3`): {law.strip()!r}")
+    return "assuming " + " and ".join(bodies)
+
+
 def _split_top_and(text: str) -> list[str]:
     """A relation conjunction split at top-level ` and ` only, an
     `and` nested inside brackets never splits."""
@@ -1209,6 +1256,13 @@ def _interpret_assumption(cj, conjectures):
         parsed_list = []
         for part in _split_top_and(region_text):
             parsed = _parse_assuming_relation(part)
+            inner = part.strip()[1:-1].strip()
+            if (parsed is None and part.strip().startswith("(")
+                    and part.strip().endswith(")")
+                    and len(_split_top_and(inner)) > 1):
+                return skip(f"a parenthesised conjunction in an assuming "
+                            f"clause is not supported yet: write it without "
+                            f"the parentheses, `assuming {inner}`")
             if parsed is None:
                 return skip(f"assuming clause must be a plain relation "
                             f"(==, !=, >=, <=, >, <): {part!r}")
@@ -1313,6 +1367,114 @@ def _shadowed_constants(lhs: str, rhs: str, param_names: set) -> list[str]:
                     and node.id not in hits:
                 hits.append(node.id)
     return hits
+
+
+#: names a claim may use as values without declaring them: the
+#: mathematical constants, infinity, the missing-value sentinel, and the
+#: claim's own tolerance
+_KNOWN_VALUE_NAMES = frozenset(
+    set(MATH_CONSTANTS) | {"oo", "infinity", "inf", "nan", "missing",
+                           "eps", "epsilon", "ε", _D_AT_SENTINEL})
+
+#: calls whose argument after the expression is a variable they bind
+#: (`d(f(x), x)`, `Sum(f(i), i, 1, n)`, `lim(f(x), x, 0)`)
+_BINDING_CALLS = frozenset({"d", "integrate", "Sum", "Prod", "sum", "prod",
+                            "lim"})
+
+
+def _bound_by_calls(tree) -> set:
+    """Intent:
+        The variables a derivative, integral, sum, product or limit
+        binds inside a parsed expression: the argument after the
+        expression, every differentiation variable of `d`, and each
+        variable a `d(...) @ {x = a}` evaluation substitutes.
+    """
+    bound: set = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in _BINDING_CALLS):
+            continue
+        args = node.args[1:]
+        if node.func.id != "d":
+            args = args[:1]
+        after_at = None
+        for arg in args:
+            if isinstance(arg, ast.Name) and arg.id == _D_AT_SENTINEL:
+                after_at = 0
+                continue
+            if after_at is not None:
+                if after_at % 2 == 0 and isinstance(arg, ast.Name):
+                    bound.add(arg.id)
+                after_at += 1
+            elif isinstance(arg, ast.Name):
+                bound.add(arg.id)
+    return bound
+
+
+def _declared_names(cj, cj_domain: dict, facts, fn) -> set:
+    """Intent:
+        Every name a claim may use as a value: the function's
+        parameters, names bound by `for`/`let`, bound functions, the
+        dimension names of a declared space (`R^(m,n)`) or of a `Shape`
+        marker on the signature, and the known constants.
+    """
+    declared = (set(facts.params) | set(cj_domain) | set(cj.free_vars)
+                | set(cj.funcs or ()) | set(_KNOWN_VALUE_NAMES) | {"f"})
+    for bound in cj_domain.values():
+        declared |= {d for d in getattr(bound, "dims", ()) if isinstance(d, str)}
+    if fn is not None:
+        try:
+            from .types import shapes_from_signature
+            for marker in shapes_from_signature(fn).values():
+                declared |= {d for d in getattr(marker, "dims", ())
+                             if isinstance(d, str)}
+        except Exception:
+            pass
+    return declared
+
+
+def _undeclared_names(cj, declared: set) -> list[str]:
+    """Intent:
+        The names a claim's statement, chain links and relational
+        premise use as values that nothing declares, in the order they
+        first appear. A name used as a subscript (`f(n)[i]`) is an
+        index, quantified over the valid positions, and so is bound. Empty for a claim whose statement is not a
+        relation (a safety predicate, `f =:= g`), whose operands are
+        read differently.
+    """
+    if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">", "raises"):
+        return []
+    sides = [cj.lhs] if cj.relation == "raises" else [cj.lhs, cj.rhs]
+    for link in cj.links or ():
+        sides += [link[0], link[2]]
+    premise = re.sub(r"^assuming\s+", "", (cj.assuming or "").strip())
+    if premise and "-->" not in premise:
+        parts = [_parse_assuming_relation(p) for p in _split_top_and(premise)]
+        if all(p is not None for p in parts):
+            sides += [s for p in parts for s in (p.lhs, p.rhs)]
+    trees = []
+    for src in sides:
+        if not src:
+            continue
+        try:
+            trees.append(ast.parse(str(src), mode="eval"))
+        except SyntaxError:
+            continue
+    # a subscript index (`f(n)[i] == i`) binds its name on every side
+    indices = {n.id for tree in trees for sub in ast.walk(tree)
+               if isinstance(sub, ast.Subscript)
+               for n in ast.walk(sub.slice) if isinstance(n, ast.Name)}
+    found: list[str] = []
+    for tree in trees:
+        call_funcs = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        bound = _bound_by_calls(tree) | indices
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Name) and id(node) not in call_funcs
+                    and not node.id.startswith("__")
+                    and node.id not in declared and node.id not in bound
+                    and node.id not in found):
+                found.append(node.id)
+    return found
 
 
 def _unbound_call_names(lhs: str, rhs: str, existing: set) -> list[str]:
@@ -2517,6 +2679,14 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     probes = check_conjectures(fn, link_cjs, domain=domain, trials=trials,
                                trials_scale=trials_scale, facts=facts,
                                extensive=extensive)
+    # a link that does not read as a claim (an undeclared name, say)
+    # makes the whole chain unreadable, whatever the other links decide
+    refused = next((p for p in probes
+                    if (p.meta or {}).get("mathema.invalid_conjecture")), None)
+    if refused is not None:
+        return Probe(cj.name, _chain_statement(cj), refused.verdict,
+                     route=None, note=refused.note,
+                     meta={"mathema.invalid_conjecture": True})
     return _combine_conjunction(probes, cj.name, _chain_statement(cj),
                                 labels)
 
@@ -3084,6 +3254,18 @@ def _validate_claim(cj, statement: str, note: str, facts,
                      note=f"{note}; domain key(s) {unknown_keys} don't match "
                           f"any real parameter (real parameters: "
                           f"{list(facts.params)})")
+    undeclared = _undeclared_names(cj, _declared_names(cj, cj_domain, facts, fn))
+    if undeclared:
+        name = undeclared[0]
+        return Probe(
+            cj.name, statement, "skipped:misspecified", route=None,
+            note=(f"{note}; undeclared name {name!r}: it is not a parameter "
+                  f"of the function, not bound by `for` or `let`, and not a "
+                  f"known constant or function; declare it with `let`, "
+                  f"for example `let {name} be [0, 1], ...`"
+                  + (f" (also undeclared: {', '.join(undeclared[1:])})"
+                     if len(undeclared) > 1 else "")),
+            meta={"mathema.invalid_conjecture": True})
     return _ClaimContext(cj=cj, statement=statement, note=note,
                          cj_domain=cj_domain, extra=frozenset(cj.funcs))
 

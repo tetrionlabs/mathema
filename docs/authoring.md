@@ -489,6 +489,13 @@ A hand-written file is the most deliberate, most reviewable place to
 override a claim, so it always wins over anything the function itself
 declares.
 
+A claim with no `name:` is named from its statement, with its relation
+as a word: `f(x) >= 0` is `f_x_ge_0` and `f(x) <= 0` is `f_x_le_0`. The
+name keys the claim's pins, locks and verified row, so it never depends
+on where the claim sits in a list. Two different claims that would take
+the same name (two domains of one law, say) are refused, asking for an
+explicit `name:` on each.
+
 ## Experiment before you declare
 
 Try a spelling before it reaches an authoring surface. Both of these
@@ -564,7 +571,7 @@ a first-class symbol a claim can reference in a premise or a
 law over its dimensions.
 
 A claim may also state a parameter's space in its own domain
-(`for a in R^(p*q), ...`). Where a claim and a marker both describe
+(`for a in R^(p,q), ...`). Where a claim and a marker both describe
 the same parameter, the marker is authoritative on RANK: a claim that
 gives it a different number of axes is a conflict, skipped with the
 reason. A different NAME at the same axis is not a conflict, it aliases

@@ -215,7 +215,8 @@ def test_every_plain_sampled_probe_carries_a_confidence_meta():
     # the confidence meta; probe:algorithmic family probes do not (a
     # known provenance gap, tracked, not asserted away here)
     import mathema as _m
-    rec = _m.check(ema, claims=["for alpha in [0, 1], f(xs, alpha) == f(xs, alpha)"])
+    rec = _m.check(ema, claims=[_m.claim(
+        "for alpha in [0, 1], f(x, alpha) == f(x, alpha)", route="probe")])
     sampled = [p for p in rec.probes
                if p.route == "probe" and p.verdict in ("holds", "falsified")
                and p.n]

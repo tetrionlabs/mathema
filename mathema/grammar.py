@@ -115,6 +115,7 @@ from ._scan import (_split_commas, mask_strings, outside_strings,
 from .domain import (MISSING as MISSING, Domain as Domain,
                      Interval as Interval, InvalidDomain as InvalidDomain,
                      _MEMBERSHIP_OPS as _MEMBERSHIP_OPS,
+                     desuperscript_spaces as _desuperscript_spaces,
                      _as_domain as _as_domain,
                      _is_missing as _is_missing,
                      domain_bound_from_json as domain_bound_from_json,
@@ -1109,6 +1110,13 @@ def extract_let_bindings(
                 f"bindings refer to each other in a cycle, so none of them "
                 f"names a value")
         rest = ",".join(segments[1:]).strip()
+        if not rest and _LET_STRIP.match(first) is None:
+            shown = unmask_strings(first.strip(), literals)
+            raise InvalidDomain(
+                f"`{shown}` reads as another `let` binding (a binding may "
+                f"continue a let run without repeating `let`), which leaves "
+                f"no claim after the let run; if it is the claim, write it "
+                f"with `==`: `{name} == {unmask_strings(expr, literals)}`")
         if _LET_FUNC_VALUE.match(expr):
             funcs[name] = expr
             text = rest
@@ -1135,6 +1143,10 @@ def extract_let_bindings(
     for target in aliases.values():
         text = re.sub(rf"\({re.escape(target)}\)(\s*{_MEMBERSHIP_OPS}\s)",
                       rf"{target}\1", text)
+    if not text.strip():
+        raise InvalidDomain(
+            "the let run binds names but has no claim after it: state the "
+            "claim after the last binding (`let c be [0, 1], f(x) + c >= 0`)")
     return (funcs, free_domain, unmask_strings(text, literals), aliases,
             pseudo_infinity)
 
@@ -1721,6 +1733,7 @@ def apply_unicode_synonyms(text: str) -> str:
     otherwise be converted to `^<digits>` and glued onto `integral`
     with no separator."""
     def substitute(masked: str) -> str:
+        masked = _desuperscript_spaces(masked)
         masked = _radical_to_call(_collapse_integral_marks(masked))
         masked = _LATEX_COMMAND.sub(
             lambda m: _LATEX_COMMANDS.get(m.group(0), m.group(0)), masked)

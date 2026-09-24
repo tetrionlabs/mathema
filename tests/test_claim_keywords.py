@@ -62,7 +62,7 @@ def test_keywords_mix_with_law_strings():
     names = {p.name for p in r.probes}
     assert "is_deterministic" in names
     assert any(p.verdict == "falsified" for p in r.probes
-               if p.name == "f_x_2")
+               if p.name == "f_x_ge_2")
 
 
 def test_long_spellings_are_accepted():

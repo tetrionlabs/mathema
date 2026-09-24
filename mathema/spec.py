@@ -1322,6 +1322,19 @@ def _domain_problem(bound) -> "str | None":
     return None
 
 
+def _auto_name_of(statement: str) -> "str | None":
+    """Intent:
+        The name an unnamed claim with this statement takes, or None
+        when the statement does not read as a claim (its own refusal
+        is reported where the claim is built).
+    """
+    from .conjecture import InvalidConjecture, claim as _claim
+    try:
+        return _claim(statement).name
+    except (InvalidConjecture, ValueError):
+        return None
+
+
 def validate_claims_file(data, rel_path: str) -> None:
     """Intent:
         Check one parsed claims file's shape, and normalize a tolerance
@@ -1391,6 +1404,14 @@ def validate_claims_file(data, rel_path: str) -> None:
                     fail(key, f"claim name {name!r} is used twice; each "
                               f"claim under one key needs its own name")
                 seen.add(name)
+            else:
+                auto = _auto_name_of(text)
+                if auto is not None and auto in seen:
+                    fail(key, f"{label} takes the name {auto!r}, which "
+                              f"another claim under this key already has; "
+                              f"give it an explicit `name:`")
+                if auto is not None:
+                    seen.add(auto)
             tol = c.get("tolerance")
             if tol is not None:
                 try:
@@ -2189,14 +2210,18 @@ def render_claim_text(cj, *, unicode: bool | None = None,
                         else None if name in scope_bound
                         else callable_ref(ref))
                  for name, ref in cj.funcs.items()}
-    let_segments = [f"let {func_renames.get(name, name)} = {ref}"
+    # a bound function keeps its own binding under its own name, and a
+    # display symbol for it is introduced as an alias of that name
+    # (`let g = numpy.exp, let E = g`), which the reparse resolves back
+    # to the same function under the same name, so the claim is the same
+    let_segments = [f"let {name} = {ref}"
                     for name, ref in func_refs.items()
-                    if ref is not None
                     # a parse-time placeholder (a bare call name awaiting
-                    # scope resolution, value == its own name) only earns
-                    # a `let` when the auto-rename gave it a short alias;
-                    # `let mystery = mystery` says nothing
-                    and func_renames.get(name, name) != ref]
+                    # scope resolution, value == its own name) and a
+                    # scope-bound name have no binding to state
+                    if ref is not None and ref != name]
+    let_segments += [f"let {symbol} = {name}"
+                     for name, symbol in func_renames.items()]
     let_segments += [f"let {_display_symbol(symbol)} = {name}"
                      for name, symbol in sorted(param_renames.items())]
     let_segments += [

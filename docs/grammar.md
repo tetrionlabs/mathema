@@ -87,6 +87,22 @@ symbol has a plain LaTeX command with no braces, that is accepted typed
 literally too, so `\forall x \in [0,1], f(x) \geq 0` is the same claim as
 its Unicode and ASCII forms.
 
+A few more spellings are accepted and read as their ascii forms:
+
+| Spelling | Reads as |
+|---|---|
+| `∀ x ∈ [1, 4], f(x) ≥ √x` | `√` without parentheses, the root of the atom after it |
+| `∀ x ∈ [1, 2], f(x) ≥ x⁻¹` | a superscript minus, a negative power |
+| `let g = mathema.lexicon.double, f \equiv g` | `\equiv`, function equivalence |
+| `\forall x \in [0, 1], f(x) \leqslant 2` | `\leqslant`, the slanted `<=` |
+| `\forall x \in [0, 1], f(x) \geqslant 0` | `\geqslant`, the slanted `>=` |
+| `for x in [0, 1], abs(f(x) - x) \leq \varepsilon` | `\varepsilon`, the claim's tolerance like `ε` |
+| `for \varphi in [0, 1], f(\varphi) \leq 1` | `\varphi`, the letter `φ` |
+| `for x in [-1, 1], \left| f(x) \right| \leq 2` | `\left`/`\right` sizing, dropped |
+
+A radical whose reach would be unclear (`√x^2`) is refused; write
+`√(x^2)` or `(√x)^2`.
+
 ### The look-alikes worth knowing about
 
 `⊂` (U+2282) is the subset operator the grammar accepts. **`⊆` (U+2286) is
@@ -198,6 +214,16 @@ stronger than you mean. The `for` clause narrows it:
 | `for z in C, f(z) == z` | the complex plane |
 | `for x in [-1, 1] \ {1}, f(x) >= 0` | an interval with a point excluded |
 | `for scale in {"info", "linear"}, f(r, scale) >= 0` | a finite set of strings |
+| `for v in R^n, f(v) >= 0` | a real vector of length `n`, never empty |
+| `for A in R^(m,n), f(A) == f(A)` | an `m`-by-`n` real matrix, rows then columns |
+
+A matrix space is written `R^(m,n)`, the order of a numpy shape. The
+spellings `R^{m,n}`, `R^(m×n)`, `R^{m×n}`, `R^(m*n)` and the superscript
+`ℝᵐˣⁿ` are the same space, as are `ℝ³ˣ³` and `ℝ^{3×3}` for a fixed size,
+and all of them are written back as `R^(m,n)`. The unicode display uses
+superscripts wherever they read back as the same space; a dimension
+named with an `x` (the superscript `ˣ` is the separator) or with a
+letter that has no superscript form is shown as `ℝ^(x,n)` instead.
 
 The excluded-point form is how you state a claim around a pole. The
 finite-set form is how a string-valued parameter that selects a branch
@@ -219,8 +245,8 @@ check every case rather than guessing.
 | `integrate(f(x), x, 0, 1) == 1` | a definite integral |
 | `∫(f(x), x, 0, 1) == 1` | the symbol form |
 | <code>integrate(f(x), x)&#124;_{0}^{1} == 1</code> | with an evaluation bar |
-| `Sum(f(i))_{i=1}^n == n*(n+1)` | a sum, subscript form |
-| `Prod(f(i), i, 1, n) >= 0` | a product |
+| `let n be [1, 20] subset Z, Sum(f(i))_{i=1}^n == n*(n+1)` | a sum, subscript form, its bound declared |
+| `let n be [1, 20] subset Z, Prod(f(i), i, 1, n) >= 0` | a product |
 | `P.V.(integrate(1/(x - c), x, -1, 1)) == f(c)` | a Cauchy principal value |
 
 ## Safety predicates
@@ -258,7 +284,7 @@ readable and lets you talk about things that are not parameters:
 | Spelling | Binds |
 |---|---|
 | `let g = math.sqrt, for x in (0,100], g(x) >= 0` | a real function, by dotted path |
-| `let g = budget_line, d(g(x, I, px, py), x) == -px/py` | another function in the same module, by bare name |
+| `let g = budget_line, let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(g(x, I, px, py), x) == -px/py` | another function in the same module, by bare name |
 | `let c be [-1e6,1e6], for x in [0,10], f(x) + c >= 0` | a free variable over a range |
 | `let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0` | a typed free variable |
 | `let compute_square_root = numpy.sqrt, for x in [0, 100], compute_square_root(x) >= 0` | a long name, kept readable |
@@ -266,6 +292,16 @@ readable and lets you talk about things that are not parameters:
 A free variable is the difference between "this holds for the inputs"
 and "this holds for the inputs and any constant you care to add", which
 is often the claim you actually meant.
+
+Every name a claim uses must be declared: a parameter of the function,
+a name bound by `for` or `let`, a dimension of a declared space
+(`n` in `R^n`), a variable a derivative, sum, integral or limit binds,
+or a known constant or function. Any other name is refused with its
+name and the `let ... be [...]` that declares it, rather than being
+sampled as a value nobody chose. A binding may continue a let run
+without repeating `let`, so a bare `name = expr` straight after the run
+reads as one more binding; a claim written that way is refused with a
+message saying to write the relation as `==`.
 
 ### Operational infinity: `let |inf| be ...`
 
@@ -333,10 +369,21 @@ watered down:
 | `assuming base_case is proven, for n in [2, 30] subset Z, f(n) == f(n-1) + f(n-2)` | that claim reached `proven` specifically |
 | `assuming is_defined(f), for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)` | that the function is defined there at all |
 | `assuming f is defined, for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)` | the postfix spelling of the same |
+| `assuming n >= 5, for xs in R^n, f(xs) == xs[4]` | a vector at least five long |
+| `assuming n >= 3, for a in R^(n,n), f(a) == a[2][2]` | a square matrix at least 3 by 3 |
+| `assuming min(m, n) >= 3, for a in R^(m,n), f(a) == a[2][2]` | a rectangular matrix with at least three rows and three columns |
 
-The last of these is how compositional claims are built: prove that a
-function is defined on a region, then assume it in the claims that
-depend on it, and the record keeps the dependency.
+A vector or matrix space is never empty, since `R^n` already means at
+least one element, so a dimension premise is needed only for a bound
+beyond that. Two `assuming` clauses in one claim are one premise, their
+conjunction: `assuming m >= 3, assuming n >= 3, ...` is stored as
+`assuming m >= 3 and n >= 3, ...`. Only relations are joined this way;
+a definedness, lemma or matrix structure premise is written as one
+clause of its own.
+
+The `f is defined` premise is how compositional claims are built:
+prove that a function is defined on a region, then assume it in the
+claims that depend on it, and the record keeps the dependency.
 
 ## Several functions in one claim
 
@@ -345,9 +392,12 @@ mention:
 
 ```
 f(x) == g(x)
-d(budget_line(x, I, px, py), x) == -px/py
-let g = budget_line, d(g(x, I, px, py), x) == -px/py
+let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(budget_line(x, I, px, py), x) == -px/py
+let g = budget_line, let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(g(x, I, px, py), x) == -px/py
 ```
+
+Inputs of the second function that are not parameters of `f` (here the
+income and the two prices) are declared with `let`, like any other name.
 
 A second function named this way is a full participant, lifted and
 reasoned about like `f` rather than treated as an opaque call.
