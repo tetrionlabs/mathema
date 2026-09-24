@@ -733,9 +733,10 @@ def claim(law: str, name: str | None = None, source: str = "user",
                         f"in the claim {law.strip()!r}") from None
                 problem = _unreadable_side(_side)
                 if problem is not None:
+                    where = ("" if _D_AT_SENTINEL in _side
+                             else f"in {_side.strip()!r}, ")
                     raise InvalidConjecture(
-                        f"{problem} (in {_side.strip()!r}, claim "
-                        f"{law.strip()!r})")
+                        f"{problem} ({where}claim {law.strip()!r})")
     # the record's grammar names the linear-algebra dialect when the
     # claim uses the matrix vocabulary: informative only (a reader sees
     # the parsing was matrix-aware), never required to round-trip, the
@@ -802,6 +803,68 @@ _NOT_CLAIM_SYNTAX = {
 _BITWISE_OPS = (ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
 
 
+_SPECIAL_CALL_SHAPES = {
+    "d": "d(expr, var, ...) or d(expr, var, order)",
+    "integrate": "integrate(expr, var) or integrate(expr, var, lo, hi)",
+    "lim": "lim(expr, var, point)",
+    "Sum": "Sum(expr, var, lo, hi)",
+    "Prod": "Prod(expr, var, lo, hi)",
+}
+
+
+def _is_variable(node) -> bool:
+    return isinstance(node, ast.Name) and node.id != _D_AT_SENTINEL
+
+
+def _special_call_problem(node: ast.Call) -> str | None:
+    """Intent:
+        Why one call of a reserved form (`d`, `integrate`, `lim`, `Sum`,
+        `Prod`) does not have that form's shape, or None when it does.
+        Every variable slot must hold a plain name, and a derivative
+        order must be a non-negative integer.
+    """
+    name, args = node.func.id, node.args
+    shape = f"`{name}` is written {_SPECIAL_CALL_SHAPES[name]}"
+    if name == "d":
+        at = next((k for k, a in enumerate(args)
+                   if isinstance(a, ast.Name) and a.id == _D_AT_SENTINEL),
+                  len(args))
+        diff = args[1:at]
+        if not args or not diff or not _is_variable(diff[0]):
+            return f"{shape}: each variable a plain name"
+        for a in diff[1:]:
+            if _is_variable(a):
+                continue
+            if not (isinstance(a, ast.Constant) and type(a.value) is int
+                    and a.value >= 0):
+                return (f"{shape}: each variable a plain name and an "
+                        f"order a non-negative integer")
+        pairs = args[at + 1:]
+        if at < len(args):
+            if not pairs or len(pairs) % 2:
+                return "`d(...) @ {...}` needs one `name = value` per point"
+            names = [p.id for p in pairs[::2] if _is_variable(p)]
+            if len(names) != len(pairs) // 2:
+                return "`d(...) @ {...}` assigns values to plain names only"
+            if len(set(names)) != len(names):
+                return (f"`d(...) @ {{...}}` gives "
+                        f"{sorted({n for n in names if names.count(n) > 1})} "
+                        f"two values")
+        return None
+    if name == "integrate":
+        ok = ((len(args) == 2 and _is_variable(args[1]))
+              or (len(args) >= 4 and (len(args) - 1) % 3 == 0
+                  and all(_is_variable(a) for a in args[1::3])))
+        return None if ok else f"{shape}, the variable a plain name"
+    if name == "lim":
+        ok = (len(args) in (3, 4) and _is_variable(args[1])
+              and (len(args) == 3 or (isinstance(args[3], ast.Constant)
+                                      and args[3].value in ("+", "-"))))
+        return None if ok else f"{shape}, the variable a plain name"
+    ok = len(args) == 4 and _is_variable(args[1])
+    return None if ok else f"{shape}, the variable a plain name"
+
+
 def _unreadable_side(side: str) -> str | None:
     """Intent:
         Why one side of a relation is not claim syntax, or None when it
@@ -827,6 +890,11 @@ def _unreadable_side(side: str) -> str | None:
                 "bounded quantity as a chained comparison (`1 <= f(x) <= 2`); "
                 "a boolean value needs its own parentheses")
     for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in _SPECIAL_CALL_SHAPES):
+            problem = _special_call_problem(node)
+            if problem is not None:
+                return problem
         what = _NOT_CLAIM_SYNTAX.get(type(node))
         if what is not None:
             return f"{what} is not claim syntax"

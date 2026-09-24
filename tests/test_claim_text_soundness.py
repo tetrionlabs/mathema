@@ -222,3 +222,54 @@ def test_a_bare_radical_no_longer_reads_as_a_free_variable():
 def test_a_radical_with_an_unclear_reach_is_refused(law):
     with pytest.raises(InvalidConjecture, match="√"):
         claim(law)
+
+
+# -- reserved call shapes -----------------------------------------------------
+
+@pytest.mark.parametrize("law, form", [
+    ("d(f(x), 1) >= 0", "`d`"),
+    ("d(f(x), x, -1) >= 0", "`d`"),
+    ("d(f(x), x+1) >= 0", "`d`"),
+    ("d() >= 0", "`d`"),
+    ("d(f(x), x) @ {x = 1, x = 2} == 2", "two values"),
+    ("integrate(f(x), 1, 0, 1) == 1", "`integrate`"),
+    ("integrate(f(x)) == 1", "`integrate`"),
+    ("integrate(f(x), x, 0) == 1", "`integrate`"),
+    ("Sum(f(i), 1, 1, n) == 1", "`Sum`"),
+    ("lim(f(x), x) == 0", "`lim`"),
+    ("f(x) >= lambda: 1", "lambda"),
+])
+def test_a_reserved_form_with_the_wrong_shape_is_refused(law, form):
+    with pytest.raises(InvalidConjecture, match=form):
+        claim(law)
+
+
+@pytest.mark.parametrize("law", [
+    "for x in [0, 1], d(f(x), x, 2) >= -99",
+    "for x in [0, 1], d(f(x), x) @ {x = 1} >= -99",
+    "integrate(f(x), x, 0, 1) >= -99",
+    "Sum(f(i), i, 1, 3) >= -99",
+    "lim(f(x), x, 0) >= -99",
+])
+def test_a_reserved_form_with_its_shape_still_reads(law):
+    assert_round_trips(law)
+
+
+@pytest.mark.parametrize("law", [
+    "f(x) >= f(x=1)",
+    "f(x) >= f(**x)",
+    "f(x) =~ 1",
+    "f(x) >= ~x",
+    "f(x) >= x << 1",
+    "f(x) >= (yield 1)",
+    "f(x) >= [i for i in x]",
+    "f(x) >= x if x else 1",
+    "f(x) >= {1}",
+    'f(x) >= b"abc"',
+    'f(x) >= f"{x}"',
+    "f(x) >= ...",
+    "f(x) >= __import__('os').__dict__",
+])
+def test_python_syntax_with_no_claim_reading_is_refused(law):
+    with pytest.raises(InvalidConjecture, match="claim syntax"):
+        claim(law)
