@@ -3610,6 +3610,20 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                      sketch=family_proof.sketch,
                      counterexample=family_proof.counterexample, note=note,
                      meta=_provenance_meta(family_proof))
+    if (family_proof is not None
+            and family_proof.meta.get("mathema.corroboration") == "uncorroborated"
+            and cj.name.split("[", 1)[0] != "is_defined"):
+        # a family disproof the executed code did not reproduce: the
+        # claim's own verdict is unknown with the engine-bug flag, and
+        # like any unknown it is superseded by real empirical evidence,
+        # so the flagged report is stashed and the probe stage decides
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            sketch=family_proof.sketch,
+            note=f"{note}; derive route undecided",
+            meta={"mathema.derive_status": "undecided",
+                  **_provenance_meta(family_proof)})
+        return None
     if family_proof is not None and cj.name.split("[", 1)[0] == "is_defined":
         # region equivalence is the ONLY reading of an is_defined
         # claim: an undecided family verdict is final, the ordinary
