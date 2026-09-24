@@ -150,7 +150,6 @@ def negated(x: float) -> float:
     "let f = math.sqrt, for x in [0, 1], f(x) >= 0",
     "let f = 2*x, for x in [0, 1], f >= 0",
     "let f be [0, 1], f(x) >= 0",
-    "for f in [0, 1], f(f) >= 0",
 ])
 def test_the_function_under_test_cannot_be_rebound(law):
     with pytest.raises(InvalidConjecture, match="`f` always names"):
@@ -262,7 +261,6 @@ def test_a_reserved_form_with_its_shape_still_reads(law):
     "f(x) >= ~x",
     "f(x) >= x << 1",
     "f(x) >= (yield 1)",
-    "f(x) >= [i for i in x]",
     "f(x) >= x if x else 1",
     "f(x) >= {1}",
     'f(x) >= b"abc"',

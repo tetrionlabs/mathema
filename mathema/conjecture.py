@@ -632,10 +632,6 @@ def claim(law: str, name: str | None = None, source: str = "user",
             raise ConflictingDomainBinding(
                 f"{rebound} bound by two quantifiers in the same claim; "
                 f"give each name one domain")
-        if "f" in new_dom:
-            raise InvalidConjecture(
-                "`f` always names the function under test and cannot be "
-                "a quantified variable; pick another name")
         dom.update(new_dom)
         if text == prev:
             break
@@ -808,10 +804,6 @@ _NOT_CLAIM_SYNTAX = {
     ast.Yield: "`yield`",
     ast.YieldFrom: "`yield`",
     ast.Await: "`await`",
-    ast.ListComp: "a comprehension",
-    ast.SetComp: "a comprehension",
-    ast.DictComp: "a comprehension",
-    ast.GeneratorExp: "a comprehension",
     ast.NamedExpr: "an assignment expression (`:=`)",
     ast.JoinedStr: "an f-string",
     ast.Starred: "argument unpacking (`*`)",
