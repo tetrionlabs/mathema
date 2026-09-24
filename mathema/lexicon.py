@@ -314,12 +314,9 @@ LEXICON: dict[str, str] = {
     # bounds (floor(u) = u - t for some t in [0,1))
     "floor_below_argument": "for x in [-20, 20], floor(x) <= x",
     "ceiling_above_argument": "for x in [-20, 20], ceil(x) >= x",
-    # `//` is accepted INPUT sugar and renders as `floor(n/2)`, but the
-    # law sandbox that evaluates a claim at a concrete point rejects it
-    # ("FloorDiv is not allowed in a law"), so a claim spelled this way
-    # is derive-only: no probe, no corroborating witness, no
-    # brute-force sweep. Write `floor(...)` when the claim needs to be
-    # evaluated, which is what the next entry does.
+    # `//` is accepted input sugar and renders as `floor(n/2)`; both
+    # spellings evaluate at a concrete point, so both reach the probe,
+    # the corroborating witness and the brute-force sweep.
     "floor_div_sugar": "for n in [1,100] subset Z, f(n) == n // 2",
     "floor_div_evaluable": "for n in [1,100] subset Z, f(n) == floor(n/2)",
     "remainder_below_modulus": "for n in [0,1000] subset Z, n % 24 <= 23",

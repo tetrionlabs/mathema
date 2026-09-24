@@ -416,7 +416,7 @@ _SAFE_FUNCS = {
 }
 _ALLOWED_NODES = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Call, ast.Name,
                   ast.Constant, ast.Load, ast.Add, ast.Sub, ast.Mult, ast.Div,
-                  ast.Pow, ast.Mod, ast.USub, ast.UAdd, ast.List, ast.Tuple,
+                  ast.Pow, ast.Mod, ast.FloorDiv, ast.USub, ast.UAdd, ast.List, ast.Tuple,
                   ast.Subscript, ast.Index, ast.Slice,
                   # truth-valued law expressions (`f(a, b) == (a <= b)`):
                   # comparisons and boolean connectives evaluate to

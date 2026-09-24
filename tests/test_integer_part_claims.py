@@ -189,3 +189,18 @@ def test_python_floor_div_and_math_floor_agree_with_the_claims(mod):
     assert mod.clock_hour(23, 1) == 0
     assert math.isclose(mod.frac_part(2.25), 0.25)
     assert mod.floor_quantize(7.3, 2.0) == 6.0
+
+
+def test_floor_division_in_a_claim_is_evaluable_on_the_probe_route(mod):
+    from mathema.conjecture import check_conjectures, claim
+    r = check_conjectures(mod.half_down, [claim(
+        "for n in [0, 20] subset Z, f(n) == n // 2", route="probe")])[0]
+    assert r.verdict == "holds", (r.verdict, r.note)
+
+
+def test_a_false_floor_division_claim_is_falsified_with_a_witness(mod):
+    from mathema.conjecture import check_conjectures, claim
+    r = check_conjectures(mod.half_down, [claim(
+        "for n in [0, 20] subset Z, f(n) == n // 3")])[0]
+    assert r.verdict == "falsified", (r.verdict, r.note)
+    assert r.counterexample
