@@ -129,9 +129,12 @@ A few consequences worth knowing:
 The scoring algorithm is versioned (`entropy-dimensions@1.1`) and recorded
 beside the scores, so a number is only ever compared against one computed
 the same way; a change to the algorithm reads as an algorithm change, not
-a regression. `@1.1` added the `[float]` companion credit above, so a
-project whose derive proofs have holding companions scores higher on
-clarity, and on overall, than it did under `@1`.
+a regression. `@1.1` made two changes, and both raise clarity and overall
+against `@1`. It added the `[float]` companion credit above. It also reads
+the relation of a verified claim the way the claim grammar does, so a
+stored identity (the store writes `f(x) = 2*x`, with a single `=`), or an
+approximate one (`~=`), now counts toward *what it computes*. Under `@1`
+it counted only toward *bounds & shape*.
 
 ## The triangle
 

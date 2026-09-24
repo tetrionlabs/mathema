@@ -116,6 +116,49 @@ def test_a_holding_float_companion_credits_numerical_stability(tmp_path):
     assert score([parent, companion("falsified")]) == alone
 
 
+_STORED_IDENTITY_FIXTURE = '''
+def double(x: float) -> float:
+    """Twice.
+
+    Claims:
+        doubles [derive]: for x in [0, 10], f(x) == 2*x
+    """
+    return 2.0 * x
+'''
+
+
+def test_a_stored_proven_identity_scores_as_an_identity(tmp_path,
+                                                        monkeypatch):
+    # the verified store writes the canonical single `=`
+    # (`f(x) = 2*x`); read back, the claim is still an identity, and
+    # scores as one: the same as the rows a reader would write by hand
+    import mathema
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    (tmp_path / "bcstored.py").write_text(_STORED_IDENTITY_FIXTURE)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    mod = __import__("bcstored")
+    mathema.write_spec(mod.double, root=str(tmp_path))
+    stored = clarity_score(mod.double, root=str(tmp_path))
+    by_hand = clarity_score(mod.double, verified_claims=[
+        {"name": "doubles", "statement": "f(x) == 2*x",
+         "verdict": "proven", "route": "derive"},
+        {"name": "doubles[float]", "statement": "f(x) == 2*x",
+         "verdict": "holds", "route": "probe",
+         "meta": {"mathema.companion_of": "doubles",
+                  "mathema.family": "is_numerically_stable"}}])
+    assert stored == by_hand
+
+
+def test_every_spelling_of_an_identity_classifies_as_one():
+    from mathema.badges import _claim_kind
+    for stmt in ("f(x) = 2*x", "f(x) == 2*x", "f(x) ~= 2*x",
+                 "for x in [0.0, 10.0]:float|missing, f(x) = 2*x"):
+        assert _claim_kind("doubles", stmt) == "value_identity", stmt
+    assert _claim_kind("b", "for x in [0.0, 1.0]:float|missing, "
+                       "0 <= f(x) <= 1") == "bound"
+    assert _claim_kind("e", "f =:= g") == "equivalence"
+
+
 def test_clarity_is_none_when_source_unavailable():
     # a builtin has no readable source, so nothing can be characterised
     # structurally: None (excluded from the roll-up), never a misleading 0

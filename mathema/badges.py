@@ -138,14 +138,30 @@ def _claim_kind(name: str, statement: str) -> str:
         return "idempotent"
     if base in ("is_defined", "excluded_outside_domain"):
         return "definedness"
-    if "=:=" in stmt or " equiv " in stmt:
+    relation = _statement_relation(stmt)
+    if relation == "=:=" or " equiv " in stmt:
         return "equivalence"
-    has_ineq = any(op in stmt for op in ("<=", ">=", "<", ">"))
-    if "==" in stmt and not has_ineq:
+    if relation in ("==", "~="):
         return "value_identity"
-    if has_ineq:
+    if relation in ("<=", ">=", "<", ">"):
         return "bound"
     return "relation"
+
+
+def _statement_relation(statement: str) -> str | None:
+    """Intent:
+        The canonical relation of a claim statement (`==`, `~=`,
+        `=:=`, `<=`, ...), as the claim grammar parses it: the
+        quantifier and `let` prefixes are set aside and a bare `=`
+        reads as `==`. A chained ordering reports its first link's
+        relation. None when the statement has no relation the grammar
+        recognises.
+    """
+    from .conjecture import claim
+    try:
+        return claim(statement, name="clarity").relation
+    except Exception:
+        return None
 
 
 def _verified_claims_for(fn, root: str) -> list:
