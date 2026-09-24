@@ -346,7 +346,9 @@ def regenerate_test_coverage(root: str, test_command: str | None = None) -> bool
     Success is a `coverage.json` newer than the run's start, not the
     command's exit status: a failing test still leaves the lines every
     other test executed. When the command leaves only a `.coverage` data
-    file, it is exported to `coverage.json` here."""
+    file, it is exported to `coverage.json` here, and per-process
+    `.coverage.<suffix>` files (a parallel-mode run, or subprocess
+    measurement) are combined into it first."""
     import importlib.util
     import subprocess
     import time
@@ -369,13 +371,23 @@ def regenerate_test_coverage(root: str, test_command: str | None = None) -> bool
     def _fresh(path: str) -> bool:
         return os.path.exists(path) and os.path.getmtime(path) >= started - 1
 
+    def _coverage(*args: str) -> None:
+        subprocess.run([sys.executable, "-m", "coverage", *args], cwd=root,
+                       capture_output=True, text=True)
+
     try:
         subprocess.run(cmd, shell=True, cwd=root,
                        capture_output=True, text=True)
-        if not _fresh(json_path) and _fresh(data_path):
-            subprocess.run([sys.executable, "-m", "coverage", "json",
-                            "-o", json_path], cwd=root,
-                           capture_output=True, text=True)
+        parallel = [name for name in os.listdir(root)
+                    if name.startswith(".coverage.")
+                    and _fresh(os.path.join(root, name))]
+        if parallel:
+            # per-process data files (parallel mode, subprocess measurement)
+            # merge into `.coverage`, keeping what the main process wrote
+            _coverage("combine", "--append")
+            _coverage("json", "-o", json_path)
+        elif not _fresh(json_path) and _fresh(data_path):
+            _coverage("json", "-o", json_path)
     except Exception:
         return False
     return _fresh(json_path)

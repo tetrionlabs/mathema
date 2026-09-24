@@ -227,6 +227,29 @@ def test_regenerate_keeps_the_report_when_a_test_fails(tmp_path):
     assert (tmp_path / "coverage.json").exists()
 
 
+def test_regenerate_combines_parallel_data_files(tmp_path):
+    # a parallel-mode run (one data file per process, as subprocess
+    # measurement writes) leaves only `.coverage.<suffix>` files; they are
+    # combined before the export, or every line they hold is lost.
+    import json
+    import sys
+
+    import mathema.impl_coverage as ic
+    (tmp_path / "m.py").write_text("def f(x):\n    return x + 1\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_m.py").write_text(
+        "import sys, os\n"
+        "sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))\n"
+        "from m import f\n"
+        "def test_passes():\n    assert f(1) == 2\n")
+    cmd = (f"{sys.executable} -m coverage run --parallel-mode -m pytest -q "
+           "-p no:cacheprovider -p no:xdist tests")
+    assert ic.regenerate_test_coverage(str(tmp_path), cmd) is True
+    report = json.loads((tmp_path / "coverage.json").read_text())
+    assert any(name.endswith("m.py") for name in report["files"])
+
+
 def test_mathema_own_functions_get_no_probe_credit():
     # checking one of mathema's own functions runs mathema's machinery,
     # which calls that same function while parsing the claim; those lines
