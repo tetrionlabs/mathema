@@ -98,6 +98,7 @@ Worked pipeline configs for GitHub Actions and GitLab are in
 
 ## Worked example: softmax, start to finish
 
+<!-- example: softmax file=functions.py -->
 ```python
 # functions.py
 import math
@@ -116,20 +117,43 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
     return [e / total for e in exps]
 ```
 
+<!-- example: softmax session -->
 ```
 $ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"
 ok   functions.softmax: source, no side effects; claims 3/3 adjudicated (0 proven, 3 holds, 0 falsified)
 ```
 
 Break it on purpose (drop the normalization, `return exps` instead of
-dividing by the total) and `sums_to_one` correctly falsifies, the row
-fails and the exit code is 1 (see
-[CDD in one page](../cdd.md#verdict-vocabulary): the counterexample is
-kept as knowledge, *and* the run fails):
+dividing by the total):
 
+<!-- example: softmax file=functions.py -->
+```python
+# functions.py
+import math
+from typing import Annotated
+from mathema.types import Shape
+
+def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+    """Turn a vector of real-valued scores into a probability distribution.
+
+    Claims:
+        sums_to_one: sum(f(scores)) == 1
+    """
+    m = max(scores)
+    exps = [math.exp(s - m) for s in scores]
+    total = sum(exps)
+    return exps
 ```
-$ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"
+
+and `sums_to_one` correctly falsifies, the row fails and the exit code
+is 1 (see [CDD in one page](../cdd.md#verdict-vocabulary): the
+counterexample is kept as knowledge, *and* the run fails):
+
+<!-- example: softmax session -->
+```
+$ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"; echo $?
 FAIL functions.softmax: source, no side effects; claims 3/3 adjudicated (0 proven, 1 holds, 2 falsified)  <- 2 falsified claim(s)
+1
 ```
 
 See [mathema verify](verify.md) for the same regression caught from the
