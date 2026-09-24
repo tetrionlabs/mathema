@@ -53,11 +53,11 @@
 [ ] docs/grammar.md:403
 [ ] docs/index.md:129
 [ ] docs/index.md:150
-[ ] docs/index.md:176
-[ ] docs/index.md:196
-[ ] docs/index.md:243
-[ ] docs/index.md:250
-[ ] docs/index.md:373
+[ ] docs/index.md:177
+[ ] docs/index.md:197
+[ ] docs/index.md:244
+[ ] docs/index.md:251
+[ ] docs/index.md:374
 [x] docs/lemmas.md:chain                         run output
 [x] docs/lemmas.md:weakest                       run output  (after)
 [x] docs/lemmas.md:orphan                        run output  (after)
@@ -68,32 +68,19 @@
 [ ] docs/mathema-docstring.md:335
 [x] docs/matrix-structure.md:identities          run verdicts
 [x] docs/matrix-structure.md:enforce-structure   run  (requires)
-[ ] docs/modes/accept.md:153
-[ ] docs/modes/accept.md:242
-[ ] docs/modes/accept.md:255
-[ ] docs/modes/audit.md:128
-[ ] docs/modes/audit.md:192
-[ ] docs/modes/check.md:119
-[ ] docs/modes/check.md:130
-[ ] docs/modes/claims.md:50
-[ ] docs/modes/describe.md:21
-[ ] docs/modes/describe.md:42
-[ ] docs/modes/describe.md:81
-[ ] docs/modes/init.md:64
-[ ] docs/modes/init.md:76
-[ ] docs/modes/init.md:101
-[ ] docs/modes/library.md:70
-[ ] docs/modes/library.md:108
-[ ] docs/modes/lock.md:41
+[x] docs/modes/accept.md:balance                 file file session session run file session session
+[x] docs/modes/audit.md:branches                 file session
+[x] docs/modes/audit.md:half                     run repl
+[x] docs/modes/check.md:softmax                  file session file session
+[x] docs/modes/claims.md:adopt                   file session run output
+[x] docs/modes/describe.md:tutorial              file run output file run session session
+[x] docs/modes/init.md:stubs                     file session session
+[ ] docs/modes/init.md:114
+[x] docs/modes/library.md:ema                    run repl repl  (slow)
+[x] docs/modes/lock.md:tripped                   file file run session file session
 [ ] docs/modes/pin.md:30
-[ ] docs/modes/review.md:55
-[ ] docs/modes/verify.md:77
-[ ] docs/modes/verify.md:87
-[ ] docs/modes/verify.md:98
-[ ] docs/modes/verify.md:141
-[ ] docs/modes/verify.md:153
-[ ] docs/modes/verify.md:165
-[ ] docs/modes/verify.md:183
+[x] docs/modes/review.md:delta                   file file run output file file run output
+[x] docs/modes/verify.md:sweep                   file run session file session file session file file session session session run file session
 [ ] docs/multi-function-claims.md:109
 [ ] docs/quickstart.md:40
 [ ] docs/quickstart.md:58
@@ -112,7 +99,7 @@
 [x] README.md:parity                             file run output
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output
-[-] README.md:179
-[-] README.md:259
+[-] README.md:184
+[-] README.md:280
 
-# 22 examples checked, 85 output fences not yet marked
+# 33 examples checked, 61 output fences not yet marked

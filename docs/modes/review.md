@@ -52,8 +52,90 @@ summary, and a `--format json` a pipeline can post on the pull request.
 
 ## Worked example
 
+The `softmax` of the [`check` worked example](check.md#worked-example-softmax-start-to-finish),
+with its claim in a claims file:
+
+<!-- example: delta file=functions.py -->
+```python
+import math
+from typing import Annotated
+from mathema.types import Shape
+
+def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+    """Turn a vector of real-valued scores into a probability distribution."""
+    m = max(scores)
+    exps = [math.exp(s - m) for s in scores]
+    total = sum(exps)
+    return [e / total for e in exps]
 ```
-$ mathema review HEAD
+
+<!-- example: delta file=softmax.claims.yaml -->
+```yaml
+functions.softmax:
+  claims:
+    - name: sums_to_one
+      statement: "sum(f(scores)) == 1"
+```
+
+verified and committed as the base:
+
+<!-- example: delta run -->
+```bash
+git init -q
+git config user.name "Ada Lovelace"
+git config user.email ada@example.com
+mathema verify --root .
+git add -A
+git commit -qm "softmax, verified"
+```
+
+<!-- example: delta output -->
+```text
+ok   functions.softmax: no baseline record; 1 proven, 2 holds, 0 falsified
+0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+grammars detected: mathema; verified by this run: mathema
+```
+
+A change then drops the normalization (`return exps`) and declares a
+new claim beside the old one:
+
+<!-- example: delta file=functions.py -->
+```python
+import math
+from typing import Annotated
+from mathema.types import Shape
+
+def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+    """Turn a vector of real-valued scores into a probability distribution."""
+    m = max(scores)
+    exps = [math.exp(s - m) for s in scores]
+    total = sum(exps)
+    return exps
+```
+
+<!-- example: delta file=softmax.claims.yaml -->
+```yaml
+functions.softmax:
+  claims:
+    - name: sums_to_one
+      statement: "sum(f(scores)) == 1"
+    - name: bounded
+      statement: "max(f(scores)) <= 1"
+```
+
+The sweep fails, and the reviewer reads the delta by claim:
+
+<!-- example: delta run -->
+```bash
+mathema verify --root .
+mathema review HEAD
+```
+
+<!-- example: delta output -->
+```text
+FAIL functions.softmax: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
+0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+grammars detected: mathema; verified by this run: mathema
 Claim changes since HEAD: 1 function(s), 1 verdict flip(s), 1 added, 0 removed, 0 newly falsified, 0 reconciled.
 
 functions.softmax
