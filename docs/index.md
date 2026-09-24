@@ -100,7 +100,9 @@ other. Every verdict carries the route that reached it:
 
 Nothing is asserted and nothing is quietly upgraded. Evidence remains evidence,
 proof remains proof, and an unresolved claim remains unresolved.
-[The evidence ladder](evidence-ladder.md) sets out every rung. The same rule
+[The evidence ladder](evidence-ladder.md) sets out every rung, and
+[Guarantees and limits](guarantees.md) states what each verdict does and
+does not establish. The same rule
 holds for this site: every output on it was produced by a real run, and the
 test suite parses every claim these pages show, so a claim cannot quietly fall
 out of the grammar.
@@ -260,8 +262,9 @@ no `--yes` flag and, when set, the PIN.
 In the familiar framing, a language model answering at once is System 1,
 fast and fluent, and a reasoning model working through steps is System 2,
 slower and more deliberate. Both generate, and both can be wrong in ways that
-read as right. mathema sits underneath them as System 0: it generates
-nothing, guesses nothing and spends no tokens. Everything it concludes comes
+read as right. mathema sits underneath them as a System 0 engine, a
+verification engine with zero models between the code and its verdict: it
+generates nothing, guesses nothing and spends no tokens. Everything it concludes comes
 from reading the function's syntax tree, doing algebra on what it finds, and
 running the real code on inputs it chooses, the same kind of deterministic
 machinery as a compiler or a test runner. Its only required dependencies are

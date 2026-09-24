@@ -77,7 +77,7 @@ mind.
 
 A test demonstrates behaviour at the inputs you chose, and a property-based
 test at many inputs you did not, but neither can say anything about the
-uncountably many points of `[0.1,2]` it never visited. mathema keeps four
+uncountably many points of `[0.1,2]` it never visited. mathema keeps its
 verdicts apart so you always know which kind of answer you have:
 
 | Verdict | Means |
@@ -85,7 +85,11 @@ verdicts apart so you always know which kind of answer you have:
 | `proven` | established mathematically over the claim's stated domain |
 | `holds (n=...)` | survived exactly `n` behavioural trials, which is evidence, not proof |
 | `falsified` | a counterexample was found by running the function, and is kept |
-| `skipped` | no available route could settle it, and the record says so |
+| `unknown` | nothing was decided, and the record keeps the reason |
+| `skipped` | the claim could not be adjudicated as stated, and the record says why |
+
+[Guarantees and limits](https://mathema.tetrionlabs.com/guarantees/) states what each
+verdict establishes and what it does not, in one place.
 
 The same distinction reaches claims no amount of test-running could establish.
 Four defining properties of the logistic function include a limit at infinity and an

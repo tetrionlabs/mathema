@@ -67,6 +67,7 @@ nav:
       - The CDD loop, end to end: tutorial.md
       - Case studies: case-studies.md
   - Concepts:
+      - Guarantees and limits: guarantees.md
       - The evidence ladder: evidence-ladder.md
       - Intent, implementation and behaviour: three-layers.md
       - Claims transfer: claims-transfer.md
