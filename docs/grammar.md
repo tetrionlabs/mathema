@@ -266,16 +266,56 @@ A free variable is the difference between "this holds for the inputs"
 and "this holds for the inputs and any constant you care to add", which
 is often the claim you actually meant.
 
-One more binding uses bars around the name, and sets the finite
-magnitude that stands in for `oo` when a domain is unbounded, so a
-claim quantified over the whole half-line can still be probed:
+### Operational infinity: `let |inf| be ...`
 
-```
-let |inf| be 1e12, for x in [0, oo], f(x) >= 0
+One more binding uses bars around the name. It sets an operational
+infinity, the finite magnitude that stands in for `oo` wherever a
+claim's domain is unbounded, and it exists because code running on
+doubles does not reach infinity. Past about `1.34e154`, `x ** 2` raises
+`OverflowError`, and a value claim is false wherever the code raises.
+With no operational infinity declared, infinity means infinity, so an
+unbounded pointwise claim meets that overflow.
+
+The standard normal density shows both halves of the rule:
+
+```python
+import math
+
+import mathema
+
+
+def gauss(x: float) -> float:
+    """The standard normal density."""
+    return math.exp(-x ** 2 / 2) / math.sqrt(2 * math.pi)
+
+for law in ["∫(f(x), x, -oo, oo) == 1",
+            "f(x) >= 0",
+            "let |inf| be 1e100, f(x) >= 0"]:
+    (p,) = mathema.claims.check(gauss, [law])
+    print(f"{law:31} {p.verdict:9} {p.counterexample or p.condition or ''}")
 ```
 
-It is not an ordinary name binding: nothing in the claim refers to
-`|inf|`, it only changes how far out the probe route samples.
+```text
+∫(f(x), x, -oo, oo) == 1        proven
+f(x) >= 0                       falsified x = 2.6815615859885194e+154
+let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ [-1e+100, 1e+100] ⊂ ℝ ∪ {∅}
+```
+
+The integral over the whole line is proven: an integral, like a limit,
+is a statement about the mathematics, and an overflow in the far tail
+does not change what it equals. The pointwise claim is a statement
+about the code at every `x`, and at `x = 2.68e154` the code raises
+before it returns anything. Declaring `let |inf| be 1e100` says that
+for this claim, "every `x`" means every `x` up to `1e100` in magnitude,
+and the proof then holds, with the region it holds over stated in the
+record rather than implied.
+
+The bound applies to both routes: the derive route proves over it, and
+the probe route samples out to it. A claim can also state a half-line
+explicitly, `let |inf| be 1e12, for x in [0, oo], f(x) >= 0`, where the
+`oo` endpoint stops at `1e12`. Nothing in the claim refers to `|inf|`
+by name, so it is not an ordinary binding, and in Python the same
+setting is `claim(..., pseudo_infinity=1e100)`.
 
 ## `assuming`: stating a premise
 

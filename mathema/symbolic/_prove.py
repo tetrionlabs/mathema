@@ -1462,7 +1462,7 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             # a coordinate the claim's evaluation point fixes is named
             # at that value, the one the executed call used
             at_witness = {**witness, **fixed}
-            where = ", ".join(f"{name} = {at_witness[sym]}"
+            where = ", ".join(f"{name} = {_witness_value_text(at_witness[sym])}"
                               for name, sym in ext_params.items()
                               if sym in at_witness)
             exc_text = exc or "an exception"
@@ -1487,6 +1487,25 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
                    "call returns, or state the raising region as its own "
                    "raises(...) claim", meta=meta)
     return None
+
+
+def _witness_value_text(value) -> str:
+    """A witness coordinate as a reader would type it: a sympy float in
+    Python's own spelling (`2.68e+154`), anything else as sympy prints it."""
+    if isinstance(value, sympy.Float):
+        return repr(float(value))
+    return str(value)
+
+
+def _clear_of_edge(edge, direction: int):
+    """A point a whole magnitude past `edge` in `direction` (+1 above,
+    -1 below): an integer while that is short to state, a float beyond
+    1e15, where an exact integer would run to hundreds of digits."""
+    step = sympy.Max(1, abs(edge))
+    point = edge + direction * step
+    if abs(point) > 10**15:
+        return sympy.Float(float(point), 3)
+    return sympy.ceiling(point) if direction > 0 else sympy.floor(point)
 
 
 def _solved_witness(cond, sym, bound):
@@ -1515,9 +1534,9 @@ def _solved_witness(cond, sym, bound):
             # and round to an integer, so the point stays clear of the
             # edge once converted to a float
             if lo.is_finite:
-                return sympy.ceiling(lo + sympy.Max(1, abs(lo)))
+                return _clear_of_edge(lo, 1)
             if hi.is_finite:
-                return sympy.floor(hi - sympy.Max(1, abs(hi)))
+                return _clear_of_edge(hi, -1)
             return sympy.Integer(0)
         if isinstance(piece, sympy.FiniteSet) and piece.args:
             return piece.args[0]

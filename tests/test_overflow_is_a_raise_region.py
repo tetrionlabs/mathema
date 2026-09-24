@@ -93,3 +93,10 @@ def test_an_operational_infinity_bounds_the_overflow_region():
     # exp overflows at 709.78, well inside 1e100, so it still falsifies
     (r,) = check_conjectures(grow, [claim("f(x) >= 0", pseudo_infinity=1e100)])
     assert r.verdict == "falsified" and r.counterexample, (r.verdict, r.note)
+
+
+def test_an_overflow_witness_is_stated_as_a_readable_number():
+    (p,) = check_conjectures(squared, [claim("f(x) >= 0")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert len(p.counterexample) < 40, p.counterexample
+    assert "e+154" in p.counterexample, p.counterexample
