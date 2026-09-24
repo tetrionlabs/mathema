@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from dataclasses import replace as _dc_replace
 
 from . import families, routes
-from ._math_vocab import MATH_CONSTANTS
+from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
 from .analysis import analyze_source
 from .grammar import (Domain, InvalidDomain, NoRelation,
                       is_missing, extract_assuming_clause,
@@ -42,9 +42,11 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       extract_outcome_clause, _split_top_level,
                       is_reserved, normalize,
                       parse_domain_safety, parse_raises, split_quantifier,
-                      split_relation_chain, unexpanded_prime_message)
+                      split_relation_chain, unexpanded_prime_message,
+                      UnreadableSpelling)
 from . import linalg
-from ._scan import _split_commas
+from ._scan import _split_commas, blank_strings
+from .domain import DuplicateBinding
 from .probing import (_close, _fmt, _prepare_sampling, _probe_density,
                       _sampling_shorthand, _synth, _synth_dict,
                       relation_holds_elementwise)
@@ -675,7 +677,15 @@ def claim(law: str, name: str | None = None, source: str = "user",
     # empirical cascade, and the record reports which mechanism
     # decided (the examine route). That normalization happens after
     # parsing, once the relation is known, see below.
-    text, ambiguous_diff_vars = extract_diff_fraction_sugar(law.strip())
+    if "#" in blank_strings(law):
+        raise InvalidConjecture(
+            f"`#` has no meaning in a claim and would silently cut off "
+            f"everything after it; remove it (a comment belongs outside "
+            f"the claim text): {law.strip()!r}")
+    try:
+        text, ambiguous_diff_vars = extract_diff_fraction_sugar(law.strip())
+    except UnreadableSpelling as e:
+        raise InvalidConjecture(str(e)) from e
     # outcome section: stripped first, on raw text, extract_outcome_
     # clause recognizes any accepted "implies" spelling directly rather
     # than relying on normalize() to have unified them, so it never has
@@ -706,6 +716,11 @@ def claim(law: str, name: str | None = None, source: str = "user",
         prev = text
         new_assuming, text = extract_assuming_clause(text)
         if new_assuming is not None:
+            if not new_assuming.strip()[len("assuming"):].strip():
+                raise InvalidConjecture(
+                    f"`assuming` has no premise before its comma: state "
+                    f"one (`assuming x > 0, ...`) or drop the keyword: "
+                    f"{law.strip()!r}")
             assuming = new_assuming
         try:
             (new_funcs, new_free_domain, text, new_aliases,
@@ -725,8 +740,15 @@ def claim(law: str, name: str | None = None, source: str = "user",
         text = normalize(text)
         try:
             new_dom, text = split_quantifier(text)
+        except DuplicateBinding as e:
+            raise ConflictingDomainBinding(str(e)) from e
         except InvalidDomain as e:
             raise InvalidConjecture(str(e)) from e
+        rebound = sorted(set(new_dom) & set(dom) - {"n"})
+        if rebound:
+            raise ConflictingDomainBinding(
+                f"{rebound} bound by two quantifiers in the same claim; "
+                f"give each name one domain")
         dom.update(new_dom)
         if text == prev:
             break
@@ -769,6 +791,12 @@ def claim(law: str, name: str | None = None, source: str = "user",
         if rel.startswith("not "):
             rel, negated = rel[4:], True
     else:
+        section = _MISCASED_SECTION.match(text)
+        if section is not None:
+            raise InvalidConjecture(
+                f"section keywords are lowercase: write "
+                f"`{section.group(1).lower()}`, not `{section.group(1)}`, "
+                f"in {law.strip()!r}")
         # a residual top-level comma is a comma-joined relation pair
         # (`f >= 1, f <= 4`), ambiguous with the section-separator comma
         # (and parsing as a bare tuple, which no relation split would
@@ -799,7 +827,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
     # a residual `|` is a bar the grammar could not pair with another,
     # and left in place it reaches rendering as unparseable text
     for _side in (lhs, rhs):
-        if _side and "|" in _side:
+        if _side and "|" in blank_strings(_side):
             raise InvalidConjecture(
                 f"the bars in {_side!r} do not pair up. Each opening bar "
                 f"needs a closing one; abs(...), norm(...) and det(...) "
@@ -824,9 +852,21 @@ def claim(law: str, name: str | None = None, source: str = "user",
                 try:
                     ast.parse(_side, mode="eval")
                 except SyntaxError:
+                    command = _LATEX_COMMAND.search(blank_strings(_side))
+                    if command is not None:
+                        raise InvalidConjecture(
+                            f"the LaTeX command `{command.group(0)}` has no "
+                            f"meaning in the claim grammar (in the claim "
+                            f"{law.strip()!r})") from None
                     raise InvalidConjecture(
                         f"cannot read {_side.strip()!r} as an expression "
                         f"in the claim {law.strip()!r}") from None
+                problem = _unreadable_side(_side)
+                if problem is not None:
+                    where = ("" if _D_AT_SENTINEL in _side
+                             else f"in {_side.strip()!r}, ")
+                    raise InvalidConjecture(
+                        f"{problem} ({where}claim {law.strip()!r})")
     # the record's grammar names the linear-algebra dialect when the
     # claim uses the matrix vocabulary: informative only (a reader sees
     # the parsing was matrix-aware), never required to round-trip, the
@@ -873,6 +913,140 @@ def claim(law: str, name: str | None = None, source: str = "user",
                       negated=negated, assuming=assuming, outcome=outcome or "",
                       links=links, pseudo_infinity=pseudo_infinity,
                       meta=dict(meta or {}), raw=law)
+
+
+_NOT_CLAIM_SYNTAX = {
+    ast.Lambda: "a lambda",
+    ast.IfExp: "a conditional expression (`a if c else b`)",
+    ast.Yield: "`yield`",
+    ast.YieldFrom: "`yield`",
+    ast.Await: "`await`",
+    ast.NamedExpr: "an assignment expression (`:=`)",
+    ast.JoinedStr: "an f-string",
+    ast.Starred: "argument unpacking (`*`)",
+    ast.Set: "a set literal",
+}
+_BITWISE_OPS = (ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
+
+
+_LATEX_COMMAND = re.compile(r"\\[A-Za-z]+")
+_MISCASED_SECTION = re.compile(
+    r"^\s*((?!for\b|let\b|assuming\b)(?i:for|let|assuming))\s")
+
+_SPECIAL_CALL_SHAPES = {
+    "d": "d(expr, var, ...) or d(expr, var, order)",
+    "integrate": "integrate(expr, var) or integrate(expr, var, lo, hi)",
+    "lim": "lim(expr, var, point)",
+    "Sum": "Sum(expr, var, lo, hi)",
+    "Prod": "Prod(expr, var, lo, hi)",
+}
+
+
+def _is_variable(node) -> bool:
+    return isinstance(node, ast.Name) and node.id != _D_AT_SENTINEL
+
+
+def _special_call_problem(node: ast.Call) -> str | None:
+    """Intent:
+        Why one call of a reserved form (`d`, `integrate`, `lim`, `Sum`,
+        `Prod`) does not have that form's shape, or None when it does.
+        Every variable slot must hold a plain name, and a derivative
+        order must be a non-negative integer.
+    """
+    name, args = node.func.id, node.args
+    shape = f"`{name}` is written {_SPECIAL_CALL_SHAPES[name]}"
+    if name == "d":
+        at = next((k for k, a in enumerate(args)
+                   if isinstance(a, ast.Name) and a.id == _D_AT_SENTINEL),
+                  len(args))
+        diff = args[1:at]
+        if not args or not diff or not _is_variable(diff[0]):
+            return f"{shape}: each variable a plain name"
+        for a in diff[1:]:
+            if _is_variable(a):
+                continue
+            if not (isinstance(a, ast.Constant) and type(a.value) is int
+                    and a.value >= 0):
+                return (f"{shape}: each variable a plain name and an "
+                        f"order a non-negative integer")
+        pairs = args[at + 1:]
+        if at < len(args):
+            if not pairs or len(pairs) % 2:
+                return "`d(...) @ {...}` needs one `name = value` per point"
+            names = [p.id for p in pairs[::2] if _is_variable(p)]
+            if len(names) != len(pairs) // 2:
+                return "`d(...) @ {...}` assigns values to plain names only"
+            if len(set(names)) != len(names):
+                return (f"`d(...) @ {{...}}` gives "
+                        f"{sorted({n for n in names if names.count(n) > 1})} "
+                        f"two values")
+        return None
+    if name == "integrate":
+        ok = ((len(args) == 2 and _is_variable(args[1]))
+              or (len(args) >= 4 and (len(args) - 1) % 3 == 0
+                  and all(_is_variable(a) for a in args[1::3])))
+        return None if ok else f"{shape}, the variable a plain name"
+    if name == "lim":
+        ok = (len(args) in (3, 4) and _is_variable(args[1])
+              and (len(args) == 3 or (isinstance(args[3], ast.Constant)
+                                      and args[3].value in ("+", "-"))))
+        return None if ok else f"{shape}, the variable a plain name"
+    ok = len(args) == 4 and _is_variable(args[1])
+    return None if ok else f"{shape}, the variable a plain name"
+
+
+def _unreadable_side(side: str) -> str | None:
+    """Intent:
+        Why one side of a relation is not claim syntax, or None when it
+        is. The side is Python expression text that already parses.
+
+    Notes:
+        An unparenthesised `and`/`or`/`not` heading a side means the
+        author joined two relations: Python precedence would read
+        `f(x) >= 1 and f(x) <= 2` as `f(x) >= (1 and f(x) <= 2)`, a
+        different and usually vacuous claim. A parenthesised boolean
+        (`f(a, b) == (a <= b)`) is a truth value and stays readable.
+        Keyword arguments, bitwise operators and the other refused
+        constructs have no reading in the claim grammar; accepting them
+        would drop or reinterpret part of what the author wrote.
+    """
+    tree = ast.parse(side.strip(), mode="eval").body
+    top_boolean = (isinstance(tree, ast.BoolOp)
+                   or (isinstance(tree, ast.UnaryOp)
+                       and isinstance(tree.op, ast.Not)))
+    if top_boolean and tree.col_offset == 0:
+        return ("`and`, `or` and `not` cannot join relations inside one "
+                "claim: state each relation as its own claim, or write a "
+                "bounded quantity as a chained comparison (`1 <= f(x) <= 2`); "
+                "a boolean value needs its own parentheses")
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in _SPECIAL_CALL_SHAPES):
+            problem = _special_call_problem(node)
+            if problem is not None:
+                return problem
+        what = _NOT_CLAIM_SYNTAX.get(type(node))
+        if what is not None:
+            return f"{what} is not claim syntax"
+        if isinstance(node, ast.Call) and node.keywords:
+            if any(k.arg is None for k in node.keywords):
+                return "argument unpacking (`**`) is not claim syntax"
+            return ("keyword arguments are not claim syntax: pass each "
+                    "argument by position")
+        if isinstance(node, ast.Constant) and (
+                isinstance(node.value, bytes) or node.value is Ellipsis):
+            return f"the literal {ast.unparse(node)} is not claim syntax"
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+            return ("`~` is not claim syntax; approximate equality is "
+                    "written `~=` (or `≈`)")
+        if isinstance(node, ast.BinOp) and isinstance(node.op, _BITWISE_OPS):
+            return "bitwise operators are not claim syntax"
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            return f"the attribute {node.attr!r} is not claim syntax"
+        if (isinstance(node, ast.Name) and node.id.startswith("__")
+                and node.id != _D_AT_SENTINEL):
+            return f"the name {node.id!r} is not claim syntax"
+    return None
 
 
 def _find_bare_reserved_name(src: str, param_names: set[str]) -> str | None:

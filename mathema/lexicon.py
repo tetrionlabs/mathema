@@ -179,8 +179,8 @@ LEXICON: dict[str, str] = {
     # auto-let: a long name auto-lets to a short spelling -------------
     # a real parameter only auto-lets in unicode (ASCII has no
     # single-letter convention for an ordinary variable); a function
-    # alias auto-lets in both modes (f/g/h already is that convention
-    # for a function), see spec.render_claim_text's own docstring.
+    # alias is part of the claim's identity and renders as written, see
+    # spec.render_claim_text's own docstring.
     "auto_let_long_param": "for acceleration in [0, 100], f(acceleration) >= 0",
     "auto_let_long_func": ("let compute_square_root = numpy.sqrt, for x in [0, 100], "
                           "compute_square_root(x) >= 0"),

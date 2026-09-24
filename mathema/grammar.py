@@ -107,7 +107,8 @@ from sympy.printing.str import StrPrinter
 from ._math_vocab import _BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _SYMPY_FUNCS, _call_name
 from ._render_mode import (get_unicode_output as get_unicode_output,
                            set_unicode_output as set_unicode_output)
-from ._scan import _split_commas
+from ._scan import (_split_commas, mask_strings, outside_strings,
+                    sub_outside_strings, unmask_strings)
 # The domain model moved wholesale to domain.py (a sympy-free leaf);
 # these re-exports keep every `from .grammar import <name>` consumer
 # working. New code should import from mathema.domain directly.
@@ -344,7 +345,7 @@ _SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉"
 _SUPERSCRIPT_TO_DIGIT = str.maketrans(_SUPERSCRIPT_DIGITS, "0123456789")
 _DIGIT_TO_SUPERSCRIPT = str.maketrans("0123456789", _SUPERSCRIPT_DIGITS)
 _DIGIT_TO_SUBSCRIPT = str.maketrans("0123456789", _SUBSCRIPT_DIGITS)
-_SUPERSCRIPT_RUN = re.compile(f"[{_SUPERSCRIPT_DIGITS}]+")
+_SUPERSCRIPT_RUN = re.compile(f"⁻?[{_SUPERSCRIPT_DIGITS}]+")
 
 _UNICODE = {
     "≤": "<=", "≥": ">=", "≠": "!=", "−": "-", "·": "*", "×": "*",
@@ -397,6 +398,11 @@ _UNICODE = {
     # docstring.
     "\\neq": "!=", "\\ne": "!=", "\\approx": "~=", "\\infty": "oo",
     "\\leq": "<=", "\\le": "<=", "\\geq": ">=", "\\ge": ">=",
+    "\\leqslant": "<=", "\\geqslant": ">=", "\\equiv": "=:=",
+    "\\varepsilon": "ε", "\\varphi": "φ",
+    # sizing commands carry no meaning of their own: `\left| x \right|`
+    # is the bars it sizes
+    "\\left": "", "\\right": "",
     "\\cdot": "*", "\\times": "*", "\\pi": "pi", "\\forall": "for ",
     "\\in": " in ",
     # \partial(...)/\lim(...): call-prefix aliases only, same narrow
@@ -423,6 +429,12 @@ _UNICODE = {
     "𝜓": "ψ", "𝜔": "ω", "ς": "σ", "𝛤": "Γ", "𝛥": "Δ", "𝛩": "Θ", "𝛬": "Λ",
     "𝛯": "Ξ", "𝛴": "Σ", "𝛶": "Υ", "𝛷": "Φ", "𝛹": "Ψ", "𝛺": "Ω",
 }
+
+# a LaTeX command is the whole run of letters after its backslash, so
+# `\left` is never read as `\le` followed by `ft`
+_LATEX_COMMAND = re.compile(r"\\[A-Za-z]+")
+_LATEX_COMMANDS = {k: v for k, v in _UNICODE.items()
+                   if _LATEX_COMMAND.fullmatch(k)}
 
 RELATIONS = ("<=", ">=", "!=", "~=", "=:=", "==", "<", ">")
 _REL_LATEX = {"==": "=", "<=": r"\leq", ">=": r"\geq", "!=": r"\neq",
@@ -592,6 +604,56 @@ class NoRelation(ValueError):
     """The law text contains no ==, !=, <=, >= (or =) to split on."""
 
 
+class UnreadableSpelling(ValueError):
+    """A symbol in the law text whose reach cannot be read without
+    guessing (a radical followed by a power, say)."""
+
+
+_RADICAL_ATOM = re.compile(
+    rf"\s*([0-9]+(?:\.[0-9]*)?|[^\W\d](?:(?![{_SUPERSCRIPT_DIGITS}])\w)*)")
+_RADICAL_TRAILER = re.compile(r"\s*(?:\^|\*\*|!|\[|[⁰¹²³⁴⁵⁶⁷⁸⁹])")
+
+
+def _radical_to_call(text: str) -> str:
+    """Intent:
+        Every `√` as a `sqrt(...)` call over the one atom that follows
+        it: `√x` is `sqrt(x)`, `√2` is `sqrt(2)`, `√f(x)` is
+        `sqrt(f(x))`, and `√(x + 1)` is `sqrt(x + 1)`. Radicals nest
+        from the inside out, so `√√x` is `sqrt(sqrt(x))`.
+
+    Raises:
+        UnreadableSpelling: a radical with no atom after it, or one
+        whose atom is followed by a power, factorial or subscript, where
+        `√x^2` could mean either `sqrt(x^2)` or `sqrt(x)^2`.
+    """
+    while "√" in text:
+        i = text.rindex("√")
+        rest = text[i + 1:]
+        if rest.lstrip().startswith("("):
+            text = text[:i] + "sqrt" + rest.lstrip()
+            continue
+        m = _RADICAL_ATOM.match(rest)
+        if m is None:
+            raise UnreadableSpelling(
+                f"`√` needs something to take the root of: write "
+                f"√(...) in {text!r}")
+        end = m.end()
+        if rest[end:end + 1] == "(" and not m.group(1)[0].isdigit():
+            depth = 0
+            for j in range(end, len(rest)):
+                depth += {"(": 1, ")": -1}.get(rest[j], 0)
+                if depth == 0:
+                    end = j + 1
+                    break
+        if _RADICAL_TRAILER.match(rest[end:]):
+            raise UnreadableSpelling(
+                f"the reach of `√` in {text!r} is ambiguous (the root of "
+                f"the power, or the power of the root): write "
+                f"√(...) with parentheses")
+        text = f"{text[:i]}sqrt({rest[:end].strip()}){rest[end:]}"
+    return text
+
+
 def _expand_let(text: str) -> str:
     """Expand every leading `let <bindings> in rest` group; one or more
     comma-separated `name = expr` pairs sharing one `in`, by
@@ -604,7 +666,8 @@ def _expand_let(text: str) -> str:
         for part in _split_commas(bindings):
             name, _, expr = part.partition("=")
             name, expr = name.strip(), expr.strip()
-            rest = re.sub(rf"\b{re.escape(name)}\b", f"({expr})", rest)
+            rest = sub_outside_strings(
+                rf"\b{re.escape(name)}\b", f"({expr})", rest)
         text = rest
         m = _LET.match(text)
     return text
@@ -778,7 +841,9 @@ def extract_diff_fraction_sugar(text: str) -> tuple[str, frozenset[str]]:
                 ambiguous.add(f"d{name}")
         return f"d({expr}, {', '.join(expanded_vars)})"
 
-    rewritten = _rewrite_balanced_calls(text, _DIFF_FRAC_OPEN, rewrite)
+    rewritten = outside_strings(
+        lambda masked: _rewrite_balanced_calls(masked, _DIFF_FRAC_OPEN,
+                                               rewrite), text)
     return rewritten, frozenset(ambiguous)
 
 
@@ -826,6 +891,24 @@ _RESERVED_CARRIERS = frozenset({
     "u8", "u16", "u32", "u64", "u128",
     "f16", "f32", "f64", "bigint", "f64int",
 })
+
+
+_SECTION_KEYWORDS = frozenset({"let", "for", "be", "in", "assuming"})
+
+
+def _refuse_binding_subject(name: str) -> None:
+    """Intent:
+        Refuse a binding of the name `f`, which always denotes the
+        function under test.
+
+    Raises:
+        InvalidDomain: `name` is `f`.
+    """
+    if name == "f":
+        raise InvalidDomain(
+            "`f` always names the function under test and cannot be "
+            "rebound; bind another name (`let g = pkg.mod.func`) and "
+            "use that")
 
 
 def extract_let_bindings(
@@ -904,6 +987,9 @@ def extract_let_bindings(
     text = apply_unicode_synonyms(text)
     if _LET_RUN_STARTS.match(text) is None:
         return {}, {}, text, {}, None
+    # quoted literals are data: masked for the whole run, so no binding
+    # substitutes into a string value
+    text, literals = mask_strings(text)
     funcs: dict[str, str] = {}
     free_domain: dict = {}
     aliases: dict[str, str] = {}
@@ -928,7 +1014,9 @@ def extract_let_bindings(
                 continue
             dm = _LET_DECLARE.match(stripped)
             if dm is not None:
-                fname, bounds = dm.group(1), dm.group(2).strip()
+                fname = dm.group(1)
+                bounds = unmask_strings(dm.group(2).strip(), literals)
+                _refuse_binding_subject(fname)
                 if fname in _BASE_SET_NAMES or bounds in _RESERVED_CARRIERS:
                     # the representation-declaration spelling: rebinding
                     # a named set's machine carrier, the same shape as
@@ -955,6 +1043,13 @@ def extract_let_bindings(
                         point = None
                     if point is not None:
                         parsed_binding = (fname, (point, point))
+                if parsed_binding is None:
+                    from .domain import _parse_binding
+                    reason = _parse_binding(f"{fname} in {bounds}")
+                    raise InvalidDomain(
+                        reason if isinstance(reason, str) else
+                        f"cannot read the bounds of `let {fname} be "
+                        f"{bounds}`")
                 if parsed_binding is not None:
                     _, value = parsed_binding
                     # a real parameter's own kind is already knowable
@@ -988,8 +1083,30 @@ def extract_let_bindings(
             continue
         m = _LET_BINDING.match(first)
         if m is None or _LET_SEGMENT_HAS_IN.search(m.group(2)):
+            if (_LET_STRIP.match(first) is not None
+                    and not _LET_SEGMENT_HAS_IN.search(first)):
+                raise InvalidDomain(
+                    f"cannot read the binding "
+                    f"{unmask_strings(first.strip(), literals)!r}: a let "
+                    f"binding is `let name = expr`, `let g = pkg.mod.func` "
+                    f"or `let name be bounds`")
             break
         name, expr = m.group(1).strip(), m.group(2).strip()
+        if name in _SECTION_KEYWORDS:
+            raise InvalidDomain(
+                f"cannot read the binding "
+                f"{unmask_strings(first.strip(), literals)!r}: {name!r} is "
+                f"a keyword of the claim grammar, not a name to bind")
+        if not expr:
+            raise InvalidDomain(
+                f"`let {name} =` binds {name!r} to nothing: give it an "
+                f"expression or a dotted function path")
+        _refuse_binding_subject(name)
+        if re.fullmatch(rf"[(\s]*{re.escape(name)}[)\s]*", expr):
+            raise InvalidDomain(
+                f"`let {name} = ...` resolves to {name!r} itself: the let "
+                f"bindings refer to each other in a cycle, so none of them "
+                f"names a value")
         rest = ",".join(segments[1:]).strip()
         if _LET_FUNC_VALUE.match(expr):
             funcs[name] = expr
@@ -1017,7 +1134,8 @@ def extract_let_bindings(
     for target in aliases.values():
         text = re.sub(rf"\({re.escape(target)}\)(\s*{_MEMBERSHIP_OPS}\s)",
                       rf"{target}\1", text)
-    return funcs, free_domain, text, aliases, pseudo_infinity
+    return (funcs, free_domain, unmask_strings(text, literals), aliases,
+            pseudo_infinity)
 
 
 def _find_balanced_call(text: str, name_pattern: "re.Pattern", start: int):
@@ -1601,12 +1719,19 @@ def apply_unicode_synonyms(text: str) -> str:
     plain word `integral` before its own superscript half could
     otherwise be converted to `^<digits>` and glued onto `integral`
     with no separator."""
-    text = _collapse_integral_marks(text)
-    for sym, repl in _UNICODE.items():
-        text = text.replace(sym, repl)
-    text = _SUPERSCRIPT_RUN.sub(
-        lambda m: "^" + m.group(0).translate(_SUPERSCRIPT_TO_DIGIT), text)
-    return text
+    def substitute(masked: str) -> str:
+        masked = _radical_to_call(_collapse_integral_marks(masked))
+        masked = _LATEX_COMMAND.sub(
+            lambda m: _LATEX_COMMANDS.get(m.group(0), m.group(0)), masked)
+        for sym, repl in _UNICODE.items():
+            if sym not in _LATEX_COMMANDS:
+                masked = masked.replace(sym, repl)
+        return _SUPERSCRIPT_RUN.sub(
+            lambda m: "^" + m.group(0).replace("⁻", "-").translate(
+                _SUPERSCRIPT_TO_DIGIT),
+            masked)
+
+    return outside_strings(substitute, text)
 
 
 def normalize(text: str) -> str:
@@ -1649,9 +1774,12 @@ def normalize(text: str) -> str:
     meaning (the tuple's own comments state each constraint); a new
     sugar is added as a new entry in the right position, never by
     editing an existing pass."""
-    for sugar_pass in _NORMALIZE_PASSES:
-        text = sugar_pass(text)
-    return text
+    def run_passes(masked: str) -> str:
+        for sugar_pass in _NORMALIZE_PASSES:
+            masked = sugar_pass(masked)
+        return masked
+
+    return outside_strings(run_passes, text)
 
 
 def _replace_sigma_pi(text: str) -> str:
@@ -1753,10 +1881,16 @@ def _caret_to_power(text: str) -> str:
     return text.replace("**", "^").replace("^", "**")
 
 
+_EQUIV_WORD = re.compile(
+    r"([\w)\]])\s+equiv\s+(?!(?:in|be)\b|∈)(?=[\w(\[])")
+
+
 def _equiv_alias(text: str) -> str:
     """`f equiv g` -> `f =:= g`: the word alias for the equivalence
-    relation (canonical ascii spelling =:=, unicode ≡)."""
-    return re.sub(r"\bequiv\b", "=:=", text)
+    relation (canonical ascii spelling =:=, unicode ≡). Only the infix
+    word between two operands is the relation, so a parameter named
+    `equiv` (`for equiv in [0, 1]`, `f(equiv)`) stays a name."""
+    return _EQUIV_WORD.sub(r"\1 =:= ", text)
 
 
 def _lim_arrow(text: str) -> str:
@@ -2081,18 +2215,21 @@ def _split_top_level(text: str, tokens: tuple) -> "tuple | None":
         every bracket pair, so a comparison inside parentheses (a
         generator expression's filter, a call argument) can never be
         mistaken for the law's own relation. None when no token occurs
-        at the top level.
+        at the top level. A token inside a quoted literal is data and
+        never splits.
     """
+    masked, literals = mask_strings(text)
     depth = 0
-    for i, ch in enumerate(text):
+    for i, ch in enumerate(masked):
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
             depth -= 1
         elif depth == 0:
             for tok in tokens:
-                if text.startswith(tok, i):
-                    return text[:i], tok, text[i + len(tok):]
+                if masked.startswith(tok, i):
+                    return (unmask_strings(masked[:i], literals), tok,
+                            unmask_strings(masked[i + len(tok):], literals))
     return None
 
 
@@ -2272,6 +2409,10 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
             # make a record state something nobody adjudicated. Held
             # uninterpreted instead, which prints back as written.
             return sympy.Function(name)(*args)
+        if name == "norm":
+            # a norm and an absolute value agree on scalars but not on
+            # vectors, so `||x||` keeps its own name in claim text
+            return sympy.Function(name)(*args)
         if name in _SYMPY_FUNCS:
             return _SYMPY_FUNCS[name](*args)
     return _verbatim_atom(node)
@@ -2322,7 +2463,9 @@ def _render_lim_call(node, args):
         # sympy conversion (a bare string, not an expression) and is
         # read off the AST here; sympy.Limit renders it as 0^+/0^-
         return sympy.Limit(args[0], args[1], args[2], dir=node.args[3].value)
-    return sympy.Limit(args[0], args[1], args[2])   # unevaluated: lim notation
+    # sympy's own default direction is "+", so a two-sided limit states
+    # "+-" explicitly and stays distinct from the one-sided one
+    return sympy.Limit(args[0], args[1], args[2], dir="+-")
 
 
 def _render_integrate_call(node, args):
@@ -2622,8 +2765,14 @@ class _CanonicalPrinter(StrPrinter):
         return f"{self._print(inner)}{marker}{{{pairs}}}"
 
     def _print_Limit(self, expr):
-        e, z, z0, _dir = expr.args
-        return f"lim({self.stringify((e, z, z0), ', ')})"
+        # a one-sided limit carries its side as a sign trailing the
+        # point (`lim(f(x), x, 0+)`), the same spelling the input reads;
+        # a limit at infinity has only one side to approach from
+        e, z, z0, direction = expr.args
+        side = (str(direction) if str(direction) in ("+", "-")
+                and not z0.is_infinite else "")
+        return (f"lim({self._print(e)}, {self._print(z)}, "
+                f"{self._print(z0)}{side})")
 
     def _print_Integral(self, expr):
         parts = [expr.function]
@@ -2667,7 +2816,7 @@ class _CanonicalPrinter(StrPrinter):
         # bound-function vocabulary) needs the funcs membership check.
         if isinstance(expr, sympy.core.function.AppliedUndef):
             name = expr.func.__name__
-            if (name not in ("P.V.", "min", "max")
+            if (name not in ("P.V.", "min", "max", "norm")
                     and name not in self._funcs):
                 # "P.V." is the grammar's own principal-value operator
                 # (an uninterpreted sympy.Function internally, but a
@@ -2770,10 +2919,9 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     callers should compare re-parsed *meaning*, never rendered text
     byte-for-byte.
 
-    `norm(x)` has no separate spelling to reconstruct: this grammar's own
-    `_SYMPY_FUNCS` already maps it to plain `Abs`, identically to `abs(x)`,
-    indistinguishable once parsed, so this always renders `Abs` as
-    `|x|`, never `||x||`, regardless of which one the original text used.
+    `norm(x)` (the `||x||` input spelling) renders as the `norm(x)` call
+    in both modes, kept apart from `abs(x)`: the two agree on a scalar
+    and differ on a vector, so they are different claims.
 
     In ASCII mode, a Greek-letter identifier that has a known backslash
     spelling (`α` -> `\\alpha`, see `_GREEK_TO_BACKSLASH`) is converted
@@ -2790,9 +2938,12 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     render_claim_text) would ever pass `{"pi"}`/`{"oo"}` here."""
     funcs = funcs | {"f"}
     expr = _node_to_sympy(ast.parse(text, mode="eval"), funcs)
-    s = to_canonical(expr, funcs, unicode, suppress_glyphs).replace("**", "^")
-    s = _abs_calls_to_bars(s)
-    if not unicode:
-        for symbol, backslash_name in _GREEK_TO_BACKSLASH.items():
-            s = s.replace(symbol, backslash_name)
-    return s
+    def respell(s: str) -> str:
+        s = _abs_calls_to_bars(s.replace("**", "^"))
+        if not unicode:
+            for symbol, backslash_name in _GREEK_TO_BACKSLASH.items():
+                s = s.replace(symbol, backslash_name)
+        return s
+
+    return outside_strings(
+        respell, to_canonical(expr, funcs, unicode, suppress_glyphs))

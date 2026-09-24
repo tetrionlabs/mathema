@@ -1686,7 +1686,7 @@ def declare(cj) -> dict:
 # the candidate name set before it decides whether to call
 # render_law_expr at all, so a lightweight regex pass is simpler than
 # parsing twice.
-_IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+_IDENTIFIER = re.compile(r"[^\W\d]\w*")
 
 
 def _ordered_real_param_names(cj, excluded: set) -> list:
@@ -1698,10 +1698,12 @@ def _ordered_real_param_names(cj, excluded: set) -> list:
     already found in the text. Both auto-let mechanisms below (a Greek-
     word exact match, the long-name pool) depend on this order being
     identical every time the same claim is rendered, in any process."""
+    from ._scan import blank_strings
+
     seen: list = []
     for text in (cj.lhs, cj.rhs):
         if isinstance(text, str):
-            for name in _IDENTIFIER.findall(text):
+            for name in _IDENTIFIER.findall(blank_strings(text)):
                 if name not in excluded and name not in seen:
                     seen.append(name)
     for name in cj.domain:
@@ -1778,17 +1780,14 @@ def _symbology_clash(param_symbols: dict, real_params) -> str | None:
 
 
 def _auto_renames(cj, funcs: frozenset, unicode: bool,
-                  long_param_threshold: int, long_func_threshold: int,
-                  canonical: bool = False):
+                  long_param_threshold: int, canonical: bool = False):
     """`(param_renames, func_renames, suppress_glyphs)`, the first two
-    are kept separate because a real parameter's original name is worth
-    preserving via an explicit `let <symbol> = <name>` clause (it's the
-    function's actual argument name, needed to reparse back to the same
-    domain key), while a function alias's own chosen text in the claim
-    isn't (it was never anything but a display choice made for this one
-    claim's own `let <alias> = <target>` binding), so a long alias is
-    simply replaced at that same binding site instead, with no extra
-    clause.
+    are kept separate because a real parameter's rename is stated by an
+    explicit `let <symbol> = <name>` clause (it's the function's actual
+    argument name, needed to reparse back to the same domain key),
+    while a function name has no such clause: a function name is part
+    of the claim's canonical text, so only a symbology provider renames
+    one, at its own binding site.
 
     Both sources feeding `param_renames`, a real parameter whose name
     spells a Greek letter's English word (`greek_symbol_for_name`,
@@ -1799,10 +1798,7 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     an arbitrary positional letter would read as noise, not a
     convention, in ASCII text, and even in unicode, a routine English
     word is common enough below ~8 characters that a lower bar would
-    catch ordinary, well-chosen names too often to be welcome. A long
-    function alias, in contrast, auto-lets in *both* modes at its own
-    (lower) `long_func_threshold`, since shortening it to a familiar
-    function letter is the well-established convention either way.
+    catch ordinary, well-chosen names too often to be welcome.
 
     Both draw from one shared `taken` set seeded with every name
     already this short in the claim (an existing single-letter real
@@ -1893,7 +1889,7 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
             if name in param_renames:
                 continue
             symbol = greek_symbol_for_name(name)
-            if symbol is not None:
+            if symbol is not None and symbol not in taken:
                 param_renames[name] = symbol
                 taken.add(symbol)
         long_params = [n for n in real_params if n not in param_renames
@@ -1912,19 +1908,11 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
             func_renames[name] = symbol
             taken.add(symbol)
 
-    # A function rename is a DISPLAY choice, and it only survives a round
-    # trip where the claim has a `let <alias> = <target>` binding site for
-    # the shortened name to be written back at. A bare call resolved out of
-    # the target's own module scope has no such site, so renaming it in the
-    # stored spelling would emit an orphan `g` that reparses to nothing and
-    # rebinds to nothing. Canonical text therefore keeps real function
-    # names, which is what its own contract already promises.
-    long_funcs = [] if canonical else [
-        n for n in cj.funcs if len(n) > long_func_threshold
-        and n not in func_renames]
-    pool_renames = auto_short_names(long_params, long_funcs, unicode=unicode, taken=taken)
+    # a function name, alias or not, is part of the canonical text, and a
+    # display that shortened it would reparse to a different claim, so
+    # the positional pool shortens real parameters only
+    pool_renames = auto_short_names(long_params, [], unicode=unicode, taken=taken)
     param_renames.update({n: pool_renames[n] for n in long_params})
-    func_renames.update({n: pool_renames[n] for n in long_funcs})
     return param_renames, func_renames, suppress_glyphs
 
 
@@ -1979,7 +1967,6 @@ def fingerprint_text(cj) -> str:
 
 def render_claim_text(cj, *, unicode: bool | None = None,
                       long_param_threshold: int = 8,
-                      long_func_threshold: int = 6,
                       canonical: bool = False) -> str:
     """The alternative to declare()'s structured-dict shape: one
     parseable string a person can copy straight back into `claim(...)`
@@ -2012,11 +1999,12 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     bound-function definition, exactly as incomplete as declare()'s own
     dict would be for the same claim.
 
-    Auto-lets two kinds of name to a short spelling, each with its own
+    Auto-lets a real parameter's name to a short spelling, with its own
     synthesized `let` clause stating the substitution explicitly rather
-    than leaving a reader to guess why a name changed spelling:
+    than leaving a reader to guess why a name changed spelling, unicode
+    output only:
 
-    - Unicode output only: a real parameter whose name spells a Greek
+    - A real parameter whose name spells a Greek
       letter's English name (`theta`, `alpha`, ...) auto-lets to the
       actual symbol (`θ`, `α`, ...), the same bridge a claim's own
       text already builds by hand (`let \\alpha = alpha`, see
@@ -2028,17 +2016,12 @@ def render_claim_text(cj, *, unicode: bool | None = None,
       first, then a fixed pool mixing Latin and a curated set of Greek
       letters, purely positional. Both are unicode-only: ASCII has no
       single-letter convention for an ordinary *variable* the way
-      `f`/`g`/`h` already is for a *function* (below), so a positional
+      `f`/`g`/`h` already is for a *function*, so a positional
       letter would read as noise there, not a convention, ASCII
       output always keeps a real parameter's plain, authored word.
-    - Both output modes: a function-alias name longer than
-      `long_func_threshold` characters (default 6) auto-lets to a short
-      spelling the same way (`f`/`g`/`h`, then in unicode `φ`/`ψ`/`χ`)
-     ; simply substituted at its own existing `let <alias> = <target>`
-      binding site, no extra clause, since the alias text was never
-      anything but a display choice made for this one claim (unlike a
-      real parameter's name, which is the function's actual argument
-      name and worth keeping visible via its own `let` clause).
+    - A function name, a `let` alias included, is never shortened:
+      it is part of the claim's canonical text, and a display that
+      renamed it would reparse to a different claim.
 
     Separately (no `let`, no rename): a real parameter named exactly
     `pi` or `oo` suppresses that constant's usual unicode glyph
@@ -2047,12 +2030,13 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     here."""
     from .grammar import get_unicode_output, render_domain, render_law_expr
     from ._providers import get_provider
+    from ._scan import sub_outside_strings
 
     if unicode is None:
         unicode = get_unicode_output()
     funcs = frozenset(cj.funcs)
     param_renames, func_renames, suppress_glyphs = _auto_renames(
-        cj, funcs, unicode, long_param_threshold, long_func_threshold,
+        cj, funcs, unicode, long_param_threshold,
         canonical=canonical)
 
     # Same symbology capability as _auto_renames; here it may also
@@ -2124,14 +2108,15 @@ def render_claim_text(cj, *, unicode: bool | None = None,
 
     def apply_safe_renames(text: str) -> str:
         for name, symbol in func_renames.items():
-            text = re.sub(rf"\b{re.escape(name)}\b", symbol, text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b", symbol, text)
         for name, symbol in safe_param_renames.items():
-            text = re.sub(rf"\b{re.escape(name)}\b", symbol, text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b", symbol, text)
         return text
 
     def apply_unsafe_backticks(text: str) -> str:
         for name, symbol in unsafe_param_renames.items():
-            text = re.sub(rf"\b{re.escape(name)}\b", f"`{symbol}`", text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b",
+                                       f"`{symbol}`", text)
         return text
 
     _REL_GLYPH = {"==": "=", "<=": "≤" if unicode else "<=",
@@ -2248,6 +2233,12 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         parts.append(assuming_text)
     if let_segments:
         parts.append(sep.join(let_segments))
+        if not for_segments:
+            # `name = expr` straight after a let run reads as one more
+            # binding, so an equation with a bare-name side is spelled
+            # with `==` there
+            statement = re.sub(r"^(\s*\w+\s*)=(?![=:])", r"\1==",
+                               statement, count=1)
     if for_segments:
         parts.append(("∀ " if unicode else "for ") + sep.join(for_segments))
     if getattr(cj, "outcome", ""):

@@ -20,11 +20,14 @@ def identity(x: float) -> float:
 
 
 def test_render_claim_text_round_trips_a_plain_relation():
+    from mathema.spec import canonical_claim_text
+
     cj = claim("f(x)^2 >= 0")
     for unicode in (True, False):
         reparsed = claim(render_claim_text(cj, unicode=unicode))
         assert (reparsed.lhs, reparsed.relation, reparsed.rhs) == \
                (cj.lhs, cj.relation, cj.rhs)
+        assert canonical_claim_text(reparsed) == canonical_claim_text(cj)
 
 
 def test_render_claim_text_reassembles_for_and_let_clauses():
@@ -235,24 +238,20 @@ def test_two_long_real_parameters_get_distinct_symbols_starting_with_x():
     assert "let y = deceleration" in text
 
 
-def test_long_function_alias_auto_lets_in_both_modes_using_real_numpy_functions():
-    # grounded in real, importable numpy functions (a genuine mathema
-    # dependency) rather than a fictional module path, so this exercises
-    # the actual dotted-path/callable resolution machinery, not just
-    # string substitution.
+def test_a_long_function_alias_is_kept_so_the_display_is_the_same_claim():
+    # the alias name is part of the canonical text, so a display that
+    # shortened it to `g` reparsed to a claim with a different identity
     from mathema.conjecture import claim
+    from mathema.spec import canonical_claim_text
 
     cj = claim("let compute_square_root = numpy.sqrt, for x in [0, 100], "
               "compute_square_root(x) >= 0")
     unicode_text = render_claim_text(cj, unicode=True)
     ascii_text = render_claim_text(cj, unicode=False)
-    assert "let g = numpy.sqrt" in unicode_text and "g(x)" in unicode_text
-    assert "let g = numpy.sqrt" in ascii_text and "g(x)" in ascii_text
-    # no extra "let g = compute_square_root" clause, the alias text
-    # itself isn't a real identity worth preserving, unlike a real
-    # parameter's actual name.
-    assert "compute_square_root" not in unicode_text
-    assert "compute_square_root" not in ascii_text
+    for text in (unicode_text, ascii_text):
+        assert "let compute_square_root = numpy.sqrt" in text
+        assert "compute_square_root(x)" in text
+        assert canonical_claim_text(claim(text)) == canonical_claim_text(cj)
 
 
 def test_long_function_alias_with_a_deep_dotted_path_still_resolves(tmp_path):
@@ -270,7 +269,7 @@ def test_long_function_alias_with_a_deep_dotted_path_still_resolves(tmp_path):
         cj = claim("let vector_norm_function = numpy.linalg.norm, "
                   "for x in [1, 100], vector_norm_function(x) >= 0")
         rendered = render_claim_text(cj, unicode=False)
-        assert "let g = numpy.linalg.norm" in rendered
+        assert "let vector_norm_function = numpy.linalg.norm" in rendered
         result = check_conjectures(identity, [claim(rendered)])[0]
         assert result.verdict == "holds"
     finally:
@@ -286,12 +285,12 @@ def test_short_function_alias_is_never_renamed():
         "let g = numpy.exp, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, g(x) ≥ 1"
 
 
-def test_long_function_alias_threshold_is_configurable():
+def test_a_function_alias_is_rendered_as_written_whatever_its_length():
     from mathema.conjecture import claim
 
     cj = claim("let sqrt = numpy.sqrt, for x in [0, 100], sqrt(x) >= 0")
-    text = render_claim_text(cj, unicode=False, long_func_threshold=3)
-    assert "let g = numpy.sqrt" in text
+    text = render_claim_text(cj, unicode=False)
+    assert "let sqrt = numpy.sqrt" in text and "sqrt(x) >= 0" in text
 
 
 def test_long_name_auto_let_is_deterministic_across_repeated_renders():
