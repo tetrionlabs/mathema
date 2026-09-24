@@ -750,10 +750,16 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 else:
                     msg = (f"{key}: claim {conflict['claim']!r} differs "
                            f"between the docstring and the declared file, "
-                           f"run `mathema docsync` to resolve")
+                           f"run `mathema docsync` to resolve (neither "
+                           f"version is adjudicated until then)")
                 _fail(key, msg)
+            # a claim whose two surfaces disagree has no single meaning
+            # to record, so neither version is adjudicated or written
+            withheld = {c["claim"] for c in _conflicts
+                        if c.get("kind") == "authoring"}
             merged_entry = resolve_declared(fn, file_entry=file_entry)
-            current_claims = merged_entry.get("claims") or []
+            current_claims = [c for c in merged_entry.get("claims") or []
+                              if c.get("name") not in withheld]
             if verified_entry:
                 # the record never gets silently rewritten by a
                 # re-authored claim: pending supersessions adjudicate the
@@ -919,6 +925,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         rec = check(fn, claims=claims if claims else [],
                     trials_scale=trials_scale,
                     known_premises=stub_premises)
+        rec.probes = [p for p in rec.probes
+                      if getattr(p, "name", None) not in withheld]
         rec.probes, late_notes = _strip_retired_probes(
             key, rec.probes, verified_entry or {}, retired_noted)
         out.lines.extend(late_notes)

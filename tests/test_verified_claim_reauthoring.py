@@ -263,3 +263,75 @@ def test_a_new_law_under_a_discovered_name_survives_its_removal(
     verify_project(root=str(tmp_path))
     verify_project(root=str(tmp_path), all=True)
     assert _row(tmp_path, key, "bound")["statement"].endswith(">= 0")
+
+
+_DOC_SOURCE = '''\
+def sq(x):
+    """Square.
+
+    Claims:
+        nonneg: for x in [-10, 10], sq(x) >= 0
+    """
+    return x * x
+'''
+
+
+def test_a_claim_stated_two_ways_is_not_recorded_until_they_agree(
+        tmp_path, monkeypatch):
+    import warnings
+
+    from mathema.verify import verify_project
+    key = "reauth_twoway.sq"
+    (tmp_path / "reauth_twoway.py").write_text(_DOC_SOURCE)
+    _claims(tmp_path, "reauth_twoway", f"""
+        {key}:
+          claims:
+            - name: nonneg
+              statement: 'for x in [-10, 10], sq(x) >= -1'
+        """)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for _ in range(2):
+            out = verify_project(root=str(tmp_path))
+            assert any("nonneg" in p and "docstring" in p
+                       for p in out.problems), out.problems
+            with pytest.raises(StopIteration):
+                _row(tmp_path, key, "nonneg")
+    # the author makes the two surfaces agree: the claim adjudicates and
+    # the sweep passes without any acceptance
+    _claims(tmp_path, "reauth_twoway", f"""
+        {key}:
+          claims:
+            - name: nonneg
+              statement: 'for x in [-10, 10], sq(x) >= 0'
+        """)
+    out = verify_project(root=str(tmp_path))
+    assert not out.problems, out.problems
+    assert _row(tmp_path, key, "nonneg")["statement"].endswith(">= 0")
+
+
+def test_docsync_settles_a_claim_stated_two_ways(tmp_path, monkeypatch):
+    # the remedy the sweep names works: docsync resolves toward the
+    # docstring, and the next sweep records that version and passes
+    import warnings
+
+    from mathema.cli import main
+    from mathema.verify import verify_project
+    key = "reauth_settle.sq"
+    (tmp_path / "reauth_settle.py").write_text(_DOC_SOURCE)
+    _claims(tmp_path, "reauth_settle", f"""
+        {key}:
+          claims:
+            - name: nonneg
+              statement: 'for x in [-10, 10], sq(x) >= -1'
+        """)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        verify_project(root=str(tmp_path))
+        assert main(["docsync", "reauth_settle", "--root", str(tmp_path),
+                     "--yes"]) == 0
+    out = verify_project(root=str(tmp_path))
+    assert not out.problems, out.problems
+    assert _row(tmp_path, key, "nonneg")["statement"].endswith(">= 0")
