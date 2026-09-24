@@ -229,13 +229,92 @@ def _claim_family(cj, fn, facts):
     a renamed predicate claim still reaches its family."""
     base = cj.name.split("[", 1)[0]
     family = families.families().get(base)
-    if family is not None and family.can_handle(fn, facts, cj.name):
+    if family is not None and family.can_handle(fn, facts, cj.name) \
+            and _statement_is_family_claim(cj, base, family, facts):
         return family
     if cj.relation in routes.examine_predicates():
         family = families.families().get(cj.relation)
         if family is not None:
             return family
     return None
+
+
+#: the families whose routes read a claim's name rather than its text,
+#: with the statement each adjudicates: derivative order and relation,
+#: against zero, in the parameter the name brackets
+_DERIVATIVE_FAMILY_FORMS = {
+    "monotonic_increasing": (1, ">="),
+    "monotonic_decreasing": (1, "<="),
+    "affine": (2, "=="),
+    "convex": (2, ">="),
+    "concave": (2, "<="),
+}
+
+_FINITE_NO_ERROR = "mathema.f.finite_no_error"
+
+_COMPARISON_RELATIONS = frozenset({"==", "~=", "!=", "<=", ">=", "<", ">"})
+
+#: the families stated as `f(<params>) == f(<params>)`, the call agreeing
+#: with itself, each examining one way it could fail to
+_SELF_AGREEMENT_FAMILIES = frozenset({"is_deterministic", "is_reproducible",
+                                      "is_state_safe"})
+
+
+def _squash(text) -> str:
+    """Claim text with all whitespace removed, for comparing two
+    spellings of the same expression."""
+    return "".join((text or "").split())
+
+
+def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
+    """Intent:
+        Whether the claim's statement is the one the family registered
+        under its name adjudicates, so a name alone never swaps the
+        question being asked.
+
+    Notes:
+        A predicate statement (`is_pole_safe(x)`, `is_symmetric(f(A))`)
+        matches the family of the same name. The derivative-sign
+        families match `d(f(<params>), p) >= 0` and its siblings, with
+        `p` the bracketed parameter. `is_numerically_stable` matches
+        `g(f, <params>) == 1` with `g` bound to `mathema.f.finite_no_
+        error`. `is_deterministic`, `is_reproducible` and
+        `is_state_safe` match `f(<params>) == f(<params>)`. `is_defined` states a region under its name (the
+        restriction form in docs/conditional-claims.md) and so accepts
+        any comparison. A family that dispatches on the function's
+        shape and reads the claim's own text (the dot-product, sum and
+        fold lifters) accepts any statement.
+    """
+    from .claim_families import (MatrixPropertyFamily, OutputPredicateFamily,
+                                 _NamedClaimFamily)
+    if cj.relation in routes.examine_predicates() \
+            or cj.relation not in _COMPARISON_RELATIONS:
+        return cj.relation == base
+    if base == "is_defined":
+        return True
+    call = f"f({', '.join(facts.params)})"
+    form = _DERIVATIVE_FAMILY_FORMS.get(base)
+    if form is not None:
+        order, relation = form
+        param = cj.name[len(base):]
+        if not (param.startswith("[") and param.endswith("]")):
+            return False
+        param = param[1:-1]
+        expected = f"d({call}, {', '.join([param] * order)})"
+        return (cj.relation == relation and _squash(cj.rhs) == "0"
+                and _squash(cj.lhs) == _squash(expected))
+    if base in _SELF_AGREEMENT_FAMILIES:
+        return (cj.relation == "==" and _squash(cj.lhs) == _squash(call)
+                and _squash(cj.rhs) == _squash(call))
+    if base == "is_numerically_stable":
+        bound = (cj.funcs or {}).get("g")
+        from .f import finite_no_error
+        return (cj.relation == "==" and _squash(cj.rhs) == "1"
+                and _squash(cj.lhs) == _squash(
+                    f"g(f, {', '.join(facts.params)})")
+                and (bound == _FINITE_NO_ERROR or bound is finite_no_error))
+    return not isinstance(family, (_NamedClaimFamily, MatrixPropertyFamily,
+                                   OutputPredicateFamily))
 
 
 def _resolve_func_ref(ref: str, *, root: str = "."):
@@ -2205,8 +2284,11 @@ def _stamp_examine_route(probe, cj, fn, facts) -> None:
     is_safety = cj.relation in routes.examine_predicates()
     if not is_safety:
         from .claim_families import SafetyFamily
-        base_family = families.families().get(cj.name.split("[", 1)[0])
-        is_safety = isinstance(base_family, SafetyFamily)
+        base = cj.name.split("[", 1)[0]
+        base_family = families.families().get(base)
+        is_safety = (isinstance(base_family, SafetyFamily)
+                     and _statement_is_family_claim(cj, base, base_family,
+                                                    facts))
     if not is_safety:
         return
     root, _, _sub = probe.route.partition(":")
