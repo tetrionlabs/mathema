@@ -1694,6 +1694,14 @@ def _accept_docstring_claim(root: str, conflict: dict) -> None:
                     # about the statement, never a silent evidence
                     # downgrade
                     c["route"] = raw["route"]
+                from .sync import yaml_has_comments
+                with open(path, encoding="utf-8") as fh:
+                    commented = yaml_has_comments(fh.read())
+                if commented:
+                    print(f"  WARN {os.path.relpath(path, root)} has YAML "
+                          f"comments, which do not survive this rewrite; "
+                          f"keep a claim's annotation in its `note:` "
+                          f"field, which persists through every rewrite")
                 with open(path, "w") as fh:
                     yaml.safe_dump(doc, fh, sort_keys=False,
                                    allow_unicode=True)
@@ -2606,9 +2614,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="declared parameter range (repeatable)")
     pc.add_argument("--trials-scale", type=float, default=1.0, metavar="FACTOR",
                     help="shrink the probe-route trial budget by this factor "
-                         "(0 < FACTOR <= 1, e.g. 0.25) for faster dev-loop "
-                         "iteration; never scales upward, and never below a "
-                         "floor that still guarantees real evidence")
+                         "(FACTOR > 0, e.g. 0.25) for faster dev-loop "
+                         "iteration; a value above 1 is clamped to 1, so it "
+                         "never scales upward, and never below a floor that "
+                         "still guarantees real evidence")
     pc.add_argument("--format", default="text",
                     choices=["text", "json", "junit", "github", "md",
                              "compact"],
@@ -2641,9 +2650,10 @@ def main(argv: list[str] | None = None) -> int:
                          "functions register")
     pv.add_argument("--trials-scale", type=float, default=1.0, metavar="FACTOR",
                     help="shrink the probe-route trial budget by this factor "
-                         "(0 < FACTOR <= 1, e.g. 0.25) for faster dev-loop "
-                         "iteration; never scales upward, and never below a "
-                         "floor that still guarantees real evidence")
+                         "(FACTOR > 0, e.g. 0.25) for faster dev-loop "
+                         "iteration; a value above 1 is clamped to 1, so it "
+                         "never scales upward, and never below a floor that "
+                         "still guarantees real evidence")
     pv.add_argument("--format", default="text", choices=["text", "json"],
                     help="report format: json emits the sweep as data "
                          "(per-key rows in the same claim vocabulary "

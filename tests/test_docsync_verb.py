@@ -137,3 +137,68 @@ def test_docsync_rootwide_without_a_target(tmp_path):
     assert r.returncode != 2, "argparse usage error: " + r.stderr
     assert r.returncode == 0, r.stdout + r.stderr
     assert "materialized" in r.stdout
+
+
+def _commented_project(tmp_path):
+    env = _project(tmp_path)
+    (tmp_path / "claims" / "c.claims.yaml").write_text(
+        "# owned by the numerics group\n"
+        "ypkg.mod.double:\n"
+        "  claims:\n"
+        "    - name: doubles\n"
+        "      statement: 'for x in [0,5], f(x) == 2*x'  # the core law\n"
+        "      route: derive\n"
+        "      note: agreed with the numerics group\n"
+        "    - name: nonneg\n"
+        "      statement: 'for x in [0,5], f(x) >= 0'\n"
+        "      route: derive\n"
+        "      note: 'a # inside a quoted note is text, not a comment'\n")
+    return env
+
+
+def test_docsync_warns_before_a_rewrite_drops_comments(tmp_path):
+    env = _commented_project(tmp_path)
+    r = _run(tmp_path, env, "docsync", "ypkg", "--root", str(tmp_path),
+             "--yes")
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    warn = next(ln for ln in out.splitlines() if "YAML comments" in ln)
+    assert "c.claims.yaml" in warn and "note:" in warn
+    assert out.index(warn) < out.index("declared file updated")
+    assert "numerics group\n" not in \
+        (tmp_path / "claims" / "c.claims.yaml").read_text().split(
+            "note:")[0]
+
+
+def test_a_note_survives_the_rewrite(tmp_path):
+    import yaml
+    env = _commented_project(tmp_path)
+    r = _run(tmp_path, env, "docsync", "ypkg", "--root", str(tmp_path),
+             "--yes")
+    assert r.returncode == 0, r.stdout + r.stderr
+    data = yaml.safe_load((tmp_path / "claims" / "c.claims.yaml").read_text())
+    notes = {c["name"]: c.get("note")
+             for c in data["ypkg.mod.double"]["claims"]}
+    assert notes == {
+        "doubles": "agreed with the numerics group",
+        "nonneg": "a # inside a quoted note is text, not a comment"}
+
+
+def test_no_comment_warning_for_a_file_without_comments(tmp_path):
+    env = _project(tmp_path)
+    r = _run(tmp_path, env, "docsync", "ypkg", "--root", str(tmp_path),
+             "--yes")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "YAML comments" not in r.stdout
+
+
+def test_yaml_comment_detection():
+    from mathema.sync import yaml_has_comments
+    assert yaml_has_comments("# header\nk: v\n")
+    assert yaml_has_comments("k: v  # trailing\n")
+    assert yaml_has_comments("  - name: a # x\n")
+    assert not yaml_has_comments("k: 'a # b'\n")
+    assert not yaml_has_comments('k: "a # b"\n')
+    assert not yaml_has_comments("k: a#b\n")
+    assert not yaml_has_comments("k: 'it''s # fine'\n")
+    assert yaml_has_comments("k: 'it''s' # comment\n")

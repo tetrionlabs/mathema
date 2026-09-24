@@ -218,6 +218,38 @@ def apply_verified_wins(claims: list, conflicts: list,
             kept.append(c)
     return kept
 
+def yaml_has_comments(text: str) -> bool:
+    """Intent:
+        Whether YAML source carries a `#` comment: a `#` that starts a
+        line's content or follows whitespace, outside a quoted scalar.
+        A `#` inside quotes, or glued to a plain word (`a#b`), is text.
+    """
+    for line in text.splitlines():
+        quote = None
+        prev = " "
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if quote == "'":
+                if ch == "'":
+                    if line[i + 1:i + 2] == "'":
+                        i += 1
+                    else:
+                        quote = None
+            elif quote == '"':
+                if ch == "\\":
+                    i += 1
+                elif ch == '"':
+                    quote = None
+            elif ch in "'\"" and (prev.isspace() or prev in ":-[{,"):
+                quote = ch
+            elif ch == "#" and prev.isspace():
+                return True
+            prev = ch
+            i += 1
+    return False
+
+
 def materialize_entry(fn, key: str, root: str = ".") -> dict:
     """Intent:
         The full declared entry for one function, every authoring

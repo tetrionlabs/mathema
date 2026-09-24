@@ -106,3 +106,19 @@ def test_audit_unknown_exclude_exits_2(tmp_path):
              cwd=tmp_path)
     assert r.returncode == 2, r.stdout + r.stderr
     assert "unknown --exclude" in r.stderr
+
+
+@pytest.mark.parametrize("verb", ["check", "verify"])
+def test_trials_scale_help_states_the_clamp(verb):
+    # a factor above 1 is accepted and clamped to 1, so the help text
+    # must not state an upper bound the parser does not enforce
+    import io
+    from contextlib import redirect_stdout
+
+    from mathema.cli import main
+    buf = io.StringIO()
+    with redirect_stdout(buf), pytest.raises(SystemExit):
+        main([verb, "--help"])
+    text = " ".join(buf.getvalue().split())
+    assert "FACTOR <= 1" not in text
+    assert "above 1" in text and "clamped to 1" in text
