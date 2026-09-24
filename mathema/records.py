@@ -271,7 +271,7 @@ def pseudo_infinity_range(value) -> tuple[float, float] | None:
     """The resolved (lo, hi) operational-infinity range for a claim's
     `pseudo_infinity` value: a bare magnitude means the symmetric
     range, a two-element pair states both sides, None stays None. The
-    one resolver every consumer (the stability sweep's corners, the
+    one resolver every consumer (the float companion's corners, the
     spec emitter, the statement renderer) reads, so the canonical
     two-sided form is produced identically everywhere."""
     if value is None:

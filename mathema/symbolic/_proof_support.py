@@ -1202,10 +1202,10 @@ def _sound_interval_result(result) -> bool:
 
         Belt and braces beside `_interval_bounds`'s own decline,
         because nothing backstops a wrong PROOF in this class: the
-        corroboration gate only re-checks disproofs, and
-        `_stability_gate` is off by default (and declines sequence
-        parameters when on), so a wrong proof here reaches the record
-        with nothing to catch it.
+        corroboration gate only re-checks disproofs, and a proof's
+        `[float]` companion tests the implementation rather than the
+        proof, so a wrong proof here reaches the record with nothing to
+        catch it.
     """
     if result is None:
         return False

@@ -19,7 +19,8 @@ then become the same object and `a[i] - b[i]` cancels to a literal 0.
 evaluates to 0, so the old exit guard let it through.
 
 There is no backstop below this for a wrong proof: the corroboration
-gate only re-checks disproofs, and `_stability_gate` is off by default.
+gate only re-checks disproofs, and a proof's `[float]` companion tests
+the implementation, not the proof.
 """
 import sympy
 

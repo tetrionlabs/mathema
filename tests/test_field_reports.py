@@ -299,12 +299,21 @@ def test_domain_variants_of_one_law_keep_distinct_rows(tmp_path):
         "for mi in [-1,0], f(mi) >= 0",
         "for mi in [2,3], f(mi) >= 0",
     ]
+    def declared(rec):
+        # the rows the claims themselves produce; each proof also
+        # spawns its `[float]` companion row
+        return [p for p in rec.probes
+                if "mathema.companion_of" not in (p.meta or {})]
+
     rec = mathema.check(mod.f, claims=variants)
-    assert len(rec.probes) == 4                    # four distinct rows kept
-    assert len({p.name for p in rec.probes}) == 4  # each with its own name
+    rows = declared(rec)
+    assert len(rows) == 4                          # four distinct rows kept
+    assert len({p.name for p in rows}) == 4        # each with its own name
 
     # exact duplicates (same statement AND domain) still collapse to one
-    assert len(mathema.check(mod.f, claims=["f(mi) >= 0", "f(mi) >= 0"]).probes) == 1
+    assert len(declared(mathema.check(
+        mod.f, claims=["f(mi) >= 0", "f(mi) >= 0"]))) == 1
     # a single domain claim keeps its plain auto-name (no suffix)
-    (only,) = mathema.check(mod.f, claims=["for mi in [0,1], f(mi) >= 0"]).probes
+    (only,) = declared(mathema.check(
+        mod.f, claims=["for mi in [0,1], f(mi) >= 0"]))
     assert only.name == "f_mi_0"

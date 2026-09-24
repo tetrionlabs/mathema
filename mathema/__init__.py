@@ -598,7 +598,8 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         probes = probes + check_conjectures(fn, all_claims, domain=merged_domain or None,
                                             trials=trials, trials_scale=trials_scale,
                                             facts=facts, extensive=extensive,
-                                            known_premises=known_premises)
+                                            known_premises=known_premises,
+                                            float_companions=True)
     from .concepts import Concept, concepts_for, flat_union
     sources = concepts_for(facts, probes)
     dismissed = set(((declared or {}).get("meta") or {}).get(

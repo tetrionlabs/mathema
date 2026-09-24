@@ -305,6 +305,10 @@ def _reductions(verified_claims, pure: bool) -> dict:
         if (claim.get("meta") or {}).get("mathema.corroboration") == \
                 "uncorroborated":
             continue
+        if (claim.get("meta") or {}).get("mathema.companion_of"):
+            # a float companion restates its parent's relation against
+            # the implementation; the clarity model has no source for it
+            continue
         st = _strength(claim.get("verdict") or "", claim.get("route") or "")
         if st <= 0:
             continue

@@ -699,6 +699,34 @@ def _strip_block(text: str, header: str) -> str:
     return "\n".join(collapsed).strip("\n")
 
 
+def _written_back(claims: list) -> list:
+    """Intent:
+        The verified rows a docstring's `Claims:` block restates: the
+        claims that held or were proven, less every float companion
+        (spawned by its parent's proof, never authored).
+    """
+    return [c for c in claims if c.get("verdict") in ("proven", "holds")
+            and not (c.get("meta") or {}).get("mathema.companion_of")]
+
+
+def _declared_route_tag(route) -> str:
+    """The `[route]` tag a docstring claim line carries for a declared
+    route: `[derive]`, `[derive:math_only]`, or nothing."""
+    return f" [{route}]" if route in ("derive", "derive:math_only") else ""
+
+
+def _route_tag(row: dict) -> str:
+    """Intent:
+        The `[route]` tag for a verified row written back: the
+        authored `derive:math_only` when the claim opted out of its
+        float companion, `[derive]` for any other proof, else nothing.
+    """
+    authored = row.get("authored")
+    if isinstance(authored, dict) and authored.get("route") == "derive:math_only":
+        return " [derive:math_only]"
+    return " [derive]" if row.get("verdict") == "proven" else ""
+
+
 def render_docstring(fn, root: str = ".") -> str:
     """The proposed new docstring text for `fn`, with `Claims:` (and
     `Intent:`, if the docstring doesn't already state one) regenerated
@@ -725,9 +753,8 @@ def render_docstring(fn, root: str = ".") -> str:
     doc = inspect.getdoc(fn) or ""
     text = _strip_block(doc, "Claims:")
 
-    claim_lines = [f"    {c['name']}{' [derive]' if c.get('verdict') == 'proven' else ''}"
-                  f": {c['statement']}"
-                  for c in claims if c.get("verdict") in ("proven", "holds")]
+    claim_lines = [f"    {c['name']}{_route_tag(c)}: {c['statement']}"
+                   for c in _written_back(claims)]
 
     blocks = []
     if _read_block(doc, _INTENT_HEADER) is None and entry.get("intent"):
@@ -770,18 +797,16 @@ def generate_docstring(fn, key: str | None = None, root: str = ".") -> str | Non
     intent = declared.get("intent") or verified_entry.get("intent") or None
 
     claim_lines: list[str] = []
-    verified_claims = [c for c in (verified_entry.get("claims") or [])
-                      if c.get("verdict") in ("proven", "holds")]
+    verified_claims = _written_back(verified_entry.get("claims") or [])
     if verified_claims:
-        claim_lines = [f"    {c['name']}"
-                      f"{' [derive]' if c.get('verdict') == 'proven' else ''}"
-                      f": {c['statement']}" for c in verified_claims]
+        claim_lines = [f"    {c['name']}{_route_tag(c)}: {c['statement']}"
+                       for c in verified_claims]
     else:
         claim_lines = [f"    {c.get('name')}"
-                      f"{' [derive]' if c.get('route') == 'derive' else ''}"
-                      f": {c.get('statement')}"
-                      for c in (declared.get("claims") or [])
-                      if c.get("name") and c.get("statement")]
+                       f"{_declared_route_tag(c.get('route'))}"
+                       f": {c.get('statement')}"
+                       for c in (declared.get("claims") or [])
+                       if c.get("name") and c.get("statement")]
 
     if not intent and not claim_lines:
         return None
