@@ -224,9 +224,9 @@ exposes to an agent accepts a verdict from its caller, and the decisions that
 turn a verdict into an accepted fact about your codebase, accepting evidence as
 sufficient, owning a residual risk, or declaring that a falsification revealed
 a wrong claim rather than a bug, go through [`mathema accept`](modes/accept.md),
-which is a person at a terminal. With a [PIN set](modes/pin.md), every such
-decision is stamped in the record as having been made by someone who knew it,
-which an agent does not.
+which is a person at a terminal. Set a [PIN](modes/pin.md) the agent does not
+know, and every such decision needs it and is stamped in the record as made by
+someone who knew it, which the agent cannot be.
 
 Settled code can be frozen at the level that matters, the individual function.
 [`mathema lock`](modes/lock.md) pins a function's structure, after which any
@@ -300,9 +300,10 @@ something that cannot be persuaded decide which of them are true.
 
 - **If you work alongside a coding agent**, mathema is the part of the loop the
   agent cannot talk its way past: it states claims, mathema checks them, you
-  accept or reject, and the functions you have signed off stay locked. The
-  [MCP interface](modes/mcp.md) gives the agent the checking tools and none of
-  the deciding ones.
+  accept or reject, and the functions you have signed off stay locked. Set a
+  PIN the agent does not know and it cannot sign off for you;
+  [working with coding agents](agents.md) covers that and the optional agent
+  tooling.
 - **If you have just inherited a codebase**, [`mathema audit`](modes/audit.md)
   is the first hour of reading done for you: every function, where it lives as
   a ready-made `sed -n` line range, what it touches, whether anything tests or

@@ -97,9 +97,11 @@ nav:
   - Using mathema from code:
       - Library usage: modes/library.md
       - API reference: api.md
-      - The MCP interface: modes/mcp.md
       - Symbology and rendering: symbology.md
       - Extending mathema: extending.md
+  - Coding agents:
+      - Working with coding agents: agents.md
+      - The MCP interface: modes/mcp.md
   - Project:
       - Licensing: licensing-policy.md
       - Versioning and stability: stability.md

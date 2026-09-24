@@ -18,7 +18,7 @@ mathema init [mypkg mypkg.sub ...] [--agents [TOOL]]
 | `target` | zero or more importable module or package name(s), same as `audit`; omit to scaffold only the git files |
 | `--root` | project root to write `.gitattributes`, `.mathema/.gitignore`, and `claims/` under (default: the nearest ancestor holding `.mathema/` within the enclosing git repository, else that repository, else `.`; never the home directory) |
 | `--agents [TOOL]` | also vendor the mathema-agents skills for TOOL (`claude`, `codex`, `gemini`, `cursor`, `copilot`, `windsurf`, `cline`); bare `--agents` auto-detects the one your project already uses |
-| `--agents-url` | git URL for the skills repo (default the public mathema-agents; also read from `MATHEMA_AGENTS_URL`) |
+| `--agents-url` | git URL for the skills repo (default the mathema-agents repository, not yet public; also read from `MATHEMA_AGENTS_URL`) |
 | `--agents-ref` | branch or tag of the skills repo to fetch (default: the branch matching your mathema minor line, such as `v0.6`, falling back to the repo's default branch); an explicit ref is never substituted |
 | `--force` | overwrite vendored agent files that already exist (default: leave them) |
 | `--ci [PROVIDER]` | also scaffold the verify-gate CI fragment (`github`, `gitlab`); bare `--ci` means github. Written only where absent, then it is yours to edit |
