@@ -30,10 +30,10 @@ intent, concepts) and every unlock asks for it before writing.
 ```text
 $ mathema accept funcs.settle nonneg --as evidence
 accepting funcs.settle :: nonneg (verdict holds) as evidence, by Alonzo Church
-  - annotate nonneg as accepted evidence at n=128 (bound to form 206704...)
+  - annotate nonneg as accepted evidence at n=128 (bound to form 206704b327da...)
 write this acceptance? [y/N] y
 PIN:
-written: annotate nonneg as accepted evidence at n=128 ...
+written: annotate nonneg as accepted evidence at n=128 (bound to form 206704b327da...)
 ```
 
 and in the record:

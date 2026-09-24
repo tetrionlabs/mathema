@@ -38,8 +38,9 @@ functions, or `None` for "not mine", in which case resolution falls
 through to the normal import path. The seam is consulted by
 `mathema check`'s target resolution and by `verify`'s store-key
 sweep, and it is fail-soft: a resolver that fails to load warns and
-is skipped, and an unregistered tag fails with a message naming the
-missing adaptor package.
+is skipped, and an unregistered tag fails (exit 2) with a message
+naming the tag and the entry-point group an adaptor package registers
+under.
 
 What the returned callables must satisfy is the runtime contract in
 `mathema.interfaces.runtime`: raise real exceptions for the failure

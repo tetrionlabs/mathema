@@ -38,7 +38,7 @@ mathema check pricing.py:discounted --claim "for rate in [0, 1], f(price, rate) 
 ```
 
 ```text
-FAIL pricing.discounted: source, no side effects; claims 1/1 adjudicated (0 hold, 1 refuted)  <- 1 falsified claim(s)
+FAIL pricing.discounted: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 Falsified, on the first try. That is not a bad start, it is the point.
@@ -113,7 +113,7 @@ mathema check pricing.py
 ```
 
 ```text
-ok   pricing.discounted: source, no side effects; claims 1/1 adjudicated (1 proven, 0 hold, 0 refuted)
+ok   pricing.discounted: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
 ```
 
 The docstring is one of four places a claim can live, alongside a
@@ -138,7 +138,9 @@ claims:
     sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative"
     condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
     route: "derive"
-    authored: "docstring"
+    authored:
+      surface: "docstring"
+      ref: "pricing.discounted:docstring:L1"
 ```
 
 The record binds to `form`, a hash of the function's *structure*, so
@@ -154,10 +156,11 @@ mathema verify
 ```
 
 `verify` re-adjudicates every recorded function whose form hash moved,
-and exits 1 if a claim is falsified or (in strict mode) unresolved, so
-it drops into a pipeline exactly where a test runner would. Exit code
+and exits 1 if a claim is falsified or unknown, or (in strict mode)
+skipped or accepted as risk, so it drops into a pipeline exactly where
+a test runner would. Exit code
 2 means mathema could not run at all, which is worth keeping distinct
-from a real finding. See [exit codes](index.md#exit-codes).
+from a real finding. See [exit codes](cdd.md#exit-codes).
 
 You do not have to write the workflow yourself:
 `mathema init --ci` scaffolds the GitHub Actions verify gate (or

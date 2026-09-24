@@ -64,8 +64,8 @@ acceptance is where a *person* takes accountability for what to do about
 it. It is integral to the CDD loop, not an add-on: evidence is adjudicated
 by the tool, but the decision to rely on a `holds`, to own a gap, or to
 adopt a corrected claim is a human's, and the record carries whose. You do
-not have to learn the vocabulary first. Run `mathema verify`: every claim
-that can be accepted names the exact command. Or type `mathema accept KEY
+not have to learn the vocabulary first. Run `mathema verify` to see which
+records fail on an unknown or falsified claim, then type `mathema accept KEY
 CLAIM` with no `--as`, and mathema reads the claim's verdict and proposes
 the natural kind (a `holds` is *evidence*, an `unknown` is a *risk*, a
 falsification is a *discovery*), then asks you to confirm. You take the

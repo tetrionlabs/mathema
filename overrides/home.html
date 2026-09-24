@@ -1,0 +1,17 @@
+{% extends "main.html" %}
+
+{% block tabs %}
+  {{ super() }}
+  <section class="mx-hero">
+    <div class="md-grid mx-hero__inner">
+      <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">The verification layer</span><span class="brk r"></span></span>
+      <h1>Know what your code actually guarantees.</h1>
+      <p>AI can write thousands of lines of code in minutes. The hard part is knowing what those lines actually do.</p>
+      <p>mathema turns the behaviour your code claims into machine-checkable evidence, connecting intent, implementation, tests and mathematical proof into one picture of what is known, what is verified, and what remains uncertain.</p>
+      <div class="mx-hero__actions">
+        <a href="{{ 'quickstart/' | url }}#install" class="md-button md-button--primary">Install mathema</a>
+        <a href="{{ 'modes/audit/' | url }}" class="md-button">See an audit</a>
+      </div>
+    </div>
+  </section>
+{% endblock %}

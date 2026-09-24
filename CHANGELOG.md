@@ -14,6 +14,14 @@ dated on the day they are tagged and published.
   and "lemma" reads as established. It also collided with the claim
   sense of the word: a lemma is a named claim another claim rests on
   through an `assuming` premise. `register_raises_when` is unchanged.
+- The `check` and `verify` summary lines name every count by the verdict
+  it counts: `1 proven, 0 holds, 0 falsified`, then `invalidated`,
+  `unknown`, `skipped` and `accepted risk` when present, where they used
+  to read `0 hold, 1 refuted, 1 unverifiable`. An invalidated claim is
+  now reported as invalidated rather than counted as falsified, and
+  strict mode names skipped claims and accepted risk separately. The
+  JSON and MCP fields are unchanged, with `falsified`, `invalidated`,
+  `skipped` and `accepted_risk` added beside them.
 
 ## 0.6.0
 

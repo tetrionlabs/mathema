@@ -46,15 +46,17 @@ summary, and a `--format json` a pipeline can post on the pull request.
 
 ```
 $ mathema review HEAD
-Claim changes since HEAD: 1 function(s), 1 verdict flip(s), 1 added, 0 removed, 1 newly falsified, 0 reconciled.
+Claim changes since HEAD: 1 function(s), 1 verdict flip(s), 1 added, 0 removed, 0 newly falsified, 0 reconciled.
 
 functions.softmax
-    sums_to_one: holds -> falsified  !!
+    sums_to_one: holds -> invalidated  !!
     + bounded
 ```
 
 `sums_to_one` regressed and a new `bounded` claim was declared; the
-reviewer sees exactly that, and nothing else.
+reviewer sees exactly that, and nothing else. A claim that held at the
+base and now has a counterexample is `invalidated`, not newly
+falsified, so the falsified count stays at 0.
 
 ## The record shape it reads
 

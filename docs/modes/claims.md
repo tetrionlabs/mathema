@@ -18,7 +18,7 @@ mathema claims KEY --adopt NAME     # write one into the declared layer
 | `key` | module-qualified function key (`functions.softmax`) |
 | `--suggest` | render the suggested standard claims with laws and exclusivity groups |
 | `--adopt NAME` | write the named suggestion into `claims/adopted.claims.yaml` |
-| `--root` | project root (default `.`) |
+| `--root` | project root (default: the nearest ancestor holding `.mathema/`, else the enclosing git repository, else `.`) |
 | `--format` | `text` (default) or `json`: emit `--suggest`'s rows columnar, matching the MCP `suggest_claims` tool |
 | `--output FILE` | write the report to a file instead of stdout |
 
@@ -43,21 +43,30 @@ not recorded as fact:
 
 ## Worked example
 
+`functions.py` holds the `softmax` from the
+[`check` worked example](check.md#worked-example-softmax-start-to-finish),
+without its `Claims:` block.
+
 ```
 $ mathema claims functions.softmax
 functions.softmax: no declared claims (mathema claims --suggest lists candidates)
 
 $ mathema claims functions.softmax --suggest
-functions.softmax: 2 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
-  - deterministic: f(scores) == f(scores)  [route best]
-  - numerically_stable: g(f, scores) == 1  [route best]
+functions.softmax: 7 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+  - is_deterministic: f(scores) == f(scores)  [route best]
+  - is_state_safe: f(scores) == f(scores)  [route best]
+  - is_numerically_stable: g(f, scores) == 1  [route best]
+  - preserves_length: dim(f(scores), 0) == dim(scores, 0)  [route probe]
+  - is_permutation_of_input: sorted(f(scores)) == sorted(scores)  [route probe]
+  - preserves_type: type(f(scores)) == type(scores)  [route probe]
+  - is_sorted_output: is_sorted_output(f(scores))  [route examine]
 
-$ mathema claims functions.softmax --adopt deterministic
-adopted deterministic into claims/adopted.claims.yaml: f(scores) == f(scores)
+$ mathema claims functions.softmax --adopt is_deterministic --root .
+adopted is_deterministic into ./claims/adopted.claims.yaml: f(scores) == f(scores)
 
 $ mathema claims functions.softmax
 functions.softmax: 1 declared claim(s)
-  - deterministic: f(scores) == f(scores)  [route best]
+  - is_deterministic: f(scores) == f(scores)  [route best]
 ```
 
 The adopted stanza is plain declared-claims YAML, so it's yours to
@@ -66,7 +75,7 @@ edit or delete like anything else in the file:
 ```yaml
 functions.softmax:
   claims:
-  - name: deterministic
+  - name: is_deterministic
     statement: f(scores) == f(scores)
     route: best
     grammar: mathema

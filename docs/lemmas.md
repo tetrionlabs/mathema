@@ -69,6 +69,8 @@ out = {p.name: p for p in check_conjectures(scale, [
     claim("assuming nonneg holds, for x in [0,10], f(x) + 1 > 0",
           name="offset"),
 ])}
+for name, p in out.items():
+    print(f"{name:<8} {p.verdict}")
 ```
 
 Each link is proven, and `offset` is proven on the strength of
@@ -93,6 +95,9 @@ out = {p.name: p for p in check_conjectures(scale, [
     claim("assuming grows is proven and sampled holds, "
           "for x in [0,10], f(x) + 1 > 0", name="rests_on_both"),
 ])}
+for name, p in out.items():
+    cap = p.meta.get("mathema.capped_by")
+    print(f"{name:<14} {p.verdict}" + (f"    capped_by={cap}" if cap else ""))
 ```
 
 ```text
@@ -121,18 +126,19 @@ deliberately strict: the bounds must agree, not merely overlap.
 (p,) = check_conjectures(scale, [
     claim("assuming absent holds, for x in [0,10], f(x) >= 0",
           name="orphan")])
+print(p.name, p.verdict, "|", p.meta["mathema.premise"])
+print("note:", p.note)
 ```
 
 ```text
 orphan unknown | missing-prerequisite
-note: prerequisite 'absent' is not a claim in this batch, nothing to
-rest this claim on
+note: ; prerequisite 'absent' is not a claim in this batch, nothing to rest this claim on
 ```
 
 The other resolution failures report themselves the same way. A name
 matching more than one claim is `ambiguous-reference` rather than being
-quietly bound to the first. A cycle is reported once, naming both
-claims. A premise that mixes a verdict reference with a relation in one
+quietly bound to the first. A cycle skips every claim in it, each
+note naming both claims. A premise that mixes a verdict reference with a relation in one
 clause is refused rather than half-interpreted.
 
 A premise can also reach outside the batch, to another function's

@@ -138,8 +138,8 @@ and the rendered text still round-trips through the parser.
 
 Return `None` for anything you have no opinion about and mathema falls
 back to its own choice, so a provider only needs to know about the
-names it cares about. A provider that fails to import, or raises, is
-skipped with a warning rather than crashing the caller.
+names it cares about. A provider that fails to import is skipped with a
+warning rather than crashing the caller.
 
 ### What mathema will not let you do
 
@@ -149,16 +149,18 @@ this rather than trusting the provider:
 - **It cannot collide.** A symbol already in use, by another parameter
   or by a name already in the claim, is rejected, so a provider can
   never make two things in one claim share a spelling.
-- **It has to survive a parse.** The symbol must be a valid Python
-  identifier *and* stable under NFKC normalisation. That second
-  condition is not pedantry: CPython normalises identifiers at parse
-  time, so `Mₛ` is a legal identifier that comes back as `Ms` once
-  parsed. A symbol like that would appear one way in the law text and
-  another way in the `let` clause, producing a line that reparses into
-  a genuinely different claim with no error raised anywhere.
+- **It has to survive a parse.** CPython normalises identifiers under
+  NFKC at parse time, so `Mₛ` is a legal identifier that comes back as
+  `Ms` once parsed. Written bare, a symbol like that would appear one
+  way in the law text and another way in the `let` clause, producing a
+  line that reparses into a genuinely different claim with no error
+  raised anywhere. So a parameter symbol that is not a valid,
+  NFKC-stable identifier is written backtick-quoted (`` `Mₛ` ``), which
+  reparses exactly, and a function symbol that fails the test is
+  declined, since a function name sits where backticks are not valid.
 
-A symbol that fails either test is declined and mathema uses its own,
-so the worst case for a bad provider is that your notation is ignored.
+A declined symbol falls back to mathema's own, so the worst case for a
+bad provider is that your notation is ignored or shown quoted.
 
 ### Rendering is presentation, never adjudication
 

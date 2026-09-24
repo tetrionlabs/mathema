@@ -1,6 +1,6 @@
 # mathema
 
-*Claim-Driven Development: turn software intent into verifiable evidence.*
+*Know what your code actually guarantees.*
 
 AI has changed the cost of producing code without changing the cost of knowing
 whether that code is correct, and so more of it now arrives than anyone can
@@ -50,7 +50,7 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 ```
 
 ```text
-ok   options.put_call_parity_gap: source, no side effects; claims 1/1 adjudicated (1 proven, 0 hold, 0 refuted)
+ok   options.put_call_parity_gap: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
 ```
 
 Everything before the last comma is the domain and everything after it is the
@@ -63,9 +63,11 @@ establishing the identity for the whole region at once. The
 notation.
 
 The domain is doing real work: drop it and the same claim comes back
-`falsified`, because nothing then stops `sigma` being zero, where `d1` divides
-by zero. A claim without its domain is a different claim, and mathema says so
-rather than assuming the range you had in mind.
+`falsified`, with a counterexample at a negative maturity where `math.sqrt(t)`
+raises, because a claim with no domain covers every real input, including ones
+the function was never meant to take. A claim without its domain is a
+different claim, and mathema says so rather than assuming the range you had in
+mind.
 
 ## Proof is not the same as testing
 
@@ -82,8 +84,13 @@ verdicts apart so you always know which kind of answer you have:
 | `skipped` | no available route could settle it, and the record says so |
 
 The same distinction reaches claims no amount of test-running could establish.
-The logistic function's defining properties include a limit at infinity and an
+Four defining properties of the logistic function include a limit at infinity and an
 improper integral over the whole real line, and all four come back proven:
+
+```python
+def logistic(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+```
 
 ```bash
 mathema check sigmoid.py \
@@ -94,7 +101,7 @@ mathema check sigmoid.py \
 ```
 
 ```text
-ok   sigmoid.logistic: source, no side effects; claims 4/4 adjudicated (4 proven, 0 hold, 0 refuted)
+ok   sigmoid.logistic: source, no side effects; claims 4/4 adjudicated (4 proven, 0 holds, 0 falsified)
 ```
 
 ## When the code is wrong
@@ -120,11 +127,9 @@ mathema.Record(discount_factor) · source, no side effects · form 8b1b8ec14a11
            [mathematics unsound, blame claim]
   proven  is_deterministic: f(x) = f(x)
   FALSIFY is_pole_safe[x]: is_pole_safe(x)
-           counterexample x = 1 is admitted by the declared domain but sits at
-           or beside a pole: the call raised ZeroDivisionError
+           counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
   FALSIFY is_representation_safe[x]: is_representation_safe(x)
-           counterexample x = 1 (the int spelling) is admitted by the declared
-           domain but the call raised ZeroDivisionError
+           counterexample x = 1 (the int spelling) is admitted by the declared domain but the call raised ZeroDivisionError
            [implementation:representation]
 ```
 
@@ -167,19 +172,38 @@ optionally a PIN, with deliberately no `--yes` flag.
 Every verdict binds to the exact code that earned it, through two identity
 hashes: `form`, over the AST structure with names and formatting normalised
 away, and `sig`, over the parameter shape. `mathema.write_spec` writes the
-record as standalone YAML under `.mathema/verified/`, and `mathema verify
---status` later reports each record as fresh or stale against the code as it
-now stands, so a verification result cannot quietly outlive the implementation
-it describes the way a test result does the moment nobody re-runs it. A locked
+record as standalone YAML under `.mathema/verified/`, and `mathema verify`
+later re-checks every record whose function, or a function it depends on, has
+changed since, so a verification result cannot quietly outlive the
+implementation it describes the way a test result does the moment nobody
+re-runs it. A locked
 function fails verification the moment its body changes, though docstring
 edits stay allowed.
 
 mathema is fully offline and no core function makes a network call, so none of
 this sends your source or your claims anywhere.
 
+## Audit a codebase you didn't write
+
+`mathema audit` reads a whole package without running anything and gives every
+function a row: its location as a ready-made `sed -n` line range, its
+branching, whether it carries claims, whether the derive route could prove
+things about it, the state outside its parameters it reads or writes, whether
+a test report covers it, and how well its docstring states its intent. Over
+mathema's own source (`mathema audit mathema --root .`) the summary line is
+honest about where things stand:
+
+```text
+0/1258 claimed, 26/1258 derivable, 26/1258 lift unconditionally, 516/1258 fully typed, 3096/6101 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), 277/1258 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 45%.
+```
+
+`mathema audit --index` writes the same map to `.mathema/index.yaml`, with each
+module's stated intent and every function's file, line and span, which is the
+fastest way to hand an agent a codebase without letting it grep its way around.
+
 ## Beyond tests
 
-| | Unit tests | Property-based testing | Formal verification | mathema |
+| | Unit tests | Property-based testing | Proof assistants and SMT solvers | mathema |
 |---|:-:|:-:|:-:|:-:|
 | Checks the examples you chose | ✓ | ✓ | | ✓ |
 | Checks many generated inputs | | ✓ | | ✓ |
@@ -202,7 +226,7 @@ than folding them into one coverage number. `mathema badges` reports
 implementation (how much code a test, probe or proof actually reached), intent
 (how much of what the docstrings promise is claimed and verified) and clarity
 (how much is known about the behaviour, falsifications included), drawn as a
-triangle whose area is the overall score:
+triangle whose area is the overall score. An illustrative example:
 
 ```text
         CLARITY 44
@@ -225,7 +249,7 @@ triangle whose area is the overall score:
         overall 28
 ```
 
-That example project reaches every line and still leaves most of what it
+That project reaches every line and still leaves most of what it
 promises unpinned, which the area shows as 28 where an average would have
 said 57. The [badges reference](https://mathema.tetrionlabs.com/modes/badges/)
 covers how each score is computed and what to expect of them.
@@ -246,7 +270,7 @@ mathema.check(ema)                                  # built-in algebraic laws
 mathema.check(ema, claims=["f(x, 1.0) == x[-1]"])   # your own claim
 mathema.check(ema, domain={"alpha": (0, 1)})        # probe inside a domain
 mathema.write_spec(ema, claims=[...])               # check, then write the record
-mathema.status()                                    # fresh/stale sweep
+mathema.status()                                    # fresh or stale, per tracked function
 ```
 
 Without anyone reading the code, the first call reports that the result is
@@ -260,7 +284,7 @@ of `x` scales or shifts the result the same way, and that reordering `x` does
 ```bash
 mathema check model.py --domain alpha=0:1 --strict     # exit 1 on failure
 mathema check model.py --format junit --output claims.xml
-mathema verify --status model.py                       # fresh/stale sweep
+mathema verify                                         # re-check what changed
 ```
 
 `--format github` and `--format json` are also available, and worked pipeline
@@ -298,7 +322,7 @@ The full documentation, including the command reference, is at
 **[mathema.tetrionlabs.com](https://mathema.tetrionlabs.com)**.
 
 mathema is at 0.6.0 and pre-1.0, feature-complete for its current scope and
-covered by over 2,000 tests; the claim grammar and record format are settled by
+covered by over 2,500 tests; the claim grammar and record format are settled by
 the spec, but the Python API is likely to change before 1.0.
 
 ## Related projects

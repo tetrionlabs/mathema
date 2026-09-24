@@ -763,7 +763,7 @@ def test_cli_check_ci_gate(tmp_path, capsys):
     from mathema.cli import main
     assert main(["check", str(f)]) == 0                       # lenient: passes
     out = capsys.readouterr().out
-    assert "claims" in out and "refuted" in out
+    assert "claims" in out and "falsified" in out
     # a DECLARED exclusion the code never guards -> a falsified claim
     # -> CI failure (no mode involved)
     assert main(["check", str(f), "--domain", "alpha=0:1",

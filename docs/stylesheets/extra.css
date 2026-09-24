@@ -1,68 +1,160 @@
-/* mathema brand palette (../symbolic_learning/brand_mathema/README.md):
-   ink #1A1714 ground, paper #FAF8F5 one-colour mark, violet #7C5CFF the
-   letter (structure/meaning), amber #F5B301 the brackets (data/evidence).
-   Material's named palette (primary:/accent: indigo, teal, ...) can't
-   express these exact values, so both are set to `custom` in mkdocs.yml
-   and defined here as CSS variables instead, the documented escape
-   hatch for a palette outside Material's own fixed list.
+/* The Tetrion Labs identity mapped onto Material's variables. The raw
+   values live in tokens.css (vendored from the brand repository); this
+   file only says which Material variable takes which token.
 
-   The header bar is ink, not violet: the two-colour mark (violet mu,
-   amber brackets) is the same combination the brand kit's own
-   favicon.svg already puts on an ink ground; a violet *header* would
-   put the violet mu directly on a violet background, with no contrast
-   left to read it by. Violet is used for body-text links/accents
-   instead, where it's never competing with the mark. */
+   The accent pair is split by ground: --accent (#3ECF8E) is legible on
+   ink and nowhere else, --accent-strong (#0E7A47) on paper and nowhere
+   else, so each scheme below takes exactly one of them. The header is
+   ink in both schemes, carrying the paper-coloured mark. */
+
+@font-face {
+  font-family: "Space Grotesk"; font-style: normal; font-weight: 600;
+  font-display: swap; src: url("../assets/fonts/space-grotesk-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 400;
+  font-display: swap; src: url("../assets/fonts/inter-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 500;
+  font-display: swap; src: url("../assets/fonts/inter-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono"; font-style: normal; font-weight: 400;
+  font-display: swap; src: url("../assets/fonts/jetbrains-mono-400.woff2") format("woff2");
+}
 
 :root {
-  --md-primary-fg-color: #1A1714;
-  --md-primary-fg-color--light: #34302A;
-  --md-primary-fg-color--dark: #0E0C0A;
-  --md-primary-bg-color: #FAF8F5;
-  --md-primary-bg-color--light: #FAF8F5CC;
+  --md-text-font: "Inter";
+  --md-code-font: "JetBrains Mono";
 
-  --md-accent-fg-color: #C98F00;
-  --md-accent-fg-color--transparent: #F5B30126;
-  --md-accent-bg-color: #1A1714;
-  --md-accent-bg-color--light: #1A1714;
-
-  --md-default-bg-color: #FAF8F5;
-  --md-typeset-a-color: #6B46E5;
+  --md-primary-fg-color: var(--ink);
+  --md-primary-fg-color--light: var(--ink-2);
+  --md-primary-fg-color--dark: var(--ink);
+  --md-primary-bg-color: var(--paper);
+  --md-primary-bg-color--light: #FAF8F5B3;
 }
 
-/* Material scopes its own light-mode variables to the media query, not
-   just the data-theme attribute the toggle sets, redefining under
-   :root alone works for the default OS-driven case, but an explicit
-   light selection via the toggle needs the same values scoped to
-   [data-md-color-scheme="default"] too, since that's what actually
-   applies once a reader has clicked "switch to light mode". */
+/* light: paper ground, ink type, the strong accent */
 [data-md-color-scheme="default"] {
-  --md-default-bg-color: #FAF8F5;
-  --md-typeset-a-color: #6B46E5;
+  --md-default-bg-color: var(--paper);
+  --md-default-fg-color: var(--ink);
+  --md-default-fg-color--light: var(--graphite);
+  --md-default-fg-color--lighter: var(--mid);
+  --md-default-fg-color--lightest: var(--rule-light);
+  --md-typeset-color: var(--ink);
+  --md-typeset-a-color: var(--accent-strong);
+  --md-accent-fg-color: var(--accent-strong);
+  --md-accent-fg-color--transparent: #0E7A471A;
+  --md-accent-bg-color: var(--paper);
+  --md-code-bg-color: var(--plate);
+  --md-code-fg-color: var(--ink);
 }
 
+/* dark: ink ground, paper type, the bright accent */
 [data-md-color-scheme="slate"] {
-  --md-default-bg-color: #1A1714;
-  --md-default-fg-color: #FAF8F5;
+  --md-default-bg-color: var(--ink);
+  --md-default-bg-color--light: var(--ink-2);
+  --md-default-fg-color: var(--paper);
   --md-default-fg-color--light: #FAF8F5CC;
-  --md-default-fg-color--lighter: #FAF8F566;
-  --md-default-fg-color--lightest: #FAF8F51F;
-  --md-primary-fg-color: #0E0C0A;
-  --md-primary-fg-color--light: #1A1714;
-  --md-primary-fg-color--dark: #000000;
-  --md-accent-fg-color: #F5B301;
-  --md-accent-fg-color--transparent: #F5B30133;
-  --md-typeset-a-color: #B7A3FF;
-  --md-code-bg-color: #24201B;
-  --md-code-fg-color: #FAF8F5;
+  --md-default-fg-color--lighter: var(--dmute);
+  --md-default-fg-color--lightest: var(--line-dark);
+  --md-typeset-color: var(--paper);
+  --md-typeset-a-color: var(--accent);
+  --md-accent-fg-color: var(--accent);
+  --md-accent-fg-color--transparent: #3ECF8E1F;
+  --md-accent-bg-color: var(--ink);
+  --md-code-bg-color: var(--ink-2);
+  --md-code-fg-color: var(--paper);
+  --md-footer-bg-color: var(--ink);
+  --md-footer-bg-color--dark: var(--ink);
 }
 
-/* The mu-and-brackets mark reads at header size (28-32px), between the
-   "full" and "heavy" cut boundary the mark's own README documents
-   (regular above 48px, heavier exactly at 48-64px), nudge its display
-   size up slightly so the brackets don't thin out at nav-logo size,
-   without touching the source SVG itself. */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-header__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
 .md-header__button.md-logo img,
 .md-header__button.md-logo svg {
   height: 1.4rem;
   width: 1.4rem;
 }
+
+/* The bracket eyebrow, `[ label ]`: each bracket is a butt-capped
+   border rather than a glyph, drawn like the strokes of the mark. */
+.brkw { display: inline-flex; align-items: stretch; }
+.brk {
+  width: .38em; border: 2px solid currentColor; flex: none;
+  align-self: stretch;
+}
+.brk.l { border-right: none; }
+.brk.r { border-left: none; }
+.brkw .bin { padding: .06em .5em; white-space: nowrap; }
+.eyebrow {
+  font-family: var(--font-display); font-size: .6rem; font-weight: 600;
+  letter-spacing: .22em; text-transform: uppercase;
+  color: var(--md-accent-fg-color); margin-bottom: 1rem;
+}
+
+/* The home page hero, full width above the Markdown content. It sits
+   on ink in both schemes, so it always takes the dark-ground accent. */
+.mx-hero {
+  background: var(--ink);
+  color: var(--paper);
+  border-bottom: 1px solid var(--line-dark);
+}
+.mx-hero__inner { padding: 4rem .8rem 3.5rem; }
+.mx-hero h1 {
+  font-family: var(--font-display); font-weight: 600;
+  font-size: clamp(1.9rem, 5vw, 3rem); line-height: 1.06;
+  letter-spacing: -0.015em; margin: 0 0 1.2rem; max-width: 18ch;
+  color: var(--paper);
+}
+.mx-hero p {
+  font-size: .95rem; line-height: 1.6; max-width: 38rem;
+  color: #FAF8F5D9; margin: 0 0 1rem;
+}
+.mx-hero .eyebrow { color: var(--accent); }
+.mx-hero__actions { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: 2rem; }
+.mx-hero .md-button { color: var(--paper); border-color: var(--paper); margin: 0; }
+.mx-hero .md-button--primary {
+  background: var(--accent); border-color: var(--accent); color: var(--ink);
+}
+.mx-hero .md-button:hover,
+.mx-hero .md-button:focus {
+  background: var(--accent); border-color: var(--accent); color: var(--ink);
+}
+
+/* Inline diagrams. Every colour comes from a Material variable, so a
+   diagram follows the page into either scheme. */
+.mx-figure { margin: 1.5rem 0 2rem; }
+.mx-diagram { width: 100%; height: auto; max-width: 42rem; display: block; }
+.mx-diagram text {
+  font-family: var(--font-mono); font-size: 13px;
+  fill: var(--md-default-fg-color);
+}
+.mx-diagram .mx-d-rail line {
+  stroke: var(--md-default-fg-color--lighter); stroke-width: 3;
+}
+.mx-diagram rect {
+  fill: var(--md-code-bg-color);
+  stroke: var(--md-default-fg-color--lightest); stroke-width: 1;
+}
+.mx-diagram .mx-d-strong rect { stroke: var(--md-accent-fg-color); stroke-width: 1.5; }
+.mx-diagram .mx-d-verdict { fill: var(--md-accent-fg-color); }
+.mx-diagram .mx-d-weak text { fill: var(--md-default-fg-color--light); }
+.mx-diagram .mx-d-weak .mx-d-verdict { fill: var(--md-default-fg-color--light); }
+.mx-diagram .mx-d-arrow {
+  stroke: var(--md-default-fg-color--lighter); stroke-width: 1.5; fill: none;
+}
+.mx-diagram .mx-d-head { fill: var(--md-default-fg-color--lighter); }
+.mx-diagram .mx-d-caption { font-family: var(--font-body); font-size: 11px;
+  fill: var(--md-default-fg-color--light); }
+
+.md-typeset .mx-actions { display: flex; flex-wrap: wrap; gap: .8rem; margin: 1.5rem 0 1rem; }
+.md-typeset .mx-actions .md-button { margin: 0; }

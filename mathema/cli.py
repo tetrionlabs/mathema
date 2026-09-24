@@ -101,7 +101,11 @@ def _check_rows(args) -> list[dict]:
         rows.append({"name": name, "tier": rec.facts.tier,
                      "identity": {"form": rec.facts.form, "sig": rec.facts.sigh},
                      "proven": proven, "holds": holds, "refuted": report.refuted,
+                     "falsified": report.falsified,
+                     "invalidated": report.invalidated,
                      "unverifiable": report.skipped + report.owned,
+                     "skipped": report.skipped,
+                     "accepted_risk": report.owned,
                      "unknown": report.unknown,
                      "verified": verified, "total": total,
                      "coverage": f"{verified}/{total}" if total else "0/0",
@@ -115,6 +119,7 @@ def _check_rows(args) -> list[dict]:
 def _format_check(rows: list[dict], fmt: str) -> str:
     from . import SPEC_VERSION, __version__
     from .analysis import tier_word
+    from .verify import summary_counts
 
     if fmt == "compact":
         # the adjudication agent shape: stance/source/gates per row,
@@ -162,15 +167,17 @@ def _format_check(rows: list[dict], fmt: str) -> str:
         lines.append(_format_check(rows, "text"))
         return "\n".join(lines)
     if fmt == "md":
-        out = ["| function | tier | claims adjudicated | proven | hold | refuted "
-               "| unknown | unverifiable | status |",
-               "|---|---|---|---|---|---|---|---|---|"]
+        out = ["| function | tier | claims adjudicated | proven | holds "
+               "| falsified | invalidated | unknown | skipped | accepted risk "
+               "| status |",
+               "|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in rows:
             status = "FAIL: " + "; ".join(r["problems"]) if r["problems"] else "ok"
             out.append(f'| `{r["name"]}` | {r["tier"]} | {r["coverage"]} '
-                       f'| {r["proven"]} | {r["holds"]} | {r["refuted"]} '
-                       f'| {r.get("unknown", 0)} | {r["unverifiable"]} | {status} |')
-        out.append(f"\ncdd spec v{SPEC_VERSION}. refutation counts as "
+                       f'| {r["proven"]} | {r["holds"]} | {r["falsified"]} '
+                       f'| {r["invalidated"]} | {r["unknown"]} '
+                       f'| {r["skipped"]} | {r["accepted_risk"]} | {status} |')
+        out.append(f"\ncdd spec v{SPEC_VERSION}. a falsified claim counts as "
                    "knowledge, never as failure.")
         return "\n".join(out)
     # text
@@ -179,12 +186,7 @@ def _format_check(rows: list[dict], fmt: str) -> str:
         state = "FAIL" if r["problems"] else "ok"
         line = (f'{state:4} {r["name"]}: {tier_word(r["tier"])}; '
                 f'claims {r["coverage"]} '
-                'adjudicated ('
-                + (f'{r["proven"]} proven, ' if r["proven"] else "")
-                + f'{r["holds"]} hold, {r["refuted"]} refuted'
-                + (f', {r.get("unknown", 0)} unknown' if r.get("unknown") else "")
-                + (f', {r["unverifiable"]} unverifiable' if r["unverifiable"] else "")
-                + ")")
+                f'adjudicated ({summary_counts(r)})')
         if r["problems"]:
             line += "  <- " + "; ".join(r["problems"])
         lines.append(line)

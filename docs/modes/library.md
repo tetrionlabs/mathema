@@ -20,11 +20,12 @@ mathema.registry.load_claims(path)            # parse an authoring-shape claims 
 
 ## `check(fn, claims=None, domain=None, trials=None, trials_scale=1.0, extensive=False, declared=None, known_premises=None)`
 
-Verify a function's claims: built-in algebraic laws plus any claims
-you pass in, each adjudicated against the real function.
+Verify a function's claims, each adjudicated against the real
+function: mathema's suggested standard claims when `claims` is
+omitted, otherwise the claims you pass in.
 
 ```python
-mathema.check(ema)                                    # built-in laws only
+mathema.check(ema)                                    # suggested claims
 mathema.check(ema, claims=["f(x, 1.0) == x[-1]"])      # add a claim
 mathema.check(ema, domain={"alpha": (0, 1)})           # sample inside a declared domain
 mathema.check(ema, claims=["excluding"], domain={"alpha": (0, 1)})
@@ -45,8 +46,8 @@ automatically. `claims=` passed here is unioned with those, winning per
 claim name on a collision.
 
 With `claims=None` (the default), mathema also adjudicates and
-displays its own *suggested* standard claims (`deterministic` and
-`numerically_stable` in the transcript below are these), candidates
+displays its own *suggested* standard claims (every row in the
+transcript below is one of these), candidates
 for adoption that never gate an exit code and are never written into a
 spec record (see [`mathema claims`](claims.md)). `claims=[]` means
 declared surfaces only: type markers, decorator, and docstring claims
@@ -57,9 +58,32 @@ per claim adjudicated.
 
 ```python
 >>> mathema.check(ema)
-mathema.Record(ema) · tier 2 · form 1dda3a0d5a72
-  holds   deterministic: ema(args) always returns the same value (n=160)
-  holds   numerically_stable: no division by zero, overflow, or NaN on sampled inputs (n=160)
+mathema.Record(ema) · source, no side effects · form 1dda3a0d5a72
+  FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
+           counterexample alpha=1 -> 0.45118195841070374, alpha=3.09918 -> -349.0594689144083 (not increasing)
+  FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
+           counterexample alpha=1e-09 -> 999999.9980000095, alpha=9.71405 -> 75934653.1750601 (not decreasing)
+  FALSIFY affine[alpha]: d(f(x, alpha), alpha, alpha) = 0
+           counterexample alpha=-2.00525, h=0.00401: curvature estimate 18.3289 does not settle affine
+  FALSIFY convex[alpha]: d(f(x, alpha), alpha, alpha) >= 0
+           counterexample alpha=-0.220263, h=0.002: curvature estimate -208.106 does not settle convex
+  FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
+           counterexample alpha=8.52571, h=0.0171: curvature estimate 3.64705e+06 does not settle concave
+  proven  is_deterministic: f(x, alpha) = f(x, alpha)
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
+  proven  is_state_safe: f(x, alpha) = f(x, alpha)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=160)
+  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=12)
+  FALSIFY bounded_lower: min(x) <= f(x, alpha)
+           counterexample ([2.01488, 3.30692, -6.39418, 3.78355, 6.96564, 7.97935], -9.1034): -6.39418363288563 vs -45761.14174665739
+  FALSIFY bounded_upper: f(x, alpha) <= max(x)
+           counterexample ([2.59648, 2.09269], -7.84153): 6.5469484767516235 vs 2.596479621674405
+  FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
+           counterexample ([6.22429, 5.95714, 3.98826, -6.56235, 7.20359, 1.66103, -8.45295], -5.87836): 78066.38231536481 vs -1129152.7241483687
+  proven  scale_equivariant: let g = mathema.f.scale_seq, c*f(x, alpha) = f(g(x, c), alpha)
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
+  proven  translation_equivariant: let g = mathema.f.shift_seq, c + f(x, alpha) = f(g(x, c), alpha)
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
 ```
 
 ## `write_spec(fn, claims=None, root=".", key=None, **kwargs)`

@@ -184,7 +184,7 @@ def test_foreign_grammar_claim_does_not_mask_a_genuine_failure(tmp_path):
 
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout
-    assert "1 unverifiable" in r.stdout
+    assert "1 skipped" in r.stdout
     assert "1 not this grammar (mathema-data)" in r.stdout
 
 

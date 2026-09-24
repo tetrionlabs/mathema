@@ -54,11 +54,39 @@ class GateReport:
     problems: list[str] = field(default_factory=list)
     proven: int = 0
     holds: int = 0
-    refuted: int = 0
+    falsified: int = 0
+    invalidated: int = 0
     unknown: int = 0
     owned: int = 0
     skipped: int = 0
     foreign: list = field(default_factory=list)
+
+    @property
+    def refuted(self) -> int:
+        """The claims a counterexample stands against, `falsified` and
+        `invalidated` together: the `refuted` stance of the claim-row
+        vocabulary."""
+        return self.falsified + self.invalidated
+
+
+def summary_counts(counts) -> str:
+    """Intent:
+        The counts part of a one-line summary, each named by the verdict
+        it counts: proven, holds and falsified always, the rarer states
+        only when present. Takes a `GateReport` or a mapping carrying
+        the same names (`accepted_risk` for the owned unknowns).
+    """
+    get = ((lambda k: counts.get(k, 0)) if isinstance(counts, dict)
+           else (lambda k: getattr(counts, "owned" if k == "accepted_risk"
+                                   else k)))
+    parts = [f"{get('proven')} proven", f"{get('holds')} holds",
+             f"{get('falsified')} falsified"]
+    for key, word in (("invalidated", "invalidated"), ("unknown", "unknown"),
+                      ("skipped", "skipped"),
+                      ("accepted_risk", "accepted risk")):
+        if get(key):
+            parts.append(f"{get(key)} {word}")
+    return ", ".join(parts)
 
 
 def gate(claims, *, strict: bool,
@@ -88,8 +116,10 @@ def gate(claims, *, strict: bool,
             r.proven += 1
         elif kind == "holds":
             r.holds += 1
-        elif kind in ("falsified", "invalidated"):
-            r.refuted += 1
+        elif kind == "falsified":
+            r.falsified += 1
+        elif kind == "invalidated":
+            r.invalidated += 1
         elif kind == "unknown":
             if name in accepted_risk:
                 r.owned += 1
@@ -97,11 +127,13 @@ def gate(claims, *, strict: bool,
                 r.unknown += 1
         elif kind == "skipped":
             r.skipped += 1
-    if r.refuted:
-        # a falsified claim is a failing check, in every mode,
-        # strictness only governs structurally-skipped claims, never
-        # wrong or undecided ones
-        r.problems.append(f"{r.refuted} falsified claim(s)")
+    # a falsified or invalidated claim is a failing check, in every
+    # mode; strictness only governs structurally-skipped claims, never
+    # wrong or undecided ones
+    if r.falsified:
+        r.problems.append(f"{r.falsified} falsified claim(s)")
+    if r.invalidated:
+        r.problems.append(f"{r.invalidated} invalidated claim(s)")
     if r.unknown:
         # an unaccepted unknown is an open epistemic gap: it fails in
         # every mode until it is resolved or a human owns the risk
@@ -110,7 +142,10 @@ def gate(claims, *, strict: bool,
     if strict and (r.skipped or r.owned):
         # accepted risk is visible relaxation, not laundering: lenient
         # proceeds past it, strict still refuses it
-        r.problems.append(f"{r.skipped + r.owned} unverifiable claim(s)")
+        if r.skipped:
+            r.problems.append(f"{r.skipped} skipped claim(s)")
+        if r.owned:
+            r.problems.append(f"{r.owned} accepted-risk claim(s)")
     if unresolved:
         r.problems.append(f"unresolved names: {', '.join(unresolved)}")
     return r
@@ -800,13 +835,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             if report.problems:
                 line += "; " + "; ".join(report.problems)
         else:
-            line = (f"{state:4} {key}: {why}; "
-                    f"{report.proven + report.holds} hold, "
-                    f"{report.refuted} refuted"
-                    + (f", {report.unknown} unknown" if report.unknown else "")
-                    + (f", {report.owned} accepted risk" if report.owned else "")
-                    + (f", {report.skipped} unverifiable" if report.skipped
-                       else ""))
+            line = f"{state:4} {key}: {why}; {summary_counts(report)}"
             if report.foreign:
                 grammars = sorted({_claim_fields(p)[2]
                                    ["mathema.foreign_grammar"]
@@ -824,7 +853,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             "problems": list(report.problems),
             "integrity_mismatch": key in integrity_warned,
             "counts": {"proven": report.proven, "holds": report.holds,
-                       "refuted": report.refuted, "unknown": report.unknown,
+                       "refuted": report.refuted,
+                       "falsified": report.falsified,
+                       "invalidated": report.invalidated,
+                       "unknown": report.unknown,
                        "accepted_risk": report.owned,
                        "skipped": report.skipped,
                        "foreign_grammar": len(report.foreign)},

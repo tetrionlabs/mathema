@@ -19,10 +19,10 @@ path and is the form the record keeps: it survives every store round
 trip, because the path is text.
 
 ```python
-mathema.check(mine, claims=["f(x) == g(x)"], funcs={"g": other})
+mathema.check(mine, claims=[mathema.claims.claim("f(x) == g(x)", funcs={"g": other})])
 ```
 
-`funcs=` binds a live callable at the call site. It adjudicates
+`funcs=` on `claim()` binds a live callable. It adjudicates
 identically, with one honest limit: a live callable has no text
 spelling, so the record keeps the law but not the binding, and a later
 run reconstructing the claim from the record alone cannot re-bind `g`.

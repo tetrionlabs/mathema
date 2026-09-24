@@ -60,23 +60,21 @@ that produced the non-finite value:
 def to_angle(x):
     return numpy.arcsin(x)          # nan for abs(x) > 1
 
-is_compendium_safe(numpy)   ->   falsified   (x = 2.0: output nan ...)
+is_compendium_safe(numpy)   ->   falsified   (-8.76733): output np.float64(nan) is a silent non-finite value from an unguarded numpy call
 ```
 
 Two fixes make it hold, and each supersedes the falsification once
 re-verified:
 
-- a **bound** that excludes the nan region, either as a claim domain,
-  `for x in [-1, 1], is_compendium_safe(numpy)`, or as a marker on the
-  parameter, `x: InRange(-1, 1)`, so the sampler never leaves the safe
-  region;
+- a **bound** that excludes the nan region as a claim domain,
+  `for x in [-1, 1], is_compendium_safe(numpy)`, so the sampler never
+  leaves the safe region;
 - a **guard** that rejects it in the body, `if abs(x) > 1: raise
-  ValueError`, or the `@enforce_domain` decorator, so the covered call
-  is never reached out of range.
+  ValueError`, so the covered call is never reached out of range.
 
 Re-running `mathema verify` after the fix records `holds`, and the new
-verdict supersedes the earlier falsification, which stays retained in
-the record's discoveries as `superseded_by`. The falsification was
+verdict supersedes the earlier falsification, which the record keeps
+as `mathema.previous_verdict: "falsified"` in the claim's meta. The falsification was
 never wrong: it was true of the unguarded code, and remains the reason
 the guard exists.
 

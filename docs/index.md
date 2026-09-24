@@ -1,346 +1,340 @@
-# mathema
+---
+template: home.html
+title: mathema
+hide:
+  - navigation
+  - toc
+---
 
-*Claim-Driven Development: turn software intent into verifiable evidence.*
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">The problem</span><span class="brk r"></span></span>
 
-## The problem this addresses
+## AI made code cheap. Verification didn't.
 
-A test tells you a function behaved correctly on the specific inputs
-the test author thought to write down. A type hint tells you the
-*shapes* of the inputs and outputs line up. Neither tells you *why*
-the function is trusted, in a form that survives the function being
-rewritten, or that a reviewer (human or model) can check against the
-real code in seconds rather than by re-reading the implementation.
+Tests pass. CI is green. The agent says done. But what do you actually know?
 
-Claim-driven development is a small, deliberately spec-first answer
-to that gap: a **claim** is a specific, checkable statement about what
-a function does (`f(-x) == -f(x)`, `min(x) <= f(x) <= max(x)`, `f`
-raises on a shape mismatch), adjudicated against the *real* function,
-not assumed from its signature. The claim, its verdict, and the
-evidence behind that verdict are the durable artifact, not a
-disposable test file that only proves something the day it was
-written. The full specification, including the exact vocabulary and
-the YAML record schema, lives in a sibling repository:
-[claim-driven-development](https://github.com/aaronbyrnephd/claim-driven-development)
-on GitHub. mathema is one implementation of it, in Python.
+Traditional metrics tell you how much code you have. Test coverage tells you
+how much of it you executed. mathema tells you where your knowledge of the code
+ends.
 
-The name is Greek: μάθημα, a thing learned. A function is trusted
-exactly to the extent of its verified claims.
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">The gap</span><span class="brk r"></span></span>
 
-## A first look
+## Passing tests don't tell you what you know
+
+A passing suite says the code did what the tests asked at the inputs the tests
+chose, which is worth a great deal and is still a narrow slice of what anyone
+reviewing the code actually wants to know. It says nothing, on its own, about:
+
+- how the function behaves at the inputs nobody wrote a test for, which
+  mathema samples and, where the mathematics permits, proves over the whole
+  declared domain;
+- the properties that follow from the implementation whether or not anyone
+  intended them, such as symmetry, monotonicity or boundedness, which mathema
+  checks with no claims written at all;
+- the assumptions a result silently relies on, which a claim has to state as
+  a domain or an `assuming` premise before it will check;
+- where the behaviour becomes undefined, such as a pole, a raise or a
+  non-finite result, which mathema looks for deliberately rather than hoping
+  to stumble on;
+- whether the docstring still describes the code, which
+  [`mathema docsync`](modes/docsync.md) reports as drift;
+- whether a change has invalidated something established earlier, including
+  through a function it depends on, which [`mathema verify`](modes/verify.md)
+  catches by re-checking every record whose code or dependencies moved;
+- and what remains unverified, which mathema reports as plainly as what it
+  has proven.
+
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">How it works</span><span class="brk r"></span></span>
+
+## Give your code an evidence layer
+
+You state what a function is meant to do as a claim, a short mathematical
+statement such as `f(-x) == -f(x)`. mathema adjudicates that claim against the
+real function by the strongest route the function's shape allows, and keeps a
+record of what was established, how, and against exactly which version of the
+code.
+
+<div class="mx-figure">
+<svg class="mx-diagram" viewBox="0 0 700 170" role="img" aria-labelledby="pipe-title pipe-desc" xmlns="http://www.w3.org/2000/svg">
+  <title id="pipe-title">The evidence layer</title>
+  <desc id="pipe-desc">Intent becomes claims; claims are checked against the implementation by tests, probes and proofs; the result is an auditable record.</desc>
+  <defs><marker id="pipe-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="mx-d-head"/></marker></defs>
+  <g class="mx-d-rung"><rect x="10" y="55" width="110" height="60" rx="3"/><text x="65" y="90" text-anchor="middle">intent</text></g>
+  <g class="mx-d-rung"><rect x="150" y="55" width="110" height="60" rx="3"/><text x="205" y="90" text-anchor="middle">claims</text></g>
+  <g class="mx-d-rung"><rect x="290" y="10" width="130" height="40" rx="3"/><text x="355" y="35" text-anchor="middle">tests</text></g>
+  <g class="mx-d-rung"><rect x="290" y="65" width="130" height="40" rx="3"/><text x="355" y="90" text-anchor="middle">probes</text></g>
+  <g class="mx-d-rung mx-d-strong"><rect x="290" y="120" width="130" height="40" rx="3"/><text x="355" y="145" text-anchor="middle">proofs</text></g>
+  <g class="mx-d-rung mx-d-strong"><rect x="520" y="55" width="170" height="60" rx="3"/><text x="605" y="84" text-anchor="middle">auditable</text><text x="605" y="102" text-anchor="middle">knowledge</text></g>
+  <g class="mx-d-arrow">
+    <line x1="120" y1="85" x2="146" y2="85" marker-end="url(#pipe-arrow)"/>
+    <line x1="260" y1="85" x2="286" y2="30" marker-end="url(#pipe-arrow)"/>
+    <line x1="260" y1="85" x2="286" y2="85" marker-end="url(#pipe-arrow)"/>
+    <line x1="260" y1="85" x2="286" y2="140" marker-end="url(#pipe-arrow)"/>
+    <line x1="420" y1="30" x2="516" y2="80" marker-end="url(#pipe-arrow)"/>
+    <line x1="420" y1="85" x2="516" y2="85" marker-end="url(#pipe-arrow)"/>
+    <line x1="420" y1="140" x2="516" y2="90" marker-end="url(#pipe-arrow)"/>
+  </g>
+</svg>
+</div>
+
+Tests you already have count toward what is known about each line of code,
+probes run the real function on inputs chosen to find trouble, and proofs
+settle a claim for every input at once where the function can be read as
+mathematics. The record that comes out is plain YAML, bound to a hash of the
+function's structure, so it can be reviewed, diffed and re-checked long after
+the conversation that produced the code has gone.
+
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Strength of evidence</span><span class="brk r"></span></span>
+
+## Evidence isn't binary
+
+A claim that held on a thousand random inputs and a claim that holds on every
+input are different kinds of knowledge, and mathema never lets one pass for the
+other. Every verdict carries the route that reached it:
+
+| Verdict | What it means |
+|---|---|
+| `proven` | settled mathematically, for every input in the declared domain |
+| `holds (n=...)` | survived exactly `n` trials against the real function, with inputs chosen by analysis where possible |
+| `falsified` | a counterexample, found by running the function and kept permanently |
+| `unknown` / `skipped` | not settled, with the reason in the record |
+
+Nothing is asserted and nothing is quietly upgraded. Evidence remains evidence,
+proof remains proof, and an unresolved claim remains unresolved.
+[The evidence ladder](evidence-ladder.md) sets out every rung.
+
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">A worked finding</span><span class="brk r"></span></span>
+
+## See what mathema finds
+
+Here is a midpoint function of the kind that gets written, reviewed and
+merged every day, and the test someone wrote for it:
+
+```python
+def midpoint(a: float, b: float) -> float:
+    """The point halfway between a and b."""
+    return (a + b) // 2
+```
+
+```python
+def test_midpoint():
+    assert midpoint(2, 8) == 5
+    assert midpoint(0, 10) == 5
+```
+
+```text
+1 passed in 0.00s
+```
+
+The developer's claim is that the midpoint lies between its two inputs, which
+is the whole point of a midpoint. mathema checks that claim twice, once over
+the integers the test happened to use and once over the real numbers the type
+hints promise:
 
 ```python
 import mathema
+from mid import midpoint
 
-def ema(x: list, alpha: float) -> float:
-    """Exponentially weighted moving average."""
-    y = x[0]
-    for v in x[1:]:
-        y = alpha * v + (1 - alpha) * y
-    return y
-```
-
-`ema` has a real loop in it. That matters later (see
-[The derive route](derive-route.md)), but not yet: the simplest way to
-use mathema needs nothing special about the function at all.
-
-### Step 1: the built-in laws, no claims stated
-
-```python
-mathema.check(ema)
-```
-
-With no `claims=` argument, mathema still runs the probes every
-function gets (`is_deterministic`, `is_state_safe`,
-`is_numerically_stable`, `is_representation_safe`), plus whichever
-built-in algebraic laws apply to `ema`'s actual shape. Here that means
-one sequence parameter feeding a numeric result, so the bounds,
-`permutation_invariant`, `scale_equivariant` and
-`translation_equivariant` all run too, alongside shape claims over the
-scalar parameter. This is the real, unedited result:
-
-```text
-mathema.Record(ema) · source, no side effects · form 1dda3a0d5a72
-  FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
-           counterexample alpha=1 -> 0.45118195841070374, alpha=3.09918 -> -349.0594689144083 (not increasing)
-  FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
-           counterexample alpha=1e-09 -> 999999.9980000095, alpha=9.71405 -> 75934653.1750601 (not decreasing)
-  FALSIFY affine[alpha]: d(f(x, alpha), alpha, alpha) == 0
-           counterexample alpha=-2.00525, h=0.00401: curvature estimate 18.3289 does not settle affine
-  FALSIFY convex[alpha]: d(f(x, alpha), alpha, alpha) >= 0
-           counterexample alpha=-0.220263, h=0.002: curvature estimate -208.106 does not settle convex
-  FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
-           counterexample alpha=8.52571, h=0.0171: curvature estimate 3.64705e+06 does not settle concave
-  proven  is_deterministic: f(x, alpha) = f(x, alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  proven  is_state_safe: f(x, alpha) = f(x, alpha)
-  holds   is_numerically_stable: g(f, x, alpha) == 1 (n=160)
-  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=12)
-  FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([2.01488, 3.30692, -6.39418, 3.78355, 6.96564, 7.97935], -9.1034): -6.39418363288563 vs -45761.14174665739
-  FALSIFY bounded_upper: f(x, alpha) <= max(x)
-           counterexample ([2.59648, 2.09269], -7.84153): 6.5469484767516235 vs 2.596479621674405
-  FALSIFY permutation_invariant: f(x, alpha) == f(g(x), alpha)
-           counterexample ([6.22429, 5.95714, 3.98826, -6.56235, 7.20359, 1.66103, -8.45295], -5.87836): 78066.38231536481 vs -1129152.7241483687
-  holds   scale_equivariant: c*f(x, alpha) == f(g(x, c), alpha) (n=160)
-  holds   translation_equivariant: f(x, alpha) + c == f(g(x, c), alpha) (n=160)
-```
-
-Every counterexample names the inputs that produced it, so a failure is
-a thing you can paste into a REPL rather than a claim to take on faith.
-Two of these are genuinely informative rather than noise. The bounds
-fail because nothing here constrains `alpha` to `[0, 1]`, and outside
-that range `ema` is not a weighted average at all, which the sampler
-demonstrates at `alpha=-9.1`. `permutation_invariant` fails because
-`ema` is order-sensitive by design, which is what "exponentially
-weighted" means. mathema does not know that is intentional, so it
-reports the counterexample and lets a reader judge it.
-
-Note `is_deterministic` came back `proven`, not `holds`. It did not need
-sampling: the body lifts to a closed symbolic form, and a closed form
-has no state to vary with. `n=160` elsewhere is not a flat constant
-either, it is a trial budget decided once per call from `ema`'s own
-structure (128 by default, more for a structurally riskier function,
-here one loop, so +32). See [mathema check](modes/check.md#the-trial-budget)
-for how that is decided, and `--trials-scale` for turning it down in a
-fast dev loop. Every verdict reports the exact `n` it used, plus a
-`meta["mathema.confidence"]` score capped below the derive route's own,
-since sampling is never proof.
-
-### Step 2: declare a domain
-
-```python
-mathema.check(ema, domain={"alpha": (0, 1)})
-```
-
-Restricting `alpha` to where `ema` is actually meant to be used changes
-the picture, not just the wording:
-
-```text
-  holds     bounded_lower
-  holds     bounded_upper
-  falsified permutation_invariant
-  holds     scale_equivariant
-  holds     translation_equivariant
-```
-
-Both bounds flip to `holds`. Sampled only inside `[0, 1]`, `ema` really
-is bounded by `min(x)` and `max(x)`, and the same code that failed a
-moment ago now passes, because the claim finally says where it applies.
-`permutation_invariant` stays falsified, as it should: narrowing the
-domain does not make an order-sensitive function order-insensitive.
-
-A declared domain is documentation, not enforcement. Whether the code
-itself *rejects* an out-of-domain argument is a separate question, and
-a separate claim you opt into:
-
-```python
-mathema.check(ema, claims=["excluding"], domain={"alpha": (0, 1)})
+print(mathema.check(midpoint, claims=[
+    mathema.claim("for a in [0, 100] subset Z, b in [0, 100] subset Z, "
+                  "min(a, b) <= f(a, b) <= max(a, b)", name="between_integers"),
+    mathema.claim("for a in [0, 100], b in [0, 100], "
+                  "min(a, b) <= f(a, b) <= max(a, b)", name="between_reals"),
+]))
 ```
 
 ```text
-  falsified excluded_outside_domain[alpha]: excluded_outside_domain(alpha)
-            counterexample alpha = -0.5 is outside the declared domain but was accepted (returned -8.497371670908786); the exclusion is asserted, not enforced
+mathema.Record(midpoint) · source, no side effects · form 3f045b3e5b8d
+  proven  between_integers: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) ≤ f(a, b) ≤ max(a, b)
+           for a in [0, 100]:int|missing, b in [0, 100]:int|missing
+  FALSIFY between_reals: for a in [0.0, 100.0]:float|missing, b in [0.0, 100.0]:float|missing, min(a, b) <= f(a, b) <= max(a, b)
+           counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
 ```
 
-`ema` has no guard at all, so this is falsified, and the message says
-exactly what that means: the exclusion is asserted, not enforced. If
-you want the guard rather than the finding, the
-[`enforce_domain` decorator](authoring.md) writes one from the domains
-already declared on the function's claims.
-
-### Step 3: state a claim of your own, on both evidence routes
-
-Every claim is adjudicated on one of two routes. **probe** calls the
-real function on seeded random inputs and reports `holds (n=...)`,
-evidence, not proof. **derive** lifts the function's body to a
-symbolic expression and decides the claim algebraically, reporting
-`proven` when it can. The same claim, checked on both:
+So the test established that the function works at two integer points. mathema
+established that over the integers it is correct everywhere in range, as a
+proof rather than a sample, and that over the reals it is wrong: floor
+division throws away the fraction, so the "midpoint" of 99.9999 and 100 is 99,
+below both of them. Nothing about this bug is exotic, and nothing in the test
+suite could have found it, because the suite only ever asked about integers.
+The fix is one character, and mathema proves it:
 
 ```python
-mathema.check(ema, claims=[
-    mathema.claim("f(x, 1.0) == x[-1]", name="collapses_probed", route="probe"),
-    mathema.claim("f(x, 1.0) == x[-1]", name="collapses_derived", route="derive"),
-])
+def midpoint(a: float, b: float) -> float:
+    """The point halfway between a and b."""
+    return (a + b) / 2
 ```
-
-```text
-mathema.Record(ema) · source, no side effects · form 1dda3a0d5a72
-  ...
-  holds   collapses_probed: f(x, 1.0) == x[-1] (n=128)
-  proven  collapses_derived: f(x, 1.0) = x[-1]
-           ∀ x ∈ Seq(ℝ)
-```
-
-Both say the claim is true, but they are not the same kind of true.
-`collapses_probed` ran `ema` 128 times on seeded random `x` and never
-saw a counterexample: real evidence, but only for the lengths and
-values it happened to sample. `collapses_derived` did not run `ema`
-at all. It lifted the loop to a closed form over the whole sequence,
-every length, every element, and simplified both sides of the claim
-to the same expression internally (`when L = 1: x[0]; otherwise
-1.0*x[L - 1]`, in plain terms rather than raw `sympy` syntax,
-available via `p.sketch` on the returned `Probe`, not printed by
-default). `proven` holds for every `x`, stated explicitly as
-`∀ x ∈ Seq(ℝ)`, not just the ones sampled. That is what "the two sides
-are the same expression" buys over "n samples agreed." The derive
-route can do this here specifically because `ema`'s loop is a linear
-fold, one of the [shapes it
-recognizes](derive-route.md#linear-accumulator-folds). Most loops are
-still not liftable, and probe stays the only route for them.
-
-### Step 4: keep the record
-
-```python
-mathema.write_spec(ema, claims=[...])
-```
-
-writes the full set of results from every call above to
-`.mathema/verified/ema.yaml`, the durable record a **provable codebase**
-keeps instead of trusting the implementation alone:
-
-```yaml
-# machine record; binds to form 1dda3a0d5a72
-ema:
-  name: "ema"
-  signature: "(x: list, alpha: float) -> float"
-  intent: "Exponentially weighted moving average."
-  identity:
-    form: "1dda3a0d5a72"      # rename/format-invariant AST structure
-    sig: "1fb43b08d3e9"       # parameter shape
-    tier: 2
-    pure: true
-    claims_fingerprint: "dc934824ba7a"
-  math: null
-  claims:
-    - name: "bounded"
-      statement: "min(x) ≤ result ≤ max(x)"
-      verdict: "falsified"
-      n: 160
-      counterexample: "x=[-8.09, 7.03, 1.96], alpha=9.22 -> result=-1060.46 < min(x)=-8.09"
-      route: "probe"
-      # note/sketch/condition/meta omitted here for brevity; every claim
-      # carries all five fields, meta included whenever a built-in law
-      # or the derive route has extra evidence to attach
-    - name: "collapses_derived"
-      statement: "f(x, 1.0) == x[-1]"
-      verdict: "proven"
-      n: null
-      counterexample: null
-      route: "derive"
-    # ... one entry per claim above
-  concepts: []
-  references: []
-  reasoning:
-    - step: "refutation"
-      claim: "NOT (min(x) ≤ result ≤ max(x))"
-      basis: "counterexample x=[-8.09, 7.03, 1.96], alpha=9.22 -> result=-1060.46 < min(x)=-8.09"
-    - step: "derivation"
-      claim: "f(x, 1.0) == x[-1]"
-      basis: "when L = 1: x[0]; otherwise x[L - 1] and x[L - 1] simplify identically"
-    # one reasoning step per claim, in plain language: "evidence" for a
-    # probed holds, "refutation" for a falsified claim on either route,
-    # "derivation" for a proven one
-  lineage:
-    generated_by: "mathema 0.5.0"
-    CDD_spec_version: "0.2.0"
-    date: "2026-08-18"
-```
-
-The record binds to `form`, a hash of the function's structure, not
-its text, so a rename or reformat does not invalidate it, but a real
-behavior change does. `mathema.status()` reports which saved records
-have gone stale against the code as it stands now.
-
-## What it does
-
-- **Structural analysis** (pure `ast`, no dependencies): loop shape,
-  purity and effects, parameter kinds, per-parameter domain guards.
-- **Probing**: runs the real function on seeded random inputs and
-  checks built-in algebraic laws (commutativity, idempotence,
-  boundedness, parity, monotonicity, equivariances) plus any claim you
-  state yourself. `holds (n=...)` is evidence, not proof. `n` is a
-  trial budget decided once per call from the function's own
-  structure, never a flat constant, and `falsified` comes with the
-  counterexample, permanently.
-- **Symbolic proof (the derive route)**: lifts a function's body to a
-  symbolic expression and decides a claim algebraically, over several
-  mathematics engines (principally sympy) and mathema's own solving. `proven` is
-  strictly stronger than `holds`: not "n samples agreed," but "the two
-  sides are the same expression." See [The derive route](derive-route.md)
-  for exactly what is liftable.
-- **The conjecture pipeline**: state a claim as one string
-  (`"f(-x) == -f(x)"`) or a `Conjecture`. Laws are validated against a
-  strict AST whitelist before they run, so proposals from an untrusted
-  source (a human in review, or a model) are safe to check. The
-  proposer never adjudicates its own claims.
-- **Identity hashes**: `form` (rename/format-invariant AST structure)
-  and `sig` (parameter shape). Every claim binds to them, so a record
-  cannot silently outlive the code it describes.
-- **The spec store**: `mathema.write_spec(fn, ...)` writes a standalone YAML
-  record to `.mathema/verified/`. `mathema.status()` reports fresh vs.
-  stale against the code as it is now.
-
-## Exit codes
-
-Every verb uses the same four, so a CI step can tell a failing gate
-apart from a broken invocation without parsing output:
-
-| Code | Meaning |
-|---|---|
-| 0 | ran, and nothing gated: claims adjudicated as stated, or the verb only reports |
-| 1 | ran, and the gate failed: a claim is falsified, unknown in strict mode, or a conflict is unresolved |
-| 2 | could not run: a target that does not resolve, an unreadable or malformed file, a bad argument, a missing optional extra |
-| 130 | interrupted (Ctrl-C or EOF) |
-
-The distinction that matters in CI is 1 against 2. A 1 is a real
-finding about your code and the record will say which claim; a 2 means
-mathema never got far enough to have an opinion, so treating the two
-alike hides a broken invocation as a failing test. `--lenient` moves
-accepted risks out of the gate and so can turn a 1 into a 0, but it
-never turns a 2 into either (see [what fails the
-run](modes/verify.md#what-fails-the-run)).
-
-## Where to go next
-
-**New here? Start with the [quick start](quickstart.md)**: five minutes,
-one function, and a claim that goes from falsified to proven.
-
-mathema can be run several different ways depending on what you are
-trying to do. See [Modes of running mathema](modes/library.md) for
-each one, or [CDD in one page](cdd.md) for the shared vocabulary
-(claim verdicts, the two evidence routes) every mode assumes.
-
-## Install
-
-Run these inside an active virtual environment (`python3 -m venv .venv && source
-.venv/bin/activate`, or your usual equivalent) rather than against a system or
-global Python.
 
 ```bash
-pip install -e .              # core: the derive route and the spec store
+mathema check mid.py:midpoint --claim "for a in [0, 100], b in [0, 100], min(a, b) <= f(a, b) <= max(a, b)"
 ```
 
-## Network policy
+```text
+ok   mid.midpoint: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+```
 
-mathema is fully offline. No core function makes a network call.
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">A whole codebase</span><span class="brk r"></span></span>
 
-## The spec
+## The Monday-morning audit
 
-Claim-driven development lays out the guiding principles this package
-implements: the claim tuple, the claim families, and the YAML record
-schema, both the authoring shape and the verified-record shape.
-Anything that reads or writes that shape interoperates with mathema's
-records without importing mathema's Python internals.
-`mathema.SPEC_VERSION` states which version a release targets, and
-every record stamps that value in `lineage.CDD_spec_version`. The
-specification is published under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/); its full vocabulary and
-schema, which this package is checked against:
+`mathema audit` answers the question anyone asks on their first morning with a
+codebase, namely where to start, without running a single test. Every function
+it can find gets a row: where it lives as a ready-made `sed -n` range, how
+branchy it is, whether it carries any claims, whether the derive route could
+prove things about it, what state outside its parameters it reads or writes,
+whether any test report covers it, and how well its docstring states its
+intent. Here is one module of mathema's own source:
 
-- [claim-driven-development](https://github.com/aaronbyrnephd/claim-driven-development):
-  the repository itself, starting with its own README. Each published
-  version has its own directory, holding the three documents mathema is
-  checked against:
-  - `cdd.md`, the core vocabulary (claim, verdict, evidence route).
-  - `claim-anatomy.md`, what a claim is made of.
-  - `record-schema.md`, the exact shape of the YAML record shown in
-    step 4 above.
+```bash
+mathema audit mathema.locks --root .
+```
+
+```text
+                          ||              || derive route                                                                     || typing                || globals                                              ||           || docs    ||
+key            | span     || claims       || derives | cx | reason                             | code                         || typed | finite_domain || vars | mutates | funcs                               || tested    || quality || docsync
+mathema.locks
+ ._write_locks | 58:66p   || {6 | 0 | -}  || no      | 1  | uses unsupported expression syntax | unsupported:unsupported-call || yes   | -             || -    | -       | locks_path                          || no-report || 0/3     || 50%
+ .load_locks   | 45:55p   || {5 | 0 | -}  || no      | 2  | 1 branch                           | branch:unrecognized-shape    || yes   | -             || -    | -       | locks_path                          || no-report || 2/3     || 50%
+ .lock         | 69:90p   || {13 | 0 | -} || no      | 5  | 4 branches                         | branch:bare-local-name+1     || yes   | -             || -    | -       | load_locks, LockError, _write_locks || no-report || 4/9     || 40%
+ .lock_state   | 105:120p || {9 | 0 | -}  || no      | 3  | 2 branches                         | branch:untraceable-local+1   || yes   | -             || -    | -       | -                                   || no-report || 3/7     || 92%
+ .locks_path   | 38:42p   || {5 | 0 | -}  || no      | 1  | uses unsupported expression syntax | unsupported:unsupported-call || yes   | -             || -    | -       | -                                   || no-report || 2/3     || 44%
+ .unlock       | 93:102p  || {7 | 0 | -}  || no      | 2  | 1 branch                           | branch:two-names-compare     || yes   | -             || -    | -       | load_locks, LockError, _write_locks || no-report || 3/6     || 40%
+
+0/6 claimed, 0/6 derivable, 0/6 lift unconditionally, 6/6 fully typed, 14/31 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), mean docsync 53%.
+```
+
+`sed -n 69,90p mathema/locks.py` prints `lock` and nothing else, which is what
+makes the table useful to an agent as much as to a person: it can go from
+"where is the function that writes the lock file" to the exact lines in one
+step. `mathema audit --index` writes the same map for a whole codebase to
+`.mathema/index.yaml`, with each module's stated intent, every function's
+file, line and span, and a pointer to its verified record where one exists.
+
+Run over all of mathema, the summary line reads:
+
+```text
+0/1258 claimed, 26/1258 derivable, 26/1258 lift unconditionally, 516/1258 fully typed, 3096/6101 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), 277/1258 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 45%.
+```
+
+Those are unflattering numbers, and they are the point: not one of mathema's
+own 1,258 functions carries a claim yet, only 26 are in a shape the derive
+route can prove things about, and 277 depend on state outside their own
+parameters. A report like that is where verification work starts, because it
+says exactly where the knowledge ends.
+
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Honest numbers</span><span class="brk r"></span></span>
+
+## Built with its own tools
+
+mathema's own source is 52,875 lines of Python in 92 files (counted
+with `find mathema -name '*.py' | xargs cat | wc -l`), exercised by 2,644
+tests (`python -m pytest --collect-only -q`). The suite also parses every claim
+shown anywhere in these docs, so a page cannot drift out of the grammar
+unnoticed, and the claims the README and the grammar page teach are drawn from
+a curated lexicon of 135 that it renders and adjudicates on every run.
+
+What mathema does not yet do is carry claims about its own functions, as the
+audit above shows. Turning its own tools on itself, so that the engine's
+claims live in its own record store and gate its own changes, is planned work
+rather than a present fact, and this page will say so until it is done.
+
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Agents and people</span><span class="brk r"></span></span>
+
+## Let AI write the code. Don't let it define what correct means.
+
+A claim outlives the implementation it describes: when an agent rewrites a
+function, the claims about it are re-checked against the new code, and if one
+breaks you know which, where and with what counterexample. Where behaviour
+cannot be established, mathema says where it stopped rather than guessing.
+
+What an agent may not do is decide what counts as correct. No tool mathema
+exposes to an agent accepts a verdict from its caller, and the decisions that
+turn a verdict into an accepted fact about your codebase, accepting evidence as
+sufficient, owning a residual risk, or declaring that a falsification revealed
+a wrong claim rather than a bug, go through [`mathema accept`](modes/accept.md),
+which is a person at a terminal. With a [PIN set](modes/pin.md), every such
+decision is stamped in the record as having been made by someone who knew it,
+which an agent does not.
+
+Settled code can be frozen at the level that matters, the individual function.
+[`mathema lock`](modes/lock.md) pins a function's structure, after which any
+change to its body fails the sweep, while docstring edits and every other
+function in the file stay free:
+
+```bash
+mathema lock pricing.discounted
+```
+
+```text
+locked pricing.discounted at form 3c02ba9abd15
+the body can no longer change under a CDD loop; docstring edits are unaffected. A human unlocks with: mathema unlock pricing.discounted
+```
+
+and after someone changes `1 - rate` to `1 + rate`:
+
+```text
+FAIL pricing.discounted: locked at form 3c02ba9abd15 but the code is now 1e43fc87752e; the record is unchanged. Restore the function, or a human runs: mathema unlock pricing.discounted
+```
+
+An agent is allowed to lock a function it has finished, which narrows what it
+can break on its next pass. Only a person can unlock one, behind a prompt with
+no `--yes` flag and, when set, the PIN.
+
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Who it's for</span><span class="brk r"></span></span>
+
+## One engine, several jobs
+
+- **If you work alongside a coding agent**, mathema is the part of the loop the
+  agent cannot talk its way past: it states claims, mathema checks them, you
+  accept or reject, and the functions you have signed off stay locked. The
+  [MCP interface](modes/mcp.md) gives the agent the checking tools and none of
+  the deciding ones.
+- **If you have just inherited a codebase**, [`mathema audit`](modes/audit.md)
+  is the first hour of reading done for you: every function, where it lives as
+  a ready-made `sed -n` line range, what it touches, whether anything tests or
+  claims it, and whether it could be proven, with `--index` writing the whole
+  map to a file you can keep.
+- **If you write numerical or financial code**, the derive route proves
+  identities, bounds, derivatives, limits and integrals about ordinary Python
+  functions, and the probe route goes looking for poles, overflow and
+  non-finite results where random testing would not.
+- **If you run CI**, [`mathema verify`](modes/verify.md) gates the whole
+  store and re-checks only what changed, [`mathema check`](modes/check.md)
+  speaks JUnit and GitHub annotations, and the exit codes keep a failing claim
+  apart from a broken invocation.
+- **If you review changes**, [`mathema review`](modes/review.md) shows the
+  claim-level difference since any git ref: which verdicts flipped, which
+  claims appeared or went away.
+- **If you answer to an auditor**, every acceptance, unlock and lock is in the
+  record with who made it and when, PIN-stamped when a PIN is set.
+
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Direction</span><span class="brk r"></span></span>
+
+## Where this goes
+
+!!! note "Direction, not current capability"
+    This section describes where mathema is heading. Nothing in it should be
+    read as a feature of the current release beyond what the linked pages
+    document.
+
+Evidence is earned about one implementation, and the natural next step is
+letting it travel. Today, [claims transfer](claims-transfer.md) carries
+evidence in from curated knowledge about the libraries your code calls, across
+between implementations shown to be equivalent, and out as a compendium others
+can consume. The direction is to make that routine across languages, so the
+claims written once about a pricing function hold the Python prototype and the
+production port to the same statement, and to connect claims upward to the
+policies and requirements they exist to satisfy, so that a line of code can be
+traced to the reason it has to behave the way it does.
+
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Start</span><span class="brk r"></span></span>
+
+## Stop measuring how much code you have. Measure how much you know about it.
+
+```bash
+pip install mathema
+```
+
+<p class="mx-actions">
+  <a href="install/" class="md-button md-button--primary">Install</a>
+  <a href="quickstart/" class="md-button">Read the quickstart</a>
+</p>

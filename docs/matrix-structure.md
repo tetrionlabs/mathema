@@ -21,7 +21,7 @@ The claim kinds form a hierarchy, cheapest first:
 
 A structure is a marker in the parameter's type, alongside its shape.
 The canonical spelling is an `Annotated` hint; `Mat(...)` is the sugar
-that produces the identical annotation:
+that produces an equivalent annotation:
 
 ```python
 from typing import Annotated
@@ -30,7 +30,7 @@ from mathema.types import Mat, Shape, Symmetric, PositiveDefinite
 # canonical
 def f(A: Annotated[list, Shape("n", "n"), Symmetric]): ...
 
-# sugar (identical annotation)
+# sugar (equivalent annotation)
 def g(A: Mat("n", "n", Symmetric)): ...
 ```
 
@@ -170,7 +170,7 @@ statement.
 @enforce_structure()
 def cholesky(A: Annotated[list, Shape("n", "n"), PositiveDefinite]): ...
 
-cholesky(non_pd_matrix)   # ValueError: A is not positive_definite
+cholesky(non_pd_matrix)   # ValueError: cholesky: A is not is_positive_definite (positive definite)
 ```
 
 A property the registry cannot decide (a spectral check with no numpy)
@@ -181,7 +181,7 @@ is skipped, never a false rejection.
 The matrix vocabulary renders through sympy's matrix printing, produced
 on demand from the canonical claim rather than stored: `A.T` as `A^{T}`,
 `det(A)` as `|A|`, a product as juxtaposition, `x.T @ A @ x` as
-`x^{\top} A x`. Nothing per-claim is kept in the record; the canonical
+`x^{T} A x`. Nothing per-claim is kept in the record; the canonical
 statement is the source, and `grammar.to_latex` renders it.
 
 ## Limits
