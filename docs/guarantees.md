@@ -34,7 +34,13 @@ them fails the claim, the result is `falsified` with that executed
 witness, recorded as `mathema.corroboration: "reproduced"`. If none do,
 the result is `unknown` with `mathema.corroboration: "uncorroborated"`,
 since an algebraic disproof that the code never exhibits more likely
-points at a fault in the engine than in the code. A falsification is
+points at a fault in the engine than in the code. A safety predicate's
+structural disproof follows the same rule. A pole inside the declared
+domain (`is_pole_safe`, `is_numerically_stable`), or a raising guard on
+a missing value the domain admits (`is_missing_safe`), is checked by
+calling the function at the point the structure names. A raise there,
+or a non-finite result at a pole, is the witness; a call that behaves
+leaves the disproof uncorroborated. A falsification is
 therefore equally strong whichever route found it, because it always
 rests on the same thing, the real function failing at a real input.
 
