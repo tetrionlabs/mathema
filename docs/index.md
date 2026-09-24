@@ -193,6 +193,10 @@ mathema check mid.py:midpoint --claim "for a in [0, 100], b in [0, 100], min(a, 
 ok   mid.midpoint: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 ```
 
+One claim, two rows: the proof, and its `[float]` companion, which runs the
+proven claim through the real code in floating point at the region's corners
+and at sampled points inside it, and holds.
+
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">A whole codebase</span><span class="brk r"></span></span>
 
 ## The Monday-morning audit
@@ -420,7 +424,9 @@ ok   options.put_call_parity_gap: source, no side effects; claims 2/2 adjudicate
 
 `proven`, over every point of a five-dimensional region of prices, rates,
 maturities and volatilities: mathema read the body as mathematics, both
-Gaussian terms cancelled, and `sigma` disappeared. No number of test cases
+Gaussian terms cancelled, and `sigma` disappeared. The `holds` is the proof's
+float companion, the same identity run through the real code in floating
+point. No number of test cases
 could establish that. The [case studies](case-studies.md#put-call-parity-and-the-greeks)
 go on to the Greeks, stated as the partial derivatives they are.
 
