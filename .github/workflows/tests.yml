@@ -2,15 +2,13 @@ name: tests
 
 on:
   push:
-    branches: [main]
-    # A prose or repo-metadata change cannot break the suite, and the
-    # suite is slow. Documentation-only pushes are handled by
-    # docs-check.yml instead, which builds the site in about a minute.
+    branches: [main, develop]
     # Keep this list to files that CANNOT affect a test outcome: a
-    # skipped run is a commit with no verdict.
+    # skipped run is a commit with no verdict. Documentation is not on
+    # it: the suite runs every documented example and compares its
+    # output (tests/test_docs_outputs.py), so a page edit can break a
+    # test. The site build itself is docs-check.yml's job.
     paths-ignore: &docs-paths
-      - "docs/**"
-      - "**.md"
       - "mkdocs.yml"
       - "LICENSE.md"
       - "NOTICE"

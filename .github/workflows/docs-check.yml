@@ -6,7 +6,7 @@ name: docs-check
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths: &docs-paths
       - "docs/**"
       - "**.md"
