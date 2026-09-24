@@ -60,7 +60,8 @@ A result that holds on a thousand random inputs and a result that holds for
 every input are different kinds of knowledge, and a report that blurs them is
 telling you what you want to hear. So every verdict carries its route, a
 `holds` always carries its trial count, a derive attempt that cannot close
-says `unknown` or `skipped` rather than falling back silently, and a symbolic
+hands the claim to the probe route with the reason it stopped kept in the
+record (a sampled `holds` never passes itself off as a proof), and a symbolic
 disproof that nothing can reproduce against the real function comes back
 `unknown` and flagged instead of `falsified`, since it more likely points at
 a fault in the engine than in your code.

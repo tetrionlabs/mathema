@@ -9,6 +9,13 @@ human act, never exposed to agent tooling or any MCP surface.
 mathema accept KEY CLAIM --as evidence|risk|discovery [--by NAME] [--note TEXT]
 ```
 
+Three acceptances cover the everyday loop (`evidence`, `risk`,
+`discovery`). Four more handle record housekeeping, each with its own
+section below: `historical` and `superseded` retire a claim with its
+history intact, `reconciled` restamps a record after a merge or rebase,
+and `trusted` records testimony from a source you vouch for. `--intent`
+and `--concepts` accept the function's stated intent and concept tags.
+
 ## Arguments
 
 | Flag | Meaning |
@@ -23,7 +30,7 @@ mathema accept KEY CLAIM --as evidence|risk|discovery [--by NAME] [--note TEXT]
 | `--format` | `text` (default) or `json`: emit the acceptance as data. Without `--yes` this is a preview that writes nothing; JSON mode never prompts |
 | `--output FILE` | write the report to a file instead of stdout |
 
-## The three acceptances
+## The three everyday acceptances
 
 - **`--as evidence`**: a `holds` verdict has enough empirical support
   for your purposes. The record keeps the acceptance alongside the

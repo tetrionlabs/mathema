@@ -13,12 +13,18 @@ clang++ -O2 -shared -o libema.dylib ema.cpp   # macOS
 python shim.py
 ```
 
-Expected output (counts vary with the sampler):
+Output (the two warnings go to stderr, shown here trimmed):
 
-```
+```text
+StateDependenceWarning: mathema: ema_cpp inherits from global scope: _lib; behavior depends on state outside the function
+StateDependenceWarning: mathema: ema_cpp inherits from global scope: _lib; behavior depends on state outside the function
 verdict: holds  route: probe
 note:    96 executed shared points agree within tolerance (sampling, never proof)
 ```
+
+The 96 is the equivalence ladder's fixed budget of shared, seeded
+draws, every one of which executed on both sides and agreed; see
+[the ladder](../../docs/multi-function-claims.md).
 
 ## Read the result honestly
 

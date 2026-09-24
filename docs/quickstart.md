@@ -160,8 +160,9 @@ mathema verify
 ```
 
 `verify` re-adjudicates every recorded function whose form hash moved,
-and exits 1 if a claim is falsified or unknown, or (in strict mode)
-skipped or accepted as risk, so it drops into a pipeline exactly where
+and exits 1 if a claim is falsified, unknown, skipped, or accepted as
+risk (`--lenient` lets the last two through, named in the report), so
+it drops into a pipeline exactly where
 a test runner would. Exit code
 2 means mathema could not run at all, which is worth keeping distinct
 from a real finding. See [exit codes](cdd.md#exit-codes).

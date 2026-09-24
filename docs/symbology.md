@@ -22,9 +22,8 @@ rather than a display step bolted on the end.
 The grammar has two equivalent output spellings, Unicode and ASCII:
 
 ```python
-from mathema.conjecture import claim
+from mathema import claim, set_unicode_output
 from mathema.spec import render_claim_text
-from mathema._render_mode import set_unicode_output
 
 c = claim("for theta in [0, 1], acceleration in [0, 100], f(theta, acceleration) >= 0")
 

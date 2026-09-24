@@ -639,16 +639,15 @@ def claim(law: str, name: str | None = None, source: str = "user",
     Spellings are normalized by grammar.py (^ is power, = reads as ==,
     Unicode ≤ ≥ − · × π accepted), so equivalent spellings are the same
     statement. Accepted relations: ==, <=, >=, plus the raises(...)
-    predicate (declared-schema.md, "Domain is a claim field") and the
-    family-derive-only `is_pole_safe(param)`/`is_builtin_safe(param)`
+    predicate and the family-derive-only `is_pole_safe(param)`/`is_builtin_safe(param)`
     predicates (no `f(...)` wrapper; these are facts about param's own
-    declared domain, not fn's return value). `route` defaults to "probe"
-    (seeded sampling, verdict `holds`/`falsified`); "derive" asks for a
-    symbolic proof instead (verdict `proven`/`falsified`, or `skipped`
-    when the function or claim can't be lifted to a closed form; see
-    symbolic.py); "best" cascades, the fast proof attempt, then the
-    extensive strategy ladder, then probing, and the output record
-    names whichever route actually settled it ("auto" is retired, not a
+    declared domain, not fn's return value). `route` defaults to "best",
+    which cascades: the fast proof attempt, then the extensive strategy
+    ladder, then probing, and the output record names whichever route
+    actually settled it. "derive" makes the fast proof attempt only; a
+    claim it cannot decide still falls through to probing, with the
+    derive attempt's status kept in `meta["mathema.derive_status"]`.
+    "probe" samples only (seeded, verdict `holds`/`falsified`) ("auto" is retired, not a
     legacy spelling of "best"). the safety predicates always adjudicate on the examine route
     regardless of the route passed in. A
     leading `let name = expr, ...` (see grammar.extract_let_bindings)

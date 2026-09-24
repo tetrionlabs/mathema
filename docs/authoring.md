@@ -309,9 +309,9 @@ to also consider a fold/dot/sum-lifted function, not just a directly
 liftable one. This can make a partially-liftable function's own
 sampling genuinely hybrid, part real symbolic resolution, part
 empirical, not just the same analysis run slower. Off by default
-everywhere; a real function-form-keyed cache
-(`diagnostics._cached_critical_points`) means the cost, when paid, is
-paid at most once per distinct function shape per process.
+everywhere; results are cached by the function's form, so the cost,
+when paid, is paid at most once per distinct function shape per
+process.
 
 On the derive route, extensive is a strategy ladder, not just a wider
 budget: exact real-root isolation (Sturm), adaptive interval
