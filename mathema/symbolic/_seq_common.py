@@ -587,9 +587,7 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     domain = dict(domain or {})
     if view.other_params:
         # the claim's own quantifier wins; the signature's
-        # Probability/Positive/Nonnegative markers fill any parameter it
-        # left unbounded (the docstring `Domain:` block used to sit here
-        # too and was removed; 0 real uses across the corpus)
+        # bound markers fill any parameter it left unbounded
         from ..types import domain_from_signature
         for name, bound in domain_from_signature(fn).items():
             if name in view.other_params:

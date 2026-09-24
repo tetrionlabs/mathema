@@ -244,8 +244,8 @@ def _try_derive_lift(fn, facts, extra_domain: dict | None = None):
     not verify anything about it. `lift_conditioned()` is only attempted
     when the function actually branches (mirrors `lift()`'s own
     branch-free precondition) and a domain can be found at all (the
-    same two sources `types.domain_from_signature()`/the docstring's own
-    `Domain:` block already merge elsewhere), with no domain, a
+    signature's bound markers, `types.domain_from_signature()`, topped
+    up by the caller's `extra_domain`), with no domain, a
     branchy function has nothing for `lift_conditioned()` to prune
     against, so trying it would only ever return `None` anyway. Returns
     the bare `sympy.Expr`, or `None` if nothing in the chain resolves."""

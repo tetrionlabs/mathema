@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The strict mathema-docstring schema: Intent:/Domain:/Claims: parsing,
+"""The strict mathema-docstring schema: Intent:/Claims: parsing,
 symbol coverage, and the verified-record write-back helper."""
 import importlib.util
 import sys
@@ -228,11 +228,9 @@ def test_docstring_sync_no_domain_declared_is_not_applicable(tmp_path):
 
 def test_docstring_sync_type_coverage_params_and_return(tmp_path):
     # the typing system is the one place a type belongs: a parameter
-    # counts as typed via its annotation (Annotated included) or a
-    # Domain: entry; the return via its annotation. There is no
-    # docstring Types: block any more, and loop-variable typing is not
-    # a scored dimension (a fold accumulator's range enters through
-    # Domain:, which symbol coverage already encourages).
+    # counts as typed via its annotation (Annotated included), the
+    # return via its annotation. A docstring `Domain:` block is not
+    # read, and loop-variable typing is not a scored dimension.
     mod = _import_module(tmp_path, "sync_typed_mod", (
         "def f(x: float, y) -> float:\n"
         "    \"\"\"Sums a sequence of values.\n"
@@ -248,9 +246,8 @@ def test_docstring_sync_type_coverage_params_and_return(tmp_path):
     ))
     s = docstring_sync(mod.f, root=str(tmp_path))
     assert s.params_typeable == 2
-    # only the real annotation counts now: a `Domain:` entry used to
-    # be credited as typing, and that block is gone; it was a
-    # domain statement, never a type
+    # only the real annotation counts: the `Domain:` entry for y is
+    # ignored
     assert s.params_typed == 1
     assert not hasattr(s, "internal_vars_typeable")
     assert s.return_typed is True

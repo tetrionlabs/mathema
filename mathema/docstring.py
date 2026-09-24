@@ -6,27 +6,23 @@ convention (alongside the loose best-practice checklist
 becomes the complete authoring surface for intent, domain, and claims,
 no separate YAML file or decorator required.
 
-    def ema(x: list, alpha: float) -> float:
+    def ema(x: list,
+            alpha: Annotated[float, InRange(0, 1, (False, True))]) -> float:
         # Exponentially weighted moving average.
         #
         # Intent:
         #     Blends each new value with the running mean.
         #
-        # Domain:
-        #     alpha: (0, 1]
-        #
         # Claims:
         #     bounded: for x in [0, 1], f(x) <= 1
         ...
 
-`Claims:` is unchanged, see `authoring.parse_docstring_claims()`. Scalar
-and shape typing lives in the signature's `Annotated` hints; see
-`types.py`; `domain_from_signature()` already
-merges it into `check()`'s domain resolution, so it needs no separate
-wiring here. `Domain:` is for a bound that isn't one of the established
-markers, most commonly a fold's own accumulator/item name, which is
-never a signature parameter at all (see `symbolic.try_prove_fold()`'s use
-of it).
+`Claims:` is unchanged, see `authoring.parse_docstring_claims()`. The
+docstring carries no domain block of its own. A parameter's domain
+comes from the signature's `Annotated` bound markers (`types.py`;
+`domain_from_signature()` merges them into `check()`'s domain
+resolution), from the bounds a claim quantifies over (`for x in [0,
+1]`), and from `domain=` passed to `check()`/`write_spec()`.
 
 Symbol coverage (every real parameter and every loop/comprehension bind
 target named somewhere in the docstring) exists to feed the derive route,
@@ -50,9 +46,6 @@ from .authoring import parse_docstring_claims
 
 _INTENT_HEADER = "intent:"
 _CLAIMS_HEADER = "claims:"
-
-_DOMAIN_LINE = re.compile(r"^\s*(?P<name>[A-Za-z_]\w*)\s*:\s*(?P<expr>.+?)\s*$")
-
 
 def _parse_intent(doc: str) -> tuple[str | None, list[str]]:
     """The `Intent:` block's prose, joined into one string, or `None` if
@@ -99,10 +92,7 @@ def _required_symbols(facts) -> set[str]:
 @dataclass
 class MathemaDocstring:
     """The result of parsing a function's docstring against the strict
-    mathema-docstring schema. `domain` is the `Domain:` block's own
-    contribution only (established `Types:` markers are a separate
-    concern, see `types.py`, already merged into
-    `domain_from_signature()`). `score`/`applicable` follow the same
+    mathema-docstring schema. `score`/`applicable` follow the same
     "N/M" pattern `inventory.docstring_quality()` uses. `conforms` is
     `True` only when there are zero structural `errors` and every
     applicable criterion is met; a low score with no errors just means
@@ -143,7 +133,7 @@ def _claim_stated_domain(parsed) -> dict:
 
 def parse_mathema_docstring(fn) -> MathemaDocstring:
     """Parse `fn`'s docstring against the strict mathema-docstring schema:
-    `Intent:`, `Domain:`, `Claims:`, plus symbol coverage. Never raises,
+    `Intent:`, `Claims:`, plus symbol coverage. Never raises,
     an unparseable docstring just scores low and lists why in `errors`."""
     import warnings
 
@@ -354,14 +344,9 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
         applicable += 1
         score += int(intent_concise)
 
-    # Where a domain is actually stated: a claim's own quantifier. The
-    # docstring `Domain:` block used to sit here too and was removed;
-    # measured at 0 real uses across a 313-file corpus, against 96% of
-    # claims carrying an inline quantifier, and it was a second,
-    # never-adjudicated declaration that could silently disagree with
-    # the claims beneath it. The signature markers remain, though they
-    # are only three sentinels (Probability/Positive/Nonnegative) with
-    # fixed intervals.
+    # Where a domain is stated: the signature's bound markers, and the
+    # bounds the docstring's own claims quantify over (a claim's
+    # bound wins where both name a parameter).
     merged_domain = {**domain_from_signature(fn), **_claim_stated_domain(parsed)}
 
     # --- raises: claim-first (raises(f(x), ExcType)), prose fallback,
@@ -384,8 +369,9 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
         applicable += raises_total
         score += raises_covered
 
-    # --- domain: declared (signature markers ∪ docstring Domain:) and,
-    # only when something is, actually enforced at runtime -----------------
+    # --- domain: declared (signature markers ∪ the claims' own
+    # quantified bounds) and, only when something is, actually enforced
+    # at runtime ---------------------------------------------------------
     scalar_params = [p for p in real_params
                      if facts is not None and facts.param_kinds.get(p) in ("scalar", "int")]
     domain_declarable = len(scalar_params)
@@ -733,9 +719,7 @@ def render_docstring(fn, root: str = ".") -> str:
     from its verified spec record (`.mathema/verified/<key>.yaml`), only
     claims that actually `held`/were `proven` are written back, each
     tagged `[derive]` when the verdict came from the derive route.
-    `Domain:` is left untouched: it's an authoring input mathema reads,
-    never an adjudicated output the verified record stores, so there's
-    nothing to write back for it. Returns text only, never writes to
+    Every other block is left as written. Returns text only, never writes to
     the `.py` file; raises `ValueError` if no verified record exists yet
     (run `mathema.write_spec(fn)` first)."""
     from .authoring import _fn_key

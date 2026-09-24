@@ -11,10 +11,10 @@ stating a preference gets this one. Seeded from the `MATHEMA_UNICODE`
 environment variable at import time (`0`/`false`/`False`/empty means
 ascii, anything else; including unset; means unicode, the default
 either way), then freely changeable at runtime via
-`set_unicode_output()`. `render_domain_bound()` deliberately does not
-read this; its own `ascii_mode=True` is fixed, for a specific
-always-hand-typed surface (the docstring `Domain:` block), not this
-general preference.
+`set_unicode_output()`. `render_domain_bound()` does not read this:
+its `ascii_mode=True` is fixed, for the hand-editable surfaces it
+renders (a spec's `let <name> be <bound>` lines, a diagnostic's
+`declared:` bound), not this general preference.
 """
 from __future__ import annotations
 

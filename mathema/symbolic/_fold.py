@@ -759,7 +759,7 @@ def try_prove_fold(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     lift the body at all. The proof attempt itself is
     `_seq_common.try_prove_seq`, shared with the dot-product and
     general-sum shapes: domain assumptions on the fold's own scalar
-    parameters (claim domain topped up by the docstring `Domain:` block)
+    parameters (claim domain topped up by the signature's bound markers)
     are what let a claim about the fold's coefficients (e.g. a
     sign-dependent bound) resolve when sympy would otherwise have no
     idea whether a scalar parameter like an EMA's `alpha` is positive."""

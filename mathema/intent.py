@@ -36,15 +36,14 @@ KEYWORDS: dict[str, str] = {
 }
 
 _SECTION = re.compile(r"^(\w[\w ]*)\n\s*-{3,}\s*$", re.M)
-# Google/Napoleon-style headers (Claims:, Types:, Intent:, Domain:,
-# Notes:) coexist with numpydoc's dash-underlined ones, authoring.py/
-# types.py/docstring.py/analysis.py's own claim/type/intent/domain/notes
-# blocks, not prose, so the summary must stop there too, same as any
-# other section. Intent:/Domain:/Notes: were a real, live gap until this
-# fixed it: only Claims/Types were ever recognized, so a docstring using
-# the strict mathema schema without a leading prose summary had its own
-# Intent:/Domain:/Notes: block text silently bleed into `Facts.doc_intent`
-# (and therefore into `to_spec()`'s own written `intent` field).
+# Google/Napoleon-style headers (Claims:, Intent:, Notes:, ...) coexist
+# with numpydoc's dash-underlined ones. Each opens a block, not prose, so
+# the summary stops at any of them, same as any other section; otherwise
+# a docstring with no leading prose summary would have its block text
+# read as `Facts.doc_intent` (and so as the `intent` field `to_spec()`
+# writes). `Types:` and `Domain:` are not read as blocks anywhere, and
+# stay listed so a docstring that carries one keeps that text out of
+# the summary.
 _GOOGLE_HEADER = re.compile(
     r"^\s*(Claims|Types|Intent|Domain|Notes|Concepts|Tags|Analysis"
     r"|References|Refs|Evidence|Policy):\s*$", re.M)

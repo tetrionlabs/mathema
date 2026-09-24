@@ -202,7 +202,7 @@ def _read_block(doc: str, header: str) -> list[str] | None:
     skipped, not returned, and don't end it. `None` if no such header
     exists anywhere in `doc` (distinct from `[]`, a header present with
     no following lines). Shared scanning shape every docstring block
-    (`Claims:`, `Intent:`, `Domain:`, `Notes:`, ...) uses, a docstring
+    (`Claims:`, `Intent:`, `Notes:`, ...) uses, a docstring
     can carry several of these, each found and read independently.
     Lives here (not in authoring.py, where it originated for `Claims:`)
     because analyze_source() itself needs it for `Notes:`, and this
