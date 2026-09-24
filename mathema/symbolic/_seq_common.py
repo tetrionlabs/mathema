@@ -612,9 +612,10 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
         view = replace(view, eval_f=eval_with_pins)
 
     aux: dict = {}
-    if tolerance is not None:
-        eps_val = sympy.Float(tolerance)
-        aux["eps"] = aux["epsilon"] = aux["ε"] = eps_val
+    from ..conjecture import DEFAULT_TOLERANCE
+    eps_val = sympy.Float(tolerance if tolerance is not None
+                          else DEFAULT_TOLERANCE)
+    aux["eps"] = aux["epsilon"] = aux["ε"] = eps_val
 
     def build(src: str):
         try:

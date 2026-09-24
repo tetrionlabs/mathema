@@ -1422,7 +1422,10 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     from .grammar import auto_short_names, greek_symbol_for_name, reserved_names
     from ._providers import get_provider, report_provider_failure
 
-    excluded = funcs | {"f"} | set(cj.free_vars) | reserved_names()
+    # `eps`/`epsilon`/`ε` are the claim's tolerance, not parameters to
+    # rename
+    excluded = (funcs | {"f", "eps", "epsilon", "ε"} | set(cj.free_vars)
+                | reserved_names())
     real_params = _ordered_real_param_names(cj, excluded)
 
     param_renames: dict = {}

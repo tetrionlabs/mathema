@@ -96,8 +96,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         code_r, aux_r = _validate(cj.rhs, set(kinds), extra) if cj.rhs else (None, set())
     except InvalidConjecture:
         return None
-    names = list(kinds) + sorted((aux_l | aux_r) - MATH_CONSTANTS.keys())
     slack = cj.tolerance if cj.tolerance is not None else 1e-9
+    # `ε`/`eps`/`epsilon` in a law is the claim's tolerance, a fixed
+    # value, never a free variable to sample
+    eps_names = (aux_l | aux_r) & {"eps", "epsilon", "ε"}
+    names = list(kinds) + sorted((aux_l | aux_r) - MATH_CONSTANTS.keys()
+                                 - eps_names)
     # raises from the function under test (or a bound function) are
     # tagged so the evaluators below can tell a genuine in-domain raise,
     # which IS a failure of a value claim, per the pedantic raise
@@ -115,7 +119,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return _wrapped
 
     base_env = {"f": _tag(fn), **_SAFE_FUNCS, **MATH_CONSTANTS,
-                **{name: _tag(v) for name, v in bound_funcs.items()}}
+                **{name: _tag(v) for name, v in bound_funcs.items()},
+                **{name: slack for name in eps_names}}
     from .records import pseudo_infinity_range
     if cap is not None:
         cap_lo, cap_hi = pseudo_infinity_range(cap)

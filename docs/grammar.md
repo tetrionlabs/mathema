@@ -136,9 +136,35 @@ whichever is larger. So `x * (1 + 1e-8)` equals `x` everywhere, while a
 constant offset of `1e-7` is caught near zero, where the relative allowance
 shrinks below it. A claim sets its own absolute tolerance with the
 `tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
-and that value replaces the 1e-9. Inside the claim text, `ε` (also `eps`
-or `epsilon`) stands for that tolerance, so a bound on the gap between two
-functions can be written the way the convention usually writes it.
+and that value replaces the 1e-9.
+
+Inside the claim text, `ε` (also `eps`, `epsilon` or `\epsilon`) names that
+tolerance directly: the declared value when there is one, and the 1e-9
+default otherwise, on both routes. It is never a free variable to sample, and
+a function parameter that happens to be called `eps` or `ε` stays a
+parameter. With two functions in `gaps.py`, one off by `1e-10` and one by
+`1e-7`:
+
+```python
+def nearly_identity(x: float) -> float:
+    return x + 1e-10
+
+
+def small_gap(x: float) -> float:
+    return x + 1e-7
+```
+
+```bash
+mathema check gaps.py --claim "for x in [0, 1], abs(f(x) - x) <= ε"
+```
+
+```text
+ok   gaps.nearly_identity: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+FAIL gaps.small_gap: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+```
+
+The first gap is within the default tolerance and proves for every `x` in the
+range; the second is a hundred times larger than it and is falsified.
 
 The other relations use the same allowance where it makes sense: `<=` and
 `>=` accept a difference within the absolute tolerance, `<` and `>` accept

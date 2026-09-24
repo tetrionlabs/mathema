@@ -2395,10 +2395,11 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         except (SyntaxError, NotSymbolic) as e:
             raise NotSymbolic(str(e)) from e
 
+    from ..conjecture import DEFAULT_TOLERANCE
     aux: dict = {}
-    if tolerance is not None:
-        eps_val = sympy.Float(tolerance)
-        aux["eps"] = aux["epsilon"] = aux["ε"] = eps_val
+    eps_val = sympy.Float(tolerance if tolerance is not None
+                          else DEFAULT_TOLERANCE)
+    aux["eps"] = aux["epsilon"] = aux["ε"] = eps_val
     if aux_funcs_lifted:
         aux[_AUX_FUNCS_KEY] = aux_funcs_lifted
     # ONE variable pipeline: a `let`-declared free variable with a

@@ -389,6 +389,26 @@
   "unicode": "f(x) ≈ x",
   "ascii": "f(x) ~= x"
  },
+ "tolerance_epsilon": {
+  "input": "for x in [0, 1], abs(f(x) - x) <= ε",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ ε",
+  "ascii": "for x in [0.0, 1.0]:float|missing, abs(x - f(x)) <= \\epsilon"
+ },
+ "tolerance_eps_ascii": {
+  "input": "for x in [0, 1], abs(f(x) - x) <= eps",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ eps",
+  "ascii": "for x in [0.0, 1.0]:float|missing, abs(x - f(x)) <= eps"
+ },
+ "tolerance_epsilon_word": {
+  "input": "for x in [0, 1], abs(f(x) - x) <= epsilon",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ epsilon",
+  "ascii": "for x in [0.0, 1.0]:float|missing, abs(x - f(x)) <= epsilon"
+ },
+ "tolerance_epsilon_latex": {
+  "input": "for x in [0, 1], abs(f(x) - x) \\leq \\epsilon",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ ε",
+  "ascii": "for x in [0.0, 1.0]:float|missing, abs(x - f(x)) <= \\epsilon"
+ },
  "derivative_call": {
   "input": "d(f(x), x) >= 0",
   "unicode": "f'(x) ≥ 0",

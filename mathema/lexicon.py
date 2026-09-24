@@ -191,6 +191,12 @@ LEXICON: dict[str, str] = {
     "domain_natural_numbers": "for n in N, f(n) >= 0",
     "domain_complex": "for z in C, f(z) == z",
     "relation_approx": "f(x) ~= x",
+    # the claim's own tolerance by name: the declared `tolerance`, else
+    # the 1e-9 default `==` and `~=` use, never a free variable
+    "tolerance_epsilon": "for x in [0, 1], abs(f(x) - x) <= ε",
+    "tolerance_eps_ascii": "for x in [0, 1], abs(f(x) - x) <= eps",
+    "tolerance_epsilon_word": "for x in [0, 1], abs(f(x) - x) <= epsilon",
+    "tolerance_epsilon_latex": "for x in [0, 1], abs(f(x) - x) \\leq \\epsilon",
     # derivatives: one primitive, many spellings -------------------
     "derivative_call": "d(f(x), x) >= 0",
     "derivative_prime": "f'(x) >= 0",
@@ -377,6 +383,8 @@ SECTIONS: dict[str, tuple[str, ...]] = {
     "domains": (
         "domain_excluded_point", "domain_discrete_strings",
         "domain_natural_numbers", "domain_complex", "relation_approx",
+        "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
+        "tolerance_epsilon_latex",
         "finite_domain_pinned", "finite_domain_small_range",
         "finite_domain_discrete_set", "real_domain_is_not_finite"),
     "integer_parts": (
@@ -595,6 +603,11 @@ def entries(*sections: str) -> dict[str, str]:
             out[key] = LEXICON[key]
     return out
 
+
+
+def nearly_identity(x: float) -> float:
+    """The identity plus an offset far below the default tolerance."""
+    return x + 1e-10
 
 
 def double(x: float) -> float:
@@ -869,6 +882,10 @@ def gd_convergence_factor(alpha: float, q: float) -> float:
 
 
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
+    "nearly_identity": (nearly_identity, [
+        "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
+        "tolerance_epsilon_latex",
+    ]),
     "double": (double, [
         "relation_eq", "relation_le_unicode", "power_caret", "abs_bars",
         "domain_closed_interval", "domain_open_interval",

@@ -3706,8 +3706,9 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # integers regardless. Anything genuinely undeclared
             # keeps the old fixed uniform(-5, 5); there's no bound
             # to respect for a name nobody ever gave one.
-            if a_name in ("eps", "epsilon", "ε") and cj.tolerance is not None:
-                env[a_name] = cj.tolerance
+            if a_name in ("eps", "epsilon", "ε"):
+                env[a_name] = (cj.tolerance if cj.tolerance is not None
+                               else DEFAULT_TOLERANCE)
             elif a_name in cj_domain:
                 env[a_name] = _synth("float", rng, cj_domain[a_name], specials=specials)
             else:
