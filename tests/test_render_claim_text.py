@@ -20,11 +20,14 @@ def identity(x: float) -> float:
 
 
 def test_render_claim_text_round_trips_a_plain_relation():
+    from mathema.spec import canonical_claim_text
+
     cj = claim("f(x)^2 >= 0")
     for unicode in (True, False):
         reparsed = claim(render_claim_text(cj, unicode=unicode))
         assert (reparsed.lhs, reparsed.relation, reparsed.rhs) == \
                (cj.lhs, cj.relation, cj.rhs)
+        assert canonical_claim_text(reparsed) == canonical_claim_text(cj)
 
 
 def test_render_claim_text_reassembles_for_and_let_clauses():
