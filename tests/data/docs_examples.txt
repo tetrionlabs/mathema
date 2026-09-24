@@ -100,8 +100,8 @@
 [ ] docs/quickstart.md:80
 [ ] docs/quickstart.md:115
 [ ] docs/symbology.md:36
-[ ] docs/symbology.md:75
-[ ] docs/symbology.md:122
+[ ] docs/symbology.md:76
+[ ] docs/symbology.md:123
 [ ] docs/three-layers.md:33
 [ ] docs/tutorial.md:57
 [ ] docs/tutorial.md:117
