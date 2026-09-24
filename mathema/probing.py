@@ -492,6 +492,40 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     return _walk(lv, rv)
 
 
+def ordering_shortfall(lv, rv, relation: str) -> float:
+    """Intent:
+        By how much `lv <relation> rv` fails when compared exactly, for
+        a closed ordering (`<=`/`>=`): the largest amount by which the
+        left side exceeds (for `<=`) or falls short of (for `>=`) the
+        right, taken elementwise over a matrix or array value. 0.0
+        when the relation holds exactly, when the relation is not a
+        closed ordering, or when the values are not finite reals.
+    """
+    if relation not in ("<=", ">="):
+        return 0.0
+    sign = 1.0 if relation == "<=" else -1.0
+    if not _is_matrix_value(lv) and not _is_matrix_value(rv):
+        if isinstance(lv, bool) or isinstance(rv, bool) \
+                or not isinstance(lv, (int, float)) \
+                or not isinstance(rv, (int, float)):
+            return 0.0
+        gap = sign * (lv - rv)
+        return gap if gap > 0 and math.isfinite(gap) else 0.0
+    from .matrices import _numpy
+    np = _numpy()
+    if np is None:
+        return 0.0
+    try:
+        gaps = sign * (np.asarray(lv, dtype=float) - np.asarray(rv, dtype=float))
+        finite = gaps[np.isfinite(gaps)]
+    except (ValueError, TypeError):
+        return 0.0
+    if finite.size == 0:
+        return 0.0
+    gap = float(finite.max())
+    return gap if gap > 0 else 0.0
+
+
 # _finite_bounds/_SpecialCycle/_synth_scalar live in ._sampling now,
 # shared with symbolic/_proof_support.py's disproof corroboration,
 # imported above, re-exported under their own names for existing

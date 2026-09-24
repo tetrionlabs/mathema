@@ -49,7 +49,7 @@ from ._scan import _split_commas, blank_strings
 from .domain import DuplicateBinding
 from .probing import (_close, _fmt, _prepare_sampling, _probe_density,
                       _sampling_shorthand, _synth, _synth_dict,
-                      relation_holds_elementwise)
+                      ordering_shortfall, relation_holds_elementwise)
 from .records import _EXC_TYPES, Probe, classify_verdict, statement_text
 from .symbolic import (mentions_matrix_ops, try_prove, try_prove_matrix,
                        try_prove_raises)
@@ -4115,6 +4115,9 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
     checked, cx, cx_stratum = 0, None, None
+    # the largest exact ordering violation the default allowance
+    # absorbed, and the arguments it happened at
+    absorbed, absorbed_at = 0.0, None
     pinned = _pinned_arg_sets(cj, len(kinds))
     # a literal argument in the claim's own call (`f(values, "nope",
     # 0.35)`) fixes that parameter to the literal; the call passes it
@@ -4464,6 +4467,10 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               f"{type(lv).__name__} vs {type(rv).__name__} "
                               f"values isn't meaningful as a single verdict "
                               f"(a complex value, or mismatched matrix shapes)")
+        if ok and cj.tolerance is None:
+            gap = ordering_shortfall(lv, rv, cj.relation)
+            if gap > absorbed:
+                absorbed, absorbed_at = gap, _fmt(tuple(args))
         if not ok:
             aux_part = ("; " + ", ".join(
                 f"{a}={env[a]:.3g}" if isinstance(env[a], (int, float))
@@ -4482,6 +4489,9 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                if assum_eval is not None else "; no evaluable inputs")
         return Probe(cj.name, statement, "skipped", route="probe",
                      note=note + why)
+    if absorbed > 0:
+        note = (f"{note}; fails by {absorbed:.3g} at {absorbed_at}, within "
+                f"the default tolerance ({DEFAULT_TOLERANCE:g})").lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
                            kinds, cj_domain, checked, critical_hints, truncated_hints),
