@@ -2298,6 +2298,17 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             probe.condition = "for " + ", ".join(
                 f"{p2} in {render_domain(b, ascii_mode=True)}"
                 for p2, b in cj.domain.items())
+        inherited = {p2: b for p2, b in domain.items()
+                     if p2 not in (cj.domain or {})}
+        if inherited:
+            # the parent domain's share of the region this claim was
+            # adjudicated over, stated beside the claim's own bindings
+            from .domain import render_domain
+            meta = dict(probe.meta or {})
+            meta["mathema.parent_domain"] = "for " + ", ".join(
+                f"{p2} in {render_domain(b, ascii_mode=True)}"
+                for p2, b in sorted(inherited.items()))
+            probe.meta = meta
         if cj.meta:
             # declared meta (the spec's own extension object, e.g.
             # concepts) passes through under the probe's meta, the
