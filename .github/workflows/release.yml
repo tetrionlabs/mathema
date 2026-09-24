@@ -9,10 +9,10 @@
 #     account, then Publishing -> add a pending trusted publisher for
 #     project "mathema": owner tetrionlabs, repo mathema, workflow
 #     release.yml, environment testpypi.
-#   PyPI: same steps under whichever account owns the project. Aaron's
-#     personal account is fine to start; trusted publishing is
-#     identical either way, and a Tetrion company account can be added
-#     as an owner later without republishing.
+#   PyPI: same steps under whichever account owns the project. A
+#     maintainer's personal account is fine to start; trusted
+#     publishing is identical either way, and a company account can be
+#     added as an owner later without republishing.
 #   GitHub repo -> Settings -> Environments:
 #     create "testpypi" (no protection) and "pypi" with a required
 #     reviewer, so the final publish is an explicit click.

@@ -35,7 +35,7 @@ updated on progress toward a fix after that.
 ## Scope
 
 mathema is fully offline: no core function makes a network call (see
-the README's "Network policy" section). A vulnerability report is
+[Security and execution](https://mathema.tetrionlabs.com/security/)). A vulnerability report is
 most useful when it identifies a concrete way that guarantee, or
 another of mathema's stated behaviors, doesn't hold, or a way that
 running `mathema check` against untrusted input (a claim string, a
