@@ -296,3 +296,28 @@ def test_a_one_sided_limit_keeps_its_side_in_its_identity():
         == "lim(f(x), x, 0) = 1"
     assert assert_round_trips("lim(f(x), x -> oo) == 0") \
         == "lim(f(x), x, oo) = 0"
+
+
+# -- identity: the missing-value policy ---------------------------------------
+
+def total(x: float) -> float:
+    return x + 1.0
+
+
+@pytest.mark.parametrize("law, ascii_domain", [
+    (r"for x in [0, 1] \ {missing}, f(x) >= 0", r"[0.0, 1.0] \ {missing}:float"),
+    (r"for x in [0, 1] \ {3, missing}, f(x) >= 0",
+     r"[0.0, 1.0] \ {3, missing}:float"),
+    (r"for x in [0, 1] \ {3}, f(x) >= 0", r"[0.0, 1.0] \ {3}:float|missing"),
+    (r"for n in [0, 5] subset Z \ {missing}, f(n) >= 0", r"[0, 5] \ {missing}:int"),
+    (r"for x in R \ {missing}, f(x) >= 0", r"R \ {missing}"),
+])
+def test_an_excluded_missing_value_is_stated_and_survives_reparse(
+        law, ascii_domain):
+    canon = assert_round_trips(law, total)
+    assert ascii_domain in canon
+
+
+def test_excluding_missing_is_a_different_claim_from_allowing_it():
+    assert fingerprint_text(claim(r"for x in [0, 1] \ {missing}, f(x) >= 0")) \
+        != fingerprint_text(claim("for x in [0, 1], f(x) >= 0"))

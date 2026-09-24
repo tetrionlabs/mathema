@@ -816,6 +816,15 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         and not isinstance(real_pieces[0], (str, frozenset))
         and real_pieces[0][0] == float("-inf") and real_pieces[0][1] == float("inf"))
     missing_included = show_missing and MISSING not in dom.excluded
+    # an excluded missing value joins the one exclusion set whenever
+    # there is a set to join (`[0, 1] \ {3, ∅}`), and always in ascii
+    # (`[0, 1] \ {missing}:float`), since an annotation with no
+    # `|missing` still reads as missing allowed; the input reads a
+    # single exclusion clause only
+    missing_merged = (show_missing and not missing_included
+                      and (ascii_mode or bool(numeric_excluded)))
+    if missing_merged:
+        numeric_excluded = numeric_excluded | {MISSING}
     exp = _render_dims(getattr(dom, "dims", ()), ascii_mode)
     if not real_pieces or fully_unbounded:
         text = dom.base_type if ascii_mode else _TYPE_GLYPH.get(dom.base_type, dom.base_type)
@@ -845,7 +854,7 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     if enumerated:
         if show_missing and enumerated_missing:
             text += "|missing" if ascii_mode else " ∪ {∅}"
-    elif show_missing and not ascii_mode:
+    elif show_missing and not ascii_mode and not missing_merged:
         text += " \\ {∅}" if not missing_included else " ∪ {∅}"
     return text
 
