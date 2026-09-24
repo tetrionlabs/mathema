@@ -143,7 +143,10 @@ claims in them.
 
 On the derive route every relation is decided exactly: `==` and `~=` both
 ask whether the two sides are the same over the whole domain, in exact real
-arithmetic.
+arithmetic. They part ways only when the exact difference is smaller than
+the probe's allowance (below): `==` is then checked against the real code
+compared exactly, while `~=`, which asks for approximate equality, accepts
+it.
 
 On the probe route, which runs the real function in floating point, `==`
 and `~=` are the same comparison: the two sides count as equal when they
@@ -190,10 +193,13 @@ declared tolerance fails only where the two sides are exactly equal.
 
 A probe `holds` that the allowance on `<=` or `>=` absorbed says so in its
 note, with the largest gap it absorbed. The derive route has no allowance
-to spend: when it disproves the claim, the real code is run at derive's
-witness and compared exactly, and a violation there, however small,
-falsifies the claim with that point as the witness. For a function that
-returns `-1e-10`:
+to spend: when it disproves a `<=`, `>=` or `==` claim, the real code is
+run at derive's witness and compared exactly, and a violation there,
+however small, falsifies the claim with that point as the witness. So
+`f(x) == x` is falsified for `x + 1e-10`, but not for `x + 1e-20` on
+`[1, 2]`, where rounding makes the executed values exactly equal. `~=` is
+never compared exactly: the allowance is what it asks for. For a function
+that returns `-1e-10`:
 
 ```python
 import mathema

@@ -521,14 +521,24 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
                              proof, seq_names):
     """Intent:
         The point derive named as its witness, when the real code
-        executed there violates a closed ordering (`<=`/`>=`) compared
-        exactly, with none of the default allowance. None when the
-        claim is not such an ordering, declares its own tolerance
-        (which is then part of the claim), names no complete in-domain
-        witness, or the code satisfies the relation there exactly.
+        executed there violates a closed ordering (`<=`/`>=`) or an
+        equality (`==`) compared exactly, with none of the default
+        allowance. None when the claim is not such a relation, declares
+        its own tolerance (which is then part of the claim), names no
+        in-domain witness, or the code satisfies the relation there
+        exactly.
+
+    Notes:
+        `~=` is approximate equality by its own spelling, so it keeps
+        the allowance and is never rechecked exactly. A coordinate
+        derive's witness leaves free (the difference does not depend on
+        it) is drawn from its declared bound with a fixed seed, a few
+        draws at most, and the first admissible completion is the point
+        compared.
     """
+    import random
     from . import corroboration as C
-    if cj.relation not in ("<=", ">=") or cj.tolerance is not None:
+    if cj.relation not in ("<=", ">=", "==") or cj.tolerance is not None:
         return None
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
                             sequences=True, exact=True)
@@ -538,10 +548,14 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
                            deps["names"])
     if not seeds:
         return None
-    point = seeds[0]
-    if set(point) != set(deps["names"]) or not deps["admits"](point):
-        return None
-    return point if deps["evaluate"](point) is False else None
+    named = seeds[0]
+    missing = [n for n in deps["names"] if n not in named]
+    rng = random.Random(0)
+    for _ in range(8 if missing else 1):
+        point = {**named, **{n: deps["sample"](n, rng) for n in missing}}
+        if deps["admits"](point):
+            return point if deps["evaluate"](point) is False else None
+    return None
 
 
 def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
@@ -565,7 +579,8 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         default. For a closed ordering with no declared tolerance, a
         search that reproduces nothing is followed by one exact
         comparison at derive's own witness: a violation there, however
-        small, is `falsified` with that witness.
+        small, is `falsified` with that witness. An equality `==` gets
+        the same exact comparison; `~=` does not.
     """
     from . import corroboration as C
     if proof.meta.get("mathema.witness_executed") and falsified.counterexample:

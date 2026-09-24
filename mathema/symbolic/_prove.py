@@ -2302,6 +2302,14 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     result = _try_prove(fn, facts, lhs_src, rhs_src, relation, domain,
                         tolerance, max_callee_depth, extensive, _split_depth,
                         funcs, assumption, assume_defined, _walk_notes=notes)
+    if (result.status == "disproven" and tolerance is not None
+            and result.meta.get("mathema.exact_disproof")):
+        # a declared tolerance is part of the claim: a difference below
+        # it disproves nothing
+        return ProofResult(
+            "undecided",
+            sketch=(f"{result.sketch}; within the declared tolerance "
+                    f"({tolerance:g}), so not a disproof of this claim"))
     if result.status == "proven" and notes.get("unread") and not assume_defined:
         return ProofResult(
             "undecided",
