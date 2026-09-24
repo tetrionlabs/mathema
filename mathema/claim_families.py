@@ -117,6 +117,27 @@ def _probe_trials(fn, facts, target: str, domain: dict, rng: random.Random,
     return "holds", checked, None
 
 
+def _interval_ends(bounds) -> "tuple[float, float] | None":
+    """Intent:
+        The finite interval hull of a sampling bound: a plain `(lo, hi)`
+        pair, or a `Domain` made of interval pieces (what a type marker
+        such as `Probability` produces). None when the bound has no
+        interval hull (no bound at all, a discrete set, a complex
+        rectangle).
+    """
+    if isinstance(bounds, tuple) and not isinstance(bounds, frozenset):
+        return _finite_bounds(*bounds)
+    if isinstance(bounds, Domain) and bounds.pieces:
+        spans = [p for p in bounds.pieces
+                 if isinstance(p, tuple) and not isinstance(p, frozenset)
+                 and not any(isinstance(v, complex) for v in p)]
+        if len(spans) != len(bounds.pieces):
+            return None
+        ends = [_finite_bounds(*p) for p in spans]
+        return min(lo for lo, _ in ends), max(hi for _, hi in ends)
+    return None
+
+
 def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     trials: int, *, increasing: bool):
     """Pairwise-sampling monotonicity: per trial, two ordered values of
@@ -135,8 +156,8 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
     bounds = domain.get(target)
 
     def trial(args):
-        x1 = _synth_scalar(rng, bounds)
-        x2 = _synth_scalar(rng, bounds)
+        x1 = _synth("float", rng, bounds)
+        x2 = _synth("float", rng, bounds)
         if x1 == x2:
             return None
         if x1 > x2:
@@ -172,10 +193,10 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if facts.param_kinds.get(target) != "scalar":
         return None
     bounds = domain.get(target)
-    lo, hi = (_finite_bounds(*bounds) if isinstance(bounds, tuple) else (None, None))
+    lo, hi = _interval_ends(bounds) or (None, None)
 
     def trial(args):
-        x0 = _synth_scalar(rng, bounds)
+        x0 = _synth("float", rng, bounds)
         span = (hi - lo) if lo is not None and hi is not None else max(1.0, abs(x0)) * 2
         h = max(span * 1e-3, 1e-6)
         if lo is not None and hi is not None and (x0 - h < lo or x0 + h > hi):
