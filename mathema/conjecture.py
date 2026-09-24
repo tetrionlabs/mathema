@@ -2084,7 +2084,7 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         elif assumption is not None:
             statement = f"assuming {assumption[1]}, {statement}"
             cj = _dc_replace(cj, assuming=f"assuming {assumption[1]}")
-        validated = _validate_claim(cj, statement, note, facts, domain)
+        validated = _validate_claim(cj, statement, note, facts, domain, fn=fn)
         if isinstance(validated, Probe):
             # a rejected claim has no canonical form (it was never a
             # claim), so its record keeps what was written, verbatim
@@ -2510,11 +2510,11 @@ def _derive_operational_domain(cj, cj_domain: dict, facts) -> dict:
 
 
 def _validate_claim(cj, statement: str, note: str, facts,
-                    domain: dict) -> "Probe | _ClaimContext":
+                    domain: dict, fn=None) -> "Probe | _ClaimContext":
     """Intent:
         Everything checked before either evidence route runs: grammar
-        membership, bare-reserved-name and ambiguous-differential
-        misspecifications, the per-claim domain merge (inline
+        membership, bare-reserved-name, ambiguous-differential and
+        `raises(...)` call-arity misspecifications, the per-claim domain merge (inline
         quantifier wins over the function-level argument, literal-
         argument inference filling gaps), free-variable/parameter
         reconciliation, and unknown domain keys.
@@ -2607,6 +2607,14 @@ def _validate_claim(cj, statement: str, note: str, facts,
             if "disallowed" in str(e):
                 return Probe(cj.name, statement, "skipped", route=None,
                              note=f"{note}; {e}")
+    if cj.relation == "raises" and fn is not None:
+        # the TypeError a call that does not fit the signature raises
+        # comes from the claim's own malformed text, never from the
+        # function, so it can neither satisfy nor refute the claim
+        mismatch = _call_arity_mismatch(cj.lhs, fn, param_set)
+        if mismatch is not None:
+            return Probe(cj.name, statement, "skipped:misspecified",
+                         route=None, note=f"{note}; {mismatch}")
     colliding = sorted(set(cj.ambiguous_diff_vars) & param_set)
     if colliding:
         # d(<expr>/d<var>)'s fraction sugar (grammar.
@@ -3493,6 +3501,46 @@ def _sympy_zero():
     import sympy
     return sympy.S.Zero
 
+
+
+def _call_arity_mismatch(src: str, fn, param_set: set) -> str | None:
+    """Intent:
+        The reason a call to `f` in the claim text `src` cannot bind to
+        `fn`'s signature (too many or too few arguments, an unknown
+        keyword), or None when every such call fits or the signature
+        cannot be read.
+
+    Notes:
+        A starred argument is not counted and makes the check decline
+        for that call. A parameter literally named `f` makes `f(...)`
+        ambiguous, so the check declines entirely.
+    """
+    import inspect as _inspect
+    if "f" in param_set:
+        return None
+    try:
+        sig = _inspect.signature(fn)
+        tree = ast.parse(src, mode="eval")
+    except (TypeError, ValueError, SyntaxError):
+        return None
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "f"):
+            continue
+        if any(isinstance(a, ast.Starred) for a in node.args) \
+                or any(k.arg is None for k in node.keywords):
+            continue
+        try:
+            sig.bind(*([None] * len(node.args)),
+                     **{k.arg: None for k in node.keywords})
+        except TypeError:
+            params = list(sig.parameters)
+            given = len(node.args) + len(node.keywords)
+            return (f"f is called here with {given} argument(s), but its "
+                    f"signature takes {len(params)} ({', '.join(params)}), "
+                    f"so any TypeError is raised by the malformed call "
+                    f"itself; call f with its own parameters")
+    return None
 
 
 def _int_annotated_params(callee) -> list:
