@@ -295,6 +295,12 @@ class _Driver:
         # policy set on this machine never reaches a documented command
         os.environ.setdefault("XDG_CONFIG_HOME",
                               os.path.join(workdir, ".config"))
+        # a documented example asks whether a claim is provable, not
+        # whether it is provable within the default cap on this machine,
+        # so the driver runs with the same generous proof budget the
+        # needs_full_proof_budget marker gives a test
+        os.environ.setdefault("MATHEMA_FAST_TIMEOUT", "60")
+        os.environ.setdefault("MATHEMA_EXTENSIVE_TIMEOUT", "120")
         env = dict(os.environ)
         env.pop("VIRTUAL_ENV", None)
         env["PATH"] = _wrappers(workdir) + os.pathsep + env.get("PATH", "")
@@ -528,6 +534,8 @@ def test_the_output_shown_is_the_output_a_run_gives(example, tmp_path):
     env = dict(os.environ)
     env.pop("VIRTUAL_ENV", None)
     env["XDG_CONFIG_HOME"] = os.path.join(workdir, ".config")
+    env["MATHEMA_FAST_TIMEOUT"] = "60"
+    env["MATHEMA_EXTENSIVE_TIMEOUT"] = "120"
     r = subprocess.run([sys.executable, os.path.abspath(__file__), "--drive",
                         spec_path], cwd=workdir, env=env, capture_output=True,
                        text=True, timeout=600)
