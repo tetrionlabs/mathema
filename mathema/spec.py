@@ -1222,6 +1222,8 @@ def declare(cj) -> dict:
     # duplicate it and re-type it on reparse.
     statement = _chain_text(cj) if cj.links else statement_text(
         cj.relation, cj.lhs, cj.rhs)
+    if getattr(cj, "negated", False) and not statement.startswith("not "):
+        statement = f"not {statement}"
     if getattr(cj, "outcome", ""):
         statement = f"{statement} => {cj.outcome}"
     sections = ([cj.assuming] if cj.assuming else []) + _let_sections(cj)

@@ -2649,14 +2649,33 @@ def render_canonical(expr: "sympy.Expr", funcs: frozenset = frozenset({"f"}),
         return _humanize(expr), False
 
 
-def _calls_to_bracket(text: str, name: str, open_br: str, close_br: str) -> str:
-    """Every top-level `name(...)` call in `text` -> `open_br...close_br`,
-    scanning with `_find_balanced_call` (not a regex) since the argument
-    can itself contain parens, shared by render_law_expr()'s abs/floor/
-    ceil bar-notation output."""
-    return _rewrite_balanced_calls(
-        text, re.compile(rf"\b{name}\("),
-        lambda m, args, call_end: f"{open_br}{args}{close_br}")
+_ABS_CALL = re.compile(r"\babs\(")
+
+
+def _abs_calls_to_bars(text: str) -> str:
+    """Intent:
+        Every `abs(...)` call in `text`, nested ones included, rendered
+        as `|...|` when its argument is a single bar term, and left as
+        the `abs(...)` call otherwise.
+
+    Notes:
+        A single bar term is what `_BAR_TOKEN` accepts: a name, a
+        number, one call, or one parenthesised group, containing no
+        bar of its own. `|x - 1|` is not one, and the grammar rejects
+        it on input, so `abs(x - 1)` keeps the call spelling; every
+        string this returns folds back to the same `abs(...)` calls
+        under `_abs_bars`. The scan is by balanced parens
+        (`_find_balanced_call`), since an argument can itself contain
+        parens, and inner calls are rewritten first, so an outer
+        argument holding an inner `|y|` keeps the call spelling too.
+    """
+    def rewrite(m, args, call_end):
+        inner = _abs_calls_to_bars(args)
+        if "|" not in inner and re.fullmatch(_BAR_TOKEN, inner):
+            return f"|{inner}|"
+        return f"abs({inner})"
+
+    return _rewrite_balanced_calls(text, _ABS_CALL, rewrite)
 
 
 def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = True,
@@ -2666,7 +2685,8 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     identity/fingerprinting already uses (`_node_to_sympy`/
     `to_canonical`), then this module's own math-over-python spelling
     preferences layered on top (`**` -> `^`; `abs(x)` -> `|x|`, in both
-    modes; `floor(x)`/`ceil(x)` stay as the plain call in both modes
+    modes, when the argument is a single bar term, `abs(x - 1)` staying
+    the call; `floor(x)`/`ceil(x)` stay as the plain call in both modes
     too, never the `⌊x⌋`/`⌈x⌉` bracket notation, even though that's
     accepted *input*: rendered small, a floor/ceil bracket reads too
     easily as a single `|`, indistinguishable from `abs`). Going
@@ -2698,7 +2718,7 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     funcs = funcs | {"f"}
     expr = _node_to_sympy(ast.parse(text, mode="eval"), funcs)
     s = to_canonical(expr, funcs, unicode, suppress_glyphs).replace("**", "^")
-    s = _calls_to_bracket(s, "abs", "|", "|")
+    s = _abs_calls_to_bars(s)
     if not unicode:
         for symbol, backslash_name in _GREEK_TO_BACKSLASH.items():
             s = s.replace(symbol, backslash_name)

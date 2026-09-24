@@ -1665,22 +1665,218 @@ class SafetyFamily(_NamedClaimFamily):
         return ("best" if "probe:algorithmic" in self._routes else "derive")
 
 
+_WITNESS_BASES = (0.0, 1.0, -1.0, 2.0, 0.5, 3.0, -2.0)
+_WITNESS_OFFSETS = (0.0, 0.5, -0.5, 1.0, -1.0, 1e-3, -1e-3)
+_WITNESS_SCALAR_KINDS = frozenset({"scalar", "int", "unknown"})
+_WITNESS_MAX_POINTS = 400
+_COMPARISONS = frozenset({"==", "!=", "<", "<=", ">", ">="})
+
+
+def _gap_satisfies(rel: str, gap_value: float) -> "bool | None":
+    """Intent:
+        Whether `lhs rel rhs` holds, given `gap_value = lhs - rhs`, or
+        None when the gap is too close to zero for the reading to be
+        trusted without being exactly zero.
+    """
+    if gap_value != 0.0 and abs(gap_value) < 1e-12:
+        return None
+    return {"==": gap_value == 0.0, "!=": gap_value != 0.0,
+            "<": gap_value < 0.0, "<=": gap_value <= 0.0,
+            ">": gap_value > 0.0, ">=": gap_value >= 0.0}.get(rel)
+
+
+def _gap_at(gap, point: dict) -> "float | None":
+    """Intent:
+        The numeric value of a sympy expression at `point` (parameter
+        name to number), or None when it is not a finite real number.
+    """
+    import sympy as _sympy
+    try:
+        value = gap.subs({s: _sympy.Float(point[s.name])
+                          for s in gap.free_symbols if s.name in point}).evalf()
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    if value.free_symbols or not value.is_real or not value.is_finite:
+        return None
+    return float(value)
+
+
+def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
+                         premises: list) -> "tuple[dict | None, int]":
+    """Intent:
+        A concrete point where the real `fn` disagrees with a
+        definedness claim: it raises where `says_defined(point)` is
+        True, or returns where it is False. Returns `(point, executed)`,
+        `point` None when no candidate reproduces, `executed` the number
+        of candidate calls actually made.
+
+    Notes:
+        Candidates come in two passes, each executed as it is produced
+        so the search stops at the first witness: a small grid of base
+        values, then points around the zero sets of `gaps` (sympy
+        expressions over the parameter symbols: the computed region's
+        guards and the stated region), each gap solved for one
+        parameter with the others held at a base value, the solution
+        offset a little each way. A candidate must lie in `domain` and
+        satisfy every premise in `premises` (sympy `(gap, relation)`
+        pairs). Only scalar parameters are searched, and only a
+        function whose signature binds them. The whole search runs
+        under the fast wall-clock cap; a cap that fires ends it.
+    """
+    import inspect
+    import itertools
+
+    import sympy as _sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS as _FAST
+    from ._timeout import _with_timeout as _capped
+    from .domain import domain_contains
+
+    params = list(facts.params)
+    kinds = {p: facts.param_kinds.get(p, "unknown") for p in params}
+    if not params or any(k not in _WITNESS_SCALAR_KINDS for k in kinds.values()):
+        return None, 0
+    try:
+        signature = inspect.signature(fn)
+        signature.bind(**{p: 0 for p in params})
+    except (TypeError, ValueError):
+        return None, 0
+
+    def grid():
+        for base in _WITNESS_BASES:
+            yield {p: base for p in params}
+        for p in params:
+            for value in _WITNESS_BASES:
+                yield {**{q: 1.0 for q in params}, p: value}
+
+    def near_zero_sets():
+        for base in _WITNESS_BASES:
+            for gap in gaps:
+                for p in params:
+                    sym = _sympy.Symbol(p, real=True)
+                    if sym not in gap.free_symbols:
+                        continue
+                    held = gap.subs({_sympy.Symbol(q, real=True): base
+                                     for q in params if q != p})
+                    try:
+                        roots = _sympy.solve(held, sym)
+                    except (NotImplementedError, ValueError, TypeError):
+                        continue
+                    for root in roots:
+                        if not getattr(root, "is_real", False) or root.free_symbols:
+                            continue
+                        for off in _WITNESS_OFFSETS:
+                            yield {**{q: base for q in params},
+                                   p: float(root) + off}
+
+    def admitted(point: dict) -> bool:
+        for p, v in point.items():
+            if domain and p in domain:
+                try:
+                    if not domain_contains(v, domain[p]):
+                        return False
+                except (TypeError, ValueError):
+                    return False
+        for gap, rel in premises:
+            value = _gap_at(gap, point)
+            if value is None or _gap_satisfies(rel, value) is not True:
+                return False
+        return True
+
+    executed = 0
+
+    def search():
+        nonlocal executed
+        seen: set = set()
+        for point in itertools.chain(grid(), near_zero_sets()):
+            point = {p: (float(round(v)) if kinds[p] == "int" else v)
+                     for p, v in point.items()}
+            key = tuple(point[p] for p in params)
+            if key in seen:
+                continue
+            seen.add(key)
+            if len(seen) > _WITNESS_MAX_POINTS:
+                return None
+            if not admitted(point):
+                continue
+            claimed = says_defined(point)
+            if claimed is None:
+                continue
+            call = {p: (int(v) if kinds[p] == "int" else v)
+                    for p, v in point.items()}
+            executed += 1
+            try:
+                fn(**call)
+            except Exception:
+                returned = False
+            else:
+                returned = True
+            if returned != claimed:
+                return call
+        return None
+
+    try:
+        found = _capped(search, _FAST)
+    except TimeoutError:
+        found = None
+    return found, executed
+
+
+def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
+                        premises):
+    """Intent:
+        The is_defined disproof as it may be reported: `disproven` with
+        the executed witness as its counterexample when one reproduces,
+        otherwise `undecided` carrying the corroboration flags (and the
+        unexecutable flag when no candidate could be called at all).
+    """
+    from .gates import _fmt_point
+    from .symbolic import ProofResult
+
+    point, executed = _definedness_witness(fn, facts, gaps, says_defined,
+                                           domain, premises)
+    if point is not None:
+        return ProofResult(
+            "disproven", sketch=sketch,
+            counterexample=_fmt_point(point, list(facts.params)),
+            meta={"mathema.corroboration": "reproduced",
+                  "mathema.witness_executed": True})
+    meta = {"mathema.corroboration": "uncorroborated"}
+    if executed == 0:
+        meta["mathema.corroboration_unexecutable"] = True
+        why = "no point in the domain could be executed"
+    else:
+        why = (f"no executed point reproduced it ({executed} points "
+               f"checked in the domain)")
+    return ProofResult(
+        "undecided",
+        sketch=f"{sketch}; uncorroborated disproof: {why}, and a "
+               f"falsification needs an executed witness",
+        meta=meta)
+
+
 def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
                        relation: str, domain: dict | None = None,
-                       tolerance: float | None = None):
+                       tolerance: float | None = None,
+                       assumption: list | None = None):
     """Intent:
         Region equivalence for a declared `is_defined` claim: the
         stated relation must match the freshly computed definedness
         region of the CURRENT body. Equivalent -> proven (drift-free);
-        provably different -> disproven naming the fresh region; else
-        undecided with the fresh region in the sketch. The claim
-        carries the domain and semantics; the live body validates it.
+        different -> disproven, with an executed witness (a point in
+        the domain and premises where the real function raises though
+        the claim says defined, or returns though the claim says it
+        raises); else undecided with the fresh region in the sketch.
+        The claim carries the domain and semantics; the live body
+        validates it.
 
     Notes:
         Always returns a ProofResult, never None: an is_defined claim
         must not fall through to the ordinary relation prover, whose
         reading (is the relation TRUE?) is a different question from
-        region equivalence.
+        region equivalence. A structural disproof no executed point
+        reproduces comes back undecided with the corroboration flags
+        (`_witnessed_disproof`).
     """
     import ast as _ast
 
@@ -1693,25 +1889,6 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 
     computed = _definedness_region(fn, facts)
 
-    if relation == "is_defined":
-        # the BARE predicate (`is_defined(f)` / `f is defined`) states
-        # no region, so it reads as the other half of the overload:
-        # f is defined EVERYWHERE. Proven when the body has no raise
-        # region at all; falsified when it has one, and the region it
-        # IS defined on is the witness. A stated region falls through
-        # to the restriction reading below.
-        if not computed:
-            return ProofResult(
-                "proven",
-                sketch="is_defined: the body has no raise region, so "
-                       "every call returns and f is defined on the whole "
-                       "domain")
-        return ProofResult(
-            "disproven",
-            sketch="is_defined: f is not defined everywhere, it returns "
-                   "only on " + " and ".join(computed)
-                   + "; state that region to claim the restriction")
-
     def to_expr(src: str):
         env = {p: _sympy.Symbol(p, real=True) for p in facts.params}
         try:
@@ -1721,29 +1898,70 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
             return None
         return None if isinstance(value, tuple) else value
 
-    stated_l, stated_r = to_expr(lhs_src), to_expr(rhs_src or "0")
-    if stated_l is None or stated_r is None:
-        return ProofResult("undecided", sketch="is_defined: the stated "
-                           "region isn't expressible over the function's "
-                           "own parameters")
-    if not computed:
-        return ProofResult(
-            "disproven",
-            sketch="is_defined: the current body has no raise regions at "
-                   "all; every call returns, so the definedness region "
-                   "is the whole domain, not the stated restriction. "
-                   "Claim totality with the bare `is_defined(f)`, which "
-                   "states no region")
     # the SAME structural region the suggestion and expansion read;
     # one source, so the family can never disagree with them
     from .conjecture import _definedness_region_structured
     from .symbolic._base import REL_TEXT as rel_of
     computed_rels = [(rel_of[type(rel)], rel.lhs - rel.rhs)
                      for rel in _definedness_region_structured(fn, facts)]
+    computed_gaps = [gap for _rel, gap in computed_rels]
+
+    # the premises a witness must satisfy, as (gap, relation) pairs; a
+    # premise with no numeric reading leaves no admissible witness
+    premises: list = []
+    for p_lhs, p_rel, p_rhs in assumption or ():
+        p_l, p_r = to_expr(p_lhs), to_expr(p_rhs or "0")
+        if p_l is None or p_r is None or p_rel not in _COMPARISONS:
+            premises = [(_sympy.nan, "==")]
+            break
+        premises.append((p_l - p_r, p_rel))
+
+    def disproof(sketch: str, gaps: list, says_defined):
+        return _witnessed_disproof(sketch, fn, facts, gaps, says_defined,
+                                   domain, premises)
+
+    if relation == "is_defined":
+        # the BARE predicate (`is_defined(f)` / `f is defined`) states
+        # no region, so it reads as the other half of the overload:
+        # f is defined EVERYWHERE. Proven when the body has no raise
+        # region at all; falsified when it has one and a point in the
+        # domain executes and raises. A stated region falls through
+        # to the restriction reading below.
+        if not computed:
+            return ProofResult(
+                "proven",
+                sketch="is_defined: the body has no raise region, so "
+                       "every call returns and f is defined on the whole "
+                       "domain")
+        return disproof(
+            "is_defined: f is not defined everywhere, it returns "
+            "only on " + " and ".join(computed)
+            + "; state that region to claim the restriction",
+            computed_gaps, lambda point: True)
+
+    stated_l, stated_r = to_expr(lhs_src), to_expr(rhs_src or "0")
+    if stated_l is None or stated_r is None:
+        return ProofResult("undecided", sketch="is_defined: the stated "
+                           "region isn't expressible over the function's "
+                           "own parameters")
+    stated_gap = stated_l - stated_r
+
+    def stated_says_defined(point: dict) -> "bool | None":
+        value = _gap_at(stated_gap, point)
+        return None if value is None else _gap_satisfies(relation, value)
+
+    witness_gaps = computed_gaps + [stated_gap]
+    if not computed:
+        return disproof(
+            "is_defined: the current body has no raise regions at "
+            "all; every call returns, so the definedness region "
+            "is the whole domain, not the stated restriction. "
+            "Claim totality with the bare `is_defined(f)`, which "
+            "states no region",
+            witness_gaps, stated_says_defined)
     if not computed_rels:
         return ProofResult("undecided", sketch="is_defined: computed region "
                            "not comparable")
-    stated_gap = stated_l - stated_r
     mirror = {">=": "<=", "<=": ">=", ">": "<", "<": ">"}
     from ._timeout import FAST_TIMEOUT_SECONDS as _FAST
     from ._timeout import _with_timeout as _capped
@@ -1804,15 +2022,29 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         except Exception:
             continue
         if diff is not None and diff.is_number and diff != 0:
-            return ProofResult(
-                "disproven",
-                sketch=f"is_defined: the stated region provably differs "
-                       f"from the current body's computed definedness "
-                       f"region, fresh region: {region_text}")
-    return ProofResult(
-        "undecided",
-        sketch=f"is_defined: couldn't decide equivalence with the computed "
-               f"region, fresh region: {region_text}")
+            return disproof(
+                f"is_defined: the stated region provably differs "
+                f"from the current body's computed definedness "
+                f"region, fresh region: {region_text}",
+                witness_gaps, stated_says_defined)
+    undecided_sketch = (f"is_defined: couldn't decide equivalence with the "
+                        f"computed region, fresh region: {region_text}")
+    # an executed disagreement settles what the structural comparison
+    # could not
+    point, _executed = _definedness_witness(fn, facts, witness_gaps,
+                                            stated_says_defined, domain,
+                                            premises)
+    if point is not None:
+        from .gates import _fmt_point
+        return ProofResult(
+            "disproven",
+            sketch=f"is_defined: the stated region disagrees with the "
+                   f"current body at an executed point, fresh region: "
+                   f"{region_text}",
+            counterexample=_fmt_point(point, list(facts.params)),
+            meta={"mathema.corroboration": "reproduced",
+                  "mathema.witness_executed": True})
+    return ProofResult("undecided", sketch=undecided_sketch)
 
 
 def _matrix_property(name: str):

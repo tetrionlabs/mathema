@@ -89,6 +89,25 @@ def summary_counts(counts) -> str:
     return ", ".join(parts)
 
 
+def _record_has_unreadable_claim(entry: dict) -> bool:
+    """Intent:
+        Whether any claim stored in a verified record fails to parse
+        under the current grammar, which is what makes rebuilding that
+        record the remedy rather than correcting an authoring surface.
+    """
+    from .conjecture import InvalidConjecture, claim
+
+    for c in (entry or {}).get("claims") or []:
+        statement = c.get("statement")
+        if not statement:
+            continue
+        try:
+            claim(statement)
+        except InvalidConjecture:
+            return True
+    return False
+
+
 def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
     """Intent:
         Give each probe the verdict its record now stores where the
@@ -442,6 +461,20 @@ def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
     return kept, notes
 
 
+def _auto_claim_name(row: dict) -> "str | None":
+    """Intent:
+        The name an unnamed declared claim row resolves to when parsed,
+        or None when the row does not parse.
+    """
+    from .conjecture import InvalidConjecture
+    from .spec import entry_claims
+    try:
+        (cj,) = entry_claims({"claims": [row]})
+    except (InvalidConjecture, ValueError):
+        return None
+    return cj.name
+
+
 def _union_verified_membership(current_claims: list,
                                verified_entry: dict) -> list:
     """Intent:
@@ -451,10 +484,16 @@ def _union_verified_membership(current_claims: list,
         (discoveries) or accepted as historical never resurrect;
         suggestion rows (surface mathema) and rows with no
         statement are not membership.
+
+    Notes:
+        A declared claim with no written name is present under the name
+        its statement auto-names to, the name its verified row carries;
+        the row's statement is the canonical spelling, which need not
+        match the text the author wrote.
     """
     if not verified_entry:
         return current_claims
-    have = {c.get("name") for c in current_claims}
+    have = {c.get("name") or _auto_claim_name(c) for c in current_claims}
     out = list(current_claims)
     retired = {d.get("name") for d in
                (verified_entry.get("discoveries") or [])} | \
@@ -700,10 +739,16 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                      for c in current_claims)
             current_fp = claims_fingerprint(current_claims)
         except InvalidConjecture as e:
-            msg = (f"{key}: a claim in this function's verified "
-                   f"record does not parse under the current "
-                   f"grammar ({e}); rebuild the record: delete "
-                   f".mathema/verified/{key}.yaml and re-run verify")
+            if _record_has_unreadable_claim(verified_entry):
+                msg = (f"{key}: a claim in this function's verified "
+                       f"record does not parse under the current "
+                       f"grammar ({e}); rebuild the record: delete "
+                       f".mathema/verified/{key}.yaml and re-run verify")
+            else:
+                where = ((declared_info or {}).get("source")
+                         or "its docstring or claims file")
+                msg = (f"{key}: a claim declared in {where} does not "
+                       f"parse ({e}); correct it there and re-run verify")
             out.problems.append(msg)
             out.lines.append(f"FAIL {msg}")
             out.keys.append({"key": key, "why": "unreadable-record",

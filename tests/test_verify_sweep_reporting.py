@@ -135,3 +135,18 @@ def test_a_discovery_reports_the_claims_file_it_rewrote(tmp_path):
     written = [ln.strip() for ln in rewritten.splitlines()
                if ln.strip().startswith("route:")]
     assert printed == written
+
+
+def test_an_unreadable_authored_claim_names_its_file_not_the_record(tmp_path):
+    (tmp_path / "funcs.py").write_text(_SETTLE_OK)
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "demo.claims.yaml").write_text(
+        "funcs.settle:\n  claims:\n"
+        "    - name: broken\n"
+        "      statement: \"f(x) >= 1 +\"\n")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    r = _run(tmp_path)
+    (row,) = _rows_for(r.stdout, "funcs.settle")
+    assert row.startswith("FAIL") and "claims/demo.claims.yaml" in row
+    assert "delete .mathema/verified" not in row
+    assert "Traceback" not in r.stdout + r.stderr

@@ -987,6 +987,9 @@ def probe(fn, facts, domain: dict | None = None,
     kinds = [facts.param_kinds.get(p, "unknown") for p in facts.params]
     if not kinds:
         return []
+    # the call the battery attempts, stated as the `callable` row's
+    # statement; why it could not be made rides in the row's note
+    callable_statement = f"f({', '.join(facts.params)}) can be called"
     domain = dict(domain or {})
     # a Literal[...]/Enum annotation already states the parameter's
     # entire value set, seed it as that parameter's domain (a stated
@@ -1002,7 +1005,7 @@ def probe(fn, facts, domain: dict | None = None,
         if k == "string" and _classify_bound(domain.get(p)) not in (
                 "frozenset", "domain"):
             return [Probe(
-                "callable", "", "skipped",
+                "callable", callable_statement, "skipped",
                 note=f"parameter {p!r} is a string with no declared "
                      f"domain; declare its values, e.g. 'for {p} in "
                      f'{{"a", "b"}}, ...\' in a claim, or annotate it '
@@ -1036,7 +1039,7 @@ def probe(fn, facts, domain: dict | None = None,
         except Exception as e:
             last_exc = e
     else:
-        return [Probe("callable", "", "skipped",
+        return [Probe("callable", callable_statement, "skipped",
                       note="could not synthesize valid inputs from the "
                            f"signature ({type(last_exc).__name__}: {last_exc})",
                       meta={"mathema.probe_gap": "input-synthesis"})]

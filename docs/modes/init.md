@@ -64,8 +64,8 @@ touched by a later re-run as the target package grows.
 ```
 $ mathema init mypkg
 mathema init: scaffolded git files:
-  /path/to/project/.gitattributes
-  /path/to/project/.mathema/.gitignore
+  .gitattributes
+  .mathema/.gitignore
 mathema init: wrote stub entries to:
   claims/mypkg.mod.claims.yaml
 ```

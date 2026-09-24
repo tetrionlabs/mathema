@@ -655,6 +655,19 @@ def claim(law: str, name: str | None = None, source: str = "user",
         lhs = linalg.apply_matrix_sugar(lhs, mat_names)
         if rhs:
             rhs = linalg.apply_matrix_sugar(rhs, mat_names)
+    # every side of a relation is an expression: text left over from a
+    # malformed relation (`1 +`, `(`, the `= 1` that `===` splits into)
+    # is refused here with the claim named, not left to surface as a
+    # SyntaxError wherever the side is next parsed
+    if r is None and ds is None:
+        for _lhs, _rel, _rhs in (links or [(lhs, rel, rhs)]):
+            for _side in (_lhs, _rhs):
+                try:
+                    ast.parse(_side, mode="eval")
+                except SyntaxError:
+                    raise InvalidConjecture(
+                        f"cannot read {_side.strip()!r} as an expression "
+                        f"in the claim {law.strip()!r}") from None
     # the record's grammar names the linear-algebra dialect when the
     # claim uses the matrix vocabulary: informative only (a reader sees
     # the parsing was matrix-aware), never required to round-trip, the
@@ -680,8 +693,9 @@ def claim(law: str, name: str | None = None, source: str = "user",
         # rest of the system keys on (`is_pole_safe[x]`), the name a
         # suggestion would have carried, so family dispatch and the
         # call-form rebuilders read hand-written and suggested claims
-        # identically
-        name = f"{rel}[{lhs}]"
+        # identically; a negated predicate is a different claim and
+        # gets its own name, never the positive row's
+        name = f"{'not_' if negated else ''}{rel}[{lhs}]"
     if name is None:
         import re
         name = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:40] or "claim"
@@ -2058,6 +2072,10 @@ def _combine_conjunction(probes: list, name: str, statement: str,
         the combined note. The reported route is "derive" only when
         every part proved, else the deciding part's own route.
     """
+    def corroboration(probe) -> dict:
+        return {k: v for k, v in (probe.meta or {}).items()
+                if k.startswith("mathema.corroboration")}
+
     for probe, label in zip(probes, labels):
         if probe.verdict == "falsified":
             cx = probe.counterexample
@@ -2066,7 +2084,8 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                          counterexample=(f"{label}: {cx}" if cx else None),
                          sketch=(f"{label}: {probe.sketch}" if probe.sketch
                                  else None),
-                         note=f"{what} falsified at {label}")
+                         note=f"{what} falsified at {label}",
+                         meta=corroboration(probe))
     verdicts = [p.verdict for p in probes]
     if all(v == "proven" for v in verdicts):
         return Probe(name, statement, "proven", route="derive",
@@ -2081,7 +2100,8 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     return Probe(name, statement, weakest.verdict, route=weakest.route,
                  sketch=weakest.sketch,
                  note=f"{what} {weakest.verdict} at {label}: "
-                      f"{weakest.note}")
+                      f"{weakest.note}",
+                 meta=corroboration(weakest))
 
 
 def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
@@ -2654,7 +2674,8 @@ def _provenance_meta(proof) -> dict:
         `route` field; nothing external should rely on these.
     """
     meta = {}
-    for key in ("mathema.derive_route", "mathema.engine_disagreement"):
+    for key in ("mathema.derive_route", "mathema.engine_disagreement",
+                "mathema.corroboration", "mathema.corroboration_unexecutable"):
         if key in proof.meta:
             meta[key] = proof.meta[key]
     return meta
@@ -2841,7 +2862,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # names the definedness region
         return Probe(cj.name, statement, "unknown", route=cj.route,
                      sketch=family_proof.sketch,
-                     note=f"{note}; region equivalence undecided")
+                     note=f"{note}; region equivalence undecided",
+                     meta=_provenance_meta(family_proof))
     # a matrix-algebra relation claim (det / transpose / matmul / trace
     # / inverse over declared matrix parameters) is decided by sympy's
     # matrix algebra, not by lifting f's body, so it is attempted before

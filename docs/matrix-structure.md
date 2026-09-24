@@ -141,13 +141,13 @@ difference to zero; scalar comparisons of a determinant or trace are
 decided by sympy's assumption engine.
 
 ```
-det(A @ B) == det(A) * det(B)                          proven
-(A @ B).T == B.T @ A.T                                 proven
-trace(A + B) == trace(A) + trace(B)                    proven
-assuming A is symmetric, A.T == A                      proven
-assuming A is orthogonal, A.T @ A == I(n)              proven
-assuming A is positive definite, det(A) > 0            proven
-assuming A is positive definite, trace(A) > 0          proven
+det(A @ B) == det(A) * det(B)   # proven
+(A @ B).T == B.T @ A.T   # proven
+trace(A + B) == trace(A) + trace(B)   # proven
+assuming A is symmetric, A.T == A   # proven
+assuming A is orthogonal, A.T @ A == I(n)   # proven
+assuming A is positive definite, det(A) > 0   # proven
+assuming A is positive definite, trace(A) > 0   # proven
 ```
 
 A relation sympy cannot close falls to the matrix-value probe: concrete

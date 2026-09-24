@@ -50,7 +50,8 @@ def test_bare_str_declines_honestly_not_a_spurious_gap():
     assert gap, [p.name for p in rec.probes]
     p = gap[0]
     assert p.verdict == "skipped"
-    assert not p.statement          # a gap asserts no law
+    # a gap asserts no law: its statement names the call it tried
+    assert p.statement == "f(r, scale) can be called"
     assert "'scale' is a string with no declared domain" in (p.note or "")
     assert claim_reason_code(p) == ClaimReasonCode.NO_EVALUABLE_INPUTS
     # the old artefact, a float thrown at the str param and the raise

@@ -39,8 +39,19 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import NoReturn
 
 from .targets import TargetError, resolve, resolve_function
+
+
+def _bad_argument(message: str) -> NoReturn:
+    """Intent:
+        Stop the command on a bad argument: `message` goes to stderr as
+        one line and the process exits 2, the could-not-run code of the
+        exit-code contract (distinct from 1, a gate that ran and
+        failed)."""
+    print(message, file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _parse_domain(items: list[str]) -> dict:
@@ -53,13 +64,13 @@ def _parse_domain(items: list[str]) -> dict:
             lo, hi = rng.split(":", 1)
             out[name] = Interval(float(lo), float(hi))
         except ValueError:
-            raise SystemExit(f"mathema: bad --domain {item!r}; expected name=lo:hi")
+            _bad_argument(f"mathema: bad --domain {item!r}; expected name=lo:hi")
     return out
 
 
 def _validate_trials_scale(scale: float) -> None:
     if scale <= 0:
-        raise SystemExit(f"mathema: --trials-scale must be > 0, got {scale!r}")
+        _bad_argument(f"mathema: --trials-scale must be > 0, got {scale!r}")
 
 
 def _check_rows(args) -> list[dict]:
@@ -676,8 +687,8 @@ def cmd_audit(args) -> int:
 
     unknown = exclude - AUDIT_ANALYSES
     if unknown:
-        raise SystemExit(f"mathema audit: unknown --exclude {sorted(unknown)}; "
-                         f"choose from {sorted(AUDIT_ANALYSES)}")
+        _bad_argument(f"mathema audit: unknown --exclude {sorted(unknown)}; "
+                      f"choose from {sorted(AUDIT_ANALYSES)}")
     compact_cols = None
     if args.compact or args.cols or getattr(args, "filter", None):
         # the speed half of column selection: analyses no chosen
@@ -713,7 +724,7 @@ def cmd_audit(args) -> int:
                            for t in item.split(",")])
             compact = compact_audit(rows, compact_cols)
         except ValueError as e:
-            raise SystemExit(f"mathema audit: {e}")
+            _bad_argument(f"mathema audit: {e}")
         print(json.dumps(compact, separators=(",", ":")))
         return 0
 
@@ -1399,7 +1410,7 @@ def cmd_init(args) -> int:
     git_written = _scaffold_git_files(root)
     if git_written:
         print("mathema init: scaffolded git files:\n  "
-              + "\n  ".join(git_written))
+              + "\n  ".join(os.path.relpath(p, root) for p in git_written))
     else:
         print("mathema init: git files already in place")
     stub_written: list = []
