@@ -10,22 +10,25 @@ theme:
   logo: assets/tetrion-mark-light.svg
   favicon: assets/favicon.ico
   font: false
+  icon:
+    repo: octicons/mark-github-24
   palette:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: custom
       accent: custom
       toggle:
-        icon: material/brightness-4
+        icon: octicons/sun-24
         name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
       primary: custom
       accent: custom
       toggle:
-        icon: material/brightness-7
+        icon: octicons/moon-24
         name: Switch to dark mode
   features:
+    - navigation.tabs
     - navigation.sections
     - navigation.top
     - content.code.copy
@@ -97,6 +100,7 @@ nav:
       - The MCP interface: modes/mcp.md
       - Symbology and rendering: symbology.md
       - Extending mathema: extending.md
-  - Licensing: licensing-policy.md
-  - Versioning: stability.md
-  - Changelog: https://github.com/tetrionlabs/mathema/blob/main/CHANGELOG.md
+  - Project:
+      - Licensing: licensing-policy.md
+      - Versioning and stability: stability.md
+      - Changelog: https://github.com/tetrionlabs/mathema/blob/main/CHANGELOG.md
