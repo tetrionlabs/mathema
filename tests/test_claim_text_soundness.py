@@ -321,3 +321,17 @@ def test_an_excluded_missing_value_is_stated_and_survives_reparse(
 def test_excluding_missing_is_a_different_claim_from_allowing_it():
     assert fingerprint_text(claim(r"for x in [0, 1] \ {missing}, f(x) >= 0")) \
         != fingerprint_text(claim("for x in [0, 1], f(x) >= 0"))
+
+
+# -- identity: norm and absolute value ----------------------------------------
+
+def magnitude(x: float) -> float:
+    return abs(x)
+
+
+def test_a_norm_and_an_absolute_value_are_different_claims():
+    norm_law = "for x in [-1, 1], ||f(x)|| >= 0"
+    abs_law = "for x in [-1, 1], |f(x)| >= 0"
+    assert fingerprint_text(claim(norm_law)) != fingerprint_text(claim(abs_law))
+    assert "norm(f(x))" in assert_round_trips(norm_law, magnitude)
+    assert "|f(x)|" in assert_round_trips(abs_law, magnitude)

@@ -2376,6 +2376,10 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
             # make a record state something nobody adjudicated. Held
             # uninterpreted instead, which prints back as written.
             return sympy.Function(name)(*args)
+        if name == "norm":
+            # a norm and an absolute value agree on scalars but not on
+            # vectors, so `||x||` keeps its own name in claim text
+            return sympy.Function(name)(*args)
         if name in _SYMPY_FUNCS:
             return _SYMPY_FUNCS[name](*args)
     return _verbatim_atom(node)
@@ -2779,7 +2783,7 @@ class _CanonicalPrinter(StrPrinter):
         # bound-function vocabulary) needs the funcs membership check.
         if isinstance(expr, sympy.core.function.AppliedUndef):
             name = expr.func.__name__
-            if (name not in ("P.V.", "min", "max")
+            if (name not in ("P.V.", "min", "max", "norm")
                     and name not in self._funcs):
                 # "P.V." is the grammar's own principal-value operator
                 # (an uninterpreted sympy.Function internally, but a
@@ -2882,10 +2886,9 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     callers should compare re-parsed *meaning*, never rendered text
     byte-for-byte.
 
-    `norm(x)` has no separate spelling to reconstruct: this grammar's own
-    `_SYMPY_FUNCS` already maps it to plain `Abs`, identically to `abs(x)`,
-    indistinguishable once parsed, so this always renders `Abs` as
-    `|x|`, never `||x||`, regardless of which one the original text used.
+    `norm(x)` (the `||x||` input spelling) renders as the `norm(x)` call
+    in both modes, kept apart from `abs(x)`: the two agree on a scalar
+    and differ on a vector, so they are different claims.
 
     In ASCII mode, a Greek-letter identifier that has a known backslash
     spelling (`α` -> `\\alpha`, see `_GREEK_TO_BACKSLASH`) is converted
