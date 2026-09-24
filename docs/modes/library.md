@@ -58,7 +58,7 @@ per claim adjudicated.
 
 ```python
 >>> mathema.check(ema)
-mathema.Record(ema) · source, no side effects · form 1dda3a0d5a72
+mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
            counterexample alpha=1 -> 0.45118195841070374, alpha=3.09918 -> -349.0594689144083 (not increasing)
   FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0

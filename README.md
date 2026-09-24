@@ -145,7 +145,7 @@ print(mathema.check(discount_factor))
 
 <!-- example: pole output match=subset -->
 ```text
-mathema.Record(discount_factor) · source, no side effects · form 8b1b8ec14a11
+mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
   FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
            counterexample x = 1
   FALSIFY even: f(-x) = f(x)

@@ -12,7 +12,7 @@ rather than checked.
 
 | Verdict | What it establishes | What it does not | What the record keeps |
 |---|---|---|---|
-| `proven` | The claim holds for every input in the declared domain, established by algebra in exact real arithmetic. On a finite integer domain, `derive:brute_force` has instead evaluated every point. | That floating point reproduces what the reals prove. Where it does not, running the real function falsifies the claim instead, see [the sigmoid case study](case-studies.md). | The route (`derive`, `derive:extensive`, `derive:brute_force`) and a sketch naming the mechanism behind the proof. A `proven` never rests on an unnamed step. |
+| `proven` | The claim holds for every input in the declared domain, established by algebra in exact real arithmetic. On a finite integer domain, `derive:brute_force` has instead evaluated every point. | That floating point reproduces what the reals prove. Where the code raises inside the domain the claim itself is falsified, see [the sigmoid case study](case-studies.md); where it returns but loses the mathematics (a NaN, a precision collapse) the `[float]` companion claim, which runs the real function at the domain's corners and across its interior, is falsified while the proof stands. | The route (`derive`, `derive:extensive`, `derive:brute_force`) and a sketch naming the mechanism behind the proof. A `proven` never rests on an unnamed step. |
 | `holds (n=...)` | The real function survived exactly `n` executed trials without a counterexample, on seeded inputs biased toward domain edges, corners, poles and special values. | A probability of failure. No statistical bound is computed or implied. The confidence stars beside a `holds` measure sampling density against the function's structure, and top out at four of five, since five is reserved for proof. | `n`, the sampling plan including its seed, and the confidence breakdown. |
 | `falsified` | The real function, called at an in-domain point, violates the claim. That point is the **witness**, and a `falsified` always has one. | Anything about why. A falsification may mean the code is wrong or the claim is, and the loop exists to tell those apart, see [the CDD loop](tutorial.md). | The counterexample, kept permanently and replayed on every later run, so a bug cannot be fixed by accident and quietly unfixed. |
 | `invalidated` | The claim was `proven` or `holds` in the previous record and the current code no longer supports it. | That it may simply be re-adjudicated away. It stays `invalidated` until the claim is supported again, or a person accepts it as a discovery or as history. | The previous verdict, what it regressed to, and the last commit where it was supported. |
@@ -82,7 +82,7 @@ built. See [Claims transfer](claims-transfer.md).
 
 - **Reals and floats.** Proof is over the reals. Floating-point
   behaviour is covered by running the code: probing, witnesses, the
-  overflow and numerical-stability checks, and
+  overflow rule, the `[float]` companion claim every proof spawns, and
   [operational infinity](grammar.md#operational-infinity-let-inf-be) for
   unbounded domains.
 - **Time caps.** Proof attempts are capped on the wall clock: 3 seconds

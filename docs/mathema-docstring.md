@@ -32,7 +32,7 @@ declares, and `x in [0, 1]^n` samples lists of any length whose entries
 lie in the unit interval:
 
 ```text
-mathema.Record(ema) · source, no side effects · form 650f21ff832d
+mathema.Record(ema) · source, no side effects · form 0a80d14e175f
   holds   bounded: for x in [0.0, 1.0]^n:float|missing, alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= 1 (n=160)
 ```
 

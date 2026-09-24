@@ -583,7 +583,7 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 <!-- example: write-spec repl -->
 ```
 >>> mathema.write_spec(softmax, root='.')
-mathema.Record(softmax) · source, no side effects · form 7302d34f1904
+mathema.Record(softmax) · source, no side effects · form 7982b776d687
   holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (n=32)
   holds   is_deterministic: f(scores) = f(scores) (n=192)
   holds   is_state_safe: f(scores) = f(scores) (n=48)

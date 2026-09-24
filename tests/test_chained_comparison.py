@@ -117,8 +117,14 @@ def test_a_chain_reports_the_route_its_links_report(fn, route):
     singles = [_verdict(fn, law, route=route) for law in
                ("for x in [-5, 5], 0 <= f(x)", "for x in [-5, 5], f(x) <= 1")]
     assert chained.verdict in ("proven", "holds")
-    assert all(s.verdict == chained.verdict for s in singles)
-    link_routes = {s.route for s in singles}
+    # a chain is a conjunction: proven only when every link proves, else
+    # it holds on the sampled links, and those are the links whose
+    # routes it reports
+    every_link_proven = all(s.verdict == "proven" for s in singles)
+    assert chained.verdict == ("proven" if every_link_proven else "holds")
+    reported = singles if every_link_proven else \
+        [s for s in singles if s.verdict == "holds"]
+    link_routes = {s.route for s in reported}
     subroutes = {r for r in link_routes if ":" in r}
     expected = (link_routes.pop() if len(link_routes) == 1
                 else subroutes.pop())

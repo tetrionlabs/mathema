@@ -41,7 +41,7 @@ function's alpha-normalised AST with the docstring stripped, so:
 ```text
 $ mathema verify
 ok   funcs.midpoint: fresh
-FAIL funcs.settle: locked at form 206704b327da but the code is now 7df50498df6f; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
+FAIL funcs.settle: locked at form 3eb01e1d9919 but the code is now d70deb99df0e; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
 1 fresh (form unchanged, skipped), 0 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 $ echo $?
@@ -96,7 +96,7 @@ pinned form hash for machines.
 funcs.settle:
   at: '2026-09-24'
   by: Alan Turing
-  form: 206704b327da
+  form: 3eb01e1d9919
   note: settled implementation
 ```
 

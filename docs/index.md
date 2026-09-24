@@ -148,7 +148,7 @@ print(mathema.check(midpoint, claims=[
 ```
 
 ```text
-mathema.Record(midpoint) · source, no side effects · form 3f045b3e5b8d
+mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
   proven  between_integers: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) ≤ f(a, b) ≤ max(a, b)
            for a in [0, 100]:int|missing, b in [0, 100]:int|missing
   FALSIFY between_reals: for a in [0.0, 100.0]:float|missing, b in [0.0, 100.0]:float|missing, min(a, b) <= f(a, b) <= max(a, b)
@@ -241,14 +241,14 @@ mathema lock pricing.discounted
 ```
 
 ```text
-locked pricing.discounted at form 3c02ba9abd15
+locked pricing.discounted at form d2ab6eef1b84
 the body can no longer change under a CDD loop; docstring edits are unaffected. A human unlocks with: mathema unlock pricing.discounted
 ```
 
 and after someone changes `1 - rate` to `1 + rate`:
 
 ```text
-FAIL pricing.discounted: locked at form 3c02ba9abd15 but the code is now 1e43fc87752e; the record is unchanged. Restore the function, or a human runs: mathema unlock pricing.discounted
+FAIL pricing.discounted: locked at form d2ab6eef1b84 but the code is now 53f9c55de50b; the record is unchanged. Restore the function, or a human runs: mathema unlock pricing.discounted
 ```
 
 An agent is allowed to lock a function it has finished, which narrows what it

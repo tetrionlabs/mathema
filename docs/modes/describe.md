@@ -43,7 +43,7 @@ Here `funcs.py` is the [tutorial](../tutorial.md) project, with
 $ mathema describe funcs:midpoint
 funcs.midpoint(a: float, b: float) -> float
   sig_hash:  6e64b8a7a1f0
-  form_hash: b5d52154377a
+  form_hash: 54265556347f
 
 Domains:
   (none inferred)

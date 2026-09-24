@@ -119,13 +119,33 @@ def normalized(fdef: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.AST:
     return f
 
 
+def form_text(node) -> str:
+    """The text a form hash is taken over: each node as its class name
+    and its fields, with every empty list, absent field and None-valued
+    field left out. Each Python version adds fields of its own to the
+    tree (3.12 gives every function a `type_params=[]`), always empty
+    by default, so a text that carries only the fields holding content
+    reads the same under every supported interpreter."""
+    if isinstance(node, ast.AST):
+        parts = []
+        for name in node._fields:
+            value = getattr(node, name, None)
+            if value is None or (isinstance(value, list) and not value):
+                continue
+            parts.append(f"{name}={form_text(value)}")
+        return f"{type(node).__name__}({', '.join(parts)})"
+    if isinstance(node, list):
+        return "[" + ", ".join(form_text(v) for v in node) + "]"
+    return repr(node)
+
+
 def form_hash(fdef: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     """The `form` identity: a 12-hex-char hash of the function's
     alpha-normalized AST (`normalized()`, locals/parameters replaced
     by binding-order names, so a pure rename doesn't change it, but any
-    real structural change does)."""
-    dump = ast.dump(normalized(fdef), annotate_fields=True, include_attributes=False)
-    return hashlib.sha256(dump.encode()).hexdigest()[:12]
+    real structural change does), rendered by `form_text` so the hash
+    is the same on every supported Python."""
+    return hashlib.sha256(form_text(normalized(fdef)).encode()).hexdigest()[:12]
 
 
 def signature_string(fn) -> str:

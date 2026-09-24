@@ -34,7 +34,7 @@ one sequence parameter feeding a numeric result, so the bounds,
 scalar parameter. This is the real, unedited result:
 
 ```text
-mathema.Record(ema) · source, no side effects · form 1dda3a0d5a72
+mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
            counterexample alpha=1 -> 0.45118195841070374, alpha=3.09918 -> -349.0594689144083 (not increasing)
   FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
@@ -121,7 +121,7 @@ mathema.check(ema, claims=["excluding"], domain={"alpha": (0, 1)})
 ```
 
 ```text
-mathema.Record(ema) · source, no side effects · form 1dda3a0d5a72
+mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY excluded_outside_domain[alpha]: excluded_outside_domain(alpha)
            counterexample alpha = -0.5 is outside the declared domain but was accepted (returned -8.497371670908786); the exclusion is asserted, not enforced
 ```
@@ -148,7 +148,7 @@ mathema.check(ema, claims=[
 ```
 
 ```text
-mathema.Record(ema) · source, no side effects · form 1dda3a0d5a72
+mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   holds   collapses_probed: f(x, 1.0) = x[-1] (n=160)
   proven  collapses_derived: f(x, 1.0) = x[-1]
            ∀ x ∈ Seq(ℝ)
@@ -183,7 +183,7 @@ durable record a **provable codebase** keeps instead of trusting the
 implementation alone (trimmed):
 
 ```yaml
-# machine record; binds to form 1dda3a0d5a72
+# machine record; binds to form 5108dc8b5d5c
 ema:
   schema_version: "0.2.0"
   name: "ema"
@@ -192,7 +192,7 @@ ema:
   grammar: "mathema"
   tolerance: 1.0e-09
   identity:
-    form: "1dda3a0d5a72"
+    form: "5108dc8b5d5c"
     sig: "1fb43b08d3e9"
     tier: 2
     source_available: true

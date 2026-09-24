@@ -177,9 +177,9 @@ mathema accept funcs.settle nonneg --as evidence --by "Ada Lovelace"
 
 ```text
 accepting funcs.settle :: nonneg (verdict holds) as evidence, by Ada Lovelace
-  - annotate nonneg as accepted evidence at n=130 (bound to form 206704b327da...)
+  - annotate nonneg as accepted evidence at n=130 (bound to form 3eb01e1d9919...)
 write this acceptance? [y/N] y
-written: annotate nonneg as accepted evidence at n=130 (bound to form 206704b327da...)
+written: annotate nonneg as accepted evidence at n=130 (bound to form 3eb01e1d9919...)
 ```
 
 `accept` prints exactly what it will write and waits for a yes. The

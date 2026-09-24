@@ -28,7 +28,7 @@ print(mathema.check(midpoint, claims=[
 ```
 
 ```text
-mathema.Record(midpoint) · source, no side effects · form 3f045b3e5b8d
+mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
   proven  between_integers: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) ≤ f(a, b) ≤ max(a, b)
            for a in [0, 100]:int|missing, b in [0, 100]:int|missing
   FALSIFY between_reals: for a in [0.0, 100.0]:float|missing, b in [0.0, 100.0]:float|missing, min(a, b) <= f(a, b) <= max(a, b)
@@ -56,7 +56,7 @@ print(mathema.check(discount_factor))
 ```
 
 ```text
-mathema.Record(discount_factor) · source, no side effects · form 8b1b8ec14a11
+mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
   FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
            counterexample x = 1
   FALSIFY even: f(-x) = f(x)
