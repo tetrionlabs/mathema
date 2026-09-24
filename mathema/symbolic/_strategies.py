@@ -168,7 +168,7 @@ def fast_squared_attempt(lhs, rhs, relation: str, domain: dict,
             sketch=f"isolating {pos} against {neg} (both nonnegative on "
                    f"the domain, so squaring preserves the relation); on "
                    f"the squared difference: {result.sketch}",
-            counterexample=result.counterexample,
+            counterexample=result.counterexample, witness=result.witness,
             quantifier=result.quantifier, meta=meta)
     return None
 
@@ -219,7 +219,7 @@ def fast_loggamma_attempt(lhs, rhs, relation: str, domain: dict,
             result.status,
             sketch=f"after rewriting loggamma to log(gamma) and combining: "
                    f"{result.sketch}",
-            counterexample=result.counterexample,
+            counterexample=result.counterexample, witness=result.witness,
             quantifier=result.quantifier, meta=meta)
     return None
 
