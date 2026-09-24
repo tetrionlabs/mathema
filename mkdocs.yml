@@ -3,7 +3,10 @@ site_description: "Claim-Driven Development: turn software intent into verifiabl
 site_url: https://mathema.tetrionlabs.com
 repo_name: tetrionlabs/mathema
 repo_url: https://github.com/tetrionlabs/mathema
-copyright: "Copyright 2026 Tetrion Ltd. Source-available under BUSL 1.1; documentation prose and examples are CC BY 4.0."
+# The deployed footer carries the company's legal details from the
+# DOCS_LEGAL_FOOTER repository variable (set in the repo's Actions
+# settings, passed by docs.yml); every other build uses the short line.
+copyright: !ENV [DOCS_LEGAL_FOOTER, "Copyright 2026 Tetrion Ltd"]
 theme:
   name: material
   custom_dir: overrides
@@ -49,6 +52,47 @@ markdown_extensions:
 
 plugins:
   - search
+  - llmstxt:
+      markdown_description: >-
+        mathema is a System 0 engine for Claim-Driven Development: a
+        verification engine with zero models between the code and its
+        verdict. You state claims about Python functions; mathema proves
+        them symbolically where the function lifts, tests them against the
+        real code where it does not, and keeps a record bound to the exact
+        code it verified. Verdicts are proven, holds (n trials), falsified
+        (with an executed witness), invalidated, unknown and skipped, and
+        each means exactly what the guarantees page says. Agents propose
+        claims; mathema adjudicates; people accept.
+      full_output: llms-full.txt
+      sections:
+        Start here:
+          - index.md: What mathema is and why it exists
+          - install.md: Installing mathema
+          - quickstart.md: State a claim, see it falsified, fix it, record it, gate CI
+          - tutorial.md: The full claim-driven development loop on a real function
+        Concepts:
+          - guarantees.md: What each verdict establishes and does not, and the glossary
+          - evidence-ladder.md: How proof and sampled evidence are kept apart
+          - cdd.md: The method, its vocabulary and exit codes
+          - derive-route.md: What the symbolic route can lift and prove
+          - claims-transfer.md: Moving claims between projects and implementations
+          - reason-codes.md: Stable reason codes and their remedies
+        Trust and governance:
+          - governance.md: Who decides what, the integrity checksum, the CI gate
+          - security.md: What runs when a claim is checked, and how to contain it
+        Writing claims:
+          - authoring.md: The authoring surfaces and their precedence
+          - grammar.md: The claim grammar, domains and tolerance
+          - multi-function-claims.md: Binding functions and the equivalence ladder
+          - lemmas.md: Claims that rest on other claims
+        Commands:
+          - modes/check.md: Check a function's claims
+          - modes/verify.md: The CI gate over the committed store
+          - modes/accept.md: Human acceptance of a verdict
+          - modes/review.md: The claim-level delta of a change
+        Coding agents:
+          - agents.md: Working with coding agents
+          - modes/mcp.md: The MCP interface
   - mkdocstrings:
       handlers:
         python:

@@ -7,7 +7,7 @@ at your own code owes you a straight answer about its own churn.
 ## Where mathema is today
 
 mathema is at **0.6.0 and pre-1.0**. It is feature-complete and
-heavily tested (over 2,000 tests), and the concepts are settled. The
+heavily tested (over 3,200 tests), and the concepts are settled. The
 Python API is **likely to change before 1.0**. That is the honest
 statement, not a formality: if you build on the library surface today,
 expect to make adjustments when 1.0 lands.

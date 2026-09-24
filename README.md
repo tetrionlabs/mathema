@@ -210,20 +210,23 @@ fastest way to hand an agent a codebase without letting it grep its way around.
 
 ## Beyond tests
 
-| | Unit tests | Property-based testing | Proof assistants and SMT solvers | mathema |
-|---|:-:|:-:|:-:|:-:|
-| Checks the examples you chose | ✓ | ✓ | | ✓ |
-| Checks many generated inputs | | ✓ | | ✓ |
-| Proves a claim over its whole domain | | | ✓ | ✓ where the function lifts |
-| Works on ordinary Python, no separate specification language | ✓ | ✓ | | ✓ |
-| Keeps a record bound to the exact code it verified | | | ✓ | ✓ |
-| Routes each claim to whatever method can settle it | | | | ✓ |
+| | Unit tests | Property-based testing | Symbolic execution (CrossHair) | Proof assistants and SMT solvers | mathema |
+|---|:-:|:-:|:-:|:-:|:-:|
+| Checks the examples you chose | ✓ | ✓ | | | ✓ |
+| Checks many generated inputs | | ✓ | ✓ | | ✓ |
+| Proves a claim over its whole domain | | | when every path is explored | ✓ | ✓ where the function lifts |
+| Works on ordinary Python, no separate specification language | ✓ | ✓ | ✓ | | ✓ |
+| Keeps a record bound to the exact code it verified | | | | ✓ | ✓ |
+| Routes each claim to whatever method can settle it | | | | | ✓ |
 
-None of these replaces the others, and mathema's probe route is the same idea
-as Hypothesis. What mathema adds is the place where a property check, a real
-proof attempt and a durable record meet on the same claim, with the claim
-routed automatically to whichever method the function's shape can support, and
-`skipped` reported plainly the moment none can.
+None of these replaces the others. mathema's probe route is the same idea as
+Hypothesis, CrossHair's symbolic execution is the nearest thing in Python to
+its derive route, and contract libraries such as icontract and deal check
+pre- and postconditions as the code runs, which complements a claim rather
+than competing with it. What mathema adds is the place where a property check,
+a real proof attempt and a durable record meet on the same claim, with the
+claim routed automatically to whichever method the function's shape can
+support, and `skipped` reported plainly the moment none can.
 
 ## Measuring a codebase
 
@@ -339,7 +342,7 @@ The full documentation, including the command reference, is at
 **[mathema.tetrionlabs.com](https://mathema.tetrionlabs.com)**.
 
 mathema is at 0.6.0 and pre-1.0, feature-complete for its current scope and
-covered by over 2,500 tests; the claim grammar and record format are settled by
+covered by over 3,200 tests; the claim grammar and record format are settled by
 the spec, but the Python API is likely to change before 1.0.
 
 ## Related projects
