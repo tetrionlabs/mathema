@@ -39,6 +39,7 @@ verdict was reached and are excluded from evidence aggregation,
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .routes import examine_predicates
@@ -97,6 +98,18 @@ class Probe:
     # Persisted as meta["mathema.stratum"] (spec.to_spec folds it), so
     # the on-disk shape needs no schema change at CDD spec v0.2.0.
     stratum: dict | None = None
+
+    def __setattr__(self, name: str, value) -> None:
+        # A note is built by appending `; <remark>` fragments onto
+        # whatever note came before, which is often empty; the note
+        # always reads from its first remark, on construction and on
+        # every later assignment alike.
+        if name == "note" and isinstance(value, str):
+            value = _NOTE_LEADING_SEPARATOR.sub("", value)
+        super().__setattr__(name, value)
+
+
+_NOTE_LEADING_SEPARATOR = re.compile(r"^(?:\s*;\s*)+")
 
 
 # exception names a raises(...) claim may assert; resolving arbitrary names

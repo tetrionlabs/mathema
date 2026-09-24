@@ -6,7 +6,7 @@ the verified layer is the append-only memory; the index is the
 generated map. `docsync` is the verb that keeps them coherent.
 
 ```bash
-mathema docsync mypkg [--root .] [--yes] [--write-docstrings] [--report] [--write]
+mathema docsync [mypkg ...] [--root .] [--yes] [--write-docstrings] [--report] [--write]
 ```
 
 ## The layer model

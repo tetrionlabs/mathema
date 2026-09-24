@@ -34,6 +34,11 @@ you meant before pointing an expensive verb at it.
 
 ## The detail view
 
+Here `funcs.py` is the [tutorial](../tutorial.md) project, with
+`midpoint` declaring `commutative` and
+`mean_bound: for a in [0, 1], b in [0, 1], f(a, b) <= 1`, after one
+`mathema verify --root .`:
+
 ```
 $ mathema describe funcs:midpoint
 funcs.midpoint(a: float, b: float) -> float
@@ -47,6 +52,7 @@ Claims:
   commutative: f(a, b) == f(b, a)  [proven]
     latex: f{\left(a,b \right)} = f{\left(b,a \right)}
   mean_bound: for a in [0, 1], b in [0, 1], f(a, b) <= 1  [proven]
+    latex: (not available: invalid syntax (<unknown>, line 1))
 
 Concepts: symmetry
 ```
@@ -117,7 +123,7 @@ request: the payload is yours to send, or not.
 | Flag | Meaning |
 |---|---|
 | `target` | importable module, package, or `module:function` name(s), the same convention as `audit` |
-| `--root` | project root to import targets relative to (default `.`) |
+| `--root` | project root to import targets relative to (default: the nearest ancestor holding `.mathema/` within the enclosing git repository, else that repository, else `.`; never the home directory) |
 | `--tier` | narrow the ladder to one tier, by name or by position 1-5 (single-function mode only) |
 | `--depth` | callee-inlining depth for the ladder (default 3, single-function mode only) |
 | `--issue` | build the structured failure report for one function |
@@ -129,4 +135,4 @@ request: the payload is yours to send, or not.
 `describe` reports rather than gates, so a successful run is always 0,
 including the run that finds no functions at all. A target that does
 not resolve exits 2, like every other verb (see
-[exit codes](../index.md#exit-codes)).
+[exit codes](../cdd.md#exit-codes)).

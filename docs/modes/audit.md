@@ -46,7 +46,7 @@ mathema audit mypkg [mypkg.sub ...]
 | `funcs` (globals group) | references to a sibling function/class/module by name, ordinary code structure, not a state dependency |
 | `unresolved` (globals group) | free names with no binding mathema can find at all, almost always a real bug |
 | `tested` | whether an existing `coverage.json`/`.coverage` covers this function (never runs tests itself): `yes`, `no`, `no-report`, or `outdated` when the function's source file changed since the report measured it (by content hash when the report is stamped with `mathema coverage --stamp`, else by file modification time); a stale yes is not evidence |
-| `locked` | whether the function's form hash is [locked](lock.md): `yes` (with who pinned it) means the body cannot change until a human runs `mathema unlock`, the assurance column. Hidden when nothing in the population is locked; `--compact` carries the pinned form hash in a `locked` column on request |
+| `locked` | whether the function's form hash is [locked](lock.md): `yes` (with who pinned it) means the body cannot change until a human runs `mathema unlock`. Hidden when nothing in the population is locked; `--compact` carries the pinned form hash in a `locked` column on request |
 | `quality` (docs group) | the docstring quality-checklist score, see below |
 
 The grid prints a group-title row above the columns (`derive route`,
@@ -126,14 +126,13 @@ def strength_to_distance(r: float, scale: str = "info") -> float:
 ```
 
 ```
-$ mathema audit mypkg
+$ mathema audit mypkg --deriv-report
 ...
 underivable functions:
   mypkg.strength_to_distance:
     line 2  branch:needs-domain(scale)
     line 4  branch:needs-domain(scale)
-codes explained: the reason-code reference in the docs, or
-`mathema describe --issue <key>` for the full hints
+codes explained: the reason-code reference in the docs, or `mathema describe --issue <key>` for the full details
 ```
 
 Both branches are resolvable once `scale` has a declared domain, a

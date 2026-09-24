@@ -69,15 +69,19 @@ def test_negative_literal_argument_also_infers_a_domain():
 def test_explicit_domain_wins_over_an_inferred_one():
     # an explicitly declared domain for code, [1, 5], excludes 0, if
     # the inferred literal (0, from f(50, 0)) illegitimately overrode
-    # it, the guard would resolve as always-true and this would come
-    # back proven. It comes back falsified instead: code in [1, 5]
-    # never triggers the guard, so the function never raises, which is
-    # only reachable if the explicit domain actually won.
-    results = check_conjectures(
+    # it, the guard would resolve as always-true and derive would come
+    # back proven. Under the explicit domain derive reads code in
+    # [1, 5], never reaches the guard, and disproves the raise; that
+    # disproof has no executed witness (the literal call f(50, 0) does
+    # raise), so it is reported uncorroborated rather than falsified,
+    # and the probe route, which runs the call, holds.
+    (p,) = check_conjectures(
         price_with_discount,
         [claim("for code in [1, 5], raises(f(50, 0), ValueError)", route="derive")])
-    assert results[0].verdict == "falsified"
-    assert "code=" not in results[0].note
+    assert p.verdict != "proven"
+    assert (p.meta or {}).get("mathema.corroboration") == "uncorroborated"
+    assert p.verdict == "holds" and p.route == "probe"
+    assert "code=" not in p.note
 
 
 def test_literal_in_an_ordinary_relation_claim_also_infers_a_domain():

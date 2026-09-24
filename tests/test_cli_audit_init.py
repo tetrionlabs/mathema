@@ -299,6 +299,19 @@ def test_init_writes_stubs_only_for_unclaimed_functions(tmp_path):
     assert parsed["trialpkg.mod.pure_fn"]["claims"] == []   # real empty list, not "[]"
 
 
+def test_init_lists_every_written_path_relative_to_the_root(tmp_path):
+    root = _write_pkg(tmp_path, _BODY)
+    r = _run(root, "init", "trialpkg", "--ci")
+    assert r.returncode == 0, r.stdout + r.stderr
+    listed = [ln.strip() for ln in r.stdout.splitlines()
+              if ln.startswith("  ")]
+    for rel in (".gitattributes", ".mathema/.gitignore",
+                "claims/trialpkg.mod.claims.yaml",
+                ".github/workflows/mathema-verify.yml"):
+        assert rel in listed, r.stdout
+    assert str(root) not in r.stdout
+
+
 def test_init_is_idempotent_and_preserves_hand_written_claims(tmp_path):
     root = _write_pkg(tmp_path, _BODY)
     r1 = _run(root, "init", "trialpkg")

@@ -40,7 +40,7 @@ def test_unknown_gates_unless_risk_accepted():
 def test_strict_refuses_owned_risk_and_skips():
     claims = [_probe("a", "unknown"), _probe("b", "skipped")]
     r = gate(claims, strict=True, accepted_risk=frozenset({"a"}))
-    assert r.problems == ["2 unverifiable claim(s)"]
+    assert r.problems == ["1 skipped claim(s)", "1 accepted-risk claim(s)"]
     r = gate(claims, strict=False, accepted_risk=frozenset({"a"}))
     assert r.problems == []
 
@@ -76,7 +76,7 @@ def test_stored_claim_dicts_gate_identically():
                "meta": {"mathema.surface": "mathema"}}]
     r = gate(stored, strict=False)
     assert r.refuted == 2 and r.unknown == 0
-    assert r.problems == ["2 falsified claim(s)"]
+    assert r.problems == ["1 falsified claim(s)", "1 invalidated claim(s)"]
 
 
 def test_unresolved_names_gate_in_every_mode():

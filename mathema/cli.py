@@ -39,8 +39,19 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import NoReturn
 
 from .targets import TargetError, resolve, resolve_function
+
+
+def _bad_argument(message: str) -> NoReturn:
+    """Intent:
+        Stop the command on a bad argument: `message` goes to stderr as
+        one line and the process exits 2, the could-not-run code of the
+        exit-code contract (distinct from 1, a gate that ran and
+        failed)."""
+    print(message, file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _parse_domain(items: list[str]) -> dict:
@@ -53,13 +64,13 @@ def _parse_domain(items: list[str]) -> dict:
             lo, hi = rng.split(":", 1)
             out[name] = Interval(float(lo), float(hi))
         except ValueError:
-            raise SystemExit(f"mathema: bad --domain {item!r}; expected name=lo:hi")
+            _bad_argument(f"mathema: bad --domain {item!r}; expected name=lo:hi")
     return out
 
 
 def _validate_trials_scale(scale: float) -> None:
     if scale <= 0:
-        raise SystemExit(f"mathema: --trials-scale must be > 0, got {scale!r}")
+        _bad_argument(f"mathema: --trials-scale must be > 0, got {scale!r}")
 
 
 def _check_rows(args) -> list[dict]:
@@ -101,7 +112,11 @@ def _check_rows(args) -> list[dict]:
         rows.append({"name": name, "tier": rec.facts.tier,
                      "identity": {"form": rec.facts.form, "sig": rec.facts.sigh},
                      "proven": proven, "holds": holds, "refuted": report.refuted,
+                     "falsified": report.falsified,
+                     "invalidated": report.invalidated,
                      "unverifiable": report.skipped + report.owned,
+                     "skipped": report.skipped,
+                     "accepted_risk": report.owned,
                      "unknown": report.unknown,
                      "verified": verified, "total": total,
                      "coverage": f"{verified}/{total}" if total else "0/0",
@@ -115,6 +130,7 @@ def _check_rows(args) -> list[dict]:
 def _format_check(rows: list[dict], fmt: str) -> str:
     from . import SPEC_VERSION, __version__
     from .analysis import tier_word
+    from .verify import summary_counts
 
     if fmt == "compact":
         # the adjudication agent shape: stance/source/gates per row,
@@ -162,15 +178,17 @@ def _format_check(rows: list[dict], fmt: str) -> str:
         lines.append(_format_check(rows, "text"))
         return "\n".join(lines)
     if fmt == "md":
-        out = ["| function | tier | claims adjudicated | proven | hold | refuted "
-               "| unknown | unverifiable | status |",
-               "|---|---|---|---|---|---|---|---|---|"]
+        out = ["| function | tier | claims adjudicated | proven | holds "
+               "| falsified | invalidated | unknown | skipped | accepted risk "
+               "| status |",
+               "|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in rows:
             status = "FAIL: " + "; ".join(r["problems"]) if r["problems"] else "ok"
             out.append(f'| `{r["name"]}` | {r["tier"]} | {r["coverage"]} '
-                       f'| {r["proven"]} | {r["holds"]} | {r["refuted"]} '
-                       f'| {r.get("unknown", 0)} | {r["unverifiable"]} | {status} |')
-        out.append(f"\ncdd spec v{SPEC_VERSION}. refutation counts as "
+                       f'| {r["proven"]} | {r["holds"]} | {r["falsified"]} '
+                       f'| {r["invalidated"]} | {r["unknown"]} '
+                       f'| {r["skipped"]} | {r["accepted_risk"]} | {status} |')
+        out.append(f"\ncdd spec v{SPEC_VERSION}. a falsified claim counts as "
                    "knowledge, never as failure.")
         return "\n".join(out)
     # text
@@ -179,12 +197,7 @@ def _format_check(rows: list[dict], fmt: str) -> str:
         state = "FAIL" if r["problems"] else "ok"
         line = (f'{state:4} {r["name"]}: {tier_word(r["tier"])}; '
                 f'claims {r["coverage"]} '
-                'adjudicated ('
-                + (f'{r["proven"]} proven, ' if r["proven"] else "")
-                + f'{r["holds"]} hold, {r["refuted"]} refuted'
-                + (f', {r.get("unknown", 0)} unknown' if r.get("unknown") else "")
-                + (f', {r["unverifiable"]} unverifiable' if r["unverifiable"] else "")
-                + ")")
+                f'adjudicated ({summary_counts(r)})')
         if r["problems"]:
             line += "  <- " + "; ".join(r["problems"])
         lines.append(line)
@@ -674,8 +687,8 @@ def cmd_audit(args) -> int:
 
     unknown = exclude - AUDIT_ANALYSES
     if unknown:
-        raise SystemExit(f"mathema audit: unknown --exclude {sorted(unknown)}; "
-                         f"choose from {sorted(AUDIT_ANALYSES)}")
+        _bad_argument(f"mathema audit: unknown --exclude {sorted(unknown)}; "
+                      f"choose from {sorted(AUDIT_ANALYSES)}")
     compact_cols = None
     if args.compact or args.cols or getattr(args, "filter", None):
         # the speed half of column selection: analyses no chosen
@@ -711,7 +724,7 @@ def cmd_audit(args) -> int:
                            for t in item.split(",")])
             compact = compact_audit(rows, compact_cols)
         except ValueError as e:
-            raise SystemExit(f"mathema audit: {e}")
+            _bad_argument(f"mathema audit: {e}")
         print(json.dumps(compact, separators=(",", ":")))
         return 0
 
@@ -1397,7 +1410,7 @@ def cmd_init(args) -> int:
     git_written = _scaffold_git_files(root)
     if git_written:
         print("mathema init: scaffolded git files:\n  "
-              + "\n  ".join(git_written))
+              + "\n  ".join(os.path.relpath(p, root) for p in git_written))
     else:
         print("mathema init: git files already in place")
     stub_written: list = []
@@ -2087,7 +2100,7 @@ def cmd_accept(args) -> int:
     exact write is printed first and nothing happens without a yes.
     Deliberately CLI-only: acceptance is a human act, never exposed to
     agent tooling or any MCP surface."""
-    from .acceptance import (AcceptanceError, apply_acceptance,
+    from .acceptance import (AcceptanceError, apply_acceptance, corrected_stub,
                              default_identity, plan_acceptance,
                              suggest_acceptance)
 
@@ -2179,13 +2192,20 @@ def cmd_accept(args) -> int:
             return 1
     summary = apply_acceptance(plan)
     print(f"written: {summary}")
-    if plan.get("corrected_statement"):
-        print("declared-layer stanza: REPLACE the old claim in your claims "
-              "file with this (the superseded claim stays retained in the "
-              "record's discoveries section):")
-        print(f"  - name: {plan['corrected_name']}")
-        print(f"    statement: \"{plan['corrected_statement']}\"")
-        print(f"    route: {plan['claim'].get('route') or 'best'}")
+    stub = corrected_stub(plan)
+    if stub is not None:
+        if plan.get("declared_edits"):
+            print(f"declared layer: {', '.join(plan['declared_edits'])} now "
+                  f"declares {stub['name']} in place of {args.claim} (the "
+                  "superseded claim stays in the record's discoveries "
+                  "section):")
+        else:
+            print("declared-layer stanza: add this to the claims file that "
+                  f"declares {args.claim}, in its place (the superseded "
+                  "claim stays in the record's discoveries section):")
+        print(f"  - name: {stub['name']}")
+        print(f"    statement: \"{stub['statement']}\"")
+        print(f"    route: {stub['route']}")
     return 0
 
 
@@ -2290,9 +2310,9 @@ def cmd_badges(args) -> int:
     CENTRALITY (a core function counts more than a leaf; implementation
     stays a raw line ratio). Renders them as a radar triangle whose area
     is the overall health number. Prints the triangle; with `--out [DIR]`
-    also writes the four artifacts (the ASCII triangle, one shields.io
-    JSON per badge, a colored SVG twin, and a JSON snapshot for CI to
-    diff) to DIR, defaulting to the standard `.mathema/badges/` under
+    also writes the artifacts (the ASCII triangle, one shields.io
+    JSON per badge, a colored SVG twin, a JSON snapshot for CI to
+    diff, and a paste-ready README snippet) to DIR, defaulting to the standard `.mathema/badges/` under
     `--root` so a README can embed `triangle.svg` by its in-repo path.
     Omit targets for the rootwide analogue of verify."""
     import os
@@ -2494,8 +2514,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="project root holding .mathema/")
     pb.add_argument("--out", nargs="?", default=None,
                     const=_badges.DEFAULT_BADGE_DIR, metavar="DIR",
-                    help="also write the four artifacts (ASCII triangle, "
-                         "shields JSON, SVG, snapshot); bare --out writes to "
+                    help="also write the artifacts (ASCII triangle, "
+                         "shields JSON per badge, SVG, snapshot, README "
+                         "snippet); bare --out writes to "
                          f"the standard {_badges.DEFAULT_BADGE_DIR}/ under "
                          "--root, or pass an explicit DIR")
     pb.set_defaults(fn=cmd_badges)
@@ -2726,7 +2747,8 @@ def main(argv: list[str] | None = None) -> int:
                           "comma-separated, lightweight, never gates")
     pac.add_argument("--dismiss-concepts", default=None, metavar="C,D",
                      help="dismiss suggested concepts so they never "
-                          "re-suggest (recorded in the declared layer)")
+                          "re-suggest (recorded in "
+                          ".mathema/meta/concepts.yaml)")
     pac.add_argument("--corrected", default=None, metavar="LAW",
                      help="with --as discovery: the corrected claim to "
                           "declare in place of the falsified one, "

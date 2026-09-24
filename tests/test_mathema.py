@@ -237,7 +237,11 @@ def test_trials_budget_is_configurable():
         return 2 * x
 
     r = mathema.check(double, trials=10)
-    assert all(p.n == 10 for p in r.probes if p.n)
+    # a falsification stops at its first witness, so its n counts the
+    # trials run up to it, never more than the budget
+    assert all(p.n == 10 for p in r.probes
+               if p.n and p.verdict != "falsified")
+    assert all(p.n <= 10 for p in r.probes if p.n)
 
 
 def test_pole_detected_empirically():
@@ -763,7 +767,7 @@ def test_cli_check_ci_gate(tmp_path, capsys):
     from mathema.cli import main
     assert main(["check", str(f)]) == 0                       # lenient: passes
     out = capsys.readouterr().out
-    assert "claims" in out and "refuted" in out
+    assert "claims" in out and "falsified" in out
     # a DECLARED exclusion the code never guards -> a falsified claim
     # -> CI failure (no mode involved)
     assert main(["check", str(f), "--domain", "alpha=0:1",

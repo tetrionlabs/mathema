@@ -6,16 +6,11 @@ repo_url: https://github.com/tetrionlabs/mathema
 copyright: "Copyright 2026 Tetrion Ltd. Source-available under BUSL 1.1; documentation prose and examples are CC BY 4.0."
 theme:
   name: material
-  logo: assets/mathema-mark.svg
-  favicon: assets/favicon.svg
+  custom_dir: overrides
+  logo: assets/tetrion-mark-light.svg
+  favicon: assets/favicon.ico
+  font: false
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: custom
@@ -23,6 +18,13 @@ theme:
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
   features:
     - navigation.sections
     - navigation.top
@@ -30,6 +32,7 @@ theme:
     - content.code.annotate
 
 extra_css:
+  - stylesheets/tokens.css
   - stylesheets/extra.css
 
 markdown_extensions:
@@ -53,9 +56,20 @@ plugins:
 
 nav:
   - Home: index.md
-  - Quick start: quickstart.md
-  - The CDD loop, end to end: tutorial.md
-  - Claim-driven development: cdd.md
+  - Get started:
+      - Install: install.md
+      - Quick start: quickstart.md
+      - See what mathema finds: findings.md
+      - A first look: first-look.md
+      - The CDD loop, end to end: tutorial.md
+      - Case studies: case-studies.md
+  - Concepts:
+      - The evidence ladder: evidence-ladder.md
+      - Intent, implementation and behaviour: three-layers.md
+      - Claims transfer: claims-transfer.md
+      - "The method: claim-driven development": cdd.md
+      - The derive route: derive-route.md
+      - Reason codes: reason-codes.md
   - Writing claims:
       - Authoring claims: authoring.md
       - The claim grammar: grammar.md
@@ -64,31 +78,25 @@ nav:
       - Lemmas: lemmas.md
       - Matrix structure and linear algebra: matrix-structure.md
       - Multi-function claims: multi-function-claims.md
-      - Claims transfer: claims-transfer.md
-  - Evidence:
-      - The derive route: derive-route.md
-      - Reason codes: reason-codes.md
   - Command reference:
       - mathema check: modes/check.md
       - mathema verify: modes/verify.md
+      - mathema audit: modes/audit.md
       - mathema claims: modes/claims.md
       - mathema accept: modes/accept.md
-      - mathema audit: modes/audit.md
-      - mathema badges: modes/badges.md
-      - mathema describe: modes/describe.md
-      - mathema docsync: modes/docsync.md
       - mathema lock and unlock: modes/lock.md
       - mathema pin: modes/pin.md
       - mathema review: modes/review.md
+      - mathema badges: modes/badges.md
+      - mathema describe: modes/describe.md
+      - mathema docsync: modes/docsync.md
       - mathema init: modes/init.md
   - Using mathema from code:
       - Library usage: modes/library.md
       - API reference: api.md
       - The MCP interface: modes/mcp.md
-  - Customising:
       - Symbology and rendering: symbology.md
       - Extending mathema: extending.md
-  - Case studies: case-studies.md
-  - Project:
-      - Versioning and stability: stability.md
-      - Licensing policy: licensing-policy.md
+  - Licensing: licensing-policy.md
+  - Versioning: stability.md
+  - Changelog: https://github.com/tetrionlabs/mathema/blob/main/CHANGELOG.md

@@ -163,9 +163,11 @@ check_conjectures(logistic_standard, [
 ```
 
 `derivative_nonneg` is not re-deriving positivity; it is resting on it,
-and the record says so. If `positive` were only sampled, the
-conclusion would be capped at `holds` and
-`meta["mathema.capped_by"]` would name it. That is the property that
+and the record says so. If `positive` were only sampled, a premise
+that demands `is proven` would have nothing to rest on and
+`derivative_nonneg` would come back `unknown`; written
+`assuming positive holds`, the conclusion would be capped at `holds`
+and `meta["mathema.capped_by"]` would name it. That is the property that
 makes a chain trustworthy: evidence never gets stronger as it
 propagates. See [Lemmas](lemmas.md) for the full behaviour.
 

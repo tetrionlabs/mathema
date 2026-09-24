@@ -41,8 +41,9 @@ a bare-name key now fails as a clear per-key problem line).
 | Finding | Default (strict) | `--lenient` |
 |---|---|---|
 | `falsified` claim | fails | fails |
+| `invalidated` claim (held before, fails now) | fails | fails |
 | `unknown` claim, not accepted | fails | fails |
-| `unknown` claim, accepted as risk | fails (shown as unverifiable) | passes, named in the row |
+| `unknown` claim, accepted as risk | fails (`N accepted-risk claim(s)`) | passes, named in the row |
 | `skipped` (unverifiable) claim | fails | passes, informational |
 | unresolved global name | fails | fails |
 | silently-unenforced declared domain | fails | passes, informational |
@@ -75,8 +76,9 @@ its record written by `write_spec()`:
 
 ```
 $ mathema verify --root .
-ok   functions.softmax: form changed; 2 hold, 0 refuted
-0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+ok   functions.softmax: fresh
+1 fresh (form unchanged, skipped), 0 adjudicated, 0 problem(s)
+grammars detected: mathema; verified by this run: mathema
 ```
 
 Drop the normalization on purpose (`return exps` instead of dividing
@@ -84,17 +86,20 @@ by the total) and re-run:
 
 ```
 $ mathema verify --root .
-FAIL functions.softmax: form changed; 1 hold, 1 refuted  <- 1 falsified claim(s)
+FAIL functions.softmax: form changed; 1 proven, 1 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+grammars detected: mathema; verified by this run: mathema
 ```
 
-`sums_to_one` is correctly `falsified`, the counterexample is kept in
-the record, and the exit code is 1. Restore the fix and re-verify:
+`sums_to_one` now fails, and because it held before it is reported
+as `invalidated` rather than `falsified`; the counterexample is kept
+in the record, and the exit code is 1. Restore the fix and re-verify:
 
 ```
 $ mathema verify --root .
-ok   functions.softmax: form changed; 2 hold, 0 refuted
+ok   functions.softmax: form changed; 1 proven, 2 holds, 0 falsified
 0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+grammars detected: mathema; verified by this run: mathema
 ```
 
 Back to clean, and the baseline is refreshed; the next `verify` will
@@ -106,22 +111,36 @@ A claim neither route could decide stays `unknown` and fails the run:
 
 ```
 $ mathema verify --root .
-FAIL functions.running_total: no baseline record; 0 hold, 0 refuted, 1 unknown  <- 1 unknown claim(s)
+FAIL functions.running_total: no baseline record; 1 proven, 1 holds, 0 falsified, 1 unknown  <- 1 unknown claim(s)
+ok   functions.softmax: fresh
+1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+grammars detected: mathema; verified by this run: mathema
 ```
 
 The ways out are real evidence (rewrite the claim or the code so a
-route can decide it) or an explicit human decision to own the gap:
+route can decide it) or an explicit human decision to own the gap.
+Naming the key re-checks it, so the row counts the accepted claim:
 
 ```
 $ mathema accept functions.running_total never_overshoots_much --as risk \
       --note "loop shape is out of derive scope; monitored"
-$ mathema verify --root . --lenient
-ok   functions.running_total: form changed; 0 hold, 0 refuted, 1 accepted risk
+$ mathema verify functions.running_total --root . --lenient
+ok   functions.running_total: targeted re-verify; 1 proven, 1 holds, 0 falsified, 1 accepted risk
+0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+grammars detected: mathema; verified by this run: mathema
 ```
 
-Strict mode (the default) still refuses the accepted risk; it shows
-up as an unverifiable claim, so a pipeline can choose whether owned
-gaps block it. See [`mathema accept`](accept.md).
+Strict mode (the default) still refuses the accepted risk, so a
+pipeline can choose whether owned gaps block it:
+
+```
+$ mathema verify functions.running_total --root .
+FAIL functions.running_total: targeted re-verify; 1 proven, 1 holds, 0 falsified, 1 accepted risk  <- 1 accepted-risk claim(s)
+0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+grammars detected: mathema; verified by this run: mathema
+```
+
+See [`mathema accept`](accept.md).
 
 ## `--status`: the fresh/stale report
 

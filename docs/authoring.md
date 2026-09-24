@@ -103,9 +103,15 @@ every other `d(...)` spelling above:
 
 ```
 d(f(v0, theta, g), theta)@{theta=pi/4} == 0       # range is maximized at 45°
-f'(v0, theta, g) at {theta=pi/4} == 0             # same claim again
+d(f(v0, theta, g)/dtheta) at {theta=pi/4} == 0    # same claim again
 d(f(x)/dx^2)@{x=1} == 6                           # differentiates twice, then substitutes
+f'(x) at {x=1} == 3                               # prime notation, one free variable
 ```
+
+Prime notation takes its variable from the call's single free name, so
+it only reads on a one-variable call. `f'(v0, theta, g)` has three, and
+`claim()` refuses it with an `InvalidConjecture` that names the
+explicit spelling, `d(f(v0, theta, g), <var>)`.
 
 `integrate(<expr>, <var>)|_{a}^{b}` (matching LaTeX's own `\big|_a^b`
 convention) is pure sugar for the already-existing bounded 4-argument
@@ -148,7 +154,7 @@ def f(a, b, c):
         raise ValueError(...)
     ...
 
-raises(f(a, b, 0), ValueError)              # skipped, a's own domain isn't declared
+raises(f(a, b, 0), ValueError)              # falsified, a's own domain isn't declared, so a sampled a != 0 returns
 for a in [0, 0], raises(f(a, b, c), ValueError)   # proven
 ```
 
@@ -242,7 +248,7 @@ argument outside its own domain already is.
 A bare string claim leaves the route to the cascade
 (`mathema.claims.claim(law)` defaults to `best`: derive where the
 function lifts, seeded sampling otherwise, and the record names
-whichever mechanism actually decided). To insist on a proof, pass
+whichever mechanism actually decided). To ask for a proof first, pass
 `route="derive"`:
 
 ```python
@@ -262,10 +268,13 @@ results = mathema.claims.check_conjectures(
     my_function, [mathema.claims.claim("f(-x) == -f(x)", route="derive")])
 ```
 
-Either way, the returned `Probe.verdict` is `proven`/`disproven`/
-`skipped`, never `holds (n=...)`. A `skipped` verdict covers two
-different things: a genuinely unliftable function, or one the derive
-route lifted fine but the specific claim stayed undecided.
+Either way, a decided proof comes back `proven`, or `falsified` with
+a witness. A claim the derive route cannot decide falls back to
+probing rather than stopping at `unknown`, so it can still come back
+`holds`, and `Probe.route` then names `probe`, the mechanism that
+actually decided. The derive diagnosis stays on the record, and covers
+two different things: a genuinely unliftable function, or one the
+derive route lifted fine but the specific claim stayed undecided.
 `Probe.meta["mathema.derive_status"]` (`"unliftable"` or `"undecided"`)
 tells the two apart programmatically, rather than parsing `.note`/
 `.sketch` text.
@@ -514,16 +523,25 @@ zero manual wiring:
 ```
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7302d34f1904
-  holds   deterministic: softmax(args) always returns the same value (n=...)
-  holds   numerically_stable: no division by zero, overflow, or NaN on sampled inputs (n=...)
-  holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (n=30)
-  holds   sums_to_one: sum(f(scores)) == 1 (n=...)
+  holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (n=32)
+  holds   is_deterministic: f(scores) = f(scores) (n=192)
+  holds   is_state_safe: f(scores) = f(scores) (n=48)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (n=192)
+  holds   preserves_length: dim(f(scores), 0) = dim(scores, 0) (n=192)
+  FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
+           counterexample ([0, 6.12225]): [0.0021887084924676944, 0.9978112915075322] vs [0.0, 6.122252531363742]
+  holds   preserves_type: type(f(scores)) = type(scores) (n=192)
+  FALSIFY is_sorted_output: is_sorted_output(f(scores))
+           counterexample ([4.86304, 8.4521, -9.06059, -3.61645]): output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
+  holds   sums_to_one: sum(f(scores)) = 1 (n=192)
 ```
 
-The first two are mathema's built-in algebraic-law probes (every
-function gets these), `shape` came from the `Annotated[list,
-Shape("n")]` hints, and `sums_to_one` came from the docstring `Claims:`
-block.
+`shape` came from the `Annotated[list, Shape("n")]` hints,
+`sums_to_one` came from the docstring `Claims:` block, and the rest are
+mathema's built-in battery: every function gets the determinism, state
+and stability probes, and a list-in, list-out function also gets the
+sequence laws. Two of those rightly falsify, because softmax neither
+permutes nor sorts its input.
 
 ## Shape markers and their shorthand
 

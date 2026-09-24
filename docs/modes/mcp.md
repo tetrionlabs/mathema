@@ -30,6 +30,8 @@ the command prints the install hint and exits 2.
 | `pending_decisions` | the human-decision queue, read-only: `[key, claim, kind, detail]` rows for pending supersessions, stale acceptances, stale intent acceptances, standing accepted risks, unaccepted unknowns and falsifications, and locked functions whose body moved; acceptance and unlock themselves stay CLI-only |
 | `lock_target` | pin a function's form hash so `verify` fails if the body changes; the safe direction, so agents may do it. There is deliberately no unlock tool: a person runs `mathema unlock` |
 | `project_index` | the generated `.mathema/index.yaml` map: system/module/function intents with acceptance rungs, keys, a sed-ready `span` per function, verified-record paths, concepts; run `mathema audit --index` (or `mathema docsync`) first if it reports the index missing |
+| `implementation_coverage` | per-function implementation coverage without running the test suite: mathema's own probes and proofs supply the `probe` and `derive` sources, as `[key, percent, potential, sources, test_stale, traced, remedy]` rows plus the repo score; `run_tests=true` re-runs the suite under coverage first (slow, and it runs your tests) |
+| `badges` | the three [badges](badges.md) (`implementation`, `intent`, `clarity`) and their `overall` over a target set, or rootwide when empty, with `[key, implementation, intent, clarity]` rows and the ASCII triangle |
 
 ## Which row set you get
 

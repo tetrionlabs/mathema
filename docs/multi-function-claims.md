@@ -19,19 +19,23 @@ path and is the form the record keeps: it survives every store round
 trip, because the path is text.
 
 ```python
-mathema.check(mine, claims=["f(x) == g(x)"], funcs={"g": other})
+mathema.check(mine, claims=[mathema.claims.claim("f(x) == g(x)", funcs={"g": other})])
 ```
 
-`funcs=` binds a live callable at the call site. It adjudicates
-identically, with one honest limit: a live callable has no text
-spelling, so the record keeps the law but not the binding, and a later
-run reconstructing the claim from the record alone cannot re-bind `g`.
-Prefer the `let` spelling for anything meant to persist.
+`funcs=` on `claim()` binds a live callable and adjudicates
+identically. When the callable is a module-level function importable
+by its own dotted path, the record stores the binding in the `let`
+spelling (`let g = mymodule.other, f(x) = g(x)`), so the claim
+rebuilds from the record alone. A callable with no such path (a
+lambda, a nested function, a function defined in `__main__`) has no
+text spelling: the record keeps the law but not the binding, and a
+later run reconstructing the claim from the record cannot re-bind `g`.
 
 A bare call name (`g(x)` with no `let` and no `funcs=`) binds
 automatically when a function of that name is defined in `f`'s module
-or the calling scope. Convenient in a notebook; the same record limit
-applies.
+or the calling scope. The record keeps the bare name, which binds the
+same way again from `f`'s module; a function found only in the calling
+scope (a notebook cell, a script) is not there for a later run to find.
 
 ## Laws over two functions
 

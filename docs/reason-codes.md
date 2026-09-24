@@ -32,7 +32,7 @@ codes only ever join.
 
 Codes carry a stable numeric id, `major.minor`: majors are the
 structural groups (1 structural blockers, 2 loop, 3 branch,
-4 unsupported), so a lookup can fetch a whole group ("2", or "loop")
+4 unsupported, 5 implementation), so a lookup can fetch a whole group ("2", or "loop")
 or a single code ("2.18") instead of the full table. Ids are additive
 only: a new code appends the next minor in its group, and a released
 id is never renumbered.
@@ -42,7 +42,7 @@ id is never renumbered.
 | 3.2 | `branch:bare-local-name` | limitation | a bare local name's truthiness guards the branch | only comparisons are traced through locals; compare explicitly ('if flag == 1:') |
 | 3.11 | `branch:composite` | limitation | an and/or chain with several distinct blocked parts | each joined condition must be prunable on its own; see the per-branch detail |
 | 3.1 | `branch:needs-domain` | actionable | every branch resolves once the named parameters have declared domains | declare a domain for the named parameter(s) in the claim, e.g. 'for x in [0, 1], s in {"a"}, ...' |
-| 3.7 | `branch:no-parameter-dependence` | limitation | the condition does not depend on any unmodified parameter | a condition over external or reassigned values cannot be settled by a claim's domain |
+| 3.7 | `branch:no-parameter-dependence` | limitation | the condition's TRACED form contains no unmodified parameter; either it genuinely uses none (a module flag, a constant guard) or the trace lost the dependence on the way | a claim's domain can only settle conditions over unmodified parameters; rewrite the condition over them, or accept the branch as unprunable |
 | 3.8 | `branch:non-affine-essential` | limitation | the condition is transcendental in the parameters | no reparameterization linearizes it; a domain whose interval evaluation settles the guard outright can still work |
 | 3.9 | `branch:non-affine-refinable` | actionable | the condition is polynomial but not affine | reparameterize to one combined variable, or declare a tighter domain that settles the guard |
 | 3.4 | `branch:non-literal-compare` | limitation | the comparand is not a literal value | compare against a literal, or bind the comparand as its own parameter |
@@ -93,7 +93,7 @@ id is never renumbered.
 | 4.8 | `unsupported:tuple-in-expression` | limitation | a tuple value used inside an expression | return and compute one scalar per function |
 | 4.6 | `unsupported:unbound-name` | actionable | a name with no binding anywhere | define or import the name; an unresolved name also fails the gate |
 | 4.5 | `unsupported:unsupported-attribute` | limitation | an attribute access with no symbolic meaning | only mapped module attributes (math.pi, ...) derive |
-| 4.2 | `unsupported:unsupported-comprehension` | limitation | a comprehension outside the recognized sum(...) shapes (a built list/dict value, a dict/set comp) | sum(<generator>) derives, rewrite the aggregation as sum(...) or an explicit accumulator loop; a comprehension VALUE is vector-valued and out of scope |
+| 4.2 | `unsupported:unsupported-comprehension` | limitation | a comprehension outside the recognized sum(...) shapes (a built list/dict value, a dict/set comp) | sum(<generator>) derives; rewrite the aggregation as sum(...) or an explicit accumulator loop; a comprehension VALUE is vector-valued and out of scope |
 | 4.3 | `unsupported:unsupported-lambda` | limitation | a lambda outside the recognized shapes | assign the lambda to a local and call it, bind it via funcs=, or use it inside sum(map/filter(...)) |
 | 4.4 | `unsupported:unsupported-call` | limitation | a call with no symbolic mapping | only the mapped math vocabulary derives; the claim still adjudicates empirically |
 | 4.1 | `unsupported:unsupported-syntax` | limitation | a statement or expression outside the derive route's read | the named statement is the blocker; the rest of the body reads fine |

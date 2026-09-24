@@ -30,21 +30,24 @@ intent, concepts) and every unlock asks for it before writing.
 ```text
 $ mathema accept funcs.settle nonneg --as evidence
 accepting funcs.settle :: nonneg (verdict holds) as evidence, by Alonzo Church
-  - annotate nonneg as accepted evidence at n=128 (bound to form 206704...)
+  - annotate nonneg as accepted evidence at n=128 (bound to form 206704b327da...)
 write this acceptance? [y/N] y
 PIN:
-written: annotate nonneg as accepted evidence at n=128 ...
+written: annotate nonneg as accepted evidence at n=128 (bound to form 206704b327da...)
 ```
 
 and in the record:
 
 ```yaml
       accepted:
-        as: evidence
-        at: "2026-09-16"
-        by: Alonzo Church
-        form: 206704b327da
-        verified_by: {method: pin, key: a3f2c1}
+        as: "evidence"
+        at: "2026-09-24"
+        n: 128
+        form: "206704b327da"
+        by: "Alonzo Church"
+        verified_by:
+          method: "pin"
+          key: "a3f2c1"
 ```
 
 `verified_by` names the method and the credential's **key id**. The

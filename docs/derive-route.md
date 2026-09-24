@@ -8,9 +8,10 @@ can actually lift, which is a real subset. This page is the complete,
 current reference for what that subset is.
 
 Lifting is honest, not clever: it never guesses at a closed form.
-Anything not covered below returns `skipped` (`"derive route
-unliftable"`), never a false `proven`. Probe-route claims remain
-viable regardless of any of this, see [CDD in one page](cdd.md).
+Anything not covered below is `underivable` on the derive route
+(the record's note names the likely reason), never a false `proven`,
+and the claim falls through to the probe route. Probe-route claims
+remain viable regardless of any of this, see [CDD in one page](cdd.md).
 
 ## What's liftable
 
@@ -330,7 +331,7 @@ element, not one sampled case, is `proven`:
 
 ```
 f(x, 1.0) == x[-1]     # proven, alpha=1 collapses the fold to the last element
-f(x, alpha) == x[-1]   # skipped, undecided (correctly: it's false for most alpha)
+f(x, alpha) == x[-1]   # falsified, correctly: it's false for most alpha
 ```
 
 ### A transformed return, not just the bare accumulator
@@ -439,7 +440,7 @@ def dot_weights(weights: list, features: list) -> float:
     return float(np.dot(weights, features))
 ```
 
-lifts directly to `Sum(weights[k]*features[k], (k, 0, L-1))`, no loop
+lifts directly to `Sum(features[k]*weights[k], (k, 0, L - 1))`, no loop
 involved at all; `float(...)`/`int(...)` wrapping the call is
 unwrapped first, the same way a bare numeric cast already is elsewhere
 in the derive route. `L` implicitly assumes `len(weights) ==
@@ -485,7 +486,7 @@ def rms(signal: list) -> float:
 ```
 
 ```
-f(signal) == f(signal)   # proven, sqrt(Sum(signal[k]**2, (k, 0, L-1)) / L)
+f(signal) == f(signal)   # proven, sqrt(Sum(signal[k]**2, (k, 0, L_signal - 1))/L_signal)
 ```
 
 **A dot product recognized directly from loop structure**, not only
@@ -503,7 +504,7 @@ def dot_product(a: list, b: list) -> float:
 ```
 
 ```
-f(a, b) == f(a, b)   # proven, Sum(a[k]*b[k], (k, 0, L-1))
+f(a, b) == f(a, b)   # proven, Sum(a[i]*b[i], (i, 0, L_a - 1))
 ```
 
 A third loop-header form, `for i, item in enumerate(seq):`, binds both
@@ -697,13 +698,13 @@ bodies:
 |---|---|---|
 | `cube(x) = x**3` | `d(f(x), x) >= 0` | `proven`; x³ is monotone increasing |
 | `heat_sol(t, x) = x**2 + 2*t` | `d(f(t,x),t) == d(f(t,x),x,x)` | `proven`, genuinely solves the heat equation |
-| `not_heat_sol(t, x) = x**2 + 3*t` | `d(f(t,x),t) == d(f(t,x),x,x)` | `falsified`, correctly, it doesn't |
+| `not_heat_sol(t, x) = x**2 + 3*t` | `d(f(t,x),t) == d(f(t,x),x,x)` | `unknown`: derive shows it doesn't (`3 ≠ 2`), but a derivative claim has no executed witness, and a falsification needs one |
 | `sinx(x) = sin(x)` | `lim(f(x)/x,x,0) == lim(d(f(x),x)/d(x,x),x,0)` | `proven`, L'Hôpital's rule as a consistency check |
 | `dot2d` (2D dot product) | `f(...)**2 <= (ax**2+ay**2)*(bx**2+by**2)` | `proven`, Cauchy-Schwarz, squared form |
-| `dot2d` | `abs(f(...)) <= sqrt(ax**2+ay**2)*sqrt(bx**2+by**2)` | `skipped`, same claim, direct sqrt/Abs form: honestly `undecided` |
-| `gram_schmidt_2d` | `f(...) == 0` | `proven`, Gram-Schmidt orthogonality |
+| `dot2d` | `abs(f(...)) <= sqrt(ax**2+ay**2)*sqrt(bx**2+by**2)` | `proven` (`derive:extensive`), same claim, direct sqrt/Abs form, squared back to the form above |
+| `gram_schmidt_2d` | `for v1x in [1,2], v1y in [1,2], f(...) == 0` | `proven`, Gram-Schmidt orthogonality |
 | `gauss_pdf` | `for sigma in [1e-6,1e6], integrate(f(x,mu,sigma),x,-oo,oo) == 1` | `proven`, normalizes to 1 |
-| `projectile_range(v0,theta,g)` | `d(f(v0,theta,g),theta)@{theta=pi/4} == 0` | `proven`; range is maximized at 45° |
+| `projectile_range(v0,theta,g)` | `for g in [9,10], d(f(v0,theta,g),theta)@{theta=pi/4} == 0` | `proven`; range is maximized at 45° |
 
 `d(...)` accepts an evaluation marker, `@{v=val, ...}` (or the word
 `at`), for a claim at one specific point rather than across a whole
@@ -716,10 +717,17 @@ bracket-free multivariable form), see [Authoring
 claims](authoring.md)'s own grammar section.
 
 Two rows above are worth reading together: the squared Cauchy-Schwarz
-form proves, but the direct `abs`/`sqrt` form of the *same
-mathematical fact* honestly comes back `skipped` rather than a false
-`proven`; this is the central honesty guarantee of the whole route,
-not an inconsistency.
+form proves directly, and the `abs`/`sqrt` form of the *same
+mathematical fact* proves only because both sides are shown
+nonnegative on the domain first, which is what makes squaring them
+sound. The sketch states that step, and the route says `extensive`.
+Two rows need a domain: `gram_schmidt_2d` divides by the squared norm
+of `v1`, and `projectile_range` divides by `g`. Unbounded, each claim
+is `falsified`: `projectile_range` reaches the division by zero at
+`g = 0`, and a raise is not a value, while `gram_schmidt_2d` returns
+`0.00011723145853181904` instead of `0` at `v1x = -1e6, v2x = 1e6`,
+where floating-point cancellation leaves a residue the exact formula
+does not have.
 
 ## Multi-function claims
 

@@ -79,3 +79,17 @@ def test_write_compendium_marks_it_a_skeleton_and_suffixes_the_version(tmp_path)
     # a library with no importable version suffixes nothing; the file is
     # still under compendium/<library>/
     assert path.endswith(".yaml") and "/compendium/lib/" in path
+
+
+def test_exported_skeleton_is_valid_yaml_with_every_header_line_commented(tmp_path):
+    import yaml
+    _seed_verified(tmp_path, "lib.mod.f", [
+        {"name": "bounded", "statement": "0 <= f(x) <= 1", "verdict": "holds",
+         "route": "probe"}])
+    path = write_compendium("lib", root=str(tmp_path))
+    text = open(path).read()
+    header = text.split("\npackage:", 1)[0].splitlines()
+    assert header and all(line.startswith("#") for line in header)
+    loaded = yaml.safe_load(text)
+    assert loaded["package"] == "lib"
+    assert loaded["functions"]["lib.mod.f"]["provenance"] == "exported-skeleton"

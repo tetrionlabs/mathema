@@ -753,17 +753,26 @@ def apply_acceptance(plan: dict) -> str:
                header=f"machine record; binds to form "
                       f"{(entry.get('identity') or {}).get('form')}")
     if plan.get("declared_edits"):
-        corrected_stub = None
-        if plan.get("corrected_statement"):
-            route = (target.get("route") or "best").split(":", 1)[0]
-            corrected_stub = {
-                "name": plan["corrected_name"],
-                "statement": plan["corrected_statement"],
-                "route": route if route in ("probe", "derive") else "best"}
+        stub = corrected_stub(plan)
         for rel in plan["declared_edits"]:
             _apply_declared_edit(plan["root"], rel, plan["key"],
-                                 target["name"], corrected_stub)
+                                 target["name"], stub)
     return "; ".join(plan["actions"])
+
+
+def corrected_stub(plan: dict) -> dict | None:
+    """Intent:
+        The declared-layer stanza for a discovery's corrected claim:
+        its name, statement and route, the route reduced to the base
+        spelling a claims file takes (`probe`, `derive` or `best`).
+        None when the plan corrects no claim.
+    """
+    if not plan.get("corrected_statement"):
+        return None
+    route = (plan["claim"].get("route") or "best").split(":", 1)[0]
+    return {"name": plan["corrected_name"],
+            "statement": plan["corrected_statement"],
+            "route": route if route in ("probe", "derive") else "best"}
 
 
 def carry_acceptance(spec: dict, key: str, path: str) -> None:

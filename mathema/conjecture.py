@@ -41,7 +41,7 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       extract_outcome_clause, _split_top_level,
                       is_reserved, normalize,
                       parse_domain_safety, parse_raises, split_quantifier,
-                      split_relation_chain)
+                      split_relation_chain, unexpanded_prime_message)
 from . import linalg
 from ._scan import _split_commas
 from .probing import (_close, _fmt, _prepare_sampling, _probe_density,
@@ -413,6 +413,11 @@ class Conjecture:
     # source `check_conjectures` re-resolves the matrix sugar from when
     # the function's signature reveals a matrix the claim text alone did
     # not). Empty for a Conjecture built directly rather than via claim().
+    scope_bound: frozenset = field(default_factory=frozenset)
+    # the `funcs` names check_conjectures resolved from f's module or the
+    # calling scope rather than from an explicit `funcs=`/`let` binding.
+    # Their text stays the bare call name, which resolves the same way
+    # when the claim is rebuilt, so rendering adds no `let` for them.
 
 
 class InvalidConjecture(ValueError):
@@ -571,6 +576,9 @@ def claim(law: str, name: str | None = None, source: str = "user",
             f"write the real name ({aliases[aliased_domain_keys[0]]!r}) in "
             f"the 'for' clause instead, or move the 'let' earlier")
     dom = {**let_domain, **dom}
+    prime_problem = unexpanded_prime_message(text)
+    if prime_problem is not None:
+        raise InvalidConjecture(prime_problem)
     r = parse_raises(text)
     ds = None if r is not None else parse_domain_safety(text)
     negated = False
@@ -631,6 +639,19 @@ def claim(law: str, name: str | None = None, source: str = "user",
         lhs = linalg.apply_matrix_sugar(lhs, mat_names)
         if rhs:
             rhs = linalg.apply_matrix_sugar(rhs, mat_names)
+    # every side of a relation is an expression: text left over from a
+    # malformed relation (`1 +`, `(`, the `= 1` that `===` splits into)
+    # is refused here with the claim named, not left to surface as a
+    # SyntaxError wherever the side is next parsed
+    if r is None and ds is None:
+        for _lhs, _rel, _rhs in (links or [(lhs, rel, rhs)]):
+            for _side in (_lhs, _rhs):
+                try:
+                    ast.parse(_side, mode="eval")
+                except SyntaxError:
+                    raise InvalidConjecture(
+                        f"cannot read {_side.strip()!r} as an expression "
+                        f"in the claim {law.strip()!r}") from None
     # the record's grammar names the linear-algebra dialect when the
     # claim uses the matrix vocabulary: informative only (a reader sees
     # the parsing was matrix-aware), never required to round-trip, the
@@ -656,8 +677,9 @@ def claim(law: str, name: str | None = None, source: str = "user",
         # rest of the system keys on (`is_pole_safe[x]`), the name a
         # suggestion would have carried, so family dispatch and the
         # call-form rebuilders read hand-written and suggested claims
-        # identically
-        name = f"{rel}[{lhs}]"
+        # identically; a negated predicate is a different claim and
+        # gets its own name, never the positive row's
+        name = f"{'not_' if negated else ''}{rel}[{lhs}]"
     if name is None:
         import re
         name = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:40] or "claim"
@@ -1234,6 +1256,7 @@ def _bind_scope_functions(cj, fn) -> str:
                 target, where = v, "the calling scope"
         if target is not None:
             cj.funcs[name] = target
+            cj.scope_bound = cj.scope_bound | {name}
             bound.append(f"{name} = {getattr(target, '__module__', '?')}"
                          f".{getattr(target, '__qualname__', name)} ({where})")
     return "; bound " + ", ".join(bound) if bound else ""
@@ -2034,6 +2057,10 @@ def _combine_conjunction(probes: list, name: str, statement: str,
         the combined note. The reported route is "derive" only when
         every part proved, else the deciding part's own route.
     """
+    def corroboration(probe) -> dict:
+        return {k: v for k, v in (probe.meta or {}).items()
+                if k.startswith("mathema.corroboration")}
+
     for probe, label in zip(probes, labels):
         if probe.verdict == "falsified":
             cx = probe.counterexample
@@ -2042,7 +2069,8 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                          counterexample=(f"{label}: {cx}" if cx else None),
                          sketch=(f"{label}: {probe.sketch}" if probe.sketch
                                  else None),
-                         note=f"{what} falsified at {label}")
+                         note=f"{what} falsified at {label}",
+                         meta=corroboration(probe))
     verdicts = [p.verdict for p in probes]
     if all(v == "proven" for v in verdicts):
         return Probe(name, statement, "proven", route="derive",
@@ -2057,7 +2085,8 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     return Probe(name, statement, weakest.verdict, route=weakest.route,
                  sketch=weakest.sketch,
                  note=f"{what} {weakest.verdict} at {label}: "
-                      f"{weakest.note}")
+                      f"{weakest.note}",
+                 meta=corroboration(weakest))
 
 
 def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
@@ -2237,15 +2266,22 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
     winner.note = f"{winner.note}; {trail}"
     carried = {k: v for k, v in (fallback.meta or {}).items()
                if k.startswith("mathema.derive") or k == "mathema.timeout"
-               or k == "mathema.corroboration"}
+               or k.startswith("mathema.corroboration")}
     if carried:
         winner.meta = {**(winner.meta or {}), **carried}
     if (fallback.meta or {}).get("mathema.corroboration") == "uncorroborated":
         # the engine-bug signal must survive whichever route wins: a
         # symbolic disproof nothing reproduced was claimed here, and a
-        # later reader (or the maintainer) needs to see that
-        winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
-                       f"disproof (probable engine bug, worth reporting)")
+        # later reader (or the maintainer) needs to see that. A claim
+        # form with no point evaluation had no reproduction attempted,
+        # so that note names the missing witness instead.
+        if (fallback.meta or {}).get("mathema.corroboration_unexecutable"):
+            winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
+                           f"disproof (the claim form has no point "
+                           f"evaluation, so derive had no executed witness)")
+        else:
+            winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
+                           f"disproof (probable engine bug, worth reporting)")
     return winner
 
 
@@ -2623,7 +2659,8 @@ def _provenance_meta(proof) -> dict:
         `route` field; nothing external should rely on these.
     """
     meta = {}
-    for key in ("mathema.derive_route", "mathema.engine_disagreement"):
+    for key in ("mathema.derive_route", "mathema.engine_disagreement",
+                "mathema.corroboration", "mathema.corroboration_unexecutable"):
         if key in proof.meta:
             meta[key] = proof.meta[key]
     return meta
@@ -2810,7 +2847,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # names the definedness region
         return Probe(cj.name, statement, "unknown", route=cj.route,
                      sketch=family_proof.sketch,
-                     note=f"{note}; region equivalence undecided")
+                     note=f"{note}; region equivalence undecided",
+                     meta=_provenance_meta(family_proof))
     # a matrix-algebra relation claim (det / transpose / matmul / trace
     # / inverse over declared matrix parameters) is decided by sympy's
     # matrix algebra, not by lifting f's body, so it is attempted before
@@ -3811,7 +3849,9 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # function returning a matrix, `0 <= f(X) <= 1`) is compared
         # ELEMENTWISE: the relation holds iff it holds at every element,
         # a scalar broadcasting across the matrix.
-        ok = relation_holds_elementwise(lv, rv, cj.relation, slack)
+        ok = relation_holds_elementwise(
+            lv, rv, cj.relation, slack,
+            exact_inequality=cj.tolerance is None)
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex return), or two

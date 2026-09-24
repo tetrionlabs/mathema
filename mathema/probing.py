@@ -382,15 +382,21 @@ def _synth_dict(key_tree, rng: random.Random, specials=None) -> dict:
     return out
 
 
-def _scalar_relation(a, b, relation: str, slack: float):
+def _scalar_relation(a, b, relation: str, slack: float,
+                     exact_inequality: bool = False):
     """One scalar comparison for the elementwise walk. A strict `<`/`>`
     gets no tolerance credit; a closed `<=`/`>=` gets the slack; `==`/
-    `~=` and `!=` go through `_close`. Raises TypeError for values that
+    `~=` go through `_close`, and so does `!=` when the claim declared a
+    tolerance. With `exact_inequality`, `!=` fails only where the two
+    values are equal, so a representation tolerance never makes two
+    different values a counterexample. Raises TypeError for values that
     do not order (a complex vs a real), which the caller reads as
     'unanswerable', not 'false'."""
     if relation in ("==", "~="):
         return _close(a, b, tolerance=slack)
     if relation == "!=":
+        if exact_inequality:
+            return not (a == b or (a != a and b != b))
         return not _close(a, b, tolerance=slack)
     if relation == "<=":
         return a <= b + slack
@@ -409,17 +415,21 @@ def _is_matrix_value(v) -> bool:
     return hasattr(v, "shape") and hasattr(v, "__array__")
 
 
-def relation_holds_elementwise(lv, rv, relation: str, slack: float):
+def relation_holds_elementwise(lv, rv, relation: str, slack: float,
+                               exact_inequality: bool = False):
     """Whether `lv <relation> rv` holds: a scalar comparison, or, when a
     side is matrix/array-valued, the relation at EVERY element (a scalar
     broadcasts against a matrix). numpy fast path when either side is an
     array, a recursive walk over nested lists otherwise. Returns
     `True`/`False`, or `None` when the comparison is structurally
     meaningless (an ordering over non-orderable values, or mismatched
-    shapes), which the caller reads as skip, never falsify."""
+    shapes), which the caller reads as skip, never falsify.
+    `exact_inequality` makes `!=` compare exactly (see
+    `_scalar_relation`)."""
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
-            return bool(_scalar_relation(lv, rv, relation, slack))
+            return bool(_scalar_relation(lv, rv, relation, slack,
+                                         exact_inequality))
         except TypeError:
             return None
     from .matrices import _numpy
@@ -436,6 +446,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float):
             if relation in ("==", "~="):
                 return bool(np.allclose(a, b, rtol=1e-6, atol=slack))
             if relation == "!=":
+                if exact_inequality:
+                    return not bool(np.array_equal(a, b, equal_nan=True))
                 return not bool(np.allclose(a, b, rtol=1e-6, atol=slack))
             if relation == "<=":
                 return bool((a <= b + slack).all())
@@ -459,7 +471,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float):
             parts = [_walk(x, v) for v in y]   # broadcast scalar x
         else:
             try:
-                return bool(_scalar_relation(x, y, relation, slack))
+                return bool(_scalar_relation(x, y, relation, slack,
+                                             exact_inequality))
             except TypeError:
                 return None
         return None if any(pt is None for pt in parts) else all(parts)
@@ -974,6 +987,9 @@ def probe(fn, facts, domain: dict | None = None,
     kinds = [facts.param_kinds.get(p, "unknown") for p in facts.params]
     if not kinds:
         return []
+    # the call the battery attempts, stated as the `callable` row's
+    # statement; why it could not be made rides in the row's note
+    callable_statement = f"f({', '.join(facts.params)}) can be called"
     domain = dict(domain or {})
     # a Literal[...]/Enum annotation already states the parameter's
     # entire value set, seed it as that parameter's domain (a stated
@@ -989,7 +1005,7 @@ def probe(fn, facts, domain: dict | None = None,
         if k == "string" and _classify_bound(domain.get(p)) not in (
                 "frozenset", "domain"):
             return [Probe(
-                "callable", "", "skipped",
+                "callable", callable_statement, "skipped",
                 note=f"parameter {p!r} is a string with no declared "
                      f"domain; declare its values, e.g. 'for {p} in "
                      f'{{"a", "b"}}, ...\' in a claim, or annotate it '
@@ -1023,7 +1039,7 @@ def probe(fn, facts, domain: dict | None = None,
         except Exception as e:
             last_exc = e
     else:
-        return [Probe("callable", "", "skipped",
+        return [Probe("callable", callable_statement, "skipped",
                       note="could not synthesize valid inputs from the "
                            f"signature ({type(last_exc).__name__}: {last_exc})",
                       meta={"mathema.probe_gap": "input-synthesis"})]

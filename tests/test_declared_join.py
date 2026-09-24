@@ -141,5 +141,5 @@ def test_cli_check_joins_and_fails_on_a_falsified_file_claim(tmp_path):
          "import sys; from mathema.cli import main; "
          "sys.exit(main(['check', 'jpkg.mod', '--root', '.']))"],
         cwd=str(tmp_path), capture_output=True, text=True, env=env)
-    assert "1 refuted" in r.stdout, r.stdout
+    assert "1 falsified" in r.stdout, r.stdout
     assert r.returncode == 1, r.stdout + r.stderr

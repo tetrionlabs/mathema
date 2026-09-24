@@ -364,7 +364,8 @@ def dump_yaml(spec: dict) -> str:
 
 def write_yaml(path: str, data: dict, header: str | None = None) -> str:
     """Write one YAML document with an optional leading `#` comment
-    line, creating the parent directory first, the one shared
+    block (one `# ` line per header line, so a multi-line header stays
+    a comment), creating the parent directory first, the one shared
     spelling of every store write (specs, machine records, declared
     stubs, suggested claims). Returns `path`."""
     d = os.path.dirname(path)
@@ -372,7 +373,8 @@ def write_yaml(path: str, data: dict, header: str | None = None) -> str:
         os.makedirs(d, exist_ok=True)
     with open(path, "w") as fh:
         if header:
-            fh.write(f"# {header}\n")
+            for line in header.splitlines():
+                fh.write(f"# {line}\n" if line else "#\n")
         fh.write(dump_yaml(data))
     return path
 
@@ -1190,6 +1192,32 @@ def _let_sections(cj) -> list:
             sections.append(f"let {name} be {render_domain_bound(bound)}")
     return sections
 
+def callable_ref(fn) -> "str | None":
+    """Intent:
+        The dotted `module.qualname` path naming a live callable, when
+        that path resolves, among the modules already loaded, back to
+        this very object. None for a callable no path names: a lambda, a
+        nested function, or a wrapper whose copied name resolves to
+        the function it wraps rather than to itself.
+
+    Notes:
+        Resolution reads `sys.modules` only and never imports, so asking
+        has no side effects. A function defined in `__main__` gets no
+        path: `__main__` is a different module in every later process,
+        so the path would not name the same function there.
+    """
+    import sys
+
+    mod = getattr(fn, "__module__", None)
+    qual = getattr(fn, "__qualname__", "")
+    if not mod or not qual or "<" in qual or mod == "__main__":
+        return None
+    obj = sys.modules.get(mod)
+    for part in qual.split("."):
+        obj = getattr(obj, part, None) if obj is not None else None
+    return f"{mod}.{qual}" if obj is fn else None
+
+
 def declare(cj) -> dict:
     """The inverse of entry_claims()'s per-claim parsing: one Conjecture
     back to declared-schema.md's claim-dict shape. This is the seam every
@@ -1220,6 +1248,8 @@ def declare(cj) -> dict:
     # duplicate it and re-type it on reparse.
     statement = _chain_text(cj) if cj.links else statement_text(
         cj.relation, cj.lhs, cj.rhs)
+    if getattr(cj, "negated", False) and not statement.startswith("not "):
+        statement = f"not {statement}"
     if getattr(cj, "outcome", ""):
         statement = f"{statement} => {cj.outcome}"
     sections = ([cj.assuming] if cj.assuming else []) + _let_sections(cj)
@@ -1253,16 +1283,11 @@ def declare(cj) -> dict:
         # map that would silently rebind a subset of the claim's names.
         refs: dict = {}
         for name, v in cj.funcs.items():
-            if isinstance(v, str):
-                refs[name] = v
-            else:
-                mod = getattr(v, "__module__", None)
-                qual = getattr(v, "__qualname__", "")
-                if mod and qual and "<" not in qual:
-                    refs[name] = f"{mod}.{qual}"
-                else:
-                    refs = {}
-                    break
+            ref = v if isinstance(v, str) else callable_ref(v)
+            if ref is None:
+                refs = {}
+                break
+            refs[name] = ref
         if refs:
             out["funcs"] = refs
     return out
@@ -1317,6 +1342,28 @@ def _is_safe_rename_symbol(symbol: str) -> bool:
     it happens, at the one place both the param and function paths
     already gate on `.isidentifier()`."""
     return symbol.isidentifier() and unicodedata.normalize("NFKC", symbol) == symbol
+
+
+def _symbology_answers(provider, params, funcs) -> tuple[dict, dict]:
+    """Intent:
+        What a `symbology` provider proposes for each real parameter
+        and each bound function name: `({param: symbol}, {func:
+        symbol})`, with a declined name (`None`, or a hook the provider
+        does not define) left out.
+
+    Notes:
+        Anything the provider raises propagates, so the caller can skip
+        the provider as a whole.
+    """
+    symbol_for_param = getattr(provider, "symbol_for_param", None)
+    symbol_for_func = getattr(provider, "symbol_for_func", None)
+    param_symbols = {} if symbol_for_param is None else {
+        name: symbol_for_param(name) for name in params}
+    func_symbols = {} if symbol_for_func is None else {
+        name: symbol_for_func(name) for name in funcs}
+    return ({n: s for n, s in param_symbols.items() if s is not None},
+            {n: s for n, s in func_symbols.items() if s is not None})
+
 
 
 def _auto_renames(cj, funcs: frozenset, unicode: bool,
@@ -1374,7 +1421,7 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     falling back to `_MATH_ATTRS`, so a genuine `pi`-named parameter is
     already proven/disproven correctly regardless of how this renders."""
     from .grammar import auto_short_names, greek_symbol_for_name, reserved_names
-    from ._providers import get_provider
+    from ._providers import get_provider, report_provider_failure
 
     excluded = funcs | {"f"} | set(cj.free_vars) | reserved_names()
     real_params = _ordered_real_param_names(cj, excluded)
@@ -1398,15 +1445,26 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     # ASCII-safe). A candidate is only accepted if it isn't already
     # `taken`, so a provider can never make two names in the same claim
     # collide with each other or with an existing single-letter name.
+    #
+    # Every answer is collected before any is used. A provider that
+    # raises from either hook is skipped for the whole render (none of
+    # its answers are used, one warning names it), so the claim renders
+    # exactly as it would with no provider installed.
+    provider_params: dict = {}
+    provider_funcs: dict = {}
     provider = None if canonical else get_provider("symbology")
     if provider is not None:
-        symbol_for_param = getattr(provider, "symbol_for_param", None)
-        if symbol_for_param is not None:
-            for name in real_params:
-                symbol = symbol_for_param(name)
-                if symbol is not None and symbol not in taken:
-                    param_renames[name] = symbol
-                    taken.add(symbol)
+        try:
+            provider_params, provider_funcs = _symbology_answers(
+                provider, real_params, cj.funcs)
+        except Exception as exc:
+            report_provider_failure("symbology", exc)
+            provider_params, provider_funcs = {}, {}
+    for name in real_params:
+        symbol = provider_params.get(name)
+        if symbol is not None and symbol not in taken:
+            param_renames[name] = symbol
+            taken.add(symbol)
 
     if unicode:
         for name in real_params:
@@ -1420,21 +1478,17 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
                       and len(n) > long_param_threshold]
 
     func_renames: dict = {}
-    if provider is not None:
-        symbol_for_func = getattr(provider, "symbol_for_func", None)
-        if symbol_for_func is not None:
-            for name in cj.funcs:
-                symbol = symbol_for_func(name)
-                # a function symbol is never backtick-wrapped (it sits in
-                # a call's own name position, where backticks aren't
-                # valid syntax even post-render), so an unsafe candidate,
-                # including one that's `.isidentifier()`-safe but not
-                # NFKC-stable, see `_is_safe_rename_symbol`, is dropped
-                # rather than accepted, the same guarantee auto_short_
-                # names' own pools already provide.
-                if symbol is not None and _is_safe_rename_symbol(symbol) and symbol not in taken:
-                    func_renames[name] = symbol
-                    taken.add(symbol)
+    for name in cj.funcs:
+        symbol = provider_funcs.get(name)
+        # a function symbol is never backtick-wrapped (it sits in a
+        # call's own name position, where backticks aren't valid syntax
+        # even post-render), so an unsafe candidate, including one
+        # that's `.isidentifier()`-safe but not NFKC-stable, see
+        # `_is_safe_rename_symbol`, is dropped rather than accepted, the
+        # same guarantee auto_short_names' own pools already provide.
+        if symbol is not None and _is_safe_rename_symbol(symbol) and symbol not in taken:
+            func_renames[name] = symbol
+            taken.add(symbol)
 
     # A function rename is a DISPLAY choice, and it only survives a round
     # trip where the claim has a `let <alias> = <target>` binding site for
@@ -1528,12 +1582,13 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     reproduces the resolved *effect* (`m1` written twice, no `let`
     needed at all), never the original alias spelling, a different
     string, the same claim. A `funcs` entry whose value is a live
-    callable (not a dotted-path string) can't be spelled as `let` text
-    either, for the same reason declare() drops it from `out["funcs"]`:
-    silently skipped here too, not an error, since the resulting claim
-    is still valid text, just missing that one bound-function
-    definition, exactly as incomplete as declare()'s own dict would be
-    for the same claim.
+    callable is spelled `let g = <module.qualname>` when `callable_ref`
+    finds an importable path resolving back to it, the same reference
+    declare() stores; a callable with no such path (a lambda, a nested
+    function) has no text spelling and is left out, not an error, since
+    the resulting claim is still valid text, just missing that one
+    bound-function definition, exactly as incomplete as declare()'s own
+    dict would be for the same claim.
 
     Auto-lets two kinds of name to a short spelling, each with its own
     synthesized `let` clause stating the substitution explicitly rather
@@ -1719,9 +1774,17 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     def _display_symbol(symbol: str) -> str:
         return symbol if _is_safe_rename_symbol(symbol) else f"`{symbol}`"
 
+    # a live callable is spelled by the importable path that resolves
+    # back to it, the same reference declare() stores; one with no such
+    # path has no text spelling and is left out
+    scope_bound: frozenset = getattr(cj, "scope_bound", frozenset())
+    func_refs = {name: (ref if isinstance(ref, str)
+                        else None if name in scope_bound
+                        else callable_ref(ref))
+                 for name, ref in cj.funcs.items()}
     let_segments = [f"let {func_renames.get(name, name)} = {ref}"
-                    for name, ref in cj.funcs.items()
-                    if isinstance(ref, str)
+                    for name, ref in func_refs.items()
+                    if ref is not None
                     # a parse-time placeholder (a bare call name awaiting
                     # scope resolution, value == its own name) only earns
                     # a `let` when the auto-rename gave it a short alias;

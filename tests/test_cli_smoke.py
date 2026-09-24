@@ -156,11 +156,11 @@ def test_check_strict_fails_on_unverifiable_claims(tmp_path):
     )
     lenient = _run("check", "guarded.py:always_raises", cwd=tmp_path)
     assert lenient.returncode == 0, lenient.stdout
-    assert "unverifiable" in lenient.stdout
+    assert "1 skipped" in lenient.stdout
 
     strict = _run("check", "guarded.py:always_raises", "--strict", cwd=tmp_path)
     assert strict.returncode == 1, strict.stdout
-    assert "unverifiable claim(s)" in strict.stdout
+    assert "1 skipped claim(s)" in strict.stdout
 
 
 # ---------------------------------------------------------------------------

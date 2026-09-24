@@ -1,8 +1,9 @@
-# CDD in one page
+# The method: claim-driven development
 
-The vocabulary every mode of running mathema shares. Short and
-reference-shaped; come back to this page when a term below shows up
-somewhere else in these docs.
+mathema is the tool; claim-driven development is the method it
+implements. This page sets out that method and the vocabulary every
+part of mathema shares, and is the one to come back to when a term
+shows up somewhere else in these docs.
 
 This page restates **claim-driven development v0.2**, the
 specification mathema implements. The specification itself lives in a
@@ -12,6 +13,30 @@ and is published under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa
 targets exactly one spec version at a time, readable at runtime as
 `mathema.SPEC_VERSION`, and every verified record stamps the version
 it was written against in its `lineage.CDD_spec_version` field.
+
+## The problem it addresses
+
+A test tells you a function behaved correctly on the specific inputs
+the test author thought to write down. A type hint tells you the
+*shapes* of the inputs and outputs line up. Neither tells you *why*
+the function is trusted, in a form that survives the function being
+rewritten, or that a reviewer (human or model) can check against the
+real code in seconds rather than by re-reading the implementation.
+
+Claim-driven development is a small, deliberately spec-first answer
+to that gap: a **claim** is a specific, checkable statement about what
+a function does (`f(-x) == -f(x)`, `min(x) <= f(x) <= max(x)`, `f`
+raises on a shape mismatch), adjudicated against the *real* function,
+not assumed from its signature. The claim, its verdict, and the
+evidence behind that verdict are the durable artifact, not a
+disposable test file that only proves something the day it was
+written. The full specification, including the exact vocabulary and
+the YAML record schema, lives in a sibling repository:
+[claim-driven-development](https://github.com/aaronbyrnephd/claim-driven-development)
+on GitHub. mathema is one implementation of it, in Python.
+
+The name mathema is Greek: μάθημα, a thing learned. A function is
+trusted exactly to the extent of its verified claims.
 
 ## What Claim-Driven Development is
 
@@ -27,10 +52,15 @@ names.
 - **`probe`**: call the real function on seeded, synthesized inputs
   and check the claim numerically. Verdict: `holds (n=...)` or
   `falsified` with a counterexample. Evidence, not proof.
-- **`derive`**: lift the function's body to a `sympy` expression and
-  prove the claim algebraically. Verdict: `proven`, `falsified`, or
-  honestly `skipped` when it can't be settled (never a false `proven`).
-  Only available for a real subset of functions; see
+- **`derive`**: lift the function's body to a symbolic expression and
+  decide the claim algebraically. Verdict: `proven`, or `falsified`
+  with a witness the real function reproduced, and never a false
+  `proven`. A symbolic disproof with no point to execute (a derivative
+  or limit claim, say) stays `unknown`. When the body will not lift, or the proof
+  cannot close, a scalar claim falls through to the probe route with
+  the reason the derive attempt stopped kept in the record, while a
+  matrix-algebra claim stays `unknown`. Only available
+  for a real subset of functions; see
   [The derive route](derive-route.md).
 
 ## Verdict vocabulary
@@ -127,3 +157,65 @@ The specification is versioned separately from mathema: a mathema
 release names the one spec version it targets, and a spec revision
 lands in mathema as a deliberate, documented upgrade rather than
 silently.
+
+## What mathema does with a claim
+
+- **Structural analysis** (pure `ast`, no dependencies): loop shape,
+  purity and effects, parameter kinds, per-parameter domain guards.
+- **Probing**: runs the real function on seeded random inputs and
+  checks built-in algebraic laws (commutativity, idempotence,
+  boundedness, parity, monotonicity, equivariances) plus any claim you
+  state yourself. `holds (n=...)` is evidence, not proof. `n` is a
+  trial budget decided once per call from the function's own
+  structure, never a flat constant, and `falsified` comes with the
+  counterexample, permanently.
+- **Symbolic proof (the derive route)**: lifts a function's body to a
+  symbolic expression and decides a claim algebraically, over several
+  mathematics engines (principally sympy) and mathema's own solving. `proven` is
+  strictly stronger than `holds`: not "n samples agreed," but "the two
+  sides are the same expression." See [The derive route](derive-route.md)
+  for exactly what is liftable.
+- **The conjecture pipeline**: state a claim as one string
+  (`"f(-x) == -f(x)"`) or a `Conjecture`. Laws are validated against a
+  strict AST whitelist before they run, so proposals from an untrusted
+  source (a human in review, or a model) are safe to check. The
+  proposer never adjudicates its own claims.
+- **Identity hashes**: `form` (rename/format-invariant AST structure)
+  and `sig` (parameter shape). Every claim binds to them, so a record
+  cannot silently outlive the code it describes.
+- **The spec store**: `mathema.write_spec(fn, ...)` writes a standalone YAML
+  record to `.mathema/verified/`, and `mathema verify` re-checks every
+  record whose function or dependencies changed.
+
+## Exit codes
+
+Every verb uses the same four, so a CI step can tell a failing gate
+apart from a broken invocation without parsing output:
+
+| Code | Meaning |
+|---|---|
+| 0 | ran, and nothing gated: claims adjudicated as stated, or the verb only reports |
+| 1 | ran, and the gate failed: a claim is falsified, invalidated or unknown, a claim is skipped or accepted as risk in strict mode, or a conflict is unresolved |
+| 2 | could not run: a target that does not resolve, an unreadable or malformed file, a bad argument, a missing optional extra |
+| 130 | interrupted (Ctrl-C or EOF) |
+
+The distinction that matters in CI is 1 against 2. A 1 is a real
+finding about your code and the record will say which claim; a 2 means
+mathema never got far enough to have an opinion, so treating the two
+alike hides a broken invocation as a failing test. `--lenient` moves
+accepted risks out of the gate and so can turn a 1 into a 0, but it
+never turns a 2 into either (see [what fails the
+run](modes/verify.md#what-fails-the-run)).
+
+## The specification documents
+
+The full vocabulary and schema this package is checked against:
+
+- [claim-driven-development](https://github.com/aaronbyrnephd/claim-driven-development):
+  the repository itself, starting with its own README. Each published
+  version has its own directory, holding the three documents mathema is
+  checked against:
+  - `cdd.md`, the core vocabulary (claim, verdict, evidence route).
+  - `claim-anatomy.md`, what a claim is made of.
+  - `record-schema.md`, the exact shape of the YAML record shown in
+    step 4 of [A first look](first-look.md).

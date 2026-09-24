@@ -1,0 +1,47 @@
+/* tetrionlabs/brand tokens v1 (2026-09-16)
+ *
+ * The design tokens every Tetrion Labs surface consumes: the site,
+ * the mathema docs theme, and OG templates. Values originate in the
+ * v5 identity (neutrals) and the Labs identity decisions (accent pair,
+ * type). Hand-authored v1; folding emission into build_tetrion.py is
+ * planned so these values and the SVG exports cannot drift.
+ *
+ * Usage rules (contrast-measured, see identity v4 sheet):
+ *   --accent (#3ECF8E)        dark grounds ONLY (8.94:1 on ink)
+ *   --accent-strong (#0E7A47) light grounds ONLY (5.09:1 on paper)
+ * Never swap them; each fails WCAG AA on the other ground.
+ * The accent never appears inside the mark or the wordmark.
+ */
+
+:root {
+  /* neutrals: identity v5, warm ink and paper */
+  --ink: #1A1714;        /* Labs page ground; Tetrion type colour   */
+  --ink-2: #221F1B;      /* elevated surface on dark                */
+  --ink-3: #2B2723;      /* hover surface on dark                   */
+  --line-dark: #33302B;  /* rules and borders on dark               */
+  --graphite: #4A443E;   /* secondary type on light (v5)            */
+  --mute-light: #6E6760; /* muted type on light                     */
+  --dmute: #8A837B;      /* muted type on dark; toned [LABS]        */
+  --mid: #9A938B;        /* faint labels on light                   */
+  --rule-light: #E2DCD3; /* rules and borders on light              */
+  --plate: #F2EEE8;      /* panel ground on light                   */
+  --paper: #FAF8F5;      /* light ground; type colour on dark       */
+
+  /* accent pair: Labs only, never on tetrion.co */
+  --accent: #3ECF8E;
+  --accent-strong: #0E7A47;
+
+  /* type */
+  --font-display: "Space Grotesk", -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;                  /* headings, wordmark */
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  /* tetrion.co display face is GFS Didot (identity v5); it is not a
+     Labs token and is listed here only so no one reaches for it. */
+
+  /* wordmark geometry (TETRION[LABS]) */
+  --wm-tracking: 0.14em; /* single-word setting                     */
+  --wm-weight-tetrion: 600;
+  --wm-weight-labs: 500;
+}

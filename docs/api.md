@@ -9,7 +9,6 @@ code actually does.
     options:
       members:
         - check
-        - note
         - analyze
         - track_claims
         - Record

@@ -285,8 +285,9 @@ route](derive-route.md) for the exact shapes this covers.
 
 ## When a claim will not parse
 
-`mathema check` reports an unparseable claim as a clean error with the
-position, and exits 2 rather than 1, because nothing was adjudicated.
+`mathema check` reports an unparseable claim as a clean error naming
+the part it could not read, and exits 2 rather than 1, because nothing
+was adjudicated.
 If you are working through an agent, the MCP surface exposes the same
 check as a `parse_claim` tool so a claim can be validated before paying
 for a full adjudication. See [the MCP interface](modes/mcp.md).

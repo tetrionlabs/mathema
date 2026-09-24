@@ -54,11 +54,83 @@ class GateReport:
     problems: list[str] = field(default_factory=list)
     proven: int = 0
     holds: int = 0
-    refuted: int = 0
+    falsified: int = 0
+    invalidated: int = 0
     unknown: int = 0
     owned: int = 0
     skipped: int = 0
     foreign: list = field(default_factory=list)
+
+    @property
+    def refuted(self) -> int:
+        """The claims a counterexample stands against, `falsified` and
+        `invalidated` together: the `refuted` stance of the claim-row
+        vocabulary."""
+        return self.falsified + self.invalidated
+
+
+def summary_counts(counts) -> str:
+    """Intent:
+        The counts part of a one-line summary, each named by the verdict
+        it counts: proven, holds and falsified always, the rarer states
+        only when present. Takes a `GateReport` or a mapping carrying
+        the same names (`accepted_risk` for the owned unknowns).
+    """
+    get = ((lambda k: counts.get(k, 0)) if isinstance(counts, dict)
+           else (lambda k: getattr(counts, "owned" if k == "accepted_risk"
+                                   else k)))
+    parts = [f"{get('proven')} proven", f"{get('holds')} holds",
+             f"{get('falsified')} falsified"]
+    for key, word in (("invalidated", "invalidated"), ("unknown", "unknown"),
+                      ("skipped", "skipped"),
+                      ("accepted_risk", "accepted risk")):
+        if get(key):
+            parts.append(f"{get(key)} {word}")
+    return ", ".join(parts)
+
+
+def _record_has_unreadable_claim(entry: dict) -> bool:
+    """Intent:
+        Whether any claim stored in a verified record fails to parse
+        under the current grammar, which is what makes rebuilding that
+        record the remedy rather than correcting an authoring surface.
+    """
+    from .conjecture import InvalidConjecture, claim
+
+    for c in (entry or {}).get("claims") or []:
+        statement = c.get("statement")
+        if not statement:
+            continue
+        try:
+            claim(statement)
+        except InvalidConjecture:
+            return True
+    return False
+
+
+def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
+    """Intent:
+        Give each probe the verdict its record now stores where the
+        record layer changed it. A claim that was supported before and
+        fails now is written as `invalidated`, and the sweep reports it
+        under that name rather than as the fresh `falsified`.
+
+    Notes:
+        Only a stored `invalidated` is carried over; every other
+        verdict is already the probe's own.
+    """
+    import yaml
+
+    try:
+        with open(path, encoding="utf-8") as fh:
+            entry = (yaml.safe_load(fh) or {}).get(key) or {}
+    except OSError:
+        return
+    stored = {c.get("name"): c.get("verdict")
+              for c in entry.get("claims") or []}
+    for p in probes:
+        if classify_verdict(stored.get(p.name) or "") == "invalidated":
+            p.verdict = stored[p.name]
 
 
 def gate(claims, *, strict: bool,
@@ -84,12 +156,18 @@ def gate(claims, *, strict: bool,
         if _volunteered(meta, note):
             continue
         kind = classify_verdict(verdict)
+        if verdict == "skipped:unknown_but_accepted":
+            # the stored form of an unknown a person accepted as risk
+            r.owned += 1
+            continue
         if kind == "proven":
             r.proven += 1
         elif kind == "holds":
             r.holds += 1
-        elif kind in ("falsified", "invalidated"):
-            r.refuted += 1
+        elif kind == "falsified":
+            r.falsified += 1
+        elif kind == "invalidated":
+            r.invalidated += 1
         elif kind == "unknown":
             if name in accepted_risk:
                 r.owned += 1
@@ -97,11 +175,13 @@ def gate(claims, *, strict: bool,
                 r.unknown += 1
         elif kind == "skipped":
             r.skipped += 1
-    if r.refuted:
-        # a falsified claim is a failing check, in every mode,
-        # strictness only governs structurally-skipped claims, never
-        # wrong or undecided ones
-        r.problems.append(f"{r.refuted} falsified claim(s)")
+    # a falsified or invalidated claim is a failing check, in every
+    # mode; strictness only governs structurally-skipped claims, never
+    # wrong or undecided ones
+    if r.falsified:
+        r.problems.append(f"{r.falsified} falsified claim(s)")
+    if r.invalidated:
+        r.problems.append(f"{r.invalidated} invalidated claim(s)")
     if r.unknown:
         # an unaccepted unknown is an open epistemic gap: it fails in
         # every mode until it is resolved or a human owns the risk
@@ -110,7 +190,10 @@ def gate(claims, *, strict: bool,
     if strict and (r.skipped or r.owned):
         # accepted risk is visible relaxation, not laundering: lenient
         # proceeds past it, strict still refuses it
-        r.problems.append(f"{r.skipped + r.owned} unverifiable claim(s)")
+        if r.skipped:
+            r.problems.append(f"{r.skipped} skipped claim(s)")
+        if r.owned:
+            r.problems.append(f"{r.owned} accepted-risk claim(s)")
     if unresolved:
         r.problems.append(f"unresolved names: {', '.join(unresolved)}")
     return r
@@ -378,6 +461,20 @@ def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
     return kept, notes
 
 
+def _auto_claim_name(row: dict) -> "str | None":
+    """Intent:
+        The name an unnamed declared claim row resolves to when parsed,
+        or None when the row does not parse.
+    """
+    from .conjecture import InvalidConjecture
+    from .spec import entry_claims
+    try:
+        (cj,) = entry_claims({"claims": [row]})
+    except (InvalidConjecture, ValueError):
+        return None
+    return cj.name
+
+
 def _union_verified_membership(current_claims: list,
                                verified_entry: dict) -> list:
     """Intent:
@@ -387,10 +484,16 @@ def _union_verified_membership(current_claims: list,
         (discoveries) or accepted as historical never resurrect;
         suggestion rows (surface mathema) and rows with no
         statement are not membership.
+
+    Notes:
+        A declared claim with no written name is present under the name
+        its statement auto-names to, the name its verified row carries;
+        the row's statement is the canonical spelling, which need not
+        match the text the author wrote.
     """
     if not verified_entry:
         return current_claims
-    have = {c.get("name") for c in current_claims}
+    have = {c.get("name") or _auto_claim_name(c) for c in current_claims}
     out = list(current_claims)
     retired = {d.get("name") for d in
                (verified_entry.get("discoveries") or [])} | \
@@ -495,15 +598,40 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     verified = load_verified(root)
     declared = load_declared(root)
     keys = sorted(set(verified) | set(declared))
+    # a function can be locked before it has any record or claims; its
+    # lock is still checked
+    lock_only = sorted(set(locks) - set(keys))
     if only:
         want = set(only)
         keys = [k for k in keys if k in want]
-    if not keys:
+        lock_only = [k for k in lock_only if k in want]
+    if not keys and not lock_only:
         out.nothing_declared = True
         return out
 
     # phase 1: freshness + adjudication + record writes. Gating waits
     # until every record is written (see the docstring note).
+    lock_messages: dict = {}   # key -> the tripped-lock failure line
+    for key in lock_only:
+        fn = _resolve_func_ref(key, root=root)
+        if fn is None:
+            msg = (f"{key}: locked, but no function of that name resolves; "
+                   f"restore it, or a human runs: mathema unlock {key}")
+        elif lock_state(key, (form := analyze(fn).form), locks,
+                        {}) == "changed":
+            lk = locks.get(key) or {}
+            msg = (f"{key}: locked at form {lk.get('form')} but the code "
+                   f"is now {form}; there is no record to "
+                   f"compare. Restore the function, or a human runs: "
+                   f"mathema unlock {key}")
+        else:
+            continue
+        out.problems.append(msg)
+        out.lines.append(f"FAIL {msg}")
+        out.keys.append({"key": key, "why": "locked-changed",
+                         "passed": False, "problems": [msg],
+                         "integrity_mismatch": False, "counts": {},
+                         "claims": []})
     pending: list = []   # (key, why, claims_for_gate, rec_or_none,
                          #  deps, accepted, unresolved, source_line)
     for key in keys:
@@ -611,10 +739,16 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                      for c in current_claims)
             current_fp = claims_fingerprint(current_claims)
         except InvalidConjecture as e:
-            msg = (f"{key}: a claim in this function's verified "
-                   f"record does not parse under the current "
-                   f"grammar ({e}); rebuild the record: delete "
-                   f".mathema/verified/{key}.yaml and re-run verify")
+            if _record_has_unreadable_claim(verified_entry):
+                msg = (f"{key}: a claim in this function's verified "
+                       f"record does not parse under the current "
+                       f"grammar ({e}); rebuild the record: delete "
+                       f".mathema/verified/{key}.yaml and re-run verify")
+            else:
+                where = ((declared_info or {}).get("source")
+                         or "its docstring or claims file")
+                msg = (f"{key}: a claim declared in {where} does not "
+                       f"parse ({e}); correct it there and re-run verify")
             out.problems.append(msg)
             out.lines.append(f"FAIL {msg}")
             out.keys.append({"key": key, "why": "unreadable-record",
@@ -637,7 +771,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                    f"Restore the function, or a human runs: "
                    f"mathema unlock {key}")
             out.problems.append(msg)
-            out.lines.append(f"FAIL {msg}")
+            lock_messages[key] = msg
             stored = verified_entry.get("claims") or []
             pending.append((key, "locked-changed", stored, None, None,
                             _accepted_risk(verified_entry), (),
@@ -740,8 +874,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "form changed")
         rec.meta = {**(getattr(rec, "meta", None) or {}),
                     "mathema.premise_state": premise_now}
-        write_record(rec, key=key, root=root, claims=current_claims,
-                     declared_intent=merged_entry.get("intent"))
+        written = write_record(rec, key=key, root=root,
+                               claims=current_claims,
+                               declared_intent=merged_entry.get("intent"))
+        _carry_recorded_verdicts(rec.probes, written, key)
         out.adjudicated += 1
         pending.append((key, why, list(rec.probes), rec, rec.dependencies,
                         accepted, rec.facts.unresolved, verified_info))
@@ -795,18 +931,18 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         report = gate(claims_for_gate, strict=strict,
                       accepted_risk=accepted, unresolved=unres)
         state = "FAIL" if report.problems else "ok"
-        if why == "fresh":
+        if why == "locked-changed":
+            # the record is left as it was, so its counts describe code
+            # that no longer exists: the row is the lock failure alone
+            line = f"FAIL {lock_messages[key]}"
+            if report.problems:
+                line += "; " + "; ".join(report.problems)
+        elif why == "fresh":
             line = f"{state:4} {key}: fresh"
             if report.problems:
                 line += "; " + "; ".join(report.problems)
         else:
-            line = (f"{state:4} {key}: {why}; "
-                    f"{report.proven + report.holds} hold, "
-                    f"{report.refuted} refuted"
-                    + (f", {report.unknown} unknown" if report.unknown else "")
-                    + (f", {report.owned} accepted risk" if report.owned else "")
-                    + (f", {report.skipped} unverifiable" if report.skipped
-                       else ""))
+            line = f"{state:4} {key}: {why}; {summary_counts(report)}"
             if report.foreign:
                 grammars = sorted({_claim_fields(p)[2]
                                    ["mathema.foreign_grammar"]
@@ -820,11 +956,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.keys.append({
             "key": key,
             "why": why,
-            "passed": not report.problems,
-            "problems": list(report.problems),
+            "passed": not report.problems and key not in lock_messages,
+            "problems": ([lock_messages[key]] if key in lock_messages
+                         else []) + list(report.problems),
             "integrity_mismatch": key in integrity_warned,
             "counts": {"proven": report.proven, "holds": report.holds,
-                       "refuted": report.refuted, "unknown": report.unknown,
+                       "refuted": report.refuted,
+                       "falsified": report.falsified,
+                       "invalidated": report.invalidated,
+                       "unknown": report.unknown,
                        "accepted_risk": report.owned,
                        "skipped": report.skipped,
                        "foreign_grammar": len(report.foreign)},

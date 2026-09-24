@@ -1390,10 +1390,10 @@ def _expand_prime(text: str) -> str:
     one apostrophe per differentiation, the variable inferred from
     `f(x)`'s own single free name (`_extract_single_free_identifier`).
     Left alone wherever that inference is ambiguous or empty
-    (`f'(x, y)`, `f'(3)`), the primed call simply isn't rewritten, and
-    falls through to whatever error an un-rewritten `name'(...)` already
-    produces downstream (the same "left alone on failure" convention
-    every other sugar in this module follows)."""
+    (`f'(x, y)`, `f'(3)`), the primed call simply isn't rewritten (the
+    same "left alone on failure" convention every other sugar in this
+    module follows), and `unexpanded_prime_message` names it for
+    `claim()` to refuse."""
     def rewrite(m, args, call_end):
         name, order = m.group(1), len(m.group(2))
         var = _extract_single_free_identifier(args)
@@ -1402,6 +1402,34 @@ def _expand_prime(text: str) -> str:
         return f"d({name}({args}), {', '.join([var] * order)})"
 
     return _rewrite_balanced_calls(text, _PRIME_NAME, rewrite)
+
+
+def unexpanded_prime_message(text: str) -> str | None:
+    """The claim-error message for the first primed call left in
+    already-normalized `text`, or `None` when there is none.
+
+    Intent:
+        Prime notation reads its differentiation variable from the
+        call's single free name, so `f'(v0, theta, g)` (three free
+        names) and `f'(3)` (none) have no derivative variable and
+        `_expand_prime` leaves them as written. This names such a call
+        and the explicit `d(...)` spelling that states the variable,
+        one `<var>` per prime.
+
+    Notes:
+        Only a balanced primed call is reported; an unbalanced one is
+        left for the parser to reject, as `_find_balanced_call` does.
+    """
+    found = _find_balanced_call(text, _PRIME_NAME, 0)
+    if found is None:
+        return None
+    m, args, _ = found
+    name, primes = m.group(1), m.group(2)
+    explicit = f"d({name}({args}), {', '.join(['<var>'] * len(primes))})"
+    count = "none" if _IDENTIFIER.search(args) is None else "more than one"
+    return (f"prime notation {name}{primes}({args}) differentiates with "
+            f"respect to the call's single free variable, and ({args}) "
+            f"has {count}; name the variable explicitly: {explicit}")
 
 
 def _expand_d_single_var(text: str) -> str:
@@ -2621,14 +2649,33 @@ def render_canonical(expr: "sympy.Expr", funcs: frozenset = frozenset({"f"}),
         return _humanize(expr), False
 
 
-def _calls_to_bracket(text: str, name: str, open_br: str, close_br: str) -> str:
-    """Every top-level `name(...)` call in `text` -> `open_br...close_br`,
-    scanning with `_find_balanced_call` (not a regex) since the argument
-    can itself contain parens, shared by render_law_expr()'s abs/floor/
-    ceil bar-notation output."""
-    return _rewrite_balanced_calls(
-        text, re.compile(rf"\b{name}\("),
-        lambda m, args, call_end: f"{open_br}{args}{close_br}")
+_ABS_CALL = re.compile(r"\babs\(")
+
+
+def _abs_calls_to_bars(text: str) -> str:
+    """Intent:
+        Every `abs(...)` call in `text`, nested ones included, rendered
+        as `|...|` when its argument is a single bar term, and left as
+        the `abs(...)` call otherwise.
+
+    Notes:
+        A single bar term is what `_BAR_TOKEN` accepts: a name, a
+        number, one call, or one parenthesised group, containing no
+        bar of its own. `|x - 1|` is not one, and the grammar rejects
+        it on input, so `abs(x - 1)` keeps the call spelling; every
+        string this returns folds back to the same `abs(...)` calls
+        under `_abs_bars`. The scan is by balanced parens
+        (`_find_balanced_call`), since an argument can itself contain
+        parens, and inner calls are rewritten first, so an outer
+        argument holding an inner `|y|` keeps the call spelling too.
+    """
+    def rewrite(m, args, call_end):
+        inner = _abs_calls_to_bars(args)
+        if "|" not in inner and re.fullmatch(_BAR_TOKEN, inner):
+            return f"|{inner}|"
+        return f"abs({inner})"
+
+    return _rewrite_balanced_calls(text, _ABS_CALL, rewrite)
 
 
 def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = True,
@@ -2638,7 +2685,8 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     identity/fingerprinting already uses (`_node_to_sympy`/
     `to_canonical`), then this module's own math-over-python spelling
     preferences layered on top (`**` -> `^`; `abs(x)` -> `|x|`, in both
-    modes; `floor(x)`/`ceil(x)` stay as the plain call in both modes
+    modes, when the argument is a single bar term, `abs(x - 1)` staying
+    the call; `floor(x)`/`ceil(x)` stay as the plain call in both modes
     too, never the `⌊x⌋`/`⌈x⌉` bracket notation, even though that's
     accepted *input*: rendered small, a floor/ceil bracket reads too
     easily as a single `|`, indistinguishable from `abs`). Going
@@ -2670,7 +2718,7 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     funcs = funcs | {"f"}
     expr = _node_to_sympy(ast.parse(text, mode="eval"), funcs)
     s = to_canonical(expr, funcs, unicode, suppress_glyphs).replace("**", "^")
-    s = _calls_to_bracket(s, "abs", "|", "|")
+    s = _abs_calls_to_bars(s)
     if not unicode:
         for symbol, backslash_name in _GREEK_TO_BACKSLASH.items():
             s = s.replace(symbol, backslash_name)

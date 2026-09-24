@@ -64,8 +64,8 @@ acceptance is where a *person* takes accountability for what to do about
 it. It is integral to the CDD loop, not an add-on: evidence is adjudicated
 by the tool, but the decision to rely on a `holds`, to own a gap, or to
 adopt a corrected claim is a human's, and the record carries whose. You do
-not have to learn the vocabulary first. Run `mathema verify`: every claim
-that can be accepted names the exact command. Or type `mathema accept KEY
+not have to learn the vocabulary first. Run `mathema verify` to see which
+records fail on an unknown or falsified claim, then type `mathema accept KEY
 CLAIM` with no `--as`, and mathema reads the claim's verdict and proposes
 the natural kind (a `holds` is *evidence*, an `unknown` is a *risk*, a
 falsification is a *discovery*), then asks you to confirm. You take the
@@ -230,7 +230,7 @@ A compendium row (curated knowledge about a library, materialised
 into the store at `declared` status when a premise first references
 it) accepted at the level its curator claims. The row's verdict
 becomes that level, the acceptance records the source
-(`compendium:numpy-2.2`), and every conclusion resting on the row
+(`compendium:numpy-2.5`), and every conclusion resting on the row
 caps there. The alternative needs no verb at all: `mathema verify`
 re-adjudicates the row against the installed library, and the local
 verdict replaces the testimony. See

@@ -17,7 +17,7 @@ Expected output (counts vary with the sampler):
 
 ```
 verdict: holds  route: probe
-note:    ; 96 executed shared points agree within tolerance (sampling, never proof)
+note:    96 executed shared points agree within tolerance (sampling, never proof)
 ```
 
 ## Read the result honestly

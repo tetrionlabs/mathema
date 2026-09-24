@@ -40,10 +40,9 @@ function's alpha-normalised AST with the docstring stripped, so:
 
 ```text
 $ mathema verify
-FAIL funcs.settle: locked at form 206704b327da but the code is now
-     7df50498df6f; the record is unchanged. Restore the function, or a
-     human runs: mathema unlock funcs.settle
+FAIL funcs.settle: locked at form 206704b327da but the code is now 7df50498df6f; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
 0 fresh (form unchanged, skipped), 0 adjudicated, 1 problem(s)
+grammars detected: mathema; verified by this run: mathema
 $ echo $?
 1
 ```
@@ -54,6 +53,11 @@ ways forward, and **the record is byte-identical to before the edit**.
 The verified baseline never moves onto code a human did not sanction,
 so a failing loop cannot accumulate `invalidated` noise against an
 implementation that was never supposed to change.
+
+A function can be locked before it has any record or declared claim.
+The sweep checks that lock too, and a changed body fails the same way,
+with the line saying `there is no record to compare` in place of
+`the record is unchanged`.
 
 ## Who locks, who unlocks
 
@@ -76,7 +80,7 @@ and when.
 
 `mathema audit` shows a `locked` column whenever anything in the
 population is locked (`yes`, with who pinned it), and counts locks in
-the summary line, so the assurance is visible at a glance rather than
+the summary line, so what is locked is visible at a glance rather than
 buried in a YAML file. `--compact --cols ...,locked` carries the
 pinned form hash for machines.
 
@@ -85,11 +89,14 @@ pinned form hash for machines.
 `.mathema/meta/locks.yaml`, committed with the store:
 
 ```yaml
+# locked functions: the form hash each is pinned at.
+# `mathema lock KEY` adds one; only `mathema unlock KEY`
+# (a human act) removes one.
 funcs.settle:
-  form: 206704b327da
-  at: "2026-09-16"
+  at: '2026-09-24'
   by: Alan Turing
-  note: "settled implementation"
+  form: 206704b327da
+  note: settled implementation
 ```
 
 The verified record carries a `locked` reflection of the same entry,

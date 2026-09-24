@@ -45,10 +45,14 @@ def test_pde_heat_equation_proven():
     assert results[0].verdict == "proven"
 
 
-def test_pde_wrong_solution_falsified():
+def test_pde_wrong_solution_is_unknown_without_an_executed_witness():
+    # the symbolic disproof is right, but a derivative claim has no
+    # point evaluation against the function, so no executed witness
+    # exists and a falsification needs one
     results = check_conjectures(
         not_heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive")])
-    assert results[0].verdict == "falsified"
+    assert results[0].verdict == "unknown"
+    assert results[0].meta["mathema.corroboration"] == "uncorroborated"
 
 
 def gauss_sum(n: float) -> float:

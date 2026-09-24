@@ -1016,6 +1016,57 @@ def _binding_operator_exempt_calls(tree) -> set:
     return exempt
 
 
+def _evaluation_points(tree, lifted, param_names: set, aux: dict) -> dict:
+    """Intent:
+        For every call nested inside a `d(...)` evaluated at a point
+        (`d(<expr>, <vars>, __at__, v, val, ...)`, the expansion of
+        `@{v=val, ...}`), the substitution that point fixes: id() of
+        the call node -> {parameter symbol: value}. Inner points win
+        over outer ones on the same parameter.
+
+    Notes:
+        A call outside any evaluation point is absent from the map. A
+        pair whose value doesn't convert is left out, so that
+        parameter stays free.
+    """
+    points: dict = {}
+
+    def visit(node, fixed):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id == "d" and node.args:
+                rest = node.args[1:]
+                at_idx = next((i for i, a in enumerate(rest)
+                               if isinstance(a, ast.Name)
+                               and a.id == _D_AT_SENTINEL), None)
+                if at_idx is not None:
+                    pairs = rest[at_idx + 1:]
+                    inner = dict(fixed)
+                    for i in range(0, len(pairs) - 1, 2):
+                        var_node, val_node = pairs[i], pairs[i + 1]
+                        if not (isinstance(var_node, ast.Name)
+                                and var_node.id in param_names):
+                            continue
+                        try:
+                            inner[lifted.params[var_node.id]] = \
+                                _law_to_sympy(val_node, lifted,
+                                              param_names, aux)
+                        except TimeoutError:
+                            raise
+                        except Exception:
+                            continue
+                    visit(node.args[0], inner)
+                    for child in rest:
+                        visit(child, fixed)
+                    return
+            if fixed:
+                points[id(node)] = dict(fixed)
+        for child in ast.iter_child_nodes(node):
+            visit(child, fixed)
+
+    visit(tree, {})
+    return points
+
+
 def _call_guard_conditions(lhs_src: str, rhs_src: str, lifted,
                            guards: list, bound_funcs: dict | None = None,
                            aux_guards: dict | None = None) -> "list | None":
@@ -1029,11 +1080,15 @@ def _call_guard_conditions(lhs_src: str, rhs_src: str, lifted,
 
     Notes:
         Entries are (condition, exception name, call text, target
-        name, substituted argument expressions), the last two feed
-        witness corroboration, which executes the real call at a
-        candidate witness. `None` declines the whole analysis (an
-        unparseable law, a tuple-valued argument), the caller MUST
-        treat that as unexcludable (undecided), never as "no guards".
+        name, substituted argument expressions, evaluation point), the
+        argument expressions feed witness corroboration, which
+        executes the real call at a candidate witness. A call inside
+        `d(...)@{v=val}` has v fixed at val in its arguments, so a
+        guard is read only where the claim evaluates the call; the
+        last entry is that {symbol: value} map (empty elsewhere).
+        `None` declines the whole analysis (an unparseable law, a
+        tuple-valued argument), the caller MUST treat that as
+        unexcludable (undecided), never as "no guards".
     """
     param_names = set(lifted.params)
     aux: dict = {_AUX_FUNCS_KEY: bound_funcs} if bound_funcs else {}
@@ -1046,6 +1101,12 @@ def _call_guard_conditions(lhs_src: str, rhs_src: str, lifted,
         except SyntaxError:
             return None
         exempt = _binding_operator_exempt_calls(tree)
+        try:
+            at_points = _evaluation_points(tree, lifted, param_names, aux)
+        except TimeoutError:
+            raise
+        except Exception:
+            return None
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Name)):
@@ -1060,9 +1121,15 @@ def _call_guard_conditions(lhs_src: str, rhs_src: str, lifted,
                 continue
             if id(node) in exempt or not target_guards:
                 continue
+            fixed = at_points.get(id(node), {})
             try:
                 args = [_law_to_sympy(a, lifted, param_names, aux)
                         for a in node.args]
+                if fixed:
+                    args = [a if isinstance(a, (tuple, _SymbolicArray))
+                            else sympy.sympify(a).subs(fixed,
+                                                       simultaneous=True)
+                            for a in args]
             except TimeoutError:
                 raise
             except Exception:
@@ -1076,7 +1143,8 @@ def _call_guard_conditions(lhs_src: str, rhs_src: str, lifted,
             for cond, exc in target_guards:
                 try:
                     out.append((cond.subs(subs, simultaneous=True), exc,
-                                ast.unparse(node), name, list(args)))
+                                ast.unparse(node), name, list(args),
+                                fixed))
                 except TimeoutError:
                     raise
                 except Exception:
@@ -1330,7 +1398,7 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
 
     undecided = False
     uncorroborated = False
-    for cond, exc, call_text, target_name, arg_exprs in sub_conds:
+    for cond, exc, call_text, target_name, arg_exprs, fixed in sub_conds:
         # note: three exclusion tiers, cheapest first, domain hull,
         # assumed region, then the PSD certificate for sqrt-style
         # `G < 0` guards the hull straddles
@@ -1380,9 +1448,12 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
                 uncorroborated = True
                 undecided = True
                 continue
-            where = ", ".join(f"{name} = {witness[sym]}"
+            # a coordinate the claim's evaluation point fixes is named
+            # at that value, the one the executed call used
+            at_witness = {**witness, **fixed}
+            where = ", ".join(f"{name} = {at_witness[sym]}"
                               for name, sym in ext_params.items()
-                              if sym in witness)
+                              if sym in at_witness)
             exc_text = exc or "an exception"
             return ProofResult(
                 "disproven",
@@ -1391,7 +1462,8 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
                        "so the claim has no value there, narrow the claim's "
                        "domain to where every call returns, or state the "
                        "raising region as its own raises(...) claim",
-                counterexample=where)
+                counterexample=where,
+                meta={"mathema.witness_executed": True})
         undecided = True
     if undecided:
         meta = ({"mathema.engine": "guard-witness-uncorroborated"}

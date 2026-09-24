@@ -74,7 +74,7 @@ partiality lemmas (below), then states it in the record behind an
 arrow:
 
 ```
-assuming f is defined --> b != 0, f(a, b) * b == a
+assuming f is defined --> b != 0, b*f(a, b) = a
 ```
 
 The region after `-->` is the resolved fact the claim was adjudicated
@@ -154,7 +154,7 @@ To enforce a dimension premise at RUNTIME, the shape analogue of
 def dot(x, y):
     return sum(a * b for a, b in zip(x, y))
 
-dot([1, 2], [3])   # ValueError: dim(x, 0)=2 violates dim(x, 0) == dim(y, 0)=1
+dot([1, 2], [3])   # ValueError: dot: dim(x, 0)=2 violates the declared premise dim(x, 0) == dim(y, 0)=1
 ```
 
 `@enforce_domain` guards a parameter's VALUE domain; `@enforce_

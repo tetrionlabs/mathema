@@ -53,7 +53,7 @@ def set_numerical_stability_check(enabled: bool) -> None:
 
 
 def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
-                     cap=None, scoped_extremes=False):
+                     cap=None, scoped_extremes=False, sequences=False):
     """Intent:
         Build the injected dependencies the corroboration engine needs
         for THIS claim: `evaluate(point)` decides the original claim's
@@ -72,17 +72,21 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         `None` when the claim can't be numerically evaluated at all (a
         calculus form d/lim/integrate, or an uncompilable law), the
         caller then marks a disproof uncorroborated and skips a proof's
-        sweep.
+        sweep. A sequence parameter is evaluable only with
+        `sequences=True`: `sample` then draws a list (respecting a
+        declared per-element bound) and `admits` requires a list whose
+        every element the bound admits.
     """
     from .domain import bound_to_sympy_set, domain_contains
     from .probing import _synth
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
-    # the gates verify scalar-real VALUE claims by calling fn at a
-    # point; a sequence parameter, a non-value relation, or a bundled
-    # (dataclass/dict) parameter isn't reproducible this way; return
-    # None so the caller leaves the derive verdict untouched
-    if any(k == "sequence" for k in kinds.values()):
+    # the gates verify VALUE claims by calling fn at a point; a
+    # non-value relation or a bundled (dataclass/dict) parameter isn't
+    # reproducible this way, and a sequence parameter only when the
+    # caller asked for list-valued points
+    seq_names = {p for p, k in kinds.items() if k == "sequence"}
+    if seq_names and not sequences:
         return None
     if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">"):
         return None
@@ -142,6 +146,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         if rel in ("==", "~="):
             return lv == rv or (both_finite and abs(lv - rv) <= tol)
         if rel == "!=":
+            # with no declared tolerance an inequality fails only at an
+            # actual equality
+            if cj.tolerance is None:
+                return not (lv == rv)
             return not (lv == rv or (both_finite and abs(lv - rv) <= tol))
         if both_finite:
             # strict relations compare natively: equality within
@@ -228,15 +236,29 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # range (or the full-extreme default), so a declared range
         # bounds the sweep's own draws, not only the corners
         b = cj_domain.get(name)
+        if name in seq_names:
+            # a sequence's declared bound is per element
+            return _synth("sequence", rng, b)
         if b is None:
             b = (cap_lo, cap_hi)
         return _synth(kinds.get(name, "float"), rng, b)
 
     def admits(point):
+        for n in seq_names:
+            # a sequence coordinate is a list, each element inside the
+            # declared per-element bound
+            v = point.get(n)
+            if not isinstance(v, (list, tuple)):
+                return False
+            bound = cj_domain.get(n)
+            if bound is not None and not all(
+                    isinstance(e, (int, float)) and domain_contains(e, bound)
+                    for e in v):
+                return False
         for n in names:
             bound = cj_domain.get(n)
             v = point.get(n)
-            if bound is None or v is None:
+            if bound is None or v is None or n in seq_names:
                 continue
             try:
                 fv = float(v)
@@ -337,6 +359,71 @@ def _fmt_point(point, names):
     return ", ".join(parts)
 
 
+def _sequence_witness(witness, seq_names):
+    """Intent:
+        A symbolic witness with each sequence parameter's element
+        coordinates reassembled into a list the real function can be
+        called with. A fold's disproof names its witness per element
+        (`x[0]`, `x[L - 1]`, `x[k]`) beside an integer length symbol
+        (`L`); the list has that length, the concretely indexed
+        elements at their positions and a symbolically indexed
+        element's value everywhere else.
+
+    Notes:
+        A sequence whose length can't be read off the witness is left
+        out, so the corroboration search samples that parameter
+        instead. Every other coordinate passes through unchanged, and
+        an empty or absent witness comes back as given.
+    """
+    import re as _re
+    if not witness or not seq_names:
+        return witness
+    out = dict(witness)
+    for p in seq_names:
+        entries = {}
+        for key, value in witness.items():
+            m = _re.fullmatch(rf"{_re.escape(p)}\[(.+)\]", str(key))
+            if m is not None and isinstance(value, (int, float)):
+                entries[m.group(1).strip()] = float(value)
+        for key in [k for k in out if str(k).startswith(f"{p}[")]:
+            del out[key]
+        # the bare parameter name, when the witness carries one, is a
+        # scalar stand-in the list replaces
+        out.pop(p, None)
+        if not entries:
+            continue
+        index_names = {n for text in entries
+                       for n in _re.findall(r"[A-Za-z_]\w*", text)}
+        lengths = [witness[n] for n in sorted(index_names)
+                   if isinstance(witness.get(n), (int, float))
+                   and float(witness[n]).is_integer() and witness[n] >= 1]
+        env = {n: int(witness[n]) for n in index_names
+               if isinstance(witness.get(n), (int, float))
+               and float(witness[n]).is_integer()}
+        concrete, filler = {}, None
+        for text, value in entries.items():
+            try:
+                idx = eval(compile(text, "<index>", "eval"),
+                           {"__builtins__": {}}, dict(env))
+            except Exception:
+                filler = value if filler is None else filler
+                continue
+            if isinstance(idx, int):
+                concrete[idx] = value
+        if lengths:
+            n = int(lengths[0])
+        elif concrete and all(i >= 0 for i in concrete):
+            n = max(concrete) + 1
+        else:
+            continue
+        seq = [filler if filler is not None else 0.0] * n
+        for idx, value in concrete.items():
+            if -n <= idx < n:
+                seq[idx] = value
+        out[p] = seq
+    return out
+
+
 def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
                         bound_funcs, assum=()):
     """Intent:
@@ -349,20 +436,44 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         a symbolic disproof nothing reproduces means an engine bug
         somewhere (a corrupted residual, an off-surface search), so the
         record must neither assert the falsification nor hide that it
-        was claimed.
+        was claimed. A disproof whose witness is already an executed
+        call to the real function (a raise-region disproof ran the call
+        and saw it raise) stands as it is.
     """
     from . import corroboration as C
-    deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum)
-    if deps is None:
-        # not scalar-real-evaluable (a calculus form, a sequence, an
-        # opaque return): the disproof can't be reproduced this way, so
-        # leave the derive verdict untouched; this gate only ever
-        # REDUCES confidence in a scalar sign disproof it could check
-        # and couldn't reproduce
+    if proof.meta.get("mathema.witness_executed") and falsified.counterexample:
+        # no stratum: a raise at the witness is the contract or the
+        # mathematics talking, which the probe route leaves unclassified
+        # too (conjecture._machine_failure_stratum)
+        falsified.meta = {**(falsified.meta or {}),
+                          "mathema.corroboration": "reproduced"}
         return falsified
+    deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
+                            sequences=True)
+    if deps is None:
+        # a claim with no point evaluation against the function (a
+        # calculus form d/lim/integrate, a law that won't compile, a
+        # bundled parameter) can't produce an executed witness, and a
+        # falsification needs one: the verdict is unknown, flagged
+        # uncorroborated like any other disproof nothing reproduced
+        falsified.verdict = "unknown"
+        falsified.meta = {**(falsified.meta or {}),
+                          "mathema.corroboration": "uncorroborated",
+                          "mathema.corroboration_unexecutable": True}
+        falsified.counterexample = None
+        falsified.note = (
+            f"{falsified.note}; uncorroborated disproof: the derive route "
+            f"reported this false, but the claim form has no point "
+            f"evaluation against the function, so the symbolic disproof "
+            f"has no executed witness, and a falsification needs one; the "
+            f"verdict stays unknown").lstrip("; ")
+        return falsified
+    seq_names = [n for n in deps["names"]
+                 if facts.param_kinds.get(n) == "sequence"]
     result = C.corroborate_disproof(deps["evaluate"], deps["names"],
                                     sample=deps["sample"], admits=deps["admits"],
-                                    witness=proof.witness)
+                                    witness=_sequence_witness(proof.witness,
+                                                              seq_names))
     if result.point is not None:
         falsified.meta = {**(falsified.meta or {}),
                           "mathema.corroboration": "reproduced"}
