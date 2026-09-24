@@ -28,8 +28,11 @@ and clarity at the apex, so a lopsided profile has a lopsided shape. The
 overall number is the share of the full triangle that the three scores fill,
 `clarity * (implementation + intent) / 2` on the fractions, which collapses
 toward zero when any layer is empty rather than averaging politely over it.
-For a small two-function project after its first sweep:
+As an illustration of the shape (the figures are chosen for the example, not
+taken from a recorded project), implementation 100, intent 26 and clarity 50
+draw as:
 
+<!-- illustration -->
 ```text
         CLARITY 50
               ◆
@@ -51,8 +54,9 @@ For a small two-function project after its first sweep:
         overall 32
 ```
 
-Every line is exercised, intent is a quarter specified, and the overall
-comes out at 32 where the mean of the three would have said 59.
+Every line is exercised and intent is a quarter specified, and the overall
+comes out at 32, `0.5 * (1.00 + 0.26) / 2`, where the mean of the three would
+have said 59.
 
 Intent and clarity roll up to the project by a mean weighted by how central
 each function is in the call graph, so a function the rest of the code leans

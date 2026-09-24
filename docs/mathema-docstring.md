@@ -4,8 +4,9 @@ A second, opinionated docstring convention, stricter than the loose
 quality checklist [`mathema audit`'s `quality` column](modes/audit.md#the-quality-score)
 scores. The idea: a function's own docstring becomes the *complete*
 authoring surface for intent, domain, and claims, no separate YAML
-file or decorator required to get real, checked evidence.
+file or decorator required to get real, checked evidence. In `ema.py`:
 
+<!-- example: ema file=ema.py -->
 ```python
 from typing import Annotated
 
@@ -31,6 +32,15 @@ def ema(x: list, alpha: Annotated[float, Probability]) -> float:
 declares, and `x in [0, 1]^n` samples lists of any length whose entries
 lie in the unit interval:
 
+<!-- example: ema run -->
+```python
+import mathema
+from ema import ema
+
+print(mathema.check(ema, claims=[]))
+```
+
+<!-- example: ema output -->
 ```text
 mathema.Record(ema) · source, no side effects · form 0a80d14e175f
   holds   bounded: for x in [0.0, 1.0]^n:float|missing, alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= 1 (n=160)
@@ -159,10 +169,10 @@ a loop item. State that with a claim-level `let`:
 
 Every real parameter, plus every `for`/comprehension loop variable, is
 expected to appear literally somewhere in the docstring. This isn't
-mainly about readability; it's what feeds the derive route: `Domain:`
-declaring a bound for a fold's accumulator or item name gives the
-prover a sign/range assumption to work with that it otherwise has none
-of. An ordinary scratch local (a running total's starting value, an
+mainly about readability; it's what feeds the derive route: a
+claim-level `let` declaring a bound for a fold's accumulator or item
+name gives the prover a sign/range assumption to work with that it
+otherwise has none of. An ordinary scratch local (a running total's starting value, an
 indexing-only loop counter) is exempt, only names whose *range* could
 plausibly matter to a proof are required.
 
@@ -181,6 +191,7 @@ def total(xs: list) -> float:
 
 ## Checking a docstring against the schema
 
+<!-- example: ema repl -->
 ```python
 >>> import mathema
 >>> from mathema.docstring import parse_mathema_docstring
@@ -195,8 +206,8 @@ False
 
 `score`/`applicable` follow the same "N/M" pattern as
 `mathema.docstring_report()`; `conforms` requires a perfect score *and*
-zero structural `errors` (a malformed `Domain:` line, a `Claims:`
-header with nothing valid parsed underneath it, a real authoring
+zero structural `errors` (a `Claims:` header with nothing valid parsed
+underneath it, or an undocumented name, as here: a real authoring
 mistake, not just an incomplete docstring). `ema`'s own docstring never
 mentions `v`, the loop variable, anywhere in its text, so [symbol
 coverage](#symbol-coverage) genuinely fails for this example; that's
@@ -216,6 +227,7 @@ its verified spec record. A docstring can satisfy every check above
 and still drift out of sync with the code as the code changes around
 it; this is the metric meant to catch that.
 
+<!-- example: ema repl -->
 ```python
 >>> from mathema.docstring import docstring_sync, docstring_sync_checklist
 >>> sync = docstring_sync(ema)
@@ -242,9 +254,9 @@ What each dimension checks:
 |---|---|---|
 | Intent / Claims / symbol coverage | yes | same as `parse_mathema_docstring()`, folded in as-is |
 | claims <code>{floor &#124; actual &#124; expected}</code> | **no** | the floor is one claim per relevant claim family per target (`inventory.claim_floor()`), the actual is what the function carries, and the expected, how many a function of this shape typically carries; needs a corpus and reads `-`. Informational only, never subtracted from `score` |
-| domain declared / enforced | yes | declared: a bound exists (in `Domain:` or a signature `Annotated` marker) for each real scalar/int parameter; enforced: the function is wrapped in `authoring.enforce_domain()`, checked at runtime, not just documented |
+| domain declared / enforced | yes | declared: a bound exists (a signature `Annotated` marker, or the quantifier of a claim in the docstring's `Claims:`) for each real scalar/int parameter; enforced: the function is wrapped in `authoring.enforce_domain()`, checked at runtime, not just documented |
 | raises declared | yes | each exception the function's body can actually raise, covered by a `raises(f(x), ExcType)` claim, a prose `Raises:` mention, or a guard raise ENFORCING a declared domain (the declaration plus its own boundary check states the raise condition formally), counted once however many apply |
-| params / return typed | yes | every real parameter and the return value, each backed by *some* type information (annotation, `Annotated`, or `Domain:`) |
+| params / return typed | yes | every real parameter and the return value, each backed by *some* type information (an annotation, an `Annotated` marker, or a bound from a claim's quantifier) |
 | callees doc quality / docsync | yes | two points per direct callee: it documents itself (docstring plus a documented return), and its own layers are in sync (Claims: names known, record form fresh), a caller's docsync genuinely contains its callees' docsync, one hop deep and cycle-safe |
 
 `domain_enforced` is only applicable when at least one domain is
@@ -266,17 +278,22 @@ skip it, like any analysis). The wide table adds one compact
 table** underneath the loose `docs` checklist grid, not appended to
 the same row, since the two measure different things:
 
+<!-- example: ema run -->
+```bash
+mathema audit ema --docs
 ```
-$ mathema audit mypkg --docs
+
+<!-- example: ema output -->
+```text
 quality:
-key           || has_docstring | has_summary | params | returns | raises | quality_ratio | claims   | concepts/tags
-mypkg.ema.ema || yes           | yes         | 2/2    | no      | -      | 4/5           | 1 parsed | -
+key     || has_docstring | has_summary | params | returns | raises | quality_ratio | claims   | concepts/tags
+ema.ema || yes           | yes         | 2/2    | no      | -      | 4/5           | 1 parsed | -
 
 4/5 docstring quality criteria met (1 function).
 
 docsync:
-key           || intent | notes | claims   | {min_expected|actual|est_applicable} || domain_declared | enforced || raises_declared || params_typed | return_typed || callees_doc_quality | callees_docsync || sync_score
-mypkg.ema.ema || yes    | -     | 1 parsed | {11 | 1 | -}                         || 1/1             | no       || -               || 2/2          | yes          || -                   | -               || 89%
+key     || intent | notes | claims   | {min_expected|actual|est_applicable} || domain_declared | enforced || raises_declared || params_typed | return_typed || callees_doc_quality | callees_docsync || sync_score
+ema.ema || yes    | -     | 1 parsed | {11 | 1 | -}                         || 1/1             | no       || -               || 2/2          | yes          || -                   | -               || 89%
 
 mean docsync 89% (how much of what each function does is surfaced as context) (1 function).
 ```
@@ -332,23 +349,30 @@ one) can be regenerated from what was actually verified, only claims
 that held or were proven are written back, each tagged `[derive]` when
 the verdict came from the derive route:
 
+<!-- example: ema run -->
 ```python
->>> from mathema.docstring import render_docstring
->>> mathema.write_spec(ema, domain={"alpha": (0.0, 1.0)})
->>> print(render_docstring(ema))
+from mathema.docstring import render_docstring
+
+record = mathema.write_spec(ema, domain={"alpha": (0.0, 1.0)})
+print(render_docstring(ema))
+```
+
+<!-- example: ema output -->
+```text
 Exponentially weighted moving average.
 
 Intent:
     Blends each new value with the running mean.
 
 Claims:
-    bounded: for x in [0.0, 1.0]:float|missing, alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= 1
+    bounded: for x in [0.0, 1.0]^n:float|missing, alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= 1
 ```
 
 `render_docstring()` returns text only; it never writes to the `.py`
-file. `Domain:` is left untouched: it's an authoring input mathema
-reads, never an adjudicated output the verified record stores, so
-there's nothing to write back for it.
+file. A domain gets no block of its own: each claim carries its
+region in its quantifier, written back with the claim, and a bound
+from a signature marker or a `domain=` argument stays where it was
+stated, so there is nothing separate to write back for it.
 
 ## Creating a docstring that isn't there yet
 

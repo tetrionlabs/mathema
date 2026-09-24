@@ -114,18 +114,28 @@ out of the grammar.
 Here is a midpoint function of the kind that gets written, reviewed and
 merged every day, and the test someone wrote for it:
 
+<!-- example: midpoint file=mid.py -->
 ```python
 def midpoint(a: float, b: float) -> float:
     """The point halfway between a and b."""
     return (a + b) // 2
 ```
 
+<!-- example: midpoint file=test_mid.py -->
 ```python
+from mid import midpoint
+
 def test_midpoint():
     assert midpoint(2, 8) == 5
     assert midpoint(0, 10) == 5
 ```
 
+<!-- example: midpoint run -->
+```bash
+python -m pytest -q test_mid.py
+```
+
+<!-- example: midpoint output match=subset -->
 ```text
 1 passed in 0.00s
 ```
@@ -135,6 +145,7 @@ is the whole point of a midpoint. mathema checks that claim twice, once over
 the integers the test happened to use and once over the real numbers the type
 hints promise:
 
+<!-- example: midpoint run -->
 ```python
 import mathema
 from mid import midpoint
@@ -147,6 +158,7 @@ print(mathema.check(midpoint, claims=[
 ]))
 ```
 
+<!-- example: midpoint output -->
 ```text
 mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
   proven  between_integers: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) ≤ f(a, b) ≤ max(a, b)
@@ -164,19 +176,26 @@ below both of them. Nothing about this bug is exotic, and nothing in the test
 suite could have found it, because the suite only ever asked about integers.
 The fix is one character, and mathema proves it:
 
+<!-- example: midpoint file=mid.py -->
 ```python
 def midpoint(a: float, b: float) -> float:
     """The point halfway between a and b."""
     return (a + b) / 2
 ```
 
+<!-- example: midpoint run -->
 ```bash
 mathema check mid.py:midpoint --claim "for a in [0, 100], b in [0, 100], min(a, b) <= f(a, b) <= max(a, b)"
 ```
 
+<!-- example: midpoint output -->
 ```text
 ok   mid.midpoint: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 ```
+
+One claim, two rows: the proof, and its `[float]` companion, which runs the
+proven claim through the real code in floating point at the region's corners
+and at sampled points inside it, and holds.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">A whole codebase</span><span class="brk r"></span></span>
 
@@ -190,20 +209,22 @@ prove things about it, what state outside its parameters it reads or writes,
 whether any test report covers it, and how well its docstring states its
 intent. Here is one module of mathema's own source:
 
+<!-- example: audit run -->
 ```bash
 mathema audit mathema.intent --root .
 ```
 
+<!-- example: audit output -->
 ```text
                          ||             || derive route                                                        || typing                || globals                                                                  ||           || docs    ||
 key           | span     || claims      || derives | cx | reason                         | code                || typed | finite_domain || vars                      | mutates | funcs                              || tested    || quality || docsync
 mathema.intent
- ._references | 93:146p  || {6 | 0 | -} || no      | 15 | 9 branches, 3 loops (1 nested) | loop:multiple-loops || yes   | -             || _REF_SECTIONS, _URL, _DOI | -       | re                                 || no-report || 0/4     || 58%
- ._sections   | 68:74p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION                  | -       | -                                  || no-report || 0/3     || 58%
- ._summary    | 77:81p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION, _GOOGLE_HEADER  | -       | -                                  || no-report || 0/2     || 53%
- .parse_doc   | 149:163p || {5 | 0 | -} || no      | 4  | 2 branches, 1 loop             | loop:not-a-fold     || yes   | -             || KEYWORDS                  | -       | DocIntent, _sections, _summary, +1 || no-report || 2/3     || 48%
+ ._references | 93:146p  || {6 | 0 | -} || no      | 15 | 9 branches, 3 loops (1 nested) | loop:multiple-loops || yes   | -             || _REF_SECTIONS, _URL, _DOI | -       | re                                 || no-report || 0/4     || 50%
+ ._sections   | 68:74p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION                  | -       | -                                  || no-report || 0/3     || 50%
+ ._summary    | 77:81p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION, _GOOGLE_HEADER  | -       | -                                  || no-report || 0/2     || 44%
+ .parse_doc   | 149:163p || {5 | 0 | -} || no      | 4  | 2 branches, 1 loop             | loop:not-a-fold     || yes   | -             || KEYWORDS                  | -       | DocIntent, _sections, _summary, +1 || no-report || 2/3     || 40%
 
-0/4 claimed, 0/4 derivable, 0/4 lift unconditionally, 4/4 fully typed, 2/12 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest; python -m coverage json`), 4/4 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 54%.
+0/4 claimed, 0/4 derivable, 0/4 lift unconditionally, 4/4 fully typed, 2/12 docstring quality criteria met, no coverage.json/.coverage report found, 4/4 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 46%.
 `derives` is what the derive route can do here, given the domain the signature, docstring and claims declare. The reason/code cells describe the UNCONDITIONAL lift, the body with nothing supplied, so a branch:needs-domain row reads blocked there and derives all the same, once a claim declares the domain that prunes the branch. Neither is a ceiling: a probe claim can still be written and adjudicated for every function here.
 ```
 
@@ -237,20 +258,43 @@ Settled code can be frozen at the level that matters, the individual function.
 change to its body fails the sweep, while docstring edits and every other
 function in the file stay free:
 
+<!-- example: lock file=pricing.py -->
+```python
+def discounted(price: float, rate: float) -> float:
+    """The price after applying a discount rate."""
+    return price * (1 - rate)
+```
+
+<!-- example: lock run -->
 ```bash
 mathema lock pricing.discounted
 ```
 
+<!-- example: lock output -->
 ```text
 locked pricing.discounted at form d2ab6eef1b84
 the body can no longer change under a CDD loop; docstring edits are unaffected. A human unlocks with: mathema unlock pricing.discounted
 ```
 
-and after someone changes `1 - rate` to `1 + rate`:
+and after someone changes `1 - rate` to `1 + rate`,
 
-```text
-FAIL pricing.discounted: locked at form d2ab6eef1b84 but the code is now 53f9c55de50b; the record is unchanged. Restore the function, or a human runs: mathema unlock pricing.discounted
+<!-- example: lock file=pricing.py -->
+```python
+def discounted(price: float, rate: float) -> float:
+    """The price after applying a discount rate."""
+    return price * (1 + rate)
 ```
+
+the next sweep stops on it (an excerpt):
+
+<!-- example: lock session match=subset -->
+```console
+$ mathema verify
+FAIL pricing.discounted: locked at form d2ab6eef1b84 but the code is now 53f9c55de50b; there is no record to compare. Restore the function, or a human runs: mathema unlock pricing.discounted
+```
+
+With a record in place the line says `the record is unchanged` instead,
+and the record stays as it was.
 
 An agent is allowed to lock a function it has finished, which narrows what it
 can break on its next pass. Only a person can unlock one, behind a prompt with
@@ -332,7 +376,7 @@ something that cannot be persuaded decide which of them are true.
   and [Security and execution](security.md) states exactly what runs when a
   claim is checked.
 - **If you set engineering standards across teams**, mathema gives
-  AI-assisted development an enterprise-grade gate: claims live beside the
+  AI-assisted development one gate that works the same everywhere: claims live beside the
   code they describe, every verdict is reproducible and bound to the exact
   code that earned it, and [Guarantees and limits](guarantees.md) states what
   each verdict is worth, so a team's evidence means the same thing in every
@@ -346,6 +390,7 @@ The same machinery reaches much further than a midpoint. Here is a European
 call minus a European put on the same strike, both priced by Black-Scholes,
 with a square root, a logarithm, an exponential and the Gaussian CDF:
 
+<!-- example: parity file=options.py -->
 ```python
 import math
 
@@ -365,19 +410,23 @@ Put-call parity says that difference is `s - k*exp(-r*t)` whatever the
 volatility, a surprising thing to claim about a function in which `sigma`
 appears five times:
 
+<!-- example: parity run -->
 ```bash
 mathema check options.py --claim "for s in [50,150], k in [50,150], \
     r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], \
     f(s,k,r,t,sigma) == s - k*exp(-r*t)"
 ```
 
+<!-- example: parity output -->
 ```text
 ok   options.put_call_parity_gap: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 ```
 
 `proven`, over every point of a five-dimensional region of prices, rates,
 maturities and volatilities: mathema read the body as mathematics, both
-Gaussian terms cancelled, and `sigma` disappeared. No number of test cases
+Gaussian terms cancelled, and `sigma` disappeared. The `holds` is the proof's
+float companion, the same identity run through the real code in floating
+point. No number of test cases
 could establish that. The [case studies](case-studies.md#put-call-parity-and-the-greeks)
 go on to the Greeks, stated as the partial derivatives they are.
 

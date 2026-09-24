@@ -55,6 +55,7 @@ refused outright: the callee is itself lifted (recursively, a callee
 can call its own callees), and its parameters are substituted with this
 call site's argument expressions.
 
+<!-- example: callee run -->
 ```python
 def _scale(x: float) -> float:
     return 2.0 * x
@@ -66,6 +67,7 @@ def uses_helper(x: float) -> float:
     return _offset(_scale(x), 1.0)
 ```
 
+<!-- example: callee verdicts fn=uses_helper route=derive -->
 ```
 f(x) == 2*x + 1   # proven
 ```
@@ -87,6 +89,7 @@ module-qualified call (`obj.method(x)`, `mod.helper(x)`), only a bare
 A callee's branch isn't an automatic refusal either, when the caller's
 own declared domain settles it:
 
+<!-- example: callee-branch run -->
 ```python
 def guarded(y: float) -> float:
     if y > 0:
@@ -97,6 +100,7 @@ def caller(x: float) -> float:
     return guarded(x) + 1.0
 ```
 
+<!-- example: callee-branch verdicts fn=caller route=derive -->
 ```
 for x in [1, 5], f(x) == x + 1     # proven
 for x in [-5, -1], f(x) == -x + 1  # proven
@@ -243,11 +247,13 @@ branch does, if the declared domain pins `flag` to exactly `True` or
 exactly `False`, the matching side is evaluated directly, no `Piecewise`
 involved at all:
 
+<!-- example: pick run -->
 ```python
 def pick(flag: bool, x: float, y: float) -> float:
     return x if flag else y
 ```
 
+<!-- example: pick verdicts fn=pick route=derive -->
 ```
 for flag in {True}, x in [0, 1], y in [0, 1], f(flag, x, y) == x   # proven
 for flag in {False}, x in [0, 1], y in [0, 1], f(flag, x, y) == y  # proven
@@ -263,11 +269,16 @@ before trusting a domain against an `if` *statement*.
 
 ## Tuple returns
 
+<!-- example: tuple run -->
 ```python
+from math import cos, sin
+
+
 def to_cartesian(r: float, theta: float) -> tuple:
     return r * cos(theta), r * sin(theta)
 ```
 
+<!-- example: tuple verdicts fn=to_cartesian route=derive -->
 ```
 f(r, theta) == (r * cos(theta), r * sin(theta))    # proven, elementwise
 f(r, theta)[0] == r * cos(theta)                   # proven, single element
@@ -279,7 +290,11 @@ A parameter that bundles many scalars, a flat `@dataclass`, or a dict
 accessed only via literal string keys, expands into one symbol per
 field/key instead of being refused outright:
 
+<!-- example: bundled run -->
 ```python
+from dataclasses import dataclass
+
+
 @dataclass
 class Config:
     a: float
@@ -289,6 +304,7 @@ def sum_fields(cfg: Config) -> float:
     return cfg.a + cfg.b
 ```
 
+<!-- example: bundled verdicts fn=sum_fields route=derive -->
 ```
 f(cfg) == cfg.a + cfg.b   # proven
 ```
@@ -301,11 +317,13 @@ parameter's slot must be a bare reference to the same parameter name.
 
 ## Clamps
 
+<!-- example: clamp run -->
 ```python
 def clamp01(x: float) -> float:
     return min(1.0, x)
 ```
 
+<!-- example: clamp verdicts fn=clamp01 route=derive -->
 ```
 for x in [0, 1], f(x) == x        # proven
 for x in [2, 5], f(x) == 1.0      # proven
@@ -325,6 +343,7 @@ loop-folding: a scalar accumulator initialized to a sequence
 parameter's first element, then updated once per remaining element by
 an expression affine in that element and the accumulator,
 
+<!-- example: fold run -->
 ```python
 def ema(x: list, alpha: float) -> float:
     y = x[0]
@@ -352,6 +371,7 @@ form, so `f(x, 1.0) == x[-1]`; untestable at any single trial count on
 the probe route, since it's about *every* length and *every* other
 element, not one sampled case, is `proven`:
 
+<!-- example: fold verdicts fn=ema route=derive -->
 ```
 f(x, 1.0) == x[-1]     # proven, alpha=1 collapses the fold to the last element
 f(x, alpha) == x[-1]   # falsified, correctly: it's false for most alpha
@@ -378,6 +398,7 @@ combining the two, a scalar substitution that collapses the
 accumulator's own recurrence *and* a transformation on the return,
 composes correctly:
 
+<!-- example: fold-scaled run -->
 ```python
 def ema_scaled(x: list, alpha: float, scale: float) -> float:
     y = x[0]
@@ -386,6 +407,7 @@ def ema_scaled(x: list, alpha: float, scale: float) -> float:
     return y * scale
 ```
 
+<!-- example: fold-scaled verdicts fn=ema_scaled route=derive -->
 ```
 f(x, 1.0, 2.0) == 2 * x[-1]   # proven
 ```
@@ -427,6 +449,7 @@ parameter (or any liftable expression built from one, e.g. `range(n +
 1)`), still folding with a genuine recurrence (the accumulator's own
 coefficient isn't 1):
 
+<!-- example: fixed-count run -->
 ```python
 def compound_balance(P: float, r: float, n: float) -> float:
     balance = P
@@ -437,10 +460,13 @@ def compound_balance(P: float, r: float, n: float) -> float:
 
 closes the same telescoping way as the sequence-based shapes above,
 absent a sequence, the "item at iteration k" is simply `k` itself, the
-loop's own index, needing no `IndexedBase` at all:
+loop's own index, needing no `IndexedBase` at all. `range(n)` raises on a
+non-integer `n`, so the claim declares `n` an integer; unquantified, it is
+falsified at the first non-integer `n` sampled:
 
+<!-- example: fixed-count verdicts fn=compound_balance route=derive -->
 ```
-f(P, r, n) == P*(1+r)**n   # proven
+for n in [0, 50] subset Z, f(P, r, n) == P*(1+r)**n   # proven
 ```
 
 The trip count is referenceable directly in claim text, exactly like
@@ -500,7 +526,11 @@ extends it three ways at once:
 **Non-affine updates**, closed as a plain, uncollapsed `Sum` rather
 than refused:
 
+<!-- example: rms run -->
 ```python
+import math
+
+
 def rms(signal: list) -> float:
     total = 0.0
     for v in signal:
@@ -508,6 +538,7 @@ def rms(signal: list) -> float:
     return math.sqrt(total / len(signal))
 ```
 
+<!-- example: rms verdicts fn=rms route=derive -->
 ```
 f(signal) == f(signal)   # proven, sqrt(Sum(signal[k]**2, (k, 0, L_signal - 1))/L_signal)
 ```
@@ -518,6 +549,7 @@ via a literal `np.dot(...)` call, an index-bound loop
 sequence parameters by that index, which is what makes this
 recognizable at all:
 
+<!-- example: dot-loop run -->
 ```python
 def dot_product(a: list, b: list) -> float:
     total = 0.0
@@ -526,6 +558,7 @@ def dot_product(a: list, b: list) -> float:
     return total
 ```
 
+<!-- example: dot-loop verdicts fn=dot_product route=derive -->
 ```
 f(a, b) == f(a, b)   # proven, Sum(a[i]*b[i], (i, 0, L_a - 1))
 ```
@@ -545,6 +578,7 @@ def present_value_series(cashflows: list, r: float) -> float:
 range(n):` (`n` an ordinary scalar parameter, or any liftable
 expression built from one), needs no sequence parameter whatsoever:
 
+<!-- example: series run -->
 ```python
 def arithmetic_series_sum(a1: float, d: float, n: float) -> float:
     total = 0
@@ -553,8 +587,9 @@ def arithmetic_series_sum(a1: float, d: float, n: float) -> float:
     return total
 ```
 
+<!-- example: series verdicts fn=arithmetic_series_sum route=derive -->
 ```
-f(a1, d, n) == n*(2*a1 + (n-1)*d)/2   # proven, Gauss's formula
+for n in [0, 50] subset Z, f(a1, d, n) == n*(2*a1 + (n-1)*d)/2   # proven, Gauss's formula
 ```
 
 **Nested loops** (one level of `Sum` per loop) and **multiple
@@ -562,6 +597,7 @@ sequential accumulator passes**, including a genuine two-pass shape
 where an ordinary scalar local sits between them and the second pass
 uses it:
 
+<!-- example: two-pass run -->
 ```python
 def sample_variance_two_pass(xs: list) -> float:
     total = 0.0
@@ -574,6 +610,7 @@ def sample_variance_two_pass(xs: list) -> float:
     return sq / len(xs)
 ```
 
+<!-- example: two-pass verdicts fn=sample_variance_two_pass route=derive -->
 ```
 f(xs) == f(xs)   # proven
 ```
@@ -603,11 +640,13 @@ picking one of several *non-numeric* literals (a string, `None`, an
 `Enum` member) had nowhere to go: the value itself was refused outright,
 even once the condition selecting it was fully resolved.
 
+<!-- example: finite-set run -->
 ```python
 def status_message(ok: bool) -> str:
     return "success" if ok else "failure"
 ```
 
+<!-- example: finite-set verdicts fn=status_message route=derive -->
 ```
 for ok in {True}, f(ok) == "success"   # proven
 for ok in {True}, f(ok) == "failure"   # falsified
@@ -658,7 +697,11 @@ this stays deferred rather than guessed at.
 A common plotting/geometry shape has no explicit Python loop at all,
 numpy vectorization stands in for it:
 
+<!-- example: linspace run requires=numpy -->
 ```python
+import numpy as np
+
+
 def ellipse_path(cx, cy, a, b, n):
     phi = np.linspace(0.0, 2.0 * np.pi, n)
     x = cx + a * np.cos(phi)
@@ -692,6 +735,7 @@ needed for the index (the count `n` still needs one, since
 never piecewise per position, so it holds for any real index, not just
 an integer one:
 
+<!-- example: linspace verdicts fn=ellipse_path route=derive -->
 ```
 for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))   # proven
 for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[0][0] == cx + a                     # proven (boundary)

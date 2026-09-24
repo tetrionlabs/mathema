@@ -166,6 +166,7 @@ a function parameter that happens to be called `eps` or `ε` stays a
 parameter. With two functions in `gaps.py`, one off by `1e-10` and one by
 `1e-7`:
 
+<!-- example: eps file=gaps.py -->
 ```python
 def nearly_identity(x: float) -> float:
     return x + 1e-10
@@ -175,17 +176,20 @@ def small_gap(x: float) -> float:
     return x + 1e-7
 ```
 
+<!-- example: eps run -->
 ```bash
 mathema check gaps.py --claim "for x in [0, 1], abs(f(x) - x) <= ε"
 ```
 
+<!-- example: eps output -->
 ```text
-ok   gaps.nearly_identity: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+ok   gaps.nearly_identity: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 FAIL gaps.small_gap: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 The first gap is within the default tolerance and proves for every `x` in the
-range; the second is a hundred times larger than it and is falsified.
+range (its second claim is the proof's `[float]` companion, which holds); the
+second is a hundred times larger than it and is falsified.
 
 The other relations use the same allowance where it makes sense: `<=` and
 `>=` accept a difference within the absolute tolerance, `<` and `>` accept
@@ -202,6 +206,7 @@ however small, falsifies the claim with that point as the witness. So
 disproof never gets this exact recheck, though a `~=` proof is still exact
 algebra. For a function that returns `-1e-10`:
 
+<!-- example: just-below run -->
 ```python
 import mathema
 
@@ -216,6 +221,7 @@ for route in ["probe", "derive"]:
     print(f"        {p.note}")
 ```
 
+<!-- example: just-below output -->
 ```text
 probe   holds
         fails by 1e-10 at (0), within the default tolerance (1e-09)
@@ -325,6 +331,7 @@ A complex result counts as a raise. A real claim reads the function as
 real-valued, and `x ** 0.5` of a negative float is a complex number in
 Python, not a real one:
 
+<!-- example: half-power run -->
 ```python
 import mathema
 
@@ -336,6 +343,7 @@ def half_power(x: float) -> float:
 print(p.verdict, p.counterexample)
 ```
 
+<!-- example: half-power output -->
 ```text
 falsified (-1): f returned the complex value 6.12323e-17+1j, which a real claim reads as a raise; narrow the claim's domain to where every call is real, or annotate the function complex
 ```
@@ -383,6 +391,7 @@ unbounded pointwise claim meets that overflow.
 
 The standard normal density shows both halves of the rule:
 
+<!-- example: gauss run -->
 ```python
 import math
 
@@ -400,6 +409,7 @@ for law in ["∫(f(x), x, -oo, oo) == 1",
     print(f"{law:31} {p.verdict:9} {p.counterexample or p.condition or ''}")
 ```
 
+<!-- example: gauss output -->
 ```text
 ∫(f(x), x, -oo, oo) == 1        proven
 f(x) >= 0                       falsified x = 2.6815615859885194e+154

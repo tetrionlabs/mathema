@@ -13,14 +13,16 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install mathema
 ```
 
-mathema is fully offline. No part of it makes a network call, there is
-no account and no API key, and the only required dependencies are
+mathema is fully offline. The one command that reaches the network is
+`mathema init --agents`, which you run by name to fetch the optional agent
+tooling with `git`. There is no account and no API key, and the only required dependencies are
 sympy for the symbolic route and pyyaml for the record store.
 
 ## Write a function
 
 Put this in `pricing.py`:
 
+<!-- example: falsify file=pricing.py -->
 ```python
 def discounted(price: float, rate: float) -> float:
     """The price after applying a discount rate."""
@@ -33,10 +35,12 @@ A claim is a specific, checkable statement about what the function
 does. The obvious one here is that discounting never makes something
 more expensive:
 
+<!-- example: falsify run -->
 ```bash
 mathema check pricing.py:discounted --claim "for rate in [0, 1], f(price, rate) <= price"
 ```
 
+<!-- example: falsify output -->
 ```text
 FAIL pricing.discounted: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
@@ -44,6 +48,7 @@ FAIL pricing.discounted: source, no side effects; claims 1/1 adjudicated (0 prov
 Falsified, on the first try. That is not a bad start, it is the point.
 Asking for the counterexample says why:
 
+<!-- example: falsify run -->
 ```python
 import mathema
 from pricing import discounted
@@ -55,6 +60,7 @@ from pricing import discounted
 print(p.verdict, p.counterexample)
 ```
 
+<!-- example: falsify output -->
 ```text
 falsified price=-8.76733e+09, rate=0.363721
 ```
@@ -68,6 +74,7 @@ told where to look.
 
 Say the thing the claim was assuming:
 
+<!-- example: falsify run -->
 ```python
 (p,) = mathema.claims.check_conjectures(
     discounted,
@@ -77,6 +84,7 @@ print(p.verdict)
 print(p.condition)
 ```
 
+<!-- example: falsify output -->
 ```text
 proven
 where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}
@@ -98,6 +106,7 @@ ladder is in [verdicts and evidence](cdd.md).
 A claim is worth more next to the function than in a shell history.
 Put it in the docstring:
 
+<!-- example: docstring file=pricing.py -->
 ```python
 def discounted(price: float, rate: float) -> float:
     """The price after applying a discount rate.
@@ -108,10 +117,12 @@ def discounted(price: float, rate: float) -> float:
     return price * (1 - rate)
 ```
 
+<!-- example: docstring run -->
 ```bash
 mathema check pricing.py
 ```
 
+<!-- example: docstring output -->
 ```text
 ok   pricing.discounted: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 ```
@@ -127,17 +138,26 @@ claims](authoring.md) for the precedence order between them.
 
 ## Keep the record
 
+<!-- example: docstring run -->
 ```python
+import mathema
+from pricing import discounted
+
 mathema.write_spec(discounted)
+print(open(".mathema/verified/pricing.discounted.yaml").read())
 ```
 
 That writes `.mathema/verified/pricing.discounted.yaml`, which is the
 durable artifact: the claim, its verdict, the region it was proved
-over, the proof sketch, and the identity hash it binds to.
+over, the proof sketch, the float companion's row, and the identity hash
+it binds to (an excerpt):
 
+<!-- example: docstring output match=subset -->
 ```yaml
+# machine record; binds to form d2ab6eef1b84
 pricing.discounted:
-  # ...
+  identity:
+    form: "d2ab6eef1b84"
   claims:
     - name: "never_raises_price"
       statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
@@ -149,7 +169,12 @@ pricing.discounted:
         surface: "docstring"
         ref: "pricing.discounted:docstring:L1"
         route: "best"
-      # ...
+    - name: "never_raises_price[float]"
+      statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
+      verdict: "holds"
+      n: 44
+      note: "the implementation of never_raises_price, executed in float at 44 points (every domain corner, then sampled interior points)"
+      route: "probe"
 ```
 
 The record binds to `form`, a hash of the function's *structure*, so

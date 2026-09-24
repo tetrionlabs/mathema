@@ -5,6 +5,7 @@ reports about each one. Every output on this page is from a real run.
 
 ## A midpoint that only works on integers
 
+<!-- example: finds file=mid.py -->
 ```python
 def midpoint(a: float, b: float) -> float:
     """The point halfway between a and b."""
@@ -15,6 +16,7 @@ A test with `assert midpoint(2, 8) == 5` passes. The claim that matters is
 that a midpoint lies between its inputs, so mathema checks it over the
 integers and over the reals:
 
+<!-- example: finds run -->
 ```python
 import mathema
 from mid import midpoint
@@ -27,21 +29,26 @@ print(mathema.check(midpoint, claims=[
 ]))
 ```
 
+<!-- example: finds output -->
 ```text
 mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
   proven  between_integers: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) ≤ f(a, b) ≤ max(a, b)
            for a in [0, 100]:int|missing, b in [0, 100]:int|missing
+  holds   between_integers[float]: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) <= f(a, b) <= max(a, b) (n=44)
   FALSIFY between_reals: for a in [0.0, 100.0]:float|missing, b in [0.0, 100.0]:float|missing, min(a, b) <= f(a, b) <= max(a, b)
            counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
 ```
 
-Proven for every pair of integers in range, and falsified over the reals,
-where floor division puts the midpoint of 99.9999 and 100 at 99. The same
+Proven for every pair of integers in range (the `holds` row under it is the
+proof's `[float]` companion, the same claim run through the real code in
+floating point), and falsified over the reals, where floor division puts the
+midpoint of 99.9999 and 100 at 99. The same
 claim, two domains, two different and equally definite answers, which is why a
 claim always carries the domain it was checked over.
 
 ## A pole nobody sampled
 
+<!-- example: finds run -->
 ```python
 def discount_factor(x: float) -> float:
     """A discount factor that divides by one minus the rate."""
@@ -51,10 +58,12 @@ def discount_factor(x: float) -> float:
 With no claims at all, mathema runs the laws every function gets and the
 safety checks that apply to this one:
 
+<!-- example: finds run -->
 ```python
 print(mathema.check(discount_factor))
 ```
 
+<!-- example: finds output match=subset -->
 ```text
 mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
   FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
@@ -76,11 +85,13 @@ function a thousand times and see nothing wrong. mathema solves the lifted
 expression for where the denominator vanishes and then makes sure that point
 is tried, which is what the route on each result records:
 
+<!-- example: finds run -->
 ```python
 for p in mathema.check(discount_factor).probes:
     print(f"{p.name:<26} {p.verdict:<10} {p.route}")
 ```
 
+<!-- example: finds output -->
 ```text
 monotonic_increasing[x]    falsified  derive
 monotonic_decreasing[x]    falsified  derive
@@ -114,10 +125,28 @@ Put-call parity for a Black-Scholes pricer is a true identity, and mathema
 [proves it](case-studies.md) over a realistic region of prices, rates,
 maturities and volatilities. Stated with no domain at all:
 
+<!-- example: parity file=options.py -->
+```python
+import math
+
+def put_call_parity_gap(s: float, k: float, r: float, t: float,
+                        sigma: float) -> float:
+    """A European call minus a European put on the same strike."""
+    root_t = math.sqrt(t)
+    d1 = (math.log(s / k) + (r + 0.5 * sigma * sigma) * t) / (sigma * root_t)
+    d2 = d1 - sigma * root_t
+    phi = lambda z: 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+    call = s * phi(d1) - k * math.exp(-r * t) * phi(d2)
+    put = k * math.exp(-r * t) * phi(-d2) - s * phi(-d1)
+    return call - put
+```
+
+<!-- example: parity run -->
 ```bash
 mathema check options.py --claim "f(s,k,r,t,sigma) == s - k*exp(-r*t)"
 ```
 
+<!-- example: parity output -->
 ```text
 FAIL options.put_call_parity_gap: source, no side effects; claims 1/2 adjudicated (0 proven, 0 holds, 1 falsified, 1 skipped)  <- 1 falsified claim(s)
 ```
@@ -129,6 +158,7 @@ claim, and stating it is what turns this `falsified` into `proven`.
 
 ## An order that matters
 
+<!-- example: finds run -->
 ```python
 def ema(x: list, alpha: float) -> float:
     """Exponentially weighted moving average."""
@@ -138,20 +168,25 @@ def ema(x: list, alpha: float) -> float:
     return y
 ```
 
+<!-- example: finds run -->
 ```python
 print(mathema.check(ema))
 ```
 
 Among the results, all found with no claims written:
 
+<!-- example: finds output match=subset -->
 ```text
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
            counterexample ([2.01488, 3.30692, -6.39418, 3.78355, 6.96564, 7.97935], -9.1034): -6.39418363288563 vs -45761.14174665739
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
            counterexample ([6.22429, 5.95714, 3.98826, -6.56235, 7.20359, 1.66103, -8.45295], -5.87836): 78066.38231536481 vs -1129152.7241483687
-  proven  scale_equivariant: let g = mathema.f.scale_seq, c*f(x, alpha) = f(g(x, c), alpha)
+  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  proven  translation_equivariant: let g = mathema.f.shift_seq, c + f(x, alpha) = f(g(x, c), alpha)
+  FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
+           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308, c=-5
+           [mathematics sound, implementation:numerical-instability]
+  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
 ```
 
@@ -162,6 +197,11 @@ all, which is a finding about the missing domain rather than the loop. And
 reversing the input changes the answer, as it should for an average that
 weights recent values more heavily: mathema does not know that is intended, so
 it reports the counterexample and leaves the judgement to a person.
+
+`scale_equivariant[float]` is the proof's float companion: the same law run
+through the real code in floating point, where nothing bounds the inputs, so
+it reaches elements near `1e+308` and the arithmetic overflows. The
+mathematics is sound and the float code does not follow it out there.
 
 [A first look](first-look.md) takes `ema` through domains, both evidence
 routes and the stored record.

@@ -21,6 +21,7 @@ rather than a display step bolted on the end.
 
 The grammar has two equivalent output spellings, Unicode and ASCII:
 
+<!-- example: alphabets run -->
 ```python
 from mathema import claim, set_unicode_output
 from mathema.spec import render_claim_text
@@ -28,11 +29,12 @@ from mathema.spec import render_claim_text
 c = claim("for theta in [0, 1], acceleration in [0, 100], f(theta, acceleration) >= 0")
 
 set_unicode_output(True)
-render_claim_text(c)
+print(render_claim_text(c))
 set_unicode_output(False)
-render_claim_text(c)
+print(render_claim_text(c))
 ```
 
+<!-- example: alphabets output -->
 ```text
 let x = acceleration, let θ = theta, ∀ θ ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, f(θ, x) ≥ 0
 for theta in [0.0, 1.0]:float|missing, acceleration in [0.0, 100.0]:float|missing, f(theta, acceleration) >= 0
@@ -67,12 +69,14 @@ makes a proof mean less than a reader assumes.
 `grammar.to_latex()` renders a law for a paper, a notebook, or a docs
 page:
 
+<!-- example: latex run -->
 ```python
 from mathema.grammar import to_latex
-to_latex("f(x)^2 >= 0")
-to_latex("d(f(x), x) >= 0")
+print(to_latex("f(x)^2 >= 0"))
+print(to_latex("d(f(x), x) >= 0"))
 ```
 
+<!-- example: latex output -->
 ```text
 f^{2}{\left(x \right)} \geq 0
 \frac{d}{d x} f{\left(x \right)} \geq 0

@@ -52,6 +52,7 @@ it, with that point as the witness. An unbounded direction runs to the
 claim's `|inf|` when one is declared, and otherwise out to `1e308`,
 sampled log-uniformly so moderate magnitudes are visited too.
 
+<!-- example: companion run -->
 ```python
 import mathema
 from mathema.conjecture import claim
@@ -71,6 +72,7 @@ for law, route in [("for x in [0, 1e6], f(x) == 1", "derive"),
               f"{p.counterexample or ''}".rstrip())
 ```
 
+<!-- example: companion output -->
 ```text
 derive           one        proven
 derive           one[float] holds
