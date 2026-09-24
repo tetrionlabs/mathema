@@ -841,6 +841,15 @@ def record(ex, key: str | None = None, root: str = ".",
     accepting it (`mathema accept --intent`)."""
     key = key or getattr(ex.facts, "name", "unknown")
     path = os.path.join(verified_dir(root), f"{key}.yaml")
+    if os.path.exists(path):
+        _data, reason = read_verified_file(path)
+        if reason is not None:
+            raise UnreadableRecord(
+                f"{os.path.relpath(path, root)} {reason}; it is left as it "
+                f"is, since writing over it would drop the history it "
+                f"holds. Repair it (keep every discoveries, historical "
+                f"and superseded row from both sides of a merge), or "
+                f"restore it from git, and run again")
     spec = to_spec(ex)
     spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [])
     _stamp_authored_routes(spec, claims or [])
@@ -1173,20 +1182,77 @@ def load_verified(root: str = ".") -> dict:
     function. This
     is the sole source of the `identity.form` hash `mathema verify` diffs
     the live code against; a declared entry never has one, so it must
-    never be consulted here."""
-    import yaml
+    never be consulted here.
+
+    A record file that does not read as a mapping (a merge left
+    conflict markers, the file is empty) is left out here and listed
+    by `unreadable_verified`."""
     merged: dict = {}
-    for machine_dir in (verified_dir(root),):
-        if not os.path.isdir(machine_dir):
-            continue
-        for name in sorted(os.listdir(machine_dir)):
-            if not name.endswith(".yaml"):
-                continue
-            path = os.path.join(machine_dir, name)
-            data = yaml.safe_load(open(path)) or {}
-            for key, entry in data.items():
-                merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
+    for path in _verified_files(root):
+        data, _reason = read_verified_file(path)
+        for key, entry in (data or {}).items():
+            merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
     return merged
+
+
+class UnreadableRecord(ValueError):
+    """A verified record file exists but does not read as a record, so
+    nothing may be written over it until a person repairs it."""
+
+
+def _verified_files(root: str) -> list:
+    machine_dir = verified_dir(root)
+    if not os.path.isdir(machine_dir):
+        return []
+    return [os.path.join(machine_dir, name)
+            for name in sorted(os.listdir(machine_dir))
+            if name.endswith(".yaml")]
+
+
+def read_verified_file(path: str) -> "tuple[dict | None, str | None]":
+    """Intent:
+        One verified record file as `(data, None)`, or `(None, reason)`
+        when it does not read as a record: it does not parse as YAML
+        (a merge left conflict markers), it is empty, or its top level
+        is not a mapping.
+    """
+    import yaml
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as e:
+        return None, f"cannot be read ({e.strerror or e})"
+    if not text.strip():
+        return None, "is empty"
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        where = f" at line {mark.line + 1}" if mark is not None else ""
+        conflict = ("; it holds merge conflict markers" if "\n<<<<<<< "
+                    in "\n" + text else "")
+        return None, f"does not parse as YAML{where}{conflict}"
+    if data is None:
+        return None, "is empty"
+    if not isinstance(data, dict):
+        return None, "is not a mapping of function keys to records"
+    return data, None
+
+
+def unreadable_verified(root: str = ".") -> dict:
+    """Intent:
+        Every verified record file that does not read as a record, as
+        `{key: {"source": relpath, "reason": text}}`, the key being the
+        file's name without `.yaml` (the name `record()` gives it).
+    """
+    out: dict = {}
+    for path in _verified_files(root):
+        data, reason = read_verified_file(path)
+        if reason is not None:
+            key = os.path.basename(path)[:-len(".yaml")]
+            out[key] = {"source": os.path.relpath(path, root),
+                        "reason": reason}
+    return out
 
 
 def load_declared(root: str = ".") -> dict:

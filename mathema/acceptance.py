@@ -328,15 +328,17 @@ def _apply_declared_edit(root: str, rel: str, key: str, claim_name: str,
 
 
 def _load_record(root: str, key: str):
-    import yaml
     from .spec import verified_dir
     path = os.path.join(verified_dir(root), f"{key}.yaml")
     if not os.path.exists(path):
         raise UnknownAcceptanceTarget(f"no verified record for {key!r} at {path}, "
                               "run `mathema verify` (or `check`) first; "
                               "acceptance annotates adjudicated evidence")
-    with open(path) as fh:
-        doc = yaml.safe_load(fh) or {}
+    from .spec import read_verified_file
+    doc, reason = read_verified_file(path)
+    if reason is not None or doc is None:
+        raise AcceptanceError(f"{path} {reason}; repair it (or restore it "
+                              f"from git) before accepting anything in it")
     if key not in doc:
         raise AcceptanceError(f"{path} holds no entry for {key!r}")
     return path, doc

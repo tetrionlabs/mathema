@@ -603,7 +603,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     locks = load_locks(root)
     verified = load_verified(root)
     declared = load_declared(root)
-    keys = sorted(set(verified) | set(declared))
+    from .spec import unreadable_verified
+    broken = unreadable_verified(root)
+    keys = sorted(set(verified) | set(declared) | set(broken))
     # a function can be locked before it has any record or claims; its
     # lock is still checked
     lock_only = sorted(set(locks) - set(keys))
@@ -648,6 +650,22 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     pending: list = []   # (key, why, claims_for_gate, rec_or_none,
                          #  deps, accepted, unresolved, source_line)
     for key in keys:
+        if key in broken:
+            # a record that does not read is never re-adjudicated or
+            # written over: that would replace the history it holds
+            # with a fresh record. The key fails and names the repair.
+            src, reason = broken[key]["source"], broken[key]["reason"]
+            _fail(key, f"{key}: the verified record {src} {reason}; "
+                       f"nothing was adjudicated or written for this key. "
+                       f"Repair it (after a merge, keep every discoveries, "
+                       f"historical and superseded row from both sides), "
+                       f"or restore it with `git checkout -- {src}`, and "
+                       f"re-run verify")
+            out.keys.append({"key": key, "why": "unreadable-record",
+                             "passed": False,
+                             "problems": list(key_problems[key]),
+                             "counts": {}, "claims": []})
+            continue
         # the freshness baseline comes from the verified layer alone; a
         # declared entry (claims/*.yaml, claimspec.yaml, ...) never
         # carries an identity, so it must never be read for this

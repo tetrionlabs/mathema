@@ -302,3 +302,76 @@ def test_a_caller_settled_after_its_callee_is_stamped_over_what_it_says(
     _policy(tmp_path)
     out = verify_project(root=str(tmp_path))
     assert not out.problems, out.problems
+
+
+# --- a record that does not read --------------------------------------------
+
+_TWO = '''\
+def one(x: float) -> float:
+    return x
+
+
+def two(x: float) -> float:
+    return 2 * x
+'''
+
+_TWO_CLAIMS = '''\
+twofix.one:
+  claims:
+    - name: ident
+      statement: 'for x in [0, 1], f(x) == x'
+twofix.two:
+  claims:
+    - name: dbl
+      statement: 'for x in [0, 1], f(x) == 2*x'
+'''
+
+_CONFLICTED = '''\
+twofix.one:
+  claims:
+<<<<<<< HEAD
+    - name: ident
+      verdict: "proven"
+=======
+    - name: ident
+      verdict: "holds"
+>>>>>>> other
+'''
+
+
+@pytest.mark.parametrize("body,reason", [(_CONFLICTED, "does not parse"),
+                                         ("", "is empty"),
+                                         ("- 1\n- 2\n", "not a mapping")])
+def test_an_unreadable_record_fails_its_own_key_and_is_left_alone(
+        tmp_path, monkeypatch, body, reason):
+    from mathema.verify import verify_project
+    (tmp_path / "twofix.py").write_text(_TWO)
+    (tmp_path / "twofix.claims.yaml").write_text(_TWO_CLAIMS)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    verify_project(root=str(tmp_path))
+    broken = tmp_path / ".mathema" / "verified" / "twofix.one.yaml"
+    broken.write_text(body)
+    out = verify_project(root=str(tmp_path), all=True)
+    assert broken.read_text() == body
+    mine = [p for p in out.problems if "twofix.one" in p]
+    assert mine and reason in mine[0], out.problems
+    assert "twofix.one.yaml" in mine[0]
+    assert not any("twofix.two" in p for p in out.problems), out.problems
+    by_key = {k["key"]: k for k in out.keys}
+    assert by_key["twofix.one"]["passed"] is False
+    assert by_key["twofix.two"]["passed"] is True
+
+
+def test_recording_over_an_unreadable_record_is_refused(tmp_path,
+                                                        monkeypatch):
+    import mathema
+    from mathema.spec import UnreadableRecord
+    (tmp_path / "twofix.py").write_text(_TWO)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    mod = __import__("twofix")
+    mathema.write_spec(mod.one, root=str(tmp_path))
+    broken = tmp_path / ".mathema" / "verified" / "twofix.one.yaml"
+    broken.write_text(_CONFLICTED)
+    with pytest.raises(UnreadableRecord):
+        mathema.write_spec(mod.one, root=str(tmp_path))
+    assert broken.read_text() == _CONFLICTED
