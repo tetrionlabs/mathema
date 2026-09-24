@@ -91,6 +91,7 @@ point where one side raises and the other returns a value is a
 counterexample, and the executed raise is its witness. `x / x` and `1.0` agree everywhere
 except `x = 0`:
 
+<!-- example: ratio run -->
 ```python
 import mathema
 
@@ -106,6 +107,7 @@ def one(x: float) -> float:
 print(p.verdict, p.counterexample)
 ```
 
+<!-- example: ratio output -->
 ```text
 falsified x=0: f raised ZeroDivisionError, g returned 1
 ```
