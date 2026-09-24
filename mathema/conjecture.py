@@ -413,6 +413,11 @@ class Conjecture:
     # source `check_conjectures` re-resolves the matrix sugar from when
     # the function's signature reveals a matrix the claim text alone did
     # not). Empty for a Conjecture built directly rather than via claim().
+    scope_bound: frozenset = field(default_factory=frozenset)
+    # the `funcs` names check_conjectures resolved from f's module or the
+    # calling scope rather than from an explicit `funcs=`/`let` binding.
+    # Their text stays the bare call name, which resolves the same way
+    # when the claim is rebuilt, so rendering adds no `let` for them.
 
 
 class InvalidConjecture(ValueError):
@@ -430,13 +435,6 @@ class ConflictingDomainBinding(InvalidConjecture):
     no separate `for` of its own in this claim; that case has only one
     declared bound to begin with, so `check_conjectures()` accepts it
     (and says so in the resulting note) rather than raising."""
-
-
-#: `f is defined --> <region>` (or `is_defined(f) --> <region>`), the
-#: statement spelling of a definedness-region claim
-_DEFINED_REGION_CLAIM = re.compile(
-    r"(?:is_defined\(\s*f\s*\)|f\s+is\s+defined)\s*(?:-->|=>|⟹)"
-    r"\s*(?P<region>.+)", re.DOTALL)
 
 
 def claim(law: str, name: str | None = None, source: str = "user",
@@ -601,20 +599,6 @@ def claim(law: str, name: str | None = None, source: str = "user",
             raise InvalidConjecture(
                 "a claim carries one relation: state each as its own "
                 "claim, or use a chained comparison (a <= b <= c)")
-        # `f is defined --> <region>`: the definedness-region claim. The
-        # relation is the region itself, and the is_defined name is what
-        # gives it the reading "f returns on exactly this region"
-        region_form = _DEFINED_REGION_CLAIM.fullmatch(text)
-        if region_form is not None:
-            if name is None:
-                name = "is_defined"
-            elif name.split("[", 1)[0] != "is_defined":
-                raise InvalidConjecture(
-                    f"`f is defined --> <region>` states the definedness "
-                    f"region, which a claim named is_defined (or "
-                    f"is_defined[k]) carries; {name!r} would read the "
-                    f"region as a plain relation")
-            text = region_form.group("region").strip()
         # a top-level implication arrow that survived to here is not
         # outcome grammar (that shape is `=> self.<claim>`, stripped
         # off raw text up front) and not an assuming pin (those live in
@@ -1272,6 +1256,7 @@ def _bind_scope_functions(cj, fn) -> str:
                 target, where = v, "the calling scope"
         if target is not None:
             cj.funcs[name] = target
+            cj.scope_bound = cj.scope_bound | {name}
             bound.append(f"{name} = {getattr(target, '__module__', '?')}"
                          f".{getattr(target, '__qualname__', name)} ({where})")
     return "; bound " + ", ".join(bound) if bound else ""

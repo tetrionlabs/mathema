@@ -62,7 +62,7 @@ mathema.Record(discount_factor) · source, no side effects · form 8b1b8ec14a11
   FALSIFY even: f(-x) = f(x)
            counterexample x = -1
   proven  is_deterministic: f(x) = f(x)
-  proven  is_defined: f is defined --> 1 - x != 0
+  proven  is_defined: 1 - x != 0
   FALSIFY is_pole_safe[x]: is_pole_safe(x)
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
   FALSIFY is_representation_safe[x]: is_representation_safe(x)
@@ -104,9 +104,9 @@ fails at `x = -1` because `f(1)` raises), which says the claim has no value
 there, not whether its mathematics holds, so they carry no tag.
 `[implementation:representation]` means the mathematics was fine and the
 implementation fell over, here because the integer `1` is admitted by the
-domain and raises. `is_defined` is the same pole seen from the other side: it
-is proven because `f` returns on exactly the region `1 - x != 0`, which is what
-`f is defined --> 1 - x != 0` states.
+domain and raises. `is_defined` is the same pole seen from the other side: a
+claim named `is_defined` states the region on which `f` returns, and it is
+proven because `f` returns on exactly `1 - x != 0` and raises everywhere else.
 
 ## A claim that needed its domain
 

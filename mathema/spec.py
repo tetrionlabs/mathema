@@ -1192,6 +1192,32 @@ def _let_sections(cj) -> list:
             sections.append(f"let {name} be {render_domain_bound(bound)}")
     return sections
 
+def callable_ref(fn) -> "str | None":
+    """Intent:
+        The dotted `module.qualname` path naming a live callable, when
+        that path resolves, among the modules already loaded, back to
+        this very object. None for a callable no path names: a lambda, a
+        nested function, or a wrapper whose copied name resolves to
+        the function it wraps rather than to itself.
+
+    Notes:
+        Resolution reads `sys.modules` only and never imports, so asking
+        has no side effects. A function defined in `__main__` gets no
+        path: `__main__` is a different module in every later process,
+        so the path would not name the same function there.
+    """
+    import sys
+
+    mod = getattr(fn, "__module__", None)
+    qual = getattr(fn, "__qualname__", "")
+    if not mod or not qual or "<" in qual or mod == "__main__":
+        return None
+    obj = sys.modules.get(mod)
+    for part in qual.split("."):
+        obj = getattr(obj, part, None) if obj is not None else None
+    return f"{mod}.{qual}" if obj is fn else None
+
+
 def declare(cj) -> dict:
     """The inverse of entry_claims()'s per-claim parsing: one Conjecture
     back to declared-schema.md's claim-dict shape. This is the seam every
@@ -1257,16 +1283,11 @@ def declare(cj) -> dict:
         # map that would silently rebind a subset of the claim's names.
         refs: dict = {}
         for name, v in cj.funcs.items():
-            if isinstance(v, str):
-                refs[name] = v
-            else:
-                mod = getattr(v, "__module__", None)
-                qual = getattr(v, "__qualname__", "")
-                if mod and qual and "<" not in qual:
-                    refs[name] = f"{mod}.{qual}"
-                else:
-                    refs = {}
-                    break
+            ref = v if isinstance(v, str) else callable_ref(v)
+            if ref is None:
+                refs = {}
+                break
+            refs[name] = ref
         if refs:
             out["funcs"] = refs
     return out
@@ -1498,22 +1519,6 @@ def canonical_claim_text(cj) -> str:
     return render_claim_text(cj, unicode=False, canonical=True)
 
 
-_DEFINED_REGION_PREFIX = "f is defined --> "
-
-
-def _states_definedness_region(cj) -> bool:
-    """Intent:
-        Whether `cj` is a definedness-region claim: named `is_defined`
-        (or `is_defined[k]`, one conjunct of a multi-piece region) with
-        a stated comparison, the claim that f returns on exactly that
-        region. Its statement renders as `f is defined --> <region>`.
-    """
-    return ((cj.name or "").split("[", 1)[0] == "is_defined"
-            and cj.relation in ("==", "~=", "!=", "<=", ">=", "<", ">")
-            and not cj.links
-            and not getattr(cj, "negated", False))
-
-
 def _strip_pinned_regions(assuming: str) -> str:
     """Intent:
         The assuming clause with every `--> <region>` pin removed, per
@@ -1547,12 +1552,7 @@ def fingerprint_text(cj) -> str:
     if cj.assuming and ("-->" in cj.assuming or "=>" in cj.assuming
                         or "⟹" in cj.assuming):
         cj = replace(cj, assuming=_strip_pinned_regions(cj.assuming))
-    text = canonical_claim_text(cj)
-    if _states_definedness_region(cj):
-        # the `f is defined -->` reading comes from the claim's name,
-        # which identity already keys on; the stated region is the text
-        text = text.replace(_DEFINED_REGION_PREFIX, "", 1)
-    return text
+    return canonical_claim_text(cj)
 
 
 def render_claim_text(cj, *, unicode: bool | None = None,
@@ -1582,12 +1582,13 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     reproduces the resolved *effect* (`m1` written twice, no `let`
     needed at all), never the original alias spelling, a different
     string, the same claim. A `funcs` entry whose value is a live
-    callable (not a dotted-path string) can't be spelled as `let` text
-    either, for the same reason declare() drops it from `out["funcs"]`:
-    silently skipped here too, not an error, since the resulting claim
-    is still valid text, just missing that one bound-function
-    definition, exactly as incomplete as declare()'s own dict would be
-    for the same claim.
+    callable is spelled `let g = <module.qualname>` when `callable_ref`
+    finds an importable path resolving back to it, the same reference
+    declare() stores; a callable with no such path (a lambda, a nested
+    function) has no text spelling and is left out, not an error, since
+    the resulting claim is still valid text, just missing that one
+    bound-function definition, exactly as incomplete as declare()'s own
+    dict would be for the same claim.
 
     Auto-lets two kinds of name to a short spelling, each with its own
     synthesized `let` clause stating the substitution explicitly rather
@@ -1754,10 +1755,6 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs))
         rhs = apply_unsafe_backticks(render_law_expr(rhs_text, renamed_funcs, unicode, suppress_glyphs))
         statement = f"{lhs} {_REL_GLYPH[cj.relation]} {rhs}"
-        if _states_definedness_region(cj):
-            # a claim named is_defined asserts f returns on exactly
-            # this region, and the statement says so
-            statement = f"{_DEFINED_REGION_PREFIX}{statement}"
     if getattr(cj, "negated", False):
         # the negation is part of the claim, whatever shape the
         # statement took above
@@ -1777,9 +1774,17 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     def _display_symbol(symbol: str) -> str:
         return symbol if _is_safe_rename_symbol(symbol) else f"`{symbol}`"
 
+    # a live callable is spelled by the importable path that resolves
+    # back to it, the same reference declare() stores; one with no such
+    # path has no text spelling and is left out
+    scope_bound: frozenset = getattr(cj, "scope_bound", frozenset())
+    func_refs = {name: (ref if isinstance(ref, str)
+                        else None if name in scope_bound
+                        else callable_ref(ref))
+                 for name, ref in cj.funcs.items()}
     let_segments = [f"let {func_renames.get(name, name)} = {ref}"
-                    for name, ref in cj.funcs.items()
-                    if isinstance(ref, str)
+                    for name, ref in func_refs.items()
+                    if ref is not None
                     # a parse-time placeholder (a bare call name awaiting
                     # scope resolution, value == its own name) only earns
                     # a `let` when the auto-rename gave it a short alias;
