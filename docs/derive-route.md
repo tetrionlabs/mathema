@@ -7,6 +7,13 @@ for every input in the declared domain", in exact real arithmetic. It's also onl
 can actually lift, which is a real subset. This page is the complete,
 current reference for what that subset is.
 
+A `proven` is the mathematics, and only the mathematics. Whether the
+float implementation carries it is a second claim, `<name>[float]`,
+which every proof spawns and which runs the real code at the domain's
+corners and at sampled points; `route="derive:math_only"` asks for the
+proof alone. [The evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)
+shows the two side by side.
+
 Lifting is honest, not clever: it never guesses at a closed form.
 Anything not covered below is `underivable` on the derive route
 (the record's note names the likely reason), never a false `proven`,
