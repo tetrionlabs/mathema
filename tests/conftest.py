@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Suite-wide pytest wiring: the `--extensive` flag that opts into the
-extensive-ladder proof corpus, and the `needs_full_proof_budget`
-marker for tests whose assertion depends on a proof actually
-finishing.
+extensive-ladder proof corpus, the `needs_full_proof_budget` marker
+for tests whose assertion depends on a proof actually finishing, and
+isolation from capability providers installed in the environment.
 
 The extensive-ladder tests each run full adjudication twice (fast
 path and ladder), so they are skipped by default and run on command:
@@ -13,6 +13,21 @@ path and ladder), so they are skipped by default and run on command:
 They parallelize cleanly under pytest-xdist (`-n auto`) when it is
 installed, since every case is a self-contained adjudication."""
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_installed_providers(monkeypatch):
+    """Capability providers installed in the environment (a symbology
+    package, say) change rendered output, so every test runs against
+    mathema's own defaults; a test about providers patches its own in."""
+    from mathema import _providers
+    discovered, load = _providers._discovered, _providers._load
+    monkeypatch.setattr(_providers, "entry_points", lambda **_: [])
+    discovered.cache_clear()
+    load.cache_clear()
+    yield
+    discovered.cache_clear()
+    load.cache_clear()
 
 
 def pytest_addoption(parser):
