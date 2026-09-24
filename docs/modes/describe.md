@@ -52,7 +52,7 @@ Claims:
   commutative: f(a, b) == f(b, a)  [proven]
     latex: f{\left(a,b \right)} = f{\left(b,a \right)}
   mean_bound: for a in [0, 1], b in [0, 1], f(a, b) <= 1  [proven]
-    latex: (not available: invalid syntax (<unknown>, line 1))
+    latex: \forall a \in \left[0, 1\right],\ b \in \left[0, 1\right]:\ f{\left(a,b \right)} \leq 1
 
 Concepts: symmetry
 ```

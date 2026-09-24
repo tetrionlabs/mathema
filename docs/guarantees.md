@@ -102,8 +102,7 @@ built. See [Claims transfer](claims-transfer.md).
   travels in the record's sampling plan, so a re-run on the same code and
   the same mathema version reproduces the same draws. Each record states
   the mathema version, the CDD spec version, the date and the commit it
-  was adjudicated at. The versions of mathema's own mathematics
-  dependencies are not yet recorded.
+  was adjudicated at.
 
 ## Glossary
 

@@ -125,6 +125,7 @@ from .domain import (MISSING as MISSING, Domain as Domain,
                      render_domain as render_domain,
                      render_domain_bound as render_domain_bound,
                      split_quantifier as split_quantifier)
+from .domain import bound_to_sympy_set
 from .routes import MATRIX_PREDICATES as _MATRIX_PREDICATES
 from .routes import OUTPUT_PREDICATES as _OUTPUT_PREDICATES
 from .linalg import (RENDER_CALLS as _MATRIX_RENDER_CALLS,
@@ -2597,7 +2598,101 @@ def parse_domain_safety(law: str) -> tuple[str, str] | None:
 
 
 def to_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
-    """Render a full law as LaTeX: `lhs rel rhs`, or the partiality
+    """Intent:
+        Render a whole claim as LaTeX: a `\\forall` over each quantified
+        name's domain, the `assuming` premise, the relation (or a chained
+        comparison, a raises or a named predicate), the functions bound
+        with `let`, and an outcome clause, in that order.
+    Notes:
+        The claim is first parsed into its canonical parts by `claim()`,
+        the same parse adjudication uses, so every spelling the grammar
+        accepts renders the same way. A fragment `claim()` does not
+        accept as a whole claim (a bare premise such as `n >= 2`) renders
+        as a single relation.
+    """
+    try:
+        from .conjecture import claim
+        parsed = claim(law)
+    except Exception:
+        return _relation_latex(law, funcs)
+    names = frozenset(funcs) | frozenset(parsed.funcs)
+
+    prefix = []
+    if parsed.domain:
+        prefix.append(r"\forall " + r",\ ".join(
+            rf"{sympy.latex(sympy.Symbol(name))} \in {_domain_latex(bound)}"
+            for name, bound in parsed.domain.items()) + ":")
+    if parsed.assuming:
+        premise = parsed.assuming[len("assuming"):].strip()
+        prefix.append(r"\text{assuming } " + _premise_latex(premise) + ",")
+
+    if parsed.links:
+        body = _relation_latex(f"{parsed.links[0][0]} {parsed.links[0][1]} "
+                               f"{parsed.links[0][2]}", names)
+        for _lhs, rel, rhs in parsed.links[1:]:
+            body += f" {_REL_LATEX[rel]} " + _relation_latex(
+                f"0 == {rhs}", names).split(" = ", 1)[1]
+    elif parsed.relation in _REL_LATEX:
+        body = _relation_latex(
+            f"{parsed.lhs} {parsed.relation} {parsed.rhs}", names)
+    elif parsed.relation == "raises":
+        body = _relation_latex(
+            f"raises({parsed.lhs}, {parsed.rhs})" if parsed.rhs
+            else f"raises({parsed.lhs})", names)
+    else:
+        subject = (_relation_latex(f"0 == {parsed.lhs}", names).split(" = ", 1)[1]
+                   if parsed.lhs else "")
+        body = (rf"\mathrm{{{_latex_text(parsed.relation)}}}"
+                rf"\left({subject}\right)")
+
+    suffix = []
+    # a name bound to a different callable is part of the claim's meaning;
+    # one resolved to itself (`det`) is only the vocabulary it already reads as
+    bindings = {n: p for n, p in parsed.funcs.items() if p != n}
+    if bindings:
+        suffix.append(r",\ \text{where } " + r",\ ".join(
+            rf"{sympy.latex(sympy.Symbol(n))} = \texttt{{{_latex_text(p)}}}"
+            for n, p in bindings.items()))
+    if parsed.outcome:
+        suffix.append(rf" \Rightarrow \mathrm{{{_latex_text(parsed.outcome)}}}")
+    return r"\ ".join(prefix + [body]) + "".join(suffix)
+
+
+def _latex_text(text: str) -> str:
+    """`text` escaped for use inside `\\mathrm{}` or `\\texttt{}`."""
+    return text.replace("\\", r"\textbackslash{}").replace("_", r"\_")
+
+
+def _premise_latex(premise: str) -> str:
+    """An `assuming` premise as LaTeX: a relation renders as one, and a
+    premise that is not a relation (`X holds`, `f is defined`) renders
+    as text."""
+    try:
+        return _relation_latex(premise)
+    except Exception:
+        return rf"\text{{{premise}}}"
+
+
+def _domain_latex(bound) -> str:
+    """One quantified name's domain as a LaTeX set, with a vector or
+    matrix domain's dimensions as an exponent (`[0, 1]^{n}`,
+    `\\mathbb{R}^{m \\times n}`). A whole-number float bound prints as an
+    integer."""
+    try:
+        s = bound_to_sympy_set(bound)
+        s = s.xreplace({v: sympy.Integer(int(v)) for v in s.atoms(sympy.Float)
+                        if float(v).is_integer()})
+        text = sympy.latex(s)
+    except Exception:
+        text = rf"\text{{{render_domain_bound(bound)}}}"
+    dims = getattr(bound, "dims", ()) or ()
+    if dims:
+        text += "^{" + r" \times ".join(str(d) for d in dims) + "}"
+    return text
+
+
+def _relation_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
+    """Render one relation as LaTeX: `lhs rel rhs`, or the partiality
     notation f(x)↑ for a raises predicate. The matrix vocabulary
     (`A.T`, `A @ B`, `det`/`inv`/`trace`, `I(n)`) renders through sympy's
     matrix printing (`A^{T}`, `|A|`, juxtaposition), decided per law from
