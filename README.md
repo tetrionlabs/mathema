@@ -27,6 +27,7 @@ Here is a European call minus a European put on the same strike, both legs
 priced by Black-Scholes, with a square root, a logarithm, an exponential and
 the Gaussian CDF expressed through `math.erf`:
 
+<!-- example: parity file=options.py -->
 ```python
 import math
 
@@ -47,12 +48,14 @@ the volatility, which is a surprising thing to say about a function where
 `sigma` appears five times. State it as a claim over the region it should hold
 on:
 
+<!-- example: parity run -->
 ```bash
 mathema check options.py --claim "for s in [50,150], k in [50,150], \
     r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], \
     f(s,k,r,t,sigma) == s - k*exp(-r*t)"
 ```
 
+<!-- example: parity output -->
 ```text
 ok   options.put_call_parity_gap: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
 ```
@@ -97,11 +100,15 @@ improper integral over the whole real line, and all four come back proven. The t
 identities carry a range because this code overflows below about `x = -709.78`, and
 stated over the whole line mathema falsifies them there:
 
+<!-- example: sigmoid file=sigmoid.py -->
 ```python
+import math
+
 def logistic(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
 ```
 
+<!-- example: sigmoid run -->
 ```bash
 mathema check sigmoid.py \
     --claim "for x in [-700, 700], d(f(x), x) == f(x)*(1 - f(x))" \
@@ -110,6 +117,7 @@ mathema check sigmoid.py \
     --claim "∫(d(f(x), x), x, -oo, oo) == 1"
 ```
 
+<!-- example: sigmoid output -->
 ```text
 ok   sigmoid.logistic: source, no side effects; claims 4/4 adjudicated (4 proven, 0 holds, 0 falsified)
 ```
@@ -120,7 +128,10 @@ Proving a good function correct is the easy half, and the question that
 matters more is whether a bad one gets caught. Here is a discount factor with a
 pole hiding in it, checked with no claims at all, only mathema's built-in laws:
 
+<!-- example: pole run -->
 ```python
+import mathema
+
 def discount_factor(x: float) -> float:
     """A discount factor that divides by one minus the rate."""
     return 1 / (1 - x)
@@ -128,6 +139,7 @@ def discount_factor(x: float) -> float:
 print(mathema.check(discount_factor))
 ```
 
+<!-- example: pole output match=subset -->
 ```text
 mathema.Record(discount_factor) · source, no side effects · form 8b1b8ec14a11
   FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
@@ -159,6 +171,7 @@ An agent can write the code and propose the claims, but mathema reserves the
 decisions that turn a verdict into an accepted fact for a person, so the agent
 never gets to mark its own homework:
 
+<!-- illustration -->
 ```text
 agent proposes a claim
         ↓
@@ -238,6 +251,7 @@ implementation (how much code a test, probe or proof actually reached), intent
 (how much is known about the behaviour, falsifications included), drawn as a
 triangle whose area is the overall score. An illustrative example:
 
+<!-- illustration -->
 ```text
         CLARITY 44
               ◆

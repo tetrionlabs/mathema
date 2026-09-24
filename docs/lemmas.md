@@ -55,6 +55,7 @@ Claims are adjudicated in dependency order, not declaration order, so a
 lemma may be written after the claim that uses it. The results still
 come back in the order you wrote them.
 
+<!-- example: chain run -->
 ```python
 from mathema.claims import check_conjectures, claim
 
@@ -76,6 +77,7 @@ for name, p in out.items():
 Each link is proven, and `offset` is proven on the strength of
 `nonneg`, which is proven on the strength of `grows`:
 
+<!-- example: chain output -->
 ```text
 grows    proven
 nonneg   proven
@@ -88,6 +90,7 @@ When a claim rests on several lemmas, the weakest one sets the ceiling.
 This is the rule that stops a chain from laundering sampled evidence
 into a proof.
 
+<!-- example: weakest run after=chain -->
 ```python
 out = {p.name: p for p in check_conjectures(scale, [
     claim("for x in [0,10], f(x) >= x", name="grows", route="derive"),
@@ -100,6 +103,7 @@ for name, p in out.items():
     print(f"{name:<14} {p.verdict}" + (f"    capped_by={cap}" if cap else ""))
 ```
 
+<!-- example: weakest output -->
 ```text
 grows          proven
 sampled        holds
@@ -122,6 +126,7 @@ deliberately strict: the bounds must agree, not merely overlap.
 
 ## When a prerequisite cannot be resolved
 
+<!-- example: orphan run after=chain -->
 ```python
 (p,) = check_conjectures(scale, [
     claim("assuming absent holds, for x in [0,10], f(x) >= 0",
@@ -130,6 +135,7 @@ print(p.name, p.verdict, "|", p.meta["mathema.premise"])
 print("note:", p.note)
 ```
 
+<!-- example: orphan output -->
 ```text
 orphan unknown | missing-prerequisite
 note: prerequisite 'absent' is not a claim in this batch, nothing to rest this claim on

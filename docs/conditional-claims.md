@@ -155,7 +155,10 @@ dimension back.
 To enforce a dimension premise at RUNTIME, the shape analogue of
 `@enforce_domain` is `@enforce_dimensions`:
 
+<!-- example: enforce-dimensions run inline -->
 ```python
+from mathema import claims_decorator, enforce_dimensions
+
 @enforce_dimensions()
 @claims_decorator("assuming len(x) == len(y), f(x, y) == f(y, x)")
 def dot(x, y):

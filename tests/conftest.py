@@ -45,6 +45,10 @@ def pytest_configure(config):
         "needs_full_proof_budget: the assertion depends on a proof "
         "finishing, so the wall-clock cap is raised, see the note above "
         "the fixture in this file")
+    config.addinivalue_line(
+        "markers",
+        "slow_docs_example: a documentation example that takes more than "
+        "a few seconds to run, see tests/test_docs_outputs.py")
 
 
 def pytest_collection_modifyitems(config, items):

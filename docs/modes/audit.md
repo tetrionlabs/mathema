@@ -34,7 +34,7 @@ mathema audit mypkg [mypkg.sub ...]
 |---|---|
 | `key` | the canonical dotted key, `module.qualname` |
 | `span` | the function's source span, sed-address style (`142:187p`), a ready-made `sed -n` range, so reading exactly one function needs no search |
-| `claimed` | any of the four authoring surfaces has a claim for this function |
+| `claims` | the claim triplet <code>{floor &#124; actual &#124; expected}</code>: the floor is the least this function's shape gives you to state (one claim per relevant claim family), the actual is how many claims it carries across the four authoring surfaces, and the expected is how many a function of this shape typically carries, which needs a corpus and so reads `-`. <code>{9 &#124; 1 &#124; -}</code> is a function with one claim against a floor of nine |
 | `cx` | cyclomatic complexity (branches + loops + 1), shown for every row |
 | `derives` (derive route group) | whether the derive route can work on this function **given the domain its signature, docstring and claims declare**. This is the provability question |
 | `reason` (derive route group) | the structural shape blocking an **unconditional** lift, the body with nothing supplied ("2 branches, 1 loop", "recursive (2 call sites)"); a dash means nothing blocks it even bare |
