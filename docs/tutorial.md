@@ -160,6 +160,12 @@ was never true. mathema will not launder that into a plain
 `falsified`, because "this used to pass" is information a reviewer
 needs.
 
+`mathema.previous_verdict` is one step: the verdict immediately before
+this one, not a history. The record has no history field because the
+record is in git. `mathema review` reports which verdicts flipped
+between two refs, and `git log .mathema/verified` lists every commit
+that changed a record.
+
 ## 3. Accept the evidence
 
 `nonneg` holds empirically, over 130 seeded trials. Whether that is

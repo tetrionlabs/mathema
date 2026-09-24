@@ -7,6 +7,7 @@ human act, never exposed to agent tooling or any MCP surface.
 
 ```bash
 mathema accept KEY CLAIM --as evidence|risk|discovery [--by NAME] [--note TEXT]
+mathema accept KEY --as reconciled [--from OLD_KEY]
 ```
 
 ## Arguments
@@ -15,7 +16,9 @@ mathema accept KEY CLAIM --as evidence|risk|discovery [--by NAME] [--note TEXT]
 |---|---|
 | `key` | function key (the record under `.mathema/verified/`) |
 | `claim` | claim name inside that record (omit for `--as reconciled`, which acts on the whole record) |
-| `--as` | `evidence`, `risk`, `discovery`, or `reconciled` (see below). Omit it and mathema reads the claim's verdict and proposes the natural kind |
+| `--as` | `evidence`, `risk`, `discovery`, or `reconciled` (see below). In text mode you can omit it and mathema reads the claim's verdict and proposes the natural kind; `--format json` never guesses, and without `--as` it exits 2 |
+| `--from OLD_KEY` | with `--as reconciled`: rename `OLD_KEY`'s record to `KEY`, for a function that moved (see [moved functions](#moved-functions-as-reconciled-from)) |
+| `--accept-form-change` | with `--from`: rename even though the record's form hash differs from the live function's |
 | `--by` | who decided (default: `git config user.name`) |
 | `--note` | free-text rationale, kept in the record |
 | `--yes` | skip the confirmation prompt (for scripted use by a human; never wire this into agent tooling) |
@@ -66,7 +69,8 @@ by the tool, but the decision to rely on a `holds`, to own a gap, or to
 adopt a corrected claim is a human's, and the record carries whose. You do
 not have to learn the vocabulary first. Run `mathema verify` to see which
 records fail on an unknown or falsified claim, then type `mathema accept KEY
-CLAIM` with no `--as`, and mathema reads the claim's verdict and proposes
+CLAIM` with no `--as` (at a terminal; `--format json` always needs `--as`),
+and mathema reads the claim's verdict and proposes
 the natural kind (a `holds` is *evidence*, an `unknown` is a *risk*, a
 falsification is a *discovery*), then asks you to confirm. You take the
 decision by saying yes, not by memorising a vocabulary.
@@ -107,9 +111,41 @@ so the claim fails the gate again until someone re-decides.
 
 ## Worked example
 
+A running balance, with three claims in a claims file:
+
+```python
+# functions.py
+def running_total(xs: list, y0: float) -> float:
+    """Add every value in xs to a starting balance y0."""
+    total = y0
+    for v in xs:
+        total = v + total
+    return total
+```
+
+```yaml
+# claims/running_total.claims.yaml
+functions.running_total:
+  claims:
+    - name: shifts_with_start
+      statement: "f(xs, y0) == f(xs, 0) + y0"
+    - name: nonneg_for_nonneg_steps
+      statement: "for xs in [0, 1]^n, f(xs, 0) >= 0"
+    - name: never_overshoots_much
+      statement: "assuming nonneg_for_nonneg_steps is proven, for xs in [0, 1]^n, f(xs, 0) <= len(xs)"
+```
+
+`shifts_with_start` is proven. `nonneg_for_nonneg_steps` only holds:
+the probe agrees, but derive cannot settle the sign of the lifted sum.
+`never_overshoots_much` rests on it being proven, so it comes back
+`unknown` with the note `prerequisite nonneg_for_nonneg_steps is holds,
+not proven, nothing to rest this claim on`, and `verify` fails on it
+(see [`mathema verify`](verify.md#unknown-claims-and-accepted-risk)).
+Owning that gap is a decision:
+
 ```
 $ mathema accept functions.running_total never_overshoots_much --as risk \
-      --note "loop shape is out of derive scope; monitored"
+      --note "the premise only holds empirically; monitored"
 accepting functions.running_total :: never_overshoots_much (verdict unknown) as risk, by Charles Babbage
   - reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
 write this acceptance? [y/N] y
@@ -185,6 +221,57 @@ Two ways to clear it:
 
   It lists every record whose checksum no longer matches, asks once, and
   re-stamps them all under a single sign-off.
+
+### Moved functions: `--as reconciled --from`
+
+A record is keyed by the function's dotted `module.qualname`, so moving
+a function to another module (or renaming it) leaves its record behind
+under a key that no longer resolves. `verify` notices when that orphan's
+form hash matches a function that has no record, and prints the rename
+as the remedy. Moving `running_total` from `functions.py` to
+`ledger.py`, with its claims file stanza renamed to match:
+
+```
+$ mathema verify --root .
+FAIL functions.running_total: cannot resolve to a live function (declared in .mathema/verified/functions.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from functions.running_total
+FAIL ledger.running_total: no record yet, and its form hash matches the orphan record functions.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from functions.running_total; if it is a different function, remove the orphan record instead
+ok   functions.softmax: fresh
+1 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
+grammars detected: mathema; verified by this run: mathema
+```
+
+The new key gets no fresh record in the meantime, because a fresh
+record would start its history over. The rename is a human act, since
+only a person can say the two are the same function:
+
+```
+$ mathema accept ledger.running_total --as reconciled --from functions.running_total
+reconciling ledger.running_total from functions.running_total: a record rename, by Charles Babbage
+  - rename the record functions.running_total to ledger.running_total, carrying its claims, acceptance history, lineage and sign-offs
+  - remove .mathema/verified/functions.running_total.yaml
+  - re-stamp the integrity and re-anchor it to HEAD
+write this rename? [y/N] y
+written: reconciled: functions.running_total renamed to ledger.running_total (by Charles Babbage)
+next: `mathema verify ledger.running_total` re-adjudicates it at its new location
+```
+
+The record moves whole: every claim row with its acceptance and
+acceptance history, the discoveries, historical and superseded
+sections, the lineage, and a lock if there is one. Like any reconcile
+it re-stamps the integrity, re-anchors to `HEAD`, and records who did
+it, when, and where the record came from (`identity.reconciled.from`),
+with the [PIN](pin.md) stamp when one is configured. The old record
+file is removed, so no orphan is left behind.
+
+The rename is refused (exit 1, nothing written) when the old key still
+resolves (that is a copy, not a move) or the new key already has a
+record. An old key with no record, or a new key that does not resolve
+to a live function, is exit 2. When the record's form hash differs
+from the live function's, the rename asks a second question at the
+prompt, since the record was made for different code; `--yes` does not
+answer it, and `--accept-form-change` does. The record then keeps its
+recorded form, so the next `verify` re-adjudicates it against the code
+it now names, and `identity.reconciled.form_changed` states both hashes.
 
 **Working with git.** The advice is one line: after a merge, rebase, or
 conflict resolution that touched `.mathema/`, run `mathema verify` to
