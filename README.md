@@ -249,11 +249,25 @@ support, and `skipped` reported plainly the moment none can.
 
 A codebase can have every line exercised by tests while having very little of
 its intent stated or verified, so mathema measures those separately rather
-than folding them into one coverage number. `mathema badges` reports
-implementation (how much code a test, probe or proof actually reached), intent
-(how much of what the docstrings promise is claimed and verified) and clarity
-(how much is known about the behaviour, falsifications included), drawn as a
-triangle whose area is the overall score. An illustrative example:
+than folding them into one coverage number. `mathema badges` reports three
+scores, each measured on its own so a strength in one can't hide a gap in
+another:
+
+- **implementation**, coverage that counts proofs: the share of statements
+  reached by a test, a probe or a derive proof, taken together, so code proven
+  symbolically counts even where no test calls it;
+- **intent**, what the code is meant to do, stated: how much of what each
+  function is meant to do is explicitly specified and up to date, so intent
+  that lives only in someone's head, or in a prompt that was thrown away,
+  shows up as a gap;
+- **clarity**, how much of the behaviour is pinned down: of everything
+  knowable about a function, how much its verified claims have settled, where
+  a proof counts for more than a sample and a failure found is still
+  knowledge.
+
+They are drawn as a triangle whose area is the overall score, so it falls
+toward zero when any one of them is empty instead of averaging politely over
+the gap. An illustrative example:
 
 <!-- illustration -->
 ```text
