@@ -544,4 +544,4 @@ def test_a_suggestion_never_outranks_a_same_named_declared_claim():
     rec = mathema.check(midpoint, claims=["f(a, b) == 999"],
                         declared=declared)
     names = {r["claim"]: r for r in (claim_row(p) for p in rec.probes)}
-    assert "999" in names["f_a_b_999"]["statement"]
+    assert "999" in names["f_a_b_eq_999"]["statement"]

@@ -217,8 +217,10 @@ LEXICON: dict[str, str] = {
     "integrate_definite": "integrate(f(x), x, 0, 1) == 1",
     "integral_symbol": "∫(f(x), x, 0, 1) == 1",
     "integrate_evaluation_bar": "integrate(f(x), x)|_{0}^{1} == 1",
-    "sum_subscript": "Sum(f(i))_{i=1}^n == n*(n+1)",
-    "prod_call": "Prod(f(i), i, 1, n) >= 0",
+    # the bound `n` is not a parameter of the summand, so it is
+    # declared; the index `i` is bound by the sum itself
+    "sum_subscript": "let n be [1, 20] subset Z, Sum(f(i))_{i=1}^n == n*(n+1)",
+    "prod_call": "let n be [1, 20] subset Z, Prod(f(i), i, 1, n) >= 0",
     "principal_value": "P.V.(integrate(1/(x - c), x, -1, 1)) == f(c)",
     # assuming: a claim states its own precondition ----------------
     "assuming_inequality": ("assuming b^2 - 4*a*c >= 0.01, for a in [1,10], "

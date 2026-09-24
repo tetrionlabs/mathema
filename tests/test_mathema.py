@@ -640,11 +640,11 @@ def test_conjecture_pipeline_core():
     def cube(x: float) -> float:
         return x * x * x
 
-    from mathema import Conjecture, check_conjectures
+    from mathema import Conjecture, check_conjectures, claim
     results = check_conjectures(cube, [
         Conjecture("odd", "f(-x)", "-f(x)"),
         Conjecture("nonnegative", "f(x)", "0", relation=">="),
-        Conjecture("shift_aux", "f(x + c)", "f(x) + c"),
+        claim("let c be [-5, 5], f(x + c) == f(x) + c", name="shift_aux"),
         Conjecture("evil", "__import__('os')", "0"),
         Conjecture("attr", "f.__code__", "0"),
     ])
@@ -666,7 +666,7 @@ def test_conjecture_derive_route_proves_symbolically():
     def cube(x: float) -> float:
         return x * x * x
 
-    from mathema import Conjecture, check_conjectures
+    from mathema import Conjecture, check_conjectures, claim
     results = check_conjectures(cube, [Conjecture("odd", "f(-x)", "-f(x)", route="derive")])
     assert results[0].verdict == "proven"
     assert results[0].sketch is not None
@@ -684,7 +684,7 @@ def test_conjecture_derive_route_unliftable_is_skipped():
             total = total * v
         return total
 
-    from mathema import Conjecture, check_conjectures
+    from mathema import Conjecture, check_conjectures, claim
     results = check_conjectures(
         looped, [Conjecture("scale", "f(xs) * 2", "f(xs) * 2", route="derive")])
     # the loop stays unliftable (named in the note); the tautology then
@@ -706,7 +706,7 @@ def test_claim_helper_strings():
     results = mathema.claims.check(cube2, [claim("f(-x) == -f(x)", pseudo_infinity=1e100),
                                            claim("f(x) >= 0", pseudo_infinity=1e100)])
     by = {p.name: p.verdict for p in results}
-    assert by["f_x_f_x"] == "proven"           # auto-named; best-route proof
+    assert by["f_x_eq_f_x"] == "proven"           # auto-named; best-route proof
     assert list(by.values()).count("falsified") == 1
 
 
@@ -728,7 +728,7 @@ def test_check_accepts_claims_alongside_built_in_probes():
     # enforcement rides along only because it was DECLARED (cube never
     # guards, so the exclusion is asserted-not-enforced: falsified)
     assert by["excluded_outside_domain[x]"] == "falsified"
-    assert by["f_x_0"] == "proven"   # x**3 >= 0 over [0, 10], best-route proof
+    assert by["f_x_ge_0"] == "proven"   # x**3 >= 0 over [0, 10], best-route proof
 
 
 # ---- claims file loader (authoring shape) ----------------------------------

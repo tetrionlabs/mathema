@@ -229,8 +229,8 @@ check every case rather than guessing.
 | `integrate(f(x), x, 0, 1) == 1` | a definite integral |
 | `∫(f(x), x, 0, 1) == 1` | the symbol form |
 | <code>integrate(f(x), x)&#124;_{0}^{1} == 1</code> | with an evaluation bar |
-| `Sum(f(i))_{i=1}^n == n*(n+1)` | a sum, subscript form |
-| `Prod(f(i), i, 1, n) >= 0` | a product |
+| `let n be [1, 20] subset Z, Sum(f(i))_{i=1}^n == n*(n+1)` | a sum, subscript form, its bound declared |
+| `let n be [1, 20] subset Z, Prod(f(i), i, 1, n) >= 0` | a product |
 | `P.V.(integrate(1/(x - c), x, -1, 1)) == f(c)` | a Cauchy principal value |
 
 ## Safety predicates
@@ -276,6 +276,16 @@ readable and lets you talk about things that are not parameters:
 A free variable is the difference between "this holds for the inputs"
 and "this holds for the inputs and any constant you care to add", which
 is often the claim you actually meant.
+
+Every name a claim uses must be declared: a parameter of the function,
+a name bound by `for` or `let`, a dimension of a declared space
+(`n` in `R^n`), a variable a derivative, sum, integral or limit binds,
+or a known constant or function. Any other name is refused with its
+name and the `let ... be [...]` that declares it, rather than being
+sampled as a value nobody chose. A binding may continue a let run
+without repeating `let`, so a bare `name = expr` straight after the run
+reads as one more binding; a claim written that way is refused with a
+message saying to write the relation as `==`.
 
 ### Operational infinity: `let |inf| be ...`
 

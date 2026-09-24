@@ -1322,6 +1322,19 @@ def _domain_problem(bound) -> "str | None":
     return None
 
 
+def _auto_name_of(statement: str) -> "str | None":
+    """Intent:
+        The name an unnamed claim with this statement takes, or None
+        when the statement does not read as a claim (its own refusal
+        is reported where the claim is built).
+    """
+    from .conjecture import InvalidConjecture, claim as _claim
+    try:
+        return _claim(statement).name
+    except (InvalidConjecture, ValueError):
+        return None
+
+
 def validate_claims_file(data, rel_path: str) -> None:
     """Intent:
         Check one parsed claims file's shape, and normalize a tolerance
@@ -1391,6 +1404,14 @@ def validate_claims_file(data, rel_path: str) -> None:
                     fail(key, f"claim name {name!r} is used twice; each "
                               f"claim under one key needs its own name")
                 seen.add(name)
+            else:
+                auto = _auto_name_of(text)
+                if auto is not None and auto in seen:
+                    fail(key, f"{label} takes the name {auto!r}, which "
+                              f"another claim under this key already has; "
+                              f"give it an explicit `name:`")
+                if auto is not None:
+                    seen.add(auto)
             tol = c.get("tolerance")
             if tol is not None:
                 try:
