@@ -57,9 +57,11 @@ names.
   with a witness the real function reproduced, and never a false
   `proven`. A symbolic disproof with no point to execute (a derivative
   or limit claim, say) stays `unknown`. When the body will not lift, or the proof
-  cannot close, a scalar claim falls through to the probe route with
-  the reason the derive attempt stopped kept in the record, while a
-  matrix-algebra claim stays `unknown`. Only available
+  cannot close, the claim falls through to the probe route with the
+  reason the derive attempt stopped kept in the record; a matrix
+  identity is sampled over matrices of its declared shape, and stays
+  `unknown` only where it cannot be sampled or was declared
+  `route: derive`. Only available
   for a real subset of functions; see
   [The derive route](derive-route.md).
 
@@ -178,9 +180,11 @@ silently.
   for exactly what is liftable.
 - **The conjecture pipeline**: state a claim as one string
   (`"f(-x) == -f(x)"`) or a `Conjecture`. Laws are validated against a
-  strict AST whitelist before they run, so proposals from an untrusted
-  source (a human in review, or a model) are safe to check. The
-  proposer never adjudicates its own claims.
+  strict AST whitelist before they run, so a proposal from an untrusted
+  source (a human in review, or a model) can do no more than evaluate
+  mathematics over the function, which itself runs as it would in its
+  own tests, see [Security and execution](security.md). The proposer
+  never adjudicates its own claims.
 - **Identity hashes**: `form` (rename/format-invariant AST structure)
   and `sig` (parameter shape). Every claim binds to them, so a record
   cannot silently outlive the code it describes.

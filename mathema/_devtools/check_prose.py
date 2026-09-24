@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     findings = check_prose(paths)
     if not findings:
         return 0
-    print("House-style findings (see CLAUDE.md, Docstring style):",
+    print("House-style findings (see docs/mathema-docstring.md):",
           file=sys.stderr)
     for path, line, kind, text in findings:
         print(f"  {path}:{line}: {kind}", file=sys.stderr)

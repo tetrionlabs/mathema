@@ -112,6 +112,43 @@ def test_to_latex_renders_relations_and_raises():
     assert r"\uparrow_{\mathrm{ValueError}}" in to_latex("raises(f(x), ValueError)")
 
 
+def test_to_latex_renders_the_quantifier_as_a_forall_over_each_domain():
+    assert to_latex("for a in [0, 1], b in [0, 1], f(a, b) <= 1") == (
+        r"\forall a \in \left[0, 1\right],\ b \in \left[0, 1\right]:\ "
+        r"f{\left(a,b \right)} \leq 1")
+
+
+def test_to_latex_keeps_a_vector_domain_dimension():
+    rendered = to_latex("for xs in [0, 1]^n, f(xs) <= 1")
+    assert r"\left[0, 1\right]^{n}" in rendered
+
+
+def test_to_latex_renders_premises_chains_bindings_and_outcomes():
+    assert to_latex("0 <= f(x) <= 1") == (
+        r"0 \leq f{\left(x \right)} \leq 1")
+    premised = to_latex("assuming n >= 2, f(a) >= 0")
+    assert premised.startswith(r"\text{assuming } n \geq 2,\ ")
+    assert premised.endswith(r"f{\left(a \right)} \geq 0")
+    bound = to_latex("let g = numpy.sum, f =:= g")
+    assert r"f \equiv g" in bound and r"\texttt{numpy.sum}" in bound
+    assert to_latex("f(x) > 0 => self.stays_positive").endswith(
+        r"\Rightarrow \mathrm{self.stays\_positive}")
+
+
+def test_every_curated_claim_renders_to_latex():
+    # the lexicon is the grammar's own curated set of claims, so any one
+    # of them failing to render is a claim the grammar accepts that
+    # `describe` and the docs cannot show
+    from mathema.lexicon import LEXICON
+    failures = []
+    for key, law in LEXICON.items():
+        try:
+            to_latex(law)
+        except Exception as exc:   # noqa: BLE001, the failure is the finding
+            failures.append(f"{key}: {law!r}: {type(exc).__name__}: {exc}")
+    assert not failures, "\n".join(failures)
+
+
 def test_every_relation_the_grammar_accepts_also_renders_to_latex():
     # RELATIONS is the set a claim may be written with, so a member
     # missing from the LaTeX map is a KeyError on input the grammar

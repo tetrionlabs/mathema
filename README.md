@@ -77,7 +77,7 @@ mind.
 
 A test demonstrates behaviour at the inputs you chose, and a property-based
 test at many inputs you did not, but neither can say anything about the
-uncountably many points of `[0.1,2]` it never visited. mathema keeps four
+uncountably many points of `[0.1,2]` it never visited. mathema keeps its
 verdicts apart so you always know which kind of answer you have:
 
 | Verdict | Means |
@@ -85,7 +85,11 @@ verdicts apart so you always know which kind of answer you have:
 | `proven` | established mathematically over the claim's stated domain |
 | `holds (n=...)` | survived exactly `n` behavioural trials, which is evidence, not proof |
 | `falsified` | a counterexample was found by running the function, and is kept |
-| `skipped` | no available route could settle it, and the record says so |
+| `unknown` | nothing was decided, and the record keeps the reason |
+| `skipped` | the claim could not be adjudicated as stated, and the record says why |
+
+[Guarantees and limits](https://mathema.tetrionlabs.com/guarantees/) states what each
+verdict establishes and what it does not, in one place.
 
 The same distinction reaches claims no amount of test-running could establish.
 Four defining properties of the logistic function include a limit at infinity and an
@@ -167,7 +171,9 @@ the function is locked                  (mathema lock)
 
 No tool exposed over MCP accepts a verdict from its caller, and claim
 expressions are validated against a strict AST whitelist before they run, so
-a claim from an untrusted source is safe to check. `mathema accept` prints the
+a claim from an untrusted source can do no more than evaluate mathematics over
+the function (the function itself runs as it would in its own tests; see
+[Security and execution](https://mathema.tetrionlabs.com/security/)). `mathema accept` prints the
 exact write before making it, and lets a person accept evidence as sufficient,
 own a residual risk explicitly, or correct a claim the falsification showed
 was wrong (the correction is itself adjudicated first). An agent may lock a
@@ -204,20 +210,23 @@ fastest way to hand an agent a codebase without letting it grep its way around.
 
 ## Beyond tests
 
-| | Unit tests | Property-based testing | Proof assistants and SMT solvers | mathema |
-|---|:-:|:-:|:-:|:-:|
-| Checks the examples you chose | ✓ | ✓ | | ✓ |
-| Checks many generated inputs | | ✓ | | ✓ |
-| Proves a claim over its whole domain | | | ✓ | ✓ where the function lifts |
-| Works on ordinary Python, no separate specification language | ✓ | ✓ | | ✓ |
-| Keeps a record bound to the exact code it verified | | | ✓ | ✓ |
-| Routes each claim to whatever method can settle it | | | | ✓ |
+| | Unit tests | Property-based testing | Symbolic execution (CrossHair) | Proof assistants and SMT solvers | mathema |
+|---|:-:|:-:|:-:|:-:|:-:|
+| Checks the examples you chose | ✓ | ✓ | | | ✓ |
+| Checks many generated inputs | | ✓ | ✓ | | ✓ |
+| Proves a claim over its whole domain | | | when every path is explored | ✓ | ✓ where the function lifts |
+| Works on ordinary Python, no separate specification language | ✓ | ✓ | ✓ | | ✓ |
+| Keeps a record bound to the exact code it verified | | | | ✓ | ✓ |
+| Routes each claim to whatever method can settle it | | | | | ✓ |
 
-None of these replaces the others, and mathema's probe route is the same idea
-as Hypothesis. What mathema adds is the place where a property check, a real
-proof attempt and a durable record meet on the same claim, with the claim
-routed automatically to whichever method the function's shape can support, and
-`skipped` reported plainly the moment none can.
+None of these replaces the others. mathema's probe route is the same idea as
+Hypothesis, CrossHair's symbolic execution is the nearest thing in Python to
+its derive route, and contract libraries such as icontract and deal check
+pre- and postconditions as the code runs, which complements a claim rather
+than competing with it. What mathema adds is the place where a property check,
+a real proof attempt and a durable record meet on the same claim, with the
+claim routed automatically to whichever method the function's shape can
+support, and `skipped` reported plainly the moment none can.
 
 ## Measuring a codebase
 
@@ -333,7 +342,7 @@ The full documentation, including the command reference, is at
 **[mathema.tetrionlabs.com](https://mathema.tetrionlabs.com)**.
 
 mathema is at 0.6.0 and pre-1.0, feature-complete for its current scope and
-covered by over 2,500 tests; the claim grammar and record format are settled by
+covered by over 3,200 tests; the claim grammar and record format are settled by
 the spec, but the Python API is likely to change before 1.0.
 
 ## Related projects

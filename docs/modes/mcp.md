@@ -70,8 +70,7 @@ column-oriented: `{"prefix": ..., "cols": [...], "rows": [[...],
 of every row, and `span` in the sed-ready `start:endp` form so the
 follow-up read is targeted; it is a ready-made `sed -n` range, not a
 line count. (`verify_project` separately returns `report`, the human
-prose; the two used to share the name `lines` and are not the same
-thing.) The caller names the columns it wants
+prose, which is a different thing.) The caller names the columns it wants
 (`cols`); the resolved selection is echoed back either way, and
 analyses no chosen column needs are never computed at all.
 

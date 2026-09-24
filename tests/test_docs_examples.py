@@ -260,3 +260,23 @@ def test_documented_api_signatures_match_the_real_ones():
             drift.append(f"{name}:\n      documented: ({params})\n      real:       ({real})")
     assert not drift, ("docs/modes/library.md documents a signature that no "
                        "longer matches:\n    " + "\n    ".join(drift))
+
+
+# --- runnable examples ------------------------------------------------------
+
+def test_the_cdd_workflow_example_runs_to_completion(tmp_path):
+    # `examples/README.md` presents cdd_workflow.py as runnable; a reader
+    # who runs it and gets a traceback stops trusting the rest. It writes
+    # its record beside itself, so it runs from a copy.
+    import shutil
+    import subprocess
+    import sys
+
+    repo = os.path.dirname(_DOCS)
+    script = tmp_path / "cdd_workflow.py"
+    shutil.copy(os.path.join(repo, "examples", "cdd_workflow.py"), script)
+    env = dict(os.environ, PYTHONPATH=repo)
+    r = subprocess.run([sys.executable, str(script)], cwd=str(tmp_path),
+                       capture_output=True, text=True, env=env, timeout=600)
+    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+    assert "All claims hold. Accept version 2." in r.stdout

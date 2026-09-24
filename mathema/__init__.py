@@ -19,21 +19,21 @@ coverage; derive is strictly stronger evidence where it applies, not a
 replacement for probe. Every claim binds to the function's identity hashes
 so a later change is caught, not silently inherited.
 
-A bare string claim (as above) defaults to the probe route. To ask for a
-symbolic proof instead, build the claim with `route="derive"` and pass it
-in the same `claims=` list, `mathema.check()` accepts a pre-built claim
-object exactly as it accepts a string, so nothing else about the call
-changes:
+A bare string claim (as above) takes the `best` route: a symbolic proof
+is attempted first, and a claim the proof cannot decide falls through to
+probing, so the returned entry's `route` names the mechanism that settled
+it. To pin the route, build the claim with `route="derive"` or
+`route="probe"` and pass it in the same `claims=` list; `mathema.check()`
+accepts a pre-built claim object exactly as it accepts a string, so
+nothing else about the call changes:
 
     r = mathema.check(my_function,
                       claims=[mathema.claims.claim("f(-x) == -f(x)", route="derive")])
 
-A `proven`/`falsified` verdict on that entry means the derive route
-actually decided it (never sampled); `unknown` means it could not,
-covering both a genuinely unliftable function and one it could lift but
-the claim itself stayed undecided. `Probe.meta["mathema.derive_status"]`
-on the returned entry ("unliftable" vs. "undecided") tells the two
-apart programmatically,
+A `proven` verdict routed `derive` means the proof decided it, never
+sampling. When the proof cannot decide, the claim still falls through to
+probing, and `Probe.meta["mathema.derive_status"]` on the returned entry
+("unliftable" vs. "undecided") records why the proof stopped;
 see authoring.md's own claim-grammar section for the full grammar
 (`d(...)`/`lim(...)`/`integrate(...)`/`Sum(...)`, domain quantifiers,
 `raises(...)`) `route="derive"` understands. `mathema.claims` is this same

@@ -861,8 +861,12 @@ than being asserted.
 
 ## What's not built at all
 
-**A real matrix/vector type**, and everything downstream of that
-(general time-series recurrences, most of linear algebra).
+**Lifting a function body over a matrix or vector parameter**, and
+everything downstream of that (general time-series recurrences, most
+of linear algebra inside a body). Matrices themselves are partly
+supported: structure predicates and linear-algebra identities prove,
+and probing samples matrices by shape and structure, see
+[Matrix structure](matrix-structure.md).
 The dot-product/general-sum machinery above is
 narrow by design, not a first step toward this, and neither is "Local
 symbolic arrays" below: a function whose *parameter* is a sequence and

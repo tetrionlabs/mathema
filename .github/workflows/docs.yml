@@ -44,9 +44,14 @@ jobs:
       - uses: astral-sh/setup-uv@v4
 
       - name: Build the site (strict)
+        env:
+          LEGAL_FOOTER: ${{ vars.DOCS_LEGAL_FOOTER }}
         run: |
           uv venv
           uv pip install -e ".[docs]"
+          # an unset repository variable expands to an empty string, which
+          # mkdocs would render as an empty footer rather than the fallback
+          if [ -n "$LEGAL_FOOTER" ]; then export DOCS_LEGAL_FOOTER="$LEGAL_FOOTER"; fi
           uv run mkdocs build --strict
 
       - name: Deploy to Cloudflare Workers static assets

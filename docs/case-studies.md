@@ -162,6 +162,9 @@ claim can rest on another through an `assuming` premise, and then the
 evidence composes:
 
 ```python
+from mathema.claims import check_conjectures, claim
+from mathema.lexicon import logistic_standard
+
 check_conjectures(logistic_standard, [
     claim("for x in [-30, 30], f(x) > 0", name="positive", route="derive"),
     claim("assuming positive is proven, for x in [-30, 30], f(x)*(1 - f(x)) >= 0",

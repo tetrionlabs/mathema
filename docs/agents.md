@@ -5,6 +5,13 @@ section is for people who pair with a coding agent (Claude Code, Cursor and
 the like) and want the agent to use mathema without being able to decide on
 its own what counts as correct.
 
+The division of labour is simple to state: agents propose, mathema
+adjudicates, people accept. An agent can write claims, run checks and read
+every verdict and counterexample, which is most of the loop, but no verdict
+ever comes from the agent, and no decision about what a verdict means for the
+project is the agent's to make. That is what lets you hand an agent the
+keyboard without handing it the definition of correct.
+
 ## What an agent can and cannot do
 
 | An agent can | Only a person can |
@@ -37,7 +44,10 @@ subprocess, which is how an agent runs commands, and `--yes` skips the y/N
 prompt but never the PIN. It is stored salted and hashed in
 `~/.config/mathema/auth.yaml`, outside the project, and every acceptance made
 with it carries its key id in the record. Without a PIN, `mathema accept
---yes` works for anyone with a shell, an agent included.
+--yes` works for anyone with a shell, an agent included. The name on an
+acceptance (`--by`, which defaults to your git `user.name`) is free text for
+the same reason, so when it matters who decided, read the record's
+`verified_by` key id rather than the name.
 
 An agent with unrestricted shell access could still delete that file and set
 a PIN of its own. That changes the key id, so the defence is to commit a

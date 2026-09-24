@@ -13,16 +13,18 @@ The whole claim-driven loop end to end, with every LLM response
 hard-coded as a mock so the example is deterministic and offline: a
 human states an intent, a "model" writes a buggy implementation,
 claims are stated, falsifications catch the bug, the counterexamples
-feed the regeneration, and the second version is recorded as provably
-a different function.
+feed the regeneration, and the second version is recorded, with the
+counterexamples as the evidence that its behaviour differs.
 
 ## `ci/`, runnable, once adapted
 
 `github-actions.yml` and `gitlab-ci.yml` are working starting points
-for wiring `mathema check` into a pipeline, including the report
-formats each platform consumes (`--format github` for Actions
-annotations, `--format junit` for the GitLab test widget). Change the
-target names to your own package and they run as they are.
+for a pipeline: `mathema verify` as the gate over the committed store,
+`mathema review` for a pull request's claim-level delta, and the
+report formats each platform consumes from `mathema check`
+(`--format github` for Actions annotations, `--format junit` for the
+GitLab test widget). Change the target names to your own package and
+they run as they are. `mathema init --ci` scaffolds the gate alone.
 
 ## `claims/`, illustrative, NOT loadable
 

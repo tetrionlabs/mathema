@@ -7,7 +7,7 @@ at your own code owes you a straight answer about its own churn.
 ## Where mathema is today
 
 mathema is at **0.6.0 and pre-1.0**. It is feature-complete and
-heavily tested (over 2,000 tests), and the concepts are settled. The
+heavily tested (over 3,200 tests), and the concepts are settled. The
 Python API is **likely to change before 1.0**. That is the honest
 statement, not a formality: if you build on the library surface today,
 expect to make adjustments when 1.0 lands.
@@ -27,8 +27,9 @@ change to the spec and not a change to mathema. Every record stamps
 `lineage.CDD_spec_version` and carries a top-level `schema_version`,
 so a record always states the vocabulary it was adjudicated under.
 
-**The verdict vocabulary.** `proven`, `holds`, `falsified`, `skipped`
-and `unknown` mean what they mean. A verdict never silently changes
+**The verdict vocabulary.** `proven`, `holds`, `falsified`,
+`invalidated`, `unknown` and `skipped` mean what
+[Guarantees and limits](guarantees.md) says they mean. A verdict never silently changes
 meaning; new evidence strengths arrive as colon subroutes on the
 `route` field, which is documented as an open string.
 

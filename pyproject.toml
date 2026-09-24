@@ -49,7 +49,8 @@ Changelog = "https://github.com/tetrionlabs/mathema/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Documentation site tooling only, not needed to use mathema itself.
-docs = ["mkdocs>=1.6", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.25"]
+docs = ["mkdocs>=1.6", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.25",
+        "mkdocs-llmstxt>=0.2"]
 # numpy is not a runtime dependency of mathema itself; installed, it
 # turns on the array fast paths (matrix structure checks, array-shaped
 # parameter synthesis) and is exercised unconditionally by the tests.

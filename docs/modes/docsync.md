@@ -31,8 +31,8 @@ mathema docsync [mypkg ...] [--root .] [--yes] [--write-docstrings] [--report] [
   (`∀ x ∈ [0.0, 5.0] ⊂ ℝ ∪ {∅}`), grammar output round-trips, so
   that one string IS the canonical region form, and repopulation
   parses it back. Records carry the git commit at adjudication and
-  an integrity checksum over each claim's statement, verdict and
-  acceptance, and over the retirement rows; a hand-edit is
+  an [integrity checksum](../governance.md#the-integrity-checksum);
+  a hand-edit is
   reported as "altered outside mathema" (an acceptance write is
   mathema's own hand and restamps). Concepts are the one deliberate
   exception to append-only: recomputed fresh each run, since tags
@@ -83,14 +83,14 @@ appends verified-but-unlisted claim names (with canonical statements)
 to an EXISTING `Claims:` block; it never creates a block and never
 rewrites a human's prose; the claim NAMES are the keys, the statement
 text in a docstring is free for humans to rephrase (the docstring is
-not the record). `--write` (from the original docsync) offers a
+not the record). `--write` offers a
 generated docstring for functions that have none, prompted per
 function. `--report` prints the per-function sync checklist.
 
 ## The score
 
-The audit `docsync` column (an ordinary analysis now, in the grid by
-default, `--exclude docsync` to skip) measures the docstring against
+The audit `docsync` column (in the grid by default, `--exclude docsync`
+to skip) measures the docstring against
 the OTHER layers, not just itself: Intent/Claims/symbol coverage,
 intent conciseness, intent-in-sync with the declared layer,
 Claims-block-in-sync (names known, zero conflicts), raises coverage

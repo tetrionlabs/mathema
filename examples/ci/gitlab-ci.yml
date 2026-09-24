@@ -1,13 +1,29 @@
-# .gitlab-ci.yml fragment: junit output surfaces claims in the MR test widget
+# .gitlab-ci.yml fragment: the verify gate over the committed .mathema/
+# store, the merge request's claim-level delta as an artifact, and
+# junit output that surfaces claims in the MR test widget.
 mathema-claims:
   image: python:3.12
+  variables:
+    GIT_DEPTH: 0            # review compares against the target branch
   script:
-    - pip install mathema
-    - mathema check src/models.py --format junit --output claims-junit.xml --strict
+    # your project must import for its claims to adjudicate; adjust
+    # the install line to however your project installs
+    - pip install -e . mathema
+    # the gate: strict by default, exit 1 on a gate failure, 2 on a
+    # broken invocation or store
+    - mathema verify
+  after_script:
+    - |
+      if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
+        mathema review "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --format json --output review.json
+      fi
+    # reporting only: a direct check of one module for the test widget
+    - mathema check src/models.py --format junit --output claims-junit.xml
     - mathema check src/models.py --format json --output claim-coverage.json
   artifacts:
     when: always
     reports:
       junit: claims-junit.xml
     paths:
+      - review.json
       - claim-coverage.json

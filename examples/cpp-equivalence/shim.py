@@ -5,7 +5,7 @@ and a thin ctypes shim over the compiled C++ one.
 
 Build the library first (see README.md), then:
 
-    python -c "from shim import run; run()"
+    python shim.py
 """
 import ctypes
 import os
@@ -34,7 +34,7 @@ def ema(x: list, alpha: float) -> float:
 
 
 def run() -> None:
-    from mathema.conjecture import check_conjectures, claim
+    from mathema.claims import check_conjectures, claim
     (p,) = check_conjectures(ema, [claim("f =:= g",
                                          funcs={"g": ema_cpp})])
     print(f"verdict: {p.verdict}  route: {p.route}")

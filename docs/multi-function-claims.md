@@ -58,7 +58,10 @@ f equiv g
 ```
 
 The equivalence relation asks whether two implementations are the same
-mathematics, and climbs a ladder:
+mathematics, which is the question behind every rewrite, refactor and
+port: an agent's new version against the one it replaces, a C++ or
+TypeScript implementation against the Python reference. It climbs a
+ladder, strongest rung first, and each rung may decline:
 
 1. **Identical canonical form.** Both functions lift to the same
    alpha-renamed shape, and the claim is proven by the form hash
@@ -67,8 +70,17 @@ mathematics, and climbs a ladder:
    subtract to zero under the declared domain. A symbolic
    falsification here must reproduce code-versus-code before it
    stands, like every other disproof.
-3. **Code-versus-code sampling.** Both real functions executed on
-   shared draws. Evidence ceiling `holds`: sampling never proves.
+3. **Closed forms.** Where both bodies provably never raise, their
+   closed forms are compared directly.
+4. **Code-versus-code sampling.** Both real functions run on the same
+   96 seeded draws from the declared domain, and at least 24 of them
+   must agree before the verdict is `holds`. Two results agree within
+   the claim's own [tolerance](grammar.md#how-close-counts-as-equal),
+   so an equivalence between a float and a fixed-point implementation
+   is stated, not guessed. A draw where either side raises, returns a
+   non-finite value, or returns something non-numeric is not compared,
+   and every such draw is counted in the record rather than dropped.
+   Evidence ceiling `holds`: sampling never proves.
 
 The record annotates both sides' structural complexity, so an
 equivalence between a one-liner and a loop reads as what it is.
@@ -76,7 +88,10 @@ equivalence between a one-liner and a loop reads as what it is.
 ## Another language on the other side
 
 What an equivalence licenses, and what it never does, is the subject
-of [Claims transfer](claims-transfer.md).
+of [Claims transfer](claims-transfer.md). How an implementation in
+another language is reached is a [target resolver](extending.md#target-resolvers),
+an extension point that maps a key such as `cpp:` or `ts:` to a
+callable.
 
 Because `g` may be any callable, the other implementation need not be
 Python: `examples/cpp-equivalence/` checks a C++ `ema` (reached

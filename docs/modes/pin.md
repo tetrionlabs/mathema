@@ -82,8 +82,7 @@ agent with unrestricted shell could delete the credential file or edit
 mathema itself; what it cannot do is produce a valid `verified_by`
 stamp in the normal course of work, and every subversion leaves a
 visible trace: a missing credential, a key id mismatch, an integrity
-checksum failure (the checksum covers the acceptance block and every
-retirement row). Calibrate
+checksum failure (see [what the checksum covers](../governance.md#the-integrity-checksum)). Calibrate
 trust accordingly, the same way the evidence ladder asks you to.
 
 ## Project policy

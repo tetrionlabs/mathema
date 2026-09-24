@@ -664,7 +664,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        f"nothing was adjudicated or written for this key. "
                        f"Repair it (after a merge, keep every discoveries, "
                        f"historical and superseded row from both sides), "
-                       f"or restore it with `git checkout -- {src}`, and "
+                       f"or restore it with `git restore {src}`, and "
                        f"re-run verify")
             out.keys.append({"key": key, "why": "unreadable-record",
                              "passed": False,

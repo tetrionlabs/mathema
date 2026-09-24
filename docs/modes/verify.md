@@ -32,9 +32,8 @@ names no record fails as a clear per-key problem line, exit 2.
 | `--output FILE` | write the report to a file instead of stdout |
 
 Store keys are canonical dotted `module.qualname` names, resolved by
-importing from `--root`; the target must be importable there (the
-old `--target` file preload and its bare-name key fallback are gone;
-a bare-name key now fails as a clear per-key problem line).
+importing from `--root`; the target must be importable there, and a
+bare-name key fails as a clear per-key problem line.
 
 ## What fails the run
 
@@ -144,8 +143,7 @@ See [`mathema accept`](accept.md).
 
 ## `--status`: the fresh/stale report
 
-`mathema verify --status` is the report-only face (the old standalone
-`status` verb): one fresh/stale line per `@mathema.track_claims`-tagged
+`mathema verify --status` is the report-only face: one fresh/stale line per `@mathema.track_claims`-tagged
 function, no adjudication, always exit 0. "Fresh" means the function's
 current identity hash matches its last verified record; "stale" means
 it changed since. Pass a target (`mathema verify --status pkg.mod` or
