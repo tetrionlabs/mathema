@@ -154,7 +154,7 @@ its in-repo path, no external hosting:
 ```
 
 The shields.io JSON files serve the same badges through shields' endpoint
-renderer, referenced by their raw URL, when separate coloured pills are
+renderer, referenced by their raw URL, when separate pills are
 wanted instead of the one triangle.
 
 ## Artifacts (`--out [DIR]`)
@@ -172,12 +172,13 @@ score means.
 
 - `triangle.txt`, the ASCII triangle: the git-diffable canonical artifact.
 - `implementation.json` / `intent.json` / `clarity.json`, shields.io
-  endpoint badges (distinct colors) a README references by raw URL.
-- `triangle.svg`, a colored radar twin with the same layout. Its fill is
-  the three scores AS a colour: red is intent, green is clarity, blue is
-  implementation, each mapped onto 0-255, so all-high reads near white,
-  all-low near black, and a lopsided profile takes the colour of its
-  strongest layer.
+  endpoint badges in the Tetrion Labs colours (an ink label, a deep green
+  value) a README references by raw URL.
+- `triangle.svg`, a dark-card twin of the ASCII triangle with the same
+  layout: the dashed `100/100/100` frame, each score a vertex on its
+  spoke, the triangle they span filled in the accent green, and the
+  overall number in the top right. It carries its own background and needs
+  no external fonts, so it reads the same on a light or a dark README.
 - `snapshot.json`, the numbers (implementation, intent, clarity, overall,
   plus `clarity_algo` and the per-function rows), for CI to compute and
   comment the area delta between commits.

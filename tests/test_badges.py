@@ -6,10 +6,12 @@ falsified claim counts). Repo roll-up weights intent + clarity by
 centrality; the overall number is the radar-triangle area. Plus the
 git-diffable render and the four emitters."""
 import json
+import re
 
-from mathema.badges import (BadgeScores, clarity_score, render_svg,
-                            ci_snapshot, render_triangle, repo_badges,
-                            shields_payloads, triangle_area, write_badges)
+from mathema.badges import (_SVG_PALETTE, BadgeScores, clarity_score,
+                            render_svg, ci_snapshot, render_triangle,
+                            repo_badges, shields_payloads, triangle_area,
+                            write_badges)
 
 
 def _load(tmp_path, name, source):
@@ -111,7 +113,8 @@ def test_shields_payloads_are_four_distinct_badges():
     sc = BadgeScores(88, 71, 52, 48)
     sp = shields_payloads(sc)
     assert set(sp) == {"implementation", "intent", "clarity"}
-    assert sp["implementation"]["color"] == "#1f6feb"
+    assert sp["implementation"]["color"] == "#0E7A47"
+    assert all(p["labelColor"] == "#1A1714" for p in sp.values())
     assert sp["clarity"]["label"] == "clarity"
     assert all(p["schemaVersion"] == 1 for p in sp.values())
 
@@ -122,7 +125,10 @@ def test_svg_and_snapshot_and_file_emission(tmp_path):
                                              "intent": 71, "clarity": 52}})
     svg = render_svg(sc)
     assert svg.startswith("<svg") and svg.rstrip().endswith("</svg>")
-    assert all(c in svg for c in ("#1f6feb", "#2da44e", "#8250df"))
+    assert "#3ECF8E" in svg and 'fill="#1A1714"' in svg
+    # every colour in the card comes from the Tetrion Labs palette
+    assert set(re.findall(r"#[0-9A-Fa-f]{6}", svg)) <= _SVG_PALETTE
+    assert ">48%</text>" in svg
     snap = ci_snapshot(sc)
     assert snap["overall"] == 48 and "pkg.f" in snap["per_function"]
     written, pruned = write_badges(sc, str(tmp_path / "out"))
