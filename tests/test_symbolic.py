@@ -1927,9 +1927,13 @@ def compound_balance_non_affine_update(P: float, r: float, n: float) -> float:
 
 def test_arithmetic_series_sum_matches_gauss_formula():
     # Gauss's formula: no sequence parameter at all, lift_sum()'s own
-    # scalar_index shape, a pure-additive accumulator.
+    # scalar_index shape, a pure-additive accumulator. The trip count
+    # ranges over whole, nonnegative numbers: range() raises TypeError
+    # for a float and is empty for a negative count.
     results = check_conjectures(
-        arithmetic_series_sum, [claim("f(a1, d, n) == n*(2*a1 + (n-1)*d)/2", route="derive")])
+        arithmetic_series_sum, [claim(
+            "for n in [0, 50] subset Z, f(a1, d, n) == n*(2*a1 + (n-1)*d)/2",
+            route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1952,7 +1956,8 @@ def test_compound_balance_matches_compound_interest_formula():
     # a genuine fold (coeff_acc = 1+r != 1), no sequence parameter at
     # all, lift_fold()'s own no-sequence shape.
     results = check_conjectures(
-        compound_balance, [claim("f(P, r, n) == P*(1+r)**n", route="derive")])
+        compound_balance, [claim("for n in [0, 50] subset Z, f(P, r, n) == P*(1+r)**n",
+                                 route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1961,7 +1966,8 @@ def test_compound_balance_affine_trip_count_proves():
     # bare name (range(n + 1), not just range(n)).
     results = check_conjectures(
         compound_balance_affine_trip_count,
-        [claim("f(P, r, n) == P*(1+r)**(n+1)", route="derive")])
+        [claim("for n in [-1, 50] subset Z, f(P, r, n) == P*(1+r)**(n+1)",
+               route="derive")])
     assert results[0].verdict == "proven"
 
 

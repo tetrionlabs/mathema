@@ -264,6 +264,18 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
         _guards_in_expr(child, env, path_cond, out, scope, missed, int_syms)
 
 
+def _integer_bound(bound) -> bool:
+    """Whether a declared bound admits only integers (`subset Z`): a
+    parameter there is called with an int, whatever its annotation."""
+    if bound is None:
+        return False
+    from ..domain import bound_assumptions
+    try:
+        return bool((bound_assumptions(bound) or {}).get("integer"))
+    except Exception:
+        return False
+
+
 def partiality_guards(fn, facts) -> list:
     """The implicit raise regions of `fn`'s body; see partiality_walk."""
     return partiality_walk(fn, facts)[0]
@@ -302,7 +314,8 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
     unmodified = _unmodified_params(facts.tree, set(facts.params or ()))
     kinds = getattr(facts, "param_kinds", None) or {}
     int_syms = frozenset(sym for name, sym in params.items()
-                         if kinds.get(name) == "int"
+                         if (kinds.get(name) == "int"
+                             or _integer_bound((domain or {}).get(name)))
                          and isinstance(sym, sympy.Symbol))
 
     scope = dict(getattr(fn, "__globals__", None) or {})
@@ -478,6 +491,29 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
                 # positivity condition rides on it (range(n) needs
                 # n >= 1). A header this can't read collects nothing.
                 body_cond = None
+                if (isinstance(stmt.iter, ast.Call)
+                        and isinstance(stmt.iter.func, ast.Name)
+                        and stmt.iter.func.id == "range"
+                        and scope.get("range", range) is range
+                        and not stmt.iter.keywords):
+                    # range() of a non-integer raises TypeError
+                    for arg in stmt.iter.args:
+                        _guards_in_expr(arg, env, path_cond, guards, scope,
+                                        missed, int_syms)
+                        try:
+                            bound_arg = _expr_to_sympy(arg, dict(env))
+                        except NotSymbolic:
+                            bound_arg = None
+                        if bound_arg is None or isinstance(bound_arg, tuple):
+                            missed.append(f"line {stmt.lineno}: range "
+                                          f"argument")
+                            continue
+                        if bound_arg.free_symbols \
+                                and not bound_arg.free_symbols <= int_syms:
+                            guards.append((sympy.And(
+                                path_cond,
+                                sympy.Ne(bound_arg, sympy.floor(bound_arg))),
+                                "TypeError"))
                 if (isinstance(stmt.iter, ast.Call)
                         and isinstance(stmt.iter.func, ast.Name)
                         and stmt.iter.func.id == "range"

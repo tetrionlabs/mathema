@@ -1892,6 +1892,36 @@ def _tighten_domain_by_assumption(domain: dict, params: dict, assumption) -> dic
         tightened[name] = Interval(lo, hi, closed_lo, closed_hi)
     return tightened
 
+def _loop_proof_raise_gate(fn, facts, domain, proof: ProofResult) -> ProofResult:
+    """Intent:
+        A loop-shape proof, kept only when every implicit raise region
+        the raise-region walk found (a non-integer `range()` argument,
+        a division) provably misses the declared domain; otherwise the
+        proof becomes undecided, since the closed form is silent about
+        the points where the code raises.
+    """
+    from ._fold import _cond_truth_over
+    from ._partiality import partiality_walk
+    try:
+        guards, _unread = partiality_walk(fn, facts, domain or {})
+    except TimeoutError:
+        raise
+    except Exception:
+        return proof
+    for cond, exc in guards:
+        if _cond_truth_over(cond, domain or {}) is True:
+            continue
+        return ProofResult(
+            "undecided",
+            sketch=f"{proof.sketch}; not kept as a proof: the code may "
+                   f"raise {exc} inside the declared domain (where "
+                   f"{_cond_text(cond)}), narrow the domain to where every "
+                   f"call returns, or state the raising region as its own "
+                   f"raises(...) claim",
+            meta=dict(proof.meta))
+    return proof
+
+
 def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
              domain: dict | None = None, tolerance: float | None = None,
              max_callee_depth: int = 3, extensive: bool = False,
@@ -2218,6 +2248,9 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             lifted = coupled
         else:
             seq_result = _loop_shape_result()
+            if seq_result.status == "proven":
+                seq_result = _loop_proof_raise_gate(fn, facts, domain,
+                                                    seq_result)
             if seq_result.status not in ("unliftable", "undecided") \
                     or not facts.branch_count:
                 return seq_result

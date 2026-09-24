@@ -145,6 +145,10 @@ def _recognize_sum_piece(acc_name: str, stmt: ast.AST, env: dict, length_syms: d
                                      seq_ibs, seq_params, opaque)
         if inner is None:
             return None
+        if kind == "scalar_index":
+            # range(n) runs max(n, 0) times: a sum up to n - 1 with
+            # n < 0 would follow the reversed-range convention instead
+            length = sympy.Max(length, 0)
         return sympy.Sum(inner, (idx_sym, 0, length - 1))
     if isinstance(stmt, ast.If) and len(stmt.body) == 1 \
             and len(stmt.orelse) <= 1:
