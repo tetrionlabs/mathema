@@ -514,6 +514,36 @@ def _sample_bare_named_set(rng: random.Random, name: str):
     return rng.uniform(-10, 10)   # "R"
 
 
+def _integer_range(piece, base_type: str) -> "tuple[int, int]":
+    """Intent:
+        The first and last integers an interval piece admits, an open
+        end excluding its endpoint and a fractional end rounding inward
+        (`(0, 5]` gives 1..5, `[0.5, 5]` gives 1..5), with an unbounded
+        side capped the way `_finite_bounds` caps a real one. `first >
+        last` when no integer lies inside.
+    """
+    from .domain import _integer_span
+    first, last = _integer_span(piece, base_type)
+    flo, fhi = _finite_bounds(float(piece[0]), float(piece[1]))
+    if math.isinf(first):
+        first = math.ceil(flo)
+    if math.isinf(last):
+        last = math.floor(fhi)
+    return int(first), int(last)
+
+
+def _synth_int_in(rng: random.Random, piece, base_type: str) -> int:
+    """Intent:
+        One uniformly drawn integer inside an interval piece (see
+        `_integer_range`). A piece holding no integer gives its first
+        candidate, which the probe's own domain check then rejects.
+    """
+    first, last = _integer_range(piece, base_type)
+    if first > last:
+        return first
+    return rng.randint(first, last)
+
+
 def _sample_domain(rng: random.Random, dom: Domain,
                    specials: "_SpecialCycle | None" = None):
     """Sample one value from a `Domain` (grammar.py's exclusion/union/
@@ -550,9 +580,14 @@ def _sample_domain(rng: random.Random, dom: Domain,
         elif isinstance(piece, tuple):
             value = _synth_scalar(rng, piece, specials=specials)
             if dom.base_type in ("Z", "N"):
-                value = int(round(value))
-                if dom.base_type == "N":
-                    value = abs(value)
+                # rounded, then held inside the piece's own integers,
+                # so a draw just inside an open or fractional end never
+                # rounds onto a point outside the domain; an infinite
+                # draw is no integer, and stands for the capped end
+                first, last = _integer_range(piece, dom.base_type)
+                if not math.isfinite(value):
+                    value = last if value > 0 else first
+                value = min(max(int(round(value)), first), max(first, last))
         else:
             value = _sample_bare_named_set(rng, piece)
         if value not in dom.excluded:
@@ -654,8 +689,7 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         return rng.random() < 0.5
     if kind == "int":
         if bounds is not None:
-            lo, hi = _finite_bounds(*bounds)
-            return rng.randint(int(lo), int(hi))
+            return _synth_int_in(rng, bounds, "Z")
         return rng.choice([0, 1, 2]) if rng.random() < 0.3 else rng.randint(0, 10)
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
 

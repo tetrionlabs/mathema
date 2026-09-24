@@ -29,6 +29,7 @@ import math
 import operator as _operator
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from dataclasses import replace as _dc_replace
 
@@ -192,6 +193,33 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
     if not choices or total > _MAX_CORNERS:
         return []
     return [list(combo) for combo in itertools.product(*choices)]
+
+
+def _sample_in_domain(value, bound) -> bool:
+    """Intent:
+        Whether one sampled scalar lies inside its parameter's declared
+        bound, for the probe route's per-trial check. Only a real number
+        is judged here: a sequence, mapping, string or complex value
+        has its own sampler, and a missing value is the missing-value
+        policy's to decide. A whole float counts as the integer it
+        equals, and an infinity is inside exactly when the bound is
+        unbounded in its direction.
+    """
+    from .domain import domain_contains
+    if bound is None or isinstance(value, bool) \
+            or not isinstance(value, (int, float)) or value != value:
+        return True
+    try:
+        if math.isinf(value):
+            far = math.copysign(sys.float_info.max, value)
+            return bool(domain_contains(far, bound)
+                        or domain_contains(int(far), bound))
+        if domain_contains(value, bound):
+            return True
+        return (isinstance(value, float) and value.is_integer()
+                and bool(domain_contains(int(value), bound)))
+    except Exception:
+        return True
 
 
 def _pinned_arg_sets(cj, arity: int) -> list:
@@ -2609,7 +2637,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # canonical set (prover, records, and comparisons all use it); the
     # declared text stays the author's, and the collapse is rendered
     # here explicitly, never silently
-    from .domain import canonical_bound, render_domain_bound
+    from .domain import bound_is_empty, canonical_bound, render_domain_bound
     for p, b in list(cj_domain.items()):
         canonical, declared_text = canonical_bound(b)
         if declared_text is not None:
@@ -2633,6 +2661,13 @@ def _validate_claim(cj, statement: str, note: str, facts,
                          f"is empty (the lower bound exceeds the upper), so "
                          f"every claim over it is vacuously true; state the "
                          f"intended bounds")
+        if bound_is_empty(b):
+            return Probe(
+                cj.name, statement, "skipped:misspecified", route=None,
+                note=f"{note}; {p}'s declared domain "
+                     f"{render_domain_bound(b)} is empty (no value lies "
+                     f"inside it), so every claim over it is vacuously "
+                     f"true; state the intended bounds")
     free_var_collisions = sorted(set(cj.free_vars) & set(facts.params))
     if free_var_collisions:
         # `let name be bounds` (a free variable, no real parameter to
@@ -3765,6 +3800,13 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 env[a_name] = _synth("float", rng, cj_domain[a_name], specials=specials)
             else:
                 env[a_name] = rng.uniform(-5, 5)
+        if not all(_sample_in_domain(env[p], cj_domain.get(p))
+                   for p in [*kinds, *aux] if p in env and p not in literal_args):
+            # a point outside the declared domain says nothing about the
+            # claim: a recorded counterexample from a wider domain, or a
+            # draw that rounded past an open or fractional end, is
+            # rejected before the function is called
+            continue
         if assum_solved is not None and trial >= len(pinned):
             # place the sample exactly on the assumed equality surface:
             # the solved-out coordinate is computed from the others,
