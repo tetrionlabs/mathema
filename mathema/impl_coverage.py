@@ -325,11 +325,17 @@ def regenerate_test_coverage(root: str, test_command: str | None = None) -> bool
     the reclaim path: afterwards the test source is current and counts
     toward the score. Needs coverage.py installed (to run `coverage
     run`), so returns False when it is absent, when no test command is
-    known, or when the run itself fails. The command defaults to
+    known, or when no fresh report results. The command defaults to
     `inventory.suggest_coverage_command` (a pytest project), else a
-    plain `coverage run -m pytest` + `coverage json`."""
+    plain `coverage run -m pytest` + `coverage json`.
+
+    Success is a `coverage.json` newer than the run's start, not the
+    command's exit status: a failing test still leaves the lines every
+    other test executed. When the command leaves only a `.coverage` data
+    file, it is exported to `coverage.json` here."""
     import importlib.util
     import subprocess
+    import time
 
     if importlib.util.find_spec("coverage") is None:
         return False
@@ -341,13 +347,24 @@ def regenerate_test_coverage(root: str, test_command: str | None = None) -> bool
             # coverage is present (checked above); drop any install prefix
             cmd = cmd.split("&&", 1)[-1].strip()
     if not cmd:
-        cmd = "python -m coverage run -m pytest && python -m coverage json"
+        cmd = "python -m coverage run -m pytest; python -m coverage json"
+    json_path = os.path.join(root, "coverage.json")
+    data_path = os.path.join(root, ".coverage")
+    started = time.time()
+
+    def _fresh(path: str) -> bool:
+        return os.path.exists(path) and os.path.getmtime(path) >= started - 1
+
     try:
-        proc = subprocess.run(cmd, shell=True, cwd=root,
-                              capture_output=True, text=True)
+        subprocess.run(cmd, shell=True, cwd=root,
+                       capture_output=True, text=True)
+        if not _fresh(json_path) and _fresh(data_path):
+            subprocess.run([sys.executable, "-m", "coverage", "json",
+                            "-o", json_path], cwd=root,
+                           capture_output=True, text=True)
     except Exception:
         return False
-    return proc.returncode == 0
+    return _fresh(json_path)
 
 
 def project_coverage(targets, root: str = ".", run_tests: bool = False,

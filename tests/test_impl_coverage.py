@@ -206,6 +206,27 @@ def test_regenerate_reports_failure_without_coverage(monkeypatch):
     assert ic.regenerate_test_coverage(".") is False
 
 
+def test_regenerate_keeps_the_report_when_a_test_fails(tmp_path):
+    # a failing test still leaves executed-line data behind; the report is
+    # exported from it and counts as regenerated, whatever the exit status.
+    import sys
+
+    import mathema.impl_coverage as ic
+    (tmp_path / "m.py").write_text("def f(x):\n    return x + 1\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_m.py").write_text(
+        "import sys, os\n"
+        "sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))\n"
+        "from m import f\n"
+        "def test_passes():\n    assert f(1) == 2\n"
+        "def test_fails():\n    assert f(1) == 3\n")
+    cmd = (f"{sys.executable} -m coverage run -m pytest -q "
+           "-p no:cacheprovider -p no:xdist tests")
+    assert ic.regenerate_test_coverage(str(tmp_path), cmd) is True
+    assert (tmp_path / "coverage.json").exists()
+
+
 def test_derive_coverage_uses_per_branch_attribution(tmp_path):
     # a domain-restricted proof records the lines it covers (excluding
     # the branch its domain prunes) in the probe meta; the coverage pass

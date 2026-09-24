@@ -707,7 +707,9 @@ def suggest_coverage_command(root: str = ".") -> str | None:
     read_test_coverage() already knows how to read, never runs it,
     only detects whether suggesting it makes sense. `None` if nothing
     pytest-shaped is found, no guess is better than a wrong one for a
-    project that uses something else entirely.
+    project that uses something else entirely. The export runs whatever
+    the test run's exit status: a failing test still leaves the lines
+    every other test executed.
 
     Uses `python -m coverage`/`python -m pytest`, not the bare `coverage`/
     `pytest` console scripts; those aren't guaranteed to be on PATH even
@@ -735,7 +737,7 @@ def suggest_coverage_command(root: str = ".") -> str | None:
                 break
     if not pytest_shaped:
         return None
-    cmd = "python -m coverage run -m pytest && python -m coverage json"
+    cmd = "python -m coverage run -m pytest; python -m coverage json"
     if importlib.util.find_spec("coverage") is None:
         cmd = "pip install coverage && " + cmd
     return cmd

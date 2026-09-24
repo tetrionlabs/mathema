@@ -351,6 +351,17 @@ def test_suggest_coverage_command_no_install_prefix_when_already_importable(tmp_
     assert not cmd.startswith("pip install")
 
 
+def test_suggest_coverage_command_exports_the_report_even_when_a_test_fails(tmp_path):
+    # `coverage json` must not be chained on the test run's success: one
+    # red test would otherwise leave no report at all, and the lines every
+    # passing test executed would be lost.
+    (tmp_path / "tests").mkdir()
+    cmd = suggest_coverage_command(str(tmp_path))
+    run_part, _, json_part = cmd.partition("python -m coverage run -m pytest")
+    assert "python -m coverage json" in json_part
+    assert "&&" not in json_part
+
+
 def fully_typed_fn(x: float, y: int) -> float:
     return x + y
 
