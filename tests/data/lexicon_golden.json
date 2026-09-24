@@ -39,6 +39,11 @@
   "unicode": "|f(x)| ≤ 1",
   "ascii": "|f(x)| <= 1"
  },
+ "abs_bars_compound": {
+  "input": "for x in [0, 1], y in [0, 1], |x + y - f(x, y)| <= ε",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x + y - f(x, y)) ≤ ε",
+  "ascii": "for x in [0.0, 1.0]:float|missing, y in [0.0, 1.0]:float|missing, abs(x + y - f(x, y)) <= \\epsilon"
+ },
  "factorial_postfix": {
   "input": "for n in [1, 5] subset Z, f(n) <= n!",
   "unicode": "∀ n ∈ [1, 5] ⊂ ℤ ∪ {∅}, f(n) ≤ factorial(n)",
@@ -233,6 +238,11 @@
   "input": "for A in R^(n*n), |A| >= 0",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, det(A) ≥ 0",
   "ascii": "for A in R^(n*n)|missing, det(A) >= 0"
+ },
+ "matrix_determinant_bars_compound": {
+  "input": "for A in R^(n*n), B in R^(n*n), |A @ B| == |A| * |B|",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, det(A @ B) = det(A)*det(B)",
+  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, det(A @ B) = det(A)*det(B)"
  },
  "inferred_literal_domain": {
   "input": "raises(f(50, 0), ValueError)",

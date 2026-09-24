@@ -16,11 +16,12 @@ unambiguous), a single `=` (or `≈`) means equality, `!=`/`≠` means
 inequality, common Unicode math symbols (≤ ≥ − · × π ∞) are accepted,
 and `|x|`/`||x||`/`⌊x⌋`/`⌈x⌉` mean `abs(x)`/`norm(x)`/`floor(x)`/`ceil(x)`
 (bitwise-or is not a whitelisted operator anywhere in the grammar, so
-`|` is otherwise unused). A bar-delimited quantity has to be a single
-name or one `f(x)`-shaped call; `let y = <expr> in |y| < 1` binds
-anything bigger to a short name first, so the bars themselves never
-have to parse a composite expression (and `||x||` never has to be told
-apart from nested `|x|`). `normalize()` maps any of these spellings to
+`|` is otherwise unused). Bars wrap any expression: a bar opens where
+an operand cannot end and closes where one can, so `|x + y - f(x)|`
+and `|x| + |y|` both read as written, and a pair whose content is
+exactly one further pair is a norm (`||x||`), while `||a| - |b||` is an
+absolute value of a difference. On a matrix expression the same bars
+are the determinant (see linalg.apply_matrix_sugar). `normalize()` maps any of these spellings to
 the one canonical Python-expression form the probe and derive routes
 both consume, so `f(x)^2 ≥ 0` and `f(x)**2 >= 0` are the same statement
 with the same identity.
@@ -473,24 +474,11 @@ def is_reserved(name: str) -> bool:
     that happens to share text with a recognized function."""
     return name in _RESERVED_CALL_NAMES
 
-# A bar-delimited quantity's content is restricted to a single token: a
-# bare name/number, one f(x)-shaped call, or one already-parenthesized
-# group. This is what makes `||x||` unambiguous, an *unrestricted*
-# |...| would let `||x||` parse either as one norm token or as nested
-# abs(abs(x)), the same characters two different ways. Anything bigger
-# than one token has to go through a `let` binding first (see _LET
-# below), which is exactly why the parenthesized-group alternative is
-# here: `_expand_let` substitutes a bound name with `(expr)`, so
-# `let y = a + b in |y| < 1` becomes `|(a + b)| < 1` before this regex
-# ever runs, and that parenthesized group is the one shape besides a
-# bare name/call that's still unambiguous (parens, unlike bars, aren't
-# reused for anything else). floor/ceil (⌊x⌋/⌈x⌉) get the same rule,
-# for the same reason.
+# The single-term shape the renderer writes between bars: a bare
+# name/number, one f(x)-shaped call, or one parenthesized group. Input
+# bars wrap any expression (see _fold_bars); rendering keeps bars for
+# one term and the `abs(...)` call spelling for anything bigger.
 _BAR_TOKEN = r"\w+(?:\([^|]*\))?|\([^|]*\)"
-_NORM_BARS = re.compile(rf"\|\|({_BAR_TOKEN})\|\|")
-_ABS_BARS = re.compile(rf"\|({_BAR_TOKEN})\|")
-_FLOOR_BARS = re.compile(rf"⌊({_BAR_TOKEN})⌋")
-_CEIL_BARS = re.compile(rf"⌈({_BAR_TOKEN})⌉")
 # `let name = expr, name2 = expr2, ... in rest`: textually binds each
 # name to `(expr)` inside `rest`, left to right within the group, so a
 # quantity too big for one bar-token can still go inside bars, e.g.
@@ -1817,20 +1805,106 @@ def _lim_direction(text: str) -> str:
         pos = call_end
 
 
-def _norm_bars(text: str) -> str:
-    return _NORM_BARS.sub(r"norm(\1)", text)
+# a bar is OPENING when what precedes it cannot end an operand: the
+# start of the text, an operator, an opening bracket, a comma, another
+# opening bar, or one of these words
+_BAR_OPENING_CHARS = frozenset("([{,+-*/^%=<>&@~:")
+_BAR_OPENING_WORDS = frozenset({"not", "and", "or", "in", "if", "else",
+                                "is", "return", "lambda"})
 
 
-def _abs_bars(text: str) -> str:
-    return _ABS_BARS.sub(r"abs(\1)", text)
+def _bar_pairs(text: str) -> "list[tuple[int, int]] | None":
+    """Intent:
+        The matched `|...|` pairs in `text` as (open, close) index
+        pairs, or None when the bars do not pair up.
+
+    Notes:
+        A bar opens when what precedes it cannot end an operand (see
+        `_BAR_OPENING_CHARS`/`_BAR_OPENING_WORDS`) and closes otherwise,
+        so `|x - |y||` and `|x| + |y|` both read the way they are
+        written.
+    """
+    stack: list = []
+    pairs: list = []
+    kinds: dict = {}
+    for i, ch in enumerate(text):
+        if ch != "|":
+            continue
+        j = i - 1
+        while j >= 0 and text[j] == " ":
+            j -= 1
+        if j < 0:
+            opening = True
+        elif text[j] == "|":
+            opening = kinds[j] == "open"
+        elif text[j] in _BAR_OPENING_CHARS:
+            opening = True
+        elif text[j].isalnum() or text[j] == "_":
+            k = j
+            while k >= 0 and (text[k].isalnum() or text[k] == "_"):
+                k -= 1
+            opening = text[k + 1:j + 1] in _BAR_OPENING_WORDS
+        else:
+            opening = False
+        if opening:
+            kinds[i] = "open"
+            stack.append(i)
+        else:
+            if not stack:
+                return None
+            kinds[i] = "close"
+            pairs.append((stack.pop(), i))
+    return None if stack else pairs
+
+
+def _fold_bars(text: str) -> str:
+    """`|expr|` -> `abs(expr)` for any expression between the bars, and
+    `||expr||` -> `norm(expr)`: a pair whose content is exactly one
+    further pair reads as a norm, so `||a| - |b||` (content not a
+    single pair) stays an absolute value of a difference. Text whose
+    bars do not pair up is returned unchanged for the claim parser to
+    refuse. A matrix operand turns `abs` into `det` later, by type."""
+    if "|" not in text:
+        return text
+    pairs = _bar_pairs(text)
+    if not pairs:
+        return text
+    close_of = dict(pairs)
+    replace: dict = {}
+    for o, c in pairs:
+        if o in replace:
+            continue
+        inner = close_of.get(o + 1)
+        if inner is not None and inner == c - 1:
+            replace[o], replace[c] = "norm(", ")"
+            replace[o + 1] = replace[c - 1] = ""
+        else:
+            replace[o], replace[c] = "abs(", ")"
+    return "".join(replace.get(i, ch) for i, ch in enumerate(text))
+
+
+def _fold_brackets(text: str, opening: str, closing: str, name: str) -> str:
+    """`⌊expr⌋` -> `floor(expr)` (and ceiling the same way) for any
+    expression, the opening and closing marks being distinct; text
+    whose marks do not balance is returned unchanged."""
+    if opening not in text:
+        return text
+    depth = 0
+    for ch in text:
+        depth += (ch == opening) - (ch == closing)
+        if depth < 0:
+            return text
+    if depth:
+        return text
+    return text.replace(opening, f"{name}(").replace(closing, ")")
 
 
 def _floor_bars(text: str) -> str:
-    return _FLOOR_BARS.sub(r"floor(\1)", text)
+    return _fold_brackets(text, "⌊", "⌋", "floor")
 
 
 def _ceil_bars(text: str) -> str:
-    return _CEIL_BARS.sub(r"ceil(\1)", text)
+    return _fold_brackets(text, "⌈", "⌉", "ceil")
 
 
 # normalize()'s pipeline as data: applied top to bottom, order
@@ -1919,8 +1993,7 @@ _NORMALIZE_PASSES: tuple = (
     _integral_word_to_call,
     _expand_integrate_at,
     apply_unicode_synonyms,
-    _norm_bars,
-    _abs_bars,
+    _fold_bars,
     _floor_bars,
     _ceil_bars,
     # after the bar sugars (so `|x|!` sees the already-folded
@@ -2661,10 +2734,10 @@ def _abs_calls_to_bars(text: str) -> str:
     Notes:
         A single bar term is what `_BAR_TOKEN` accepts: a name, a
         number, one call, or one parenthesised group, containing no
-        bar of its own. `|x - 1|` is not one, and the grammar rejects
-        it on input, so `abs(x - 1)` keeps the call spelling; every
-        string this returns folds back to the same `abs(...)` calls
-        under `_abs_bars`. The scan is by balanced parens
+        bar of its own. `|x - 1|` is not one, so `abs(x - 1)` keeps
+        the call spelling (the grammar reads `|x - 1|` on input too);
+        every string this returns folds back to the same `abs(...)`
+        calls under `_fold_bars`. The scan is by balanced parens
         (`_find_balanced_call`), since an argument can itself contain
         parens, and inner calls are rewritten first, so an outer
         argument holding an inner `|y|` keeps the call spelling too.

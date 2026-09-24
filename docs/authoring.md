@@ -19,9 +19,9 @@ raises(f(x), ValueError)            # partiality: asserts the call raises
 f(x) == g(x)                        # relate two implementations (funcs={"g": other_fn})
 ```
 
-Shorthand: `|x|`/`||x||`/`⌊x⌋`/`⌈x⌉` for `abs`/`norm`/`floor`/`ceil`;
-`!=`/`≈` as their own relations; `let y = a + b in |y| < 1` for
-composing an expression inside a bar. Every claim renders to LaTeX
+Shorthand: `|x|`/`||x||`/`⌊x⌋`/`⌈x⌉` for `abs`/`norm`/`floor`/`ceil`,
+each wrapping any expression, so `|x + y - f(x, y)|` is the absolute value
+of the whole difference; `!=`/`≈` as their own relations. Every claim renders to LaTeX
 exactly (`mathema.grammar.to_latex`), going *through* sympy so it's
 mathematically faithful, not typographically literal.
 

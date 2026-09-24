@@ -177,6 +177,7 @@ declared tolerance fails only where the two sides are exactly equal.
 |---|---|
 | `f(x)^2 >= 0` | powers with a caret |
 | <code>&#124;f(x)&#124; &lt;= 1</code> | absolute value with bars |
+| <code>for x in [0, 1], y in [0, 1], &#124;x + y - f(x, y)&#124; &lt;= ε</code> | bars around any expression; on matrices, the determinant |
 | `for n in [1, 5] subset Z, f(n) <= n!` | postfix factorial |
 | `f(x, 1.0) == x[-1]` | indexing into a sequence parameter |
 | `f(\alpha) ≤ 1` | a Greek name written as a LaTeX escape |

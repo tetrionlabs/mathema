@@ -679,17 +679,14 @@ def claim(law: str, name: str | None = None, source: str = "user",
         lhs, rel, rhs = links[0]
         if len(links) == 1:
             links = []
-    # a residual `|` is an abs/norm bar the grammar could not fold: a bar
-    # wraps a single term, so a compound quantity (`|A @ B|`, `|x + y|`)
-    # never folds, and left in place it reaches rendering as unparseable
-    # text. Reject it here, naming the spelling that works, rather than
-    # let it surface as an opaque error downstream.
+    # a residual `|` is a bar the grammar could not pair with another,
+    # and left in place it reaches rendering as unparseable text
     for _side in (lhs, rhs):
         if _side and "|" in _side:
             raise InvalidConjecture(
-                f"a bar-delimited quantity wraps a single term, but {_side!r} "
-                f"is compound. Write det(...) for a matrix determinant, "
-                f"abs(...) for an absolute value, or norm(...) for a norm.")
+                f"the bars in {_side!r} do not pair up. Each opening bar "
+                f"needs a closing one; abs(...), norm(...) and det(...) "
+                f"are the call spellings of the same quantities.")
     # type-aware matrix sugar: `A^T` -> `A.T`, `|A|` -> `det(A)`,
     # `A^-1` -> `inv(A)`, but only for names known to be matrices, from
     # this claim's own domain or supplied by a caller holding the

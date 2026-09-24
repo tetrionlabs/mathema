@@ -47,6 +47,8 @@ LEXICON: dict[str, str] = {
     "equivalence_with_let": "let g = numpy.sum, f =:= g",
     "power_caret": "f(x)^2 >= 0",
     "abs_bars": "|f(x)| <= 1",
+    # bars wrap any expression, not only one term
+    "abs_bars_compound": "for x in [0, 1], y in [0, 1], |x + y - f(x, y)| <= ε",
     "factorial_postfix": "for n in [1, 5] subset Z, f(n) <= n!",
     # dimensional access: `dim(x, axis)` is canonical; `len`/`rows`/
     # `cols` are sugar folding to it. A dimension premise over two
@@ -124,6 +126,9 @@ LEXICON: dict[str, str] = {
     # is tagged `mathema/linalg` for these
     "matrix_transpose_sugar": "let A be R^(n*n), A^T == A",
     "matrix_determinant_sugar": "for A in R^(n*n), |A| >= 0",
+    # the same bars around a matrix expression are its determinant
+    "matrix_determinant_bars_compound":
+        "for A in R^(n*n), B in R^(n*n), |A @ B| == |A| * |B|",
     "inferred_literal_domain": "raises(f(50, 0), ValueError)",
     # let: alias, function binding, free variable -----------------
     "let_alias": ("let m = m1, for m1 in [0.1,1000], x1 in [-100,100], "
@@ -346,7 +351,7 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "odd_function",
         "relation_eq", "relation_le_unicode", "equivalence_canonical",
         "equivalence_word_alias", "equivalence_with_let",
-        "power_caret", "abs_bars",
+        "power_caret", "abs_bars", "abs_bars_compound",
         "factorial_postfix", "dim_length_premise",
         "dim_conformability", "dim_marker_premise",
         "space_vector_real", "space_vector_bounded", "space_matrix",
@@ -366,7 +371,7 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "matrix_determinant_product", "matrix_transpose_product",
         "matrix_trace_additive", "matrix_inverse_identity",
         "matrix_output_symmetric_postfix", "matrix_transpose_sugar",
-        "matrix_determinant_sugar",
+        "matrix_determinant_sugar", "matrix_determinant_bars_compound",
         "inferred_literal_domain"),
     "lets": (
         "let_alias", "let_function_dotted", "let_free_var_closed",
@@ -603,6 +608,16 @@ def entries(*sections: str) -> dict[str, str]:
             out[key] = LEXICON[key]
     return out
 
+
+
+def add_two(x: float, y: float) -> float:
+    """The sum of two numbers."""
+    return x + y
+
+
+def matmul(A, B):
+    """The matrix product."""
+    return A @ B
 
 
 def nearly_identity(x: float) -> float:
@@ -882,6 +897,8 @@ def gd_convergence_factor(alpha: float, q: float) -> float:
 
 
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
+    "add_two": (add_two, ["abs_bars_compound"]),
+    "matmul": (matmul, ["matrix_determinant_bars_compound"]),
     "nearly_identity": (nearly_identity, [
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex",
