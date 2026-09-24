@@ -58,12 +58,12 @@ def load_locks(root: str = ".") -> dict:
 def _write_locks(root: str, data: dict) -> None:
     import yaml
     path = locks_path(root)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("# locked functions: the form hash each is pinned at.\n"
-                "# `mathema lock KEY` adds one; only `mathema unlock KEY`\n"
-                "# (a human act) removes one.\n")
-        yaml.safe_dump(data, f, sort_keys=True, allow_unicode=True)
+    from .spec import atomic_write_text
+    atomic_write_text(
+        path, "# locked functions: the form hash each is pinned at.\n"
+              "# `mathema lock KEY` adds one; only `mathema unlock KEY`\n"
+              "# (a human act) removes one.\n"
+        + yaml.safe_dump(data, sort_keys=True, allow_unicode=True))
 
 
 def lock(root: str, key: str, form: str, *, by: str | None = None,

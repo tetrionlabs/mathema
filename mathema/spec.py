@@ -367,15 +367,52 @@ def write_yaml(path: str, data: dict, header: str | None = None) -> str:
     block (one `# ` line per header line, so a multi-line header stays
     a comment), creating the parent directory first, the one shared
     spelling of every store write (specs, machine records, declared
-    stubs, suggested claims). Returns `path`."""
+    stubs, suggested claims). Returns `path`.
+
+    The write is atomic (see `atomic_write_text`): an interrupted or
+    failed write leaves the previous file exactly as it was."""
+    text = ""
+    if header:
+        text = "".join(f"# {line}\n" if line else "#\n"
+                       for line in header.splitlines())
+    return atomic_write_text(path, text + dump_yaml(data))
+
+
+def atomic_write_text(path: str, text: str) -> str:
+    """Intent:
+        Replace the file at `path` with `text` all at once, creating
+        the parent directory first. The text goes to a temporary file
+        in the same directory, is flushed to disk, and is renamed over
+        `path`; a rename within one filesystem is atomic, so a reader
+        (or an interrupted run) sees either the old file or the new
+        one, never a truncated one. An existing file's permission
+        bits carry over. Returns `path`.
+    """
+    import tempfile
     d = os.path.dirname(path)
     if d:
         os.makedirs(d, exist_ok=True)
-    with open(path, "w") as fh:
-        if header:
-            for line in header.splitlines():
-                fh.write(f"# {line}\n" if line else "#\n")
-        fh.write(dump_yaml(data))
+    fd, tmp = tempfile.mkstemp(dir=d or ".",
+                               prefix=f".{os.path.basename(path)}.",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if os.path.exists(path):
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp, 0o666 & ~umask)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     return path
 
 

@@ -293,9 +293,9 @@ def _apply_declared_edit(root: str, rel: str, key: str, claim_name: str,
     if corrected:
         kept.append(dict(corrected))
     entry["claims"] = kept
-    with open(path, "w") as fh:
-        yaml.safe_dump(data, fh, sort_keys=False, default_flow_style=False,
-                       allow_unicode=True)
+    from .spec import atomic_write_text
+    atomic_write_text(path, yaml.safe_dump(
+        data, sort_keys=False, default_flow_style=False, allow_unicode=True))
 
 
 def _load_record(root: str, key: str):
@@ -1065,10 +1065,11 @@ def apply_scope_intent_acceptance(plan: dict) -> str:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     doc = (yaml.safe_load(open(path)) or {}) if os.path.exists(path) else {}
     doc[plan["key"]] = {"text": plan["text"], "accepted": plan["accepted"]}
-    with open(path, "w") as fh:
-        fh.write("# scope-level intent acceptances (module / __project__)"
-                 ", committed with the store\n")
-        yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
+    from .spec import atomic_write_text
+    atomic_write_text(
+        path, "# scope-level intent acceptances (module / __project__)"
+              ", committed with the store\n"
+        + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
     return f"accepted the stated intent of {plan['key']} as documented"
 
 

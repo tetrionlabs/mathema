@@ -1834,8 +1834,9 @@ def cmd_claims(args) -> int:
         with open(path) as fh:
             doc = yaml.safe_load(fh) or {}
     doc.setdefault(args.key, {}).setdefault("claims", []).append(stanza)
-    with open(path, "w") as fh:
-        yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
+    from .spec import atomic_write_text
+    atomic_write_text(path, yaml.safe_dump(doc, sort_keys=False,
+                                           allow_unicode=True))
     print(f"adopted {chosen.name} into {path}: "
           f"{claim_statement(chosen)}")
     return 0
