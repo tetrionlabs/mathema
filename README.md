@@ -106,9 +106,11 @@ verdict establishes and what it does not, in one place.
 
 The same distinction reaches claims no amount of test-running could establish.
 Four defining properties of the logistic function include a limit at infinity and an
-improper integral over the whole real line, and all four come back proven. The two
-identities carry a range because this code overflows below about `x = -709.78`, and
-stated over the whole line mathema falsifies them there:
+improper integral over the whole real line, and all four come back proven, with a
+fifth row for the symmetry identity's `[float]` companion (the calculus claims
+spawn none, having no point to execute). The two identities carry a range
+because this code overflows below about `x = -709.78`, and stated over the
+whole line mathema falsifies them there:
 
 <!-- example: sigmoid file=sigmoid.py -->
 ```python
@@ -216,8 +218,10 @@ re-runs it. A locked
 function fails verification the moment its body changes, though docstring
 edits stay allowed.
 
-mathema is fully offline and no core function makes a network call, so none of
-this sends your source or your claims anywhere.
+mathema is fully offline: nothing in checking, verifying or recording makes a
+network call, so none of this sends your source or your claims anywhere. The
+one command that fetches anything is the explicit, opt-in `mathema init
+--agents`, which clones the skills repository.
 
 ## Audit a codebase you didn't write
 

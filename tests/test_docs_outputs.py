@@ -291,6 +291,10 @@ class _Driver:
         self.ns = {"__name__": "__main__"}
         self.buffer = []
         self.blocks = 0
+        # every example runs against its own configuration, so a PIN or
+        # policy set on this machine never reaches a documented command
+        os.environ.setdefault("XDG_CONFIG_HOME",
+                              os.path.join(workdir, ".config"))
         env = dict(os.environ)
         env.pop("VIRTUAL_ENV", None)
         env["PATH"] = _wrappers(workdir) + os.pathsep + env.get("PATH", "")
@@ -523,6 +527,7 @@ def test_the_output_shown_is_the_output_a_run_gives(example, tmp_path):
                    "before": before}, fh)
     env = dict(os.environ)
     env.pop("VIRTUAL_ENV", None)
+    env["XDG_CONFIG_HOME"] = os.path.join(workdir, ".config")
     r = subprocess.run([sys.executable, os.path.abspath(__file__), "--drive",
                         spec_path], cwd=workdir, env=env, capture_output=True,
                        text=True, timeout=600)
