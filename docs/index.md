@@ -284,8 +284,8 @@ own: exact root isolation for polynomial differences, interval refinement over
 the domain, a gallery of equivalent rewrites, a library of changes of
 variable, and z3's nonlinear real arithmetic when the `smt` extra is
 installed, followed by one more try of the ordinary attempt at 15 seconds.
-However many strategies there are, the ladder stops after 45 seconds, so a
-single claim can never hold up a run for long. Probing searches harder at the
+Behind all of that sits a failsafe: whatever happens, the ladder stops at 45
+seconds, so a single claim can never hold up a run indefinitely. Probing searches harder at the
 same time, spending the wider cap on finding the critical points worth
 sampling, and a proof found this way records its route as `derive:extensive`,
 so the extra effort is visible in the record.
