@@ -798,33 +798,44 @@ def write_badges(scores: BadgeScores, out_dir: str) -> "tuple[list, list]":
     return written, pruned
 
 
-_DOCS = "https://github.com/tetrionlabs/mathema/blob/main/docs/modes/badges.md"
+_DOCS_HOME = "https://mathema.tetrionlabs.com/"
+_DOCS = _DOCS_HOME + "modes/badges/"
 _MEANINGS = (
-    ("implementation", "how much of the code's behaviour is covered by "
-                       "tests, probes, or proofs", "#the-three-badges"),
+    ("implementation", "the share of statements reached by a test, a probe "
+                       "or a derive proof, taken together",
+     "#the-three-badges"),
     ("intent", "how much of what the code is meant to do is explicitly "
                "specified", "#the-three-badges"),
-    ("clarity", "how much of the code's knowable behaviour is made "
-                "explicit and unambiguous", "#how-clarity-is-scored"),
+    ("clarity", "how much of each function's knowable behaviour its "
+                "verified claims have pinned down", "#how-clarity-is-scored"),
+    ("overall", "the area the three span, so it falls toward zero when any "
+                "one of them is empty", "#the-triangle"),
 )
 
 
 def readme_snippet() -> str:
-    """A paste-ready README block: the three shields, the triangle, and
-    what each score means, each linking to the section of the badge docs
-    that defines it. The shields read the committed JSON by raw URL, so
-    the consumer substitutes OWNER/REPO once."""
+    """A paste-ready README block: the three shields and the triangle,
+    centred, then what each score means, each linking to the section of
+    the badge docs that defines it. The shields read the committed JSON by
+    raw URL, so the consumer substitutes OWNER/REPO once."""
     raw = ("https://raw.githubusercontent.com/OWNER/REPO/main/"
            ".mathema/badges")
-    shields = " ".join(
-        f"![{dim}](https://img.shields.io/endpoint?url={raw}/{dim}.json)"
-        for dim, _why, _anchor in _MEANINGS)
-    rows = "\n".join(f"| [{dim}]({_DOCS}{anchor}) | {why} |"
+    shields = "\n".join(
+        f'  <img src="https://img.shields.io/endpoint?url={raw}/{dim}.json" '
+        f'alt="{dim}">'
+        for dim, _why, _anchor in _MEANINGS if dim != "overall")
+    rows = "\n".join(f"| [**{dim}**]({_DOCS}{anchor}) | {why} |"
                       for dim, why, anchor in _MEANINGS)
-    return (f"{shields}\n\n"
+    return ('<p align="center">\n'
+            f"{shields}\n"
+            "</p>\n\n"
             "<!-- substitute OWNER/REPO above; the badges read the JSON "
             "committed under .mathema/badges/ -->\n\n"
-            "![mathema triangle](.mathema/badges/triangle.svg)\n\n"
-            "| score | what it measures |\n|---|---|\n"
+            '<p align="center">\n'
+            '  <img src=".mathema/badges/triangle.svg" '
+            'alt="mathema triangle" width="360">\n'
+            "</p>\n\n"
+            "| score | what it measures |\n|:---|:---|\n"
             f"{rows}\n\n"
-            f"[mathema]({_DOCS}): know what your code actually does\n")
+            f"[ [mathema]({_DOCS_HOME}) ] know what your code actually "
+            "does\n")
