@@ -18,54 +18,39 @@
 [x] docs/case-studies.md:sigmoid-above-zero      verdicts
 [x] docs/case-studies.md:sigmoid-below-one       verdicts
 [x] docs/case-studies.md:descent                 verdicts
-[ ] docs/claims-transfer.md:42
-[ ] docs/claims-transfer.md:87
 [x] docs/conditional-claims.md:enforce-dimensions run
-[ ] docs/derive-route.md:69
-[ ] docs/derive-route.md:100
-[ ] docs/derive-route.md:251
-[ ] docs/derive-route.md:271
-[ ] docs/derive-route.md:292
-[ ] docs/derive-route.md:309
-[ ] docs/derive-route.md:355
-[ ] docs/derive-route.md:389
-[ ] docs/derive-route.md:442
-[ ] docs/derive-route.md:511
-[ ] docs/derive-route.md:529
-[ ] docs/derive-route.md:556
-[ ] docs/derive-route.md:577
-[ ] docs/derive-route.md:611
-[ ] docs/derive-route.md:695
-[ ] docs/evidence-ladder.md:74
+[x] docs/derive-route.md:callee                  run verdicts
+[x] docs/derive-route.md:callee-branch           run verdicts
+[x] docs/derive-route.md:pick                    run verdicts
+[x] docs/derive-route.md:tuple                   run verdicts
+[x] docs/derive-route.md:bundled                 run verdicts
+[x] docs/derive-route.md:clamp                   run verdicts
+[x] docs/derive-route.md:fold                    run verdicts
+[x] docs/derive-route.md:fold-scaled             run verdicts
+[x] docs/derive-route.md:fixed-count             run verdicts
+[x] docs/derive-route.md:rms                     run verdicts
+[x] docs/derive-route.md:dot-loop                run verdicts
+[x] docs/derive-route.md:series                  run verdicts
+[x] docs/derive-route.md:two-pass                run verdicts
+[x] docs/derive-route.md:finite-set              run verdicts
+[x] docs/derive-route.md:linspace                run verdicts  (requires)
+[x] docs/evidence-ladder.md:companion            run output
 [ ] docs/extending.md:183
-[ ] docs/findings.md:30
-[ ] docs/findings.md:58
-[ ] docs/findings.md:84
-[ ] docs/findings.md:121
-[ ] docs/findings.md:147
-[ ] docs/first-look.md:36
-[ ] docs/first-look.md:95
-[ ] docs/first-look.md:123
-[ ] docs/first-look.md:150
-[ ] docs/grammar.md:182
-[ ] docs/grammar.md:219
-[ ] docs/grammar.md:339
-[ ] docs/grammar.md:403
-[ ] docs/index.md:129
-[ ] docs/index.md:150
-[ ] docs/index.md:176
-[ ] docs/index.md:196
-[ ] docs/index.md:243
-[ ] docs/index.md:250
-[ ] docs/index.md:373
+[x] docs/findings.md:finds                       file run output run run output run output run run output
+[x] docs/findings.md:parity                      file run output
+[x] docs/first-look.md:ema                       run run output run output run output run output run output
+[x] docs/grammar.md:eps                          file run output
+[x] docs/grammar.md:just-below                   run output
+[x] docs/grammar.md:half-power                   run output
+[x] docs/grammar.md:gauss                        run output
+[x] docs/index.md:midpoint                       file file run output run output file run output
+[x] docs/index.md:audit                          run output
+[x] docs/index.md:lock                           file run output file session
+[x] docs/index.md:parity                         file run output
 [x] docs/lemmas.md:chain                         run output
 [x] docs/lemmas.md:weakest                       run output  (after)
 [x] docs/lemmas.md:orphan                        run output  (after)
-[ ] docs/mathema-docstring.md:34
-[ ] docs/mathema-docstring.md:184
-[ ] docs/mathema-docstring.md:219
-[ ] docs/mathema-docstring.md:269
-[ ] docs/mathema-docstring.md:335
+[x] docs/mathema-docstring.md:ema                file run output repl repl run output run output
 [x] docs/matrix-structure.md:identities          run verdicts
 [x] docs/matrix-structure.md:enforce-structure   run  (requires)
 [ ] docs/modes/accept.md:153
@@ -94,25 +79,18 @@
 [ ] docs/modes/verify.md:153
 [ ] docs/modes/verify.md:165
 [ ] docs/modes/verify.md:183
-[ ] docs/multi-function-claims.md:109
-[ ] docs/quickstart.md:40
-[ ] docs/quickstart.md:58
-[ ] docs/quickstart.md:80
-[ ] docs/quickstart.md:115
-[ ] docs/symbology.md:36
-[ ] docs/symbology.md:76
-[ ] docs/symbology.md:123
-[ ] docs/three-layers.md:33
-[ ] docs/tutorial.md:57
-[ ] docs/tutorial.md:117
-[ ] docs/tutorial.md:178
-[ ] docs/tutorial.md:198
-[ ] docs/tutorial.md:216
-[ ] docs/tutorial.md:249
+[x] docs/multi-function-claims.md:ratio          run output
+[x] docs/quickstart.md:falsify                   file run output run output run output
+[x] docs/quickstart.md:docstring                 file run output run output
+[x] docs/symbology.md:alphabets                  run output
+[x] docs/symbology.md:latex                      run output
+[ ] docs/symbology.md:127
+[-] docs/three-layers.md:36
+[x] docs/tutorial.md:loop                        file run file run output file run output run output run output run output run output
 [x] README.md:parity                             file run output
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output
-[-] README.md:179
-[-] README.md:259
+[-] README.md:184
+[-] README.md:280
 
-# 22 examples checked, 85 output fences not yet marked
+# 56 examples checked, 28 output fences not yet marked
