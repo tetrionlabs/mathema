@@ -565,14 +565,14 @@
   "ascii": "for s in [50.0, 150.0]:float|missing, k in [50.0, 150.0]:float|missing, r in [0.0, 0.1]:float|missing, t in [0.1, 2.0]:float|missing, sigma in [0.05, 0.8]:float|missing, d(f(s, k, r, t, sigma), s) <= 1"
  },
  "sigmoid_derivative": {
-  "input": "d(f(x), x) == f(x)*(1 - f(x))",
-  "unicode": "f'(x) = (1 - f(x))*f(x)",
-  "ascii": "d(f(x), x) = (1 - f(x))*f(x)"
+  "input": "for x in [-700, 700], d(f(x), x) == f(x)*(1 - f(x))",
+  "unicode": "∀ x ∈ [-700.0, 700.0] ⊂ ℝ ∪ {∅}, f'(x) = (1 - f(x))*f(x)",
+  "ascii": "for x in [-700.0, 700.0]:float|missing, d(f(x), x) = (1 - f(x))*f(x)"
  },
  "sigmoid_symmetry": {
-  "input": "f(-x) == 1 - f(x)",
-  "unicode": "f(-x) = 1 - f(x)",
-  "ascii": "f(-x) = 1 - f(x)"
+  "input": "for x in [-700, 700], f(-x) == 1 - f(x)",
+  "unicode": "∀ x ∈ [-700.0, 700.0] ⊂ ℝ ∪ {∅}, f(-x) = 1 - f(x)",
+  "ascii": "for x in [-700.0, 700.0]:float|missing, f(-x) = 1 - f(x)"
  },
  "sigmoid_limit_upper": {
   "input": "lim(f(x), x -> oo) == 1",

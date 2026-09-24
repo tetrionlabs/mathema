@@ -1044,7 +1044,10 @@ def _unbound_call_names(lhs: str, rhs: str, existing: set) -> list[str]:
 
 def _collect_definedness_guards(fn, facts) -> list:
     """Every raise-region guard of fn itself: registered partiality
-    lemmas plus explicit raise branches from the piecewise lift."""
+    lemmas plus explicit raise branches from the piecewise lift. Float
+    overflow is left out: where a computation leaves the doubles is an
+    operational boundary, stated by an operational infinity, not part
+    of the region the function is defined on."""
     from .symbolic._conditioned import lift_piecewise
     from .symbolic._partiality import partiality_guards
     guards: list = []
@@ -1059,7 +1062,7 @@ def _collect_definedness_guards(fn, facts) -> list:
                 guards += pw.raise_guards
         except Exception:
             pass
-    return guards
+    return [(cond, exc) for cond, exc in guards if exc != "OverflowError"]
 
 
 def _negated_guard_texts(cond, negate, op_text) -> list[str]:
@@ -2387,6 +2390,43 @@ class _ClaimContext:
     # either
 
 
+_REAL_KINDS = {"scalar", "float", "int"}
+
+
+def _derive_operational_domain(cj, cj_domain: dict, facts) -> dict:
+    """Intent:
+        The domain the derive route reads when the claim declares an
+        operational infinity (`pseudo_infinity`, `let |inf| be ...`):
+        every real scalar parameter's unbounded direction stops at the
+        declared stand-in for infinity, so "for all x" means for all x
+        the author treats as finite. With no operational infinity the
+        declared domain is returned unchanged, and infinity is infinity.
+    """
+    from .domain import Interval
+    from .records import pseudo_infinity_range
+    pinf = pseudo_infinity_range(getattr(cj, "pseudo_infinity", None))
+    if pinf is None:
+        return cj_domain
+    plo, phi = pinf
+    out = dict(cj_domain)
+    for p in facts.params or ():
+        if facts.param_kinds.get(p, "scalar") not in _REAL_KINDS:
+            continue
+        b = out.get(p)
+        if b is None or b == "R":
+            out[p] = Interval(plo, phi)
+        elif isinstance(b, tuple) and not isinstance(b, frozenset) and len(b) == 2:
+            try:
+                lo, hi = float(b[0]), float(b[1])
+            except (TypeError, ValueError):
+                continue
+            if lo == float("-inf") or hi == float("inf"):
+                out[p] = Interval(max(lo, plo), min(hi, phi),
+                                  getattr(b, "closed_lo", True) or lo < plo,
+                                  getattr(b, "closed_hi", True) or hi > phi)
+    return out
+
+
 def _validate_claim(cj, statement: str, note: str, facts,
                     domain: dict) -> "Probe | _ClaimContext":
     """Intent:
@@ -2740,8 +2780,10 @@ def _operational_domain(cj_domain: dict, magnitude: float):
         region.
 
     Notes:
-        Only the probe stage consumes this: the symbolic proof keeps
-        the declared domain (proven still means proven to infinity).
+        The probe stage's reading. The derive route bounds the same
+        unbounded directions through `_derive_operational_domain`, so
+        a proof under an operational infinity is a proof up to it, and
+        the record states that bound.
         Bare type bounds ("N", "Z", a Domain object) are not rewritten,
         the shorthand replaces the oo SYMBOL the author wrote,
         nothing else.
@@ -3007,6 +3049,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                   f"it explicitly with funcs=")
             # route == "best": the probe stage reports its own skip
             return None
+    derive_domain = _derive_operational_domain(cj, cj_domain, facts)
     if cj.relation == "raises":
         # only ever reachable via domain-conditioned branch
         # pruning, a raises claim with no domain specific
@@ -3014,10 +3057,10 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # unliftable from try_prove_raises itself, same as any
         # other undecidable derive claim.
         proof = try_prove_raises(fn, facts, cj.lhs, cj.rhs or None,
-                                 domain=cj_domain)
+                                 domain=derive_domain)
     else:
         proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
-                          domain=cj_domain, tolerance=cj.tolerance,
+                          domain=derive_domain, tolerance=cj.tolerance,
                           extensive=extensive, funcs=bound_funcs or None,
                           assumption=assumption,
                           assume_defined=ctx.assume_defined)

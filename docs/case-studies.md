@@ -71,13 +71,13 @@ Its defining properties are calculus facts, and each is a claim.
 identity backpropagation is built on:
 
 ```
-d(f(x), x) == f(x)*(1 - f(x))
+for x in [-700, 700], d(f(x), x) == f(x)*(1 - f(x))
 ```
 
 **It is symmetric about the origin:**
 
 ```
-f(-x) == 1 - f(x)
+for x in [-700, 700], f(-x) == 1 - f(x)
 ```
 
 **It saturates, which limits state:**
@@ -99,7 +99,11 @@ the whole line states exactly:
 
 All five are **proven**. The derivative identity, the limits and the
 integral are settled symbolically, which is the difference between
-knowing a property and having sampled it.
+knowing a property and having sampled it. The two identities carry a
+range because this code cannot evaluate the whole line: below about
+`x = -709.78`, `math.exp(-x)` raises `OverflowError`, so stated over
+the whole line both are **falsified** (witnesses `x = -1420` and
+`x = 1420`), for the reason the next section spells out.
 
 ### Where it gets interesting: a true claim that falsifies
 
@@ -109,13 +113,16 @@ mathema disagrees:
 
 | claim | verdict | witness |
 |---|---|---|
-| `f(x) > 0` | falsified | `x = -1e6` raised `OverflowError` |
-| `f(x) < 1` | falsified | `x = 1e6` returned exactly `1.0` |
+| `f(x) > 0` | falsified | `x = -1420` raised `OverflowError` |
+| `f(x) < 1` | falsified | `x = -1420` raised `OverflowError` |
+| `for x in [0, 1e6], f(x) < 1` | falsified | `x = 1e6` returned exactly `1.0` |
 
-Neither is a mathematical error. At `x = -1e6`, `math.exp(1e6)`
-overflows before any division happens. At `x = 1e6`, `exp(-x)`
-underflows to zero and the result saturates to exactly `1.0`, so the
-strict inequality fails in f64 while remaining true in the reals.
+None of these is a mathematical error. At `x = -1420`, `math.exp(1420)`
+overflows before any division happens, and a claim has no value where
+the code raises. Past the overflow the upper bound fails a second
+way: at `x = 1e6`, `exp(-x)` underflows to zero and the result
+saturates to exactly `1.0`, so the strict inequality fails in f64
+while remaining true in the reals.
 
 This is the distinction the record is built to preserve: the
 mathematics is sound and the implementation is not total over the

@@ -85,7 +85,9 @@ verdicts apart so you always know which kind of answer you have:
 
 The same distinction reaches claims no amount of test-running could establish.
 Four defining properties of the logistic function include a limit at infinity and an
-improper integral over the whole real line, and all four come back proven:
+improper integral over the whole real line, and all four come back proven. The two
+identities carry a range because this code overflows below about `x = -709.78`, and
+stated over the whole line mathema falsifies them there:
 
 ```python
 def logistic(x: float) -> float:
@@ -94,8 +96,8 @@ def logistic(x: float) -> float:
 
 ```bash
 mathema check sigmoid.py \
-    --claim "d(f(x), x) == f(x)*(1 - f(x))" \
-    --claim "f(-x) == 1 - f(x)" \
+    --claim "for x in [-700, 700], d(f(x), x) == f(x)*(1 - f(x))" \
+    --claim "for x in [-700, 700], f(-x) == 1 - f(x)" \
     --claim "lim(f(x), x -> oo) == 1" \
     --claim "∫(d(f(x), x), x, -oo, oo) == 1"
 ```

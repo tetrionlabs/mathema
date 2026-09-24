@@ -1317,8 +1317,14 @@ def _witness_corroborated(callable_target, arg_exprs: list,
         expression at the witness numerically; any evaluation failure,
         or a call that returns a value, refuses corroboration.
     """
+    import inspect
+    try:
+        annotations = [prm.annotation for prm in
+                       inspect.signature(callable_target).parameters.values()]
+    except (TypeError, ValueError):
+        annotations = []
     vals = []
-    for expr in arg_exprs:
+    for i, expr in enumerate(arg_exprs):
         try:
             e = sympy.sympify(expr).subs(witness)
             # an argument symbol the guard never constrained has no
@@ -1332,10 +1338,15 @@ def _witness_corroborated(callable_target, arg_exprs: list,
             return False
         if abs(v.imag) > 1e-12:
             return False
-        # an integral value is passed as int: a float where the code
-        # expects an int (a range() bound) would raise a TypeError
-        # that has nothing to do with the guard under test
-        vals.append(int(v.real) if float(v.real).is_integer() else v.real)
+        # a float-annotated parameter always gets a float; otherwise an
+        # integral value is passed as int, since a float where the code
+        # expects an int (a range() bound) would raise a TypeError that
+        # has nothing to do with the guard under test
+        annotation = annotations[i] if i < len(annotations) else None
+        if annotation is float or annotation == "float":
+            vals.append(float(v.real))
+        else:
+            vals.append(int(v.real) if float(v.real).is_integer() else v.real)
     try:
         callable_target(*vals)
     except TimeoutError:
@@ -1500,10 +1511,13 @@ def _solved_witness(cond, sym, bound):
             lo, hi = piece.start, piece.end
             if lo.is_finite and hi.is_finite:
                 return (lo + hi) / 2
+            # past a single finite edge, step a whole magnitude beyond it
+            # and round to an integer, so the point stays clear of the
+            # edge once converted to a float
             if lo.is_finite:
-                return lo + 1
+                return sympy.ceiling(lo + sympy.Max(1, abs(lo)))
             if hi.is_finite:
-                return hi - 1
+                return sympy.floor(hi - sympy.Max(1, abs(hi)))
             return sympy.Integer(0)
         if isinstance(piece, sympy.FiniteSet) and piece.args:
             return piece.args[0]

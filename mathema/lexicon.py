@@ -265,8 +265,8 @@ LEXICON: dict[str, str] = {
     "greek_delta_upper": ("for s in [50,150], k in [50,150], r in [0.0,0.1], "
                  "t in [0.1,2], sigma in [0.05,0.8], "
                  "∂(f(s,k,r,t,sigma), s) <= 1"),
-    "sigmoid_derivative": "d(f(x), x) == f(x)*(1 - f(x))",
-    "sigmoid_symmetry": "f(-x) == 1 - f(x)",
+    "sigmoid_derivative": "for x in [-700, 700], d(f(x), x) == f(x)*(1 - f(x))",
+    "sigmoid_symmetry": "for x in [-700, 700], f(-x) == 1 - f(x)",
     "sigmoid_limit_upper": "lim(f(x), x -> oo) == 1",
     "sigmoid_limit_lower": "lim(f(x), x -> -oo) == 0",
     "sigmoid_density_integrates": "∫(d(f(x), x), x, -oo, oo) == 1",
@@ -724,8 +724,10 @@ def cubed(x: float) -> float:
     """f(x) = x^3, an odd function: negating the input negates the
     result, which is what "odd_function" states. The plainest example of
     a symmetry claim, and the one most of this project's documentation
-    reaches for."""
-    return x ** 3
+    reaches for. Written as a product, which overflows to a signed
+    infinity rather than raising, so the symmetry holds for every
+    float."""
+    return x * x * x
 
 
 def unit_sqrt(x: float) -> float:

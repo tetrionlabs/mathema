@@ -49,6 +49,10 @@ _PARTIALITY_LEMMAS: dict = {
     "math.log10": [(lambda u: sympy.Le(u, 0), "ValueError")],
     "math.asin": [(lambda u: sympy.Gt(sympy.Abs(u), 1), "ValueError")],
     "math.acos": [(lambda u: sympy.Gt(sympy.Abs(u), 1), "ValueError")],
+    # exp overflows past log of the largest double, 709.782712893384
+    # (the exact binary value, so the region boundary is the real one)
+    "math.exp": [(lambda u: sympy.Gt(u, sympy.Rational(709.782712893384)),
+                  "OverflowError")],
     # numpy.linspace(start, stop, num): num must be a nonnegative integer
     "numpy.linspace": [
         (lambda *a: sympy.Ne(a[2], sympy.floor(a[2])) if len(a) > 2
@@ -147,8 +151,24 @@ def _inline_lambdas(stmt: ast.stmt, lambdas: dict) -> ast.stmt:
     return _LambdaInliner(lambdas).visit(copy.deepcopy(stmt))
 
 
+_DBL_MAX = 1.7976931348623157e308
+
+
+def _float_pow_region(base, exponent: float, int_syms: frozenset):
+    """The regions where `base ** exponent` raises OverflowError, a float
+    power whose result would exceed the largest double: the base above
+    the limit, and below its negation. An integer base (every symbol
+    integer-typed, no float constant) never overflows, so it has none."""
+    if base.free_symbols and base.free_symbols <= int_syms \
+            and not base.atoms(sympy.Float):
+        return []
+    limit = sympy.Float(_DBL_MAX ** (1.0 / exponent), 17)
+    return [sympy.Gt(base, limit), sympy.Lt(base, -limit)]
+
+
 def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
-                    scope: dict, missed: "list | None" = None) -> None:
+                    scope: dict, missed: "list | None" = None,
+                    int_syms: frozenset = frozenset()) -> None:
     """Intent:
         Collect every implicit raise region inside one expression: a
         call with a registered partiality lemma (math.sqrt's negative
@@ -181,14 +201,14 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
 
     if isinstance(node, ast.IfExp):
         from ._conditioned import _condition_to_sympy
-        _guards_in_expr(node.test, env, path_cond, out, scope, missed)
+        _guards_in_expr(node.test, env, path_cond, out, scope, missed, int_syms)
         cond = _condition_to_sympy(node.test, dict(env))
         if cond is not None:
             _guards_in_expr(node.body, env, sympy.And(path_cond, cond),
-                            out, scope, missed)
+                            out, scope, missed, int_syms)
             _guards_in_expr(node.orelse, env,
                             sympy.And(path_cond, sympy.Not(cond)), out,
-                            scope, missed)
+                            scope, missed, int_syms)
         elif has_partial(node.body) or has_partial(node.orelse):
             miss("conditional expression")
         return
@@ -196,7 +216,7 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
         # only the first operand is unconditionally evaluated
         if node.values:
             _guards_in_expr(node.values[0], env, path_cond, out, scope,
-                            missed)
+                            missed, int_syms)
         if any(has_partial(v) for v in node.values[1:]):
             miss("and/or operand")
         return
@@ -214,6 +234,21 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
                 miss("call argument")
                 continue
             out.append((sympy.And(path_cond, region), exc_name))
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow) \
+            and isinstance(node.right, ast.Constant) \
+            and isinstance(node.right.value, (int, float)) \
+            and not isinstance(node.right.value, bool) \
+            and node.right.value > 1:
+        try:
+            base = _expr_to_sympy(node.left, dict(env))
+        except NotSymbolic:
+            base = None
+        if base is None or isinstance(base, tuple):
+            miss("power base")
+        elif base.free_symbols:
+            for region in _float_pow_region(base, float(node.right.value),
+                                            int_syms):
+                out.append((sympy.And(path_cond, region), "OverflowError"))
     if isinstance(node, ast.BinOp) \
             and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
         try:
@@ -226,7 +261,7 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
             out.append((sympy.And(path_cond, sympy.Eq(denom, 0)),
                         "ZeroDivisionError"))
     for child in ast.iter_child_nodes(node):
-        _guards_in_expr(child, env, path_cond, out, scope, missed)
+        _guards_in_expr(child, env, path_cond, out, scope, missed, int_syms)
 
 
 def partiality_guards(fn, facts) -> list:
@@ -265,6 +300,10 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
     from ._conditioned import (_branch_condition_truth, _condition_to_sympy,
                                _unmodified_params)
     unmodified = _unmodified_params(facts.tree, set(facts.params or ()))
+    kinds = getattr(facts, "param_kinds", None) or {}
+    int_syms = frozenset(sym for name, sym in params.items()
+                         if kinds.get(name) == "int"
+                         and isinstance(sym, sympy.Symbol))
 
     scope = dict(getattr(fn, "__globals__", None) or {})
     guards: list = []
@@ -304,7 +343,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
         # environment: any later raise region that reads it fails to
         # lift and is reported as missed
         _guards_in_expr(value_node, env, path_cond_box[0], guards, scope,
-                        missed)
+                        missed, int_syms)
         env = {k: v for k, v in env.items() if k != name}
         lambdas.pop(name, None)
         try:
@@ -382,13 +421,13 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
                 if cond is None:
                     stop(stmt)
                     return
-                _guards_in_expr(stmt.test, env, path_cond, guards, scope, missed)
+                _guards_in_expr(stmt.test, env, path_cond, guards, scope, missed, int_syms)
                 guards.append((sympy.And(path_cond, sympy.Not(cond)),
                                "AssertionError"))
                 path_cond = sympy.And(path_cond, cond)
             elif isinstance(stmt, ast.Return):
                 if stmt.value is not None:
-                    _guards_in_expr(stmt.value, env, path_cond, guards, scope, missed)
+                    _guards_in_expr(stmt.value, env, path_cond, guards, scope, missed, int_syms)
                 return   # nothing after a return executes
             elif isinstance(stmt, ast.If):
                 cond = _condition_to_sympy(stmt.test, env)
@@ -408,7 +447,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
                     if always_exits(live):
                         return
                     continue
-                _guards_in_expr(stmt.test, env, path_cond, guards, scope, missed)
+                _guards_in_expr(stmt.test, env, path_cond, guards, scope, missed, int_syms)
                 walk(stmt.body, sympy.And(path_cond, cond), env)
                 if stmt.orelse:
                     walk(stmt.orelse, sympy.And(path_cond, sympy.Not(cond)), env)
@@ -460,7 +499,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
                     for node in ast.walk(stmt):
                         if isinstance(node, (ast.Assign, ast.AugAssign)):
                             _guards_in_expr(node.value, env, body_cond,
-                                            guards, scope, missed)
+                                            guards, scope, missed, int_syms)
                 loop_names = set()
                 for node in ast.walk(stmt):
                     if isinstance(node, ast.Name) and isinstance(
@@ -472,7 +511,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
             elif isinstance(stmt, ast.Pass):
                 continue
             elif isinstance(stmt, ast.Expr):
-                _guards_in_expr(stmt.value, env, path_cond, guards, scope, missed)
+                _guards_in_expr(stmt.value, env, path_cond, guards, scope, missed, int_syms)
             else:
                 stop(stmt)
                 return
