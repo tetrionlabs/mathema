@@ -677,16 +677,15 @@ def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
                 raise NotSymbolic(
                     f"{node.func.id}(...)'s index must be a bare name: "
                     f"{ast.unparse(node)!r}")
-            # unlike d/lim/integrate, the index need not be one of the
-            # function's own parameters; it's a fresh dummy variable, so
-            # it's registered in aux (like any other free name) rather
-            # than looked up in lifted.params. Known sharp edge: if the
-            # index name happens to coincide with an actual parameter,
-            # the parameter binding wins (ast.Name resolves param_names
-            # first), the same collision already documented for the `n=`
-            # domain-intensity modifier.
+            # the index is a bound integer variable, registered in aux
+            # rather than looked up in lifted.params. Its scope is the
+            # summand only: there it shadows a parameter of the same
+            # name (`Sum(f(i), i, 1, n)` for `def f(i)` sums over the
+            # index, the parameter is not free in the summand), while
+            # the bounds are read in the enclosing scope.
             var_sym = aux.setdefault(var_node.id, sympy.Symbol(var_node.id, integer=True))
-            inner = _law_to_sympy(node.args[0], lifted, param_names, aux)
+            inner = _law_to_sympy(node.args[0], lifted,
+                                  set(param_names) - {var_node.id}, aux)
             lo = _law_to_sympy(node.args[2], lifted, param_names, aux)
             hi = _law_to_sympy(node.args[3], lifted, param_names, aux)
             op = sympy.summation if node.func.id == "Sum" else sympy.product
