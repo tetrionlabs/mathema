@@ -16,10 +16,27 @@ A target that resolves to **exactly one function** (a full dotted key
 like `funcs.midpoint`, or the `module:name` shorthand) prints that
 function's detail view. Anything else, a package, a module, several
 targets, lists every function found, one per line, with its rendered
-signature:
+signature. With the [tutorial](../tutorial.md) project's `funcs.py`:
 
+<!-- example: tutorial file=funcs.py -->
+```python
+def settle(x: float) -> float:
+    """Settlement amount for a signed exposure x."""
+    return x
+
+
+def midpoint(a: float, b: float) -> float:
+    """The midpoint of two values."""
+    return (a + b) / 2.0
 ```
-$ mathema describe funcs
+
+<!-- example: tutorial run -->
+```bash
+mathema describe funcs
+```
+
+<!-- example: tutorial output -->
+```text
 funcs.midpoint(a: float, b: float) -> float
 funcs.settle(x: float) -> float
 
@@ -34,11 +51,39 @@ you meant before pointing an expensive verb at it.
 
 ## The detail view
 
-Here `funcs.py` is the [tutorial](../tutorial.md) project, with
-`midpoint` declaring `commutative` and
-`mean_bound: for a in [0, 1], b in [0, 1], f(a, b) <= 1`, after one
-`mathema verify --root .`:
+Here the tutorial's `claims/demo.claims.yaml` also gives `midpoint` a
+`mean_bound` claim:
 
+<!-- example: tutorial file=claims/demo.claims.yaml -->
+```yaml
+funcs.settle:
+  claims:
+    - name: nonneg
+      statement: "for x in [-5, 5], f(x) >= 0"
+      route: probe
+    - name: symmetric_in_sign
+      statement: "for x in [-5, 5], f(x) == f(-x)"
+      route: probe
+    - name: negative_exposure_negative
+      statement: "for x in [-5, -1], f(x) <= 0"
+      route: probe
+funcs.midpoint:
+  claims:
+    - name: commutative
+      statement: "f(a, b) == f(b, a)"
+      route: derive
+    - name: mean_bound
+      statement: "for a in [0, 1], b in [0, 1], f(a, b) <= 1"
+```
+
+and after one sweep:
+
+<!-- example: tutorial run -->
+```bash
+mathema verify --root .
+```
+
+<!-- example: tutorial session match=subset -->
 ```
 $ mathema describe funcs:midpoint
 funcs.midpoint(a: float, b: float) -> float
@@ -78,9 +123,12 @@ which is the derive route's own pipeline made visible:
 | 4 | `lifted` | the sympy expression tree the body lifted to |
 | 5 | `canonical` | that tree simplified |
 
+With `--tier`, the header above is followed by that one tier alone
+(shown here without the header):
+
+<!-- example: tutorial session match=subset -->
 ```
 $ mathema describe funcs:midpoint --tier lifted
-...
 --- lifted ---
 Add
     Mul

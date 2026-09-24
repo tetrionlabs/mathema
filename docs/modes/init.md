@@ -47,9 +47,36 @@ all of `.mathema/` instead; that is a local choice, not the default.
 
 For every discovered function with zero claims, writes a bare
 `claims: []` declared entry, an explicit, empty placeholder, not a
-claim, to `claims/<module>.claims.yaml`.
+claim, to `claims/<module>.claims.yaml`. Given a package whose one
+module holds two unclaimed functions:
 
-```yaml
+<!-- example: stubs file=mypkg/__init__.py -->
+```python
+"""A small package."""
+```
+
+<!-- example: stubs file=mypkg/mod.py -->
+```python
+def pure_fn(x: float) -> float:
+    return 2.0 * x + 1.0
+
+
+def branchy_fn(x: float) -> float:
+    if x < 0:
+        return -x
+    return x
+```
+
+<!-- example: stubs session -->
+```
+$ mathema init mypkg
+mathema init: scaffolded git files:
+  .gitattributes
+  .mathema/.gitignore
+mathema init: wrote stub entries to:
+  claims/mypkg.mod.claims.yaml
+$ cat claims/mypkg.mod.claims.yaml
+# mathema init: bare declared stubs for mypkg.mod (fill in claims; an empty list means nothing declared yet)
 mypkg.mod.branchy_fn:
   claims: []
 mypkg.mod.pure_fn:
@@ -59,20 +86,11 @@ mypkg.mod.pure_fn:
 Additive and idempotent by construction: reads any existing file first
 and only appends keys not already present (claimed *or* already
 stubbed), so a hand-written claim sitting next to a stub is never
-touched by a later re-run as the target package grows.
+touched by a later re-run as the target package grows. Running it again
+once the git files are in place and every stub has either been filled
+in or left alone:
 
-```
-$ mathema init mypkg
-mathema init: scaffolded git files:
-  .gitattributes
-  .mathema/.gitignore
-mathema init: wrote stub entries to:
-  claims/mypkg.mod.claims.yaml
-```
-
-Running it again once the git files are in place and every stub has
-either been filled in or left alone:
-
+<!-- example: stubs session -->
 ```
 $ mathema init mypkg
 mathema init: git files already in place
@@ -102,11 +120,16 @@ tool, so name yours (or let bare `--agents` detect it):
 $ mathema init --agents claude
 mathema init: git files already in place
 mathema init: vendored mathema-agents skills for claude:
+  .claude/skills/clear-the-gate/SKILL.md
   .claude/skills/design-claims/SKILL.md
+  .claude/skills/start-from-claims/SKILL.md
   .claude/skills/use-mathema-mcp/SKILL.md
+  from v0.6, matching mathema 0.6.0
 ```
 
-Only the skills and your tool's adapter are copied, never the skills
+The last line names the skills branch fetched: the one matching your
+mathema minor line, or the repo's default branch when that line has
+none yet. Only the skills and your tool's adapter are copied, never the skills
 repo's own notes, license, or history. A file already present is left as
 it is (`--force` overwrites), so a re-run is safe and a local edit
 survives. Bare `--agents` with no tool detected (or several) vendors

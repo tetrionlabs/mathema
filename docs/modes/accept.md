@@ -23,7 +23,8 @@ and `--concepts` accept the function's stated intent and concept tags.
 |---|---|
 | `key` | function key (the record under `.mathema/verified/`) |
 | `claim` | claim name inside that record (omit for `--as reconciled`, which acts on the whole record) |
-| `--as` | `evidence`, `risk`, `discovery`, or `reconciled` (see below). In text mode you can omit it and mathema reads the claim's verdict and proposes the natural kind; `--format json` never guesses, and without `--as` it exits 2 |
+| `--as` | `evidence`, `risk`, `discovery`, `historical`, `superseded`, `trusted`, or `reconciled` (see below). In text mode you can omit it and mathema reads the claim's verdict and proposes the natural kind; `--format json` never guesses, and without `--as` it exits 2 |
+| `--all` | with `--as reconciled` and no key: reconcile every record whose checksum no longer matches, in one act |
 | `--from OLD_KEY` | with `--as reconciled`: rename `OLD_KEY`'s record to `KEY`, for a function that moved (see [moved functions](#moved-functions-as-reconciled-from)) |
 | `--accept-form-change` | with `--from`: rename even though the record's form hash differs from the live function's |
 | `--by` | who decided (default: `git config user.name`) |
@@ -118,10 +119,11 @@ so the claim fails the gate again until someone re-decides.
 
 ## Worked example
 
-A running balance, with three claims in a claims file:
+A running balance in `balances.py`, with three claims in
+`claims/running_total.claims.yaml`:
 
+<!-- example: balance file=balances.py -->
 ```python
-# functions.py
 def running_total(xs: list, y0: float) -> float:
     """Add every value in xs to a starting balance y0."""
     total = y0
@@ -130,9 +132,9 @@ def running_total(xs: list, y0: float) -> float:
     return total
 ```
 
+<!-- example: balance file=claims/running_total.claims.yaml -->
 ```yaml
-# claims/running_total.claims.yaml
-functions.running_total:
+balances.running_total:
   claims:
     - name: shifts_with_start
       statement: "f(xs, y0) == f(xs, 0) + y0"
@@ -142,23 +144,32 @@ functions.running_total:
       statement: "assuming nonneg_for_nonneg_steps is proven, for xs in [0, 1]^n, f(xs, 0) <= len(xs)"
 ```
 
-`shifts_with_start` is proven. `nonneg_for_nonneg_steps` only holds:
-the probe agrees, but derive cannot settle the sign of the lifted sum.
+`shifts_with_start` is proven (and its `shifts_with_start[float]`
+companion holds). `nonneg_for_nonneg_steps` only holds: the probe
+agrees, but derive cannot settle the sign of the lifted sum.
 `never_overshoots_much` rests on it being proven, so it comes back
 `unknown` with the note `prerequisite nonneg_for_nonneg_steps is holds,
 not proven, nothing to rest this claim on`, and `verify` fails on it
-(see [`mathema verify`](verify.md#unknown-claims-and-accepted-risk)).
-Owning that gap is a decision:
+(see [`mathema verify`](verify.md#unknown-claims-and-accepted-risk)):
 
+<!-- example: balance session -->
 ```
-$ mathema accept functions.running_total never_overshoots_much --as risk \
-      --note "the premise only holds empirically; monitored"
-accepting functions.running_total :: never_overshoots_much (verdict unknown) as risk, by Charles Babbage
+$ mathema verify --root .
+FAIL balances.running_total: no baseline record; 2 proven, 2 holds, 0 falsified, 1 unknown  <- 1 unknown claim(s)
+0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+grammars detected: mathema; verified by this run: mathema
+```
+
+Owning that gap is a decision. At a terminal, mathema prints the exact
+write and asks `write this acceptance? [y/N]`; `--yes` answers it here:
+
+<!-- example: balance session -->
+```
+$ mathema accept balances.running_total never_overshoots_much --as risk --note "the premise only holds empirically; monitored" --by "Charles Babbage" --yes
+accepting balances.running_total :: never_overshoots_much (verdict unknown) as risk, by Charles Babbage
   - reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
-write this acceptance? [y/N] y
 written: reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
 ```
-
 
 ## `--as historical`
 
@@ -236,30 +247,48 @@ A record is keyed by the function's dotted `module.qualname`, so moving
 a function to another module (or renaming it) leaves its record behind
 under a key that no longer resolves. `verify` notices when that orphan's
 form hash matches a function that has no record, and prints the rename
-as the remedy. Moving `running_total` from `functions.py` to
+as the remedy. Moving `running_total` from `balances.py` to
 `ledger.py`, with its claims file stanza renamed to match:
 
+<!-- example: balance run -->
+```bash
+mv balances.py ledger.py
+```
+
+<!-- example: balance file=claims/running_total.claims.yaml -->
+```yaml
+ledger.running_total:
+  claims:
+    - name: shifts_with_start
+      statement: "f(xs, y0) == f(xs, 0) + y0"
+    - name: nonneg_for_nonneg_steps
+      statement: "for xs in [0, 1]^n, f(xs, 0) >= 0"
+    - name: never_overshoots_much
+      statement: "assuming nonneg_for_nonneg_steps is proven, for xs in [0, 1]^n, f(xs, 0) <= len(xs)"
+```
+
+<!-- example: balance session -->
 ```
 $ mathema verify --root .
-FAIL functions.running_total: cannot resolve to a live function (declared in .mathema/verified/functions.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from functions.running_total
-FAIL ledger.running_total: no record yet, and its form hash matches the orphan record functions.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from functions.running_total; if it is a different function, remove the orphan record instead
-ok   functions.softmax: fresh
-1 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
-grammars detected: mathema; verified by this run: mathema
+FAIL balances.running_total: cannot resolve to a live function (declared in .mathema/verified/balances.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total
+FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
+0 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
+grammars detected: (none); verified by this run: mathema
 ```
 
 The new key gets no fresh record in the meantime, because a fresh
 record would start its history over. The rename is a human act, since
-only a person can say the two are the same function:
+only a person can say the two are the same function (again with
+`--yes` standing in for the prompt, `write this rename? [y/N]`):
 
+<!-- example: balance session -->
 ```
-$ mathema accept ledger.running_total --as reconciled --from functions.running_total
-reconciling ledger.running_total from functions.running_total: a record rename, by Charles Babbage
-  - rename the record functions.running_total to ledger.running_total, carrying its claims, acceptance history, lineage and sign-offs
-  - remove .mathema/verified/functions.running_total.yaml
+$ mathema accept ledger.running_total --as reconciled --from balances.running_total --by "Charles Babbage" --yes
+reconciling ledger.running_total from balances.running_total: a record rename, by Charles Babbage
+  - rename the record balances.running_total to ledger.running_total, carrying its claims, acceptance history, lineage and sign-offs
+  - remove .mathema/verified/balances.running_total.yaml
   - re-stamp the integrity and re-anchor it to HEAD
-write this rename? [y/N] y
-written: reconciled: functions.running_total renamed to ledger.running_total (by Charles Babbage)
+written: reconciled: balances.running_total renamed to ledger.running_total (by Charles Babbage)
 next: `mathema verify ledger.running_total` re-adjudicates it at its new location
 ```
 

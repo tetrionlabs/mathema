@@ -71,9 +71,37 @@ Exit codes: 0 clean; 1 gate failure; 2 usage/target/store error;
 
 ## Worked example
 
-Continuing from [`mathema check`](check.md)'s `softmax` example, with
-its record written by `write_spec()`:
+Continuing from [`mathema check`](check.md)'s `softmax` example:
 
+<!-- example: sweep file=functions.py -->
+```python
+import math
+from typing import Annotated
+from mathema.types import Shape
+
+def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+    """Turn a vector of real-valued scores into a probability distribution.
+
+    Claims:
+        sums_to_one: sum(f(scores)) == 1
+    """
+    m = max(scores)
+    exps = [math.exp(s - m) for s in scores]
+    total = sum(exps)
+    return [e / total for e in exps]
+```
+
+with its record written by `write_spec()`:
+
+<!-- example: sweep run -->
+```python
+import mathema
+from functions import softmax
+
+mathema.write_spec(softmax)
+```
+
+<!-- example: sweep session -->
 ```
 $ mathema verify --root .
 ok   functions.softmax: fresh
@@ -82,8 +110,29 @@ grammars detected: mathema; verified by this run: mathema
 ```
 
 Drop the normalization on purpose (`return exps` instead of dividing
-by the total) and re-run:
+by the total):
 
+<!-- example: sweep file=functions.py -->
+```python
+import math
+from typing import Annotated
+from mathema.types import Shape
+
+def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+    """Turn a vector of real-valued scores into a probability distribution.
+
+    Claims:
+        sums_to_one: sum(f(scores)) == 1
+    """
+    m = max(scores)
+    exps = [math.exp(s - m) for s in scores]
+    total = sum(exps)
+    return exps
+```
+
+and re-run:
+
+<!-- example: sweep session -->
 ```
 $ mathema verify --root .
 FAIL functions.softmax: form changed; 1 proven, 1 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
@@ -93,8 +142,28 @@ grammars detected: mathema; verified by this run: mathema
 
 `sums_to_one` now fails, and because it held before it is reported
 as `invalidated` rather than `falsified`; the counterexample is kept
-in the record, and the exit code is 1. Restore the fix and re-verify:
+in the record, and the exit code is 1. Restore the fix (the first
+version of `functions.py` above) and re-verify:
 
+<!-- example: sweep file=functions.py -->
+```python
+import math
+from typing import Annotated
+from mathema.types import Shape
+
+def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+    """Turn a vector of real-valued scores into a probability distribution.
+
+    Claims:
+        sums_to_one: sum(f(scores)) == 1
+    """
+    m = max(scores)
+    exps = [math.exp(s - m) for s in scores]
+    total = sum(exps)
+    return [e / total for e in exps]
+```
+
+<!-- example: sweep session -->
 ```
 $ mathema verify --root .
 ok   functions.softmax: form changed; 1 proven, 2 holds, 0 falsified
@@ -108,9 +177,10 @@ be fresh again until the code or the claim set actually changes.
 ## Unknown claims and accepted risk
 
 A claim neither route could decide stays `unknown` and fails the run.
-Add a running balance to `functions.py`, with three claims in a claims
-file:
+Add a running balance in `balances.py`, with three claims in
+`claims/running_total.claims.yaml`:
 
+<!-- example: sweep file=balances.py -->
 ```python
 def running_total(xs: list, y0: float) -> float:
     """Add every value in xs to a starting balance y0."""
@@ -120,9 +190,9 @@ def running_total(xs: list, y0: float) -> float:
     return total
 ```
 
+<!-- example: sweep file=claims/running_total.claims.yaml -->
 ```yaml
-# claims/running_total.claims.yaml
-functions.running_total:
+balances.running_total:
   claims:
     - name: shifts_with_start
       statement: "f(xs, y0) == f(xs, 0) + y0"
@@ -134,27 +204,36 @@ functions.running_total:
 
 `never_overshoots_much` rests on `nonneg_for_nonneg_steps` being
 proven, and that one only holds (the probe agrees; derive cannot settle
-the sign of the lifted sum), so the dependent claim is `unknown`. The
-second proven claim in the count is `dependencies_current`, which
-`verify` adds to every record:
+the sign of the lifted sum), so the dependent claim is `unknown`.
+`shifts_with_start` proves on the derive route, and every proof spawns
+a `shifts_with_start[float]` companion, the same law checked in
+floating point (see
+[the evidence ladder](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)),
+which holds. The second proven claim in the count is
+`dependencies_current`, which `verify` adds to every record:
 
+<!-- example: sweep session -->
 ```
 $ mathema verify --root .
-FAIL functions.running_total: no baseline record; 2 proven, 1 holds, 0 falsified, 1 unknown  <- 1 unknown claim(s)
+FAIL balances.running_total: no baseline record; 2 proven, 2 holds, 0 falsified, 1 unknown  <- 1 unknown claim(s)
 ok   functions.softmax: fresh
 1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
 The ways out are real evidence (rewrite the claim or the code so a
-route can decide it) or an explicit human decision to own the gap.
-Naming the key re-checks it, so the row counts the accepted claim:
+route can decide it) or an explicit human decision to own the gap
+(`--yes` here answers the confirmation prompt). Naming the key
+re-checks it, so the row counts the accepted claim:
 
+<!-- example: sweep session -->
 ```
-$ mathema accept functions.running_total never_overshoots_much --as risk \
-      --note "the premise only holds empirically; monitored"
-$ mathema verify functions.running_total --root . --lenient
-ok   functions.running_total: targeted re-verify; 2 proven, 1 holds, 0 falsified, 1 accepted risk
+$ mathema accept balances.running_total never_overshoots_much --as risk --note "the premise only holds empirically; monitored" --by "Charles Babbage" --yes
+accepting balances.running_total :: never_overshoots_much (verdict unknown) as risk, by Charles Babbage
+  - reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
+written: reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
+$ mathema verify balances.running_total --root . --lenient
+ok   balances.running_total: targeted re-verify; 2 proven, 2 holds, 0 falsified, 1 accepted risk
 0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -162,9 +241,10 @@ grammars detected: mathema; verified by this run: mathema
 Strict mode (the default) still refuses the accepted risk, so a
 pipeline can choose whether owned gaps block it:
 
+<!-- example: sweep session -->
 ```
-$ mathema verify functions.running_total --root .
-FAIL functions.running_total: targeted re-verify; 2 proven, 1 holds, 0 falsified, 1 accepted risk  <- 1 accepted-risk claim(s)
+$ mathema verify balances.running_total --root .
+FAIL balances.running_total: targeted re-verify; 2 proven, 2 holds, 0 falsified, 1 accepted risk  <- 1 accepted-risk claim(s)
 0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -175,15 +255,36 @@ See [`mathema accept`](accept.md).
 
 A record is keyed by the function's dotted name, so a function moved to
 another module leaves its record under a key that no longer resolves,
-and that key fails the run. When the orphan's form hash matches a
-function that has no record, the failure line says so and names the
-exact remedy, and the new key is held back rather than given a fresh
-record that would start its history over:
+and that key fails the run. Move `running_total` from `balances.py` to
+`ledger.py`, and rename its claims file stanza to match:
 
+<!-- example: sweep run -->
+```bash
+mv balances.py ledger.py
+```
+
+<!-- example: sweep file=claims/running_total.claims.yaml -->
+```yaml
+ledger.running_total:
+  claims:
+    - name: shifts_with_start
+      statement: "f(xs, y0) == f(xs, 0) + y0"
+    - name: nonneg_for_nonneg_steps
+      statement: "for xs in [0, 1]^n, f(xs, 0) >= 0"
+    - name: never_overshoots_much
+      statement: "assuming nonneg_for_nonneg_steps is proven, for xs in [0, 1]^n, f(xs, 0) <= len(xs)"
+```
+
+When the orphan's form hash matches a function that has no record, the
+failure line says so and names the exact remedy, and the new key is
+held back rather than given a fresh record that would start its
+history over:
+
+<!-- example: sweep session -->
 ```
 $ mathema verify --root .
-FAIL functions.running_total: cannot resolve to a live function (declared in .mathema/verified/functions.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from functions.running_total
-FAIL ledger.running_total: no record yet, and its form hash matches the orphan record functions.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from functions.running_total; if it is a different function, remove the orphan record instead
+FAIL balances.running_total: cannot resolve to a live function (declared in .mathema/verified/balances.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total
+FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
 ok   functions.softmax: fresh
 1 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
