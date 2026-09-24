@@ -235,13 +235,80 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
     return _probe_trials(fn, facts, target, domain, rng, trials, trial)
 
 
+def _raise_or_nonfinite(out) -> "str | None":
+    """What went wrong with a call's return value at a hazard point
+    (`returned inf`, `returned nan`), or None when the value is finite
+    or not a number at all (a non-numeric return is out of scope for a
+    numeric-hazard check)."""
+    try:
+        as_float = float(out)
+    except (TypeError, ValueError):
+        return None
+    if as_float != as_float or math.isinf(as_float):
+        return f"returned {out!r}"
+    return None
+
+
+def _executed_family_witness(fn, facts, target: str, value, domain: dict,
+                             failure=None, draws: int = 8):
+    """Intent:
+        Run the real function with `target` fixed at `value` (every
+        other parameter drawn inside the declared domain) and report
+        the first failure: `raised <Exception>` for a raise, else
+        whatever `failure(returned_value)` names. Returns
+        (what_happened or None, number_of_calls_made).
+
+    Notes:
+        With a single parameter one call is the whole question; with
+        more, up to `draws` draws of the other parameters are tried,
+        from a fixed seed so the witness is reproducible. A failing
+        call is a witness for the claim at that point; a clean run at
+        every draw is not evidence the other way, only the absence of
+        a witness.
+    """
+    rng = random.Random(0)
+    rounds = 1 if len(facts.params) == 1 else draws
+    executed = 0
+    for _ in range(rounds):
+        args = _synth_other_params(fn, facts, target, domain, rng)
+        executed += 1
+        try:
+            with _pinned_float_env():
+                out = _call_with_target(fn, facts, target, args, value)
+        except Exception as exc:
+            return f"raised {type(exc).__name__}", executed
+        what = failure(out) if failure is not None else None
+        if what is not None:
+            return what, executed
+    return None, executed
+
+
+def _uncorroborated_family_disproof(sketch: str, why: str,
+                                    reason: "str | None" = None):
+    """Intent:
+        A family's structural disproof that no executed call
+        reproduced, as it may be reported: `undecided`, carrying the
+        corroboration flag every uncorroborated disproof carries, and
+        `reason` as `mathema.corroboration_reason` when given.
+    """
+    from .symbolic import ProofResult
+    meta = {"mathema.corroboration": "uncorroborated"}
+    if reason is not None:
+        meta["mathema.corroboration_reason"] = reason
+    return ProofResult(
+        "undecided",
+        sketch=f"{sketch}; uncorroborated disproof: {why}, and a "
+               f"falsification needs an executed witness",
+        meta=meta)
+
+
 def _pole_exclusion_proof(fn, facts, domain: dict, params,
                           proven_sketch: str):
     """Intent:
         The pole-vs-declared-domain containment proof both pole-hazard
-        derive routes share: disproven the moment any of `params` has a
-        pole provably inside its own bound (that location is the
-        counterexample), proven with `proven_sketch` when every
+        derive routes share: when any of `params` has a pole provably
+        inside its own bound, the real function is called there
+        (`_witnessed_pole`), proven with `proven_sketch` when every
         checked parameter's poles are provably excluded, None when
         nothing was checkable or any containment was undecided.
 
@@ -268,10 +335,7 @@ def _pole_exclusion_proof(fn, facts, domain: dict, params,
         checked_any = True
         verdict, contained = _pole_safety(bounds, poles)
         if verdict == "falsified":
-            return ProofResult("disproven",
-                               sketch=f"{p} = {contained[0]} is a pole inside "
-                                      "the declared domain",
-                               counterexample=f"{p} = {contained[0]}")
+            return _witnessed_pole(fn, facts, domain, p, contained[0])
         if verdict == "undecided":
             return None
     if not checked_any:
@@ -279,15 +343,62 @@ def _pole_exclusion_proof(fn, facts, domain: dict, params,
     return ProofResult("proven", sketch=proven_sketch)
 
 
+def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
+    """Intent:
+        The pole-containment disproof as it may be reported: the real
+        function is called at the pole's machine spelling; a raise or
+        a non-finite return there is `disproven` with that executed
+        witness, anything else is the uncorroborated `undecided`.
+
+    Notes:
+        An irrational pole (sqrt(2)) has no exact float spelling, so
+        the call lands beside it, where the code may well return a
+        large finite value: the pole exists in exact arithmetic and
+        floating point does not reproduce it, so the disproof is not
+        reported as one, and its reason says so.
+    """
+    import sympy
+    from .hazards import _admitted_spelling
+    from .symbolic import ProofResult
+    sketch = f"{param} = {pole_text} is a pole inside the declared domain"
+    try:
+        value = _admitted_spelling(float(sympy.sympify(pole_text)),
+                                   domain.get(param))
+    except Exception:
+        value = None
+    if value is None:
+        return _uncorroborated_family_disproof(
+            sketch, f"the pole {pole_text} has no machine spelling the "
+                    f"domain admits, so no call could be made there")
+    what, executed = _executed_family_witness(
+        fn, facts, param, value, domain, failure=_raise_or_nonfinite)
+    if what is None:
+        from .corroboration import (EXACT_ARITHMETIC_ONLY,
+                                    EXACT_ARITHMETIC_ONLY_NOTE)
+        return _uncorroborated_family_disproof(
+            sketch, f"{EXACT_ARITHMETIC_ONLY_NOTE}: the call at "
+                    f"{param} = {value!r} returned a finite value "
+                    f"({executed} call(s) made)",
+            reason=EXACT_ARITHMETIC_ONLY)
+    spelled = (f"{param} = {value!r}" if pole_text == repr(value)
+               else f"{param} = {value!r} (the pole {pole_text})")
+    return ProofResult(
+        "disproven", sketch=sketch,
+        counterexample=f"{spelled} {what}",
+        meta={"mathema.corroboration": "reproduced",
+              "mathema.witness_executed": True})
+
+
 def _is_numerically_stable_derive(fn, facts, lhs_src: str, rhs_src: str,
                                relation: str, domain: dict | None = None,
                                tolerance: float | None = None):
     """Intent:
-        A derive-route half for is_numerically_stable: disproven when a
+        A derive-route half for is_numerically_stable: when a
         declared-domain parameter's own pole provably lies inside its
         bound (the reasoning is_pole_safe[param] uses, via the shared
-        _pole_exclusion_proof), undecided (None, falling through to the
-        probe check) otherwise.
+        _pole_exclusion_proof), disproven if the executed call there
+        raises or returns a non-finite value, else the uncorroborated
+        undecided; None (falling through to the probe check) otherwise.
 
     Notes:
         Pole exclusion never proves the claim. `finite_no_error(f, ...)
@@ -304,7 +415,7 @@ def _is_numerically_stable_derive(fn, facts, lhs_src: str, rhs_src: str,
         fn, facts, domain, list(domain),
         proven_sketch="every declared-domain parameter's own poles are "
                       "excluded by its bound")
-    if proof is None or proof.status != "disproven":
+    if proof is None or proof.status == "proven":
         return None
     return proof
 
@@ -529,8 +640,8 @@ def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     """Intent:
         A derive-route check for is_pole_safe[param]: proven when
         param's own declared domain provably excludes every pole of fn
-        found for it, disproven when one is provably inside, undecided
-        otherwise (falling through to _pole_probe's admitted-pole
+        found for it, disproven when one is provably inside and the
+        executed call there fails, undecided otherwise (falling through to _pole_probe's admitted-pole
         trials on route="best").
 
     Notes:
@@ -1469,9 +1580,11 @@ def _is_missing_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         The structural half of is_missing_safe[param]: proven when the
         declared domain excludes missing for param AND fn's own body
         guards BOTH missing spellings (NaN and None) with explicit
-        raising checks; disproven when the domain includes missing
-        (the default) but a raising guard rejects either spelling
-        anyway; undecided (None) otherwise, a guard covering only
+        raising checks; when the domain includes missing (the default)
+        but a raising guard names a spelling, the function is called
+        with that spelling: disproven with the executed raise as the
+        witness, else the uncorroborated undecided; undecided (None)
+        otherwise, a guard covering only
         one spelling leaves the other to the runtime probe, which
         settles what structure alone can't.
 
@@ -1499,12 +1612,26 @@ def _is_missing_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                                   "enforced by explicit raising guards for both "
                                   "missing spellings (NaN and None)")
     if included and coverage:
-        spelled = "nan" if "nan" in coverage else "None"
-        return ProofResult("disproven",
-                           sketch=f"the declared domain admits a missing {param} "
-                                  "(missing is included by default; no \\ {∅} "
-                                  "exclusion is stated) but the body raises on it",
-                           counterexample=f"{param} = {spelled} raises by explicit guard")
+        sketch = (f"the declared domain admits a missing {param} (missing "
+                  "is included by default; no \\ {∅} exclusion is stated) "
+                  "but the body has a raising guard for it")
+        spellings = [(label, value) for key, label, value in
+                     (("nan", "nan", float("nan")), ("none", "None", None))
+                     if key in coverage]
+        executed = 0
+        for label, value in spellings:
+            what, calls = _executed_family_witness(fn, facts, param, value,
+                                                   domain)
+            executed += calls
+            if what is not None:
+                return ProofResult(
+                    "disproven", sketch=sketch,
+                    counterexample=f"{param} = {label} {what}",
+                    meta={"mathema.corroboration": "reproduced",
+                          "mathema.witness_executed": True})
+        return _uncorroborated_family_disproof(
+            sketch, f"no call with a missing {param} raised ({executed} "
+                    f"call(s) made)")
     return None
 
 

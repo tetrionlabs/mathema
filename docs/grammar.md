@@ -143,7 +143,11 @@ claims in them.
 
 On the derive route every relation is decided exactly: `==` and `~=` both
 ask whether the two sides are the same over the whole domain, in exact real
-arithmetic.
+arithmetic, and a proof of either is exact algebra. They part ways only
+when derive disproves the claim by a difference smaller than the probe's
+allowance (below): for `==` the real code is then run at derive's witness
+and compared exactly, while `~=`, which asks for approximate equality,
+gets no such recheck, and the allowance decides.
 
 On the probe route, which runs the real function in floating point, `==`
 and `~=` are the same comparison: the two sides count as equal when they
@@ -190,10 +194,13 @@ declared tolerance fails only where the two sides are exactly equal.
 
 A probe `holds` that the allowance on `<=` or `>=` absorbed says so in its
 note, with the largest gap it absorbed. The derive route has no allowance
-to spend: when it disproves the claim, the real code is run at derive's
-witness and compared exactly, and a violation there, however small,
-falsifies the claim with that point as the witness. For a function that
-returns `-1e-10`:
+to spend: when it disproves a `<=`, `>=` or `==` claim, the real code is
+run at derive's witness and compared exactly, and a violation there,
+however small, falsifies the claim with that point as the witness. So
+`f(x) == x` is falsified for `x + 1e-10`, but not for `x + 1e-20` on
+`[1, 2]`, where rounding makes the executed values exactly equal. A `~=`
+disproof never gets this exact recheck, though a `~=` proof is still exact
+algebra. For a function that returns `-1e-10`:
 
 ```python
 import mathema
@@ -218,7 +225,13 @@ derive  falsified x=0.0616333
 
 A declared tolerance is part of the claim, so it stays in force on both
 routes. A derive disproof that the executed code does not reproduce even
-compared exactly comes back `unknown`, flagged as a probable engine bug.
+compared exactly comes back `unknown` with
+`mathema.corroboration: "uncorroborated"`. When the exact comparison ran at
+the point where the exact difference is, as for `x + 1e-20`, the record
+adds `mathema.corroboration_reason: "exact arithmetic only"` and the note
+says the difference exists in exact arithmetic and floating point does not
+reproduce it. Any other unreproduced disproof is flagged as a probable
+engine bug.
 
 ## Expressions
 

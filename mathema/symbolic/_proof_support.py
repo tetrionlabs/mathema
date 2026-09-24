@@ -694,7 +694,8 @@ def _piecewise_seed_points(diff, free: list, bounds: dict) -> list[dict]:
 
 
 def _corroborate_disproof(diff, domain: dict, params: dict,
-                          bound_context=None, tolerance: float = 1e-9):
+                          bound_context=None, tolerance: float = 1e-9,
+                          exact: bool = False):
     """A concrete counterexample point for `diff != 0`, found by the
     same seeded scalar sampler `probing.py`'s own probes use
     (`_synth_scalar`, `.._sampling`), `None` if none of
@@ -722,9 +723,15 @@ def _corroborate_disproof(diff, domain: dict, params: dict,
     `diff.is_number`/`is_constant` deciding a genuine, unconditional
     nonzero value, not from `_random()`; confirmed directly by
     evaluating it, not treated as an un-corroborated guess the way an
-    empty search would otherwise read."""
+    empty search would otherwise read.
+
+    With `exact=True` a point qualifies when `diff`, evaluated in exact
+    arithmetic at the sampled floats' own exact values, is provably
+    nonzero there, however small; `tolerance` is then unused."""
     free = sorted(diff.free_symbols, key=str)
     if not free:
+        if exact:
+            return {} if diff.is_zero is False else None
         try:
             value = complex(diff.evalf())
         except (TypeError, ValueError):
@@ -820,6 +827,15 @@ def _corroborate_disproof(diff, domain: dict, params: dict,
                 continue
             full_point = {**point, sym: sv.real}
         if not _point_satisfies_context(full_point, bound_context):
+            continue
+        if exact:
+            try:
+                at = diff.subs({sym: sympy.Rational(v)
+                                for sym, v in point.items()})
+            except (TypeError, ValueError):
+                continue
+            if at.is_zero is False:
+                return full_point
             continue
         try:
             value = complex(diff.subs(point).evalf())
@@ -2139,6 +2155,17 @@ def _decide_equality(lhs, rhs, diff, relation, domain, bound_context, params,
                                f"difference simplifies to {_humanize(diff)}{detail}",
                                witness={str(s): v for s, v in counterexample.items()},
                                disproof_hint=diff)
+    if relation == "==":
+        exact_point = _exact_disproof_witness(diff, domain, params,
+                                              bound_context)
+        if exact_point is not None:
+            return ProofResult(
+                "disproven",
+                sketch=f"{_humanize(lhs)} ≠ {_humanize(rhs)}: the difference "
+                       f"{_humanize(diff)} is nonzero in exact arithmetic, "
+                       f"by less than the tolerance",
+                witness=exact_point, disproof_hint=diff,
+                meta={"mathema.exact_disproof": True})
     if equal is False:
         return ProofResult("undecided",
                            sketch=f"sympy's .equals() claimed {_humanize(diff)} != 0, "
@@ -2147,6 +2174,30 @@ def _decide_equality(lhs, rhs, diff, relation, domain, bound_context, params,
                                  "reported as disproven")
     return ProofResult("undecided",
                        sketch=f"sympy could not simplify {_humanize(diff)} to 0")
+
+
+def _exact_disproof_witness(diff, domain: dict, params: dict,
+                            bound_context=None) -> "dict | None":
+    """Intent:
+        A complete in-domain point where `diff` is provably nonzero in
+        exact arithmetic, keyed by symbol name, or None. A difference
+        that is a nonzero constant is nonzero everywhere, so any
+        admissible point is its witness.
+
+    Notes:
+        Reached only after the tolerance-bounded search found nothing:
+        whatever this returns differs by less than that tolerance, so
+        the result is marked `mathema.exact_disproof` and stands only
+        once the real code, compared exactly at this point, differs
+        too.
+    """
+    point = _corroborate_disproof(diff, domain, params, bound_context,
+                                  exact=True)
+    if point is None:
+        return None
+    if not point:
+        return _representative_point(diff, domain, params, bound_context)
+    return {str(sym): v for sym, v in point.items()}
 
 
 def _sum_closed_zero(diff) -> "bool | None":

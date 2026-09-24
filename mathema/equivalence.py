@@ -17,10 +17,12 @@ assembles the Probe. `f =:= g` means `for x in D, f(x) == g(x)`, so a
 point where one side raises and the other returns a value falsifies,
 with the executed raise as the witness. A complex result under a real
 claim counts as a raise (unless that side is annotated `complex`). A
-drawn point where both sides raise, either returns a non-finite float,
-or either returns something non-numeric is not adjudicated, and every
-such point is counted in the record's sampling meta rather than
-dropped silently.
+point where both sides raise the same exception type is agreement (the
+two behave the same there); different exception types at the same point
+falsify, with the executed pair as the witness. A drawn point where
+either side returns a non-finite float or something non-numeric is not
+adjudicated, and every such point is counted in the record's sampling
+meta rather than dropped silently.
 """
 from __future__ import annotations
 
@@ -182,6 +184,35 @@ def _one_sided_raise(args, names, fv, f_exc, gv, g_exc, rhs_name) -> str | None:
     return f"{point}: {raised}, f returned {_fmt_value(fv)}"
 
 
+def _raise_kind(exc: str) -> str:
+    """The behaviour a raise stands for when two sides are compared:
+    the exception type name, or `a complex result` for a complex value
+    a real claim reads as a raise."""
+    return "a complex result" if exc.startswith("complex ") else exc
+
+
+def _differing_raises(args, names, fv, f_exc, gv, g_exc,
+                      rhs_name) -> str | None:
+    """Intent:
+        The counterexample text for a point where both sides raised,
+        but not the same kind of raise, else None.
+    """
+    from .probing import _fmt
+    if not (fv is _RAISED and gv is _RAISED):
+        return None
+    if _raise_kind(f_exc) == _raise_kind(g_exc):
+        return None
+    point = _fmt(tuple(args), names=tuple(names))
+
+    def said(side, exc):
+        if exc.startswith("complex "):
+            return (f"{side} returned the complex value "
+                    f"{exc[len('complex '):]}, which a real claim reads "
+                    f"as a raise")
+        return f"{side} raised {exc}"
+    return f"{point}: {said('f', f_exc)}, {said(rhs_name, g_exc)}"
+
+
 def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
     """Intent:
         The full `=:=` adjudication: validate the claim shape, bind
@@ -320,6 +351,9 @@ def _rung_symbolic(case: _Case, state: _LadderState) -> Probe | None:
         falsified = _raise_witness_probe(case, proof)
         if falsified is not None:
             return falsified
+        coinciding = _coinciding_raise_proof(case)
+        if coinciding is not None:
+            return coinciding
         state.raise_note = proof.sketch
         proof = replace(proof, status="undecided")
     state.proof = proof
@@ -329,9 +363,10 @@ def _rung_symbolic(case: _Case, state: _LadderState) -> Probe | None:
 def _raise_witness_probe(case: _Case, proof) -> Probe | None:
     """Intent:
         Both sides executed at the witness of a raise-region disproof,
-        and a falsified Probe when exactly one of them raises there.
-        None when the witness has no complete point, or both sides
-        raise, or both return.
+        and a falsified Probe when exactly one of them raises there, or
+        both raise different kinds of exception. None when the witness
+        has no complete point, both sides raise the same kind, or both
+        return.
     """
     from .domain import _as_int_if_whole
     from .probing import complex_is_a_raise
@@ -351,15 +386,213 @@ def _raise_witness_probe(case: _Case, proof) -> Probe | None:
     gv, g_exc = _run_side(case.gfn, args,
                           complex_is_a_raise(case.gfn, case.cj_domain))
     cx = _one_sided_raise(args, params, fv, f_exc, gv, g_exc, case.rhs_name)
+    what = "one side raises where the other returns a value"
+    if cx is None:
+        cx = _differing_raises(args, params, fv, f_exc, gv, g_exc,
+                               case.rhs_name)
+        what = "the two sides raise different exceptions"
     if cx is None:
         return None
     return _stamp(Probe(
         case.cj.name, case.statement, "falsified", route="derive",
         counterexample=cx, sketch=proof.sketch,
-        note=f"{case.note}; one side raises where the other returns a "
-             f"value: {proof.sketch}",
+        note=f"{case.note}; {what}: {proof.sketch}",
         meta={**case.annotations, "mathema.corroboration": "reproduced"}),
         "symbolic")
+
+
+def _coinciding_raise_proof(case: _Case) -> Probe | None:
+    """Intent:
+        Proven when both sides raise the same exception on exactly the
+        same region of the declared domain and their closed forms agree
+        everywhere else, else None.
+
+    Notes:
+        The value half is the symbolic difference proved under
+        `assume_defined`, which quantifies over the points where every
+        call returns. The raise half compares the two sides' complete
+        raise regions (`_raise_regions`), exception by exception, and
+        needs the regions of different exceptions on one side to be
+        disjoint, since at an overlap the exception raised depends on
+        evaluation order.
+    """
+    from .symbolic import try_prove
+
+    try:
+        regions = _coinciding_raise_regions(case)
+    except TimeoutError:
+        return None
+    if not regions:
+        return None
+    params = ", ".join(case.facts.params)
+    try:
+        proof = try_prove(case.fn, case.facts, f"f({params})",
+                          f"{case.rhs_name}({params})", "==",
+                          domain=case.cj_domain,
+                          tolerance=case.cj.tolerance,
+                          funcs={case.rhs_name: case.gfn},
+                          assume_defined=True)
+    except Exception:
+        return None
+    if proof.status != "proven":
+        return None
+    name = case.facts.params[0]
+    where = "; ".join(f"{exc} where {_region_text(region, name)}"
+                      for exc, region in sorted(regions.items()))
+    return _stamp(Probe(
+        case.cj.name, case.statement, "proven", route="derive",
+        sketch=f"both sides raise the same exception on the same region "
+               f"({where}), and wherever both return the symbolic "
+               f"difference vanishes: {proof.sketch}",
+        condition=proof.quantifier, note=case.note,
+        meta=dict(case.annotations)), "symbolic")
+
+
+def _region_text(region, name: str) -> str:
+    """A region of one parameter's values as relation text: `x = 0`,
+    `-1 <= x < 0`, pieces joined by `or`; sympy's own spelling for any
+    other shape."""
+    import sympy
+
+    def num(v) -> str:
+        try:
+            return f"{float(v):g}"
+        except (TypeError, ValueError):
+            return str(v)
+
+    if isinstance(region, sympy.Union):
+        return " or ".join(_region_text(part, name) for part in region.args)
+    if isinstance(region, sympy.FiniteSet):
+        return " or ".join(f"{name} = {num(v)}" for v in region)
+    if isinstance(region, sympy.Interval):
+        parts = []
+        if region.start.is_finite:
+            parts.append(f"{num(region.start)} "
+                         f"{'<' if region.left_open else '<='} ")
+        parts.append(name)
+        if region.end.is_finite:
+            parts.append(f" {'<' if region.right_open else '<='} "
+                         f"{num(region.end)}")
+        return "".join(parts)
+    return f"{name} in {region}"
+
+
+def _coinciding_raise_regions(case: _Case) -> "dict | None":
+    """Intent:
+        The shared raise regions of the two sides, as {exception name:
+        region inside the declared domain}, when both sides' complete
+        raise regions are the same exception by exception and the
+        regions of different exceptions are disjoint. None otherwise,
+        including whenever a region cannot be decided.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+
+    def compute():
+        f_regions = _raise_regions(case.fn, case.facts, case.cj_domain,
+                                   case.facts.params[0])
+        if f_regions is None:
+            return None
+        g_domain = {case.gfacts.params[0]:
+                    case.cj_domain.get(case.facts.params[0])}
+        g_regions = _raise_regions(case.gfn, case.gfacts, g_domain,
+                                   case.facts.params[0])
+        if g_regions is None or set(f_regions) != set(g_regions):
+            return None
+        for exc in f_regions:
+            same = sympy.SymmetricDifference(f_regions[exc],
+                                             g_regions[exc]).is_empty
+            if same is not True:
+                return None
+        kinds = sorted(f_regions)
+        for i, a in enumerate(kinds):
+            for b in kinds[i + 1:]:
+                if sympy.Intersection(f_regions[a],
+                                      f_regions[b]).is_empty is not True:
+                    return None
+        return f_regions
+
+    return _with_timeout(compute, FAST_TIMEOUT_SECONDS)
+
+
+def _raise_regions(fn, facts, cj_domain, name: str) -> "dict | None":
+    """Intent:
+        Every region of the declared domain where `fn` raises, as
+        {exception name: sympy set of values of its single parameter,
+        renamed to `name`}, empty regions left out. None when the
+        function has more than one parameter, the raise-region walk did
+        not read every statement, the body asserts, raises from inside
+        a loop or recursion, can return a complex value, or a region is
+        not a set of values of that one parameter.
+    """
+    import ast
+
+    import sympy
+
+    from .domain import bound_to_sympy_set
+    from .symbolic._base import _bind_params
+    from .symbolic._conditioned import lift_piecewise
+    from .symbolic._partiality import partiality_walk
+
+    if facts.tree is None or len(facts.params) != 1:
+        return None
+    nodes = list(ast.walk(facts.tree))
+    if any(isinstance(n, ast.Assert) for n in nodes):
+        return None
+    complex_regions: list = []
+    try:
+        guards, unread = partiality_walk(fn, facts, cj_domain or {},
+                                         complex_out=complex_regions)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    if unread is not None or complex_regions:
+        return None
+    guards = list(guards)
+    if any(isinstance(n, ast.Raise) for n in nodes):
+        if facts.loops or facts.recursion:
+            return None
+        try:
+            pw = lift_piecewise(fn, facts)
+        except TimeoutError:
+            raise
+        except Exception:
+            return None
+        if pw is None:
+            return None
+        guards += list(pw.raise_guards)
+    try:
+        params, _aggregate = _bind_params(fn, facts)
+    except Exception:
+        return None
+    sym = params.get(facts.params[0])
+    if sym is None:
+        return None
+    bound = (cj_domain or {}).get(facts.params[0])
+    try:
+        domain_set = (sympy.S.Reals if bound is None
+                      else bound_to_sympy_set(bound))
+    except Exception:
+        return None
+    shared = sympy.Symbol(name, real=True)
+    regions: dict = {}
+    for cond, exc in guards:
+        if cond.free_symbols - {sym}:
+            return None
+        try:
+            region = cond.subs(sym, shared).as_set()
+        except TimeoutError:
+            raise
+        except Exception:
+            return None
+        region = sympy.Intersection(region, domain_set)
+        if region.is_empty is True:
+            continue
+        regions[exc] = (sympy.Union(regions[exc], region)
+                        if exc in regions else region)
+    return regions
 
 
 def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
@@ -389,7 +622,7 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     rel_slack = 0.0 if cj.tolerance is not None else EQUIV_REL_SLACK
     f_complex = complex_is_a_raise(case.fn, case.cj_domain)
     g_complex = complex_is_a_raise(case.gfn, case.cj_domain)
-    checked, cx = 0, None
+    checked, cx, both_raised = 0, None, 0
     discarded = {"out_of_domain": 0, "not_compared": 0, "non_numeric": 0}
     for _ in range(EQUIV_SAMPLE_DRAWS):
         args = [_synth(k, rng, case.cj_domain.get(p))
@@ -407,8 +640,13 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
             checked += 1
             cx = one_sided
             break
-        if fv is _RAISED or gv is _RAISED:
-            discarded["not_compared"] += 1
+        if fv is _RAISED and gv is _RAISED:
+            checked += 1
+            cx = _differing_raises(args, kinds, fv, f_exc, gv, g_exc,
+                                   case.rhs_name)
+            if cx is not None:
+                break
+            both_raised += 1
             continue
         if not (_numberlike(fv) and _numberlike(gv)):
             discarded["non_numeric"] += 1
@@ -425,6 +663,8 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
 
     sampling: dict = {"draws": EQUIV_SAMPLE_DRAWS, "checked": checked,
                       "seed": EQUIV_SEED}
+    if both_raised:
+        sampling["both_raised"] = both_raised
     nonzero = {k: v for k, v in discarded.items() if v}
     if nonzero:
         sampling["discarded"] = nonzero
@@ -432,6 +672,9 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     skipped = discarded["not_compared"] + discarded["non_numeric"]
     aside = (f"; {skipped} of {state.executed} executed points were "
              f"not comparable" if skipped else "")
+    if both_raised:
+        aside += (f"; at {both_raised} of the agreeing points both sides "
+                  f"raised the same exception")
     if state.raise_note:
         aside += f"; not proven, since {state.raise_note}"
 
@@ -441,7 +684,8 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
             n=checked, counterexample=cx,
             note=f"{case.note}; the two implementations disagree at an "
                  f"executed shared point, a raise on one side against a "
-                 f"value on the other counting as a disagreement{aside}",
+                 f"value on the other, or different exceptions, counting "
+                 f"as a disagreement{aside}",
             meta=meta), "sampled")
     if state.proof is not None and state.proof.status == "disproven":
         # the symbolic rung claimed inequivalence but no executed point
