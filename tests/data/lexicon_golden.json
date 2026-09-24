@@ -545,9 +545,9 @@
   "ascii": "for alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= max(x)"
  },
  "certificate_quadratic": {
-  "input": "for s1 in [0.05,0.5], s2 in [0.05,0.5], rho in [-0.9,0.9], d(f(w,s1,s2,rho), w, w) >= 0",
-  "unicode": "let ρ = rho, ∀ s1 ∈ [0.05, 0.5] ⊂ ℝ ∪ {∅}, s2 ∈ [0.05, 0.5] ⊂ ℝ ∪ {∅}, ρ ∈ [-0.9, 0.9] ⊂ ℝ ∪ {∅}, ∂²(f(w, s1, s2, ρ)/∂w²) ≥ 0",
-  "ascii": "for s1 in [0.05, 0.5]:float|missing, s2 in [0.05, 0.5]:float|missing, rho in [-0.9, 0.9]:float|missing, d(f(w, s1, s2, rho), w, w) >= 0"
+  "input": "let |inf| be 1e100, for s1 in [0.05,0.5], s2 in [0.05,0.5], rho in [-0.9,0.9], d(f(w,s1,s2,rho), w, w) >= 0",
+  "unicode": "let ρ = rho, let |∞| be 1e+100, ∀ s1 ∈ [0.05, 0.5] ⊂ ℝ ∪ {∅}, s2 ∈ [0.05, 0.5] ⊂ ℝ ∪ {∅}, ρ ∈ [-0.9, 0.9] ⊂ ℝ ∪ {∅}, ∂²(f(w, s1, s2, ρ)/∂w²) ≥ 0",
+  "ascii": "let |inf| be 1e+100, for s1 in [0.05, 0.5]:float|missing, s2 in [0.05, 0.5]:float|missing, rho in [-0.9, 0.9]:float|missing, d(f(w, s1, s2, rho), w, w) >= 0"
  },
  "parity_identity": {
   "input": "for s in [50,150], k in [50,150], r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], f(s,k,r,t,sigma) == s - k*exp(-r*t)",

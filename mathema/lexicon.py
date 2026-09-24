@@ -251,7 +251,8 @@ LEXICON: dict[str, str] = {
                                 "min(x) <= f(x, alpha)"),
     "certificate_convex_upper": ("for alpha in [0, 1], "
                                 "f(x, alpha) <= max(x)"),
-    "certificate_quadratic": ("for s1 in [0.05,0.5], s2 in [0.05,0.5], "
+    "certificate_quadratic": ("let |inf| be 1e100, "
+                              "for s1 in [0.05,0.5], s2 in [0.05,0.5], "
                              "rho in [-0.9,0.9], "
                              "d(f(w,s1,s2,rho), w, w) >= 0"),
     # case studies: real formulae from openly licensed references,
