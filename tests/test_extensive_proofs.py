@@ -213,12 +213,18 @@ def test_unit_circle_residues_prove_what_sympy_integrates_wrongly():
     assert "unit-circle contour" in r.sketch
 
 
-def test_unit_circle_residues_falsify_a_wrong_closed_form():
+def test_unit_circle_residues_disprove_a_wrong_closed_form():
     # the same integral against a wrong closed form (missing the
-    # square root): the residue value is exact, so this is a genuine
-    # falsification, not a decline.
+    # square root): the residue value is exact, so the derive route
+    # disproves it, but an integral has no point at which the real
+    # function can be executed against it, so the disproof stays
+    # uncorroborated and the verdict is unknown with the reason kept,
+    # never a falsification without an executed witness.
     r = _run(wrong_trig_integral_value, _TRIG_INTEGRAL_LAW, extensive=True)
-    assert r.verdict == "falsified", (r.verdict, r.sketch)
+    assert r.verdict == "unknown", (r.verdict, r.sketch)
+    assert r.meta.get("mathema.corroboration") == "uncorroborated"
+    assert r.meta.get("mathema.corroboration_unexecutable") is True
+    assert "the derive route reported this false" in r.note
 
 
 def fourier_two_factor_value(a: float) -> float:
@@ -295,8 +301,15 @@ def test_divergence_claims_decide_against_a_literal_infinity():
     # structurally, both ways.
     law = "for k in [1,1000], x in [0.1,100], lim(f(k,x), x, 0) == oo"
     assert _run(inverse_square, law, extensive=False).verdict == "proven"
+    # the wrong limit is disproved structurally, and a limit has no
+    # point at which the real function can be executed against it, so
+    # the disproof is recorded as uncorroborated rather than reported
+    # as a falsification without an executed witness
     wrong = "for k in [1,1000], x in [0.1,100], lim(f(k,x), x, oo) == oo"
-    assert _run(inverse_square, wrong, extensive=False).verdict == "falsified"
+    r = _run(inverse_square, wrong, extensive=False)
+    assert r.verdict == "unknown", (r.verdict, r.sketch)
+    assert r.meta.get("mathema.corroboration_unexecutable") is True
+    assert "the derive route reported this false" in r.note
 
 
 def am_gm_gap(a: float, b: float) -> float:
