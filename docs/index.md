@@ -201,6 +201,7 @@ mathema.intent
  .parse_doc   | 149:163p || {5 | 0 | -} || no      | 4  | 2 branches, 1 loop             | loop:not-a-fold     || yes   | -             || KEYWORDS                  | -       | DocIntent, _sections, _summary, +1 || no-report || 2/3     || 48%
 
 0/4 claimed, 0/4 derivable, 0/4 lift unconditionally, 4/4 fully typed, 2/12 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest; python -m coverage json`), 4/4 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 54%.
+`derives` is what the derive route can do here, given the domain the signature, docstring and claims declare. The reason/code cells describe the UNCONDITIONAL lift, the body with nothing supplied, so a branch:needs-domain row reads blocked there and derives all the same, once a claim declares the domain that prunes the branch. Neither is a ceiling: a probe claim can still be written and adjudicated for every function here.
 ```
 
 `sed -n 149,163p mathema/intent.py` prints `parse_doc` and nothing else, which
