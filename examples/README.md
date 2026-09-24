@@ -24,9 +24,9 @@ formats each platform consumes (`--format github` for Actions
 annotations, `--format junit` for the GitLab test widget). Change the
 target names to your own package and they run as they are.
 
-## `claims/`, illustrative, NOT loadable
+## `sketches/`, illustrative, NOT loadable
 
-`functions.py` is real, runnable code: `python examples/claims/functions.py`
+`functions.py` is real, runnable code: `python examples/sketches/functions.py`
 adjudicates both functions.
 
 `great_circle.yaml` and `fourier_sum.yaml` are **sketches in a
