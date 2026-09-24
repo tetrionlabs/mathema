@@ -335,3 +335,17 @@ def test_a_norm_and_an_absolute_value_are_different_claims():
     assert fingerprint_text(claim(norm_law)) != fingerprint_text(claim(abs_law))
     assert "norm(f(x))" in assert_round_trips(norm_law, magnitude)
     assert "|f(x)|" in assert_round_trips(abs_law, magnitude)
+
+
+# -- identity: a bare-name equation after a let run ----------------------------
+
+@pytest.mark.parametrize("law", [
+    "r == 1 - alpha*q",
+    "let c be [0, 1], r == c",
+    "let g = math.sqrt, r == g(q)",
+])
+def test_a_bare_name_equation_is_not_read_as_another_binding(law):
+    assert_round_trips(law)
+    for unicode in (True, False):
+        reparsed = claim(render_claim_text(claim(law), unicode=unicode))
+        assert (reparsed.lhs, reparsed.relation) == ("r", "==")

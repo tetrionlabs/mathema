@@ -1832,6 +1832,12 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         parts.append(assuming_text)
     if let_segments:
         parts.append(sep.join(let_segments))
+        if not for_segments:
+            # `name = expr` straight after a let run reads as one more
+            # binding, so an equation with a bare-name side is spelled
+            # with `==` there
+            statement = re.sub(r"^(\s*\w+\s*)=(?![=:])", r"\1==",
+                               statement, count=1)
     if for_segments:
         parts.append(("∀ " if unicode else "for ") + sep.join(for_segments))
     if getattr(cj, "outcome", ""):
