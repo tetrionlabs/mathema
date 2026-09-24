@@ -2200,6 +2200,28 @@ def _chain_statement(cj) -> str:
     return " ".join(parts)
 
 
+def _conjunction_route(routes: list, default: str) -> str:
+    """Intent:
+        The route a conjunction reports, from the routes of the parts
+        that set its verdict: their shared route when they agree; the
+        one subroute when the rest report its plain root (`derive` and
+        `derive:extensive` give `derive:extensive`, since the wider
+        mechanism was needed to settle the whole); else their shared
+        root; `default` when the parts share nothing or report none.
+    """
+    known = [r for r in routes if r]
+    if not known:
+        return default
+    distinct = set(known)
+    if len(distinct) == 1:
+        return known[0]
+    roots = {r.partition(":")[0] for r in distinct}
+    if len(roots) != 1:
+        return default
+    subroutes = {r for r in distinct if ":" in r}
+    return subroutes.pop() if len(subroutes) == 1 else roots.pop()
+
+
 def _combine_conjunction(probes: list, name: str, statement: str,
                          labels: list, what: str = "chained comparison",
                          unit: str = "link") -> "Probe":
@@ -2215,8 +2237,9 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     Notes:
         `labels` names each part for the counterexample/sketch (e.g.
         "link 1: a <= b"); `what`/`unit` name the conjunction kind in
-        the combined note. The reported route is "derive" only when
-        every part proved, else the deciding part's own route.
+        the combined note. The reported route is the one the deciding
+        parts report (`_conjunction_route`): every part for a proof,
+        the holding parts for a `holds`, the deciding part otherwise.
     """
     def corroboration(probe) -> dict:
         return {k: v for k, v in (probe.meta or {}).items()
@@ -2234,11 +2257,16 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                          meta=corroboration(probe))
     verdicts = [p.verdict for p in probes]
     if all(v == "proven" for v in verdicts):
-        return Probe(name, statement, "proven", route="derive",
+        return Probe(name, statement, "proven",
+                     route=_conjunction_route(
+                         [p.route for p in probes], "derive"),
                      note=f"every {unit} of the {what} proven")
     if all(v in ("proven", "holds") for v in verdicts):
         n = min((p.n for p in probes if p.n), default=0)
-        return Probe(name, statement, "holds", n=n, route="probe",
+        return Probe(name, statement, "holds", n=n,
+                     route=_conjunction_route(
+                         [p.route for p in probes if p.verdict == "holds"],
+                         "probe"),
                      note=f"every {unit} of the {what} holds")
     weakest = next(p for p, v in zip(probes, verdicts)
                    if v not in ("proven", "holds"))

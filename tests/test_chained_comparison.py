@@ -98,3 +98,28 @@ def test_body_chained_comparison_is_derivable():
 def test_body_chain_indicator_is_bounded_zero_one():
     p = _verdict(_unit, "for x in [-5, 5], 0 <= f(x) <= 1")
     assert p.verdict == "proven"
+
+
+def _logistic(x: float) -> float:
+    return 1 / (1 + math.exp(-x))
+
+
+def _clip01(x: float) -> float:
+    return min(max(x, 0.0), 1.0)
+
+
+@pytest.mark.parametrize("fn, route", [(_logistic, "probe"),
+                                       (_clip01, "best")])
+def test_a_chain_reports_the_route_its_links_report(fn, route):
+    # the chain's route names the mechanism that decided it, the same
+    # stamp each link gets as a claim of its own
+    chained = _verdict(fn, "for x in [-5, 5], 0 <= f(x) <= 1", route=route)
+    singles = [_verdict(fn, law, route=route) for law in
+               ("for x in [-5, 5], 0 <= f(x)", "for x in [-5, 5], f(x) <= 1")]
+    assert chained.verdict in ("proven", "holds")
+    assert all(s.verdict == chained.verdict for s in singles)
+    link_routes = {s.route for s in singles}
+    subroutes = {r for r in link_routes if ":" in r}
+    expected = (link_routes.pop() if len(link_routes) == 1
+                else subroutes.pop())
+    assert chained.route == expected, (chained.route, link_routes)
