@@ -19,23 +19,24 @@
 [x] docs/case-studies.md:sigmoid-below-one       verdicts
 [x] docs/case-studies.md:descent                 verdicts
 [ ] docs/claims-transfer.md:42
-[ ] docs/claims-transfer.md:86
+[ ] docs/claims-transfer.md:87
 [x] docs/conditional-claims.md:enforce-dimensions run
-[ ] docs/derive-route.md:62
-[ ] docs/derive-route.md:93
-[ ] docs/derive-route.md:244
-[ ] docs/derive-route.md:264
-[ ] docs/derive-route.md:285
-[ ] docs/derive-route.md:302
-[ ] docs/derive-route.md:348
-[ ] docs/derive-route.md:382
-[ ] docs/derive-route.md:435
-[ ] docs/derive-route.md:504
-[ ] docs/derive-route.md:522
-[ ] docs/derive-route.md:549
-[ ] docs/derive-route.md:570
-[ ] docs/derive-route.md:604
-[ ] docs/derive-route.md:688
+[ ] docs/derive-route.md:69
+[ ] docs/derive-route.md:100
+[ ] docs/derive-route.md:251
+[ ] docs/derive-route.md:271
+[ ] docs/derive-route.md:292
+[ ] docs/derive-route.md:309
+[ ] docs/derive-route.md:355
+[ ] docs/derive-route.md:389
+[ ] docs/derive-route.md:442
+[ ] docs/derive-route.md:511
+[ ] docs/derive-route.md:529
+[ ] docs/derive-route.md:556
+[ ] docs/derive-route.md:577
+[ ] docs/derive-route.md:611
+[ ] docs/derive-route.md:695
+[ ] docs/evidence-ladder.md:74
 [ ] docs/extending.md:183
 [ ] docs/findings.md:30
 [ ] docs/findings.md:58
@@ -46,25 +47,30 @@
 [ ] docs/first-look.md:95
 [ ] docs/first-look.md:123
 [ ] docs/first-look.md:150
-[ ] docs/grammar.md:162
-[ ] docs/grammar.md:299
-[ ] docs/index.md:127
-[ ] docs/index.md:148
-[ ] docs/index.md:174
-[ ] docs/index.md:194
-[ ] docs/index.md:241
-[ ] docs/index.md:248
-[ ] docs/index.md:360
+[ ] docs/grammar.md:178
+[ ] docs/grammar.md:212
+[ ] docs/grammar.md:326
+[ ] docs/grammar.md:390
+[ ] docs/index.md:129
+[ ] docs/index.md:150
+[ ] docs/index.md:176
+[ ] docs/index.md:196
+[ ] docs/index.md:243
+[ ] docs/index.md:250
+[ ] docs/index.md:373
 [x] docs/lemmas.md:chain                         run output
 [x] docs/lemmas.md:weakest                       run output  (after)
 [x] docs/lemmas.md:orphan                        run output  (after)
-[ ] docs/mathema-docstring.md:170
-[ ] docs/mathema-docstring.md:205
-[ ] docs/mathema-docstring.md:255
-[ ] docs/mathema-docstring.md:321
+[ ] docs/mathema-docstring.md:34
+[ ] docs/mathema-docstring.md:184
+[ ] docs/mathema-docstring.md:219
+[ ] docs/mathema-docstring.md:269
+[ ] docs/mathema-docstring.md:335
 [x] docs/matrix-structure.md:identities          run verdicts
 [x] docs/matrix-structure.md:enforce-structure   run  (requires)
-[ ] docs/modes/accept.md:110
+[ ] docs/modes/accept.md:153
+[ ] docs/modes/accept.md:242
+[ ] docs/modes/accept.md:255
 [ ] docs/modes/audit.md:128
 [ ] docs/modes/audit.md:192
 [ ] docs/modes/check.md:119
@@ -77,33 +83,36 @@
 [ ] docs/modes/init.md:76
 [ ] docs/modes/init.md:101
 [ ] docs/modes/library.md:59
+[ ] docs/modes/library.md:97
 [ ] docs/modes/lock.md:41
 [ ] docs/modes/pin.md:30
 [ ] docs/modes/review.md:55
 [ ] docs/modes/verify.md:77
 [ ] docs/modes/verify.md:87
 [ ] docs/modes/verify.md:98
-[ ] docs/modes/verify.md:112
-[ ] docs/modes/verify.md:124
-[ ] docs/modes/verify.md:136
+[ ] docs/modes/verify.md:141
+[ ] docs/modes/verify.md:153
+[ ] docs/modes/verify.md:165
+[ ] docs/modes/verify.md:183
+[ ] docs/multi-function-claims.md:105
 [ ] docs/quickstart.md:40
 [ ] docs/quickstart.md:58
 [ ] docs/quickstart.md:80
 [ ] docs/quickstart.md:115
-[ ] docs/symbology.md:37
-[ ] docs/symbology.md:76
-[ ] docs/symbology.md:123
+[ ] docs/symbology.md:36
+[ ] docs/symbology.md:75
+[ ] docs/symbology.md:122
 [ ] docs/three-layers.md:33
 [ ] docs/tutorial.md:57
 [ ] docs/tutorial.md:117
-[ ] docs/tutorial.md:172
-[ ] docs/tutorial.md:192
-[ ] docs/tutorial.md:210
-[ ] docs/tutorial.md:243
+[ ] docs/tutorial.md:178
+[ ] docs/tutorial.md:198
+[ ] docs/tutorial.md:216
+[ ] docs/tutorial.md:249
 [x] README.md:parity                             file run output
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output
-[-] README.md:171
-[-] README.md:246
+[-] README.md:179
+[-] README.md:259
 
-# 22 examples checked, 76 output fences not yet marked
+# 22 examples checked, 85 output fences not yet marked

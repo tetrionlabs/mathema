@@ -57,7 +57,7 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 
 <!-- example: parity output -->
 ```text
-ok   options.put_call_parity_gap: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+ok   options.put_call_parity_gap: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 ```
 
 Everything before the last comma is the domain and everything after it is the
@@ -65,9 +65,13 @@ law, with `f` standing for the function under test. `[0.1,2]` is a
 mathematical interval rather than a two-element Python list, so the claim
 covers every real value in it, and mathema lifted the body to a symbolic
 expression in which both Gaussian terms cancel and `sigma` disappears,
-establishing the identity for the whole region at once. The
-[claim grammar](https://mathema.tetrionlabs.com/grammar/) has the full
-notation.
+establishing the identity for the whole region at once. The second row is
+that proof's `[float]` companion, a separate claim that runs the same identity
+through the real code in floating point at the region's corners and across its
+interior, because a proof is about the mathematics and whether the
+implementation keeps up with it in f64 is a different question, answered here
+by `holds`. The [claim grammar](https://mathema.tetrionlabs.com/grammar/) has
+the full notation.
 
 The domain is doing real work: drop it and the same claim comes back
 `falsified`, with a counterexample at a negative maturity where `math.sqrt(t)`
@@ -119,7 +123,7 @@ mathema check sigmoid.py \
 
 <!-- example: sigmoid output -->
 ```text
-ok   sigmoid.logistic: source, no side effects; claims 4/4 adjudicated (4 proven, 0 holds, 0 falsified)
+ok   sigmoid.logistic: source, no side effects; claims 5/5 adjudicated (4 proven, 1 holds, 0 falsified)
 ```
 
 ## When the code is wrong

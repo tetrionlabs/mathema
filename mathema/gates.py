@@ -96,8 +96,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         integer-only reaches `fn` as an int, corners included.
     """
     import math
-    from .domain import (_as_int_if_whole, bound_assumptions,
-                         bound_to_sympy_set, domain_contains, is_missing)
+    from .domain import (_as_int_if_whole, bound_to_sympy_set,
+                         domain_contains, is_missing)
     from .probing import (ComplexResult, _synth, complex_is_a_raise,
                           is_complex_value)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
