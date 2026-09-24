@@ -91,5 +91,7 @@ they answer different questions:
   agent that ran the verification.
 
 Neither is the `route` (`probe`/`derive`/`examine`), which is *how* the
-claim was checked. Where a claim came from, who wrote it, and how it was
+claim was checked. The route the claim *asked* for (`probe`, `derive`,
+or `best` when none was named) rides beside them as `authored.route`, so
+a claim restored from its row is checked the way it was written. Where a claim came from, who wrote it, and how it was
 adjudicated are three separate axes, and the record keeps them so.
