@@ -658,6 +658,27 @@ def test_audit_tested_outdated_when_source_newer_than_report(tmp_path):
     assert "outdated, source changed after the coverage report" in r.stdout
 
 
+def test_audit_tested_trusts_a_stamped_report_over_file_times(tmp_path):
+    # the same file times as above, but the report is stamped with its
+    # sources' content hashes and the source is unchanged: the report
+    # still describes this code, so the cell is not "outdated"
+    import os
+
+    from mathema.inventory import stamp_coverage_sources
+    root = _write_pkg(tmp_path, _BODY)
+    (root / "coverage.json").write_text(
+        '{"files": {"trialpkg/mod.py": {"executed_lines": [2, 3]}}}')
+    stamp_coverage_sources(str(root))
+    stale = os.path.getmtime(root / "coverage.json") - 100
+    os.utime(root / "coverage.json", (stale, stale))
+    r = _run(root, "audit", "trialpkg", "--one-line")
+    assert r.returncode == 0, r.stdout + r.stderr
+    header = r.stdout.splitlines()[1]
+    line = next(ln for ln in r.stdout.splitlines()
+                if "trialpkg.mod.pure_fn" in ln)
+    assert _field(header, line, "tested") != "outdated"
+
+
 def test_audit_index_prints_the_table_it_wrote(tmp_path):
     root = _write_pkg(tmp_path, _BODY)
     r = _run(root, "audit", "trialpkg", "--index")

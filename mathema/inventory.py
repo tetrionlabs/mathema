@@ -23,6 +23,8 @@ import ast
 import inspect
 import os
 import re
+from dataclasses import dataclass, field
+
 from .analysis import quiet_facts
 from .intent import _sections
 
@@ -701,13 +703,121 @@ def read_test_coverage(root: str = ".") -> dict[str, set[int]] | None:
     return None
 
 
+COVERAGE_SOURCES_FILE = "coverage.sources.json"
+
+
+def _coverage_report_file(root: str) -> str | None:
+    """The report `read_test_coverage` reads: `coverage.json` first, then
+    a native `.coverage`; None when neither exists."""
+    for name in ("coverage.json", ".coverage"):
+        path = os.path.join(root, name)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _file_digest(path: str) -> str | None:
+    """The sha256 of a file's bytes, or None when it cannot be read."""
+    import hashlib
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def stamp_coverage_sources(root: str = ".") -> str | None:
+    """Intent:
+        Record the content hash of every source file the coverage report
+        measured, beside the report as `coverage.sources.json`, together
+        with the hash of the report itself. Returns the file written, or
+        None when there is no readable report.
+    Notes:
+        The stamp is what makes a report's freshness checkable anywhere
+        (a checkout, a CI artifact, a cache): a file's lines count only
+        while its content still matches what was measured. File-level,
+        since coverage lines are keyed by line number and any edit in the
+        file can shift them.
+    """
+    import json
+    report = _coverage_report_file(root)
+    data = read_test_coverage(root)
+    if report is None or data is None:
+        return None
+    files = {}
+    for path in sorted(data):
+        digest = _file_digest(path)
+        if digest is not None:
+            files[os.path.relpath(path, root)] = digest
+    out = os.path.join(root, COVERAGE_SOURCES_FILE)
+    with open(out, "w") as fh:
+        json.dump({"algorithm": "sha256",
+                   "report": os.path.basename(report),
+                   "report_digest": _file_digest(report),
+                   "files": files}, fh, indent=1, sort_keys=True)
+    return out
+
+
+@dataclass(frozen=True)
+class ReportFreshness:
+    """How far a coverage report can be trusted for each source file.
+    `method` is `"hash"` when a stamp matching the report exists (a file
+    is stale exactly when its content changed since measurement),
+    `"mtime"` when it does not (a file is stale when modified after the
+    report was written), and None when there is no report."""
+    method: str | None
+    report_mtime: float | None = None
+    digests: dict = field(default_factory=dict)
+
+    def is_stale(self, path: str) -> bool:
+        """Whether the report's lines for `path` describe code that has
+        since changed."""
+        if self.method == "hash":
+            recorded = self.digests.get(os.path.realpath(path))
+            return recorded is not None and recorded != _file_digest(path)
+        if self.method == "mtime" and self.report_mtime is not None:
+            try:
+                return os.path.getmtime(path) > self.report_mtime
+            except OSError:
+                return False
+        return False
+
+
+def coverage_freshness(root: str = ".") -> ReportFreshness:
+    """Intent:
+        The freshness check for the coverage report under `root`: by
+        content hash when a stamp written for this exact report exists,
+        else by file modification time.
+    """
+    import json
+    report = _coverage_report_file(root)
+    if report is None:
+        return ReportFreshness(method=None)
+    stamp_path = os.path.join(root, COVERAGE_SOURCES_FILE)
+    if os.path.exists(stamp_path):
+        try:
+            with open(stamp_path) as fh:
+                stamp = json.load(fh)
+        except (OSError, ValueError):
+            stamp = {}
+        if (stamp.get("report") == os.path.basename(report)
+                and stamp.get("report_digest") == _file_digest(report)):
+            digests = {os.path.realpath(os.path.join(root, rel)): digest
+                       for rel, digest in (stamp.get("files") or {}).items()}
+            return ReportFreshness(method="hash", digests=digests)
+    return ReportFreshness(method="mtime",
+                           report_mtime=os.path.getmtime(report))
+
+
 def suggest_coverage_command(root: str = ".") -> str | None:
     """Best-effort: does this project look like it uses pytest? If so,
     the command that would produce the coverage.json report
     read_test_coverage() already knows how to read, never runs it,
     only detects whether suggesting it makes sense. `None` if nothing
     pytest-shaped is found, no guess is better than a wrong one for a
-    project that uses something else entirely.
+    project that uses something else entirely. The export runs whatever
+    the test run's exit status: a failing test still leaves the lines
+    every other test executed.
 
     Uses `python -m coverage`/`python -m pytest`, not the bare `coverage`/
     `pytest` console scripts; those aren't guaranteed to be on PATH even
@@ -735,7 +845,7 @@ def suggest_coverage_command(root: str = ".") -> str | None:
                 break
     if not pytest_shaped:
         return None
-    cmd = "python -m coverage run -m pytest && python -m coverage json"
+    cmd = "python -m coverage run -m pytest; python -m coverage json"
     if importlib.util.find_spec("coverage") is None:
         cmd = "pip install coverage && " + cmd
     return cmd

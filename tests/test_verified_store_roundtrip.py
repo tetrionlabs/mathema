@@ -259,6 +259,34 @@ def test_root_is_found_upward_instead_of_scattering_a_second_store(tmp_path):
     assert "rpkg.mod.double" in r.stdout         # and actually found it
 
 
+def test_root_discovery_stays_inside_the_repository(tmp_path, monkeypatch):
+    # a `.mathema/` ABOVE the enclosing git repository belongs to something
+    # else (a parent project, a per-user config directory); the root is
+    # this repository, never an ancestor outside it
+    from mathema.cli import _resolve_root
+    outer = tmp_path / "outer"
+    (outer / ".mathema").mkdir(parents=True)
+    repo = outer / "repo"
+    (repo / "src").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    monkeypatch.chdir(repo / "src")
+    assert os.path.realpath(_resolve_root(None)) == os.path.realpath(repo)
+
+
+def test_root_discovery_never_takes_the_home_directory(tmp_path, monkeypatch):
+    # outside any repository, the home directory's `.mathema/` is per-user
+    # configuration, not a project store
+    from mathema.cli import _resolve_root
+    home = tmp_path / "home"
+    (home / ".mathema").mkdir(parents=True)
+    work = home / "work"
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    assert os.path.realpath(_resolve_root(None)) == os.path.realpath(work)
+
+
 def test_explicit_root_is_taken_verbatim(tmp_path):
     # an explicit --root is an instruction, never second-guessed: it
     # still creates a store where the user pointed

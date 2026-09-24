@@ -266,6 +266,14 @@ mathema verify --status model.py                       # fresh/stale sweep
 `--format github` and `--format json` are also available, and worked pipeline
 configs for GitHub Actions and GitLab are in [examples/ci/](examples/ci/).
 
+## Intent
+
+mathema exists to make the behaviour of a function something that can be
+checked rather than assumed, namely a claim about what the function does,
+stated precisely enough that the code can be held to it, with the result
+recorded as proof, as evidence, or as an open question, whichever is true,
+and kept honest as the code changes underneath it.
+
 ## Install
 
 mathema needs Python 3.10 or newer. Install it inside an active virtual

@@ -24,7 +24,8 @@ import os
 import pkgutil
 import sys
 
-from .inventory import (derivability_report, docstring_quality, is_pure_enough,
+from .inventory import (coverage_freshness, derivability_report,
+                        docstring_quality, is_pure_enough,
                         is_test_covered, mutated_globals, purity_reason,
                         read_test_coverage, scope_dependencies,
                         structural_complexity, typing_info)
@@ -613,8 +614,8 @@ def audit_rows(targets: list[str], root: str = ".",
     from .locks import load_locks
     locks = load_locks(root)
     coverage_data = None if "tested" in exclude else read_test_coverage(root)
-    coverage_mtime = (None if coverage_data is None
-                      else _coverage_report_mtime(root))
+    freshness = (None if coverage_data is None
+                 else coverage_freshness(root))
     # shared across the sweep: each function's shallow sync computed
     # once, then reused when it appears as someone's callee
     sync_cache: dict = {}
@@ -676,7 +677,7 @@ def audit_rows(targets: list[str], root: str = ".",
             "test_covered": (None if "tested" in exclude
                              else "no-report" if coverage_data is None
                              else "outdated" if _coverage_outdated(
-                                 fn, coverage_mtime)
+                                 fn, freshness)
                              else ("yes" if is_test_covered(fn, coverage_data)
                                    else "no")),
             "_scope_excluded": "scope" in exclude,
@@ -690,39 +691,22 @@ def audit_rows(targets: list[str], root: str = ".",
 
 
 
-def _coverage_report_mtime(root: str):
+def _coverage_outdated(fn, freshness) -> bool:
     """Intent:
-        The coverage report's file mtime (coverage.json preferred,
-        matching read_test_coverage's own order), None when neither
-        file exists.
-    """
-    import os as _os
-    for name in ("coverage.json", ".coverage"):
-        path = _os.path.join(root, name)
-        if _os.path.exists(path):
-            try:
-                return _os.path.getmtime(path)
-            except OSError:
-                return None
-    return None
-
-
-def _coverage_outdated(fn, report_mtime) -> bool:
-    """Intent:
-        Whether the function's source file changed after the coverage
-        report was produced, the report's yes/no describes code that
-        no longer exists, so neither answer is trustworthy and the
+        Whether the function's source file changed since the coverage
+        report measured it (by content hash when the report is stamped,
+        else by file time); the report's yes/no then describes code
+        that no longer exists, so neither answer is trustworthy and the
         cell says "outdated" instead of either.
     """
-    if report_mtime is None:
+    if freshness is None:
         return False
     import inspect as _inspect
-    import os as _os
     try:
         src = _inspect.getsourcefile(fn)
-        return src is not None and _os.path.getmtime(src) > report_mtime
-    except (TypeError, OSError):
+    except TypeError:
         return False
+    return src is not None and freshness.is_stale(src)
 
 # the compact table's column registry: name -> raw value off an
 # audit_rows() row. Raw data, not grid strings, a missing/inapplicable

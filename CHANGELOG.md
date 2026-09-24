@@ -6,6 +6,32 @@ dated on the day they are tagged and published.
 
 ## Unreleased
 
+### Added
+
+- `mathema coverage --stamp` records the content hash of every source
+  file an existing coverage report measured, in `coverage.sources.json`
+  beside it. A stamped report's freshness is judged by content, so it
+  stays trustworthy across a checkout, a CI artifact or a cache, where
+  file times mean nothing. Unstamped reports fall back to file times, and
+  `mathema coverage` prints which check it used. `--run-tests` stamps the
+  report it produces.
+
+### Fixed
+
+- `mathema coverage --run-tests` keeps the report when a test fails. The
+  suggested command no longer chains the JSON export on the test run's
+  success, so one red test no longer discards every other test's lines.
+- `--run-tests` combines per-process coverage data files (a parallel-mode
+  run, or subprocess measurement) before exporting, so lines executed in a
+  subprocess are no longer lost.
+- Project root discovery stays inside the enclosing git repository. A
+  `.mathema/` above it (a parent project's store, or the per-user
+  `~/.mathema` directory) was taken as the root, so a command run
+  without `--root` could act on the wrong directory.
+- `mathema badges` gives no implementation credit from a stale coverage
+  report. A function the report showed as fully covered skipped the
+  freshness check.
+
 ### Changed
 
 - `mathema.lemmas` is now `mathema.partiality`. The module declares
