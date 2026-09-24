@@ -205,7 +205,7 @@ ema:
     - name: "collapses_derived"
       statement: "f(x, 1.0) = x[-1]"
       verdict: "proven"
-      note: "; inferred alpha=1 from the claim's own literal argument"
+      note: "inferred alpha=1 from the claim's own literal argument"
       sketch: "when L = 1: x[0]; otherwise x[L - 1] and x[L - 1] simplify identically"
       condition: "∀ x ∈ Seq(ℝ)"
       route: "derive"
@@ -214,7 +214,7 @@ ema:
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
       n: 160
-      note: "; inferred alpha=1 from the claim's own literal argument"
+      note: "inferred alpha=1 from the claim's own literal argument"
       route: "probe"
       # ...
   concepts:

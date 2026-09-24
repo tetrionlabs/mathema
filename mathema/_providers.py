@@ -11,7 +11,9 @@ Discovery is one thin, generic `importlib.metadata.entry_points()`
 lookup, scanned once per process and cached. Fail-soft throughout,
 matching `conjecture.py`'s own unrecognized-route handling: a missing
 or broken provider never crashes the caller, it falls back to
-`default`.
+`default`. A provider that loads but raises while being called is the
+call site's to catch; `report_provider_failure` gives every call site
+the same once-per-provider warning.
 """
 from __future__ import annotations
 
@@ -46,3 +48,33 @@ def get_provider(name: str, default=None):
     `default`, never raises."""
     provider = _load(name)
     return provider if provider is not None else default
+
+
+_warned_failures: set = set()
+
+
+def provider_label(name: str) -> str:
+    """The entry-point value (`package.module:object`) registered for
+    capability `name`, the spelling a warning names a provider by, or
+    `name` itself when nothing is registered under it."""
+    ep = _discovered().get(name)
+    return ep.value if ep is not None else name
+
+
+def report_provider_failure(name: str, exc: Exception) -> None:
+    """Intent:
+        Warn that the provider for capability `name` raised `exc` while
+        being called and was skipped, once per provider per process.
+
+    Notes:
+        A second failure from the same provider is silent, so a provider
+        that raises on every render produces one warning, not one per
+        claim.
+    """
+    label = provider_label(name)
+    if (name, label) in _warned_failures:
+        return
+    _warned_failures.add((name, label))
+    warnings.warn(f"mathema: provider {label!r} for capability {name!r} "
+                  f"raised ({exc!r}), skipped for this call, falling back "
+                  f"to mathema's own rendering", stacklevel=3)

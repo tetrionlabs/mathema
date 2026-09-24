@@ -89,6 +89,31 @@ def summary_counts(counts) -> str:
     return ", ".join(parts)
 
 
+def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
+    """Intent:
+        Give each probe the verdict its record now stores where the
+        record layer changed it. A claim that was supported before and
+        fails now is written as `invalidated`, and the sweep reports it
+        under that name rather than as the fresh `falsified`.
+
+    Notes:
+        Only a stored `invalidated` is carried over; every other
+        verdict is already the probe's own.
+    """
+    import yaml
+
+    try:
+        with open(path, encoding="utf-8") as fh:
+            entry = (yaml.safe_load(fh) or {}).get(key) or {}
+    except OSError:
+        return
+    stored = {c.get("name"): c.get("verdict")
+              for c in entry.get("claims") or []}
+    for p in probes:
+        if classify_verdict(stored.get(p.name) or "") == "invalidated":
+            p.verdict = stored[p.name]
+
+
 def gate(claims, *, strict: bool,
          accepted_risk: frozenset = frozenset(),
          unresolved=()) -> GateReport:
@@ -112,6 +137,10 @@ def gate(claims, *, strict: bool,
         if _volunteered(meta, note):
             continue
         kind = classify_verdict(verdict)
+        if verdict == "skipped:unknown_but_accepted":
+            # the stored form of an unknown a person accepted as risk
+            r.owned += 1
+            continue
         if kind == "proven":
             r.proven += 1
         elif kind == "holds":
@@ -539,6 +568,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
 
     # phase 1: freshness + adjudication + record writes. Gating waits
     # until every record is written (see the docstring note).
+    lock_messages: dict = {}   # key -> the tripped-lock failure line
     pending: list = []   # (key, why, claims_for_gate, rec_or_none,
                          #  deps, accepted, unresolved, source_line)
     for key in keys:
@@ -672,7 +702,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                    f"Restore the function, or a human runs: "
                    f"mathema unlock {key}")
             out.problems.append(msg)
-            out.lines.append(f"FAIL {msg}")
+            lock_messages[key] = msg
             stored = verified_entry.get("claims") or []
             pending.append((key, "locked-changed", stored, None, None,
                             _accepted_risk(verified_entry), (),
@@ -775,8 +805,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "form changed")
         rec.meta = {**(getattr(rec, "meta", None) or {}),
                     "mathema.premise_state": premise_now}
-        write_record(rec, key=key, root=root, claims=current_claims,
-                     declared_intent=merged_entry.get("intent"))
+        written = write_record(rec, key=key, root=root,
+                               claims=current_claims,
+                               declared_intent=merged_entry.get("intent"))
+        _carry_recorded_verdicts(rec.probes, written, key)
         out.adjudicated += 1
         pending.append((key, why, list(rec.probes), rec, rec.dependencies,
                         accepted, rec.facts.unresolved, verified_info))
@@ -830,7 +862,13 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         report = gate(claims_for_gate, strict=strict,
                       accepted_risk=accepted, unresolved=unres)
         state = "FAIL" if report.problems else "ok"
-        if why == "fresh":
+        if why == "locked-changed":
+            # the record is left as it was, so its counts describe code
+            # that no longer exists: the row is the lock failure alone
+            line = f"FAIL {lock_messages[key]}"
+            if report.problems:
+                line += "; " + "; ".join(report.problems)
+        elif why == "fresh":
             line = f"{state:4} {key}: fresh"
             if report.problems:
                 line += "; " + "; ".join(report.problems)
@@ -849,8 +887,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.keys.append({
             "key": key,
             "why": why,
-            "passed": not report.problems,
-            "problems": list(report.problems),
+            "passed": not report.problems and key not in lock_messages,
+            "problems": ([lock_messages[key]] if key in lock_messages
+                         else []) + list(report.problems),
             "integrity_mismatch": key in integrity_warned,
             "counts": {"proven": report.proven, "holds": report.holds,
                        "refuted": report.refuted,

@@ -1390,10 +1390,10 @@ def _expand_prime(text: str) -> str:
     one apostrophe per differentiation, the variable inferred from
     `f(x)`'s own single free name (`_extract_single_free_identifier`).
     Left alone wherever that inference is ambiguous or empty
-    (`f'(x, y)`, `f'(3)`), the primed call simply isn't rewritten, and
-    falls through to whatever error an un-rewritten `name'(...)` already
-    produces downstream (the same "left alone on failure" convention
-    every other sugar in this module follows)."""
+    (`f'(x, y)`, `f'(3)`), the primed call simply isn't rewritten (the
+    same "left alone on failure" convention every other sugar in this
+    module follows), and `unexpanded_prime_message` names it for
+    `claim()` to refuse."""
     def rewrite(m, args, call_end):
         name, order = m.group(1), len(m.group(2))
         var = _extract_single_free_identifier(args)
@@ -1402,6 +1402,34 @@ def _expand_prime(text: str) -> str:
         return f"d({name}({args}), {', '.join([var] * order)})"
 
     return _rewrite_balanced_calls(text, _PRIME_NAME, rewrite)
+
+
+def unexpanded_prime_message(text: str) -> str | None:
+    """The claim-error message for the first primed call left in
+    already-normalized `text`, or `None` when there is none.
+
+    Intent:
+        Prime notation reads its differentiation variable from the
+        call's single free name, so `f'(v0, theta, g)` (three free
+        names) and `f'(3)` (none) have no derivative variable and
+        `_expand_prime` leaves them as written. This names such a call
+        and the explicit `d(...)` spelling that states the variable,
+        one `<var>` per prime.
+
+    Notes:
+        Only a balanced primed call is reported; an unbalanced one is
+        left for the parser to reject, as `_find_balanced_call` does.
+    """
+    found = _find_balanced_call(text, _PRIME_NAME, 0)
+    if found is None:
+        return None
+    m, args, _ = found
+    name, primes = m.group(1), m.group(2)
+    explicit = f"d({name}({args}), {', '.join(['<var>'] * len(primes))})"
+    count = "none" if _IDENTIFIER.search(args) is None else "more than one"
+    return (f"prime notation {name}{primes}({args}) differentiates with "
+            f"respect to the call's single free variable, and ({args}) "
+            f"has {count}; name the variable explicitly: {explicit}")
 
 
 def _expand_d_single_var(text: str) -> str:

@@ -132,7 +132,7 @@ print("note:", p.note)
 
 ```text
 orphan unknown | missing-prerequisite
-note: ; prerequisite 'absent' is not a claim in this batch, nothing to rest this claim on
+note: prerequisite 'absent' is not a claim in this batch, nothing to rest this claim on
 ```
 
 The other resolution failures report themselves the same way. A name

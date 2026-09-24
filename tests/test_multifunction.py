@@ -146,7 +146,11 @@ def test_counterexample_respects_let_declared_free_variable_domains():
                  "for a in [0.1,0.9], "
                  "d(f(x,y,a),x)/d(f(x,y,a),y) == d(budget_line(x,I,px,py),x)",
                  route="derive")
-    assert r.verdict == "falsified"   # true only at the optimum, so
+    # false away from the optimum, but a calculus form has no point
+    # evaluation against the function, so the symbolic disproof has no
+    # executed witness and the verdict is unknown, flagged
+    assert r.verdict == "unknown"
+    assert (r.meta or {}).get("mathema.corroboration") == "uncorroborated"
     cx = r.counterexample or r.sketch or ""
     import re
     for name, lo, hi in (("px", 0.5, 20.0), ("py", 0.5, 20.0)):

@@ -2325,27 +2325,11 @@ def cmd_compendium(args) -> int:
     return 0
 
 
-def _resolve_root(value: "str | None") -> str:
+def _git_toplevel() -> "str | None":
     """Intent:
-        The project root a command works against. An explicit --root
-        is an instruction and is taken verbatim. Otherwise the root is
-        DISCOVERED: the nearest ancestor holding a `.mathema/` store,
-        else the enclosing git repository, else the working directory.
-        Running from inside a package used to create a whole second
-        store there; a store is the product, so it is found rather
-        than scattered.
+        The top level of the git repository (or worktree) holding the
+        working directory, or None outside git or when git is absent.
     """
-    if value is not None:
-        return os.path.abspath(value)
-    here = os.path.abspath(os.getcwd())
-    path = here
-    while True:
-        if os.path.isdir(os.path.join(path, ".mathema")):
-            return path
-        parent = os.path.dirname(path)
-        if parent == path:
-            break
-        path = parent
     import subprocess
     try:
         out = subprocess.run(["git", "rev-parse", "--show-toplevel"],
@@ -2355,7 +2339,56 @@ def _resolve_root(value: "str | None") -> str:
             return os.path.abspath(top)
     except Exception:
         pass
-    return here
+    return None
+
+
+def _discover_root(here: str, git_top: "str | None", home: str) -> str:
+    """Intent:
+        The inferred project root for the absolute working directory
+        `here`. Walks up from `here` to the nearest folder holding
+        `.mathema/`, stopping at `git_top` (the enclosing git
+        repository's top level, or None outside git), so a store
+        above the repository is never reached. Inside a repository
+        with no store on the way up, the root is `git_top`; outside
+        git with no store found, it is `here`.
+
+    Notes:
+        `home` is never returned as a discovered store root:
+        `~/.mathema` holds user-level configuration, not a project
+        store. Folders are compared by `os.path.realpath`, since git
+        reports resolved paths and `here` may pass through a symlink.
+    """
+    home_r = os.path.realpath(home)
+    top_r = os.path.realpath(git_top) if git_top else None
+    path = here
+    while True:
+        real = os.path.realpath(path)
+        if real != home_r and os.path.isdir(os.path.join(path, ".mathema")):
+            return path
+        if top_r is not None and real == top_r:
+            return git_top  # type: ignore[return-value]
+        parent = os.path.dirname(path)
+        if parent == path:
+            return here
+        path = parent
+
+
+def _resolve_root(value: "str | None") -> str:
+    """Intent:
+        The project root a command works against. An explicit --root
+        is an instruction and is taken verbatim. Otherwise the root is
+        DISCOVERED: the nearest ancestor holding a `.mathema/` store
+        within the enclosing git repository, else that repository's
+        top level, else the working directory. The home directory is
+        never discovered as a root because of `~/.mathema`. Running
+        from inside a package used to create a whole second store
+        there; a store is the product, so it is found rather than
+        scattered.
+    """
+    if value is not None:
+        return os.path.abspath(value)
+    return _discover_root(os.path.abspath(os.getcwd()), _git_toplevel(),
+                          os.path.expanduser("~"))
 
 
 def main(argv: list[str] | None = None) -> int:

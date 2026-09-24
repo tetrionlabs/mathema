@@ -60,9 +60,9 @@ mathema.Record(discount_factor) · source, no side effects · form 8b1b8ec14a11
   FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
            counterexample x = 1
   FALSIFY even: f(-x) = f(x)
-           counterexample x=-1.17273e+09
-           [mathematics unsound, blame claim]
+           counterexample x = -1
   proven  is_deterministic: f(x) = f(x)
+  proven  is_defined: f is defined --> 1 - x != 0
   FALSIFY is_pole_safe[x]: is_pole_safe(x)
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
   FALSIFY is_representation_safe[x]: is_representation_safe(x)
@@ -98,12 +98,15 @@ is_pole_safe[x]            falsified  probe:algorithmic
 is_representation_safe[x]  falsified  probe:algorithmic
 ```
 
-The bracketed tags keep two different kinds of finding apart.
-`[mathematics unsound, blame claim]` on `even` means the code is fine and the
-claim was simply untrue of it, since nothing suggested this function should be
-even. `[implementation:representation]` means the mathematics was fine and the
+Every falsification here carries a witness that was executed against the
+function. The derive rows are witnessed by the call at the pole itself (`even`
+fails at `x = -1` because `f(1)` raises), which says the claim has no value
+there, not whether its mathematics holds, so they carry no tag.
+`[implementation:representation]` means the mathematics was fine and the
 implementation fell over, here because the integer `1` is admitted by the
-domain and raises.
+domain and raises. `is_defined` is the same pole seen from the other side: it
+is proven because `f` returns on exactly the region `1 - x != 0`, which is what
+`f is defined --> 1 - x != 0` states.
 
 ## A claim that needed its domain
 
@@ -119,9 +122,8 @@ mathema check options.py --claim "f(s,k,r,t,sigma) == s - k*exp(-r*t)"
 FAIL options.put_call_parity_gap: source, no side effects; claims 1/2 adjudicated (0 proven, 0 holds, 1 falsified, 1 skipped)  <- 1 falsified claim(s)
 ```
 
-The counterexample is `s=-1.17273e+09, k=-7.54158e+09, r=5.42448e+09,
-t=-9.40317e+08, sigma=-5.30982e+09`, a negative maturity at which
-`math.sqrt(t)` raises. A claim with no domain covers every real input, and
+The counterexample is `s = 1, k = 1, r = 1, t = -1, sigma = 1`, a negative
+maturity at which `math.sqrt(t)` raises. A claim with no domain covers every real input, and
 mathema will not assume the range you had in mind; the domain is part of the
 claim, and stating it is what turns this `falsified` into `proven`.
 

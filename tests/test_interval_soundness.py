@@ -18,9 +18,8 @@ then become the same object and `a[i] - b[i]` cancels to a literal 0.
 `Sum(0, ...)` answers `is_number` and `is_comparable` with True and
 evaluates to 0, so the old exit guard let it through.
 
-There is no backstop below this: `gates._point_evaluator` returns None
-for any sequence parameter, so the corroboration gate cannot reproduce
-a sequence disproof, and `_stability_gate` is off by default.
+There is no backstop below this for a wrong proof: the corroboration
+gate only re-checks disproofs, and `_stability_gate` is off by default.
 """
 import sympy
 

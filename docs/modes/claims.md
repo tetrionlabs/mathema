@@ -18,7 +18,7 @@ mathema claims KEY --adopt NAME     # write one into the declared layer
 | `key` | module-qualified function key (`functions.softmax`) |
 | `--suggest` | render the suggested standard claims with laws and exclusivity groups |
 | `--adopt NAME` | write the named suggestion into `claims/adopted.claims.yaml` |
-| `--root` | project root (default: the nearest ancestor holding `.mathema/`, else the enclosing git repository, else `.`) |
+| `--root` | project root (default: the nearest ancestor holding `.mathema/` within the enclosing git repository, else that repository, else `.`; never the home directory) |
 | `--format` | `text` (default) or `json`: emit `--suggest`'s rows columnar, matching the MCP `suggest_claims` tool |
 | `--output FILE` | write the report to a file instead of stdout |
 

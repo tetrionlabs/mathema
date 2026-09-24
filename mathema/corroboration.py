@@ -76,18 +76,25 @@ def _seed_points(witness: dict | None, names: list[str]) -> list[dict]:
         sampling.
 
     Notes:
-        Only numeric witness coordinates are used; a coordinate absent
-        from the witness is left to the sampler. Empty witness -> [].
+        Numeric witness coordinates are used and perturbed; a list
+        coordinate (a sequence parameter's witness) is carried into
+        every seed unchanged; a coordinate absent from the witness is
+        left to the sampler. Empty witness -> [].
     """
     if not witness:
         return []
     base = {n: float(witness[n]) for n in names
-            if n in witness and _is_number(witness[n])}
-    if not base:
+            if n in witness and not isinstance(witness[n], (list, tuple))
+            and _is_number(witness[n])}
+    fixed = {n: list(witness[n]) for n in names
+             if isinstance(witness.get(n), (list, tuple))}
+    if not base and not fixed:
         return []
-    points = [dict(base)]
-    for delta in _PERTURBATIONS:
-        points.append({n: base[n] * (1.0 + delta) + delta for n in base})
+    points = [{**fixed, **base}]
+    if base:
+        for delta in _PERTURBATIONS:
+            points.append({**fixed, **{n: base[n] * (1.0 + delta) + delta
+                                       for n in base}})
     return points
 
 

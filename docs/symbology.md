@@ -138,8 +138,15 @@ and the rendered text still round-trips through the parser.
 
 Return `None` for anything you have no opinion about and mathema falls
 back to its own choice, so a provider only needs to know about the
-names it cares about. A provider that fails to import is skipped with a
-warning rather than crashing the caller.
+names it cares about.
+
+A provider never crashes a render. One that fails to import is skipped
+with a warning. One that raises from either hook while a claim renders
+is skipped for that render: none of its answers for that claim are
+used, the claim renders with mathema's own names, and a warning naming
+the provider's entry point is issued the first time it fails in a
+process. Only ordinary exceptions are caught this way; an interrupt
+such as `KeyboardInterrupt` still stops the render.
 
 ### What mathema will not let you do
 

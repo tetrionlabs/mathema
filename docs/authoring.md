@@ -103,9 +103,15 @@ every other `d(...)` spelling above:
 
 ```
 d(f(v0, theta, g), theta)@{theta=pi/4} == 0       # range is maximized at 45°
-f'(v0, theta, g) at {theta=pi/4} == 0             # same claim again
+d(f(v0, theta, g)/dtheta) at {theta=pi/4} == 0    # same claim again
 d(f(x)/dx^2)@{x=1} == 6                           # differentiates twice, then substitutes
+f'(x) at {x=1} == 3                               # prime notation, one free variable
 ```
+
+Prime notation takes its variable from the call's single free name, so
+it only reads on a one-variable call. `f'(v0, theta, g)` has three, and
+`claim()` refuses it with an `InvalidConjecture` that names the
+explicit spelling, `d(f(v0, theta, g), <var>)`.
 
 `integrate(<expr>, <var>)|_{a}^{b}` (matching LaTeX's own `\big|_a^b`
 convention) is pure sugar for the already-existing bounded 4-argument

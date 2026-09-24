@@ -41,7 +41,7 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       extract_outcome_clause, _split_top_level,
                       is_reserved, normalize,
                       parse_domain_safety, parse_raises, split_quantifier,
-                      split_relation_chain)
+                      split_relation_chain, unexpanded_prime_message)
 from . import linalg
 from ._scan import _split_commas
 from .probing import (_close, _fmt, _prepare_sampling, _probe_density,
@@ -432,6 +432,13 @@ class ConflictingDomainBinding(InvalidConjecture):
     (and says so in the resulting note) rather than raising."""
 
 
+#: `f is defined --> <region>` (or `is_defined(f) --> <region>`), the
+#: statement spelling of a definedness-region claim
+_DEFINED_REGION_CLAIM = re.compile(
+    r"(?:is_defined\(\s*f\s*\)|f\s+is\s+defined)\s*(?:-->|=>|⟹)"
+    r"\s*(?P<region>.+)", re.DOTALL)
+
+
 def claim(law: str, name: str | None = None, source: str = "user",
          route: str = "best", grammar: str = GRAMMAR,
          funcs: dict | None = None, tolerance: float | None = None,
@@ -571,6 +578,9 @@ def claim(law: str, name: str | None = None, source: str = "user",
             f"write the real name ({aliases[aliased_domain_keys[0]]!r}) in "
             f"the 'for' clause instead, or move the 'let' earlier")
     dom = {**let_domain, **dom}
+    prime_problem = unexpanded_prime_message(text)
+    if prime_problem is not None:
+        raise InvalidConjecture(prime_problem)
     r = parse_raises(text)
     ds = None if r is not None else parse_domain_safety(text)
     negated = False
@@ -591,6 +601,20 @@ def claim(law: str, name: str | None = None, source: str = "user",
             raise InvalidConjecture(
                 "a claim carries one relation: state each as its own "
                 "claim, or use a chained comparison (a <= b <= c)")
+        # `f is defined --> <region>`: the definedness-region claim. The
+        # relation is the region itself, and the is_defined name is what
+        # gives it the reading "f returns on exactly this region"
+        region_form = _DEFINED_REGION_CLAIM.fullmatch(text)
+        if region_form is not None:
+            if name is None:
+                name = "is_defined"
+            elif name.split("[", 1)[0] != "is_defined":
+                raise InvalidConjecture(
+                    f"`f is defined --> <region>` states the definedness "
+                    f"region, which a claim named is_defined (or "
+                    f"is_defined[k]) carries; {name!r} would read the "
+                    f"region as a plain relation")
+            text = region_form.group("region").strip()
         # a top-level implication arrow that survived to here is not
         # outcome grammar (that shape is `=> self.<claim>`, stripped
         # off raw text up front) and not an assuming pin (those live in
@@ -2237,15 +2261,22 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
     winner.note = f"{winner.note}; {trail}"
     carried = {k: v for k, v in (fallback.meta or {}).items()
                if k.startswith("mathema.derive") or k == "mathema.timeout"
-               or k == "mathema.corroboration"}
+               or k.startswith("mathema.corroboration")}
     if carried:
         winner.meta = {**(winner.meta or {}), **carried}
     if (fallback.meta or {}).get("mathema.corroboration") == "uncorroborated":
         # the engine-bug signal must survive whichever route wins: a
         # symbolic disproof nothing reproduced was claimed here, and a
-        # later reader (or the maintainer) needs to see that
-        winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
-                       f"disproof (probable engine bug, worth reporting)")
+        # later reader (or the maintainer) needs to see that. A claim
+        # form with no point evaluation had no reproduction attempted,
+        # so that note names the missing witness instead.
+        if (fallback.meta or {}).get("mathema.corroboration_unexecutable"):
+            winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
+                           f"disproof (the claim form has no point "
+                           f"evaluation, so derive had no executed witness)")
+        else:
+            winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
+                           f"disproof (probable engine bug, worth reporting)")
     return winner
 
 
@@ -3811,7 +3842,9 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # function returning a matrix, `0 <= f(X) <= 1`) is compared
         # ELEMENTWISE: the relation holds iff it holds at every element,
         # a scalar broadcasting across the matrix.
-        ok = relation_holds_elementwise(lv, rv, cj.relation, slack)
+        ok = relation_holds_elementwise(
+            lv, rv, cj.relation, slack,
+            exact_inequality=cj.tolerance is None)
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex return), or two

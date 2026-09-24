@@ -1163,10 +1163,11 @@ def _sound_interval_result(result) -> bool:
         an AccumBounds sitting in a summation limit.
 
         Belt and braces beside `_interval_bounds`'s own decline,
-        because the corroboration gate cannot backstop this class at
-        all: `gates._point_evaluator` returns None for any sequence
-        parameter, and `_stability_gate` is off by default, so a wrong
-        verdict here reaches the record with nothing to catch it.
+        because nothing backstops a wrong PROOF in this class: the
+        corroboration gate only re-checks disproofs, and
+        `_stability_gate` is off by default (and declines sequence
+        parameters when on), so a wrong proof here reaches the record
+        with nothing to catch it.
     """
     if result is None:
         return False

@@ -64,16 +64,14 @@ def test_shift_proves_exactly_when_the_weights_sum_to_one(folds):
     assert p.verdict == "proven", (p.verdict, p.note)
     assert "Sum evaluated in closed form" in (p.sketch or "")
 
-    # total's weights sum to L, not 1: the same law is false and the
-    # derive route refutes it symbolically. KNOWN GAP, tracked: the
-    # corroboration gate exempts sequence shapes (its point evaluator
-    # declines them), so this falsification carries no executed
-    # witness yet; when sequence corroboration lands this pin should
-    # start asserting q.counterexample instead.
+    # total's weights sum to L, not 1: the same law is false, the
+    # derive route refutes it symbolically, and the corroboration gate
+    # reproduces that against the real function with a list witness
     q = _one(folds.total, "let c be [1, 5], f(xs) + c == f(g(xs, c))",
              {"g": "mathema.f.shift_seq"}, route="best")
     assert q.verdict == "falsified"
-    assert q.counterexample is None
+    assert q.counterexample and "xs=[" in q.counterexample
+    assert (q.meta or {}).get("mathema.corroboration") == "reproduced"
 
 
 def test_the_battery_equivariances_now_prove_on_linear_folds(folds):

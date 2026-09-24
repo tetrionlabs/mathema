@@ -237,7 +237,11 @@ def test_trials_budget_is_configurable():
         return 2 * x
 
     r = mathema.check(double, trials=10)
-    assert all(p.n == 10 for p in r.probes if p.n)
+    # a falsification stops at its first witness, so its n counts the
+    # trials run up to it, never more than the budget
+    assert all(p.n == 10 for p in r.probes
+               if p.n and p.verdict != "falsified")
+    assert all(p.n <= 10 for p in r.probes if p.n)
 
 
 def test_pole_detected_empirically():

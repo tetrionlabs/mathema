@@ -698,7 +698,7 @@ bodies:
 |---|---|---|
 | `cube(x) = x**3` | `d(f(x), x) >= 0` | `proven`; x³ is monotone increasing |
 | `heat_sol(t, x) = x**2 + 2*t` | `d(f(t,x),t) == d(f(t,x),x,x)` | `proven`, genuinely solves the heat equation |
-| `not_heat_sol(t, x) = x**2 + 3*t` | `d(f(t,x),t) == d(f(t,x),x,x)` | `falsified`, correctly, it doesn't |
+| `not_heat_sol(t, x) = x**2 + 3*t` | `d(f(t,x),t) == d(f(t,x),x,x)` | `unknown`: derive shows it doesn't (`3 ≠ 2`), but a derivative claim has no executed witness, and a falsification needs one |
 | `sinx(x) = sin(x)` | `lim(f(x)/x,x,0) == lim(d(f(x),x)/d(x,x),x,0)` | `proven`, L'Hôpital's rule as a consistency check |
 | `dot2d` (2D dot product) | `f(...)**2 <= (ax**2+ay**2)*(bx**2+by**2)` | `proven`, Cauchy-Schwarz, squared form |
 | `dot2d` | `abs(f(...)) <= sqrt(ax**2+ay**2)*sqrt(bx**2+by**2)` | `proven` (`derive:extensive`), same claim, direct sqrt/Abs form, squared back to the form above |

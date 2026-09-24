@@ -123,9 +123,9 @@ mathema.Record(discount_factor) · source, no side effects · form 8b1b8ec14a11
   FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
            counterexample x = 1
   FALSIFY even: f(-x) = f(x)
-           counterexample x=-1.17273e+09
-           [mathematics unsound, blame claim]
+           counterexample x = -1
   proven  is_deterministic: f(x) = f(x)
+  proven  is_defined: f is defined --> 1 - x != 0
   FALSIFY is_pole_safe[x]: is_pole_safe(x)
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
   FALSIFY is_representation_safe[x]: is_representation_safe(x)
@@ -138,9 +138,8 @@ sampling lands exactly on `x == 1` with probability zero, so a property-based
 run can pass a thousand trials here and report nothing, whereas mathema solves
 the lifted expression for where the denominator vanishes and makes sure that
 point is tried. Every falsification rests on an executed witness, never on a
-symbolic argument alone, and the bracketed tags keep a claim that was simply
-untrue (`even`) apart from an implementation that fell over (the integer `1`
-raising where the domain admits it).
+symbolic argument alone, and the bracketed tag marks an implementation that
+fell over (the integer `1` raising where the domain admits it).
 
 ## Built for AI-assisted development
 

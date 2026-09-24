@@ -45,6 +45,10 @@ region:
   statement: "x >= 0"
 ```
 
+A record renders the restriction as `f is defined --> x >= 0`, so the
+row never reads as a claim that `x >= 0` holds everywhere, and that
+spelling parses back to the same claim (named `is_defined`).
+
 ```
 is_defined(f)               # TOTALITY: f returns everywhere, it never raises
 f is defined                # the same claim, postfix spelling

@@ -123,7 +123,7 @@ request: the payload is yours to send, or not.
 | Flag | Meaning |
 |---|---|
 | `target` | importable module, package, or `module:function` name(s), the same convention as `audit` |
-| `--root` | project root to import targets relative to (default: the nearest ancestor holding `.mathema/`, else the enclosing git repository, else `.`) |
+| `--root` | project root to import targets relative to (default: the nearest ancestor holding `.mathema/` within the enclosing git repository, else that repository, else `.`; never the home directory) |
 | `--tier` | narrow the ladder to one tier, by name or by position 1-5 (single-function mode only) |
 | `--depth` | callee-inlining depth for the ladder (default 3, single-function mode only) |
 | `--issue` | build the structured failure report for one function |

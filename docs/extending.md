@@ -133,51 +133,57 @@ refuses to load.
 ## What mathema calls back on you
 
 Registering a capability is a two-way contract. `SURFACE` says what you
-may import; `CAPABILITY_PROTOCOLS` says what mathema calls on what you
-registered, and with which keyword arguments.
+may import; the other direction is what mathema calls on the object you
+registered. One capability is called today, `symbology`, which renders
+claim text in your own notation:
 
-```python
-from mathema.interfaces.extension import capability_problems
-import my_package.diagram
+| Member | Called as | Returns |
+|---|---|---|
+| `symbol_for_param` | `symbol_for_param(name)`, once for each real parameter in the claim | the symbol, or `None` to decline |
+| `symbol_for_func` | `symbol_for_func(name)`, once for each bound function name | the symbol, or `None` to decline |
 
-assert capability_problems(my_package.diagram, "describe_diagram") == []
-```
+Both members are optional, and the name is passed positionally. mathema
+calls them on the object the entry point loads, so a module, a class
+with static methods, or an instance all work. If either hook raises,
+the provider is skipped for that render with a warning naming your
+entry point, and the claim renders with mathema's own names. [Symbology and
+rendering](symbology.md) covers which symbols are accepted and how the
+renames appear in the claim text.
 
-`capability_problems` returns a list of strings, empty when you
-conform. Put it in your own test suite. It reports a missing member, a
-member that is not callable, and a member that refuses a keyword
-mathema passes.
+`CAPABILITY_PROTOCOLS` is the machine-readable form of this direction,
+and `capability_problems(provider, capability)` checks a provider
+against an entry in it. The registry is empty today, since `symbology`
+is not declared in it, so there is no capability to check a provider
+against yet, and `capability_problems` raises `KeyError` for any name.
 
 ## A minimal capability
 
 ```python
-# my_package/diagram.py
-from mathema.interfaces.extension import Rendered
+# my_package/symbology.py
 
+class UnitsSymbology:
+    """Symbols for a mechanics package."""
 
-class LabelLegend:
-    def render_key(self) -> str:
-        return ""
-
-
-def render_structure(fdef, tier, *, globals_ns, name_map=None,
-                     seq_params=frozenset(), depth=3, legend=None):
-    ...  # return an object with a .render() -> str method
-
-
-def render_lifted_tree(expr) -> Rendered:
-    return Rendered(text=str(expr), available=True)
+    @staticmethod
+    def symbol_for_param(name: str) -> str | None:
+        return {"mass": "m", "velocity": "v"}.get(name)
 ```
 
 ```toml
 # pyproject.toml
 [project.entry-points."mathema.capabilities"]
-describe_diagram = "my_package.diagram"
+symbology = "my_package.symbology:UnitsSymbology"
 ```
 
-With the package installed, `mathema audit --describe` renders through
-your code. With it uninstalled, mathema renders its own plain text and
-says nothing about the difference.
+With the package installed, the claim `for mass in [0, 10], velocity
+in [0, 5], f(mass, velocity) >= 0` renders with your symbols, each
+declared as a `let` binding. With it uninstalled, mathema renders its
+own names:
+
+```text
+default        : ∀ mass ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, velocity ∈ [0.0, 5.0] ⊂ ℝ ∪ {∅}, f(mass, velocity) ≥ 0
+with provider  : let m = mass, let v = velocity, ∀ m ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, v ∈ [0.0, 5.0] ⊂ ℝ ∪ {∅}, f(m, v) ≥ 0
+```
 
 ## Reference
 
