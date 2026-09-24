@@ -10,7 +10,8 @@ come back undecided and fall to sampling.
 Each of those integer parts satisfies an exact bound, which mathema can
 supply even though sympy will not: `floor(u) = u - t` and
 `ceiling(u) = u + t` for some `t` in `[0, 1)`, and `Mod(a, n)` is
-`(n - 1) * s` for some `s` in `[0, 1]` when `n` is positive. Replacing
+`n * s` for some `s` in `[0, 1)` when `n` is positive, tightened to
+`(n - 1) * s` with `s` in `[0, 1]` when both operands are integers. Replacing
 each node with a fresh auxiliary carrying those bounds turns the
 question into a bounded one the interval rung already decides.
 
@@ -56,6 +57,14 @@ _SRC = '''
     def clock_hour(h: int, d: int) -> int:
         """Hour on a 24-hour clock after a duration."""
         return (h + d) % 24
+
+    def real_remainder(x: float) -> float:
+        """Remainder of x modulo 3.0."""
+        return x % 3.0
+
+    def floor_doubling(x: float) -> float:
+        """floor(2x) - 2 floor(x), always 0 or 1."""
+        return math.floor(2 * x) - 2 * math.floor(x)
 '''
 
 
@@ -115,6 +124,9 @@ def test_an_integer_part_fact_proves(mod, func, law):
     ("clock_hour",
      "for h in [0,23] subset Z, d in [0,100] subset Z, f(h,d) >= 1",
      "0 is reachable"),
+    ("real_remainder", "for x in [-5,5], f(x) <= 2", "f(2.5) = 2.5"),
+    ("real_remainder", "for x in [-5,5], f(x) <= 2.5", "f(2.9) = 2.9"),
+    ("real_remainder", "for x in [0,5], f(x) != 2.5", "f(2.5) = 2.5"),
 ])
 def test_a_false_integer_part_claim_never_proves(mod, func, law, why):
     p = _verdict(getattr(mod, func), law)
@@ -132,6 +144,36 @@ def test_a_claim_and_its_negation_are_never_both_proven(mod):
         b = _verdict(mod.frac_part, f"for x in [-20,20], {negation}")
         assert not (a.verdict == "proven" and b.verdict == "proven"), \
             (law, negation, a.verdict, b.verdict)
+
+
+def test_a_real_remainder_is_bounded_by_its_modulus_not_one_less(mod):
+    """`n - 1` bounds an integer remainder; a real one reaches any value
+    below the modulus."""
+    p = _verdict(mod.real_remainder, "for x in [-5,5], f(x) <= 3")
+    assert p.verdict == "proven", (p.verdict, p.sketch)
+    p = _verdict(mod.real_remainder, "for x in [-5,5], f(x) >= 0")
+    assert p.verdict == "proven", (p.verdict, p.sketch)
+
+
+def test_a_relaxation_never_disproves_a_true_claim(mod):
+    """The relaxed range contains the true one, so a relaxed expression
+    that can be negative says nothing about the real one: the two
+    floors here move together, the auxiliaries do not."""
+    p = _verdict(mod.floor_doubling, "for x in [-5,5], f(x) >= 0")
+    assert p.verdict in ("proven", "holds"), (p.verdict, p.note)
+    assert (p.meta or {}).get("mathema.corroboration") != "uncorroborated"
+
+
+def test_a_relaxed_disproof_is_not_reported_as_one():
+    import sympy
+
+    from mathema.domain import Interval
+    from mathema.symbolic._proof_support import _prove_relation
+    x = sympy.Symbol("x", real=True)
+    lhs = sympy.floor(2 * x) - 2 * sympy.floor(x)
+    result = _prove_relation(lhs, sympy.Integer(0), ">=",
+                             {"x": Interval(-5.0, 5.0)}, None, {"x": x})
+    assert result.status != "disproven", result
 
 
 # --- the relaxation itself --------------------------------------------------
