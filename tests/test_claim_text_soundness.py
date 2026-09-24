@@ -138,3 +138,52 @@ def test_a_hash_is_refused_rather_than_truncating_the_claim(law):
 
 def test_a_hash_inside_a_string_value_is_data():
     assert_round_trips('f(x, "a # b") >= 0')
+
+
+# -- bindings ---------------------------------------------------------------
+
+def negated(x: float) -> float:
+    return -1.0 - x
+
+
+@pytest.mark.parametrize("law", [
+    "let f = math.sqrt, for x in [0, 1], f(x) >= 0",
+    "let f = 2*x, for x in [0, 1], f >= 0",
+    "let f be [0, 1], f(x) >= 0",
+    "for f in [0, 1], f(f) >= 0",
+])
+def test_the_function_under_test_cannot_be_rebound(law):
+    with pytest.raises(InvalidConjecture, match="`f` always names"):
+        claim(law)
+
+
+def test_a_false_claim_cannot_be_made_to_hold_by_rebinding_f():
+    assert _verdict(negated, claim("for x in [0, 1], f(x) >= 0")) \
+        == "falsified"
+    with pytest.raises(InvalidConjecture):
+        claim("let f = math.sqrt, for x in [0, 1], f(x) >= 0")
+
+
+@pytest.mark.parametrize("law", [
+    "for x in [0, 1], x in [2, 3], f(x) >= 0",
+    "for x in [0, 1], for x in [2, 3], f(x) >= 0",
+])
+def test_one_name_bound_twice_is_a_conflict(law):
+    from mathema.conjecture import ConflictingDomainBinding
+    with pytest.raises(ConflictingDomainBinding, match="'x'"):
+        claim(law)
+
+
+@pytest.mark.parametrize("law, message", [
+    ("let = 3, f(x) >= 0", "cannot read the binding"),
+    ("let x = , f(x) >= 0", "binds 'x' to nothing"),
+    ("let g = , f(x) >= g(x)", "binds 'g' to nothing"),
+])
+def test_a_malformed_let_binding_is_refused(law, message):
+    with pytest.raises(InvalidConjecture, match=message):
+        claim(law)
+
+
+def test_a_well_formed_let_run_still_reads():
+    assert_round_trips("let g = math.sqrt, for x in [0, 1], g(x) >= 0")
+    assert_round_trips("let c be [-1, 1], for x in [0, 1], f(x + c) >= -9")

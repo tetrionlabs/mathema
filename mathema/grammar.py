@@ -832,6 +832,24 @@ _RESERVED_CARRIERS = frozenset({
 })
 
 
+_SECTION_KEYWORDS = frozenset({"let", "for", "be", "in", "assuming"})
+
+
+def _refuse_binding_subject(name: str) -> None:
+    """Intent:
+        Refuse a binding of the name `f`, which always denotes the
+        function under test.
+
+    Raises:
+        InvalidDomain: `name` is `f`.
+    """
+    if name == "f":
+        raise InvalidDomain(
+            "`f` always names the function under test and cannot be "
+            "rebound; bind another name (`let g = pkg.mod.func`) and "
+            "use that")
+
+
 def extract_let_bindings(
         text: str) -> tuple[dict[str, str], dict, str, dict[str, str],
                             float | None]:
@@ -937,6 +955,7 @@ def extract_let_bindings(
             if dm is not None:
                 fname = dm.group(1)
                 bounds = unmask_strings(dm.group(2).strip(), literals)
+                _refuse_binding_subject(fname)
                 if fname in _BASE_SET_NAMES or bounds in _RESERVED_CARRIERS:
                     # the representation-declaration spelling: rebinding
                     # a named set's machine carrier, the same shape as
@@ -996,8 +1015,25 @@ def extract_let_bindings(
             continue
         m = _LET_BINDING.match(first)
         if m is None or _LET_SEGMENT_HAS_IN.search(m.group(2)):
+            if (_LET_STRIP.match(first) is not None
+                    and not _LET_SEGMENT_HAS_IN.search(first)):
+                raise InvalidDomain(
+                    f"cannot read the binding "
+                    f"{unmask_strings(first.strip(), literals)!r}: a let "
+                    f"binding is `let name = expr`, `let g = pkg.mod.func` "
+                    f"or `let name be bounds`")
             break
         name, expr = m.group(1).strip(), m.group(2).strip()
+        if name in _SECTION_KEYWORDS:
+            raise InvalidDomain(
+                f"cannot read the binding "
+                f"{unmask_strings(first.strip(), literals)!r}: {name!r} is "
+                f"a keyword of the claim grammar, not a name to bind")
+        if not expr:
+            raise InvalidDomain(
+                f"`let {name} =` binds {name!r} to nothing: give it an "
+                f"expression or a dotted function path")
+        _refuse_binding_subject(name)
         rest = ",".join(segments[1:]).strip()
         if _LET_FUNC_VALUE.match(expr):
             funcs[name] = expr

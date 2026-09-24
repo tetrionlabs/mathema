@@ -44,6 +44,7 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       split_relation_chain, unexpanded_prime_message)
 from . import linalg
 from ._scan import _split_commas, blank_strings
+from .domain import DuplicateBinding
 from .probing import (_close, _fmt, _prepare_sampling, _probe_density,
                       _sampling_shorthand, _synth, _synth_dict,
                       relation_holds_elementwise)
@@ -613,8 +614,19 @@ def claim(law: str, name: str | None = None, source: str = "user",
         text = normalize(text)
         try:
             new_dom, text = split_quantifier(text)
+        except DuplicateBinding as e:
+            raise ConflictingDomainBinding(str(e)) from e
         except InvalidDomain as e:
             raise InvalidConjecture(str(e)) from e
+        rebound = sorted(set(new_dom) & set(dom) - {"n"})
+        if rebound:
+            raise ConflictingDomainBinding(
+                f"{rebound} bound by two quantifiers in the same claim; "
+                f"give each name one domain")
+        if "f" in new_dom:
+            raise InvalidConjecture(
+                "`f` always names the function under test and cannot be "
+                "a quantified variable; pick another name")
         dom.update(new_dom)
         if text == prev:
             break

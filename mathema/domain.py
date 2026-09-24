@@ -132,6 +132,12 @@ class InvalidDomain(ValueError):
     that's legitimately "no domain here", not a syntax error."""
 
 
+class DuplicateBinding(InvalidDomain):
+    """Raised by `split_quantifier()` when one quantifier binds the same
+    name twice: two domains for one name, neither of which can be
+    preferred silently."""
+
+
 _FOR_PREFIX = re.compile(r"^\s*for\s+", re.DOTALL)
 # "x in D" / "x ∈ D" / "x \in D" / "x \elem D", all one membership
 # operator, matched up front so every binding shape below only ever has
@@ -1312,6 +1318,10 @@ def split_quantifier(text: str) -> tuple[dict, str]:
         if isinstance(parsed, str):
             raise InvalidDomain(parsed)
         name, value = parsed
+        if name in domain:
+            raise DuplicateBinding(
+                f"{name!r} is bound twice in one quantifier; give it one "
+                f"domain")
         domain[name] = value
     for name, value in ne_pending:
         bound = domain.get(name)
