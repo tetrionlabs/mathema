@@ -58,6 +58,11 @@ class AcceptanceError(ValueError):
     doesn't exist, or a statement the discovery path can't invert."""
 
 
+class UnknownAcceptanceTarget(AcceptanceError):
+    """Raised when the named record or claim does not exist, a target
+    that does not resolve rather than a request the rules refuse."""
+
+
 def default_identity() -> str | None:
     """The accepting identity when none is given: `git config
     user.name` if available, else None (the annotation simply omits
@@ -298,7 +303,7 @@ def _load_record(root: str, key: str):
     from .spec import verified_dir
     path = os.path.join(verified_dir(root), f"{key}.yaml")
     if not os.path.exists(path):
-        raise AcceptanceError(f"no verified record for {key!r} at {path}, "
+        raise UnknownAcceptanceTarget(f"no verified record for {key!r} at {path}, "
                               "run `mathema verify` (or `check`) first; "
                               "acceptance annotates adjudicated evidence")
     with open(path) as fh:
@@ -355,7 +360,7 @@ def suggest_acceptance(root: str, key: str, claim_name: str) -> tuple:
     if target is None:
         names = ", ".join(sorted(filter(None, (c.get("name") for c in claims)))) \
             or "none"
-        raise AcceptanceError(f"{key} has no claim named {claim_name!r} "
+        raise UnknownAcceptanceTarget(f"{key} has no claim named {claim_name!r} "
                               f"(recorded claims: {names})")
     base = classify_verdict(target.get("verdict") or "")
     if base == "proven":
@@ -402,7 +407,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
     target = next((c for c in claims if c.get("name") == claim_name), None)
     if target is None:
         names = ", ".join(sorted(filter(None, (c.get("name") for c in claims)))) or "none"
-        raise AcceptanceError(f"{key} has no claim named {claim_name!r} "
+        raise UnknownAcceptanceTarget(f"{key} has no claim named {claim_name!r} "
                               f"(recorded claims: {names})")
     verdict = target.get("verdict") or ""
     base = classify_verdict(verdict)

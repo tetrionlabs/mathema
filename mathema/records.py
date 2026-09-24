@@ -17,9 +17,11 @@ vocabulary:
   (a derive attempt that came back undecided/unliftable, a family that
   declined). `meta` says why, when an attempt was actually made.
 - `"documented"` / `"declared"`: intent-level evidence rungs, not
-  full claim verdicts: a deliberate statement (an `Intent:` block, an
-  `intent:` field in the declared spec) is `documented`; one inferred
-  from a bare summary is `declared`, the lowest rung.
+  full claim verdicts: any stated intent (a docstring summary, an
+  `Intent:` block, an `intent:` field in the declared spec) is
+  `declared` until a person accepts it with `mathema accept --intent`,
+  which makes it `documented`. `declared` is also the verdict of a
+  claim authored and stored but not yet adjudicated.
 - `"falsified"`: refuted, by counterexample or symbolic disproof.
   Knowledge, not failure; the diagnose/accept workflow decides whether
   it is a bug or a genuine discovery.

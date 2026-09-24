@@ -123,6 +123,28 @@ claims in them.
 | `f equiv g` | the word alias for the same relation |
 | `for a in [0.1,10], b in [0.1,10], 2/(1/a+1/b) <= f(a,b) <= (a+b)/2` | a chained comparison, both bounds in one claim |
 
+### How close counts as equal
+
+On the derive route every relation is decided exactly: `==` and `~=` both
+ask whether the two sides are the same over the whole domain, in exact real
+arithmetic.
+
+On the probe route, which runs the real function in floating point, `==`
+and `~=` are the same comparison: the two sides count as equal when they
+agree within a relative tolerance of 1e-6 or an absolute tolerance of 1e-9,
+whichever is larger. So `x * (1 + 1e-8)` equals `x` everywhere, while a
+constant offset of `1e-7` is caught near zero, where the relative allowance
+shrinks below it. A claim sets its own absolute tolerance with the
+`tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
+and that value replaces the 1e-9. Inside the claim text, `ε` (also `eps`
+or `epsilon`) stands for that tolerance, so a bound on the gap between two
+functions can be written the way the convention usually writes it.
+
+The other relations use the same allowance where it makes sense: `<=` and
+`>=` accept a difference within the absolute tolerance, `<` and `>` accept
+none, since equality must not pass for strictly less, and `!=` with no
+declared tolerance fails only where the two sides are exactly equal.
+
 ## Expressions
 
 | Spelling | Meaning |

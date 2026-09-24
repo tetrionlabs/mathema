@@ -133,6 +133,67 @@ def _yaml_safe_args(args) -> list:
     return out
 
 
+_MAX_CORNERS = 64
+
+
+def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
+    """Intent:
+        The corners of a claim's bounded domain box as argument lists,
+        in `kinds` order: every combination of each parameter's included
+        endpoints, with a literal argument held at its literal. Empty
+        unless every parameter is a real or integer scalar with a finite
+        interval domain (or fixed by a literal), and when the box has
+        more than `_MAX_CORNERS` corners.
+
+    Notes:
+        Only an endpoint the domain includes is used; an open end is not
+        in the domain, so a point there is never tried. A value the
+        domain excludes is dropped. A raise that needs two parameters at
+        their extremes together is invisible to per-parameter sampling
+        and found here.
+    """
+    import itertools
+
+    from .domain import Domain, domain_contains
+
+    choices = []
+    for p, k in kinds.items():
+        if p in literal_args:
+            choices.append([literal_args[p]])
+            continue
+        if k not in ("scalar", "float", "int"):
+            return []
+        bound = domain.get(p)
+        pieces = (bound.pieces if isinstance(bound, Domain) else (bound,))
+        ends: list = []
+        for piece in pieces:
+            if not (isinstance(piece, tuple) and not isinstance(piece, frozenset)
+                    and len(piece) == 2):
+                return []
+            lo, hi = piece
+            try:
+                if not (math.isfinite(lo) and math.isfinite(hi)):
+                    return []
+            except TypeError:
+                return []
+            if getattr(piece, "closed_lo", True):
+                ends.append(lo)
+            if getattr(piece, "closed_hi", True):
+                ends.append(hi)
+        ends = [v for v in dict.fromkeys(ends) if domain_contains(v, bound)]
+        if k == "int":
+            ends = [int(v) for v in ends if float(v).is_integer()]
+        if not ends:
+            return []
+        choices.append(ends)
+    total = 1
+    for c in choices:
+        total *= len(c)
+    if not choices or total > _MAX_CORNERS:
+        return []
+    return [list(combo) for combo in itertools.product(*choices)]
+
+
 def _pinned_arg_sets(cj, arity: int) -> list:
     """Intent:
         The claim's recorded counterexamples (`Conjecture.pins`) as
@@ -3523,6 +3584,10 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     literal_args = _literal_call_args(cj.lhs, facts.params)
     if cj.rhs:
         literal_args.update(_literal_call_args(cj.rhs, facts.params))
+    # the domain box's corners replay with the recorded counterexamples,
+    # before any random sampling
+    pinned += [c for c in _domain_corners(kinds, cj_domain, literal_args)
+               if c not in pinned]
     call_raised = [None]   # the LABEL of the callee that raised, or None
 
     def _tagged(callee, label):

@@ -1,9 +1,9 @@
 # The derive route: what's liftable
 
-The `derive` route lifts a function's body to a `sympy` expression and
+The `derive` route lifts a function's body to a symbolic expression and
 decides a claim algebraically. `proven` is strictly stronger evidence
-than `holds (n=...)`, not "n samples agreed," but "the two sides are
-the same expression." It's also only available for the functions it
+than `holds (n=...)`, not "n samples agreed," but "the relation holds
+for every input in the declared domain", in exact real arithmetic. It's also only available for the functions it
 can actually lift, which is a real subset. This page is the complete,
 current reference for what that subset is.
 

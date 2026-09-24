@@ -67,14 +67,14 @@ names.
 
 | Verdict | Route | Means |
 |---|---|---|
-| `proven` | derive | The two sides are the same expression, exactly. |
+| `proven` | derive | Established by algebra over the whole declared domain, in exact real arithmetic. Where floating point breaks what the reals prove, running the real function falsifies the claim instead; see [the sigmoid case study](case-studies.md#where-it-gets-interesting-a-true-claim-that-falsifies). |
 | `holds (n=...)` | probe | Held on every one of `n` seeded trials. Evidence, not proof. |
 | `falsified` | either | A counterexample exists and is kept, permanently. |
 | `unknown` | either | Adjudication ran but couldn't decide (an undecided proof, inconclusive sampling). |
 | `skipped` | either | Couldn't be adjudicated at all (unliftable body, foreign grammar, an unresolvable key). |
 | `invalidated` | either | A previously supported claim regressed: re-adjudication no longer supports it, and the record says what it was before. |
-| `documented` | none | Stated in documentation only; nothing was adjudicated. |
-| `declared` | none | Authored and stored, awaiting adjudication. |
+| `documented` | none | Of intent, not a claim: stated intent a person has accepted with `mathema accept --intent`. |
+| `declared` | none | Of a claim: authored and stored, awaiting adjudication. Of intent: stated, not yet accepted by a person (the lowest rung of [the evidence ladder](evidence-ladder.md)). |
 
 A verdict may carry a colon subroute refining its base family, e.g.
 `skipped:misspecified` when the claim itself is malformed rather than
@@ -172,8 +172,9 @@ silently.
 - **Symbolic proof (the derive route)**: lifts a function's body to a
   symbolic expression and decides a claim algebraically, over several
   mathematics engines (principally sympy) and mathema's own solving. `proven` is
-  strictly stronger than `holds`: not "n samples agreed," but "the two
-  sides are the same expression." See [The derive route](derive-route.md)
+  strictly stronger than `holds`: not "n samples agreed," but "the
+  relation holds for every input in the domain", an equality or an
+  inequality alike. See [The derive route](derive-route.md)
   for exactly what is liftable.
 - **The conjecture pipeline**: state a claim as one string
   (`"f(-x) == -f(x)"`) or a `Conjecture`. Laws are validated against a

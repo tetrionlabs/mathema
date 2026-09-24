@@ -430,7 +430,8 @@ def test_accept_json_reports_a_refusal_as_data(tmp_path):
                          "--as", "risk", "--format", "json")
     assert doc["ok"] is False and doc["applied"] is False
     assert "no_such_claim" in doc["error"]
-    assert r.returncode == 1
+    # a claim that does not exist is a target that does not resolve
+    assert r.returncode == 2
 
 
 def _verify_all(root):

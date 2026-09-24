@@ -1844,7 +1844,8 @@ def cmd_claims(args) -> int:
 
 def _accept_json(args, *, kind: str, plan: "dict | None" = None,
                  applied: bool = False, written: "str | None" = None,
-                 error: "str | None" = None, extra: "dict | None" = None) -> int:
+                 error: "str | None" = None, extra: "dict | None" = None,
+                 code: int = 1) -> int:
     """Intent:
         One JSON envelope for every acceptance path. `plan_acceptance`
         hands back the whole live YAML document under "doc" (and a
@@ -1855,7 +1856,7 @@ def _accept_json(args, *, kind: str, plan: "dict | None" = None,
         _emit_json({"ok": False, "error": error, "kind": kind,
                     "key": args.key, "applied": False},
                    getattr(args, "output", None))
-        return 1
+        return code
     plan = plan or {}
     body = {"ok": True, "kind": kind, "key": args.key,
             "claim": plan.get("claim_name", getattr(args, "claim", None)),
@@ -1878,7 +1879,8 @@ def _accept_context(args, by: str | None) -> int:
         human rung) and --concepts/--dismiss-concepts (tag curation).
         Same prompted contract as claim acceptance.
     """
-    from .acceptance import (AcceptanceError, apply_intent_acceptance,
+    from .acceptance import (AcceptanceError, UnknownAcceptanceTarget,
+                             apply_intent_acceptance,
                              apply_scope_intent_acceptance,
                              plan_intent_acceptance,
                              plan_scope_intent_acceptance)
@@ -1901,10 +1903,11 @@ def _accept_context(args, by: str | None) -> int:
         try:
             plan = planner(args.root, args.key, by=by, note=args.note)
         except AcceptanceError as e:
+            code = 2 if isinstance(e, UnknownAcceptanceTarget) else 1
             if as_json:
-                return _accept_json(args, kind=kind, error=str(e))
+                return _accept_json(args, kind=kind, error=str(e), code=code)
             print(f"cannot accept: {e}")
-            return 1
+            return code
         if as_json:
             if not args.yes:
                 return _accept_json(args, kind=kind, plan=plan,
@@ -2100,7 +2103,8 @@ def cmd_accept(args) -> int:
     exact write is printed first and nothing happens without a yes.
     Deliberately CLI-only: acceptance is a human act, never exposed to
     agent tooling or any MCP surface."""
-    from .acceptance import (AcceptanceError, apply_acceptance, corrected_stub,
+    from .acceptance import (AcceptanceError, UnknownAcceptanceTarget,
+                             apply_acceptance, corrected_stub,
                              default_identity, plan_acceptance,
                              suggest_acceptance)
 
@@ -2141,7 +2145,7 @@ def cmd_accept(args) -> int:
                                                        args.claim)
         except AcceptanceError as e:
             print(f"cannot accept: {e}")
-            return 1
+            return 2 if isinstance(e, UnknownAcceptanceTarget) else 1
         print(f"no --as given: {args.claim} is {verdict}, so accepting as "
               f"{kind} ({reason})")
         args.as_ = kind
@@ -2162,10 +2166,11 @@ def cmd_accept(args) -> int:
                                by=by, note=args.note,
                                corrected=getattr(args, "corrected", None))
     except AcceptanceError as e:
+        code = 2 if isinstance(e, UnknownAcceptanceTarget) else 1
         if as_json:
-            return _accept_json(args, kind="claim", error=str(e))
+            return _accept_json(args, kind="claim", error=str(e), code=code)
         print(f"cannot accept: {e}")
-        return 1
+        return code
     if as_json:
         # plan-only unless --yes: a client previews the change, shows
         # it to a human, then re-runs with --yes. JSON mode never

@@ -682,12 +682,11 @@ def record(ex, key: str | None = None, root: str = ".",
     Python-only parse of that same declared shape.
 
     `declared_intent` (an `intent:` field on the declared entry this
-    record was checked against, when one exists) is a deliberate
-    statement of intent, so it earns the `documented` rung; it fills
-    the record's own `intent` when the docstring provided none, and
-    stamps `meta["mathema.intent_provenance"]: documented` either way
-    (stating intent in the declared spec upgrades the evidence even
-    when a summary line also exists)."""
+    record was checked against, when one exists) fills the record's
+    own `intent` when the docstring provided none, and stamps
+    `meta["mathema.intent_provenance"]: declared`. Every stated intent
+    starts on the `declared` rung; `documented` is the human act of
+    accepting it (`mathema accept --intent`)."""
     key = key or getattr(ex.facts, "name", "unknown")
     path = os.path.join(verified_dir(root), f"{key}.yaml")
     spec = to_spec(ex)
