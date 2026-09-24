@@ -54,22 +54,57 @@ def _bad_argument(message: str) -> NoReturn:
     raise SystemExit(2)
 
 
+class _Parser(argparse.ArgumentParser):
+    """The argument parser with the exit-code contract's error shape: a
+    usage error is one line on stderr and exit 2, pointing at `--help`
+    rather than printing the usage block."""
+
+    def error(self, message: str) -> NoReturn:
+        _bad_argument(f"{self.prog}: {message} (see `{self.prog} --help`)")
+
+
+def _non_negative_int(text: str) -> int:
+    """An argparse type: an integer that is zero or more."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected a whole number, got {text!r}") from None
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, got {value}")
+    return value
+
+
 def _parse_domain(items: list[str]) -> dict:
+    import math
+
     from .grammar import Interval
 
     out = {}
     for item in items or []:
         try:
             name, rng = item.split("=", 1)
-            lo, hi = rng.split(":", 1)
-            out[name] = Interval(float(lo), float(hi))
+            lo_text, hi_text = rng.split(":", 1)
+            lo, hi = float(lo_text), float(hi_text)
         except ValueError:
             _bad_argument(f"mathema: bad --domain {item!r}; expected name=lo:hi")
+        if not name.strip():
+            _bad_argument(f"mathema: bad --domain {item!r}; the parameter "
+                          f"name is empty")
+        if math.isnan(lo) or math.isnan(hi):
+            _bad_argument(f"mathema: bad --domain {item!r}; a NaN endpoint "
+                          f"bounds nothing")
+        if lo > hi:
+            _bad_argument(f"mathema: bad --domain {item!r}; the interval is "
+                          f"inverted (lo > hi)")
+        out[name.strip()] = Interval(lo, hi)
     return out
 
 
 def _validate_trials_scale(scale: float) -> None:
-    if scale <= 0:
+    # a factor above 1 is clamped to 1 downstream; NaN compares false
+    # both ways, so it is refused here along with zero and below
+    if not scale > 0:
         _bad_argument(f"mathema: --trials-scale must be > 0, got {scale!r}")
 
 
@@ -87,11 +122,25 @@ def _check_rows(args) -> list[dict]:
     target = resolve(args.target, root)
     if not target.functions:
         raise TargetError(f"no functions found in {args.target}")
+    domain = _parse_domain(args.domain)
+    if domain:
+        import inspect
+        params: set = set()
+        for fn in target.functions.values():
+            try:
+                params |= set(inspect.signature(fn).parameters)
+            except (TypeError, ValueError):
+                continue
+        unknown = sorted(set(domain) - params)
+        if unknown:
+            _bad_argument(f"mathema: bad --domain: {', '.join(unknown)} is "
+                          f"not a parameter of any function in "
+                          f"{args.target}")
     verified_store = load_verified(root)
     declared_store = load_declared(root)
     for name, fn in sorted(target.functions.items()):
         rec = check(fn, claims=list(args.claim) if args.claim else None,
-                    domain=_parse_domain(args.domain) or None,
+                    domain=domain or None,
                     trials_scale=args.trials_scale,
                     declared=retrieve(fn, root, store=declared_store))
         # the one gate (verify.gate): provenance population, so a
@@ -308,7 +357,7 @@ def cmd_verify(args) -> int:
                        "adjudicated": result.adjudicated,
                        "problems": len(result.problems)},
         }, getattr(args, "output", None))
-        return 2 if result.authoring_errors else 1 if result.problems else 0
+        return _verify_exit(args, result)
     lines = list(result.lines)
     lines.append(f"{result.fresh} fresh (form unchanged, skipped), "
                  f"{result.adjudicated} adjudicated, "
@@ -321,7 +370,20 @@ def cmd_verify(args) -> int:
         + (f"; not verified here (different grammar, needs its own tool): "
            f"{', '.join(other_grammars)}" if other_grammars else ""))
     print("\n".join(lines))
-    return 2 if result.authoring_errors else 1 if result.problems else 0
+    return _verify_exit(args, result)
+
+
+def _verify_exit(args, result) -> int:
+    """Intent:
+        The verify exit code: 2 for an authoring error or a named key
+        that no longer resolves to a function, 1 for any other problem,
+        0 for none.
+    """
+    named_unresolved = args.target and any(
+        k.get("why") == "unresolvable" for k in result.keys)
+    if result.authoring_errors or named_unresolved:
+        return 2
+    return 1 if result.problems else 0
 
 
 def _typed_status(ti: dict) -> str:
@@ -1407,6 +1469,9 @@ def cmd_init(args) -> int:
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    for target in args.target or []:
+        # every target resolves before anything is written
+        resolve(target, args.root)
     git_written = _scaffold_git_files(root)
     if git_written:
         print("mathema init: scaffolded git files:\n  "
@@ -1442,9 +1507,8 @@ def cmd_review(args) -> int:
     it for a CI job to post as a PR comment."""
     import os
 
-    from .review import render, review
+    from .review import UnknownRef, render, review
 
-    from .review import UnknownRef
     root = os.path.abspath(args.root)
     try:
         result = review(root, ref=args.ref)
@@ -2333,12 +2397,17 @@ def cmd_badges(args) -> int:
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
-    scores = repo_badges(args.target or None, root=root)
-    print(render_triangle(scores.implementation, scores.intent,
-                          scores.clarity))
+    out_dir = None
     if args.out is not None:
         out_dir = (args.out if os.path.isabs(args.out)
                    else os.path.join(root, args.out))
+        # the output directory is made first, so an unwritable one stops
+        # the command before anything is printed
+        os.makedirs(out_dir, exist_ok=True)
+    scores = repo_badges(args.target or None, root=root)
+    print(render_triangle(scores.implementation, scores.intent,
+                          scores.clarity))
+    if out_dir is not None:
         written, pruned = write_badges(scores, out_dir)
         print(f"\nwrote {len(written)} artifacts to {out_dir}")
         for path in pruned:
@@ -2358,10 +2427,14 @@ def cmd_compendium(args) -> int:
     import os
 
     from .compendium.export import write_compendium
+    from .spec import load_verified
 
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    if not any(k.split(".")[0] == args.library for k in load_verified(root)):
+        raise TargetError(f"no verified records for library "
+                          f"{args.library!r} under {root}; nothing to export")
     path = write_compendium(args.library, root=root, out_dir=args.out)
     print(f"wrote compendium skeleton for {args.library!r} to {path}")
     print("(a partial skeleton: complete the TODOs, confirm nan_when, and "
@@ -2424,7 +2497,7 @@ def main(argv: list[str] | None = None) -> int:
     `sys.argv` (the normal case); passing an explicit list is for
     testing/programmatic invocation."""
     from . import badges as _badges
-    ap = argparse.ArgumentParser(prog="mathema",
+    ap = _Parser(prog="mathema",
                                  description="Claim-Driven Development: turn "
                                              "software intent into verifiable "
                                              "evidence.")
@@ -2689,7 +2762,7 @@ def main(argv: list[str] | None = None) -> int:
                          "name(s), same convention as audit")
     pd.add_argument("--root", default=None,
                     help="project root to import targets relative to")
-    pd.add_argument("--depth", type=int, default=3,
+    pd.add_argument("--depth", type=_non_negative_int, default=3,
                     help="callee-inlining depth for the tier-ladder diagram "
                          "(single-function mode only; default 3)")
     pd.add_argument("--tier",
@@ -2838,6 +2911,11 @@ def main(argv: list[str] | None = None) -> int:
     pm.set_defaults(fn=cmd_mcp)
 
     args = ap.parse_args(argv)
+    # init may create its root, and `verify --status` always exits 0
+    if (getattr(args, "root", None) is not None and args.cmd != "init"
+            and getattr(args, "status", None) is None
+            and not os.path.isdir(args.root)):
+        _bad_argument(f"mathema: --root {args.root!r} is not a directory")
     if getattr(args, "root", None) is None and hasattr(args, "root"):
         args.root = _resolve_root(None)
         if os.path.abspath(args.root) != os.path.abspath(os.getcwd()):

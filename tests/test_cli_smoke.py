@@ -72,7 +72,7 @@ def test_check_unknown_function_fails_cleanly(tmp_path):
     funcs = tmp_path / "funcs.py"
     _write_funcs(funcs)
     r = _run("check", "funcs.py:bogus", cwd=tmp_path)
-    assert r.returncode != 0
+    assert r.returncode == 2, r.stdout + r.stderr
     assert "Traceback" not in r.stderr
     assert "bogus" in r.stdout + r.stderr
 
@@ -103,7 +103,7 @@ def test_check_bad_domain_syntax_fails_cleanly(tmp_path):
     funcs = tmp_path / "funcs.py"
     _write_funcs(funcs)
     r = _run("check", "funcs.py:add", "--domain", "not-a-domain", cwd=tmp_path)
-    assert r.returncode != 0
+    assert r.returncode == 2, r.stdout + r.stderr
     assert "Traceback" not in r.stderr
     assert "bad --domain" in r.stdout + r.stderr
 
@@ -634,7 +634,7 @@ def test_trials_scale_zero_or_negative_is_a_clean_error(tmp_path):
     _write_funcs(tmp_path / "funcs.py")
     for bad in ("0", "-0.5"):
         r = _run("check", "funcs.py", "--trials-scale", bad, cwd=tmp_path)
-        assert r.returncode != 0
+        assert r.returncode == 2, r.stdout + r.stderr
         assert "--trials-scale" in (r.stdout + r.stderr)
 
 
