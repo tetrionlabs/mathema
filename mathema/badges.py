@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 # calibration change (the constants below) bumps the minor (@1.1); a
 # structural change (a dimension added or removed, an entailment changed)
 # bumps the major (@2). ci_snapshot records it beside the score.
-CLARITY_ALGO = "entropy-dimensions@1"
+CLARITY_ALGO = "entropy-dimensions@1.1"
 
 # The @1 constants, one labelled set so a recalibration is a new set plus a
 # version bump and past scores stay reproducible. Every number is the a-
@@ -305,11 +305,20 @@ def _reductions(verified_claims, pure: bool) -> dict:
         if (claim.get("meta") or {}).get("mathema.corroboration") == \
                 "uncorroborated":
             continue
-        if (claim.get("meta") or {}).get("mathema.companion_of"):
-            # a float companion restates its parent's relation against
-            # the implementation; the clarity model has no source for it
-            continue
         st = _strength(claim.get("verdict") or "", claim.get("route") or "")
+        meta = claim.get("meta") or {}
+        if meta.get("mathema.companion_of"):
+            # a float companion executes its parent's relation against the
+            # implementation in float across the domain. Holding, it
+            # establishes its family (is_numerically_stable) for the
+            # function; falsified, it is a defect in the parent's
+            # implementation and says nothing about the family as a whole
+            from .records import classify_verdict
+            family = _SAFETY_SOURCE.get(meta.get("mathema.family") or "")
+            if family and classify_verdict(claim.get("verdict") or "") in (
+                    "holds", "proven"):
+                bump("safety:" + family, st)
+            continue
         if st <= 0:
             continue
         base = name.split("[", 1)[0]

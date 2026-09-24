@@ -85,6 +85,37 @@ def test_clarity_grades_a_holds_by_mechanism(tmp_path):
             "statement": "f(x) == 2*x", "verdict": "proven"}])
 
 
+def test_a_holding_float_companion_credits_numerical_stability(tmp_path):
+    # a `[float]` companion that holds is the relation executed in float
+    # across the domain: it establishes is_numerically_stable for the
+    # function, exactly as a claim of that family would; a falsified one
+    # establishes nothing about stability
+    mod = _load(tmp_path, "bcfloat_fixture",
+                "def double(x: float) -> float:\n"
+                "    '''Twice.'''\n"
+                "    return 2.0 * x\n")
+    parent = {"name": "doubles", "statement": "f(x) == 2*x",
+              "verdict": "proven", "route": "derive"}
+
+    def companion(verdict):
+        return {"name": "doubles[float]", "statement": "f(x) == 2*x",
+                "verdict": verdict, "route": "probe",
+                "meta": {"mathema.companion_of": "doubles",
+                         "mathema.family": "is_numerically_stable"}}
+
+    def score(rows):
+        return clarity_score(mod.double, verified_claims=rows)
+
+    stable = {"name": "is_numerically_stable", "statement": "g(f, x) = 1",
+              "verdict": "holds", "route": "probe"}
+    alone = score([parent])
+    assert score([parent, companion("holds")]) > alone
+    assert score([parent, companion("holds")]) == score([parent, stable])
+    assert score([parent, companion("proven")]) == score(
+        [parent, dict(stable, verdict="proven")])
+    assert score([parent, companion("falsified")]) == alone
+
+
 def test_clarity_is_none_when_source_unavailable():
     # a builtin has no readable source, so nothing can be characterised
     # structurally: None (excluded from the roll-up), never a misleading 0
@@ -167,7 +198,7 @@ def test_repo_badges_implementation_is_a_raw_ratio_not_centrality(tmp_path):
     # no verified store here, so clarity sits at the structural floor
     # (nothing verified, only what the code visibly shows), a low number
     assert scores.clarity < 25
-    assert scores.algo == "entropy-dimensions@1"
+    assert scores.algo == "entropy-dimensions@1.1"
 
 
 def test_repo_badges_gives_no_implementation_credit_from_a_stale_report(tmp_path):
