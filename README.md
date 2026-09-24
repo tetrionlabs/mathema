@@ -171,7 +171,9 @@ the function is locked                  (mathema lock)
 
 No tool exposed over MCP accepts a verdict from its caller, and claim
 expressions are validated against a strict AST whitelist before they run, so
-a claim from an untrusted source is safe to check. `mathema accept` prints the
+a claim from an untrusted source can do no more than evaluate mathematics over
+the function (the function itself runs as it would in its own tests; see
+[Security and execution](https://mathema.tetrionlabs.com/security/)). `mathema accept` prints the
 exact write before making it, and lets a person accept evidence as sufficient,
 own a residual risk explicitly, or correct a claim the falsification showed
 was wrong (the correction is itself adjudicated first). An agent may lock a

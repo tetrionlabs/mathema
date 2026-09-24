@@ -1,34 +1,62 @@
 # .github/workflows/mathema.yml
-# Claim coverage and transformation lineage as first-class CI artifacts.
+# The verify gate over the committed .mathema/ store, the claim-level
+# delta of a pull request, and inline annotations on the changed code.
 name: mathema
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   claims:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # review compares against the base branch
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - run: pip install mathema
+      # your project must import for its claims to adjudicate; adjust
+      # this line to however your project installs
+      - run: pip install -e . mathema
 
-      # Annotations appear inline on the PR; exit 1 fails the job under --strict
-      - name: Claim check (annotated)
-        run: mathema check src/models.py --format github --domain alpha=0:1 --strict
+      # The gate. Strict by default: a falsified, invalidated or unknown
+      # claim fails the job, and so does a skipped claim or accepted risk
+      # until --lenient says those are understood. Exit 1 is a gate
+      # failure, exit 2 a broken invocation or store.
+      - name: Verify
+        run: mathema verify
 
-      # Artifacts: machine-readable claim coverage + badge
-      - name: Claim coverage report
-        if: always()
+      # What this pull request changed, as claims and verdicts rather
+      # than YAML: flipped verdicts, added and removed claims, new
+      # acceptances. Post review.md as a PR comment with your action of
+      # choice.
+      - name: Claim-level review
+        if: always() && github.event_name == 'pull_request'
         run: |
-          mathema check src/models.py --format json --output claim-coverage.json \
-            --badge claim-badge.json
-      - name: Step summary
+          mathema review "origin/${{ github.base_ref }}" --output review.md
+          mathema review "origin/${{ github.base_ref }}" --format json --output review.json
+
+      # Inline annotations and a step summary from a direct check of one
+      # module, with its claim coverage as JSON. Reporting only; the gate
+      # above decides.
+      - name: Annotations and coverage report
         if: always()
-        run: mathema check src/models.py --format md >> "$GITHUB_STEP_SUMMARY"
+        continue-on-error: true
+        run: |
+          mathema check src/models.py --format github --domain alpha=0:1
+          mathema check src/models.py --format md >> "$GITHUB_STEP_SUMMARY"
+          mathema check src/models.py --format json --output claim-coverage.json
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mathema-artifacts
+          if-no-files-found: ignore
           path: |
+            review.md
+            review.json
             claim-coverage.json
-            claim-badge.json

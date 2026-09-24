@@ -152,8 +152,9 @@ changes without its history being silently rewritten.
 
 ## `--as reconciled`: after a merge, rebase, or a declared-claim edit
 
-Every verified record carries an integrity checksum over its claims,
-verdicts, and sign-offs, and an anchor (the commit it was stamped at).
+Every verified record carries an
+[integrity checksum](../governance.md#the-integrity-checksum) over its
+claims, verdicts, and sign-offs, and an anchor (the commit it was stamped at).
 When the record's contents no longer match the checksum, `verify` says
 so, and now that `.mathema/` is tracked, ordinary git makes this happen
 without anyone hand-editing anything: a merge or rebase brings in a

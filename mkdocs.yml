@@ -100,6 +100,9 @@ nav:
       - API reference: api.md
       - Symbology and rendering: symbology.md
       - Extending mathema: extending.md
+  - Trust and governance:
+      - Governance and audit: governance.md
+      - Security and execution: security.md
   - Coding agents:
       - Working with coding agents: agents.md
       - The MCP interface: modes/mcp.md
