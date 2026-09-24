@@ -276,6 +276,19 @@ between machines, whether a proof finishes inside its time cap, is written
 into the record whenever the cap was hit, so a `holds` that would have been
 a `proven` on a quieter machine says so.
 
+When a proof matters more than the time it takes, `extensive=True` asks for
+more. It is off by default and costs real time: the cap on a proof attempt
+rises from 3 to 15 seconds, and a claim the ordinary procedure leaves
+undecided goes through a ladder of genuinely different strategies, each
+separately capped. The ladder tries exact root isolation for polynomial
+differences, interval refinement over the domain, a gallery of equivalent
+rewrites, a library of changes of variable, z3's nonlinear real arithmetic
+when the `smt` extra is installed, and finally one retry at the wider cap,
+all inside a total budget of 45 seconds per claim. Probing searches harder at
+the same time, spending the wider cap on finding the critical points worth
+sampling. A proof found this way records its route as `derive:extensive`, so
+the extra effort is visible in the record.
+
 That is the division of labour the rest of this page assumes. Let a model
 propose the code and the claims, which is what models are good at, and let
 something that cannot be persuaded decide which of them are true.
