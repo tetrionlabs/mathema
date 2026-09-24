@@ -2210,14 +2210,18 @@ def render_claim_text(cj, *, unicode: bool | None = None,
                         else None if name in scope_bound
                         else callable_ref(ref))
                  for name, ref in cj.funcs.items()}
-    let_segments = [f"let {func_renames.get(name, name)} = {ref}"
+    # a bound function keeps its own binding under its own name, and a
+    # display symbol for it is introduced as an alias of that name
+    # (`let g = numpy.exp, let E = g`), which the reparse resolves back
+    # to the same function under the same name, so the claim is the same
+    let_segments = [f"let {name} = {ref}"
                     for name, ref in func_refs.items()
-                    if ref is not None
                     # a parse-time placeholder (a bare call name awaiting
-                    # scope resolution, value == its own name) only earns
-                    # a `let` when the auto-rename gave it a short alias;
-                    # `let mystery = mystery` says nothing
-                    and func_renames.get(name, name) != ref]
+                    # scope resolution, value == its own name) and a
+                    # scope-bound name have no binding to state
+                    if ref is not None and ref != name]
+    let_segments += [f"let {symbol} = {name}"
+                     for name, symbol in func_renames.items()]
     let_segments += [f"let {_display_symbol(symbol)} = {name}"
                      for name, symbol in sorted(param_renames.items())]
     let_segments += [
