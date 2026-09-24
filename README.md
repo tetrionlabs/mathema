@@ -4,8 +4,8 @@
 
 AI has changed the cost of producing code without changing the cost of knowing
 whether that code is correct, and so more of it now arrives than anyone can
-review line by line. **mathema** adds a verification layer between generated
-code and accepted code: you state what a function is supposed to do as an
+review line by line. **mathema** adds a verification layer between AI-assisted
+code and trusted systems: you state what a function is supposed to do as an
 explicit claim, and mathema checks it against the real function, proving it
 outright where the mathematics permits and gathering reported evidence where
 it does not. What comes back is a durable record of what has been established,
@@ -14,6 +14,11 @@ how, and whether it still applies to the code in front of you.
 Nothing is asserted and nothing is quietly upgraded. Evidence remains
 evidence, proof remains proof, and a claim that nothing could settle remains
 unresolved and says so.
+
+mathema is a System 0 engine: a verification engine with zero models between
+the code and its verdict. Every result comes from mathematics and from running
+the real code, never from a model's judgement, so there are no LLM tokens to
+pay for, no account or API key, and your code never leaves your machine.
 
 The name is Greek: μάθημα, a thing learned.
 
@@ -236,7 +241,9 @@ fastest way to hand an agent a codebase without letting it grep its way around.
 | Keeps a record bound to the exact code it verified | | | | ✓ | ✓ |
 | Routes each claim to whatever method can settle it | | | | | ✓ |
 
-None of these replaces the others. mathema's probe route is the same idea as
+None of these replaces the others, and mathema complements your test suite
+rather than replacing it: the lines your tests already reach count toward the
+implementation score. mathema's probe route is the same idea as
 Hypothesis, CrossHair's symbolic execution is the nearest thing in Python to
 its derive route, and contract libraries such as icontract and deal check
 pre- and postconditions as the code runs, which complements a claim rather
@@ -249,15 +256,29 @@ support, and `skipped` reported plainly the moment none can.
 
 A codebase can have every line exercised by tests while having very little of
 its intent stated or verified, so mathema measures those separately rather
-than folding them into one coverage number. `mathema badges` reports
-implementation (how much code a test, probe or proof actually reached), intent
-(how much of what the docstrings promise is claimed and verified) and clarity
-(how much is known about the behaviour, falsifications included), drawn as a
-triangle whose area is the overall score. An illustrative example:
+than folding them into one coverage number. `mathema badges` reports three
+scores, each measured on its own so a strength in one can't hide a gap in
+another:
+
+- **implementation**, coverage that counts proofs: the share of statements
+  reached by a test, a probe or a derive proof, taken together, so code proven
+  symbolically counts even where no test calls it;
+- **intent**, what the code is meant to do, stated: how much of what each
+  function is meant to do is explicitly specified and up to date, so intent
+  that lives only in someone's head, or in a prompt that was thrown away,
+  shows up as a gap;
+- **clarity**, how much of the behaviour is pinned down: of everything
+  knowable about a function, how much its verified claims have settled, where
+  a proof counts for more than a sample and a failure found is still
+  knowledge.
+
+They are drawn as a triangle whose area is the overall score, so it falls
+toward zero when any one of them is empty instead of averaging politely over
+the gap. An illustrative example:
 
 <!-- illustration -->
 ```text
-        CLARITY 44
+        CLARITY 50
               ◆
              · ·
             ·   ·
@@ -265,21 +286,20 @@ triangle whose area is the overall score. An illustrative example:
           ·       ·
          ·         ·
         ·           ·
-       ·             ·
-      ·       ●       ·
-     ·      ···        ·
-    ·     ······        ·
-   ·   ·········         ·
-  ·  ············         ·
- · ···············         ·
+       ·      ●      ·
+      ·     ···       ·
+     ·    ······       ·
+    ·   ········        ·
+   ·  ···········        ·
+  · ·············         ·
+ ·················         ·
 ●·············+···●·········◆
   IMPL 100           INTENT 26
-        overall 28
+        overall 32
 ```
 
-That project reaches every line and still leaves most of what it
-promises unpinned, which the area shows as 28 where an average would have
-said 57. The [badges reference](https://mathema.tetrionlabs.com/modes/badges/)
+Every line is exercised and intent is a quarter specified, which the area
+shows as 32 where the mean of the three would have said 59. The [badges reference](https://mathema.tetrionlabs.com/modes/badges/)
 covers how each score is computed and what to expect of them.
 
 ## API
@@ -309,14 +329,19 @@ of `x` scales or shifts the result the same way, and that reordering `x` does
 
 ## CI
 
+A gate, not a dashboard:
+
 ```bash
-mathema check model.py --domain alpha=0:1 --strict     # exit 1 on failure
-mathema check model.py --format junit --output claims.xml
-mathema verify                                         # re-check what changed
+mathema verify                  # the gate: re-checks what changed, fails on what broke
+mathema review origin/main      # what a pull request changed, as claims and verdicts
+mathema check model.py --format junit --output claims.xml   # reports for the CI UI
 ```
 
-`--format github` and `--format json` are also available, and worked pipeline
-configs for GitHub Actions and GitLab are in [examples/ci/](examples/ci/).
+A failing claim exits 1 and a broken invocation exits 2, so a pipeline can
+tell a real finding from a broken run. `mathema init --ci` scaffolds the
+GitHub Actions or GitLab step, `--format github`, `junit` and `json` feed each
+platform's own reports, and fuller pipelines are in
+[examples/ci/](examples/ci/).
 
 ## Intent
 
@@ -383,8 +408,8 @@ See also [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md),
 ## Licensing
 
 mathema is source-available under the [Business Source License
-1.1](LICENSE.md). Production use is free for organisations under USD 10M
-revenue or using it in at most three repositories, and for research, teaching
-and evaluation, and every released version converts to AGPL-3.0-or-later four
-years after its release. See [LICENSING.md](LICENSING.md) for the
+1.1](LICENSE.md). Production use is free for organisations under USD 10
+million in revenue, for up to three repositories, for research, teaching,
+personal and other non-commercial use, and for a 90-day evaluation, and every
+released version converts to AGPL-3.0-or-later four years after its release. See [LICENSING.md](LICENSING.md) for the
 plain-language version.

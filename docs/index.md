@@ -151,6 +151,7 @@ print(mathema.check(midpoint, claims=[
 mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
   proven  between_integers: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) ≤ f(a, b) ≤ max(a, b)
            for a in [0, 100]:int|missing, b in [0, 100]:int|missing
+  holds   between_integers[float]: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) <= f(a, b) <= max(a, b) (n=44)
   FALSIFY between_reals: for a in [0.0, 100.0]:float|missing, b in [0.0, 100.0]:float|missing, min(a, b) <= f(a, b) <= max(a, b)
            counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
 ```
@@ -174,7 +175,7 @@ mathema check mid.py:midpoint --claim "for a in [0, 100], b in [0, 100], min(a, 
 ```
 
 ```text
-ok   mid.midpoint: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+ok   mid.midpoint: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 ```
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">A whole codebase</span><span class="brk r"></span></span>
@@ -371,7 +372,7 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 ```
 
 ```text
-ok   options.put_call_parity_gap: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+ok   options.put_call_parity_gap: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 ```
 
 `proven`, over every point of a five-dimensional region of prices, rates,
@@ -391,17 +392,10 @@ go on to the Greeks, stated as the partial derivatives they are.
 
 ### One claim, every implementation
 
-A claim is a statement about mathematics, not about Python, and mathema
-already treats it that way: [claims transfer](claims-transfer.md) checks a C++
-port of a function against its Python original by sampling shared inputs,
-today. The direction is to make every language a first-class citizen, so the
-claims written once about a pricing function or a signal filter hold the
-Python prototype, the C++ or Rust engine and the TypeScript front end to the
-same statement, and a port that drifts is caught the day it drifts rather than
-the day a number looks wrong. Each implementation would also record the number
-representation it actually computes in, a 64-bit integer, a 32-bit float,
-with the machine hazards that come with it, so a claim proven over the reals
-is checked against the arithmetic each language really does.
+A claim is a statement about mathematics, not about Python, and
+[claims transfer](claims-transfer.md) already checks an implementation in
+another language against its Python original. The direction is for a claim
+written once to hold wherever the behaviour it describes is implemented.
 
 ### Implementations generated from proofs
 

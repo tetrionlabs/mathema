@@ -9,7 +9,7 @@ strength in one can't hide a gap in another.
 | Layer | The question | Measured by |
 |---|---|---|
 | **Implementation** | How much of the code has anything actually exercised? | the share of statements reached by a test, a probe or a derive proof, taken together |
-| **Intent** | How much of what the docstrings promise is claimed and verified? | how much of each docstring's stated behaviour has a verified claim behind it |
+| **Intent** | How much of what the code is meant to do is stated? | how much of what each function is meant to do is explicitly specified and up to date |
 | **Clarity** (behaviour) | Of everything knowable about a function's behaviour, how much has been pinned down? | an information score over five dimensions: what it computes, what it accepts, its bounds and shape, how safely it runs, and where it can go wrong |
 
 The layers are independent in practice as well as in principle. Tests that
@@ -51,9 +51,8 @@ For a small two-function project after its first sweep:
         overall 32
 ```
 
-Every line is exercised, a quarter of what the docstrings promise is pinned
-down, and the overall comes out at 32 where the mean of the three would have
-said 59.
+Every line is exercised, intent is a quarter specified, and the overall
+comes out at 32 where the mean of the three would have said 59.
 
 Intent and clarity roll up to the project by a mean weighted by how central
 each function is in the call graph, so a function the rest of the code leans

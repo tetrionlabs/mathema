@@ -40,8 +40,10 @@ trusted exactly to the extent of its verified claims.
 
 ## What Claim-Driven Development is
 
-State a mathematical claim about a function, mathema adjudicates it
-against the real function, and keeps the record. A claim is a
+State what a function should do, then keep a machine-checkable record
+of whether the real implementation satisfies it. The claim says what
+should be true, the implementation says how it is achieved, and the
+evidence says why it should be believed. A claim is a
 statement like `f(-x) == -f(x)` (an odd function) or
 `for x in [0, 1], f(x) <= 1` (bounded on a declared domain), written
 over the generic function name `f` and the function's own parameter

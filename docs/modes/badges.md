@@ -16,8 +16,9 @@ store knows under `--root`).
   coverage`, how many statements a test, a probe, or a derive proof
   exercises (their union). A physical ratio, so it is neither averaged
   nor weighted.
-- **intent** (spec layer): `docsync`, how much of what each function's
-  docstring states is actually claimed and verified.
+- **intent** (spec layer): `docsync`, how much of what each function is
+  meant to do is explicitly specified and up to date, so intent that lives
+  only in someone's head shows up as a gap.
 - **clarity** (behaviour layer): how much is KNOWN about a function's
   behaviour, scored from its VERIFIED claims. See below.
 
