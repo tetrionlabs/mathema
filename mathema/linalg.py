@@ -82,7 +82,7 @@ def operand_matrix_names(node: ast.AST) -> frozenset:
 
 def declared_matrix_names(domain: dict | None) -> frozenset:
     """The names a claim's own domain declares to be matrices: those
-    whose bound carries two dimensions (an `R^(m*n)` space or a 2-D
+    whose bound carries two dimensions (an `R^(m,n)` space or a 2-D
     `Shape`). This is what `claim()` can know from the claim text alone,
     unioned with any matrix names a caller supplies from the signature."""
     return frozenset(

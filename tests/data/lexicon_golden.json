@@ -75,9 +75,9 @@
   "ascii": "for xs in [0.0, 1.0]^n:float|missing, f(xs) <= 1"
  },
  "space_matrix": {
-  "input": "for A in R^(m*n), f(A) == f(A)",
+  "input": "for A in R^(m,n), f(A) == f(A)",
   "unicode": "∀ A ∈ ℝᵐˣⁿ ∪ {∅}, f(A) = f(A)",
-  "ascii": "for A in R^(m*n)|missing, f(A) = f(A)"
+  "ascii": "for A in R^(m,n)|missing, f(A) = f(A)"
  },
  "space_shared_dim": {
   "input": "for x in R^n, y in R^n, f(x, y) == f(y, x)",
@@ -205,44 +205,44 @@
   "ascii": "is_finite(A)"
  },
  "matrix_determinant_product": {
-  "input": "for A in R^(n*n), B in R^(n*n), det(A @ B) == det(A) * det(B)",
+  "input": "for A in R^(n,n), B in R^(n,n), det(A @ B) == det(A) * det(B)",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, det(A @ B) = det(A)*det(B)",
-  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, det(A @ B) = det(A)*det(B)"
+  "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, det(A @ B) = det(A)*det(B)"
  },
  "matrix_transpose_product": {
-  "input": "for A in R^(n*n), B in R^(n*n), (A @ B).T == B.T @ A.T",
+  "input": "for A in R^(n,n), B in R^(n,n), (A @ B).T == B.T @ A.T",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, (A @ B).T = B.T @ A.T",
-  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, (A @ B).T = B.T @ A.T"
+  "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, (A @ B).T = B.T @ A.T"
  },
  "matrix_trace_additive": {
-  "input": "for A in R^(n*n), B in R^(n*n), trace(A + B) == trace(A) + trace(B)",
+  "input": "for A in R^(n,n), B in R^(n,n), trace(A + B) == trace(A) + trace(B)",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, trace(A + B) = trace(A) + trace(B)",
-  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, trace(A + B) = trace(A) + trace(B)"
+  "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, trace(A + B) = trace(A) + trace(B)"
  },
  "matrix_inverse_identity": {
-  "input": "assuming det(A) != 0, for A in R^(n*n), inv(A) @ A == I(n)",
+  "input": "assuming det(A) != 0, for A in R^(n,n), inv(A) @ A == I(n)",
   "unicode": "assuming det(A) != 0, ∀ A ∈ ℝⁿˣⁿ ∪ {∅}, inv(A) @ A = I(n)",
-  "ascii": "assuming det(A) != 0, for A in R^(n*n)|missing, inv(A) @ A = I(n)"
+  "ascii": "assuming det(A) != 0, for A in R^(n,n)|missing, inv(A) @ A = I(n)"
  },
  "matrix_output_symmetric_postfix": {
-  "input": "for A in R^(n*n), f(A) is symmetric",
+  "input": "for A in R^(n,n), f(A) is symmetric",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, is_symmetric(f(A))",
-  "ascii": "for A in R^(n*n)|missing, is_symmetric(f(A))"
+  "ascii": "for A in R^(n,n)|missing, is_symmetric(f(A))"
  },
  "matrix_transpose_sugar": {
-  "input": "let A be R^(n*n), A^T == A",
+  "input": "let A be R^(n,n), A^T == A",
   "unicode": "let A be ℝⁿˣⁿ ∪ {∅}, A.T = A",
-  "ascii": "let A be R^(n*n)|missing, A.T = A"
+  "ascii": "let A be R^(n,n)|missing, A.T = A"
  },
  "matrix_determinant_sugar": {
-  "input": "for A in R^(n*n), |A| >= 0",
+  "input": "for A in R^(n,n), |A| >= 0",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, det(A) ≥ 0",
-  "ascii": "for A in R^(n*n)|missing, det(A) >= 0"
+  "ascii": "for A in R^(n,n)|missing, det(A) >= 0"
  },
  "matrix_determinant_bars_compound": {
-  "input": "for A in R^(n*n), B in R^(n*n), |A @ B| == |A| * |B|",
+  "input": "for A in R^(n,n), B in R^(n,n), |A @ B| == |A| * |B|",
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, det(A @ B) = det(A)*det(B)",
-  "ascii": "for A in R^(n*n)|missing, B in R^(n*n)|missing, det(A @ B) = det(A)*det(B)"
+  "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, det(A @ B) = det(A)*det(B)"
  },
  "inferred_literal_domain": {
   "input": "raises(f(50, 0), ValueError)",

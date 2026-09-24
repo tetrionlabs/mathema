@@ -264,7 +264,7 @@ def test_a_space_endpoint_power_is_not_the_dimension():
 
 
 @pytest.mark.parametrize("spelling", [
-    "v in R^", "v in R^^n", "v in R^(m,n)", "v in R^()", "v in R^(m",
+    "v in R^", "v in R^^n", "v in R^(m,)", "v in R^()", "v in R^(m",
     "v in R^-1", "v in R^n^", "v in [0,1]^n^m", "x in R**n**2",
 ])
 def test_malformed_space_forms_reject_cleanly(spelling):

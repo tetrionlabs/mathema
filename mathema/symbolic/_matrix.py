@@ -7,7 +7,7 @@ A claim over matrix parameters, `det(A @ B) == det(A) * det(B)`,
 identity of matrix algebra, not a fact about a function's body. sympy
 already carries that algebra: this module lifts the claim's own
 expressions to `sympy.MatrixSymbol` terms (dimensions from a `Shape`
-marker or an `R^(n*n)` space form), turns structure premises into
+marker or an `R^(n,n)` space form), turns structure premises into
 sympy matrix assumptions (`Q.symmetric`, `Q.positive_definite`,
 `Q.orthogonal`, ...), and decides the relation by refining both sides
 under those assumptions and simplifying their difference.
@@ -58,7 +58,7 @@ _ASK_FOR_RELATION = {
 def matrix_param_dims(domain: dict, shapes: dict) -> dict:
     """`{param: (rows, cols)}` in the claim author's own dimension
     tokens (an `int`, or a `str` name), for every parameter that is a
-    matrix: one sized from a 2-D `Shape` marker or an `R^(m*n)`
+    matrix: one sized from a 2-D `Shape` marker or an `R^(m,n)`
     space-form domain. The raw tokens are what both the symbolic lift
     and the matrix-value probe need, the lift turning a name into a
     shared `sympy.Symbol`, the probe into a shared concrete size."""

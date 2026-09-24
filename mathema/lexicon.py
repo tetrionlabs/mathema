@@ -67,7 +67,7 @@ LEXICON: dict[str, str] = {
     # dimension name across two parameters draws them to one length
     "space_vector_real": "for v in R^n, f(v) >= 0",
     "space_vector_bounded": "for xs in [0, 1]^n, f(xs) <= 1",
-    "space_matrix": "for A in R^(m*n), f(A) == f(A)",
+    "space_matrix": "for A in R^(m,n), f(A) == f(A)",
     "space_shared_dim": "for x in R^n, y in R^n, f(x, y) == f(y, x)",
     "domain_closed_interval": "for x in [0, 1], f(x) >= 0",
     "domain_open_interval": "for x in (0, 1), f(x) >= 0",
@@ -111,26 +111,26 @@ LEXICON: dict[str, str] = {
     # `.T`, `det`/`inv`/`trace`, `I(n)`) over matrix parameters, proven
     # in sympy's matrix algebra on the derive route
     "matrix_determinant_product":
-        "for A in R^(n*n), B in R^(n*n), det(A @ B) == det(A) * det(B)",
+        "for A in R^(n,n), B in R^(n,n), det(A @ B) == det(A) * det(B)",
     "matrix_transpose_product":
-        "for A in R^(n*n), B in R^(n*n), (A @ B).T == B.T @ A.T",
+        "for A in R^(n,n), B in R^(n,n), (A @ B).T == B.T @ A.T",
     "matrix_trace_additive":
-        "for A in R^(n*n), B in R^(n*n), trace(A + B) == trace(A) + trace(B)",
+        "for A in R^(n,n), B in R^(n,n), trace(A + B) == trace(A) + trace(B)",
     # an inverse needs its premise: inv raises on a singular matrix
     "matrix_inverse_identity":
-        "assuming det(A) != 0, for A in R^(n*n), inv(A) @ A == I(n)",
+        "assuming det(A) != 0, for A in R^(n,n), inv(A) @ A == I(n)",
     # the postfix reading of an OUTPUT structure claim: `f(A) is
     # symmetric` folds to `is_symmetric(f(A))`
-    "matrix_output_symmetric_postfix": "for A in R^(n*n), f(A) is symmetric",
+    "matrix_output_symmetric_postfix": "for A in R^(n,n), f(A) is symmetric",
     # the math-paper sugar, resolved from whether the operand is a
     # declared matrix: `A^T` -> `A.T` (transpose), `|A|` -> `det(A)`. A
     # scalar operand keeps power / absolute value. The record's grammar
     # is tagged `mathema/linalg` for these
-    "matrix_transpose_sugar": "let A be R^(n*n), A^T == A",
-    "matrix_determinant_sugar": "for A in R^(n*n), |A| >= 0",
+    "matrix_transpose_sugar": "let A be R^(n,n), A^T == A",
+    "matrix_determinant_sugar": "for A in R^(n,n), |A| >= 0",
     # the same bars around a matrix expression are its determinant
     "matrix_determinant_bars_compound":
-        "for A in R^(n*n), B in R^(n*n), |A @ B| == |A| * |B|",
+        "for A in R^(n,n), B in R^(n,n), |A @ B| == |A| * |B|",
     "inferred_literal_domain": "raises(f(50, 0), ValueError)",
     # let: alias, function binding, free variable -----------------
     "let_alias": ("let m = m1, for m1 in [0.1,1000], x1 in [-100,100], "
@@ -455,7 +455,7 @@ TAGS: dict[str, tuple[str, ...]] = {
     "dim_length_premise": ("length", "shape", "conformable", "size"),
     "dim_conformability": ("shape", "conformable", "matching lengths"),
     "space_vector_real": ("vector space", "free dimension", "R^n"),
-    "space_matrix": ("matrix space", "shape", "R^(m*n)"),
+    "space_matrix": ("matrix space", "shape", "R^(m,n)"),
     "let_alias": ("alias", "abbreviation", "shorthand", "naming"),
     "let_pseudo_infinity": ("infinity", "unbounded", "limit of the range"),
     "derivative_call": ("derivative", "differentiate", "gradient", "slope"),

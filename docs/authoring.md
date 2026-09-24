@@ -564,7 +564,7 @@ a first-class symbol a claim can reference in a premise or a
 law over its dimensions.
 
 A claim may also state a parameter's space in its own domain
-(`for a in R^(p*q), ...`). Where a claim and a marker both describe
+(`for a in R^(p,q), ...`). Where a claim and a marker both describe
 the same parameter, the marker is authoritative on RANK: a claim that
 gives it a different number of axes is a conflict, skipped with the
 reason. A different NAME at the same axis is not a conflict, it aliases

@@ -136,10 +136,17 @@ conformable every trial. `len`, `rows` and `cols` remain sugar for
 A parameter's domain can also state the SPACE directly, rather than
 its element domain: `for v in R^n` is a real vector of length `n`,
 `for xs in [0, 1]^n` a vector with elements in `[0, 1]`, and
-`for A in R^(m*n)` an `m`-by-`n` matrix. The element domain is the
-base and the dimension the exponent; in unicode the exponent renders
-as a superscript (`ℝⁿ`, `ℝᵐˣⁿ`), the missing-value clause trailing the
-whole space. A dimension NAME is the constraint: `R^n` on two
+`for A in R^(m,n)` an `m`-by-`n` matrix (rows, then columns, the
+order of a numpy shape). The element domain is the base and the
+dimensions the exponent; in unicode the exponent renders as a
+superscript (`ℝⁿ`, `ℝᵐˣⁿ`, `ℝ²ˣ³`), the missing-value clause trailing
+the whole space. A dimension whose name the superscripts cannot carry
+(one containing an `x`, which would read as the `ˣ` separator, or a
+letter with no superscript form such as `q`) renders as the plain
+exponent instead (`ℝ^(x,n)`). The matrix space is also accepted as
+`R^{m,n}`, `R^(m×n)`, `R^{m×n}`, `R^(m*n)`, `ℝᵐˣⁿ` and, for a fixed
+size, `ℝ³ˣ³` or `ℝ^{3×3}`; every one of these is the same claim and
+is written back as `R^(m,n)`. A dimension NAME is the constraint: `R^n` on two
 parameters draws them to one length every trial, so a claim about a
 function that requires equal-length inputs holds without a separate
 premise. `len`/`rows`/`cols` remain the axis-0/0/1 sugar for reading a

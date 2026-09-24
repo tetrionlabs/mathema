@@ -111,12 +111,12 @@ ordinary one.
 | <code>&#124;A&#124;</code> | `det(A)` | `abs(A)` |
 | `A^-1` | `inv(A)` | `1 / A` (reciprocal) |
 
-The type is known from a signature marker, an `R^(m*n)` domain, or a
-`let ... be R^(m*n)` declaration:
+The type is known from a signature marker, an `R^(m,n)` domain, or a
+`let ... be R^(m,n)` declaration:
 
 ```
-let A be R^(n*n), A^T == A          #  ->  A.T == A
-for A in R^(n*n), |A| >= 0          #  ->  det(A) >= 0
+let A be R^(n,n), A^T == A          #  ->  A.T == A
+for A in R^(n,n), |A| >= 0          #  ->  det(A) >= 0
 ```
 
 Because the reading is per-operand, one expression can mix the two:

@@ -115,6 +115,7 @@ from ._scan import (_split_commas, mask_strings, outside_strings,
 from .domain import (MISSING as MISSING, Domain as Domain,
                      Interval as Interval, InvalidDomain as InvalidDomain,
                      _MEMBERSHIP_OPS as _MEMBERSHIP_OPS,
+                     desuperscript_spaces as _desuperscript_spaces,
                      _as_domain as _as_domain,
                      _is_missing as _is_missing,
                      domain_bound_from_json as domain_bound_from_json,
@@ -1720,6 +1721,7 @@ def apply_unicode_synonyms(text: str) -> str:
     otherwise be converted to `^<digits>` and glued onto `integral`
     with no separator."""
     def substitute(masked: str) -> str:
+        masked = _desuperscript_spaces(masked)
         masked = _radical_to_call(_collapse_integral_marks(masked))
         masked = _LATEX_COMMAND.sub(
             lambda m: _LATEX_COMMANDS.get(m.group(0), m.group(0)), masked)

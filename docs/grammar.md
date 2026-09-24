@@ -198,6 +198,16 @@ stronger than you mean. The `for` clause narrows it:
 | `for z in C, f(z) == z` | the complex plane |
 | `for x in [-1, 1] \ {1}, f(x) >= 0` | an interval with a point excluded |
 | `for scale in {"info", "linear"}, f(r, scale) >= 0` | a finite set of strings |
+| `for v in R^n, f(v) >= 0` | a real vector of length `n`, never empty |
+| `for A in R^(m,n), f(A) == f(A)` | an `m`-by-`n` real matrix, rows then columns |
+
+A matrix space is written `R^(m,n)`, the order of a numpy shape. The
+spellings `R^{m,n}`, `R^(m×n)`, `R^{m×n}`, `R^(m*n)` and the superscript
+`ℝᵐˣⁿ` are the same space, as are `ℝ³ˣ³` and `ℝ^{3×3}` for a fixed size,
+and all of them are written back as `R^(m,n)`. The unicode display uses
+superscripts wherever they read back as the same space; a dimension
+named with an `x` (the superscript `ˣ` is the separator) or with a
+letter that has no superscript form is shown as `ℝ^(x,n)` instead.
 
 The excluded-point form is how you state a claim around a pole. The
 finite-set form is how a string-valued parameter that selects a branch

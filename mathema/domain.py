@@ -63,27 +63,61 @@ def _from_superscript(text: str) -> str:
     return "".join(_SUPERSCRIPT_INV.get(ch, ch) for ch in text)
 
 
-#: dimension names of a space exponent: a single name, or a product
-#: (`m*n`/`m×n`). Names are identifiers; a bare integer is allowed for a
-#: fixed dimension (`R^3`).
+#: dimension names of a space exponent: a single name, or a list of
+#: them separated by `,` (the canonical `m,n`), `*` or `×`. Names are
+#: identifiers; a bare integer is allowed for a fixed dimension (`R^3`).
 _DIM_EXPONENT = re.compile(
-    r"^(?:[A-Za-z_]\w*|\d+)(?:\s*[*×]\s*(?:[A-Za-z_]\w*|\d+))*$")
+    r"^(?:[A-Za-z_]\w*|\d+)(?:\s*[*×,]\s*(?:[A-Za-z_]\w*|\d+))*$")
 
 
 _SUPERSCRIPT_RUN = re.compile(
     "[" + "".join(re.escape(c) for c in _SUPERSCRIPT.values()) + "]+")
 
+#: the superscript separator between dimensions (`ℝᵐˣⁿ`). It is also the
+#: superscript letter x, so a dimension named with an `x` never displays
+#: as a superscript.
+_SUPERSCRIPT_TIMES = "ˣ"
+
+#: a superscript run directly after a set (`ℝ`, `R`, an interval's
+#: closing bracket) that holds the separator: a whole matrix exponent,
+#: digits included (`ℝ³ˣ³`).
+_SPACE_SUPERSCRIPT_RUN = re.compile(
+    r"([ℝℤℕℂ\]\)]|\b[RZNC])(" + _SUPERSCRIPT_RUN.pattern + ")")
+
+
+def _plain_exponent(run: str) -> str:
+    """A superscript exponent run as a plain `^` exponent: `ⁿ` -> `^n`,
+    `ᵐˣⁿ` -> `^(m,n)`, `³ˣ³` -> `^(3,3)`. A run that is only the
+    separator reads as the dimension `x`. A run with an empty dimension
+    (`ᵐˣ`) keeps its `×` so the domain parser refuses it."""
+    if run == _SUPERSCRIPT_TIMES:
+        return "^x"
+    names = [_from_superscript(piece) for piece in run.split(_SUPERSCRIPT_TIMES)]
+    if len(names) == 1:
+        return f"^{names[0]}"
+    if not all(names):
+        return "^(" + "×".join(names) + ")"
+    return "^(" + ",".join(names) + ")"
+
+
+def desuperscript_spaces(text: str) -> str:
+    """Every superscript matrix exponent after a set rewritten as a plain
+    `^(m,n)` exponent, before anything reads its superscript digits as
+    an ordinary power (`ℝ³ˣ³` -> `ℝ^(3,3)`)."""
+    def repl(m):
+        run = m.group(2)
+        if _SUPERSCRIPT_TIMES not in run:
+            return m.group(0)
+        return m.group(1) + _plain_exponent(run)
+    return _SPACE_SUPERSCRIPT_RUN.sub(repl, text)
+
 
 def _desuperscript(text: str) -> str:
     """Any run of superscript characters rewritten as an explicit
     `^<plain>` power, so the unicode space form (`ℝⁿ`, `[0,1]ᵏ`) and
-    the ascii form (`R^n`, `[0,1]^k`) reach the same parse. A multi-
-    token exponent is parenthesised (`ℝᵐˣⁿ` -> `R^(m×n)`) so the top-
-    level caret split reads it as one exponent."""
-    def repl(m):
-        plain = _from_superscript(m.group(0))
-        return f"^({plain})" if any(c in "×*" for c in plain) else f"^{plain}"
-    return _SUPERSCRIPT_RUN.sub(repl, text)
+    the ascii form (`R^n`, `[0,1]^k`) reach the same parse. A matrix
+    exponent becomes the comma list (`ℝᵐˣⁿ` -> `R^(m,n)`)."""
+    return _SUPERSCRIPT_RUN.sub(lambda m: _plain_exponent(m.group(0)), text)
 
 
 def _split_top_caret(text: str) -> "tuple[str, str] | None":
@@ -110,15 +144,16 @@ def _split_top_caret(text: str) -> "tuple[str, str] | None":
 
 
 def _parse_dims(exponent: str) -> "tuple | None":
-    """A space exponent (`n`, `m*n`, `(m×n)`, superscript forms) as a
-    tuple of dimension tokens, or None when it is not a dimension
-    exponent at all (so an ordinary numeric power is left alone)."""
+    """A space exponent (`n`, `(m,n)`, `{m,n}`, `(m*n)`, `(m×n)`,
+    superscript forms) as a tuple of dimension tokens, or None when it
+    is not a dimension exponent at all (so an ordinary numeric power is
+    left alone)."""
     exp = _from_superscript(exponent).strip()
-    if exp.startswith("(") and exp.endswith(")"):
+    if (exp[:1], exp[-1:]) in (("(", ")"), ("{", "}")):
         exp = exp[1:-1].strip()
     if not _DIM_EXPONENT.match(exp):
         return None
-    parts = re.split(r"\s*[*×]\s*", exp)
+    parts = re.split(r"\s*[*×,]\s*", exp)
     return tuple(p.strip() for p in parts if p.strip())
 
 
@@ -803,17 +838,18 @@ def _render_complex(z: complex) -> str:
 
 
 def _render_dims(dims: tuple, ascii_mode: bool) -> str:
-    """A space exponent for `dims`: `^n`/`^(m*n)` in ascii, and the
-    unicode superscript (`ⁿ`/`ᵐˣⁿ`) when every character has a
-    superscript form, else the parenthesised `^(m×n)` spelling."""
+    """A space exponent for `dims`: `^n`/`^(m,n)` in ascii. In unicode,
+    the superscript (`ⁿ`/`ᵐˣⁿ`) when every dimension has a superscript
+    form and none contains the letter `x` (spelled like the separator
+    `ˣ`), else the same plain `^n`/`^(m,n)` exponent, so the display
+    always reads back as the same space."""
     if not dims:
         return ""
-    if ascii_mode:
-        body = "*".join(dims)
-        return f"^{body}" if len(dims) == 1 else f"^({body})"
-    body = "×".join(dims)
-    sup = _to_superscript(body)
-    return sup if sup is not None else f"^({body})"
+    plain = f"^{dims[0]}" if len(dims) == 1 else "^(" + ",".join(dims) + ")"
+    if ascii_mode or any("x" in d for d in dims):
+        return plain
+    sup = _to_superscript("×".join(dims))
+    return sup if sup is not None else plain
 
 
 def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None = None,
