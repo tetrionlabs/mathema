@@ -7,6 +7,7 @@ probe:algorithmic (pairwise sampling / finite-difference curvature),
 and is_numerically_stable via a domain_hazards-based derive route,
 directly against the mechanism, and end to end through
 check_conjectures()."""
+import math
 import random
 
 from mathema.analysis import analyze_source
@@ -97,12 +98,13 @@ def test_is_numerically_stable_derive_disproven_when_domain_contains_a_pole():
     assert result.status == "disproven"
 
 
-def test_is_numerically_stable_derive_proven_when_domain_excludes_the_pole():
+def test_is_numerically_stable_derive_undecided_when_domain_excludes_the_pole():
+    # every pole excluded still leaves overflow and NaN open, so the
+    # probe decides
     facts = analyze_source(npv_two_period)
     result = _is_numerically_stable_derive(npv_two_period, facts, "", "", "==",
                                         domain={"r": (0.0, 5.0)})
-    assert result is not None
-    assert result.status == "proven"
+    assert result is None
 
 
 def test_is_numerically_stable_derive_declines_with_no_declared_domain():
@@ -140,3 +142,17 @@ def test_a_derive_route_claim_falls_back_to_the_family_with_the_route_named():
         facts=facts)
     assert results[0].verdict == "holds"
     assert results[0].route == "probe:algorithmic"
+
+
+def exp_over_x(x: float) -> float:
+    return math.exp(x) / x
+
+
+def test_pole_exclusion_alone_does_not_prove_numerical_stability():
+    # no pole of exp(x)/x lies in [1, 1000], but exp overflows past
+    # 709.78, where finite_no_error(f, x) is 0
+    (p,) = check_conjectures(exp_over_x, [claim(
+        "for x in [1, 1000], g(f, x) == 1", name="is_numerically_stable",
+        route="best", funcs={"g": "mathema.f.finite_no_error"})])
+    assert p.verdict != "proven", (p.verdict, p.sketch)
+    assert p.verdict == "falsified"

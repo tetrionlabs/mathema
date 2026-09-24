@@ -10,7 +10,7 @@ Two kinds live here:
   techniques for claims derive can't decide (monotonicity, affine-ness,
   convexity/concavity), the route a `route="best"` claim falls back to.
 - derive-route families, symbolic/structural checks with no sampling
-  at all (`is_numerically_stable`'s pole-exclusion reasoning,
+  at all (`is_numerically_stable`'s pole-containment disproof,
   `is_builtin_safe[param]`'s restricted-real-domain check,
   `is_pole_safe[param]`'s pole-containment check), each returning a
   `symbolic.ProofResult` or `None` to decline. The safety predicates
@@ -283,27 +283,30 @@ def _is_numerically_stable_derive(fn, facts, lhs_src: str, rhs_src: str,
                                relation: str, domain: dict | None = None,
                                tolerance: float | None = None):
     """Intent:
-        A derive-route alternative to is_numerically_stable's existing
-        probe implementation: proven when every declared-domain
-        parameter's own poles are provably excluded by its bound (the
-        same reasoning is_pole_safe[param] already uses, via the shared
-        _pole_exclusion_proof), disproven when one is provably inside,
-        undecided (returns None, falling through to the existing probe
-        check) otherwise.
+        A derive-route half for is_numerically_stable: disproven when a
+        declared-domain parameter's own pole provably lies inside its
+        bound (the reasoning is_pole_safe[param] uses, via the shared
+        _pole_exclusion_proof), undecided (None, falling through to the
+        probe check) otherwise.
 
     Notes:
-        lhs_src/rhs_src/relation are unused (this doesn't reason about
-        the claim's own algebraic text at all, only fn's poles against
-        the declared domain), kept for protocol uniformity with every
+        Pole exclusion never proves the claim. `finite_no_error(f, ...)
+        == 1` also fails on an overflow (exp past 709.78) and on a NaN,
+        neither of which is a pole, so with every pole excluded the
+        claim is still open and the probe decides it. lhs_src/rhs_src/
+        relation are unused, kept for protocol uniformity with every
         other derive-route family.
     """
     domain = domain or {}
     if not domain:
         return None
-    return _pole_exclusion_proof(
+    proof = _pole_exclusion_proof(
         fn, facts, domain, list(domain),
         proven_sketch="every declared-domain parameter's own poles are "
                       "excluded by its bound")
+    if proof is None or proof.status != "disproven":
+        return None
+    return proof
 
 
 # --- is_builtin_safe[param]: a declared-domain parameter fed into a
