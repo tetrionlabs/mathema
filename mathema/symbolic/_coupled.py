@@ -165,7 +165,8 @@ def lift_coupled(fn, facts) -> "Lifted | None":
         return None
     if isinstance(ret_expr, tuple):
         return None
-    final = ret_expr.subs({a_sym: a_n, b_sym: b_n}).subs(n, trip)
+    # range(trip) runs max(trip, 0) times
+    final = ret_expr.subs({a_sym: a_n, b_sym: b_n}).subs(n, sympy.Max(trip, 0))
     try:
         final = _with_timeout(lambda: sympy.simplify(final),
                               FAST_TIMEOUT_SECONDS)

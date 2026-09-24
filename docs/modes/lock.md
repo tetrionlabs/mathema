@@ -40,8 +40,9 @@ function's alpha-normalised AST with the docstring stripped, so:
 
 ```text
 $ mathema verify
+ok   funcs.midpoint: fresh
 FAIL funcs.settle: locked at form 206704b327da but the code is now 7df50498df6f; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
-0 fresh (form unchanged, skipped), 0 adjudicated, 1 problem(s)
+1 fresh (form unchanged, skipped), 0 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 $ echo $?
 1
@@ -102,7 +103,11 @@ funcs.settle:
 The verified record carries a `locked` reflection of the same entry,
 covered by the integrity checksum, which is what makes hand-deletion
 detectable: a record that says locked with no meta entry behind it
-fails the sweep as a lock removed outside `mathema unlock`.
+fails the sweep as a lock removed outside `mathema unlock`, and a meta
+entry whose `form` no longer matches the record's stamp fails it as a
+lock moved outside `mathema unlock`. Either way the record is left as
+it was, stamp included, so the failure stands on every sweep until the
+entry is restored or a human unlocks.
 
 ## The honest threat model
 

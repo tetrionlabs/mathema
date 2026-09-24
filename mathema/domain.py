@@ -132,6 +132,12 @@ class InvalidDomain(ValueError):
     that's legitimately "no domain here", not a syntax error."""
 
 
+class DuplicateBinding(InvalidDomain):
+    """Raised by `split_quantifier()` when one quantifier binds the same
+    name twice: two domains for one name, neither of which can be
+    preferred silently."""
+
+
 _FOR_PREFIX = re.compile(r"^\s*for\s+", re.DOTALL)
 # "x in D" / "x ∈ D" / "x \in D" / "x \elem D", all one membership
 # operator, matched up front so every binding shape below only ever has
@@ -612,6 +618,81 @@ def finite_members(bound, limit: int):
     return tuple(sorted(out, key=_member_sort_key))
 
 
+def _integer_span(piece, base_type: str):
+    """Intent:
+        The first and last integers an interval piece admits under an
+        integer base type, as `(first, last)`, honouring open ends and
+        fractional endpoints; `N` starts no lower than 0. An infinite
+        end comes back infinite, and `first > last` means no integer
+        lies inside.
+    """
+    lo, hi = float(piece[0]), float(piece[1])
+    closed_lo = getattr(piece, "closed_lo", True)
+    closed_hi = getattr(piece, "closed_hi", True)
+    if math.isinf(lo):
+        first = lo
+    else:
+        first = math.ceil(lo) if closed_lo else math.floor(lo) + 1
+    if math.isinf(hi):
+        last = hi
+    else:
+        last = math.floor(hi) if closed_hi else math.ceil(hi) - 1
+    if base_type == "N":
+        first = max(first, 0)
+    return first, last
+
+
+def bound_is_empty(bound) -> bool:
+    """Intent:
+        Whether a declared bound admits no value at all: a reversed
+        interval, a degenerate one with an open end (`(1, 1)`,
+        `[1, 1)`), or an integer-typed domain none of whose pieces holds
+        an integer outside `excluded` (`(0, 1) ⊂ Z`).
+
+    Notes:
+        A vector or matrix space, a complex rectangle, a discrete set,
+        a bare named set and anything unrecognised read as non-empty:
+        the answer is `True` only when emptiness is certain. The
+        missing-value policy is not a member of the value set, so a
+        domain that admits only a missing value still counts as empty.
+    """
+    dom = bound if isinstance(bound, Domain) else None
+    excluded: frozenset
+    if dom is None:
+        if not (isinstance(bound, tuple) and not isinstance(bound, frozenset)
+                and len(bound) == 2):
+            return False
+        pieces, base_type, excluded = (bound,), "R", frozenset()
+    else:
+        if dom.dims or dom.base_type == "C" or not dom.pieces:
+            return False
+        pieces, base_type, excluded = dom.pieces, dom.base_type, dom.excluded
+    for piece in pieces:
+        if not (isinstance(piece, tuple) and not isinstance(piece, frozenset)
+                and len(piece) == 2):
+            return False
+        try:
+            lo, hi = float(piece[0]), float(piece[1])
+        except (TypeError, ValueError):
+            return False
+        if base_type in ("Z", "N"):
+            first, last = _integer_span(piece, base_type)
+            if first > last:
+                continue
+            if math.isinf(first) or math.isinf(last) \
+                    or last - first + 1 > len(excluded):
+                return False
+            if any(v not in excluded for v in range(int(first), int(last) + 1)):
+                return False
+            continue
+        if lo < hi:
+            return False
+        if lo == hi and getattr(piece, "closed_lo", True) \
+                and getattr(piece, "closed_hi", True) and lo not in excluded:
+            return False
+    return True
+
+
 def domain_contains(value, bound) -> bool:
     """Is `value` a member of the domain `bound` describes, the single
     source of truth every consumer (`authoring.enforce_domain`, the
@@ -689,9 +770,9 @@ def _render_set_member(v, *, ascii_mode: bool) -> str:
     accepts either quote style on the way in and keeps neither, so one
     spelling comes back out.
 
-    A member whose own text contains a quote or a comma is outside what
-    a set binding can express; `_split_commas` is not quote-aware, so
-    such a value cannot be read back whatever it is rendered as."""
+    A member whose own text contains a double quote is outside what a
+    set binding can express: rendered inside double quotes, such a value
+    cannot be read back."""
     if v is MISSING:
         return "missing" if ascii_mode else "∅"
     if isinstance(v, str):
@@ -810,6 +891,15 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         and not isinstance(real_pieces[0], (str, frozenset))
         and real_pieces[0][0] == float("-inf") and real_pieces[0][1] == float("inf"))
     missing_included = show_missing and MISSING not in dom.excluded
+    # an excluded missing value joins the one exclusion set whenever
+    # there is a set to join (`[0, 1] \ {3, ∅}`), and always in ascii
+    # (`[0, 1] \ {missing}:float`), since an annotation with no
+    # `|missing` still reads as missing allowed; the input reads a
+    # single exclusion clause only
+    missing_merged = (show_missing and not missing_included
+                      and (ascii_mode or bool(numeric_excluded)))
+    if missing_merged:
+        numeric_excluded = numeric_excluded | {MISSING}
     exp = _render_dims(getattr(dom, "dims", ()), ascii_mode)
     if not real_pieces or fully_unbounded:
         text = dom.base_type if ascii_mode else _TYPE_GLYPH.get(dom.base_type, dom.base_type)
@@ -839,7 +929,7 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     if enumerated:
         if show_missing and enumerated_missing:
             text += "|missing" if ascii_mode else " ∪ {∅}"
-    elif show_missing and not ascii_mode:
+    elif show_missing and not ascii_mode and not missing_merged:
         text += " \\ {∅}" if not missing_included else " ∪ {∅}"
     return text
 
@@ -889,14 +979,18 @@ def domain_bound_to_json(b) -> str | dict:
     A `frozenset` -> `{"set": [sorted members]}`, so a discrete-value
     domain is never confused with an interval the way a bare
     `list(frozenset(...))` used to be. A `Domain` -> `{"base_type",
-    "pieces", "excluded", "explicit_type"}`, each piece/excluded-member
+    "pieces", "excluded", "explicit_type"}` plus `"dims"` for a vector or
+    matrix space (`R^(n*n)`), each piece/excluded-member
     recursively encoded the same way (with `MISSING` itself standing in
     as one fixed, JSON-safe token)."""
     if isinstance(b, Domain):
-        return {"base_type": b.base_type,
+        out = {"base_type": b.base_type,
                "pieces": [domain_bound_to_json(p) for p in b.pieces],
                "excluded": sorted((_json_value(v) for v in b.excluded), key=str),
                "explicit_type": b.explicit_type}
+        if b.dims:
+            out["dims"] = list(b.dims)
+        return out
     if isinstance(b, str):
         return b
     if isinstance(b, frozenset):
@@ -932,7 +1026,8 @@ def domain_bound_from_json(v):
         return Domain(base_type=v["base_type"],
                       pieces=tuple(domain_bound_from_json(p) for p in v["pieces"]),
                       excluded=frozenset(_value_from_json(x) for x in v["excluded"]),
-                      explicit_type=v.get("explicit_type", False))
+                      explicit_type=v.get("explicit_type", False),
+                      dims=tuple(str(d) for d in v.get("dims", ())))
     if "set" in v:
         return frozenset(_value_from_json(x) for x in v["set"])
     return Interval(_endpoint_from_json(v["lo"]), _endpoint_from_json(v["hi"]),
@@ -995,6 +1090,26 @@ def _parse_piece(text: str):
     m = _PIECE_NAMED.match(text)
     if m is not None:
         return _SUBSET_ASCII.get(m.group(1), m.group(1))
+    return None
+
+
+def _interval_problem(piece) -> str | None:
+    """Intent:
+        Why an interval piece cannot be read as a set of reals, or None:
+        an endpoint that is not a number (NaN) orders against nothing.
+
+    Notes:
+        An empty interval (`[2, 1]`, `(1, 1]`) is readable and is
+        refused at adjudication as `skipped:misspecified`, so one such
+        claim does not stop the rest of a claims file from loading.
+    """
+    if not isinstance(piece, Interval):
+        return None
+    lo, hi = piece
+    if not all(isinstance(v, (int, float)) for v in (lo, hi)):
+        return None
+    if lo != lo or hi != hi:
+        return "has an endpoint that is not a number"
     return None
 
 
@@ -1111,7 +1226,11 @@ def _parse_binding(part: str):
         if not pt or _parse_piece(pt) is None:
             return (f"{part!r}: {pt!r} isn't a recognized interval, discrete "
                     f"set, or named set (R/Z/N) for {name!r}")
-        pieces.append(_parse_piece(pt))
+        piece = _parse_piece(pt)
+        problem = _interval_problem(piece)
+        if problem is not None:
+            return f"{part!r}: {pt.strip()!r} {problem} for {name!r}"
+        pieces.append(piece)
 
     # a single bare named-set piece ("x in Z", "x in R") sets the base
     # type directly, the same as an explicit ⊂ clause would; it isn't
@@ -1307,6 +1426,10 @@ def split_quantifier(text: str) -> tuple[dict, str]:
         if isinstance(parsed, str):
             raise InvalidDomain(parsed)
         name, value = parsed
+        if name in domain:
+            raise DuplicateBinding(
+                f"{name!r} is bound twice in one quantifier; give it one "
+                f"domain")
         domain[name] = value
     for name, value in ne_pending:
         bound = domain.get(name)

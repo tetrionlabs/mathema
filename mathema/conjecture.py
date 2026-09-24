@@ -29,11 +29,12 @@ import math
 import operator as _operator
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from dataclasses import replace as _dc_replace
 
 from . import families, routes
-from ._math_vocab import MATH_CONSTANTS
+from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
 from .analysis import analyze_source
 from .grammar import (Domain, InvalidDomain, NoRelation,
                       is_missing, extract_assuming_clause,
@@ -41,9 +42,11 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       extract_outcome_clause, _split_top_level,
                       is_reserved, normalize,
                       parse_domain_safety, parse_raises, split_quantifier,
-                      split_relation_chain, unexpanded_prime_message)
+                      split_relation_chain, unexpanded_prime_message,
+                      UnreadableSpelling)
 from . import linalg
-from ._scan import _split_commas
+from ._scan import _split_commas, blank_strings
+from .domain import DuplicateBinding
 from .probing import (_close, _fmt, _prepare_sampling, _probe_density,
                       _sampling_shorthand, _synth, _synth_dict,
                       relation_holds_elementwise)
@@ -133,6 +136,94 @@ def _yaml_safe_args(args) -> list:
     return out
 
 
+_MAX_CORNERS = 64
+
+
+def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
+    """Intent:
+        The corners of a claim's bounded domain box as argument lists,
+        in `kinds` order: every combination of each parameter's included
+        endpoints, with a literal argument held at its literal. Empty
+        unless every parameter is a real or integer scalar with a finite
+        interval domain (or fixed by a literal), and when the box has
+        more than `_MAX_CORNERS` corners.
+
+    Notes:
+        Only an endpoint the domain includes is used; an open end is not
+        in the domain, so a point there is never tried. A value the
+        domain excludes is dropped. A raise that needs two parameters at
+        their extremes together is invisible to per-parameter sampling
+        and found here.
+    """
+    import itertools
+
+    from .domain import Domain, domain_contains
+
+    choices = []
+    for p, k in kinds.items():
+        if p in literal_args:
+            choices.append([literal_args[p]])
+            continue
+        if k not in ("scalar", "float", "int"):
+            return []
+        bound = domain.get(p)
+        pieces = (bound.pieces if isinstance(bound, Domain) else (bound,))
+        ends: list = []
+        for piece in pieces:
+            if not (isinstance(piece, tuple) and not isinstance(piece, frozenset)
+                    and len(piece) == 2):
+                return []
+            lo, hi = piece
+            try:
+                if not (math.isfinite(lo) and math.isfinite(hi)):
+                    return []
+            except TypeError:
+                return []
+            if getattr(piece, "closed_lo", True):
+                ends.append(lo)
+            if getattr(piece, "closed_hi", True):
+                ends.append(hi)
+        ends = [v for v in dict.fromkeys(ends) if domain_contains(v, bound)]
+        if k == "int":
+            ends = [int(v) for v in ends if float(v).is_integer()]
+        if not ends:
+            return []
+        choices.append(ends)
+    total = 1
+    for c in choices:
+        total *= len(c)
+    if not choices or total > _MAX_CORNERS:
+        return []
+    return [list(combo) for combo in itertools.product(*choices)]
+
+
+def _sample_in_domain(value, bound) -> bool:
+    """Intent:
+        Whether one sampled scalar lies inside its parameter's declared
+        bound, for the probe route's per-trial check. Only a real number
+        is judged here: a sequence, mapping, string or complex value
+        has its own sampler, and a missing value is the missing-value
+        policy's to decide. A whole float counts as the integer it
+        equals, and an infinity is inside exactly when the bound is
+        unbounded in its direction.
+    """
+    from .domain import domain_contains
+    if bound is None or isinstance(value, bool) \
+            or not isinstance(value, (int, float)) or value != value:
+        return True
+    try:
+        if math.isinf(value):
+            far = math.copysign(sys.float_info.max, value)
+            return bool(domain_contains(far, bound)
+                        or domain_contains(int(far), bound))
+        if domain_contains(value, bound):
+            return True
+        return (isinstance(value, float) and value.is_integer()
+                and bool(domain_contains(int(value), bound)))
+    except Exception:
+        return True
+
+
 def _pinned_arg_sets(cj, arity: int) -> list:
     """Intent:
         The claim's recorded counterexamples (`Conjecture.pins`) as
@@ -168,13 +259,92 @@ def _claim_family(cj, fn, facts):
     a renamed predicate claim still reaches its family."""
     base = cj.name.split("[", 1)[0]
     family = families.families().get(base)
-    if family is not None and family.can_handle(fn, facts, cj.name):
+    if family is not None and family.can_handle(fn, facts, cj.name) \
+            and _statement_is_family_claim(cj, base, family, facts):
         return family
     if cj.relation in routes.examine_predicates():
         family = families.families().get(cj.relation)
         if family is not None:
             return family
     return None
+
+
+#: the families whose routes read a claim's name rather than its text,
+#: with the statement each adjudicates: derivative order and relation,
+#: against zero, in the parameter the name brackets
+_DERIVATIVE_FAMILY_FORMS = {
+    "monotonic_increasing": (1, ">="),
+    "monotonic_decreasing": (1, "<="),
+    "affine": (2, "=="),
+    "convex": (2, ">="),
+    "concave": (2, "<="),
+}
+
+_FINITE_NO_ERROR = "mathema.f.finite_no_error"
+
+_COMPARISON_RELATIONS = frozenset({"==", "~=", "!=", "<=", ">=", "<", ">"})
+
+#: the families stated as `f(<params>) == f(<params>)`, the call agreeing
+#: with itself, each examining one way it could fail to
+_SELF_AGREEMENT_FAMILIES = frozenset({"is_deterministic", "is_reproducible",
+                                      "is_state_safe"})
+
+
+def _squash(text) -> str:
+    """Claim text with all whitespace removed, for comparing two
+    spellings of the same expression."""
+    return "".join((text or "").split())
+
+
+def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
+    """Intent:
+        Whether the claim's statement is the one the family registered
+        under its name adjudicates, so a name alone never swaps the
+        question being asked.
+
+    Notes:
+        A predicate statement (`is_pole_safe(x)`, `is_symmetric(f(A))`)
+        matches the family of the same name. The derivative-sign
+        families match `d(f(<params>), p) >= 0` and its siblings, with
+        `p` the bracketed parameter. `is_numerically_stable` matches
+        `g(f, <params>) == 1` with `g` bound to `mathema.f.finite_no_
+        error`. `is_deterministic`, `is_reproducible` and
+        `is_state_safe` match `f(<params>) == f(<params>)`. `is_defined` states a region under its name (the
+        restriction form in docs/conditional-claims.md) and so accepts
+        any comparison. A family that dispatches on the function's
+        shape and reads the claim's own text (the dot-product, sum and
+        fold lifters) accepts any statement.
+    """
+    from .claim_families import (MatrixPropertyFamily, OutputPredicateFamily,
+                                 _NamedClaimFamily)
+    if cj.relation in routes.examine_predicates() \
+            or cj.relation not in _COMPARISON_RELATIONS:
+        return cj.relation == base
+    if base == "is_defined":
+        return True
+    call = f"f({', '.join(facts.params)})"
+    form = _DERIVATIVE_FAMILY_FORMS.get(base)
+    if form is not None:
+        order, relation = form
+        param = cj.name[len(base):]
+        if not (param.startswith("[") and param.endswith("]")):
+            return False
+        param = param[1:-1]
+        expected = f"d({call}, {', '.join([param] * order)})"
+        return (cj.relation == relation and _squash(cj.rhs) == "0"
+                and _squash(cj.lhs) == _squash(expected))
+    if base in _SELF_AGREEMENT_FAMILIES:
+        return (cj.relation == "==" and _squash(cj.lhs) == _squash(call)
+                and _squash(cj.rhs) == _squash(call))
+    if base == "is_numerically_stable":
+        bound = (cj.funcs or {}).get("g")
+        from .f import finite_no_error
+        return (cj.relation == "==" and _squash(cj.rhs) == "1"
+                and _squash(cj.lhs) == _squash(
+                    f"g(f, {', '.join(facts.params)})")
+                and (bound == _FINITE_NO_ERROR or bound is finite_no_error))
+    return not isinstance(family, (_NamedClaimFamily, MatrixPropertyFamily,
+                                   OutputPredicateFamily))
 
 
 def _resolve_func_ref(ref: str, *, root: str = "."):
@@ -223,6 +393,16 @@ GRAMMAR = "mathema"
 DEFAULT_TOLERANCE = 1e-9    # this module's own statement dialect (record-schema.md's
                        # `grammar` field), see mathema.data.grammar.GRAMMAR for
                        # the one other grammar in the codebase today.
+
+def _declared_rel_tol(cj) -> float:
+    """Intent:
+        The relative allowance an equality gets on the probe route: none
+        when the claim declared its tolerance, which is then the whole
+        allowance, and the default relative tolerance otherwise.
+    """
+    from .probing import DEFAULT_RELATIVE_TOLERANCE
+    return 0.0 if cj.tolerance is not None else DEFAULT_RELATIVE_TOLERANCE
+
 
 def _runtime_dim(value, axis):
     """`dim(value, axis)` at evaluation time: the size of the axis-th
@@ -276,7 +456,7 @@ _SAFE_FUNCS = {
 }
 _ALLOWED_NODES = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Call, ast.Name,
                   ast.Constant, ast.Load, ast.Add, ast.Sub, ast.Mult, ast.Div,
-                  ast.Pow, ast.Mod, ast.USub, ast.UAdd, ast.List, ast.Tuple,
+                  ast.Pow, ast.Mod, ast.FloorDiv, ast.USub, ast.UAdd, ast.List, ast.Tuple,
                   ast.Subscript, ast.Index, ast.Slice,
                   # truth-valued law expressions (`f(a, b) == (a <= b)`):
                   # comparisons and boolean connectives evaluate to
@@ -497,7 +677,15 @@ def claim(law: str, name: str | None = None, source: str = "user",
     # empirical cascade, and the record reports which mechanism
     # decided (the examine route). That normalization happens after
     # parsing, once the relation is known, see below.
-    text, ambiguous_diff_vars = extract_diff_fraction_sugar(law.strip())
+    if "#" in blank_strings(law):
+        raise InvalidConjecture(
+            f"`#` has no meaning in a claim and would silently cut off "
+            f"everything after it; remove it (a comment belongs outside "
+            f"the claim text): {law.strip()!r}")
+    try:
+        text, ambiguous_diff_vars = extract_diff_fraction_sugar(law.strip())
+    except UnreadableSpelling as e:
+        raise InvalidConjecture(str(e)) from e
     # outcome section: stripped first, on raw text, extract_outcome_
     # clause recognizes any accepted "implies" spelling directly rather
     # than relying on normalize() to have unified them, so it never has
@@ -528,6 +716,11 @@ def claim(law: str, name: str | None = None, source: str = "user",
         prev = text
         new_assuming, text = extract_assuming_clause(text)
         if new_assuming is not None:
+            if not new_assuming.strip()[len("assuming"):].strip():
+                raise InvalidConjecture(
+                    f"`assuming` has no premise before its comma: state "
+                    f"one (`assuming x > 0, ...`) or drop the keyword: "
+                    f"{law.strip()!r}")
             assuming = new_assuming
         try:
             (new_funcs, new_free_domain, text, new_aliases,
@@ -547,8 +740,15 @@ def claim(law: str, name: str | None = None, source: str = "user",
         text = normalize(text)
         try:
             new_dom, text = split_quantifier(text)
+        except DuplicateBinding as e:
+            raise ConflictingDomainBinding(str(e)) from e
         except InvalidDomain as e:
             raise InvalidConjecture(str(e)) from e
+        rebound = sorted(set(new_dom) & set(dom) - {"n"})
+        if rebound:
+            raise ConflictingDomainBinding(
+                f"{rebound} bound by two quantifiers in the same claim; "
+                f"give each name one domain")
         dom.update(new_dom)
         if text == prev:
             break
@@ -591,6 +791,12 @@ def claim(law: str, name: str | None = None, source: str = "user",
         if rel.startswith("not "):
             rel, negated = rel[4:], True
     else:
+        section = _MISCASED_SECTION.match(text)
+        if section is not None:
+            raise InvalidConjecture(
+                f"section keywords are lowercase: write "
+                f"`{section.group(1).lower()}`, not `{section.group(1)}`, "
+                f"in {law.strip()!r}")
         # a residual top-level comma is a comma-joined relation pair
         # (`f >= 1, f <= 4`), ambiguous with the section-separator comma
         # (and parsing as a bare tuple, which no relation split would
@@ -618,17 +824,14 @@ def claim(law: str, name: str | None = None, source: str = "user",
         lhs, rel, rhs = links[0]
         if len(links) == 1:
             links = []
-    # a residual `|` is an abs/norm bar the grammar could not fold: a bar
-    # wraps a single term, so a compound quantity (`|A @ B|`, `|x + y|`)
-    # never folds, and left in place it reaches rendering as unparseable
-    # text. Reject it here, naming the spelling that works, rather than
-    # let it surface as an opaque error downstream.
+    # a residual `|` is a bar the grammar could not pair with another,
+    # and left in place it reaches rendering as unparseable text
     for _side in (lhs, rhs):
-        if _side and "|" in _side:
+        if _side and "|" in blank_strings(_side):
             raise InvalidConjecture(
-                f"a bar-delimited quantity wraps a single term, but {_side!r} "
-                f"is compound. Write det(...) for a matrix determinant, "
-                f"abs(...) for an absolute value, or norm(...) for a norm.")
+                f"the bars in {_side!r} do not pair up. Each opening bar "
+                f"needs a closing one; abs(...), norm(...) and det(...) "
+                f"are the call spellings of the same quantities.")
     # type-aware matrix sugar: `A^T` -> `A.T`, `|A|` -> `det(A)`,
     # `A^-1` -> `inv(A)`, but only for names known to be matrices, from
     # this claim's own domain or supplied by a caller holding the
@@ -649,9 +852,21 @@ def claim(law: str, name: str | None = None, source: str = "user",
                 try:
                     ast.parse(_side, mode="eval")
                 except SyntaxError:
+                    command = _LATEX_COMMAND.search(blank_strings(_side))
+                    if command is not None:
+                        raise InvalidConjecture(
+                            f"the LaTeX command `{command.group(0)}` has no "
+                            f"meaning in the claim grammar (in the claim "
+                            f"{law.strip()!r})") from None
                     raise InvalidConjecture(
                         f"cannot read {_side.strip()!r} as an expression "
                         f"in the claim {law.strip()!r}") from None
+                problem = _unreadable_side(_side)
+                if problem is not None:
+                    where = ("" if _D_AT_SENTINEL in _side
+                             else f"in {_side.strip()!r}, ")
+                    raise InvalidConjecture(
+                        f"{problem} ({where}claim {law.strip()!r})")
     # the record's grammar names the linear-algebra dialect when the
     # claim uses the matrix vocabulary: informative only (a reader sees
     # the parsing was matrix-aware), never required to round-trip, the
@@ -698,6 +913,140 @@ def claim(law: str, name: str | None = None, source: str = "user",
                       negated=negated, assuming=assuming, outcome=outcome or "",
                       links=links, pseudo_infinity=pseudo_infinity,
                       meta=dict(meta or {}), raw=law)
+
+
+_NOT_CLAIM_SYNTAX = {
+    ast.Lambda: "a lambda",
+    ast.IfExp: "a conditional expression (`a if c else b`)",
+    ast.Yield: "`yield`",
+    ast.YieldFrom: "`yield`",
+    ast.Await: "`await`",
+    ast.NamedExpr: "an assignment expression (`:=`)",
+    ast.JoinedStr: "an f-string",
+    ast.Starred: "argument unpacking (`*`)",
+    ast.Set: "a set literal",
+}
+_BITWISE_OPS = (ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
+
+
+_LATEX_COMMAND = re.compile(r"\\[A-Za-z]+")
+_MISCASED_SECTION = re.compile(
+    r"^\s*((?!for\b|let\b|assuming\b)(?i:for|let|assuming))\s")
+
+_SPECIAL_CALL_SHAPES = {
+    "d": "d(expr, var, ...) or d(expr, var, order)",
+    "integrate": "integrate(expr, var) or integrate(expr, var, lo, hi)",
+    "lim": "lim(expr, var, point)",
+    "Sum": "Sum(expr, var, lo, hi)",
+    "Prod": "Prod(expr, var, lo, hi)",
+}
+
+
+def _is_variable(node) -> bool:
+    return isinstance(node, ast.Name) and node.id != _D_AT_SENTINEL
+
+
+def _special_call_problem(node: ast.Call) -> str | None:
+    """Intent:
+        Why one call of a reserved form (`d`, `integrate`, `lim`, `Sum`,
+        `Prod`) does not have that form's shape, or None when it does.
+        Every variable slot must hold a plain name, and a derivative
+        order must be a non-negative integer.
+    """
+    name, args = node.func.id, node.args
+    shape = f"`{name}` is written {_SPECIAL_CALL_SHAPES[name]}"
+    if name == "d":
+        at = next((k for k, a in enumerate(args)
+                   if isinstance(a, ast.Name) and a.id == _D_AT_SENTINEL),
+                  len(args))
+        diff = args[1:at]
+        if not args or not diff or not _is_variable(diff[0]):
+            return f"{shape}: each variable a plain name"
+        for a in diff[1:]:
+            if _is_variable(a):
+                continue
+            if not (isinstance(a, ast.Constant) and type(a.value) is int
+                    and a.value >= 0):
+                return (f"{shape}: each variable a plain name and an "
+                        f"order a non-negative integer")
+        pairs = args[at + 1:]
+        if at < len(args):
+            if not pairs or len(pairs) % 2:
+                return "`d(...) @ {...}` needs one `name = value` per point"
+            names = [p.id for p in pairs[::2] if _is_variable(p)]
+            if len(names) != len(pairs) // 2:
+                return "`d(...) @ {...}` assigns values to plain names only"
+            if len(set(names)) != len(names):
+                return (f"`d(...) @ {{...}}` gives "
+                        f"{sorted({n for n in names if names.count(n) > 1})} "
+                        f"two values")
+        return None
+    if name == "integrate":
+        ok = ((len(args) == 2 and _is_variable(args[1]))
+              or (len(args) >= 4 and (len(args) - 1) % 3 == 0
+                  and all(_is_variable(a) for a in args[1::3])))
+        return None if ok else f"{shape}, the variable a plain name"
+    if name == "lim":
+        ok = (len(args) in (3, 4) and _is_variable(args[1])
+              and (len(args) == 3 or (isinstance(args[3], ast.Constant)
+                                      and args[3].value in ("+", "-"))))
+        return None if ok else f"{shape}, the variable a plain name"
+    ok = len(args) == 4 and _is_variable(args[1])
+    return None if ok else f"{shape}, the variable a plain name"
+
+
+def _unreadable_side(side: str) -> str | None:
+    """Intent:
+        Why one side of a relation is not claim syntax, or None when it
+        is. The side is Python expression text that already parses.
+
+    Notes:
+        An unparenthesised `and`/`or`/`not` heading a side means the
+        author joined two relations: Python precedence would read
+        `f(x) >= 1 and f(x) <= 2` as `f(x) >= (1 and f(x) <= 2)`, a
+        different and usually vacuous claim. A parenthesised boolean
+        (`f(a, b) == (a <= b)`) is a truth value and stays readable.
+        Keyword arguments, bitwise operators and the other refused
+        constructs have no reading in the claim grammar; accepting them
+        would drop or reinterpret part of what the author wrote.
+    """
+    tree = ast.parse(side.strip(), mode="eval").body
+    top_boolean = (isinstance(tree, ast.BoolOp)
+                   or (isinstance(tree, ast.UnaryOp)
+                       and isinstance(tree.op, ast.Not)))
+    if top_boolean and tree.col_offset == 0:
+        return ("`and`, `or` and `not` cannot join relations inside one "
+                "claim: state each relation as its own claim, or write a "
+                "bounded quantity as a chained comparison (`1 <= f(x) <= 2`); "
+                "a boolean value needs its own parentheses")
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in _SPECIAL_CALL_SHAPES):
+            problem = _special_call_problem(node)
+            if problem is not None:
+                return problem
+        what = _NOT_CLAIM_SYNTAX.get(type(node))
+        if what is not None:
+            return f"{what} is not claim syntax"
+        if isinstance(node, ast.Call) and node.keywords:
+            if any(k.arg is None for k in node.keywords):
+                return "argument unpacking (`**`) is not claim syntax"
+            return ("keyword arguments are not claim syntax: pass each "
+                    "argument by position")
+        if isinstance(node, ast.Constant) and (
+                isinstance(node.value, bytes) or node.value is Ellipsis):
+            return f"the literal {ast.unparse(node)} is not claim syntax"
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+            return ("`~` is not claim syntax; approximate equality is "
+                    "written `~=` (or `≈`)")
+        if isinstance(node, ast.BinOp) and isinstance(node.op, _BITWISE_OPS):
+            return "bitwise operators are not claim syntax"
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            return f"the attribute {node.attr!r} is not claim syntax"
+        if (isinstance(node, ast.Name) and node.id.startswith("__")
+                and node.id != _D_AT_SENTINEL):
+            return f"the name {node.id!r} is not claim syntax"
+    return None
 
 
 def _find_bare_reserved_name(src: str, param_names: set[str]) -> str | None:
@@ -928,12 +1277,21 @@ def _interpret_assumption(cj, conjectures):
     return conjuncts_of(text, text)
 
 
+#: how to write each math constant when a parameter of the same name
+#: takes the bare token
+_CONSTANT_SPELLINGS = {
+    "e": "write exp(1) for Euler's number",
+    "pi": "write acos(-1) for pi",
+}
+
+
 def _shadowed_constants(lhs: str, rhs: str, param_names: set) -> list[str]:
     """Intent:
         Math-constant names (`e`/`pi`) that a real parameter shadows: a
         bare `ast.Name` in the law that is both a `MATH_CONSTANTS` name
         AND a parameter. The parameter wins (unchanged), but the caller
-        warns, pointing at `exp(1)`, so the reading is never silent.
+        warns, naming the spelling that still reaches the constant
+        (`_CONSTANT_SPELLINGS`), so the reading is never silent.
 
     Notes:
         Value position only: a name in a call's function slot (there is
@@ -986,7 +1344,10 @@ def _unbound_call_names(lhs: str, rhs: str, existing: set) -> list[str]:
 
 def _collect_definedness_guards(fn, facts) -> list:
     """Every raise-region guard of fn itself: registered partiality
-    lemmas plus explicit raise branches from the piecewise lift."""
+    lemmas plus explicit raise branches from the piecewise lift. Float
+    overflow is left out: where a computation leaves the doubles is an
+    operational boundary, stated by an operational infinity, not part
+    of the region the function is defined on."""
     from .symbolic._conditioned import lift_piecewise
     from .symbolic._partiality import partiality_guards
     guards: list = []
@@ -1001,7 +1362,7 @@ def _collect_definedness_guards(fn, facts) -> list:
                 guards += pw.raise_guards
         except Exception:
             pass
-    return guards
+    return [(cond, exc) for cond, exc in guards if exc != "OverflowError"]
 
 
 def _negated_guard_texts(cond, negate, op_text) -> list[str]:
@@ -1810,7 +2171,8 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         if shadowed:
             note += (f"; {', '.join(shadowed)} read as the parameter"
                      f"{'s' if len(shadowed) > 1 else ''}, not the math "
-                     f"constant, write exp(1) for Euler's number")
+                     f"constant, "
+                     + ", ".join(_CONSTANT_SPELLINGS[c] for c in shadowed))
         assumption = _interpret_assumption(cj, conjectures)
         if isinstance(assumption, Probe):
             out.append(_stamped(assumption, cj))
@@ -1944,7 +2306,7 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         elif assumption is not None:
             statement = f"assuming {assumption[1]}, {statement}"
             cj = _dc_replace(cj, assuming=f"assuming {assumption[1]}")
-        validated = _validate_claim(cj, statement, note, facts, domain)
+        validated = _validate_claim(cj, statement, note, facts, domain, fn=fn)
         if isinstance(validated, Probe):
             # a rejected claim has no canonical form (it was never a
             # claim), so its record keeps what was written, verbatim
@@ -1999,6 +2361,17 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         # family-owned name reaches the family's own empirical
         # technique rather than the generic sampling loop
         ctx.family = _claim_family(cj, fn, facts)
+        emptied = _empty_premise_parameter(ctx, facts)
+        if emptied is not None:
+            out.append(stamp(Probe(
+                cj.name, statement, "skipped", route=None,
+                note=f"{ctx.note}; the premise ({ctx.assumption_display}) "
+                     f"admits no value of {emptied} in its declared "
+                     f"domain, so the claim quantifies over nothing and "
+                     f"is vacuous; state a premise the domain can "
+                     f"satisfy",
+                meta={"mathema.empty_premise": emptied})))
+            continue
         if cj.relation == "=:=":
             # function equivalence has its own ladder (form hash ->
             # symbolic difference -> code-vs-code sampling); neither
@@ -2039,6 +2412,28 @@ def _chain_statement(cj) -> str:
     return " ".join(parts)
 
 
+def _conjunction_route(routes: list, default: str) -> str:
+    """Intent:
+        The route a conjunction reports, from the routes of the parts
+        that set its verdict: their shared route when they agree; the
+        one subroute when the rest report its plain root (`derive` and
+        `derive:extensive` give `derive:extensive`, since the wider
+        mechanism was needed to settle the whole); else their shared
+        root; `default` when the parts share nothing or report none.
+    """
+    known = [r for r in routes if r]
+    if not known:
+        return default
+    distinct = set(known)
+    if len(distinct) == 1:
+        return known[0]
+    roots = {r.partition(":")[0] for r in distinct}
+    if len(roots) != 1:
+        return default
+    subroutes = {r for r in distinct if ":" in r}
+    return subroutes.pop() if len(subroutes) == 1 else roots.pop()
+
+
 def _combine_conjunction(probes: list, name: str, statement: str,
                          labels: list, what: str = "chained comparison",
                          unit: str = "link") -> "Probe":
@@ -2054,8 +2449,9 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     Notes:
         `labels` names each part for the counterexample/sketch (e.g.
         "link 1: a <= b"); `what`/`unit` name the conjunction kind in
-        the combined note. The reported route is "derive" only when
-        every part proved, else the deciding part's own route.
+        the combined note. The reported route is the one the deciding
+        parts report (`_conjunction_route`): every part for a proof,
+        the holding parts for a `holds`, the deciding part otherwise.
     """
     def corroboration(probe) -> dict:
         return {k: v for k, v in (probe.meta or {}).items()
@@ -2073,11 +2469,16 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                          meta=corroboration(probe))
     verdicts = [p.verdict for p in probes]
     if all(v == "proven" for v in verdicts):
-        return Probe(name, statement, "proven", route="derive",
+        return Probe(name, statement, "proven",
+                     route=_conjunction_route(
+                         [p.route for p in probes], "derive"),
                      note=f"every {unit} of the {what} proven")
     if all(v in ("proven", "holds") for v in verdicts):
         n = min((p.n for p in probes if p.n), default=0)
-        return Probe(name, statement, "holds", n=n, route="probe",
+        return Probe(name, statement, "holds", n=n,
+                     route=_conjunction_route(
+                         [p.route for p in probes if p.verdict == "holds"],
+                         "probe"),
                      note=f"every {unit} of the {what} holds")
     weakest = next(p for p, v in zip(probes, verdicts)
                    if v not in ("proven", "holds"))
@@ -2144,8 +2545,11 @@ def _stamp_examine_route(probe, cj, fn, facts) -> None:
     is_safety = cj.relation in routes.examine_predicates()
     if not is_safety:
         from .claim_families import SafetyFamily
-        base_family = families.families().get(cj.name.split("[", 1)[0])
-        is_safety = isinstance(base_family, SafetyFamily)
+        base = cj.name.split("[", 1)[0]
+        base_family = families.families().get(base)
+        is_safety = (isinstance(base_family, SafetyFamily)
+                     and _statement_is_family_claim(cj, base, base_family,
+                                                    facts))
     if not is_safety:
         return
     root, _, _sub = probe.route.partition(":")
@@ -2329,12 +2733,49 @@ class _ClaimContext:
     # either
 
 
+_REAL_KINDS = {"scalar", "float", "int"}
+
+
+def _derive_operational_domain(cj, cj_domain: dict, facts) -> dict:
+    """Intent:
+        The domain the derive route reads when the claim declares an
+        operational infinity (`pseudo_infinity`, `let |inf| be ...`):
+        every real scalar parameter's unbounded direction stops at the
+        declared stand-in for infinity, so "for all x" means for all x
+        the author treats as finite. With no operational infinity the
+        declared domain is returned unchanged, and infinity is infinity.
+    """
+    from .domain import Interval
+    from .records import pseudo_infinity_range
+    pinf = pseudo_infinity_range(getattr(cj, "pseudo_infinity", None))
+    if pinf is None:
+        return cj_domain
+    plo, phi = pinf
+    out = dict(cj_domain)
+    for p in facts.params or ():
+        if facts.param_kinds.get(p, "scalar") not in _REAL_KINDS:
+            continue
+        b = out.get(p)
+        if b is None or b == "R":
+            out[p] = Interval(plo, phi)
+        elif isinstance(b, tuple) and not isinstance(b, frozenset) and len(b) == 2:
+            try:
+                lo, hi = float(b[0]), float(b[1])
+            except (TypeError, ValueError):
+                continue
+            if lo == float("-inf") or hi == float("inf"):
+                out[p] = Interval(max(lo, plo), min(hi, phi),
+                                  getattr(b, "closed_lo", True) or lo < plo,
+                                  getattr(b, "closed_hi", True) or hi > phi)
+    return out
+
+
 def _validate_claim(cj, statement: str, note: str, facts,
-                    domain: dict) -> "Probe | _ClaimContext":
+                    domain: dict, fn=None) -> "Probe | _ClaimContext":
     """Intent:
         Everything checked before either evidence route runs: grammar
-        membership, bare-reserved-name and ambiguous-differential
-        misspecifications, the per-claim domain merge (inline
+        membership, bare-reserved-name, ambiguous-differential and
+        `raises(...)` call-arity misspecifications, the per-claim domain merge (inline
         quantifier wins over the function-level argument, literal-
         argument inference filling gaps), free-variable/parameter
         reconciliation, and unknown domain keys.
@@ -2427,6 +2868,14 @@ def _validate_claim(cj, statement: str, note: str, facts,
             if "disallowed" in str(e):
                 return Probe(cj.name, statement, "skipped", route=None,
                              note=f"{note}; {e}")
+    if cj.relation == "raises" and fn is not None:
+        # the TypeError a call that does not fit the signature raises
+        # comes from the claim's own malformed text, never from the
+        # function, so it can neither satisfy nor refute the claim
+        mismatch = _call_arity_mismatch(cj.lhs, fn, param_set)
+        if mismatch is not None:
+            return Probe(cj.name, statement, "skipped:misspecified",
+                         route=None, note=f"{note}; {mismatch}")
     colliding = sorted(set(cj.ambiguous_diff_vars) & param_set)
     if colliding:
         # d(<expr>/d<var>)'s fraction sugar (grammar.
@@ -2501,7 +2950,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # canonical set (prover, records, and comparisons all use it); the
     # declared text stays the author's, and the collapse is rendered
     # here explicitly, never silently
-    from .domain import canonical_bound, render_domain_bound
+    from .domain import bound_is_empty, canonical_bound, render_domain_bound
     for p, b in list(cj_domain.items()):
         canonical, declared_text = canonical_bound(b)
         if declared_text is not None:
@@ -2525,6 +2974,13 @@ def _validate_claim(cj, statement: str, note: str, facts,
                          f"is empty (the lower bound exceeds the upper), so "
                          f"every claim over it is vacuously true; state the "
                          f"intended bounds")
+        if bound_is_empty(b):
+            return Probe(
+                cj.name, statement, "skipped:misspecified", route=None,
+                note=f"{note}; {p}'s declared domain "
+                     f"{render_domain_bound(b)} is empty (no value lies "
+                     f"inside it), so every claim over it is vacuously "
+                     f"true; state the intended bounds")
     free_var_collisions = sorted(set(cj.free_vars) & set(facts.params))
     if free_var_collisions:
         # `let name be bounds` (a free variable, no real parameter to
@@ -2682,8 +3138,10 @@ def _operational_domain(cj_domain: dict, magnitude: float):
         region.
 
     Notes:
-        Only the probe stage consumes this: the symbolic proof keeps
-        the declared domain (proven still means proven to infinity).
+        The probe stage's reading. The derive route bounds the same
+        unbounded directions through `_derive_operational_domain`, so
+        a proof under an operational infinity is a proof up to it, and
+        the record states that bound.
         Bare type bounds ("N", "Z", a Domain object) are not rewritten,
         the shorthand replaces the oo SYMBOL the author wrote,
         nothing else.
@@ -2779,6 +3237,22 @@ def _derive_line_coverage(fn, facts, domain):
     return {first_line - 1 + ln for ln in live}
 
 
+def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
+    """Intent:
+        The parameter whose declared range the claim's premises leave
+        with no point at all, or None when the premises (if any) leave
+        every range non-empty or cannot be read as bounds.
+    """
+    if not ctx.assumption:
+        return None
+    from .symbolic._prove import premise_empties_domain
+    try:
+        premises = [(a.lhs, a.relation, a.rhs) for a in ctx.assumption]
+    except AttributeError:
+        return None
+    return premise_empties_domain(ctx.cj_domain, set(facts.params), premises)
+
+
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        extensive: bool) -> "Probe | None":
     """Intent:
@@ -2872,7 +3346,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                 _structs[_pp] = tuple(sorted(
                     set(_structs.get(_pp, ())) | set(_props)))
             mproof = try_prove_matrix(cj.lhs, cj.rhs, cj.relation, facts,
-                                      cj_domain, _shapes, _structs)
+                                      cj_domain, _shapes, _structs,
+                                      premises=assumption)
             if mproof is not None and mproof.status == "proven":
                 return Probe(cj.name, statement, "proven",
                              sketch=mproof.sketch, note=note, route="derive",
@@ -2949,6 +3424,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                   f"it explicitly with funcs=")
             # route == "best": the probe stage reports its own skip
             return None
+    derive_domain = _derive_operational_domain(cj, cj_domain, facts)
     if cj.relation == "raises":
         # only ever reachable via domain-conditioned branch
         # pruning, a raises claim with no domain specific
@@ -2956,10 +3432,10 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # unliftable from try_prove_raises itself, same as any
         # other undecidable derive claim.
         proof = try_prove_raises(fn, facts, cj.lhs, cj.rhs or None,
-                                 domain=cj_domain)
+                                 domain=derive_domain)
     else:
         proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
-                          domain=cj_domain, tolerance=cj.tolerance,
+                          domain=derive_domain, tolerance=cj.tolerance,
                           extensive=extensive, funcs=bound_funcs or None,
                           assumption=assumption,
                           assume_defined=ctx.assume_defined)
@@ -2969,10 +3445,30 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         settles it outright. Tried only where the symbolic routes left
         no reliable verdict, so nothing they decided can move."""
         from ._brute_force import brute_force_proof
-        return brute_force_proof(cj, fn, facts, cj_domain, bound_funcs,
-                                 assumption=assumption or [])
+        from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+        try:
+            return _with_timeout(
+                lambda: brute_force_proof(cj, fn, facts, cj_domain,
+                                          bound_funcs,
+                                          assumption=assumption or []),
+                EXTENSIVE_TIMEOUT_SECONDS)
+        except TimeoutError:
+            # an unfinished sweep covers only a prefix of the domain,
+            # which settles nothing
+            return None
 
-    if proof.status in ("undecided", "unliftable"):
+    depth_refusal = (proof.meta or {}).get("mathema.recursion_depth")
+    if depth_refusal is not None:
+        # the implementation cannot recurse deep enough to cover this
+        # domain, so a sweep of it would walk into the same stack limit
+        # (or, for a branching recursion, run exponentially long first).
+        # The refusal stands; an executed witness at the domain's top
+        # turns it into the falsification the raise rule calls for.
+        witnessed = _recursion_depth_witness(ctx, fn, facts, bound_funcs,
+                                             assumption or [], proof, note)
+        if witnessed is not None:
+            return witnessed
+    elif proof.status in ("undecided", "unliftable"):
         swept = _brute_force_fallback()
         if swept is not None:
             proof = swept
@@ -3119,6 +3615,68 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     return None
 
 
+def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
+                             assumption, proof, note) -> "Probe | None":
+    """Intent:
+        The falsification behind a stack-depth refusal: the claim run at
+        the top of the recursed parameter's domain, where the refusal
+        says the call needs more frames than the interpreter allows. A
+        RecursionError there is a raise inside the domain, so the value
+        claim is falsified with that executed point as its witness, and
+        the refusal's sketch (which names the safe bound) is kept.
+
+        None when there is no finite top, the top is not admitted, the
+        run does not end in a RecursionError, or it outruns the fast
+        wall-clock cap.
+
+    Notes:
+        One point is run, never a sweep: a recursion descends one frame
+        per index step before doing any other work, so a call past the
+        limit raises after about a thousand frames, while the points
+        below the limit can be arbitrarily expensive (a doubly recursive
+        definition is exponential in its argument).
+    """
+    from ._timeout import FAST_TIMEOUT_SECONDS, _WallClockExpired, _with_timeout
+    from .gates import _fmt_point, _point_evaluator
+    info = proof.meta["mathema.recursion_depth"]
+    param, top = info["param"], info["top"]
+    if top is None:
+        return None
+    raised: list = []
+
+    def _recording(*a, **kw):
+        try:
+            return fn(*a, **kw)
+        except Exception as exc:
+            raised.append(exc)
+            raise
+
+    kit = _point_evaluator(ctx.cj, _recording, facts, ctx.cj_domain,
+                           bound_funcs, assumption)
+    if kit is None or list(kit["names"]) != [param]:
+        return None
+    point = {param: top}
+    if not kit["admits"](point):
+        return None
+    try:
+        verdict = _with_timeout(lambda: kit["evaluate"](point),
+                                FAST_TIMEOUT_SECONDS)
+    except (TimeoutError, _WallClockExpired):
+        return None
+    if verdict is not False or not raised \
+            or not isinstance(raised[-1], RecursionError):
+        return None
+    where = _fmt_point(point, [param])
+    cj = ctx.cj
+    return Probe(cj.name, ctx.statement, "falsified", route="derive",
+                 sketch=proof.sketch,
+                 counterexample=f"{where}: raised RecursionError",
+                 note=note,
+                 stratum=_machine_failure_stratum(raised[-1], where),
+                 meta={"mathema.corroboration": "reproduced",
+                       "mathema.recursion_depth": dict(info)})
+
+
 def _adjudicate_equivalence(ctx: "_ClaimContext", fn, facts) -> "Probe":
     """The `f =:= g` ladder, in its own module; see equivalence.py."""
     from .equivalence import adjudicate
@@ -3228,6 +3786,46 @@ def _sympy_zero():
     import sympy
     return sympy.S.Zero
 
+
+
+def _call_arity_mismatch(src: str, fn, param_set: set) -> str | None:
+    """Intent:
+        The reason a call to `f` in the claim text `src` cannot bind to
+        `fn`'s signature (too many or too few arguments, an unknown
+        keyword), or None when every such call fits or the signature
+        cannot be read.
+
+    Notes:
+        A starred argument is not counted and makes the check decline
+        for that call. A parameter literally named `f` makes `f(...)`
+        ambiguous, so the check declines entirely.
+    """
+    import inspect as _inspect
+    if "f" in param_set:
+        return None
+    try:
+        sig = _inspect.signature(fn)
+        tree = ast.parse(src, mode="eval")
+    except (TypeError, ValueError, SyntaxError):
+        return None
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "f"):
+            continue
+        if any(isinstance(a, ast.Starred) for a in node.args) \
+                or any(k.arg is None for k in node.keywords):
+            continue
+        try:
+            sig.bind(*([None] * len(node.args)),
+                     **{k.arg: None for k in node.keywords})
+        except TypeError:
+            params = list(sig.parameters)
+            given = len(node.args) + len(node.keywords)
+            return (f"f is called here with {given} argument(s), but its "
+                    f"signature takes {len(params)} ({', '.join(params)}), "
+                    f"so any TypeError is raised by the malformed call "
+                    f"itself; call f with its own parameters")
+    return None
 
 
 def _int_annotated_params(callee) -> list:
@@ -3431,10 +4029,13 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 a_code_l, a_aux_l = _validate(acj.lhs, set(kinds), extra)
                 a_code_r, a_aux_r = _validate(acj.rhs, set(kinds), extra)
                 a_tol = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
+                a_rel = _declared_rel_tol(cj)
                 a_op = {"<=": _operator.le, ">=": _operator.ge,
                         "<": _operator.lt, ">": _operator.gt,
-                        "==": lambda a, b, t=a_tol: _close(a, b, tolerance=t),
-                        "!=": lambda a, b, t=a_tol: not _close(a, b, tolerance=t)
+                        "==": lambda a, b, t=a_tol, r=a_rel:
+                            _close(a, b, tolerance=t, rel_tol=r),
+                        "!=": lambda a, b, t=a_tol, r=a_rel:
+                            not _close(a, b, tolerance=t, rel_tol=r)
                         }[acj.relation]
                 compiled.append((a_code_l, a_code_r, a_op))
                 aux_all |= a_aux_l | a_aux_r
@@ -3514,7 +4115,6 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
     checked, cx, cx_stratum = 0, None, None
-    fragile: list = []
     pinned = _pinned_arg_sets(cj, len(kinds))
     # a literal argument in the claim's own call (`f(values, "nope",
     # 0.35)`) fixes that parameter to the literal; the call passes it
@@ -3523,6 +4123,10 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     literal_args = _literal_call_args(cj.lhs, facts.params)
     if cj.rhs:
         literal_args.update(_literal_call_args(cj.rhs, facts.params))
+    # the domain box's corners replay with the recorded counterexamples,
+    # before any random sampling
+    pinned += [c for c in _domain_corners(kinds, cj_domain, literal_args)
+               if c not in pinned]
     call_raised = [None]   # the LABEL of the callee that raised, or None
 
     def _tagged(callee, label):
@@ -3641,12 +4245,20 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # integers regardless. Anything genuinely undeclared
             # keeps the old fixed uniform(-5, 5); there's no bound
             # to respect for a name nobody ever gave one.
-            if a_name in ("eps", "epsilon", "ε") and cj.tolerance is not None:
-                env[a_name] = cj.tolerance
+            if a_name in ("eps", "epsilon", "ε"):
+                env[a_name] = (cj.tolerance if cj.tolerance is not None
+                               else DEFAULT_TOLERANCE)
             elif a_name in cj_domain:
                 env[a_name] = _synth("float", rng, cj_domain[a_name], specials=specials)
             else:
                 env[a_name] = rng.uniform(-5, 5)
+        if not all(_sample_in_domain(env[p], cj_domain.get(p))
+                   for p in [*kinds, *aux] if p in env and p not in literal_args):
+            # a point outside the declared domain says nothing about the
+            # claim: a recorded counterexample from a wider domain, or a
+            # draw that rounded past an open or fractional end, is
+            # rejected before the function is called
+            continue
         if assum_solved is not None and trial >= len(pinned):
             # place the sample exactly on the assumed equality surface:
             # the solved-out coordinate is computed from the others,
@@ -3718,25 +4330,15 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # from a BOUND function is not excused: is_defined(f)
                 # says nothing about g, and the pedantic reading stands
                 continue
-            # a raise at a floating-point BOUNDARY is a different animal
-            # from a raise region: sin(m)^2 + cos(m)^2 can round to
-            # 1.0000000000000002 and push acos past its edge at an
-            # isolated unlucky float, however exact the mathematics is.
-            # The declared tolerance (epsilon) is the machine's own
-            # buffer: if every input nudged within it evaluates AND
-            # satisfies the claim, the raise is sub-epsilon fragility,
-            # counted as a within-tolerance pass, surfaced in the note
-            # (with the clamp remedy), never a counterexample. A raise
-            # that survives the nudge is a real region: falsified.
+            # a raise at a floating-point BOUNDARY: sin(m)^2 + cos(m)^2
+            # can round to 1.0000000000000002 and push acos past its
+            # edge at an isolated float, however exact the mathematics
+            # is. It is still a raise at an in-domain point, so it
+            # falsifies like any other; when every input nudged within
+            # the tolerance evaluates AND satisfies the claim, the
+            # counterexample names it as sub-epsilon fragility (stratum
+            # 5.6) with the clamp remedy instead of the domain one.
             slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
-            # a member registered as being ABOUT numerical fragility
-            # (is_numerically_stable's SafetyFamily) inverts the
-            # absorption below: for it the fragility IS the
-            # counterexample, not tolerated noise
-            base_family = families.families().get(cj.name.split("[", 1)[0])
-            stability_axis = bool(getattr(base_family,
-                                          "fragility_is_counterexample",
-                                          False))
             boundary = False
             for direction in (1.0, -1.0):
                 jenv = dict(env)
@@ -3748,9 +4350,11 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 try:
                     jl = eval(code_l, {"__builtins__": {}}, jenv)
                     jr = eval(code_r, {"__builtins__": {}}, jenv)
-                    jok = (_close(jl, jr, tolerance=slack)
+                    jok = (_close(jl, jr, tolerance=slack,
+                                  rel_tol=_declared_rel_tol(cj))
                            if cj.relation in ("==", "~=") else
-                           not _close(jl, jr, tolerance=slack)
+                           not _close(jl, jr, tolerance=slack,
+                                      rel_tol=_declared_rel_tol(cj))
                            if cj.relation == "!=" else
                            jl <= jr + slack if cj.relation == "<=" else
                            jl >= jr - slack)
@@ -3759,13 +4363,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if jok:
                     boundary = True
                     break
-            if boundary and not stability_axis:
-                checked += 1
-                fragile.append(f"{_fmt(tuple(args))} raised {type(e).__name__}")
-                continue
-            if boundary and stability_axis:
-                # the stability axis exists to CATCH exactly this: the
-                # mathematics is fine within epsilon, the machine isn't
+            if boundary:
                 checked += 1
                 cx = (f"{_fmt(tuple(args))}: raised {type(e).__name__} at a "
                       f"floating-point boundary (the same inputs nudged "
@@ -3819,16 +4417,19 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   "the raising region as its own raises(...) claim")
             cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args)))
             break
-        if is_missing(lv) or is_missing(rv):
+        if (is_missing(lv) or is_missing(rv)) and not (
+                not any(is_missing(v) for v in args)
+                and any(isinstance(v, float) and v != v for v in (lv, rv))):
             # a domain that includes missing by default (see
             # grammar.parse_binding's own policy) can sample the
             # missing sentinel itself as a candidate value; a
-            # function that rejects it outright already lands in
-            # the except above, but one that returns it unchanged
-            # (identity, say) leaves lv/rv genuinely non-comparable,
-            # neither confirms nor denies the claim, so this
-            # sample is inconclusive, the same as a raised
-            # exception already is, not a crash.
+            # function that returns it unchanged (identity, say)
+            # leaves lv/rv genuinely non-comparable, neither
+            # confirming nor denying the claim, so this sample is
+            # inconclusive. A NaN computed from non-missing inputs is
+            # different: it is the function's value at an in-domain
+            # point, and the comparison below reads it as IEEE does
+            # (no ordering holds, and it equals no number).
             continue
         checked += 1
         # a declared tolerance governs the comparison outright; the
@@ -3851,7 +4452,8 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # a scalar broadcasting across the matrix.
         ok = relation_holds_elementwise(
             lv, rv, cj.relation, slack,
-            exact_inequality=cj.tolerance is None)
+            exact_inequality=cj.tolerance is None,
+            rel_tol=_declared_rel_tol(cj))
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex return), or two
@@ -3880,21 +4482,10 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                if assum_eval is not None else "; no evaluable inputs")
         return Probe(cj.name, statement, "skipped", route="probe",
                      note=note + why)
-    if fragile:
-        # numerically fragile boundary points, absorbed within epsilon:
-        # real knowledge about the implementation (is_numerically_stable's
-        # axis catches the raw raise), and the remedy is a clamp at the
-        # raising operation's argument, not a claims change
-        note = (f"{note}; {len(fragile)} sample(s) raised at a floating-point "
-                f"boundary but pass within ε (first: {fragile[0]}), a clamp "
-                f"at the raising operation's argument would remove the "
-                f"fragility")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
                            kinds, cj_domain, checked, critical_hints, truncated_hints),
-                      "mathema.confidence": _probe_density(risk, checked),
-                      **({"mathema.boundary_fragility": len(fragile)}
-                         if fragile else {})})
+                      "mathema.confidence": _probe_density(risk, checked)})
 
 
 

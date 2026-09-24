@@ -373,7 +373,8 @@ def test_superseded_claim_never_regrows_as_live(tmp_path):
     prior = {"identity": {"form": "abc"},
              "claims": [{"name": "kept", "verdict": "holds"}],
              "discoveries": [{"name": "old_belief", "verdict": "invalidated",
-                              "superseded_by": "old_belief_corrected"}]}
+                              "superseded_by": "old_belief_corrected",
+                              "accepted": {"as": "discovery"}}]}
     path = tmp_path / "prior.yaml"
     path.write_text(yaml.safe_dump({"k": prior}))
     carry_acceptance(entry, "k", str(path))
@@ -430,7 +431,8 @@ def test_accept_json_reports_a_refusal_as_data(tmp_path):
                          "--as", "risk", "--format", "json")
     assert doc["ok"] is False and doc["applied"] is False
     assert "no_such_claim" in doc["error"]
-    assert r.returncode == 1
+    # a claim that does not exist is a target that does not resolve
+    assert r.returncode == 2
 
 
 def _verify_all(root):

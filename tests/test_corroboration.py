@@ -73,29 +73,40 @@ def test_uncorroborated_disproof_downgrades_and_probe_supersedes(monkeypatch):
     assert "UNCORROBORATED" in p.note and "engine bug" in p.note
 
 
-def test_scoped_sweep_leaves_an_unbounded_uncapped_proof_alone():
-    # exact in real arithmetic, and the implementation raises
-    # OverflowError at large x, but with no operational infinity
-    # bound, the scoped sweep never visits an extreme: the unbounded
-    # direction is is_extremity_safe's own job, so the sound proof
-    # stands (the exact failure mode that forced the sweep default
-    # OFF, now scoped away)
+def test_an_unbounded_exp_claim_is_falsified_by_its_overflow():
+    # exact in real arithmetic, but math.exp raises OverflowError past
+    # x = 709.78, which lies inside the unbounded domain, so the claim
+    # is false there; on a range inside the representable region it
+    # is proven
     def grow(x):
         return math.exp(x)
     p = _v(grow, "f(x) == exp(x)")
+    assert p.verdict == "falsified"
+    assert p.counterexample
+    assert _v(grow, "for x in [-700, 700], f(x) == exp(x)").verdict == "proven"
+
+
+def test_scoped_sweep_leaves_an_unbounded_uncapped_proof_alone():
+    # exact in real arithmetic, and the float implementation collapses
+    # to 0 past 2^53, but with no operational infinity bound the scoped
+    # sweep never visits an extreme: the unbounded direction is
+    # is_extremity_safe's own job, so the proof stands
+    def plus_one_minus(x):
+        return (x + 1.0) - x
+    p = _v(plus_one_minus, "f(x) == 1")
     assert p.verdict == "proven"
 
 
 def test_operational_infinity_opts_the_sweep_into_extremes():
-    def grow(x):
-        return math.exp(x)
-    # bound comfortably inside what exp handles -> proven
-    p = _v(grow, "f(x) == exp(x)", pseudo_infinity=100.0)
+    def plus_one_minus(x):
+        return (x + 1.0) - x
+    # bound comfortably inside exact float addition -> proven
+    p = _v(plus_one_minus, "f(x) == 1", pseudo_infinity=100.0)
     assert p.verdict == "proven"
-    # bound past the overflow threshold: the author DECLARED 1e6 as
-    # operational infinity, so the sweep visits it and the
-    # implementation's overflow there is a real finding
-    p2 = _v(grow, "f(x) == exp(x)", pseudo_infinity=1e6)
+    # bound past 2^53: the author DECLARED 1e17 as operational
+    # infinity, so the sweep visits it and the collapse to 0 there is
+    # a real finding
+    p2 = _v(plus_one_minus, "f(x) == 1", pseudo_infinity=1e17)
     assert p2.verdict == "falsified"
     assert "numerically unstable" in p2.sketch
     assert p2.meta.get("mathema.numerically_unstable")
@@ -122,9 +133,10 @@ def test_bounded_domain_proof_is_stable():
 
 def test_stability_check_off_leaves_the_proof():
     conjecture.set_numerical_stability_check(False)
-    def grow(x):
-        return math.exp(x)
-    assert _v(grow, "f(x) == exp(x)").verdict == "proven"
+    def plus_one_minus(x):
+        return (x + 1.0) - x
+    assert _v(plus_one_minus, "f(x) == 1", pseudo_infinity=1e17).verdict \
+        == "proven"
 
 
 def test_integer_kind_parameter_is_swept_at_integer_points():

@@ -313,17 +313,13 @@ def test_abs_norm_floor_ceil_bars():
     assert normalize("⌈x⌉ >= x") == "ceil(x) >= x"
 
 
-def test_bar_content_restricted_to_single_token():
-    # a composite expression inside bars is not accepted; it has to go
-    # through `let` first (see below). normalize leaves the literal bars,
-    # and claim() rejects the residual bar with an actionable message
-    # rather than letting it reach rendering as invalid Python.
-    assert "|" in normalize("|a + b| < 1")
-    from mathema.conjecture import InvalidConjecture
-    with pytest.raises(InvalidConjecture, match="wraps a single term"):
-        claim("|a + b| < 1")
-    with pytest.raises(InvalidConjecture, match="wraps a single term"):
-        claim("|A @ B| == |A| * |B|")
+def test_bar_content_may_be_any_expression():
+    # bars wrap any expression; on matrices the same bars are the
+    # determinant, decided by the operands' types
+    assert normalize("|a + b| < 1").replace(" ", "") == "abs(a+b)<1"
+    assert claim("|a + b| < 1").lhs.replace(" ", "") in ("abs(a+b)", "abs(b+a)")
+    mat = claim("for A in R^(n*n), B in R^(n*n), |A @ B| == |A| * |B|")
+    assert "det(" in mat.lhs and "abs" not in mat.lhs + mat.rhs
     # a single-token bar still folds and is accepted
     assert claim("|x| < 1").lhs == "abs(x)"
 

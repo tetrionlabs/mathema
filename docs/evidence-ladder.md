@@ -28,8 +28,8 @@ and it never lets a weaker result be reported as a stronger one.
 | `derive:extensive` | `proven` | The same, reached only by the deeper search you opt into with `extensive=True`. |
 | `probe:semi_analytical`, `probe:algorithmic` | `holds (n=...)` | The real function survived `n` trials whose inputs were chosen by analysis, such as the points where a denominator vanishes, or by a technique specific to the claim. |
 | `probe` | `holds (n=...)` | The real function survived `n` seeded random trials. |
-| `documented` | none | A deliberate statement of intent, such as an `Intent:` block, with nothing adjudicated yet. |
-| `declared` | none | Intent inferred from a bare docstring summary, the weakest rung there is. |
+| `documented` | none | Stated intent that a person has accepted with `mathema accept --intent`. |
+| `declared` | none | Stated intent (a docstring summary, an `Intent:` block, an `intent:` field) that no person has accepted yet, the weakest rung there is. |
 
 The two informed probing routes share a rung because they draw on different
 sources of information without either being stronger than the other. The

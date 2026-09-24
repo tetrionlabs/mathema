@@ -474,7 +474,11 @@ def _lift_fold_impl(fn, facts) -> "FoldLift | dict":
     else:
         rest = sympy.Sum(a * b**(length - 1 - k) * item_at(k), (k, 0, length - 2))
         unrolled = b**length * init_expr + a * item_at(length - 1) + rest
-        acc_expr = sympy.Piecewise((init_expr, sympy.Eq(length, 0)), (unrolled, True))
+        # a scalar trip count can be negative, and range() of one is
+        # empty; at zero the unrolled form already reduces to the
+        # initial value
+        empty = sympy.Eq(length, 0) if seq is not None else length < 0
+        acc_expr = sympy.Piecewise((init_expr, empty), (unrolled, True))
     expr = (tuple(t.subs(acc_sym, acc_expr) for t in return_template)
            if isinstance(return_template, tuple) else return_template.subs(acc_sym, acc_expr))
     from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
@@ -534,7 +538,7 @@ def _fold_eval_at(fold: "FoldLift", subs: dict):
             acc_at = sympy.Piecewise((item_at(0), sympy.Eq(length_at, 1)), (last, True))
         else:
             init_at = fold.init_expr.subs(subs, simultaneous=True)
-            acc_at = sympy.Piecewise((init_at, sympy.Eq(length_at, 0)), (last, True))
+            acc_at = sympy.Piecewise((init_at, length_at <= 0), (last, True))
     else:
         acc_at = fold.acc_expr.subs(subs, simultaneous=True)
     # `subs` applies to the TEMPLATE first (its own direct scalar

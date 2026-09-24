@@ -188,8 +188,7 @@ statement is the source, and `grammar.to_latex` renders it.
 
 The dependency `numpy` is optional (the `test` extra); element-wise and
 structural checks fall back to pure Python, spectral checks decline
-without it. Determinant and inverse sampling need numpy. A bar-delimited
-determinant wraps a single name only (`|A|`); a product's determinant is
-the canonical `det(A @ B)`, exactly as a scalar `|x + y|` is written
-`abs(x + y)`. A matrix ordering (`A > B`) is undefined and declined; only
+without it. Determinant and inverse sampling need numpy. Bars around any
+matrix expression are its determinant, so `|A @ B|` is the same claim as
+`det(A @ B)`, and the record writes it with the `det` spelling. A matrix ordering (`A > B`) is undefined and declined; only
 scalar comparisons of determinants and traces are decided.

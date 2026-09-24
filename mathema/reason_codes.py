@@ -245,8 +245,10 @@ CODE_TABLE: dict[str, dict] = {
     "recursion": {
         "derive_unlock": _LIMITATION,
         "meaning": "the function calls itself",
-        "hint": "recursive definitions are not derivable today; an "
-                "iterative or closed-form equivalent is"},
+        "hint": "a single-parameter recurrence of the recognized shape "
+                "is solved, and a claim over a small integer range is "
+                "checked exhaustively; any other recursion is not "
+                "derivable, and an iterative or closed-form equivalent is"},
     "no-parameters": {
         "derive_unlock": _NOT_APPLICABLE,
         "meaning": "nothing to quantify over",

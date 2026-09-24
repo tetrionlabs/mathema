@@ -47,6 +47,8 @@ LEXICON: dict[str, str] = {
     "equivalence_with_let": "let g = numpy.sum, f =:= g",
     "power_caret": "f(x)^2 >= 0",
     "abs_bars": "|f(x)| <= 1",
+    # bars wrap any expression, not only one term
+    "abs_bars_compound": "for x in [0, 1], y in [0, 1], |x + y - f(x, y)| <= ε",
     "factorial_postfix": "for n in [1, 5] subset Z, f(n) <= n!",
     # dimensional access: `dim(x, axis)` is canonical; `len`/`rows`/
     # `cols` are sugar folding to it. A dimension premise over two
@@ -114,7 +116,9 @@ LEXICON: dict[str, str] = {
         "for A in R^(n*n), B in R^(n*n), (A @ B).T == B.T @ A.T",
     "matrix_trace_additive":
         "for A in R^(n*n), B in R^(n*n), trace(A + B) == trace(A) + trace(B)",
-    "matrix_inverse_identity": "for A in R^(n*n), inv(A) @ A == I(n)",
+    # an inverse needs its premise: inv raises on a singular matrix
+    "matrix_inverse_identity":
+        "assuming det(A) != 0, for A in R^(n*n), inv(A) @ A == I(n)",
     # the postfix reading of an OUTPUT structure claim: `f(A) is
     # symmetric` folds to `is_symmetric(f(A))`
     "matrix_output_symmetric_postfix": "for A in R^(n*n), f(A) is symmetric",
@@ -124,6 +128,9 @@ LEXICON: dict[str, str] = {
     # is tagged `mathema/linalg` for these
     "matrix_transpose_sugar": "let A be R^(n*n), A^T == A",
     "matrix_determinant_sugar": "for A in R^(n*n), |A| >= 0",
+    # the same bars around a matrix expression are its determinant
+    "matrix_determinant_bars_compound":
+        "for A in R^(n*n), B in R^(n*n), |A @ B| == |A| * |B|",
     "inferred_literal_domain": "raises(f(50, 0), ValueError)",
     # let: alias, function binding, free variable -----------------
     "let_alias": ("let m = m1, for m1 in [0.1,1000], x1 in [-100,100], "
@@ -172,8 +179,8 @@ LEXICON: dict[str, str] = {
     # auto-let: a long name auto-lets to a short spelling -------------
     # a real parameter only auto-lets in unicode (ASCII has no
     # single-letter convention for an ordinary variable); a function
-    # alias auto-lets in both modes (f/g/h already is that convention
-    # for a function), see spec.render_claim_text's own docstring.
+    # alias is part of the claim's identity and renders as written, see
+    # spec.render_claim_text's own docstring.
     "auto_let_long_param": "for acceleration in [0, 100], f(acceleration) >= 0",
     "auto_let_long_func": ("let compute_square_root = numpy.sqrt, for x in [0, 100], "
                           "compute_square_root(x) >= 0"),
@@ -191,6 +198,12 @@ LEXICON: dict[str, str] = {
     "domain_natural_numbers": "for n in N, f(n) >= 0",
     "domain_complex": "for z in C, f(z) == z",
     "relation_approx": "f(x) ~= x",
+    # the claim's own tolerance by name: the declared `tolerance`, else
+    # the 1e-9 default `==` and `~=` use, never a free variable
+    "tolerance_epsilon": "for x in [0, 1], abs(f(x) - x) <= ε",
+    "tolerance_eps_ascii": "for x in [0, 1], abs(f(x) - x) <= eps",
+    "tolerance_epsilon_word": "for x in [0, 1], abs(f(x) - x) <= epsilon",
+    "tolerance_epsilon_latex": "for x in [0, 1], abs(f(x) - x) \\leq \\epsilon",
     # derivatives: one primitive, many spellings -------------------
     "derivative_call": "d(f(x), x) >= 0",
     "derivative_prime": "f'(x) >= 0",
@@ -240,7 +253,8 @@ LEXICON: dict[str, str] = {
                                 "min(x) <= f(x, alpha)"),
     "certificate_convex_upper": ("for alpha in [0, 1], "
                                 "f(x, alpha) <= max(x)"),
-    "certificate_quadratic": ("for s1 in [0.05,0.5], s2 in [0.05,0.5], "
+    "certificate_quadratic": ("let |inf| be 1e100, "
+                              "for s1 in [0.05,0.5], s2 in [0.05,0.5], "
                              "rho in [-0.9,0.9], "
                              "d(f(w,s1,s2,rho), w, w) >= 0"),
     # case studies: real formulae from openly licensed references,
@@ -254,8 +268,8 @@ LEXICON: dict[str, str] = {
     "greek_delta_upper": ("for s in [50,150], k in [50,150], r in [0.0,0.1], "
                  "t in [0.1,2], sigma in [0.05,0.8], "
                  "∂(f(s,k,r,t,sigma), s) <= 1"),
-    "sigmoid_derivative": "d(f(x), x) == f(x)*(1 - f(x))",
-    "sigmoid_symmetry": "f(-x) == 1 - f(x)",
+    "sigmoid_derivative": "for x in [-700, 700], d(f(x), x) == f(x)*(1 - f(x))",
+    "sigmoid_symmetry": "for x in [-700, 700], f(-x) == 1 - f(x)",
     "sigmoid_limit_upper": "lim(f(x), x -> oo) == 1",
     "sigmoid_limit_lower": "lim(f(x), x -> -oo) == 0",
     "sigmoid_density_integrates": "∫(d(f(x), x), x, -oo, oo) == 1",
@@ -302,12 +316,9 @@ LEXICON: dict[str, str] = {
     # bounds (floor(u) = u - t for some t in [0,1))
     "floor_below_argument": "for x in [-20, 20], floor(x) <= x",
     "ceiling_above_argument": "for x in [-20, 20], ceil(x) >= x",
-    # `//` is accepted INPUT sugar and renders as `floor(n/2)`, but the
-    # law sandbox that evaluates a claim at a concrete point rejects it
-    # ("FloorDiv is not allowed in a law"), so a claim spelled this way
-    # is derive-only: no probe, no corroborating witness, no
-    # brute-force sweep. Write `floor(...)` when the claim needs to be
-    # evaluated, which is what the next entry does.
+    # `//` is accepted input sugar and renders as `floor(n/2)`; both
+    # spellings evaluate at a concrete point, so both reach the probe,
+    # the corroborating witness and the brute-force sweep.
     "floor_div_sugar": "for n in [1,100] subset Z, f(n) == n // 2",
     "floor_div_evaluable": "for n in [1,100] subset Z, f(n) == floor(n/2)",
     "remainder_below_modulus": "for n in [0,1000] subset Z, n % 24 <= 23",
@@ -340,7 +351,7 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "odd_function",
         "relation_eq", "relation_le_unicode", "equivalence_canonical",
         "equivalence_word_alias", "equivalence_with_let",
-        "power_caret", "abs_bars",
+        "power_caret", "abs_bars", "abs_bars_compound",
         "factorial_postfix", "dim_length_premise",
         "dim_conformability", "dim_marker_premise",
         "space_vector_real", "space_vector_bounded", "space_matrix",
@@ -360,7 +371,7 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "matrix_determinant_product", "matrix_transpose_product",
         "matrix_trace_additive", "matrix_inverse_identity",
         "matrix_output_symmetric_postfix", "matrix_transpose_sugar",
-        "matrix_determinant_sugar",
+        "matrix_determinant_sugar", "matrix_determinant_bars_compound",
         "inferred_literal_domain"),
     "lets": (
         "let_alias", "let_function_dotted", "let_free_var_closed",
@@ -377,6 +388,8 @@ SECTIONS: dict[str, tuple[str, ...]] = {
     "domains": (
         "domain_excluded_point", "domain_discrete_strings",
         "domain_natural_numbers", "domain_complex", "relation_approx",
+        "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
+        "tolerance_epsilon_latex",
         "finite_domain_pinned", "finite_domain_small_range",
         "finite_domain_discrete_set", "real_domain_is_not_finite"),
     "integer_parts": (
@@ -597,6 +610,21 @@ def entries(*sections: str) -> dict[str, str]:
 
 
 
+def add_two(x: float, y: float) -> float:
+    """The sum of two numbers."""
+    return x + y
+
+
+def matmul(A, B):
+    """The matrix product."""
+    return A @ B
+
+
+def nearly_identity(x: float) -> float:
+    """The identity plus an offset far below the default tolerance."""
+    return x + 1e-10
+
+
 def double(x: float) -> float:
     """f(x) = 2x, the plain function every single-construct LEXICON
     entry above (relation/power/abs/domain shapes) is checked against."""
@@ -696,8 +724,10 @@ def cubed(x: float) -> float:
     """f(x) = x^3, an odd function: negating the input negates the
     result, which is what "odd_function" states. The plainest example of
     a symmetry claim, and the one most of this project's documentation
-    reaches for."""
-    return x ** 3
+    reaches for. Written as a product, which overflows to a signed
+    infinity rather than raising, so the symmetry holds for every
+    float."""
+    return x * x * x
 
 
 def unit_sqrt(x: float) -> float:
@@ -869,6 +899,12 @@ def gd_convergence_factor(alpha: float, q: float) -> float:
 
 
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
+    "add_two": (add_two, ["abs_bars_compound"]),
+    "matmul": (matmul, ["matrix_determinant_bars_compound"]),
+    "nearly_identity": (nearly_identity, [
+        "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
+        "tolerance_epsilon_latex",
+    ]),
     "double": (double, [
         "relation_eq", "relation_le_unicode", "power_caret", "abs_bars",
         "domain_closed_interval", "domain_open_interval",

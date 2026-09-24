@@ -113,7 +113,7 @@ def test_strict_check_counts_unknown_as_unverifiable(tmp_path):
                             + row["unverifiable"] + row["unknown"])
 
 
-def test_declared_intent_earns_documented_provenance(tmp_path):
+def test_declared_intent_starts_on_the_declared_rung(tmp_path):
     key = "vocab.intent"
     facts = mathema.analyze(branchy)
     rec = mathema.Record(facts=facts, probes=[])

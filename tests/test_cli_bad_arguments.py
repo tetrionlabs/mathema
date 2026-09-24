@@ -67,9 +67,9 @@ def test_verify_reports_a_malformed_claims_file_claim_without_a_traceback(
         '      statement: "f(x) >= 1 +"\n')
     r = _run("verify", "--root", str(tmp_path), cwd=tmp_path)
     assert "Traceback" not in r.stderr, r.stderr
-    # the established per-key report: a FAIL line naming the key, and the
-    # gate fails
-    assert r.returncode == 1, r.stdout + r.stderr
+    # the per-key report: a FAIL line naming the key; a claim that does
+    # not parse is an authoring error, exit 2, as `check` gives
+    assert r.returncode == 2, r.stdout + r.stderr
     assert "FAIL vpkg.mod.sq" in r.stdout
     assert "f(x) >= 1 +" in r.stdout
 

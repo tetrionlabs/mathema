@@ -14,7 +14,7 @@ def ema(x: list, alpha: Annotated[float, Probability]) -> float:
         Blends each new value with the running mean.
 
     Claims:
-        bounded: for x in [0, 1], f(x) <= 1
+        bounded: for x in [0, 1], alpha in [0, 1], f(x, alpha) <= 1
     """
     y = x[0]
     for v in x[1:]:
@@ -206,17 +206,19 @@ it; this is the metric meant to catch that.
 >>> from mathema.docstring import docstring_sync, docstring_sync_checklist
 >>> sync = docstring_sync(ema)
 >>> sync.score, sync.applicable
-(6, 9)
+(8, 10)
 >>> print("\n".join(docstring_sync_checklist(sync)))
 ✓ Intent: present
+✓ intent concise (8 words)
+✓ Claims: block in sync (names known, no surface conflicts)
 ✓ Claims: present (1 parsed)
-· claims: 1 actual, 1 structural floor (not scored)
+· claims {11 | 1 | -} floor | actual | expected (not scored)
 ✓ domain declared (1/1)
 ✗ domain enforced
 ✗ symbol coverage (2/3)
 ✓ params typed (2/2)
-✗ internal vars typed (0/1)
 ✓ return typed
+docsync 89% (how much of what the function does is surfaced as context)
 ! 'v' used but not documented
 ```
 
@@ -252,26 +254,27 @@ the same row, since the two measure different things:
 
 ```
 $ mathema audit mypkg --docs
-key           || has_docstring | has_summary | params | returns | raises | claims   | docs_score
-mypkg.ema.ema || yes           | yes         | 2/2    | no      | -      | 1 parsed | 4/5
+quality:
+key           || has_docstring | has_summary | params | returns | raises | quality_ratio | claims   | concepts/tags
+mypkg.ema.ema || yes           | yes         | 2/2    | no      | -      | 4/5           | 1 parsed | -
 
-4/5 docstring best-practice criteria met (1 function).
+4/5 docstring quality criteria met (1 function).
 
 docsync:
-key           || intent | notes | claims   | {min_expected|actual|est_applicable} || declared | enforced || raises || params_typed | internal_typed | return_typed | callees_doc || sync_score
-mypkg.ema.ema || yes    | -     | 1 parsed | {1 | 1 | -}    || 1/1      | no       || -      || 2/2          | 0/1            | yes          | -             || 6/9
+key           || intent | notes | claims   | {min_expected|actual|est_applicable} || domain_declared | enforced || raises_declared || params_typed | return_typed || callees_doc_quality | callees_docsync || sync_score
+mypkg.ema.ema || yes    | -     | 1 parsed | {11 | 1 | -}                         || 1/1             | no       || -               || 2/2          | yes          || -                   | -               || 89%
 
-mean docsync 58% (weighted CDD-compliance measure) (1 function).
+mean docsync 89% (how much of what each function does is surfaced as context) (1 function).
 ```
 
-`declared`/`enforced` sit under a `domain` group heading, and `raises`
-under its own single-column group, the `||` marks a group boundary,
+`domain_declared`/`enforced` sit together in one group, and
+`raises_declared` in its own single-column group, the `||` marks a group boundary,
 `|` a column boundary within one, same convention the loose `docs`
 table already uses. the claims column is `{min_expected|actual|est_applicable}`:
-`ema` has no branching beyond its `for` loop and no declared domain
-guards to add to the floor, so its one parsed claim already clears the
-floor of one, and `expected` reads `-` until a corpus can say what a
-function of this shape typically carries.
+the floor for `ema` is 11 (one claim per claim family relevant to a
+function of its shape), so its one parsed claim sits under it, and
+`expected` reads `-` until a corpus can say what a function of this
+shape typically carries.
 
 ## The docsync percentage
 
@@ -321,8 +324,11 @@ the verdict came from the derive route:
 >>> print(render_docstring(ema))
 Exponentially weighted moving average.
 
+Intent:
+    Blends each new value with the running mean.
+
 Claims:
-    bounded: f(x) <= 1
+    bounded: for x in [0.0, 1.0]:float|missing, alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= 1
 ```
 
 `render_docstring()` returns text only; it never writes to the `.py`

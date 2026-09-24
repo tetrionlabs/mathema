@@ -567,7 +567,23 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     `assumption` is the claim's own premises as `(lhs, relation, rhs)`
     triples, the same form the scalar route takes: each one narrows the
     domain box, so a claim made under `assuming n >= 3` is adjudicated
-    over that region rather than over every `n`."""
+    over that region rather than over every `n`.
+
+    A premise that admits the empty list for a sequence the code cannot
+    fold when empty (it reads `xs[0]`, or divides by `len(xs)`) is
+    adjudicated on the executed call first; see
+    `_prove._empty_sequence_raise`."""
+    from ..analysis import analyze_source
+    from ._prove import _empty_sequence_raise
+    try:
+        empty = _empty_sequence_raise(fn, analyze_source(fn), lhs_src,
+                                      rhs_src, domain, assumption)
+    except TimeoutError:
+        raise
+    except Exception:
+        empty = None
+    if empty is not None:
+        return empty
     domain = dict(domain or {})
     if view.other_params:
         # the claim's own quantifier wins; the signature's
@@ -612,9 +628,10 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
         view = replace(view, eval_f=eval_with_pins)
 
     aux: dict = {}
-    if tolerance is not None:
-        eps_val = sympy.Float(tolerance)
-        aux["eps"] = aux["epsilon"] = aux["ε"] = eps_val
+    from ..conjecture import DEFAULT_TOLERANCE
+    eps_val = sympy.Float(tolerance if tolerance is not None
+                          else DEFAULT_TOLERANCE)
+    aux["eps"] = aux["epsilon"] = aux["ε"] = eps_val
 
     def build(src: str):
         try:

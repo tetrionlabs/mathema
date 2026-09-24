@@ -6,7 +6,7 @@ gate, the reason-code registry, instead of shelling out and parsing
 tables.
 
 ```bash
-pip install mathema[mcp]
+pip install "mathema[mcp]"
 mathema mcp serve [--root .]
 ```
 

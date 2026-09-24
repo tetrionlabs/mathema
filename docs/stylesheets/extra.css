@@ -122,6 +122,11 @@
 .mx-hero .eyebrow { color: var(--accent); }
 .mx-hero__actions { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: 2rem; }
 .mx-hero .md-button { color: var(--paper); border-color: var(--paper); margin: 0; }
+.mx-hero .md-button,
+.md-typeset .mx-actions .md-button {
+  font-size: 1rem; font-weight: 600; padding: .75em 1.75em;
+  border-radius: .2rem;
+}
 .mx-hero .md-button--primary {
   background: var(--accent); border-color: var(--accent); color: var(--ink);
 }
@@ -158,3 +163,10 @@
 
 .md-typeset .mx-actions { display: flex; flex-wrap: wrap; gap: .8rem; margin: 1.5rem 0 1rem; }
 .md-typeset .mx-actions .md-button { margin: 0; }
+
+/* A table's first column names the row (a verdict, a spelling): its
+   code breaks only at spaces, never inside a word. */
+.md-typeset table:not([class]) td:first-child code {
+  word-break: keep-all;
+  overflow-wrap: normal;
+}

@@ -72,28 +72,28 @@ the three declared claims):
     - name: "negative_exposure_negative"
       statement: "for x in [-5.0, -1.0]:float|missing, f(x) <= 0"
       verdict: "holds"
-      n: 32
+      n: 34
       route: "probe"
       # ...
     - name: "nonneg"
       statement: "for x in [-5.0, 5.0]:float|missing, f(x) >= 0"
       verdict: "falsified"
       n: 1
-      counterexample: "(-4.38367): -4.383667491623871 vs 0"
+      counterexample: "(-5): -5.0 vs 0"
       route: "probe"
       # ...
         mathema.counterexample_args:
-          - -4.383667491623871
+          - -5.0
       # ...
     - name: "symmetric_in_sign"
       statement: "for x in [-5.0, 5.0]:float|missing, f(x) = f(-x)"
       verdict: "falsified"
       n: 1
-      counterexample: "(-1.36279): -1.3627939099401543 vs 1.3627939099401543"
+      counterexample: "(-5): -5.0 vs 5.0"
       route: "probe"
       # ...
         mathema.counterexample_args:
-          - -1.3627939099401543
+          - -5.0
 ```
 
 Look at the third one. `negative_exposure_negative` **holds**, and it
@@ -130,20 +130,20 @@ and the record now keeps the arc (trimmed):
       statement: "for x in [-5.0, -1.0]:float|missing, f(x) <= 0"
       verdict: "invalidated"
       n: 1
-      counterexample: "(-1.38109): 1.38109097388468 vs 0"
+      counterexample: "(-5): 5.0 vs 0"
       # ...
         mathema.previous_verdict: "holds"
         mathema.regressed_to: "falsified"
     - name: "nonneg"
       statement: "for x in [-5.0, 5.0]:float|missing, f(x) >= 0"
       verdict: "holds"
-      n: 128
+      n: 130
       # ...
         mathema.previous_verdict: "falsified"
     - name: "symmetric_in_sign"
       statement: "for x in [-5.0, 5.0]:float|missing, f(x) = f(-x)"
       verdict: "holds"
-      n: 128
+      n: 130
       # ...
         mathema.previous_verdict: "falsified"
 ```
@@ -162,7 +162,7 @@ needs.
 
 ## 3. Accept the evidence
 
-`nonneg` holds empirically, over 128 seeded trials. Whether that is
+`nonneg` holds empirically, over 130 seeded trials. Whether that is
 enough is a human decision, so there is a verb for making it:
 
 ```bash
@@ -171,9 +171,9 @@ mathema accept funcs.settle nonneg --as evidence --by "Ada Lovelace"
 
 ```text
 accepting funcs.settle :: nonneg (verdict holds) as evidence, by Ada Lovelace
-  - annotate nonneg as accepted evidence at n=128 (bound to form 206704b327da...)
+  - annotate nonneg as accepted evidence at n=130 (bound to form 206704b327da...)
 write this acceptance? [y/N] y
-written: annotate nonneg as accepted evidence at n=128 (bound to form 206704b327da...)
+written: annotate nonneg as accepted evidence at n=130 (bound to form 206704b327da...)
 ```
 
 `accept` prints exactly what it will write and waits for a yes. The
@@ -210,10 +210,10 @@ mathema accept funcs.settle negative_exposure_negative --as discovery --by "Ada 
 ```text
 accepting funcs.settle :: negative_exposure_negative (verdict invalidated) as discovery, by Ada Lovelace
   - move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness
-  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 128 trials
+  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 130 trials
   - rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
 write this acceptance? [y/N] y
-written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 128 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
+written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 130 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
 declared layer: claims/demo.claims.yaml now declares negative_exposure_negative_corrected in place of negative_exposure_negative (the superseded claim stays in the record's discoveries section):
   - name: negative_exposure_negative_corrected
     statement: "for x in [-5.0, -1.0]:float|missing, f(x) > 0"

@@ -5,6 +5,8 @@ recurrence resolves to its exact closed form via rsolve, with the
 soundness gates (integer domain, integer call arguments, interpreter
 stack depth) refusing loudly where the closed form stops describing the
 actual implementation."""
+import re
+
 from mathema.conjecture import claim, check_conjectures
 
 
@@ -101,11 +103,11 @@ def test_stack_depth_beyond_the_interpreter_limit_refuses_to_prove():
     # falsifies
     r = _verdict(fib, "for n in [0, 100000] subset Z, f(n) == f(n-1) + f(n-2)")
     # the derive gate refuses to prove past the interpreter limit, and
-    # the probe fallback then hits the limit for real: falsified with a
-    # RecursionError witness, the machine agreeing with the gate
+    # running the top of the domain hits the limit for real: falsified
+    # with a RecursionError witness, the machine agreeing with the gate
     assert r.verdict == "falsified"
-    assert "recursion limit" in r.note
-    assert "RecursionError" in (r.counterexample or "") + r.note
+    assert "recursion limit" in r.sketch
+    assert "RecursionError" in (r.counterexample or "")
 
 
 def test_nonlinear_recurrence_declines_to_the_ordinary_report():
@@ -143,3 +145,46 @@ def test_disproof_corroboration_respects_an_integer_domain():
     n_val = float(nums[0])
     assert n_val == int(n_val), r.counterexample     # on the lattice
     assert 0 <= n_val <= 20, r.counterexample        # inside the domain
+
+
+def test_stack_depth_refusal_survives_a_finite_integer_domain():
+    # [1, 100000] subset Z is finite, but the implementation recurses
+    # one frame per step and raises RecursionError near n = 1000: the
+    # verdict is a falsification at an executed in-domain point, and
+    # its sketch keeps the gate's statement of the safe bound
+    r = _verdict(triangular, "for n in [1, 100000] subset Z, f(n) == n*(n+1)/2")
+    assert r.verdict == "falsified", (r.verdict, r.sketch, r.note)
+    assert r.route == "derive", r.route
+    assert re.search(r"n <= \d+ is safe here", r.sketch or ""), r.sketch
+    assert "RecursionError" in (r.counterexample or ""), r.counterexample
+    assert (r.stratum or {}).get("cause") == "implementation:recursion-depth"
+
+
+_FIB_OVER_A_HUGE_DOMAIN = """
+import sys
+sys.path.insert(0, "tests")
+from test_recurrence import fib, _verdict
+r = _verdict(fib, "for n in [2, 100000] subset Z, f(n) == f(n-1) + f(n-2)")
+print(r.verdict)
+print(r.sketch)
+print(r.counterexample)
+"""
+
+
+def test_exponential_recursion_over_a_huge_domain_terminates():
+    # a naive doubly-recursive fib over a hundred thousand integers:
+    # visiting every point would evaluate fib(40), fib(41), ... one by
+    # one. The adjudication has to finish, falsified at a point where
+    # the stack really runs out, with the safe bound named.
+    import os
+    import subprocess
+    import sys
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    out = subprocess.run([sys.executable, "-c", _FIB_OVER_A_HUGE_DOMAIN],
+                         cwd=root, capture_output=True, text=True,
+                         timeout=120)
+    assert out.returncode == 0, out.stderr
+    verdict, sketch, cx = out.stdout.splitlines()[-3:]
+    assert verdict == "falsified", out.stdout
+    assert "n <= 501 is safe here" in sketch, sketch
+    assert "RecursionError" in cx, cx

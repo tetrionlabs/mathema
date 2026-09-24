@@ -77,7 +77,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         declared per-element bound) and `admits` requires a list whose
         every element the bound admits.
     """
-    from .domain import bound_to_sympy_set, domain_contains
+    from .domain import (_as_int_if_whole, bound_assumptions,
+                         bound_to_sympy_set, domain_contains, is_missing)
     from .probing import _synth
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
@@ -96,8 +97,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         code_r, aux_r = _validate(cj.rhs, set(kinds), extra) if cj.rhs else (None, set())
     except InvalidConjecture:
         return None
-    names = list(kinds) + sorted((aux_l | aux_r) - MATH_CONSTANTS.keys())
     slack = cj.tolerance if cj.tolerance is not None else 1e-9
+    # `ε`/`eps`/`epsilon` in a law is the claim's tolerance, a fixed
+    # value, never a free variable to sample
+    eps_names = (aux_l | aux_r) & {"eps", "epsilon", "ε"}
+    names = list(kinds) + sorted((aux_l | aux_r) - MATH_CONSTANTS.keys()
+                                 - eps_names)
     # raises from the function under test (or a bound function) are
     # tagged so the evaluators below can tell a genuine in-domain raise,
     # which IS a failure of a value claim, per the pedantic raise
@@ -115,7 +120,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return _wrapped
 
     base_env = {"f": _tag(fn), **_SAFE_FUNCS, **MATH_CONSTANTS,
-                **{name: _tag(v) for name, v in bound_funcs.items()}}
+                **{name: _tag(v) for name, v in bound_funcs.items()},
+                **{name: slack for name in eps_names}}
     from .records import pseudo_infinity_range
     if cap is not None:
         cap_lo, cap_hi = pseudo_infinity_range(cap)
@@ -129,8 +135,23 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     else:
         cap_lo, cap_hi = -_EXTREME, _EXTREME
 
+    int_names = set()
+    for name in names:
+        try:
+            if (bound_assumptions(cj_domain.get(name)) or {}).get("integer"):
+                int_names.add(name)
+        except Exception:
+            continue
+
+    def _typed(point):
+        # a whole-number coordinate of an integer domain is passed as an
+        # int, the value the probe route draws there; a float would make
+        # `range(n)` raise where the claim is about integers
+        return {n: (_as_int_if_whole(v) if n in int_names else v)
+                for n, v in point.items()}
+
     def _values(point):
-        env = {**base_env, **point}
+        env = {**base_env, **_typed(point)}
         lv = eval(code_l, {"__builtins__": {}}, env)
         rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else 0
         return lv, rv
@@ -188,11 +209,21 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return _relation_holds(lv, rv, slack)
         # non-numeric result: an EQUALITY relation still compares
         # exactly (None vs a real number is a genuine mismatch, so an
-        # opaque disproof reproduces); a NaN stays inconclusive (the
-        # missing-policy axis owns it), and ordering over non-orderable
-        # values proves nothing
-        if any(isinstance(v, float) and v != v for v in (lv, rv)):
-            return None
+        # opaque disproof reproduces), and ordering over non-orderable
+        # values proves nothing. A NaN that propagates a missing input
+        # is the missing-policy axis's business, inconclusive here; a
+        # NaN computed from non-missing inputs is read as IEEE reads
+        # it: no ordering holds, it equals no number, and two NaN
+        # sides agree, as the probe route's comparison has it
+        nan_sides = [isinstance(v, float) and v != v for v in (lv, rv)]
+        if any(nan_sides):
+            if any(is_missing(v) for v in point.values()):
+                return None
+            if cj.relation in ("==", "~="):
+                return all(nan_sides)
+            if cj.relation == "!=":
+                return not all(nan_sides)
+            return False
         if cj.relation in ("==", "~="):
             try:
                 return bool(lv == rv)

@@ -904,4 +904,5 @@ def residue_attempts(lhs, rhs, relation: str, domain: dict, bound_context,
     return ProofResult(result.status,
                        sketch="; ".join(notes) + f"; {result.sketch}",
                        counterexample=result.counterexample,
+                       witness=result.witness,
                        quantifier=result.quantifier, meta=meta)

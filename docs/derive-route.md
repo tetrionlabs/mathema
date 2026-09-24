@@ -1,9 +1,9 @@
 # The derive route: what's liftable
 
-The `derive` route lifts a function's body to a `sympy` expression and
+The `derive` route lifts a function's body to a symbolic expression and
 decides a claim algebraically. `proven` is strictly stronger evidence
-than `holds (n=...)`, not "n samples agreed," but "the two sides are
-the same expression." It's also only available for the functions it
+than `holds (n=...)`, not "n samples agreed," but "the relation holds
+for every input in the declared domain", in exact real arithmetic. It's also only available for the functions it
 can actually lift, which is a real subset. This page is the complete,
 current reference for what that subset is.
 
@@ -37,7 +37,7 @@ remain viable regardless of any of this, see [CDD in one page](cdd.md).
 | A call to a plain function this one calls (`_scale(x)`, not a method or module-qualified call) | ✅ up to 3 levels deep by default, including a callee with its own branch if the caller's domain settles it, see below |
 | A claim relating two (or more) functions, `f(x) == g(x)`, `d(f(x, g(x,I,px,py), a), x) == 0` | ✅ each bound function lifts to its own closed form and substitutes like `f`, see "Multi-function claims" below |
 | A non-scalar parameter | ❌ for `lift()` itself, with two independent exceptions: a whole body that's exactly `return np.dot(a, b)` (see "Dot products"), or a loop that sums over it; any loop, nested or sequential, whose accumulator is purely additive (see "General sum accumulation") |
-| A parameter typed as a matrix/vector | ❌, no matrix type in the grammar yet |
+| A parameter typed as a matrix/vector | ❌ for lifting the body; a matrix claim declares its domain as `R^(m*n)` and is adjudicated by probing and the linear-algebra identities in [Matrix structure](matrix-structure.md) |
 | A *local* array built from `np.linspace`/`np.arange`, transformed elementwise, returned bare or as one element of a tuple | ✅; index it in claim text via `f(...)[i]`, see "Local symbolic arrays" below |
 
 ## Callees
@@ -664,13 +664,14 @@ indexes into an array-valued result: a literal int for a boundary
 claim, or a bare name for a claim over the whole array (bound as a
 fresh variable, the same pattern `lim(...)`'s own bound variable
 already uses). No new claim-grammar syntax, no domain declaration
-needed for the index; the closed form is a single uniform formula,
+needed for the index (the count `n` still needs one, since
+`np.linspace` raises for a negative or non-integer count); the closed form is a single uniform formula,
 never piecewise per position, so it holds for any real index, not just
 an integer one:
 
 ```
-f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))   # proven
-f(cx, cy, a, b, n)[0][0] == cx + a                     # proven (boundary)
+for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))   # proven
+for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[0][0] == cx + a                     # proven (boundary)
 ```
 
 Declines rather than guessing on: two independently built arrays
@@ -767,9 +768,10 @@ enough:
    which always wins over scope resolution, and the only form that
    accepts an arbitrary callable.
 
-A bound function that doesn't lift makes the claim undecided with the
-blocking function named ("bound function g (loopy) is not liftable
-..."), never a silent skip; `raises(...)` claims still require a
+A bound function that doesn't lift makes the derive route report
+`underivable` with the blocking function named ("bound function g
+(loopy) is not derivable, likely reason: ..."), never a silent skip,
+and the probe route then adjudicates the claim; `raises(...)` claims still require a
 bare `f(...)` call. On the probe route the same bindings are simply
 called. Only a plain Python function ever binds automatically, a
 class or other callable needs the explicit `funcs=` form.
@@ -811,8 +813,12 @@ Three gates keep the closed form honest about the implementation:
   implementation still recurses about one frame per index step, so a
   domain whose top implies a depth beyond the interpreter's recursion
   limit refuses to prove, `fib(100000)` raises `RecursionError`
-  however true Binet is. The sketch names the safe bound, the
-  iterative rewrite, and the `raises(...)` claim as ways out.
+  however true Binet is. The claim is then run once at the top of
+  the domain, and the RecursionError it raises there is the executed
+  witness of a falsification (a raise inside a value claim's domain).
+  The domain is never swept point by point past the limit. The
+  sketch names the safe bound, the iterative rewrite, and the
+  `raises(...)` claim as ways out.
 - **Non-termination is a raise region.** Isolated base points
   (`if n == 0: ... if n == 1: ...`) leave the recursion descending
   forever below them; that region is treated exactly like an explicit

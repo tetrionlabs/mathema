@@ -695,15 +695,16 @@ def test_conjecture_derive_route_unliftable_is_skipped():
 
 def test_claim_helper_strings():
     from mathema.claims import claim
-    c = claim("f(-x) == -f(x)")
+    c = claim("f(-x) == -f(x)", pseudo_infinity=1e100)
     assert c.lhs == "f(-x)" and c.rhs == "-f(x)" and c.relation == "=="
-    c2 = claim("min(x) <= f(x, alpha)", name="lower")
+    c2 = claim("min(x) <= f(x, alpha)", name="lower", pseudo_infinity=1e100)
     assert c2.name == "lower" and c2.relation == "<="
 
     def cube2(x: float) -> float:
         return x ** 3
 
-    results = mathema.claims.check(cube2, ["f(-x) == -f(x)", "f(x) >= 0"])
+    results = mathema.claims.check(cube2, [claim("f(-x) == -f(x)", pseudo_infinity=1e100),
+                                           claim("f(x) >= 0", pseudo_infinity=1e100)])
     by = {p.name: p.verdict for p in results}
     assert by["f_x_f_x"] == "proven"           # auto-named; best-route proof
     assert list(by.values()).count("falsified") == 1

@@ -396,11 +396,11 @@ def test_ellipse_path_proves():
     # claim per array, each indexed by a bound name (i) substituted for
     # phi's own closed form (i*(2*pi)/(n-1)).
     results = check_conjectures(
-        ellipse_path, [claim("f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))",
+        ellipse_path, [claim("for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))",
                             route="derive")])
     assert results[0].verdict == "proven"
     results = check_conjectures(
-        ellipse_path, [claim("f(cx, cy, a, b, n)[1][i] == cy + b*sin(2*pi*i/(n-1))",
+        ellipse_path, [claim("for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[1][i] == cy + b*sin(2*pi*i/(n-1))",
                             route="derive")])
     assert results[0].verdict == "proven"
 

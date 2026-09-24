@@ -147,10 +147,15 @@ def _synth_scalar(rng: random.Random, bounds=None,
                 return rng.choice([b for b in (lo, hi) if math.isinf(b)])
             flo, fhi = _finite_bounds(lo, hi)
             span = fhi - flo
-            candidates = [flo if closed_lo else flo + span * 1e-6,
-                         fhi if closed_hi else fhi - span * 1e-6,
+            # a relative step inside each end, at least one float (and
+            # never past the other end), so a subnormal-width range
+            # never rounds the step back onto the endpoint
+            in_lo = min(max(flo + span * 1e-6, math.nextafter(flo, math.inf)), fhi)
+            in_hi = max(min(fhi - span * 1e-6, math.nextafter(fhi, -math.inf)), flo)
+            candidates = [flo if closed_lo else in_lo,
+                         fhi if closed_hi else in_hi,
                          (flo + fhi) / 2,
-                         flo + span * 1e-6, fhi - span * 1e-6]
+                         in_lo, in_hi]
             if extra:
                 candidates += [v for v in extra if flo < v < fhi]
             return rng.choice(candidates)

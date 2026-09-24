@@ -96,27 +96,35 @@ def test_every_spelling_is_a_render_parse_render_fixed_point():
     domains gained a spurious `⊂ ℝ` on the second pass (false for ℂ
     besides). All three were one cause, the trailing `∪ {∅}`
     missing-value clause being absorbed by whatever preceded it.
+
+    A fixed point alone is not enough: a display that reparses to a
+    different claim can still render back to itself. So the reparsed
+    display must also have the original's canonical text, the claim's
+    identity.
     """
-    from mathema.conjecture import claim
+    from mathema.conjecture import InvalidConjecture, claim
     from mathema.lexicon import LEXICON
-    from mathema.spec import render_claim_text
+    from mathema.spec import canonical_claim_text, render_claim_text
 
     drifted = []
     for name, law in LEXICON.items():
-        try:
-            conjecture = claim(law)
-        except Exception:
-            continue          # a spelling the grammar declines by design
+        conjecture = claim(law)
+        canonical = canonical_claim_text(conjecture)
         for unicode_mode in (True, False):
             once = render_claim_text(conjecture, unicode=unicode_mode)
             try:
-                twice = render_claim_text(claim(once), unicode=unicode_mode)
-            except Exception as exc:
+                reparsed = claim(once)
+            except InvalidConjecture as exc:
                 drifted.append(f"{name}: rendered text will not reparse "
-                               f"({type(exc).__name__}): {once}")
+                               f"({exc}): {once}")
                 continue
+            twice = render_claim_text(reparsed, unicode=unicode_mode)
             if once != twice:
                 drifted.append(f"{name}:\n    {once}\n    {twice}")
+            if canonical_claim_text(reparsed) != canonical:
+                drifted.append(f"{name}: display reparses to another claim"
+                               f"\n    {canonical}"
+                               f"\n    {canonical_claim_text(reparsed)}")
     assert not drifted, "rendered claims drift on reparse:\n" + "\n".join(drifted)
 
 
@@ -133,6 +141,14 @@ def test_a_rendered_domain_always_states_its_missing_policy():
     excluded = claim("for x in [0,10] \\ {missing}, f(x) >= 0")
     assert "\\ {∅}" in render_claim_text(excluded, unicode=True)
     assert "|missing" not in render_claim_text(excluded, unicode=False)
+    assert "\\ {missing}" in render_claim_text(excluded, unicode=False)
+
+    from mathema.spec import canonical_claim_text
+    for conjecture in (allowed, excluded):
+        for unicode_mode in (True, False):
+            shown = render_claim_text(conjecture, unicode=unicode_mode)
+            assert canonical_claim_text(claim(shown)) == \
+                canonical_claim_text(conjecture)
 
 
 def test_every_spelling_survives_the_declared_store():
@@ -149,14 +165,11 @@ def test_every_spelling_survives_the_declared_store():
     added to the grammar later cannot quietly skip the store."""
     from mathema.conjecture import claim
     from mathema.lexicon import LEXICON
-    from mathema.spec import declare, entry_claims
+    from mathema.spec import canonical_claim_text, declare, entry_claims
 
     lost = []
     for name, law in LEXICON.items():
-        try:
-            original = claim(law)
-        except Exception:
-            continue          # a spelling the grammar declines by design
+        original = claim(law)
         try:
             restored = entry_claims({"claims": [declare(original)]})[0]
         except Exception as exc:
@@ -170,6 +183,8 @@ def test_every_spelling_survives_the_declared_store():
             ("funcs", set(original.funcs), set(restored.funcs)),
             ("assuming", original.assuming, restored.assuming),
             ("tolerance", original.tolerance, restored.tolerance),
+            ("canonical text", canonical_claim_text(original),
+                               canonical_claim_text(restored)),
         ):
             if before != after:
                 lost.append(f"{name}: {what} {before!r} -> {after!r}")
@@ -365,19 +380,16 @@ def test_every_spelling_has_a_stable_canonical_form():
     collapsing to `x` (a strictly different, usually false assertion)
     and `∂σ` degrading into an ordinary quotient (a proven claim coming
     back unknown)."""
-    from mathema.conjecture import claim
+    from mathema.conjecture import InvalidConjecture, claim
     from mathema.lexicon import LEXICON
     from mathema.spec import canonical_claim_text
 
     drifted = []
     for name, law in LEXICON.items():
-        try:
-            once = canonical_claim_text(claim(law))
-        except Exception:
-            continue          # a spelling the grammar declines by design
+        once = canonical_claim_text(claim(law))
         try:
             twice = canonical_claim_text(claim(once))
-        except Exception as exc:
+        except InvalidConjecture as exc:
             drifted.append(f"{name}: canonical text will not reparse "
                            f"({type(exc).__name__}): {once}")
             continue

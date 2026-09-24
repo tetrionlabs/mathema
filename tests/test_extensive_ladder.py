@@ -153,3 +153,39 @@ def test_atan_compactification_falsifies_over_the_whole_line():
     value_text = p.counterexample.split("=", 1)[1].split("(~")[0].strip()
     x_val = float(sympy.sympify(value_text))
     assert x_val * math.sin(x_val) < -2
+
+
+def test_a_sturm_disproof_carries_its_witness():
+    """The exact root-isolation rung names its counterexample point in
+    `witness`, the field the corroboration gate seeds from, not only in
+    the display string."""
+    import sympy
+
+    from mathema.domain import Interval
+    from mathema.symbolic._extensive import _sturm_decide
+    x = sympy.Symbol("x", real=True)
+    sign = _sturm_decide((x - sympy.Rational(3, 10)) ** 2
+                         - sympy.Rational(1, 10 ** 6), ">=",
+                         {"x": Interval(-1000.0, 1000.0, True, True)},
+                         {"x": x})
+    assert sign.status == "disproven"
+    assert sign.witness is not None and float(sign.witness["x"]) == 0.3
+    root = _sturm_decide(x ** 2 - 2, "!=",
+                         {"x": Interval(-10.0, 10.0, True, True)}, {"x": x})
+    assert root.status == "disproven"
+    assert root.witness is not None
+    assert abs(abs(float(root.witness["x"])) - 2 ** 0.5) < 1e-12
+
+
+def test_an_extensive_disproof_reaches_try_prove_with_its_witness():
+    from mathema.analysis import analyze_source
+    from mathema.domain import Interval
+    from mathema.symbolic import try_prove
+
+    def narrow_dip(x: float) -> float:
+        return (x - 0.3) ** 2 - 0.000001
+    r = try_prove(narrow_dip, analyze_source(narrow_dip), "f(x)", "0", ">=",
+                  domain={"x": Interval(-1000.0, 1000.0, True, True)},
+                  extensive=True)
+    assert r.status == "disproven", r
+    assert r.witness is not None and "x" in r.witness, r

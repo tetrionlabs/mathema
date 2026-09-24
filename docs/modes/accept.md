@@ -129,8 +129,8 @@ resurrects.
 ## `--as superseded`
 
 Re-authoring a claim that is already in the verified layer (the
-same name, a different statement or region on any authoring surface)
-is a conflict verify flags, and the verified version keeps
+same name with a different statement, region, tolerance or route on
+any authoring surface) is a conflict verify flags, and the verified version keeps
 adjudicating until a human adopts the change:
 
 ```
@@ -154,7 +154,9 @@ different version of a record, a stash pop restores an in-progress one,
 or you append a declared claim to a function that already has a verified
 row. The warning names the likely cause (a moved anchor reads as a
 history rewrite; an intact one as a content change) and never accuses
-you of tampering. Two ways to clear it:
+you of tampering. Under a [policy](pin.md#project-policy) with
+`require_verification`, the mismatch fails the run instead of warning.
+Two ways to clear it:
 
 - **Re-verify** (`mathema verify <key>`, or the whole sweep): re-adjudicates
   against the live code and re-stamps. This is the default and the right

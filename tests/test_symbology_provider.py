@@ -109,3 +109,29 @@ def test_a_wall_clock_interrupt_inside_a_provider_is_not_swallowed(install):
     install(_Interrupted)
     with pytest.raises(_WallClockExpired):
         render_claim_text(claim(_CLAIM), unicode=False)
+
+
+class _Colliding:
+    _MAP = {"spot": "S", "strike": "rate"}
+
+    @staticmethod
+    def symbol_for_param(name):
+        return _Colliding._MAP.get(name)
+
+
+def test_a_provider_renaming_onto_another_parameter_is_refused(install):
+    law = ("for spot in [1, 500], strike in [1, 500], rate in [0, 1], "
+           "f(spot, strike, rate) >= 0")
+    default = render_claim_text(claim(law), unicode=False)
+    install(_Colliding)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        text = render_claim_text(claim(law), unicode=False)
+    assert text == default
+    assert "let S" not in text
+    messages = [str(w.message) for w in caught]
+    assert len(messages) == 1
+    assert f"{_MODULE}:Provider" in messages[0]
+    assert "'rate'" in messages[0] and "strike" in messages[0]
+    reparsed = claim(text)
+    assert set(reparsed.domain) == {"spot", "strike", "rate"}

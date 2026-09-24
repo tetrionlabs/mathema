@@ -114,12 +114,10 @@ def _provably_signed(expr, domain: dict, params: dict, bound_context) -> bool | 
     if bound_context is not None:
         try:
             with sympy.assuming(bound_context):
-                decided = sympy.ask(sympy.Q.positive(expr))
-                if decided is not None:
-                    return decided
-                decided = sympy.ask(sympy.Q.negative(expr))
-                if decided is not None:
-                    return not decided
+                if sympy.ask(sympy.Q.nonnegative(expr)) is True:
+                    return True
+                if sympy.ask(sympy.Q.negative(expr)) is True:
+                    return False
         except TimeoutError:
             raise
         except Exception:
@@ -133,13 +131,19 @@ def _provably_signed(expr, domain: dict, params: dict, bound_context) -> bool | 
         return corners
     if expr.is_Mul:
         negatives = 0
+        may_vanish = False
         for factor in expr.args:
             sign = _provably_signed(factor, domain, params, bound_context)
             if sign is None:
                 return None
             if sign is False:
                 negatives += 1
-        return negatives % 2 == 0
+            else:
+                # nonnegative includes zero, so the product may be zero
+                may_vanish = True
+        if negatives % 2 == 0:
+            return True
+        return None if may_vanish else False
     return None
 
 
@@ -198,7 +202,25 @@ def _resolve_clamps(expr, domain: dict, params: dict):
         if node.is_number:
             c = float(node)
             return c, c
-        return bounds.get(node)
+        if node in bounds:
+            return bounds[node]
+        # a compound side (`n - 1`, the trip count of a range loop) is
+        # bounded by its interval hull, which contains its true range
+        try:
+            hull = _interval_bounds(node, domain, params)
+        except TimeoutError:
+            raise
+        except Exception:
+            return None
+        if isinstance(hull, sympy.AccumBounds):
+            lo, hi = hull.min, hull.max
+        elif hull is not None and getattr(hull, "is_number", False):
+            lo = hi = hull
+        else:
+            return None
+        if not (lo.is_finite and hi.is_finite):
+            return None
+        return float(lo), float(hi)
 
     subs = {}
     for node in expr.atoms(sympy.Min, sympy.Max):
@@ -241,10 +263,12 @@ def _resolve_int_parts(expr, domain: dict, params: dict):
         nothing to relax.
 
     Notes:
-        The three facts, each exact: `floor(u) = u - t` for some
-        `t` in `[0, 1)`; `ceiling(u) = u + t` for the same range; and
-        `Mod(a, n) = (n - 1) * s` for some `s` in `[0, 1]` whenever `n`
-        is positive.
+        The facts, each exact: `floor(u) = u - t` for some `t` in
+        `[0, 1)`; `ceiling(u) = u + t` for the same range; and, for a
+        positive modulus `n`, `Mod(a, n) = n * s` for some `s` in
+        `[0, 1)`, tightened to `(n - 1) * s` with `s` in `[0, 1]` when
+        both `a` and `n` are integers (only then is `n - 1` the largest
+        remainder).
 
         `Mod` is expressed as a fraction of its own SYMBOLIC bound
         rather than as a free auxiliary with a numeric box, because the
@@ -257,11 +281,11 @@ def _resolve_int_parts(expr, domain: dict, params: dict):
         `floor(u) - floor(u)` still cancels. Distinct nodes get distinct
         auxiliaries, which is what makes this an over-approximation: the
         real integer parts move together with their arguments, and these
-        auxiliaries move independently. That direction is the safe one.
-        The relaxed expression's range CONTAINS the true range, so a
-        proof or a disproof over the relaxation holds of the original,
-        while an undecided relaxation simply decides nothing, exactly
-        as before.
+        auxiliaries move independently. The relaxed expression's range
+        CONTAINS the true range, so a proof over the relaxation holds
+        of the original, while a disproof over it does not (a relaxed
+        point need not be a real one); `_prove_relation` reads a
+        relaxed disproof as undecided.
 
         `_resolve_mod` runs before this and collapses the narrow case it
         can do EXACTLY. This is the lossy fallback for everything else.
@@ -287,8 +311,13 @@ def _resolve_int_parts(expr, domain: dict, params: dict):
         aux = sympy.Symbol(name, nonnegative=True)
         new_params[name] = aux
         if isinstance(node, sympy.Mod):
-            new_domain[name] = Interval(0.0, 1.0, True, True)
-            out = out.subs(node, (node.args[1] - 1) * aux)
+            dividend, modulus = node.args
+            if dividend.is_integer and modulus.is_integer:
+                new_domain[name] = Interval(0.0, 1.0, True, True)
+                out = out.subs(node, (modulus - 1) * aux)
+            else:
+                new_domain[name] = Interval(0.0, 1.0, True, False)
+                out = out.subs(node, modulus * aux)
         else:
             new_domain[name] = Interval(0.0, 1.0, True, False)
             out = out.subs(node, node.args[0] - aux
@@ -880,7 +909,9 @@ def _decide_relation(lhs, rhs, relation: str, domain: dict, bound_context,
     # integer parts they could not remove. It augments domain/params
     # with the auxiliaries it introduces, so the deciders below (and the
     # interval rung in particular) can see their bounds.
+    unrelaxed_params = len(params)
     diff, domain, params = _resolve_int_parts(diff, domain, params)
+    relaxed = len(params) != unrelaxed_params
     diff = _resolve_piecewise(diff, domain, params)
     diff = _resolve_zero_powers(diff, domain, params)
     diff = sympy.simplify(diff)
@@ -890,6 +921,13 @@ def _decide_relation(lhs, rhs, relation: str, domain: dict, bound_context,
                            "by the derive route")
     result = decider(lhs, rhs, diff, relation, domain, bound_context, params,
                      tolerance)
+    if relaxed and result.status == "disproven":
+        return ProofResult(
+            "undecided",
+            sketch=f"{result.sketch}, but only over the relaxed integer "
+                   f"parts (each floor, ceiling and remainder replaced by "
+                   f"an independent bounded value), which is no disproof "
+                   f"of the original")
     if deferred_diff is not None and result.status == "disproven":
         quad = _quadrature_confirms_nonzero(deferred_diff, domain, params)
         if quad is False:

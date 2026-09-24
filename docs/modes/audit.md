@@ -215,7 +215,7 @@ reads `{min_expected|actual|est_applicable}`).
 analysis (nothing else is even computed) in favor of a colored grid,
 one row per function, with each checklist criterion as its own column
 (`has_docstring`, `has_summary`, `params`, `returns`, `raises`,
-`claims`, `docs_score`) instead of one summary "N/M", the same
+`quality_ratio`, `claims`, `concepts/tags`) instead of one summary "N/M", the same
 per-parameter/per-exception counts described above, laid out so a
 whole package's docstring gaps are scannable at a glance rather than
 read one function-block at a time. The docsync sync grid is appended by default (see [docsync](docsync.md)); exclude it with `--exclude docsync`.

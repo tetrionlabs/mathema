@@ -123,12 +123,62 @@ claims in them.
 | `f equiv g` | the word alias for the same relation |
 | `for a in [0.1,10], b in [0.1,10], 2/(1/a+1/b) <= f(a,b) <= (a+b)/2` | a chained comparison, both bounds in one claim |
 
+### How close counts as equal
+
+On the derive route every relation is decided exactly: `==` and `~=` both
+ask whether the two sides are the same over the whole domain, in exact real
+arithmetic.
+
+On the probe route, which runs the real function in floating point, `==`
+and `~=` are the same comparison: the two sides count as equal when they
+agree within a relative tolerance of 1e-6 or an absolute tolerance of 1e-9,
+whichever is larger. So `x * (1 + 1e-8)` equals `x` everywhere, while a
+constant offset of `1e-7` is caught near zero, where the relative allowance
+shrinks below it. A claim sets its own absolute tolerance with the
+`tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
+and that value replaces the whole allowance: the two sides must agree within
+it, with no relative tolerance on top.
+
+Inside the claim text, `ε` (also `eps`, `epsilon` or `\epsilon`) names that
+tolerance directly: the declared value when there is one, and the 1e-9
+default otherwise, on both routes. It is never a free variable to sample, and
+a function parameter that happens to be called `eps` or `ε` stays a
+parameter. With two functions in `gaps.py`, one off by `1e-10` and one by
+`1e-7`:
+
+```python
+def nearly_identity(x: float) -> float:
+    return x + 1e-10
+
+
+def small_gap(x: float) -> float:
+    return x + 1e-7
+```
+
+```bash
+mathema check gaps.py --claim "for x in [0, 1], abs(f(x) - x) <= ε"
+```
+
+```text
+ok   gaps.nearly_identity: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+FAIL gaps.small_gap: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+```
+
+The first gap is within the default tolerance and proves for every `x` in the
+range; the second is a hundred times larger than it and is falsified.
+
+The other relations use the same allowance where it makes sense: `<=` and
+`>=` accept a difference within the absolute tolerance, `<` and `>` accept
+none, since equality must not pass for strictly less, and `!=` with no
+declared tolerance fails only where the two sides are exactly equal.
+
 ## Expressions
 
 | Spelling | Meaning |
 |---|---|
 | `f(x)^2 >= 0` | powers with a caret |
 | <code>&#124;f(x)&#124; &lt;= 1</code> | absolute value with bars |
+| <code>for x in [0, 1], y in [0, 1], &#124;x + y - f(x, y)&#124; &lt;= ε</code> | bars around any expression; on matrices, the determinant |
 | `for n in [1, 5] subset Z, f(n) <= n!` | postfix factorial |
 | `f(x, 1.0) == x[-1]` | indexing into a sequence parameter |
 | `f(\alpha) ≤ 1` | a Greek name written as a LaTeX escape |
@@ -217,16 +267,56 @@ A free variable is the difference between "this holds for the inputs"
 and "this holds for the inputs and any constant you care to add", which
 is often the claim you actually meant.
 
-One more binding uses bars around the name, and sets the finite
-magnitude that stands in for `oo` when a domain is unbounded, so a
-claim quantified over the whole half-line can still be probed:
+### Operational infinity: `let |inf| be ...`
 
-```
-let |inf| be 1e12, for x in [0, oo], f(x) >= 0
+One more binding uses bars around the name. It sets an operational
+infinity, the finite magnitude that stands in for `oo` wherever a
+claim's domain is unbounded, and it exists because code running on
+doubles does not reach infinity. Past about `1.34e154`, `x ** 2` raises
+`OverflowError`, and a value claim is false wherever the code raises.
+With no operational infinity declared, infinity means infinity, so an
+unbounded pointwise claim meets that overflow.
+
+The standard normal density shows both halves of the rule:
+
+```python
+import math
+
+import mathema
+
+
+def gauss(x: float) -> float:
+    """The standard normal density."""
+    return math.exp(-x ** 2 / 2) / math.sqrt(2 * math.pi)
+
+for law in ["∫(f(x), x, -oo, oo) == 1",
+            "f(x) >= 0",
+            "let |inf| be 1e100, f(x) >= 0"]:
+    (p,) = mathema.claims.check(gauss, [law])
+    print(f"{law:31} {p.verdict:9} {p.counterexample or p.condition or ''}")
 ```
 
-It is not an ordinary name binding: nothing in the claim refers to
-`|inf|`, it only changes how far out the probe route samples.
+```text
+∫(f(x), x, -oo, oo) == 1        proven
+f(x) >= 0                       falsified x = 2.6815615859885194e+154
+let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ [-1e+100, 1e+100] ⊂ ℝ ∪ {∅}
+```
+
+The integral over the whole line is proven: an integral, like a limit,
+is a statement about the mathematics, and an overflow in the far tail
+does not change what it equals. The pointwise claim is a statement
+about the code at every `x`, and at `x = 2.68e154` the code raises
+before it returns anything. Declaring `let |inf| be 1e100` says that
+for this claim, "every `x`" means every `x` up to `1e100` in magnitude,
+and the proof then holds, with the region it holds over stated in the
+record rather than implied.
+
+The bound applies to both routes: the derive route proves over it, and
+the probe route samples out to it. A claim can also state a half-line
+explicitly, `let |inf| be 1e12, for x in [0, oo], f(x) >= 0`, where the
+`oo` endpoint stops at `1e12`. Nothing in the claim refers to `|inf|`
+by name, so it is not an ordinary binding, and in Python the same
+setting is `claim(..., pseudo_infinity=1e100)`.
 
 ## `assuming`: stating a premise
 

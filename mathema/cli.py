@@ -54,22 +54,57 @@ def _bad_argument(message: str) -> NoReturn:
     raise SystemExit(2)
 
 
+class _Parser(argparse.ArgumentParser):
+    """The argument parser with the exit-code contract's error shape: a
+    usage error is one line on stderr and exit 2, pointing at `--help`
+    rather than printing the usage block."""
+
+    def error(self, message: str) -> NoReturn:
+        _bad_argument(f"{self.prog}: {message} (see `{self.prog} --help`)")
+
+
+def _non_negative_int(text: str) -> int:
+    """An argparse type: an integer that is zero or more."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected a whole number, got {text!r}") from None
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, got {value}")
+    return value
+
+
 def _parse_domain(items: list[str]) -> dict:
+    import math
+
     from .grammar import Interval
 
     out = {}
     for item in items or []:
         try:
             name, rng = item.split("=", 1)
-            lo, hi = rng.split(":", 1)
-            out[name] = Interval(float(lo), float(hi))
+            lo_text, hi_text = rng.split(":", 1)
+            lo, hi = float(lo_text), float(hi_text)
         except ValueError:
             _bad_argument(f"mathema: bad --domain {item!r}; expected name=lo:hi")
+        if not name.strip():
+            _bad_argument(f"mathema: bad --domain {item!r}; the parameter "
+                          f"name is empty")
+        if math.isnan(lo) or math.isnan(hi):
+            _bad_argument(f"mathema: bad --domain {item!r}; a NaN endpoint "
+                          f"bounds nothing")
+        if lo > hi:
+            _bad_argument(f"mathema: bad --domain {item!r}; the interval is "
+                          f"inverted (lo > hi)")
+        out[name.strip()] = Interval(lo, hi)
     return out
 
 
 def _validate_trials_scale(scale: float) -> None:
-    if scale <= 0:
+    # a factor above 1 is clamped to 1 downstream; NaN compares false
+    # both ways, so it is refused here along with zero and below
+    if not scale > 0:
         _bad_argument(f"mathema: --trials-scale must be > 0, got {scale!r}")
 
 
@@ -87,11 +122,25 @@ def _check_rows(args) -> list[dict]:
     target = resolve(args.target, root)
     if not target.functions:
         raise TargetError(f"no functions found in {args.target}")
+    domain = _parse_domain(args.domain)
+    if domain:
+        import inspect
+        params: set = set()
+        for fn in target.functions.values():
+            try:
+                params |= set(inspect.signature(fn).parameters)
+            except (TypeError, ValueError):
+                continue
+        unknown = sorted(set(domain) - params)
+        if unknown:
+            _bad_argument(f"mathema: bad --domain: {', '.join(unknown)} is "
+                          f"not a parameter of any function in "
+                          f"{args.target}")
     verified_store = load_verified(root)
     declared_store = load_declared(root)
     for name, fn in sorted(target.functions.items()):
         rec = check(fn, claims=list(args.claim) if args.claim else None,
-                    domain=_parse_domain(args.domain) or None,
+                    domain=domain or None,
                     trials_scale=args.trials_scale,
                     declared=retrieve(fn, root, store=declared_store))
         # the one gate (verify.gate): provenance population, so a
@@ -246,7 +295,7 @@ def cmd_verify(args) -> int:
     """The test-runner sweep, printed: `verify.verify_project` does the
     work (freshness, re-adjudication, record refresh, the one gate);
     this command renders its lines and the run summary, and exits 1 on
-    any problem. The NOTE for authors: a function whose only declared
+    any problem, 2 when a declared claim does not parse. The NOTE for authors: a function whose only declared
     claims live on a @claims_decorator or docstring Claims: block, with
     no prior verified record and no claims file anywhere, has no key
     the sweep can discover, the stores enumerate the population."""
@@ -308,7 +357,7 @@ def cmd_verify(args) -> int:
                        "adjudicated": result.adjudicated,
                        "problems": len(result.problems)},
         }, getattr(args, "output", None))
-        return 1 if result.problems else 0
+        return _verify_exit(args, result)
     lines = list(result.lines)
     lines.append(f"{result.fresh} fresh (form unchanged, skipped), "
                  f"{result.adjudicated} adjudicated, "
@@ -321,6 +370,19 @@ def cmd_verify(args) -> int:
         + (f"; not verified here (different grammar, needs its own tool): "
            f"{', '.join(other_grammars)}" if other_grammars else ""))
     print("\n".join(lines))
+    return _verify_exit(args, result)
+
+
+def _verify_exit(args, result) -> int:
+    """Intent:
+        The verify exit code: 2 for an authoring error or a named key
+        that no longer resolves to a function, 1 for any other problem,
+        0 for none.
+    """
+    named_unresolved = args.target and any(
+        k.get("why") == "unresolvable" for k in result.keys)
+    if result.authoring_errors or named_unresolved:
+        return 2
     return 1 if result.problems else 0
 
 
@@ -1407,6 +1469,9 @@ def cmd_init(args) -> int:
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    for target in args.target or []:
+        # every target resolves before anything is written
+        resolve(target, args.root)
     git_written = _scaffold_git_files(root)
     if git_written:
         print("mathema init: scaffolded git files:\n  "
@@ -1442,10 +1507,14 @@ def cmd_review(args) -> int:
     it for a CI job to post as a PR comment."""
     import os
 
-    from .review import render, review
+    from .review import UnknownRef, render, review
 
     root = os.path.abspath(args.root)
-    result = review(root, ref=args.ref)
+    try:
+        result = review(root, ref=args.ref)
+    except UnknownRef as e:
+        print(f"mathema: {e}", file=sys.stderr)
+        return 2
     if getattr(args, "format", "text") == "json":
         _emit_json(result, getattr(args, "output", None))
         return 0
@@ -1834,8 +1903,9 @@ def cmd_claims(args) -> int:
         with open(path) as fh:
             doc = yaml.safe_load(fh) or {}
     doc.setdefault(args.key, {}).setdefault("claims", []).append(stanza)
-    with open(path, "w") as fh:
-        yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
+    from .spec import atomic_write_text
+    atomic_write_text(path, yaml.safe_dump(doc, sort_keys=False,
+                                           allow_unicode=True))
     print(f"adopted {chosen.name} into {path}: "
           f"{claim_statement(chosen)}")
     return 0
@@ -1844,7 +1914,8 @@ def cmd_claims(args) -> int:
 
 def _accept_json(args, *, kind: str, plan: "dict | None" = None,
                  applied: bool = False, written: "str | None" = None,
-                 error: "str | None" = None, extra: "dict | None" = None) -> int:
+                 error: "str | None" = None, extra: "dict | None" = None,
+                 code: int = 1) -> int:
     """Intent:
         One JSON envelope for every acceptance path. `plan_acceptance`
         hands back the whole live YAML document under "doc" (and a
@@ -1855,7 +1926,7 @@ def _accept_json(args, *, kind: str, plan: "dict | None" = None,
         _emit_json({"ok": False, "error": error, "kind": kind,
                     "key": args.key, "applied": False},
                    getattr(args, "output", None))
-        return 1
+        return code
     plan = plan or {}
     body = {"ok": True, "kind": kind, "key": args.key,
             "claim": plan.get("claim_name", getattr(args, "claim", None)),
@@ -1878,7 +1949,8 @@ def _accept_context(args, by: str | None) -> int:
         human rung) and --concepts/--dismiss-concepts (tag curation).
         Same prompted contract as claim acceptance.
     """
-    from .acceptance import (AcceptanceError, apply_intent_acceptance,
+    from .acceptance import (AcceptanceError, UnknownAcceptanceTarget,
+                             apply_intent_acceptance,
                              apply_scope_intent_acceptance,
                              plan_intent_acceptance,
                              plan_scope_intent_acceptance)
@@ -1901,10 +1973,11 @@ def _accept_context(args, by: str | None) -> int:
         try:
             plan = planner(args.root, args.key, by=by, note=args.note)
         except AcceptanceError as e:
+            code = 2 if isinstance(e, UnknownAcceptanceTarget) else 1
             if as_json:
-                return _accept_json(args, kind=kind, error=str(e))
+                return _accept_json(args, kind=kind, error=str(e), code=code)
             print(f"cannot accept: {e}")
-            return 1
+            return code
         if as_json:
             if not args.yes:
                 return _accept_json(args, kind=kind, plan=plan,
@@ -2100,7 +2173,8 @@ def cmd_accept(args) -> int:
     exact write is printed first and nothing happens without a yes.
     Deliberately CLI-only: acceptance is a human act, never exposed to
     agent tooling or any MCP surface."""
-    from .acceptance import (AcceptanceError, apply_acceptance, corrected_stub,
+    from .acceptance import (AcceptanceError, UnknownAcceptanceTarget,
+                             apply_acceptance, corrected_stub,
                              default_identity, plan_acceptance,
                              suggest_acceptance)
 
@@ -2141,7 +2215,7 @@ def cmd_accept(args) -> int:
                                                        args.claim)
         except AcceptanceError as e:
             print(f"cannot accept: {e}")
-            return 1
+            return 2 if isinstance(e, UnknownAcceptanceTarget) else 1
         print(f"no --as given: {args.claim} is {verdict}, so accepting as "
               f"{kind} ({reason})")
         args.as_ = kind
@@ -2162,10 +2236,11 @@ def cmd_accept(args) -> int:
                                by=by, note=args.note,
                                corrected=getattr(args, "corrected", None))
     except AcceptanceError as e:
+        code = 2 if isinstance(e, UnknownAcceptanceTarget) else 1
         if as_json:
-            return _accept_json(args, kind="claim", error=str(e))
+            return _accept_json(args, kind="claim", error=str(e), code=code)
         print(f"cannot accept: {e}")
-        return 1
+        return code
     if as_json:
         # plan-only unless --yes: a client previews the change, shows
         # it to a human, then re-runs with --yes. JSON mode never
@@ -2322,12 +2397,17 @@ def cmd_badges(args) -> int:
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
-    scores = repo_badges(args.target or None, root=root)
-    print(render_triangle(scores.implementation, scores.intent,
-                          scores.clarity))
+    out_dir = None
     if args.out is not None:
         out_dir = (args.out if os.path.isabs(args.out)
                    else os.path.join(root, args.out))
+        # the output directory is made first, so an unwritable one stops
+        # the command before anything is printed
+        os.makedirs(out_dir, exist_ok=True)
+    scores = repo_badges(args.target or None, root=root)
+    print(render_triangle(scores.implementation, scores.intent,
+                          scores.clarity))
+    if out_dir is not None:
         written, pruned = write_badges(scores, out_dir)
         print(f"\nwrote {len(written)} artifacts to {out_dir}")
         for path in pruned:
@@ -2347,10 +2427,14 @@ def cmd_compendium(args) -> int:
     import os
 
     from .compendium.export import write_compendium
+    from .spec import load_verified
 
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    if not any(k.split(".")[0] == args.library for k in load_verified(root)):
+        raise TargetError(f"no verified records for library "
+                          f"{args.library!r} under {root}; nothing to export")
     path = write_compendium(args.library, root=root, out_dir=args.out)
     print(f"wrote compendium skeleton for {args.library!r} to {path}")
     print("(a partial skeleton: complete the TODOs, confirm nan_when, and "
@@ -2413,7 +2497,7 @@ def main(argv: list[str] | None = None) -> int:
     `sys.argv` (the normal case); passing an explicit list is for
     testing/programmatic invocation."""
     from . import badges as _badges
-    ap = argparse.ArgumentParser(prog="mathema",
+    ap = _Parser(prog="mathema",
                                  description="Claim-Driven Development: turn "
                                              "software intent into verifiable "
                                              "evidence.")
@@ -2678,7 +2762,7 @@ def main(argv: list[str] | None = None) -> int:
                          "name(s), same convention as audit")
     pd.add_argument("--root", default=None,
                     help="project root to import targets relative to")
-    pd.add_argument("--depth", type=int, default=3,
+    pd.add_argument("--depth", type=_non_negative_int, default=3,
                     help="callee-inlining depth for the tier-ladder diagram "
                          "(single-function mode only; default 3)")
     pd.add_argument("--tier",
@@ -2827,6 +2911,11 @@ def main(argv: list[str] | None = None) -> int:
     pm.set_defaults(fn=cmd_mcp)
 
     args = ap.parse_args(argv)
+    # init may create its root, and `verify --status` always exits 0
+    if (getattr(args, "root", None) is not None and args.cmd != "init"
+            and getattr(args, "status", None) is None
+            and not os.path.isdir(args.root)):
+        _bad_argument(f"mathema: --root {args.root!r} is not a directory")
     if getattr(args, "root", None) is None and hasattr(args, "root"):
         args.root = _resolve_root(None)
         if os.path.abspath(args.root) != os.path.abspath(os.getcwd()):
@@ -2837,9 +2926,11 @@ def main(argv: list[str] | None = None) -> int:
     from .auth import HumanVerificationError
     from .conjecture import InvalidConjecture
     from .locks import LockError
+    from .spec import ClaimsFileError
     try:
         return args.fn(args)
-    except (DiscoveryError, TargetError, InvalidConjecture, LockError) as e:
+    except (DiscoveryError, TargetError, InvalidConjecture, LockError,
+            ClaimsFileError) as e:
         print(f"mathema: {e}", file=sys.stderr)
         return 2
     except HumanVerificationError as e:

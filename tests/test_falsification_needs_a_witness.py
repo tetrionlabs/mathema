@@ -52,7 +52,7 @@ def test_a_true_sequence_fold_claim_is_still_proven():
 @pytest.mark.needs_full_proof_budget
 def test_a_calculus_disproof_with_no_executable_witness_is_unknown():
     [p] = check_conjectures(not_heat_sol, [
-        claim("d(f(t,x),t) == d(f(t,x),x,x)", route="derive")])
+        claim("d(f(t,x),t) == d(f(t,x),x,x)", route="derive", pseudo_infinity=1e100)])
     assert p.verdict == "unknown"
     assert p.counterexample is None
     assert (p.meta or {}).get("mathema.corroboration") == "uncorroborated"
@@ -64,7 +64,7 @@ def test_a_true_calculus_claim_is_still_proven():
     def heat_sol(t, x):
         return x**2 + 2*t
     [p] = check_conjectures(heat_sol, [
-        claim("d(f(t,x),t) == d(f(t,x),x,x)", route="derive")])
+        claim("d(f(t,x),t) == d(f(t,x),x,x)", route="derive", pseudo_infinity=1e100)])
     assert p.verdict == "proven"
 
 

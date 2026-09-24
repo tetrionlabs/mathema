@@ -301,3 +301,60 @@ def test_the_domain_filter_rejects_nonfinite_and_excluded_draws():
     # a bare unbounded draw is fine; only nonfinite is rejected there
     assert _draw_in_domain(123.0, None)
     assert not _draw_in_domain(float("inf"), None)
+
+
+# --- raise regions -----------------------------------------------------------
+
+def _self_ratio(x: float) -> float:
+    return x / x
+
+
+def _one(x: float) -> float:
+    return 1.0
+
+
+def _removable(x: float) -> float:
+    return (x * x - 1.0) / (x - 1.0)
+
+
+def _line(x: float) -> float:
+    return x + 1.0
+
+
+def _root_squared(x: float) -> float:
+    import math
+    return math.sqrt(x) ** 2
+
+
+def _identity(x: float) -> float:
+    return x
+
+
+def test_a_side_that_raises_inside_the_domain_is_never_proven_equivalent():
+    """x / x and 1.0 share a closed form, but x / x raises at 0; the
+    algebra of the two lifts says nothing about the point where one
+    side has no value, so equivalence is not proven there."""
+    for f, g, law in ((_self_ratio, _one, "f =:= g"),
+                      (_self_ratio, _one, "for x in [-1, 1], f =:= g"),
+                      (_removable, _line, "f =:= g"),
+                      (_removable, _line, "for x in [0, 2], f =:= g"),
+                      (_root_squared, _identity, "f =:= g"),
+                      (_root_squared, _identity,
+                       "for x in [-1, 1], f =:= g")):
+        (p,) = check_conjectures(f, [claim(law, funcs={"g": g},
+                                           route="derive")])
+        assert p.verdict != "proven", (f.__name__, law, p.sketch)
+
+
+def test_the_raising_point_is_named_in_the_record():
+    (p,) = check_conjectures(_self_ratio, [claim(
+        "for x in [-1, 1], f =:= g", funcs={"g": _one}, route="derive")])
+    assert "ZeroDivisionError" in (p.note or "")
+    assert "x = 0" in (p.note or "")
+
+
+def test_raise_free_closed_forms_still_prove():
+    (p,) = check_conjectures(_root_squared, [claim(
+        "for x in [0, 4], f =:= g", funcs={"g": _identity},
+        route="derive")])
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)

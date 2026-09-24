@@ -29,7 +29,15 @@ Keyed by function (`module.qualname`), and within each, by claim name:
 - **newly falsified** claims (a flip into `falsified`, or an added claim
   that lands `falsified`),
 - **reconciled** records (a human blessed the current contents with
-  [`mathema accept --as reconciled`](accept.md#-as-reconciled-after-a-merge-rebase-or-a-declared-claim-edit)).
+  [`mathema accept --as reconciled`](accept.md#-as-reconciled-after-a-merge-rebase-or-a-declared-claim-edit)),
+- **restated** claims (the same name, a different statement),
+- **retirement rows** added to or dropped from a record's `discoveries`,
+  `historical` and `superseded` sections. A dropped row is marked `!!`:
+  it is the usual trace of a merge conflict resolved to one side, and
+  it puts a retired claim back in play.
+
+The summary names restated claims and retirement rows only when there
+are some. A `ref` that does not name a commit exits 2.
 
 The closing summary counts each movement across the whole store.
 
@@ -69,8 +77,10 @@ it is the proof's own quantifier) but not a probe row (where it merely
 restates the statement and domain); a per-row `grammar` appears only when
 it differs from the record's grammar. Claim rows are sorted by name, so a
 non-deterministic probe order never shows up as a diff. None of this
-touches the integrity checksum, which covers only each claim's name,
-verdict, and acceptance, plus the identity and lock forms.
+touches the integrity checksum, which covers each claim's name,
+statement, domain, route, tolerance, verdict and acceptance, the rows
+of the `discoveries`, `historical` and `superseded` sections, plus the
+identity and lock forms.
 
 **Surface versus author.** Two provenance facts are kept apart, because
 they answer different questions:
@@ -89,5 +99,7 @@ they answer different questions:
   agent that ran the verification.
 
 Neither is the `route` (`probe`/`derive`/`examine`), which is *how* the
-claim was checked. Where a claim came from, who wrote it, and how it was
+claim was checked. The route the claim *asked* for (`probe`, `derive`,
+or `best` when none was named) rides beside them as `authored.route`, so
+a claim restored from its row is checked the way it was written. Where a claim came from, who wrote it, and how it was
 adjudicated are three separate axes, and the record keeps them so.

@@ -132,3 +132,37 @@ def test_a_plain_derive_proof_reports_the_base_route_not_extensive(tmp_path):
         sys.modules.pop("affine_fixture", None)
     assert results[0].verdict == "proven"
     assert results[0].route == "derive"
+
+
+def _spike_at_four(n: int) -> int:
+    if n == 4:
+        return -1
+    return n
+
+
+def _step_above_one(x: float) -> float:
+    if x > 1:
+        return 1.0
+    return 2.0
+
+
+def test_a_disproof_on_a_split_piece_keeps_its_point():
+    """The domain split proves the claim piece by piece; a piece that
+    disproves it is a single point here, and the disproof reaches the
+    record with that point as its executed witness rather than being
+    lost to sampling that never lands on it."""
+    from mathema.conjecture import check_conjectures, claim
+    (p,) = check_conjectures(_spike_at_four, [claim(
+        "for n in [0, 100000] subset Z, f(n) >= 0", route="derive")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert p.counterexample and "4" in p.counterexample, p.counterexample
+
+
+def test_a_split_piece_disproof_carries_a_witness():
+    from mathema.analysis import analyze_source
+    from mathema.domain import Interval
+    from mathema.symbolic import try_prove
+    r = try_prove(_step_above_one, analyze_source(_step_above_one), "f(x)",
+                  "1", "==", domain={"x": Interval(1.0, 2.0, True, True)})
+    assert r.status == "disproven"
+    assert r.witness and float(r.witness["x"]) == 1.0, r.witness

@@ -35,13 +35,13 @@ def sq(t: float, x: float, sigma: float) -> float:
 
 
 def test_monotonicity_via_first_derivative():
-    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive")])
+    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive", pseudo_infinity=1e100)])
     assert results[0].verdict == "proven"
 
 
 def test_pde_heat_equation_proven():
     results = check_conjectures(
-        heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive")])
+        heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive", pseudo_infinity=1e100)])
     assert results[0].verdict == "proven"
 
 
@@ -50,7 +50,7 @@ def test_pde_wrong_solution_is_unknown_without_an_executed_witness():
     # point evaluation against the function, so no executed witness
     # exists and a falsification needs one
     results = check_conjectures(
-        not_heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive")])
+        not_heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive", pseudo_infinity=1e100)])
     assert results[0].verdict == "unknown"
     assert results[0].meta["mathema.corroboration"] == "uncorroborated"
 
@@ -102,7 +102,7 @@ def test_not_equal_and_approx_equal_relations_on_probe_route():
 
 
 def test_approx_equal_provable_on_derive_route_like_equality():
-    results = check_conjectures(cube, [claim("f(x) ~= x^3", route="derive")])
+    results = check_conjectures(cube, [claim("f(x) ~= x^3", route="derive", pseudo_infinity=1e100)])
     assert results[0].verdict == "proven"
 
 
@@ -188,7 +188,7 @@ def test_ito_drift_coefficient_matching():
     diffusion symbols, no stochastic-process machinery involved."""
     results = check_conjectures(sq, [claim(
         "2*mu*x + sigma**2 == d(f(t,x,sigma), t) + mu*d(f(t,x,sigma), x) "
-        "+ 0.5*sigma**2*d(f(t,x,sigma), x, x)", route="derive")])
+        "+ 0.5*sigma**2*d(f(t,x,sigma), x, x)", route="derive", pseudo_infinity=1e100)])
     assert results[0].verdict == "proven"
 
 
@@ -1402,9 +1402,9 @@ def test_proven_fold_claim_reaches_the_reasoning_chain():
 # --- proof quantifiers and readable sketches --------------------------------
 
 def test_proven_scalar_claim_carries_a_quantifier():
-    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive")])
+    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive", pseudo_infinity=1e100)])
     assert results[0].verdict == "proven"
-    assert results[0].condition == "∀ x ∈ ℝ"
+    assert results[0].condition == "∀ x ∈ [-1e+100, 1e+100] ⊂ ℝ ∪ {∅}"
 
 
 def test_proven_scalar_claim_quantifier_reflects_a_declared_domain():
@@ -1634,24 +1634,24 @@ def array_sum_reduction(a: float, n: float) -> float:
 
 def test_linspace_bare_array_return_proves_symbolic_index():
     results = check_conjectures(
-        sine_wave, [claim("f(amp, freq, n)[i] == amp*sin(2*pi*freq*i/(n-1))",
+        sine_wave, [claim("for n in [2, 50] ⊂ Z, f(amp, freq, n)[i] == amp*sin(2*pi*freq*i/(n-1))",
                          route="derive")])
     assert results[0].verdict == "proven"
 
 
 def test_linspace_bare_array_return_proves_literal_index_boundary():
     results = check_conjectures(
-        sine_wave, [claim("f(amp, freq, n)[0] == 0", route="derive")])
+        sine_wave, [claim("for n in [2, 50] ⊂ Z, f(amp, freq, n)[0] == 0", route="derive")])
     assert results[0].verdict == "proven"
 
 
 def test_linspace_tuple_of_arrays_return_proves_both_elements():
     results = check_conjectures(
-        ellipse_path, [claim("f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))",
+        ellipse_path, [claim("for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))",
                             route="derive")])
     assert results[0].verdict == "proven"
     results = check_conjectures(
-        ellipse_path, [claim("f(cx, cy, a, b, n)[1][i] == cy + b*sin(2*pi*i/(n-1))",
+        ellipse_path, [claim("for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[1][i] == cy + b*sin(2*pi*i/(n-1))",
                             route="derive")])
     assert results[0].verdict == "proven"
 
@@ -1682,7 +1682,7 @@ def test_reduction_over_a_local_array_declines_not_crash():
 
 def test_unindexed_array_valued_claim_is_unliftable_not_a_crash():
     results = check_conjectures(
-        sine_wave, [claim("f(amp, freq, n) == 0", route="derive")])
+        sine_wave, [claim("for n in [2, 50] ⊂ Z, f(amp, freq, n) == 0", route="derive")])
     assert results[0].verdict == "falsified"   # raises on sampled inputs
     assert "indexed" in results[0].note
 
@@ -1927,9 +1927,13 @@ def compound_balance_non_affine_update(P: float, r: float, n: float) -> float:
 
 def test_arithmetic_series_sum_matches_gauss_formula():
     # Gauss's formula: no sequence parameter at all, lift_sum()'s own
-    # scalar_index shape, a pure-additive accumulator.
+    # scalar_index shape, a pure-additive accumulator. The trip count
+    # ranges over whole, nonnegative numbers: range() raises TypeError
+    # for a float and is empty for a negative count.
     results = check_conjectures(
-        arithmetic_series_sum, [claim("f(a1, d, n) == n*(2*a1 + (n-1)*d)/2", route="derive")])
+        arithmetic_series_sum, [claim(
+            "for n in [0, 50] subset Z, f(a1, d, n) == n*(2*a1 + (n-1)*d)/2",
+            route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1952,7 +1956,8 @@ def test_compound_balance_matches_compound_interest_formula():
     # a genuine fold (coeff_acc = 1+r != 1), no sequence parameter at
     # all, lift_fold()'s own no-sequence shape.
     results = check_conjectures(
-        compound_balance, [claim("f(P, r, n) == P*(1+r)**n", route="derive")])
+        compound_balance, [claim("for n in [0, 50] subset Z, f(P, r, n) == P*(1+r)**n",
+                                 route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1961,7 +1966,8 @@ def test_compound_balance_affine_trip_count_proves():
     # bare name (range(n + 1), not just range(n)).
     results = check_conjectures(
         compound_balance_affine_trip_count,
-        [claim("f(P, r, n) == P*(1+r)**(n+1)", route="derive")])
+        [claim("for n in [-1, 50] subset Z, f(P, r, n) == P*(1+r)**(n+1)",
+               route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1987,7 +1993,7 @@ def gaussian_pdf(x: float, mu: float, sigma: float) -> float:
 def test_derivative_at_a_point_proves_projectile_range_maximized_at_45_degrees():
     results = check_conjectures(
         projectile_range, [claim("for g in [9, 10], "
-                                 "d(f(v0,theta,g), theta)@{theta=pi/4} == 0", route="derive")])
+                                 "d(f(v0,theta,g), theta)@{theta=pi/4} == 0", route="derive", pseudo_infinity=1e100)])
     # g bounded away from 0: the division's raising region is excluded
     assert results[0].verdict == "proven"
 
@@ -2003,7 +2009,7 @@ def test_derivative_at_a_point_with_multiple_substitutions():
 def test_plain_derivative_claim_without_evaluation_bar_still_works():
     results = check_conjectures(
         projectile_range, [claim("for g in [9, 10], d(f(v0,theta,g), theta) "
-                                 "== 2*v0**2*cos(2*theta)/g", route="derive")])
+                                 "== 2*v0**2*cos(2*theta)/g", route="derive", pseudo_infinity=1e100)])
     assert results[0].verdict == "proven"
 
 
@@ -2043,6 +2049,8 @@ def test_skipped_derive_claim_tags_unliftable_status_in_meta():
 
 
 def test_skipped_derive_claim_tags_undecided_status_in_meta():
-    results = check_conjectures(cube, [claim("f(x) <= f(y)", route="derive")])
+    def cube_product(x: float) -> float:
+        return x * x * x
+    results = check_conjectures(cube_product, [claim("f(x) <= f(y)", route="derive")])
     assert results[0].verdict == "falsified"   # x^3 <= y^3 is just false
     assert results[0].meta["mathema.derive_status"] == "undecided"

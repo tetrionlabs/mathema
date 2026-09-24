@@ -288,10 +288,11 @@ def accept_concepts(root: str, key: str, accepted: list,
             if c and c not in have:
                 have.append(c)
         doc.setdefault(key, {})["concepts_dismissed"] = have
-        with open(path, "w") as fh:
-            fh.write("# concept curation, dismissals recorded here so "
-                     "suggestions never repeat; part of .mathema/meta, "
-                     "committed with the store\n")
-            yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
+        from .spec import atomic_write_text
+        atomic_write_text(
+            path, "# concept curation, dismissals recorded here so "
+                  "suggestions never repeat; part of .mathema/meta, "
+                  "committed with the store\n"
+            + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
         wrote.append(f"dismissed {', '.join(dismissed)}")
     return "; ".join(wrote) or "nothing to write"

@@ -100,7 +100,10 @@ other. Every verdict carries the route that reached it:
 
 Nothing is asserted and nothing is quietly upgraded. Evidence remains evidence,
 proof remains proof, and an unresolved claim remains unresolved.
-[The evidence ladder](evidence-ladder.md) sets out every rung.
+[The evidence ladder](evidence-ladder.md) sets out every rung. The same rule
+holds for this site: every output on it was produced by a real run, and the
+test suite parses every claim these pages show, so a claim cannot quietly fall
+out of the grammar.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">A worked finding</span><span class="brk r"></span></span>
 
@@ -185,57 +188,28 @@ whether any test report covers it, and how well its docstring states its
 intent. Here is one module of mathema's own source:
 
 ```bash
-mathema audit mathema.locks --root .
+mathema audit mathema.intent --root .
 ```
 
 ```text
-                          ||              || derive route                                                                     || typing                || globals                                              ||           || docs    ||
-key            | span     || claims       || derives | cx | reason                             | code                         || typed | finite_domain || vars | mutates | funcs                               || tested    || quality || docsync
-mathema.locks
- ._write_locks | 58:66p   || {6 | 0 | -}  || no      | 1  | uses unsupported expression syntax | unsupported:unsupported-call || yes   | -             || -    | -       | locks_path                          || no-report || 0/3     || 50%
- .load_locks   | 45:55p   || {5 | 0 | -}  || no      | 2  | 1 branch                           | branch:unrecognized-shape    || yes   | -             || -    | -       | locks_path                          || no-report || 2/3     || 50%
- .lock         | 69:90p   || {13 | 0 | -} || no      | 5  | 4 branches                         | branch:bare-local-name+1     || yes   | -             || -    | -       | load_locks, LockError, _write_locks || no-report || 4/9     || 40%
- .lock_state   | 105:120p || {9 | 0 | -}  || no      | 3  | 2 branches                         | branch:untraceable-local+1   || yes   | -             || -    | -       | -                                   || no-report || 3/7     || 92%
- .locks_path   | 38:42p   || {5 | 0 | -}  || no      | 1  | uses unsupported expression syntax | unsupported:unsupported-call || yes   | -             || -    | -       | -                                   || no-report || 2/3     || 44%
- .unlock       | 93:102p  || {7 | 0 | -}  || no      | 2  | 1 branch                           | branch:two-names-compare     || yes   | -             || -    | -       | load_locks, LockError, _write_locks || no-report || 3/6     || 40%
+                         ||             || derive route                                                        || typing                || globals                                                                  ||           || docs    ||
+key           | span     || claims      || derives | cx | reason                         | code                || typed | finite_domain || vars                      | mutates | funcs                              || tested    || quality || docsync
+mathema.intent
+ ._references | 93:146p  || {6 | 0 | -} || no      | 15 | 9 branches, 3 loops (1 nested) | loop:multiple-loops || yes   | -             || _REF_SECTIONS, _URL, _DOI | -       | re                                 || no-report || 0/4     || 58%
+ ._sections   | 68:74p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION                  | -       | -                                  || no-report || 0/3     || 58%
+ ._summary    | 77:81p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION, _GOOGLE_HEADER  | -       | -                                  || no-report || 0/2     || 53%
+ .parse_doc   | 149:163p || {5 | 0 | -} || no      | 4  | 2 branches, 1 loop             | loop:not-a-fold     || yes   | -             || KEYWORDS                  | -       | DocIntent, _sections, _summary, +1 || no-report || 2/3     || 48%
 
-0/6 claimed, 0/6 derivable, 0/6 lift unconditionally, 6/6 fully typed, 14/31 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), mean docsync 53%.
+0/4 claimed, 0/4 derivable, 0/4 lift unconditionally, 4/4 fully typed, 2/12 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest; python -m coverage json`), 4/4 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 54%.
+`derives` is what the derive route can do here, given the domain the signature, docstring and claims declare. The reason/code cells describe the UNCONDITIONAL lift, the body with nothing supplied, so a branch:needs-domain row reads blocked there and derives all the same, once a claim declares the domain that prunes the branch. Neither is a ceiling: a probe claim can still be written and adjudicated for every function here.
 ```
 
-`sed -n 69,90p mathema/locks.py` prints `lock` and nothing else, which is what
-makes the table useful to an agent as much as to a person: it can go from
-"where is the function that writes the lock file" to the exact lines in one
+`sed -n 149,163p mathema/intent.py` prints `parse_doc` and nothing else, which
+is what makes the table useful to an agent as much as to a person: it can go
+from "where is the function that parses a docstring" to the exact lines in one
 step. `mathema audit --index` writes the same map for a whole codebase to
 `.mathema/index.yaml`, with each module's stated intent, every function's
 file, line and span, and a pointer to its verified record where one exists.
-
-Run over all of mathema, the summary line reads:
-
-```text
-0/1268 claimed, 26/1268 derivable, 26/1268 lift unconditionally, 521/1268 fully typed, 3130/6152 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), 282/1268 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 45%.
-```
-
-Those are unflattering numbers, and they are the point: not one of mathema's
-own 1,268 functions carries a claim yet, only 26 are in a shape the derive
-route can prove things about, and 282 depend on state outside their own
-parameters. A report like that is where verification work starts, because it
-says exactly where the knowledge ends.
-
-<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Honest numbers</span><span class="brk r"></span></span>
-
-## Built with its own tools
-
-mathema's own source is 53,313 lines of Python in 92 files (counted
-with `find mathema -name '*.py' | xargs cat | wc -l`), exercised by 2,684
-tests (`python -m pytest --collect-only -q`). The suite also parses every claim
-shown anywhere in these docs, so a page cannot drift out of the grammar
-unnoticed, and the claims the README and the grammar page teach are drawn from
-a curated lexicon of 135 that it renders and adjudicates on every run.
-
-What mathema does not yet do is carry claims about its own functions, as the
-audit above shows. Turning its own tools on itself, so that the engine's
-claims live in its own record store and gate its own changes, is planned work
-rather than a present fact, and this page will say so until it is done.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Agents and people</span><span class="brk r"></span></span>
 
@@ -251,9 +225,9 @@ exposes to an agent accepts a verdict from its caller, and the decisions that
 turn a verdict into an accepted fact about your codebase, accepting evidence as
 sufficient, owning a residual risk, or declaring that a falsification revealed
 a wrong claim rather than a bug, go through [`mathema accept`](modes/accept.md),
-which is a person at a terminal. With a [PIN set](modes/pin.md), every such
-decision is stamped in the record as having been made by someone who knew it,
-which an agent does not.
+which is a person at a terminal. Set a [PIN](modes/pin.md) the agent does not
+know, and every such decision needs it and is stamped in the record as made by
+someone who knew it, which the agent cannot be.
 
 Settled code can be frozen at the level that matters, the individual function.
 [`mathema lock`](modes/lock.md) pins a function's structure, after which any
@@ -279,15 +253,58 @@ An agent is allowed to lock a function it has finished, which narrows what it
 can break on its next pass. Only a person can unlock one, behind a prompt with
 no `--yes` flag and, when set, the PIN.
 
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">System 0</span><span class="brk r"></span></span>
+
+## No model in the loop
+
+In the familiar framing, a language model answering at once is System 1,
+fast and fluent, and a reasoning model working through steps is System 2,
+slower and more deliberate. Both generate, and both can be wrong in ways that
+read as right. mathema sits underneath them as System 0: it generates
+nothing, guesses nothing and spends no tokens. Everything it concludes comes
+from reading the function's syntax tree, doing algebra on what it finds, and
+running the real code on inputs it chooses, the same kind of deterministic
+machinery as a compiler or a test runner. Its only required dependencies are
+sympy and pyyaml.
+
+That changes what a verdict is worth next to an agent. The agent cannot talk
+mathema round, because there is no prompt to talk to; the answer depends on
+the code and the claim and nothing else. A check costs CPU seconds rather
+than tokens, so it runs on every commit in CI, offline, on a machine with no
+account and no API key. And the same code, claims and version give the same
+verdicts on every run: sampling is seeded, and the one thing that can vary
+between machines, whether a proof finishes inside its time cap, is written
+into the record whenever the cap was hit, so a `holds` that would have been
+a `proven` on a quieter machine says so.
+
+When a proof matters more than the time it takes, `extensive=True` asks for
+more. It is off by default and costs real time. The ordinary proof attempt
+gets up to 15 seconds instead of 3, and a claim it still leaves undecided goes
+on to a ladder of genuinely different strategies, each given 3 seconds of its
+own: exact root isolation for polynomial differences, interval refinement over
+the domain, a gallery of equivalent rewrites, a library of changes of
+variable, and z3's nonlinear real arithmetic when the `smt` extra is
+installed, followed by one more try of the ordinary attempt at 15 seconds.
+Behind all of that sits a failsafe: whatever happens, the ladder stops at 45
+seconds, so a single claim can never hold up a run indefinitely. Probing
+searches harder at the same time, spending the wider cap on finding the
+critical points worth sampling, and a proof found this way records its route
+as `derive:extensive`, so the extra effort is visible in the record.
+
+That is the division of labour the rest of this page assumes. Let a model
+propose the code and the claims, which is what models are good at, and let
+something that cannot be persuaded decide which of them are true.
+
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Who it's for</span><span class="brk r"></span></span>
 
 ## One engine, several jobs
 
 - **If you work alongside a coding agent**, mathema is the part of the loop the
   agent cannot talk its way past: it states claims, mathema checks them, you
-  accept or reject, and the functions you have signed off stay locked. The
-  [MCP interface](modes/mcp.md) gives the agent the checking tools and none of
-  the deciding ones.
+  accept or reject, and the functions you have signed off stay locked. Set a
+  PIN the agent does not know and it cannot sign off for you;
+  [working with coding agents](agents.md) covers that and the optional agent
+  tooling.
 - **If you have just inherited a codebase**, [`mathema audit`](modes/audit.md)
   is the first hour of reading done for you: every function, where it lives as
   a ready-made `sed -n` line range, what it touches, whether anything tests or
@@ -307,24 +324,91 @@ no `--yes` flag and, when set, the PIN.
 - **If you answer to an auditor**, every acceptance, unlock and lock is in the
   record with who made it and when, PIN-stamped when a PIN is set.
 
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Case study</span><span class="brk r"></span></span>
+
+## A harder case
+
+The same machinery reaches much further than a midpoint. Here is a European
+call minus a European put on the same strike, both priced by Black-Scholes,
+with a square root, a logarithm, an exponential and the Gaussian CDF:
+
+```python
+import math
+
+def put_call_parity_gap(s: float, k: float, r: float, t: float,
+                        sigma: float) -> float:
+    """A European call minus a European put on the same strike."""
+    root_t = math.sqrt(t)
+    d1 = (math.log(s / k) + (r + 0.5 * sigma * sigma) * t) / (sigma * root_t)
+    d2 = d1 - sigma * root_t
+    phi = lambda z: 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+    call = s * phi(d1) - k * math.exp(-r * t) * phi(d2)
+    put = k * math.exp(-r * t) * phi(-d2) - s * phi(-d1)
+    return call - put
+```
+
+Put-call parity says that difference is `s - k*exp(-r*t)` whatever the
+volatility, a surprising thing to claim about a function in which `sigma`
+appears five times:
+
+```bash
+mathema check options.py --claim "for s in [50,150], k in [50,150], \
+    r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], \
+    f(s,k,r,t,sigma) == s - k*exp(-r*t)"
+```
+
+```text
+ok   options.put_call_parity_gap: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+```
+
+`proven`, over every point of a five-dimensional region of prices, rates,
+maturities and volatilities: mathema read the body as mathematics, both
+Gaussian terms cancelled, and `sigma` disappeared. No number of test cases
+could establish that. The [case studies](case-studies.md#put-call-parity-and-the-greeks)
+go on to the Greeks, stated as the partial derivatives they are.
+
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Direction</span><span class="brk r"></span></span>
 
 ## Where this goes
 
 !!! note "Direction, not current capability"
-    This section describes where mathema is heading. Nothing in it should be
-    read as a feature of the current release beyond what the linked pages
-    document.
+    Each thread below starts from what mathema does today, then says where
+    it is heading. The heading part is direction: nothing beyond what the
+    linked pages document is a feature of the current release.
 
-Evidence is earned about one implementation, and the natural next step is
-letting it travel. Today, [claims transfer](claims-transfer.md) carries
-evidence in from curated knowledge about the libraries your code calls, across
-between implementations shown to be equivalent, and out as a compendium others
-can consume. The direction is to make that routine across languages, so the
-claims written once about a pricing function hold the Python prototype and the
-production port to the same statement, and to connect claims upward to the
-policies and requirements they exist to satisfy, so that a line of code can be
-traced to the reason it has to behave the way it does.
+### One claim, every implementation
+
+A claim is a statement about mathematics, not about Python, and mathema
+already treats it that way: [claims transfer](claims-transfer.md) checks a C++
+port of a function against its Python original by sampling shared inputs,
+today. The direction is to make every language a first-class citizen, so the
+claims written once about a pricing function or a signal filter hold the
+Python prototype, the C++ engine and the TypeScript front end to the same
+statement, and a port that drifts is caught the day it drifts rather than the
+day a number looks wrong.
+
+### Linear algebra as a first-class subject
+
+mathema already reads [matrix structure](matrix-structure.md), symmetric,
+orthogonal, positive definite, and proves identities such as
+`det(A @ B) == det(A) * det(B)` over whole families of matrices. The direction
+is deeper:
+eigenvalue and decomposition claims, conditioning and numerical stability
+stated as claims, and matrix calculus, so the code at the heart of
+optimisation and machine learning can be held to the mathematics it
+implements.
+
+### Complex analysis
+
+Identities over the complex plane already prove: for `f(z) = z*z`, the claim
+`for z in C, f(-z) == f(z)` is settled for every complex `z`. The direction is
+the analysis itself, analyticity, branch cuts, poles and residues, and contour
+integrals, which is where signal processing, control and much of physics
+actually live.
+
+Each of these widens what can be stated and proven, while the rule stays the
+same as it is today: evidence remains evidence, proof remains proof, and
+whatever cannot yet be settled says so.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Start</span><span class="brk r"></span></span>
 

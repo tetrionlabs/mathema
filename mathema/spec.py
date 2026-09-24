@@ -367,15 +367,52 @@ def write_yaml(path: str, data: dict, header: str | None = None) -> str:
     block (one `# ` line per header line, so a multi-line header stays
     a comment), creating the parent directory first, the one shared
     spelling of every store write (specs, machine records, declared
-    stubs, suggested claims). Returns `path`."""
+    stubs, suggested claims). Returns `path`.
+
+    The write is atomic (see `atomic_write_text`): an interrupted or
+    failed write leaves the previous file exactly as it was."""
+    text = ""
+    if header:
+        text = "".join(f"# {line}\n" if line else "#\n"
+                       for line in header.splitlines())
+    return atomic_write_text(path, text + dump_yaml(data))
+
+
+def atomic_write_text(path: str, text: str) -> str:
+    """Intent:
+        Replace the file at `path` with `text` all at once, creating
+        the parent directory first. The text goes to a temporary file
+        in the same directory, is flushed to disk, and is renamed over
+        `path`; a rename within one filesystem is atomic, so a reader
+        (or an interrupted run) sees either the old file or the new
+        one, never a truncated one. An existing file's permission
+        bits carry over. Returns `path`.
+    """
+    import tempfile
     d = os.path.dirname(path)
     if d:
         os.makedirs(d, exist_ok=True)
-    with open(path, "w") as fh:
-        if header:
-            for line in header.splitlines():
-                fh.write(f"# {line}\n" if line else "#\n")
-        fh.write(dump_yaml(data))
+    fd, tmp = tempfile.mkstemp(dir=d or ".",
+                               prefix=f".{os.path.basename(path)}.",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if os.path.exists(path):
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp, 0o666 & ~umask)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     return path
 
 
@@ -518,27 +555,33 @@ def _git_commit(root: str) -> "str | None":
     return sha if out.returncode == 0 and len(sha) == 40 else None
 
 
-def integrity_checksum(entry: dict) -> str:
+_INTEGRITY_SCHEME = "v2"
+
+
+def _acceptance_summary(row: dict) -> str:
     """Intent:
-        The tamper-evidence checksum over a verified entry's key
-        fields: sorted (claim name, verdict, acceptance) triples plus
-        the form hash and any lock stamp. Acceptance is summarized as
-        (as, verified_by key, staleness), so a hand-forged or
-        hand-stripped sign-off trips the mismatch the same way an
-        edited verdict does. Deliberately narrow otherwise;
-        notes/sketches/meta are free to be reformatted. Advisory: a
-        mismatch warns and points at the fix, it does not block.
+        A claim row's acceptance as the checksum sees it: the
+        disposition, the key id of any credential that verified it, and
+        whether it has gone stale.
+    """
+    accepted = row.get("accepted")
+    if not isinstance(accepted, dict):
+        return ""
+    vb = accepted.get("verified_by") or {}
+    return (f"{accepted.get('as', '')}:{vb.get('key', '')}"
+            f":{1 if accepted.get('stale') else 0}")
+
+
+def _legacy_integrity_checksum(entry: dict) -> str:
+    """Intent:
+        The checksum a record carries when it was stamped before the
+        current scheme: sorted (claim name, verdict, acceptance) triples
+        plus the form hash and any lock stamp, as a bare 16-hex digest.
+        Kept so a record stamped that way still verifies unchanged.
     """
     import hashlib
-    def _acc(c: dict) -> str:
-        accepted = c.get("accepted")
-        if not isinstance(accepted, dict):
-            return ""
-        vb = accepted.get("verified_by") or {}
-        return (f"{accepted.get('as', '')}:{vb.get('key', '')}"
-                f":{1 if accepted.get('stale') else 0}")
-
-    rows = sorted((c.get("name") or "", c.get("verdict") or "", _acc(c))
+    rows = sorted((c.get("name") or "", c.get("verdict") or "",
+                   _acceptance_summary(c))
                   for c in entry.get("claims") or [])
     basis = "|".join(f"{n}={v};{a}" for n, v, a in rows)
     basis += f"#form={(entry.get('identity') or {}).get('form', '')}"
@@ -546,6 +589,76 @@ def integrity_checksum(entry: dict) -> str:
     if isinstance(locked, dict):
         basis += f"#locked={locked.get('form', '')}"
     return hashlib.sha256(basis.encode()).hexdigest()[:16]
+
+
+def integrity_checksum(entry: dict) -> str:
+    """Intent:
+        The tamper-evidence checksum over a verified entry's material
+        content, spelled `v2:<16 hex>`. It covers, for every live claim
+        row, what the claim states (name, statement, domain, route,
+        tolerance), its verdict and its acceptance (as, verified_by
+        key, staleness); every row of the `discoveries`, `historical`
+        and `superseded` sections the same way; the form hash, the
+        claims fingerprint, the intent acceptance and any lock stamp.
+        A hand edit to any of these, including a row added to a
+        retirement section, trips the mismatch. Notes, sketches and
+        meta are free to be reformatted.
+    Notes:
+        The digest is unkeyed, so it detects an edit made without
+        recomputing it; anyone who can run the computation can restamp
+        a record. A mismatch warns, and under a policy with
+        `require_verification` it fails the sweep.
+    """
+    import hashlib
+    import json
+
+    def _row(section: str, c: dict) -> str:
+        if not isinstance(c, dict):
+            return f"{section}|{json.dumps(c, sort_keys=True, default=str)}"
+        fields = {"name": c.get("name") or "",
+                  "statement": c.get("statement") or c.get("law") or "",
+                  "verdict": c.get("verdict") or "",
+                  "route": c.get("route") or "",
+                  "tolerance": c.get("tolerance"),
+                  "domain": c.get("domain"),
+                  "superseded_by": c.get("superseded_by"),
+                  "accepted": _acceptance_summary(c)}
+        return f"{section}|" + json.dumps(fields, sort_keys=True,
+                                          default=str)
+
+    parts = sorted(_row("claims", c) for c in entry.get("claims") or [])
+    for section in ("discoveries", "historical", "superseded"):
+        parts.extend(sorted(_row(section, c)
+                            for c in entry.get(section) or []))
+    identity = entry.get("identity") or {}
+    parts.append(f"#form={identity.get('form', '')}")
+    parts.append(f"#claims_fingerprint="
+                 f"{identity.get('claims_fingerprint', '')}")
+    intent_accepted = entry.get("intent_accepted")
+    if isinstance(intent_accepted, dict):
+        parts.append("#intent=" + _acceptance_summary(
+            {"accepted": {"as": "documented", **intent_accepted}}))
+    locked = entry.get("locked")
+    if isinstance(locked, dict):
+        parts.append(f"#locked={locked.get('form', '')}")
+    digest = hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+    return f"{_INTEGRITY_SCHEME}:{digest}"
+
+
+def integrity_matches(entry: dict) -> "bool | None":
+    """Intent:
+        Whether a verified entry's contents match its stored integrity
+        checksum, under whichever scheme stamped it: a `v2:` checksum
+        is compared with `integrity_checksum`, a bare digest with the
+        earlier scheme. None when the entry carries no checksum at all.
+    """
+    stored = (entry.get("identity") or {}).get("integrity")
+    if not stored:
+        return None
+    stored = str(stored)
+    if stored.startswith(f"{_INTEGRITY_SCHEME}:"):
+        return integrity_checksum(entry) == stored
+    return _legacy_integrity_checksum(entry) == stored
 
 
 def pin_summary(entry: dict) -> "dict | str":
@@ -669,6 +782,45 @@ def _relativize_record_paths(spec: dict, root: str) -> None:
             fix(row)
 
 
+def base_route(route: "str | None") -> str:
+    """Intent:
+        A route as a claim is authored with it: `probe`, `derive` or
+        `best`, the subroute of an evidence route (`derive:extensive`)
+        dropped, and anything else read as `best`.
+    """
+    route = (route or "best").split(":", 1)[0]
+    return route if route in ("probe", "derive") else "best"
+
+
+def _stamp_authored_routes(spec: dict, claims: list) -> None:
+    """Intent:
+        Record on each claim row the route its claim was authored
+        with, as `authored.route`, beside the evidence route in
+        `route`. A claim authored with the default route is proven or
+        held by whichever route decided it, so the evidence route
+        alone cannot say how the claim was written.
+    """
+    authored = {c.get("name"): base_route(c.get("route"))
+                for c in claims if isinstance(c, dict) and c.get("name")
+                and (c.get("statement") or c.get("law"))}
+    for row in spec.get("claims") or []:
+        route = authored.get(row.get("name"))
+        if route is not None and row.get("statement"):
+            row.setdefault("authored", {})["route"] = route
+
+
+def authored_route(row: dict) -> str:
+    """Intent:
+        The route a verified row's claim was authored with: its
+        `authored.route` when the row records one, otherwise the base
+        of its evidence route, which is how a row written before the
+        authored route was kept reads.
+    """
+    stated = (row.get("authored") or {}).get("route") \
+        if isinstance(row.get("authored"), dict) else None
+    return base_route(stated or row.get("route"))
+
+
 def record(ex, key: str | None = None, root: str = ".",
           claims: list | None = None, declared_intent: str | None = None) -> str:
     """Write this explanation into the machine layer of the project store:
@@ -682,16 +834,25 @@ def record(ex, key: str | None = None, root: str = ".",
     Python-only parse of that same declared shape.
 
     `declared_intent` (an `intent:` field on the declared entry this
-    record was checked against, when one exists) is a deliberate
-    statement of intent, so it earns the `documented` rung; it fills
-    the record's own `intent` when the docstring provided none, and
-    stamps `meta["mathema.intent_provenance"]: documented` either way
-    (stating intent in the declared spec upgrades the evidence even
-    when a summary line also exists)."""
+    record was checked against, when one exists) fills the record's
+    own `intent` when the docstring provided none, and stamps
+    `meta["mathema.intent_provenance"]: declared`. Every stated intent
+    starts on the `declared` rung; `documented` is the human act of
+    accepting it (`mathema accept --intent`)."""
     key = key or getattr(ex.facts, "name", "unknown")
     path = os.path.join(verified_dir(root), f"{key}.yaml")
+    if os.path.exists(path):
+        _data, reason = read_verified_file(path)
+        if reason is not None:
+            raise UnreadableRecord(
+                f"{os.path.relpath(path, root)} {reason}; it is left as it "
+                f"is, since writing over it would drop the history it "
+                f"holds. Repair it (keep every discoveries, historical "
+                f"and superseded row from both sides of a merge), or "
+                f"restore it from git, and run again")
     spec = to_spec(ex)
     spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [])
+    _stamp_authored_routes(spec, claims or [])
     if declared_intent and not spec.get("intent"):
         # the declared layer's intent is the skeleton when the
         # docstring provides none, still the declared rung
@@ -745,8 +906,10 @@ def record(ex, key: str | None = None, root: str = ".",
         except Exception:
             prior = None
     prior_lineage = (prior or {}).get("lineage") or {}
-    if prior is not None and \
-            ((prior.get("identity") or {}).get("integrity") == new_integrity):
+    prior_stamp = ((prior or {}).get("identity") or {}).get("integrity")
+    if prior is not None and prior_stamp and integrity_matches(
+            {**spec, "identity": {**spec["identity"],
+                                  "integrity": prior_stamp}}):
         if prior_lineage.get("date"):
             spec.setdefault("lineage", {})["date"] = prior_lineage["date"]
         spec.setdefault("lineage", {})["commit"] = \
@@ -768,10 +931,11 @@ def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
         provenance) rather than re-recording from a live check.
 
     Notes:
-        The checksum covers claim names, verdicts, acceptance and the
-        form hash, so an amendment touching any of those recomputes it
-        honestly; everything else in the entry is written exactly as
-        given.
+        The checksum covers what each claim states, its verdict and
+        acceptance, the retirement rows and the form hash (see
+        `integrity_checksum`), so an amendment touching any of those
+        recomputes it honestly; everything else in the entry is
+        written exactly as given.
     """
     entry.setdefault("identity", {})["integrity"] = integrity_checksum(entry)
     form = (entry.get("identity") or {}).get("form", "")
@@ -1018,20 +1182,235 @@ def load_verified(root: str = ".") -> dict:
     function. This
     is the sole source of the `identity.form` hash `mathema verify` diffs
     the live code against; a declared entry never has one, so it must
-    never be consulted here."""
-    import yaml
+    never be consulted here.
+
+    A record file that does not read as a mapping (a merge left
+    conflict markers, the file is empty) is left out here and listed
+    by `unreadable_verified`."""
     merged: dict = {}
-    for machine_dir in (verified_dir(root),):
-        if not os.path.isdir(machine_dir):
-            continue
-        for name in sorted(os.listdir(machine_dir)):
-            if not name.endswith(".yaml"):
-                continue
-            path = os.path.join(machine_dir, name)
-            data = yaml.safe_load(open(path)) or {}
-            for key, entry in data.items():
-                merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
+    for path in _verified_files(root):
+        data, _reason = read_verified_file(path)
+        for key, entry in (data or {}).items():
+            merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
     return merged
+
+
+class UnreadableRecord(ValueError):
+    """A verified record file exists but does not read as a record, so
+    nothing may be written over it until a person repairs it."""
+
+
+def _verified_files(root: str) -> list:
+    machine_dir = verified_dir(root)
+    if not os.path.isdir(machine_dir):
+        return []
+    return [os.path.join(machine_dir, name)
+            for name in sorted(os.listdir(machine_dir))
+            if name.endswith(".yaml")]
+
+
+def read_verified_file(path: str) -> "tuple[dict | None, str | None]":
+    """Intent:
+        One verified record file as `(data, None)`, or `(None, reason)`
+        when it does not read as a record: it does not parse as YAML
+        (a merge left conflict markers), it is empty, or its top level
+        is not a mapping.
+    """
+    import yaml
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as e:
+        return None, f"cannot be read ({e.strerror or e})"
+    if not text.strip():
+        return None, "is empty"
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        where = f" at line {mark.line + 1}" if mark is not None else ""
+        conflict = ("; it holds merge conflict markers" if "\n<<<<<<< "
+                    in "\n" + text else "")
+        return None, f"does not parse as YAML{where}{conflict}"
+    if data is None:
+        return None, "is empty"
+    if not isinstance(data, dict):
+        return None, "is not a mapping of function keys to records"
+    return data, None
+
+
+def unreadable_verified(root: str = ".") -> dict:
+    """Intent:
+        Every verified record file that does not read as a record, as
+        `{key: {"source": relpath, "reason": text}}`, the key being the
+        file's name without `.yaml` (the name `record()` gives it).
+    """
+    out: dict = {}
+    for path in _verified_files(root):
+        data, reason = read_verified_file(path)
+        if reason is not None:
+            key = os.path.basename(path)[:-len(".yaml")]
+            out[key] = {"source": os.path.relpath(path, root),
+                        "reason": reason}
+    return out
+
+
+class ClaimsFileError(ValueError):
+    """A claims file whose shape mathema cannot read: the message names
+    the file, the function key and the field at fault."""
+
+
+_CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
+                 "grammar", "funcs", "pseudo_infinity", "meta", "authored",
+                 "source", "family", "note")
+_ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references")
+
+
+def _misspelling(field_name: str, known: tuple) -> "str | None":
+    """Intent:
+        The known field an unknown one is a near miss of, or None when
+        it is not close to any. An unknown field that is no near miss
+        is the author's own annotation and is left alone.
+    """
+    import difflib
+    if field_name in known:
+        return None
+    close = difflib.get_close_matches(field_name, known, n=1, cutoff=0.8)
+    return close[0] if close else None
+
+
+def _domain_problem(bound) -> "str | None":
+    """Intent:
+        Why one claims-file domain bound does not read, or None when it
+        does: `[lo, hi]`, `{lo, hi, closed_lo, closed_hi}`, `{set: [...]}`,
+        a stored `Domain` mapping, or the type names `Z` and `N`. An
+        interval needs real endpoints, neither NaN, with lo <= hi.
+    """
+    import math
+    if isinstance(bound, str):
+        return None if bound in ("Z", "N") else (
+            f"{bound!r} is not a bound (use [lo, hi], "
+            f"{{lo: .., hi: ..}}, {{set: [...]}}, Z or N)")
+    if isinstance(bound, list):
+        if len(bound) != 2:
+            return f"{bound!r} is not a [lo, hi] pair"
+        ends = bound
+    elif isinstance(bound, dict):
+        if "base_type" in bound or "set" in bound:
+            from .domain import domain_bound_from_json
+            try:
+                domain_bound_from_json(bound)
+            except (KeyError, TypeError, ValueError) as e:
+                return f"{bound!r} does not read ({e})"
+            return None
+        if "lo" not in bound or "hi" not in bound:
+            return f"{bound!r} needs both lo and hi"
+        ends = [bound["lo"], bound["hi"]]
+    else:
+        return f"{bound!r} is not a bound"
+    try:
+        lo, hi = (complex(e) if isinstance(e, str) and "j" in e.lower()
+                  else float(e) for e in ends)
+    except (TypeError, ValueError):
+        return f"{bound!r} has an endpoint that is not a number"
+    if isinstance(lo, complex) or isinstance(hi, complex):
+        return None
+    if math.isnan(lo) or math.isnan(hi):
+        return f"{bound!r} has a NaN endpoint"
+    if lo > hi:
+        return f"{bound!r} is inverted (lo > hi)"
+    return None
+
+
+def validate_claims_file(data, rel_path: str) -> None:
+    """Intent:
+        Check one parsed claims file's shape, and normalize a tolerance
+        written as numeric text (YAML reads `1e-6` as a string) to its
+        number. The shape: a mapping of function keys (plus an optional
+        file-level `grammar`) to entries; an entry is a mapping whose
+        `claims` is a list of mappings; each claim states its law as
+        text under `statement` (or `law`), names it at most once per
+        key, and gives a readable `domain` and a non-negative
+        `tolerance` when it gives them. A field that is a near miss of
+        a known one is refused, since it would otherwise be ignored.
+
+    Raises:
+        ClaimsFileError: the first shape problem, naming the file, the
+            key and the claim.
+    """
+    import math
+
+    def fail(where: str, problem: str):
+        raise ClaimsFileError(f"{rel_path}: {where}: {problem}")
+
+    if not isinstance(data, dict):
+        raise ClaimsFileError(
+            f"{rel_path}: the top level is a {type(data).__name__}, not a "
+            f"mapping of function keys to entries")
+    for key, entry in data.items():
+        if key == "grammar":
+            continue
+        if entry is None:
+            continue
+        if not isinstance(entry, dict):
+            fail(key, f"the entry is a {type(entry).__name__}, not a "
+                      f"mapping (expected `claims:` and the like under it)")
+        for field_name in entry:
+            near = _misspelling(str(field_name), _ENTRY_FIELDS)
+            if near:
+                fail(key, f"unknown field {field_name!r} (did you mean "
+                          f"{near!r}?)")
+        claims = entry.get("claims")
+        if claims is None:
+            continue
+        if not isinstance(claims, list):
+            fail(key, f"`claims` is a {type(claims).__name__}, not a list")
+        seen: set = set()
+        for i, c in enumerate(claims, 1):
+            if not isinstance(c, dict):
+                fail(key, f"claim {i} is a {type(c).__name__}, not a mapping "
+                          f"(write it as `- statement: ...`)")
+            label = f"claim {c.get('name')!r}" if c.get("name") \
+                else f"claim {i}"
+            for field_name in c:
+                near = _misspelling(str(field_name), _CLAIM_FIELDS)
+                if near:
+                    fail(key, f"{label}: unknown field {field_name!r} (did "
+                              f"you mean {near!r}?)")
+            text = c.get("statement", c.get("law"))
+            if text is None:
+                fail(key, f"{label} has no `statement`")
+            if not isinstance(text, str) or not text.strip():
+                fail(key, f"{label}: `statement` must be the claim's text, "
+                          f"not {text!r}")
+            name = c.get("name")
+            if name is not None:
+                if not isinstance(name, str) or not name.strip():
+                    fail(key, f"claim {i}: `name` must be text, not {name!r}")
+                if name in seen:
+                    fail(key, f"claim name {name!r} is used twice; each "
+                              f"claim under one key needs its own name")
+                seen.add(name)
+            tol = c.get("tolerance")
+            if tol is not None:
+                try:
+                    value = float(tol)
+                except (TypeError, ValueError):
+                    value = float("nan")
+                if isinstance(tol, bool) or math.isnan(value) or value < 0:
+                    fail(key, f"{label}: `tolerance` must be a non-negative "
+                              f"number, not {tol!r}")
+                if isinstance(tol, str):
+                    c["tolerance"] = value
+            domain = c.get("domain")
+            if domain is not None:
+                if not isinstance(domain, dict):
+                    fail(key, f"{label}: `domain` must map each parameter "
+                              f"to its bound, not {domain!r}")
+                for param, bound in domain.items():
+                    problem = _domain_problem(bound)
+                    if problem:
+                        fail(key, f"{label}: `domain` for {param}: {problem}")
 
 
 def load_declared(root: str = ".") -> dict:
@@ -1061,12 +1440,21 @@ def load_declared(root: str = ".") -> dict:
 
     merged: dict = {}
     for _, path in sorted(files):          # shallow first, deep last → deep wins
-        data = yaml.safe_load(open(path)) or {}
-        if not isinstance(data, dict):
+        rel_path = os.path.relpath(path, root)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = yaml.safe_load(fh)
+        except yaml.YAMLError as e:
+            mark = getattr(e, "problem_mark", None)
+            where = f" at line {mark.line + 1}" if mark is not None else ""
+            raise ClaimsFileError(
+                f"{rel_path}: malformed YAML{where}") from None
+        if data is None:
             continue
+        validate_claims_file(data, rel_path)
         file_grammar = data.pop("grammar", None)
         for key, entry in data.items():
-            if not isinstance(entry, dict):
+            if entry is None:
                 continue
             entry.pop("identity", None)    # a declared file never states one
             if file_grammar:
@@ -1298,7 +1686,7 @@ def declare(cj) -> dict:
 # the candidate name set before it decides whether to call
 # render_law_expr at all, so a lightweight regex pass is simpler than
 # parsing twice.
-_IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+_IDENTIFIER = re.compile(r"[^\W\d]\w*")
 
 
 def _ordered_real_param_names(cj, excluded: set) -> list:
@@ -1310,10 +1698,12 @@ def _ordered_real_param_names(cj, excluded: set) -> list:
     already found in the text. Both auto-let mechanisms below (a Greek-
     word exact match, the long-name pool) depend on this order being
     identical every time the same claim is rendered, in any process."""
+    from ._scan import blank_strings
+
     seen: list = []
     for text in (cj.lhs, cj.rhs):
         if isinstance(text, str):
-            for name in _IDENTIFIER.findall(text):
+            for name in _IDENTIFIER.findall(blank_strings(text)):
                 if name not in excluded and name not in seen:
                     seen.append(name)
     for name in cj.domain:
@@ -1366,18 +1756,38 @@ def _symbology_answers(provider, params, funcs) -> tuple[dict, dict]:
 
 
 
+def _symbology_clash(param_symbols: dict, real_params) -> str | None:
+    """Intent:
+        Why a provider's parameter symbols cannot be used together, or
+        None when they can: a symbol that spells a different real
+        parameter of the claim, or one symbol proposed for two
+        parameters. Either makes two parameters share a spelling in
+        the rendered text.
+    """
+    params = set(real_params)
+    owner: dict = {}
+    for name, symbol in param_symbols.items():
+        if symbol == name:
+            continue
+        if symbol in params:
+            return (f"it renders parameter {name} as {symbol!r}, which is "
+                    f"already the name of parameter {symbol}")
+        if symbol in owner:
+            return (f"it renders both {owner[symbol]} and {name} as "
+                    f"{symbol!r}")
+        owner[symbol] = name
+    return None
+
+
 def _auto_renames(cj, funcs: frozenset, unicode: bool,
-                  long_param_threshold: int, long_func_threshold: int,
-                  canonical: bool = False):
+                  long_param_threshold: int, canonical: bool = False):
     """`(param_renames, func_renames, suppress_glyphs)`, the first two
-    are kept separate because a real parameter's original name is worth
-    preserving via an explicit `let <symbol> = <name>` clause (it's the
-    function's actual argument name, needed to reparse back to the same
-    domain key), while a function alias's own chosen text in the claim
-    isn't (it was never anything but a display choice made for this one
-    claim's own `let <alias> = <target>` binding), so a long alias is
-    simply replaced at that same binding site instead, with no extra
-    clause.
+    are kept separate because a real parameter's rename is stated by an
+    explicit `let <symbol> = <name>` clause (it's the function's actual
+    argument name, needed to reparse back to the same domain key),
+    while a function name has no such clause: a function name is part
+    of the claim's canonical text, so only a symbology provider renames
+    one, at its own binding site.
 
     Both sources feeding `param_renames`, a real parameter whose name
     spells a Greek letter's English word (`greek_symbol_for_name`,
@@ -1388,10 +1798,7 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     an arbitrary positional letter would read as noise, not a
     convention, in ASCII text, and even in unicode, a routine English
     word is common enough below ~8 characters that a lower bar would
-    catch ordinary, well-chosen names too often to be welcome. A long
-    function alias, in contrast, auto-lets in *both* modes at its own
-    (lower) `long_func_threshold`, since shortening it to a familiar
-    function letter is the well-established convention either way.
+    catch ordinary, well-chosen names too often to be welcome.
 
     Both draw from one shared `taken` set seeded with every name
     already this short in the claim (an existing single-letter real
@@ -1421,9 +1828,13 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     falling back to `_MATH_ATTRS`, so a genuine `pi`-named parameter is
     already proven/disproven correctly regardless of how this renders."""
     from .grammar import auto_short_names, greek_symbol_for_name, reserved_names
-    from ._providers import get_provider, report_provider_failure
+    from ._providers import (get_provider, report_provider_failure,
+                             report_provider_rejection)
 
-    excluded = funcs | {"f"} | set(cj.free_vars) | reserved_names()
+    # `eps`/`epsilon`/`ε` are the claim's tolerance, not parameters to
+    # rename
+    excluded = (funcs | {"f", "eps", "epsilon", "ε"} | set(cj.free_vars)
+                | reserved_names())
     real_params = _ordered_real_param_names(cj, excluded)
 
     param_renames: dict = {}
@@ -1460,6 +1871,13 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
         except Exception as exc:
             report_provider_failure("symbology", exc)
             provider_params, provider_funcs = {}, {}
+        clash = _symbology_clash(provider_params, real_params)
+        if clash is not None:
+            # a parameter shown under another parameter's name reparses
+            # as a different claim, so none of this provider's answers
+            # are used for this render
+            report_provider_rejection("symbology", clash)
+            provider_params, provider_funcs = {}, {}
     for name in real_params:
         symbol = provider_params.get(name)
         if symbol is not None and symbol not in taken:
@@ -1471,7 +1889,7 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
             if name in param_renames:
                 continue
             symbol = greek_symbol_for_name(name)
-            if symbol is not None:
+            if symbol is not None and symbol not in taken:
                 param_renames[name] = symbol
                 taken.add(symbol)
         long_params = [n for n in real_params if n not in param_renames
@@ -1490,19 +1908,11 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
             func_renames[name] = symbol
             taken.add(symbol)
 
-    # A function rename is a DISPLAY choice, and it only survives a round
-    # trip where the claim has a `let <alias> = <target>` binding site for
-    # the shortened name to be written back at. A bare call resolved out of
-    # the target's own module scope has no such site, so renaming it in the
-    # stored spelling would emit an orphan `g` that reparses to nothing and
-    # rebinds to nothing. Canonical text therefore keeps real function
-    # names, which is what its own contract already promises.
-    long_funcs = [] if canonical else [
-        n for n in cj.funcs if len(n) > long_func_threshold
-        and n not in func_renames]
-    pool_renames = auto_short_names(long_params, long_funcs, unicode=unicode, taken=taken)
+    # a function name, alias or not, is part of the canonical text, and a
+    # display that shortened it would reparse to a different claim, so
+    # the positional pool shortens real parameters only
+    pool_renames = auto_short_names(long_params, [], unicode=unicode, taken=taken)
     param_renames.update({n: pool_renames[n] for n in long_params})
-    func_renames.update({n: pool_renames[n] for n in long_funcs})
     return param_renames, func_renames, suppress_glyphs
 
 
@@ -1557,7 +1967,6 @@ def fingerprint_text(cj) -> str:
 
 def render_claim_text(cj, *, unicode: bool | None = None,
                       long_param_threshold: int = 8,
-                      long_func_threshold: int = 6,
                       canonical: bool = False) -> str:
     """The alternative to declare()'s structured-dict shape: one
     parseable string a person can copy straight back into `claim(...)`
@@ -1590,11 +1999,12 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     bound-function definition, exactly as incomplete as declare()'s own
     dict would be for the same claim.
 
-    Auto-lets two kinds of name to a short spelling, each with its own
+    Auto-lets a real parameter's name to a short spelling, with its own
     synthesized `let` clause stating the substitution explicitly rather
-    than leaving a reader to guess why a name changed spelling:
+    than leaving a reader to guess why a name changed spelling, unicode
+    output only:
 
-    - Unicode output only: a real parameter whose name spells a Greek
+    - A real parameter whose name spells a Greek
       letter's English name (`theta`, `alpha`, ...) auto-lets to the
       actual symbol (`θ`, `α`, ...), the same bridge a claim's own
       text already builds by hand (`let \\alpha = alpha`, see
@@ -1606,17 +2016,12 @@ def render_claim_text(cj, *, unicode: bool | None = None,
       first, then a fixed pool mixing Latin and a curated set of Greek
       letters, purely positional. Both are unicode-only: ASCII has no
       single-letter convention for an ordinary *variable* the way
-      `f`/`g`/`h` already is for a *function* (below), so a positional
+      `f`/`g`/`h` already is for a *function*, so a positional
       letter would read as noise there, not a convention, ASCII
       output always keeps a real parameter's plain, authored word.
-    - Both output modes: a function-alias name longer than
-      `long_func_threshold` characters (default 6) auto-lets to a short
-      spelling the same way (`f`/`g`/`h`, then in unicode `φ`/`ψ`/`χ`)
-     ; simply substituted at its own existing `let <alias> = <target>`
-      binding site, no extra clause, since the alias text was never
-      anything but a display choice made for this one claim (unlike a
-      real parameter's name, which is the function's actual argument
-      name and worth keeping visible via its own `let` clause).
+    - A function name, a `let` alias included, is never shortened:
+      it is part of the claim's canonical text, and a display that
+      renamed it would reparse to a different claim.
 
     Separately (no `let`, no rename): a real parameter named exactly
     `pi` or `oo` suppresses that constant's usual unicode glyph
@@ -1625,12 +2030,13 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     here."""
     from .grammar import get_unicode_output, render_domain, render_law_expr
     from ._providers import get_provider
+    from ._scan import sub_outside_strings
 
     if unicode is None:
         unicode = get_unicode_output()
     funcs = frozenset(cj.funcs)
     param_renames, func_renames, suppress_glyphs = _auto_renames(
-        cj, funcs, unicode, long_param_threshold, long_func_threshold,
+        cj, funcs, unicode, long_param_threshold,
         canonical=canonical)
 
     # Same symbology capability as _auto_renames; here it may also
@@ -1702,14 +2108,15 @@ def render_claim_text(cj, *, unicode: bool | None = None,
 
     def apply_safe_renames(text: str) -> str:
         for name, symbol in func_renames.items():
-            text = re.sub(rf"\b{re.escape(name)}\b", symbol, text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b", symbol, text)
         for name, symbol in safe_param_renames.items():
-            text = re.sub(rf"\b{re.escape(name)}\b", symbol, text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b", symbol, text)
         return text
 
     def apply_unsafe_backticks(text: str) -> str:
         for name, symbol in unsafe_param_renames.items():
-            text = re.sub(rf"\b{re.escape(name)}\b", f"`{symbol}`", text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b",
+                                       f"`{symbol}`", text)
         return text
 
     _REL_GLYPH = {"==": "=", "<=": "≤" if unicode else "<=",
@@ -1826,6 +2233,12 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         parts.append(assuming_text)
     if let_segments:
         parts.append(sep.join(let_segments))
+        if not for_segments:
+            # `name = expr` straight after a let run reads as one more
+            # binding, so an equation with a bare-name side is spelled
+            # with `==` there
+            statement = re.sub(r"^(\s*\w+\s*)=(?![=:])", r"\1==",
+                               statement, count=1)
     if for_segments:
         parts.append(("∀ " if unicode else "for ") + sep.join(for_segments))
     if getattr(cj, "outcome", ""):

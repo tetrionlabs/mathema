@@ -49,13 +49,13 @@ def test_plain_comma_form_has_no_ambiguous_vars():
 
 
 def test_fraction_sugar_proves_correctly_end_to_end():
-    result = check_conjectures(square, [claim("d(f(x)/dx) == 2*x", route="derive")])[0]
+    result = check_conjectures(square, [claim("d(f(x)/dx) == 2*x", route="derive", pseudo_infinity=1e100)])[0]
     assert result.verdict == "proven"
 
 
 def test_fraction_sugar_division_escape_hatch_proves_correctly():
     result = check_conjectures(
-        square, [claim("d((1 + f(x))/(2+3)/dx) == 2*x/5", route="derive")])[0]
+        square, [claim("d((1 + f(x))/(2+3)/dx) == 2*x/5", route="derive", pseudo_infinity=1e100)])[0]
     assert result.verdict == "proven"
 
 
@@ -103,11 +103,11 @@ def test_prime_notation_ambiguous_is_left_unexpanded():
 
 
 def test_d_single_arg_and_prime_prove_correctly_end_to_end():
-    r1 = check_conjectures(square, [claim("d(f(x)) == 2*x", route="derive")])[0]
+    r1 = check_conjectures(square, [claim("d(f(x)) == 2*x", route="derive", pseudo_infinity=1e100)])[0]
     assert r1.verdict == "proven"
-    r2 = check_conjectures(square, [claim("f'(x) == 2*x", route="derive")])[0]
+    r2 = check_conjectures(square, [claim("f'(x) == 2*x", route="derive", pseudo_infinity=1e100)])[0]
     assert r2.verdict == "proven"
-    r3 = check_conjectures(square, [claim("f''(x) == 2", route="derive")])[0]
+    r3 = check_conjectures(square, [claim("f''(x) == 2", route="derive", pseudo_infinity=1e100)])[0]
     assert r3.verdict == "proven"
 
 
@@ -352,3 +352,15 @@ def test_differentiate_wrt_a_param_named_e_does_not_resolve_to_eulers_number():
 
     # the bare token `e` in value position is still Euler's number
     assert canonical_claim_text(claim("for x in [1, 5], f(x) == e")).endswith("= e")
+
+
+def test_a_shadowed_constant_names_its_own_remedy():
+    from mathema.conjecture import claim, check_conjectures
+
+    def turn(pi: float) -> float:
+        return pi + 1.0
+
+    (p,) = check_conjectures(turn, [claim("for pi in [0, 1], f(pi) >= pi")])
+    assert "'pi' read as the parameter" in p.note or "pi read as the parameter" in p.note
+    assert "acos(-1)" in p.note, p.note
+    assert "exp(1)" not in p.note, p.note
