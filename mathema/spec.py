@@ -2071,7 +2071,7 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     `_auto_renames`'s own docstring for why suppressing beats renaming
     here."""
     from .grammar import get_unicode_output, render_domain, render_law_expr
-    from ._providers import get_provider
+    from ._providers import get_provider, report_provider_failure
     from ._scan import sub_outside_strings
 
     if unicode is None:
@@ -2081,32 +2081,24 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         cj, funcs, unicode, long_param_threshold,
         canonical=canonical)
 
-    # Same symbology capability as _auto_renames; here it may also
-    # restate the segment separator and whether an unbounded domain's
-    # missing side prints explicitly (default True, matching
-    # render_domain's own default). `None` from show_missing means "no
-    # opinion", so it defers to the True default rather than being
-    # treated as a False override.
-    #
-    # A separator is accepted only when it still *is* a comma once
-    # surrounding whitespace is removed, so `", "` and `",\n"` are both
-    # allowed and anything else falls back to the default. The claim
-    # grammar splits sections on the comma (`_split_commas`): a
-    # separator that is any other character renders a claim that cannot
-    # be read back, which is the same round-trip hazard
-    # `_is_safe_rename_symbol` guards the symbol path against.
+    # Same symbology capability as _auto_renames; here it may also say
+    # whether an unbounded domain's missing side prints explicitly
+    # (default True, matching render_domain's own default). `None` from
+    # show_missing means "no opinion", so it defers to the True default
+    # rather than being treated as a False override, and a provider that
+    # raises is reported once and treated the same way: a provider never
+    # crashes a render.
     provider = None if canonical else get_provider("symbology")
     sep = ", "
     domain_show_missing = True
     if provider is not None:
-        separator = getattr(provider, "separator", None)
-        if separator is not None:
-            candidate = separator()
-            if isinstance(candidate, str) and candidate.strip() == ",":
-                sep = candidate
         show_missing = getattr(provider, "show_missing", None)
         if show_missing is not None:
-            result = show_missing(cj)
+            try:
+                result = show_missing(cj)
+            except Exception as exc:
+                report_provider_failure("symbology", exc)
+                result = None
             if result is not None:
                 domain_show_missing = result
     # render_law_expr's own `funcs` set gates which call-shaped names it

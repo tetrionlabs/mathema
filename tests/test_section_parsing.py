@@ -9,7 +9,7 @@ marker, are recognized and captured verbatim, with no adjudication
 semantics yet. Also covers the backtick-escaped display-symbol alias
 (`` let `<token>` = <name> ``) both directions: parsing it as input,
 and spec.render_claim_text's own auto-backtick-wrapping when a
-(currently only synthetic, pre-mathema-symbology) rename symbol isn't
+rename symbol, such as a symbology provider's, isn't
 `.isidentifier()`-safe."""
 from mathema.conjecture import claim
 
@@ -171,7 +171,7 @@ def test_render_claim_text_auto_backtick_wraps_an_unsafe_rename_symbol(monkeypat
     # nothing in today's built-in auto-let logic ever produces an
     # unsafe symbol (Greek letters and the positional pool are both
     # always plain-identifier-safe by construction); this simulates
-    # what a future mathema-symbology-supplied symbol would need,
+    # what a symbology provider's symbol would need,
     # confirming spec.render_claim_text's own backtick-wrapping (not
     # grammar.py's input-side parsing, already covered above) actually
     # fires and the result still reparses correctly.

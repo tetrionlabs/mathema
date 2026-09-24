@@ -190,17 +190,6 @@ def test_a_function_alias_or_free_variable_named_like_a_greek_letter_is_not_rele
     assert "let φ" not in render_claim_text(free_var, unicode=True)
 
 
-# NOTE for anyone running the suite with a `"symbology"` capability
-# provider genuinely installed (e.g. the mathema-symbology package from
-# PyPI): this test and the two below it
-# (test_long_real_parameter_threshold_is_configurable,
-# test_two_long_real_parameters_get_distinct_symbols_starting_with_x)
-# fail in that environment BY DESIGN, not as a regression, a provider
-# resolves names like `velocity`/`acceleration` to its own symbols ahead
-# of the positional x/y/z pool, regardless of length. That precedence is
-# an accepted consequence of the capability design. The reference suite
-# runs provider-free; uninstall the provider before treating a failure
-# here as real.
 def test_long_real_parameter_name_auto_lets_in_unicode_only():
     # the default threshold is 8 characters; "velocity" (8) stays put,
     # "acceleration" (12) doesn't. Unicode only: ASCII has no

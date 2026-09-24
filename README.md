@@ -406,7 +406,7 @@ families and the YAML record schema), maintained independently under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), so anything
 that reads or writes that shape interoperates with mathema's records without
 importing it. `mathema.SPEC_VERSION` states the targeted version and every
-record stamps it. [mathema-symbology](https://github.com/tetrionlabs/mathema-symbology)
+record stamps it. [mathema-symbology](https://github.com/aaronbyrnephd/mathema-symbology)
 renders claims in a field's conventional notation, and
 [mathema-agents](https://github.com/tetrionlabs/mathema-agents) teaches coding
 agents to drive the claim loop properly, vendored by an explicit, opt-in
