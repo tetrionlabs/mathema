@@ -593,6 +593,56 @@ class NoRelation(ValueError):
     """The law text contains no ==, !=, <=, >= (or =) to split on."""
 
 
+class UnreadableSpelling(ValueError):
+    """A symbol in the law text whose reach cannot be read without
+    guessing (a radical followed by a power, say)."""
+
+
+_RADICAL_ATOM = re.compile(
+    rf"\s*([0-9]+(?:\.[0-9]*)?|[^\W\d](?:(?![{_SUPERSCRIPT_DIGITS}])\w)*)")
+_RADICAL_TRAILER = re.compile(r"\s*(?:\^|\*\*|!|\[|[⁰¹²³⁴⁵⁶⁷⁸⁹])")
+
+
+def _radical_to_call(text: str) -> str:
+    """Intent:
+        Every `√` as a `sqrt(...)` call over the one atom that follows
+        it: `√x` is `sqrt(x)`, `√2` is `sqrt(2)`, `√f(x)` is
+        `sqrt(f(x))`, and `√(x + 1)` is `sqrt(x + 1)`. Radicals nest
+        from the inside out, so `√√x` is `sqrt(sqrt(x))`.
+
+    Raises:
+        UnreadableSpelling: a radical with no atom after it, or one
+        whose atom is followed by a power, factorial or subscript, where
+        `√x^2` could mean either `sqrt(x^2)` or `sqrt(x)^2`.
+    """
+    while "√" in text:
+        i = text.rindex("√")
+        rest = text[i + 1:]
+        if rest.lstrip().startswith("("):
+            text = text[:i] + "sqrt" + rest.lstrip()
+            continue
+        m = _RADICAL_ATOM.match(rest)
+        if m is None:
+            raise UnreadableSpelling(
+                f"`√` needs something to take the root of: write "
+                f"√(...) in {text!r}")
+        end = m.end()
+        if rest[end:end + 1] == "(" and not m.group(1)[0].isdigit():
+            depth = 0
+            for j in range(end, len(rest)):
+                depth += {"(": 1, ")": -1}.get(rest[j], 0)
+                if depth == 0:
+                    end = j + 1
+                    break
+        if _RADICAL_TRAILER.match(rest[end:]):
+            raise UnreadableSpelling(
+                f"the reach of `√` in {text!r} is ambiguous (the root of "
+                f"the power, or the power of the root): write "
+                f"√(...) with parentheses")
+        text = f"{text[:i]}sqrt({rest[:end].strip()}){rest[end:]}"
+    return text
+
+
 def _expand_let(text: str) -> str:
     """Expand every leading `let <bindings> in rest` group; one or more
     comma-separated `name = expr` pairs sharing one `in`, by
@@ -1647,7 +1697,7 @@ def apply_unicode_synonyms(text: str) -> str:
     otherwise be converted to `^<digits>` and glued onto `integral`
     with no separator."""
     def substitute(masked: str) -> str:
-        masked = _collapse_integral_marks(masked)
+        masked = _radical_to_call(_collapse_integral_marks(masked))
         for sym, repl in _UNICODE.items():
             masked = masked.replace(sym, repl)
         return _SUPERSCRIPT_RUN.sub(

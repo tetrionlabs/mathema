@@ -187,3 +187,38 @@ def test_a_malformed_let_binding_is_refused(law, message):
 def test_a_well_formed_let_run_still_reads():
     assert_round_trips("let g = math.sqrt, for x in [0, 1], g(x) >= 0")
     assert_round_trips("let c be [-1, 1], for x in [0, 1], f(x + c) >= -9")
+
+
+# -- radicals ---------------------------------------------------------------
+
+def square(x: float) -> float:
+    return x * x
+
+
+@pytest.mark.parametrize("law, rhs", [
+    ("for x in [1, 4], f(x) >= √x", "sqrt(x)"),
+    ("for x in [1, 4], f(x) >= √ x", "sqrt(x)"),
+    ("for x in [1, 4], f(x) >= √2", "sqrt(2)"),
+    ("for x in [1, 4], f(x) >= √f(x) - 9", "sqrt(f(x)) - 9"),
+    ("for x in [1, 4], f(x) >= √√x", "sqrt(sqrt(x))"),
+])
+def test_a_radical_takes_the_root_of_the_atom_after_it(law, rhs):
+    assert claim(law).rhs == rhs
+    assert_round_trips(law, square)
+    assert canonical_claim_text(claim(law)) == canonical_claim_text(
+        claim(law.replace(law.split(">= ")[1], rhs)))
+
+
+def test_a_bare_radical_no_longer_reads_as_a_free_variable():
+    assert _verdict(square, claim("for x in [1, 4], f(x) >= √x")) \
+        == _verdict(square, claim("for x in [1, 4], f(x) >= √(x)"))
+
+
+@pytest.mark.parametrize("law", [
+    "f(x) >= √x^2",
+    "f(x) >= √x²",
+    "f(x) >= √",
+])
+def test_a_radical_with_an_unclear_reach_is_refused(law):
+    with pytest.raises(InvalidConjecture, match="√"):
+        claim(law)

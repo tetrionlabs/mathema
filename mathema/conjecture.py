@@ -41,7 +41,8 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       extract_outcome_clause, _split_top_level,
                       is_reserved, normalize,
                       parse_domain_safety, parse_raises, split_quantifier,
-                      split_relation_chain, unexpanded_prime_message)
+                      split_relation_chain, unexpanded_prime_message,
+                      UnreadableSpelling)
 from . import linalg
 from ._scan import _split_commas, blank_strings
 from .domain import DuplicateBinding
@@ -564,7 +565,10 @@ def claim(law: str, name: str | None = None, source: str = "user",
             f"`#` has no meaning in a claim and would silently cut off "
             f"everything after it; remove it (a comment belongs outside "
             f"the claim text): {law.strip()!r}")
-    text, ambiguous_diff_vars = extract_diff_fraction_sugar(law.strip())
+    try:
+        text, ambiguous_diff_vars = extract_diff_fraction_sugar(law.strip())
+    except UnreadableSpelling as e:
+        raise InvalidConjecture(str(e)) from e
     # outcome section: stripped first, on raw text, extract_outcome_
     # clause recognizes any accepted "implies" spelling directly rather
     # than relying on normalize() to have unified them, so it never has
