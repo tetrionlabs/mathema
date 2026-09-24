@@ -53,7 +53,8 @@ def set_numerical_stability_check(enabled: bool) -> None:
 
 
 def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
-                     cap=None, scoped_extremes=False, sequences=False):
+                     cap=None, scoped_extremes=False, sequences=False,
+                     exact=False):
     """Intent:
         Build the injected dependencies the corroboration engine needs
         for THIS claim: `evaluate(point)` decides the original claim's
@@ -64,6 +65,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         or None; `admits(point)` is in-domain-and-assumption
         membership; `sample(name, rng)` draws a value respecting the
         parameter's declared bound (the probe route's own `_synth`);
+        `exact` drops the default allowance, so a claim with no
+        declared tolerance is compared with none;
         `corners` are the domain endpoints (infinity taken at `cap`'s
         resolved pseudo-infinity range, else +-`_EXTREME`); plus the
         free-variable `names`.
@@ -79,7 +82,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     """
     from .domain import (_as_int_if_whole, bound_assumptions,
                          bound_to_sympy_set, domain_contains, is_missing)
-    from .probing import _synth
+    from .probing import (ComplexResult, _synth, complex_is_a_raise,
+                          is_complex_value)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     # the gates verify VALUE claims by calling fn at a point; a
@@ -97,7 +101,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         code_r, aux_r = _validate(cj.rhs, set(kinds), extra) if cj.rhs else (None, set())
     except InvalidConjecture:
         return None
-    slack = cj.tolerance if cj.tolerance is not None else 1e-9
+    slack = (cj.tolerance if cj.tolerance is not None
+             else 0.0 if exact else 1e-9)
     # `ε`/`eps`/`epsilon` in a law is the claim's tolerance, a fixed
     # value, never a free variable to sample
     eps_names = (aux_l | aux_r) & {"eps", "epsilon", "ε"}
@@ -110,18 +115,26 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # nothing about the claim
     calls_raised = [False]
 
-    def _tag(callee):
+    def _tag(callee, label):
+        # a complex result under a real claim counts as a raise too
+        complex_raises = complex_is_a_raise(callee, cj_domain)
+
         def _wrapped(*a, **kw):
             try:
-                return callee(*a, **kw)
+                value = callee(*a, **kw)
             except Exception:
                 calls_raised[0] = True
                 raise
+            if complex_raises and is_complex_value(value):
+                calls_raised[0] = True
+                raise ComplexResult(label, value)
+            return value
         return _wrapped
 
-    base_env = {"f": _tag(fn), **_SAFE_FUNCS, **MATH_CONSTANTS,
-                **{name: _tag(v) for name, v in bound_funcs.items()},
-                **{name: slack for name in eps_names}}
+    base_env = {"f": _tag(fn, "f"), **_SAFE_FUNCS, **MATH_CONSTANTS,
+                **{name: _tag(v, name) for name, v in bound_funcs.items()},
+                **{name: (cj.tolerance if cj.tolerance is not None else 1e-9)
+                   for name in eps_names}}
     from .records import pseudo_infinity_range
     if cap is not None:
         cap_lo, cap_hi = pseudo_infinity_range(cap)
@@ -455,6 +468,36 @@ def _sequence_witness(witness, seq_names):
     return out
 
 
+_DEFAULT_ORDERING_SLACK = 1e-9
+
+
+def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
+                             proof, seq_names):
+    """Intent:
+        The point derive named as its witness, when the real code
+        executed there violates a closed ordering (`<=`/`>=`) compared
+        exactly, with none of the default allowance. None when the
+        claim is not such an ordering, declares its own tolerance
+        (which is then part of the claim), names no complete in-domain
+        witness, or the code satisfies the relation there exactly.
+    """
+    from . import corroboration as C
+    if cj.relation not in ("<=", ">=") or cj.tolerance is not None:
+        return None
+    deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
+                            sequences=True, exact=True)
+    if deps is None:
+        return None
+    seeds = C._seed_points(_sequence_witness(proof.witness, seq_names),
+                           deps["names"])
+    if not seeds:
+        return None
+    point = seeds[0]
+    if set(point) != set(deps["names"]) or not deps["admits"](point):
+        return None
+    return point if deps["evaluate"](point) is False else None
+
+
 def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
                         bound_funcs, assum=()):
     """Intent:
@@ -470,6 +513,13 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         was claimed. A disproof whose witness is already an executed
         call to the real function (a raise-region disproof ran the call
         and saw it raise) stands as it is.
+
+    Notes:
+        The search compares with the claim's tolerance, or the 1e-9
+        default. For a closed ordering with no declared tolerance, a
+        search that reproduces nothing is followed by one exact
+        comparison at derive's own witness: a violation there, however
+        small, is `falsified` with that witness.
     """
     from . import corroboration as C
     if proof.meta.get("mathema.witness_executed") and falsified.counterexample:
@@ -525,6 +575,23 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             # nothing to add and relabelling it would report weaker
             # evidence than was actually obtained.
             falsified.route = "probe:semi_analytical"
+        return falsified
+    exact_point = _exact_witness_violation(cj, fn, facts, cj_domain,
+                                           bound_funcs, assum, proof,
+                                           seq_names)
+    if exact_point is not None:
+        pt = _fmt_point(exact_point, deps["names"])
+        falsified.meta = {**(falsified.meta or {}),
+                          "mathema.corroboration": "reproduced"}
+        falsified.counterexample = pt or falsified.counterexample
+        if falsified.stratum is None:
+            falsified.stratum = {"mathematics": "unsound",
+                                 "blame": "claim", "witness": pt}
+        falsified.note = (
+            f"{falsified.note}; reproduced exactly at derive's witness: "
+            f"the executed code violates the relation there by less than "
+            f"the default tolerance ({_DEFAULT_ORDERING_SLACK:g}) the probe "
+            f"route allows, and compared exactly it fails").lstrip("; ")
         return falsified
     falsified.verdict = "unknown"
     falsified.meta = {**(falsified.meta or {}),

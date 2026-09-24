@@ -492,6 +492,100 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     return _walk(lv, rv)
 
 
+class ComplexResult(ArithmeticError):
+    """A complex value returned by a function that a real claim reads as
+    real-valued. The claim treats it as a raise: the call has no real
+    value at that point. `callee` names the function, `value` is what
+    it returned."""
+
+    def __init__(self, callee: str, value):
+        super().__init__(f"{callee} returned the complex value "
+                         f"{_complex_text(value)}")
+        self.callee = callee
+        self.value = value
+
+
+def _complex_text(value) -> str:
+    try:
+        return _fmt_value(complex(value))
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def is_complex_value(v) -> bool:
+    """Whether `v` is a complex number, or a numpy value or array of
+    complex dtype."""
+    if isinstance(v, complex):
+        return True
+    return getattr(getattr(v, "dtype", None), "kind", None) == "c"
+
+
+def _bound_is_complex(bound) -> bool:
+    if isinstance(bound, str):
+        return bound == "C"
+    if getattr(bound, "base_type", None) == "C":
+        return True
+    if isinstance(bound, tuple):
+        return any(isinstance(v, complex) for v in bound)
+    pieces = getattr(bound, "pieces", None) or ()
+    return any(_bound_is_complex(p) for p in pieces if isinstance(p, tuple))
+
+
+def complex_is_a_raise(callee, cj_domain: dict | None) -> bool:
+    """Intent:
+        Whether a complex result from `callee` counts as a raise under a
+        claim with domain `cj_domain`: yes, unless the callee is
+        annotated `complex` (its return or any parameter) or the claim
+        quantifies some variable over the complex plane (`C`, or a
+        rectangle with complex corners).
+    """
+    import inspect
+    if any(_bound_is_complex(b) for b in (cj_domain or {}).values()):
+        return False
+    try:
+        sig = inspect.signature(callee)
+    except (TypeError, ValueError):
+        return True
+    annotations = [sig.return_annotation,
+                   *(prm.annotation for prm in sig.parameters.values())]
+    return not any(a is not inspect.Signature.empty and "complex" in str(a)
+                   for a in annotations)
+
+
+def ordering_shortfall(lv, rv, relation: str) -> float:
+    """Intent:
+        By how much `lv <relation> rv` fails when compared exactly, for
+        a closed ordering (`<=`/`>=`): the largest amount by which the
+        left side exceeds (for `<=`) or falls short of (for `>=`) the
+        right, taken elementwise over a matrix or array value. 0.0
+        when the relation holds exactly, when the relation is not a
+        closed ordering, or when the values are not finite reals.
+    """
+    if relation not in ("<=", ">="):
+        return 0.0
+    sign = 1.0 if relation == "<=" else -1.0
+    if not _is_matrix_value(lv) and not _is_matrix_value(rv):
+        if isinstance(lv, bool) or isinstance(rv, bool) \
+                or not isinstance(lv, (int, float)) \
+                or not isinstance(rv, (int, float)):
+            return 0.0
+        gap = sign * (lv - rv)
+        return gap if gap > 0 and math.isfinite(gap) else 0.0
+    from .matrices import _numpy
+    np = _numpy()
+    if np is None:
+        return 0.0
+    try:
+        gaps = sign * (np.asarray(lv, dtype=float) - np.asarray(rv, dtype=float))
+        finite = gaps[np.isfinite(gaps)]
+    except (ValueError, TypeError):
+        return 0.0
+    if finite.size == 0:
+        return 0.0
+    gap = float(finite.max())
+    return gap if gap > 0 else 0.0
+
+
 # _finite_bounds/_SpecialCycle/_synth_scalar live in ._sampling now,
 # shared with symbolic/_proof_support.py's disproof corroboration,
 # imported above, re-exported under their own names for existing
@@ -767,8 +861,14 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             # Domain-typed bound (a `⊂ Z` refinement) falls through to
             # the set-notation rendering below, subscripting it blind
             # was a real crash on the empirical-fallback path
-            parts.append(f"{p}~U{{{int(bounds[0])}..{int(bounds[1])}}}" if bounds
-                         else f"{p}~{{0,1,2}}[p=.3]⊔U{{0..10}}")
+            # the integers actually drawn: an open or fractional end
+            # rounds inward and an unbounded end is capped, as
+            # `_synth_int_in` samples them
+            if bounds:
+                first, last = _integer_range(bounds, "Z")
+                parts.append(f"{p}~U{{{first}..{last}}}")
+            else:
+                parts.append(f"{p}~{{0,1,2}}[p=.3]⊔U{{0..10}}")
         elif bound_shape == "interval":
             lo, hi = bounds
             parts.append(f"{p}~U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]{crit_suffix(p)}")

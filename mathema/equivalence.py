@@ -13,10 +13,14 @@ A claim family registered under the name `equivalence` is consulted
 before the built-in ladder and may return a verdict of its own; the
 result passes the same family verdict contract every family route
 does (a falsification must carry its witness), and this module still
-assembles the Probe. Sampling here is values-only: a drawn point where
-either side raises, returns a non-finite float, or returns something
-non-numeric is never adjudicated, and every such point is counted in
-the record's sampling meta rather than dropped silently.
+assembles the Probe. `f =:= g` means `for x in D, f(x) == g(x)`, so a
+point where one side raises and the other returns a value falsifies,
+with the executed raise as the witness. A complex result under a real
+claim counts as a raise (unless that side is annotated `complex`). A
+drawn point where both sides raise, either returns a non-finite float,
+or either returns something non-numeric is not adjudicated, and every
+such point is counted in the record's sampling meta rather than
+dropped silently.
 """
 from __future__ import annotations
 
@@ -32,7 +36,8 @@ EQUIV_SAMPLE_DRAWS = 96
 EQUIV_MIN_AGREEMENTS = 24
 #: the shared-draw seed, fixed so both sides see identical points
 EQUIV_SEED = 20260718
-#: the relative slack term beside the claim's own tolerance
+#: the relative slack term beside the default tolerance; a declared
+#: tolerance is the whole allowance and gets none
 EQUIV_REL_SLACK = 1e-9
 
 #: verdicts a registered equivalence family may return
@@ -132,6 +137,49 @@ def _numberlike(v) -> bool:
 
 def _finite(v) -> bool:
     return _numberlike(v) and v == v and abs(v) != float("inf")
+
+
+def _run_side(fn, args, complex_raises: bool):
+    """Intent:
+        Call one side at `args`: `(value, None)` when it returns, or
+        `(_RAISED, name)` naming the exception it raised. A complex
+        result counts as a raise when `complex_raises`, named
+        `complex <value>`.
+    """
+    from .probing import _fmt_value, is_complex_value
+    try:
+        value = fn(*args)
+    except Exception as e:
+        return _RAISED, type(e).__name__
+    if complex_raises and is_complex_value(value):
+        try:
+            text = _fmt_value(complex(value))
+        except (TypeError, ValueError):
+            text = repr(value)
+        return _RAISED, f"complex {text}"
+    return value, None
+
+
+def _one_sided_raise(args, names, fv, f_exc, gv, g_exc, rhs_name) -> str | None:
+    """Intent:
+        The counterexample text for a point where exactly one side
+        raised and the other returned a value, else None.
+    """
+    from .probing import _fmt, _fmt_value
+    if (fv is _RAISED) == (gv is _RAISED):
+        return None
+    point = _fmt(tuple(args), names=tuple(names))
+    if fv is _RAISED:
+        raised = (f"f returned the complex value {f_exc[len('complex '):]}, "
+                  f"which a real claim reads as a raise"
+                  if f_exc.startswith("complex ")
+                  else f"f raised {f_exc}")
+        return f"{point}: {raised}, {rhs_name} returned {_fmt_value(gv)}"
+    raised = (f"{rhs_name} returned the complex value "
+              f"{g_exc[len('complex '):]}, which a real claim reads as a raise"
+              if g_exc.startswith("complex ")
+              else f"{rhs_name} raised {g_exc}")
+    return f"{point}: {raised}, f returned {_fmt_value(fv)}"
 
 
 def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
@@ -265,13 +313,53 @@ def _rung_symbolic(case: _Case, state: _LadderState) -> Probe | None:
             meta=dict(case.annotations)), "symbolic")
     if proof is not None and proof.status == "disproven" \
             and (proof.meta or {}).get("mathema.witness_executed"):
-        # an executed raise, not a value disagreement: sampling compares
-        # values only, so the raise is recorded and the verdict is left
-        # to the value rungs
+        # an executed raise: when the other side returns a value at the
+        # same point, the two disagree there and that point is the
+        # witness; otherwise the raise is recorded and the verdict is
+        # left to the value rungs
+        falsified = _raise_witness_probe(case, proof)
+        if falsified is not None:
+            return falsified
         state.raise_note = proof.sketch
         proof = replace(proof, status="undecided")
     state.proof = proof
     return None
+
+
+def _raise_witness_probe(case: _Case, proof) -> Probe | None:
+    """Intent:
+        Both sides executed at the witness of a raise-region disproof,
+        and a falsified Probe when exactly one of them raises there.
+        None when the witness has no complete point, or both sides
+        raise, or both return.
+    """
+    from .domain import _as_int_if_whole
+    from .probing import complex_is_a_raise
+    witness = proof.witness or {}
+    params = list(case.facts.params)
+    if not all(p in witness for p in params):
+        return None
+    args = []
+    for p in params:
+        v = witness[p]
+        kind = case.facts.param_kinds.get(p, "unknown")
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            v = _as_int_if_whole(v) if kind in ("int", "bool") else float(v)
+        args.append(v)
+    fv, f_exc = _run_side(case.fn, args,
+                          complex_is_a_raise(case.fn, case.cj_domain))
+    gv, g_exc = _run_side(case.gfn, args,
+                          complex_is_a_raise(case.gfn, case.cj_domain))
+    cx = _one_sided_raise(args, params, fv, f_exc, gv, g_exc, case.rhs_name)
+    if cx is None:
+        return None
+    return _stamp(Probe(
+        case.cj.name, case.statement, "falsified", route="derive",
+        counterexample=cx, sketch=proof.sketch,
+        note=f"{case.note}; one side raises where the other returns a "
+             f"value: {proof.sketch}",
+        meta={**case.annotations, "mathema.corroboration": "reproduced"}),
+        "symbolic")
 
 
 def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
@@ -291,13 +379,16 @@ def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
 
 def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     from .conjecture import DEFAULT_TOLERANCE
-    from .probing import _fmt, _fmt_value, _synth
+    from .probing import _fmt, _fmt_value, _synth, complex_is_a_raise
 
     cj = case.cj
     kinds = {p: case.facts.param_kinds.get(p, "unknown")
              for p in case.facts.params}
     rng = random.Random(EQUIV_SEED)
     tol = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
+    rel_slack = 0.0 if cj.tolerance is not None else EQUIV_REL_SLACK
+    f_complex = complex_is_a_raise(case.fn, case.cj_domain)
+    g_complex = complex_is_a_raise(case.gfn, case.cj_domain)
     checked, cx = 0, None
     discarded = {"out_of_domain": 0, "not_compared": 0, "non_numeric": 0}
     for _ in range(EQUIV_SAMPLE_DRAWS):
@@ -307,15 +398,15 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
                    for p, a in zip(kinds, args)):
             discarded["out_of_domain"] += 1
             continue
-        try:
-            fv = case.fn(*args)
-        except Exception:
-            fv = _RAISED
-        try:
-            gv = case.gfn(*args)
-        except Exception:
-            gv = _RAISED
+        fv, f_exc = _run_side(case.fn, args, f_complex)
+        gv, g_exc = _run_side(case.gfn, args, g_complex)
         state.executed += 1
+        one_sided = _one_sided_raise(args, kinds, fv, f_exc, gv, g_exc,
+                                     case.rhs_name)
+        if one_sided is not None:
+            checked += 1
+            cx = one_sided
+            break
         if fv is _RAISED or gv is _RAISED:
             discarded["not_compared"] += 1
             continue
@@ -327,7 +418,7 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
             continue
         checked += 1
         scale = max(abs(fv), abs(gv), 1.0)
-        if abs(fv - gv) > tol + EQUIV_REL_SLACK * scale:
+        if abs(fv - gv) > tol + rel_slack * scale:
             cx = (_fmt(tuple(args), names=tuple(kinds))
                   + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
             break
@@ -349,7 +440,9 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
             cj.name, case.statement, "falsified", route="probe",
             n=checked, counterexample=cx,
             note=f"{case.note}; the two implementations disagree at an "
-                 f"executed shared point{aside}", meta=meta), "sampled")
+                 f"executed shared point, a raise on one side against a "
+                 f"value on the other counting as a disagreement{aside}",
+            meta=meta), "sampled")
     if state.proof is not None and state.proof.status == "disproven":
         # the symbolic rung claimed inequivalence but no executed point
         # reproduces it: the standard uncorroborated downgrade

@@ -781,6 +781,30 @@ def _corroborate_disproof(diff, domain: dict, params: dict,
     return None
 
 
+def _representative_point(expr, domain: dict, params: dict,
+                          bound_context=None) -> "dict | None":
+    """Intent:
+        One seeded in-domain point for every parameter and every free
+        symbol of `expr`, respecting each declared bound and the
+        assuming clause: the witness of a disproof that holds at every
+        point of the domain, such as an ordering whose interval hull
+        is negative throughout. Keys are the symbol names.
+
+    Notes:
+        The same seeded sampler `_corroborate_disproof` draws from,
+        with a negative tolerance so the first admissible point
+        qualifies. None when no admissible point turns up.
+    """
+    symbols = set(params.values()) | set(expr.free_symbols)
+    if not symbols:
+        return None
+    point = _corroborate_disproof(sympy.Add(*symbols), domain, params,
+                                  bound_context, tolerance=-1.0)
+    if not point:
+        return None
+    return {str(sym): v for sym, v in point.items()}
+
+
 def _prove_relation(lhs, rhs, relation: str, domain: dict, bound_context,
                     params: dict, opaque: "OpaqueRegistry | None" = None,
                     extensive: bool = False,
@@ -2140,7 +2164,9 @@ def _decide_ordering(lhs, rhs, diff, relation, domain, bound_context, params,
         return ProofResult("disproven",
                            sketch=f"interval evaluation over the declared "
                                   f"domain: {_humanize(target)} ∈ {box}, "
-                                  "always negative")
+                                  "always negative",
+                           witness=_representative_point(
+                               target, domain, params, bound_context))
 
     def _is_nonneg(expr):
         # .is_nonnegative only ever consults assumptions baked
