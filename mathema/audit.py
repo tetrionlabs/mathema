@@ -311,6 +311,22 @@ def _claim_domain(entry: dict) -> dict:
                 merged.setdefault(name, bound)
     return merged
 
+def _declared_entry(fn, stored: dict | None) -> dict:
+    """Intent:
+        The claims every authoring surface declares for `fn`: the
+        claims-file entry from the loaded store, merged with the
+        function's own docstring and decorator claims at the usual
+        precedence. The file entry alone when the function's own claims
+        cannot be read.
+    """
+    from .authoring import resolve_declared
+    file_entry = (stored or {}).get("entry") or {}
+    try:
+        return resolve_declared(fn, file_entry=file_entry)
+    except Exception:
+        return file_entry
+
+
 def derivable_in_context(fn, facts=None, declared_domain: dict | None = None) -> bool | None:
     """Intent:
         Whether the derive route can work on `fn` given the context it
@@ -644,7 +660,7 @@ def audit_rows(targets: list[str], root: str = ".",
         unconditional = None if skip_derive else is_pure_enough(fn)
         derivable = (None if skip_derive
                      else derivable_in_context(fn, declared_domain=_claim_domain(
-                         (declared.get(key) or {}).get("entry") or {})))
+                         _declared_entry(fn, declared.get(key)))))
         rows.append({
             "key": key,
             "_fn": fn,

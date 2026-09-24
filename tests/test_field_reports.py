@@ -128,6 +128,34 @@ def test_a_claim_quantifier_supplies_the_derive_context(tmp_path, monkeypatch):
     assert row["unconditional"] is False, "the body still does not lift bare"
 
 
+def test_a_docstring_claim_quantifier_supplies_the_derive_context(
+        tmp_path, monkeypatch):
+    """A `Claims:` block in the docstring is an authoring surface like a
+    claims file: its quantifier is the context `mathema check` proves
+    the claim with, so `derivable` reads it too."""
+    from mathema.audit import audit_rows
+
+    pkg = tmp_path / "geodoc"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "spiral.py").write_text(
+        "def spiral_radius(theta, a):\n"
+        '    """Archimedean spiral radius; negative angles mirror.\n'
+        "\n"
+        "    Claims:\n"
+        "        nonneg: for theta in [0, 100], a in [1, 2], f(theta, a) >= 0\n"
+        '    """\n'
+        "    if theta < 0:\n"
+        "        return a * (-theta)\n"
+        "    return a * theta\n")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    row = audit_rows(["geodoc"], root=".")[0]
+    assert row["derivable"] is True, "the docstring's domain makes this derivable"
+    assert row["unconditional"] is False, "the body still does not lift bare"
+
+
 def _lag_overlap(n, lag):
     """Overlapping sample count at a given lag."""
     return n - abs(lag)
