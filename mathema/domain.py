@@ -695,9 +695,9 @@ def _render_set_member(v, *, ascii_mode: bool) -> str:
     accepts either quote style on the way in and keeps neither, so one
     spelling comes back out.
 
-    A member whose own text contains a quote or a comma is outside what
-    a set binding can express; `_split_commas` is not quote-aware, so
-    such a value cannot be read back whatever it is rendered as."""
+    A member whose own text contains a double quote is outside what a
+    set binding can express: rendered inside double quotes, such a value
+    cannot be read back."""
     if v is MISSING:
         return "missing" if ascii_mode else "∅"
     if isinstance(v, str):
