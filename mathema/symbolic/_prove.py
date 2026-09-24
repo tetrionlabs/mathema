@@ -1686,6 +1686,9 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
                        "domain to where every call returns, or state the "
                        "raising region as its own raises(...) claim",
                 counterexample=where,
+                witness=_witness_numbers(
+                    {name: at_witness[sym] for name, sym in ext_params.items()
+                     if sym in at_witness}),
                 meta={"mathema.witness_executed": True})
         undecided = True
     if undecided:
@@ -1699,6 +1702,22 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
                    "call returns, or state the raising region as its own "
                    "raises(...) claim", meta=meta)
     return None
+
+
+def _witness_numbers(point: dict) -> "dict | None":
+    """A witness point with each coordinate as a Python number: a sympy
+    integer as an int, any other real value as a float. None when some
+    coordinate has no real numeric value."""
+    out = {}
+    for name, value in point.items():
+        try:
+            if getattr(value, "is_Integer", False) or isinstance(value, int):
+                out[name] = int(value)
+            else:
+                out[name] = float(value)
+        except (TypeError, ValueError):
+            return None
+    return out
 
 
 def _witness_value_text(value) -> str:
@@ -2462,6 +2481,7 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                    f"premise to len({target}) >= 1, or state the raising "
                    f"case as its own raises(...) claim",
             counterexample=where,
+            witness=dict(zip(facts.params, args)),
             meta={"mathema.witness_executed": True})
     return None
 

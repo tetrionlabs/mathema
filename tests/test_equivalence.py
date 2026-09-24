@@ -122,13 +122,18 @@ def test_check_keeps_a_live_funcs_binding_through_the_declared_merge():
 # --- the honest sampling tallies (verdicts unchanged) -----------------------
 
 def test_discarded_points_are_tallied_never_silent():
-    """A side that raises over part of the domain no longer vanishes
-    from the record: the verdict stays value-based, but the sampling
-    meta counts every point that could not be compared and the note
-    says so."""
+    """Points where both sides raise are not compared: neither side has
+    a value there to disagree with. They do not vanish from the record:
+    the sampling meta counts every point that could not be compared and
+    the note says so."""
     from dataclasses import replace
 
     from mathema.analysis import analyze_source
+
+    def partial_naive(a, b, c):
+        if a < 0:
+            raise ValueError("half the domain refused")
+        return (1 * a + 2 * b + 3 * c) / 6.0
 
     def partial_twin(*args):
         if args[0] < 0:
@@ -139,7 +144,7 @@ def test_discarded_points_are_tallied_never_silent():
     partial_twin.__mathema_facts__ = replace(analyze_source(tri_naive),
                                              tree=None, form="doc:ffee0011")
 
-    (p,) = check_conjectures(tri_naive, [claim(
+    (p,) = check_conjectures(partial_naive, [claim(
         "for a in [-5, 5], b in [-1, 1], c in [-1, 1], f =:= g",
         funcs={"g": partial_twin}, route="probe")])
     assert p.verdict == "holds", (p.verdict, p.note)
@@ -147,6 +152,30 @@ def test_discarded_points_are_tallied_never_silent():
     assert sampling["discarded"]["not_compared"] > 0
     assert sampling["checked"] >= 24
     assert "not comparable" in (p.note or "")
+
+
+def test_one_side_raising_where_the_other_returns_falsifies():
+    """`f =:= g` means `for x in D, f(x) == g(x)`: a point where one
+    side raises and the other returns a value is a counterexample, and
+    the executed raise is its witness."""
+    from dataclasses import replace
+
+    from mathema.analysis import analyze_source
+
+    def partial_twin(*args):
+        if args[0] < 0:
+            raise ValueError("half the domain refused")
+        return (1 * args[0] + 2 * args[1] + 3 * args[2]) / 6.0
+    partial_twin.__mathema_facts__ = replace(analyze_source(tri_naive),
+                                             tree=None, form="doc:ffee0011")
+
+    (p,) = check_conjectures(tri_naive, [claim(
+        "for a in [-5, 5], b in [-1, 1], c in [-1, 1], f =:= g",
+        funcs={"g": partial_twin}, route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "g raised ValueError" in p.counterexample
+    a = float(p.counterexample.split("a=")[1].split(",")[0])
+    assert a < 0
 
 
 def test_the_deciding_rung_is_stamped():
@@ -358,3 +387,57 @@ def test_raise_free_closed_forms_still_prove():
         "for x in [0, 4], f =:= g", funcs={"g": _identity},
         route="derive")])
     assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+
+
+def test_a_raise_region_found_symbolically_falsifies_with_its_witness():
+    for f, g, law, raised in (
+            (_self_ratio, _one, "for x in [-1, 1], f =:= g",
+             "ZeroDivisionError"),
+            (_removable, _line, "for x in [0, 2], f =:= g",
+             "ZeroDivisionError"),
+            (_root_squared, _identity, "for x in [-1, 1], f =:= g",
+             "ValueError")):
+        (p,) = check_conjectures(f, [claim(law, funcs={"g": g},
+                                           route="derive")])
+        assert p.verdict == "falsified", (f.__name__, p.verdict, p.note)
+        assert f"f raised {raised}" in p.counterexample, p.counterexample
+
+
+# --- complex results ----------------------------------------------------------
+
+def _half_power(x: float) -> float:
+    return x ** 0.5
+
+
+def _abs_half_power(x: float) -> float:
+    return abs(x) ** 0.5
+
+
+def test_a_complex_result_on_one_side_falsifies():
+    (p,) = check_conjectures(_half_power, [claim(
+        "for x in [-1, 1], f =:= g", funcs={"g": _abs_half_power})])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "complex" in p.counterexample
+
+
+# --- the declared tolerance --------------------------------------------------
+
+def _big_plus(x: float) -> float:
+    return x + 1e-3
+
+
+def test_a_declared_tolerance_is_the_whole_allowance():
+    """With x near 1e7 a relative term of 1e-9 alone would allow 1e-2;
+    a declared tolerance of 1e-4 allows exactly 1e-4, so a gap of 1e-3
+    is a counterexample."""
+    (p,) = check_conjectures(_big_plus, [claim(
+        "for x in [1e7, 1e8], f =:= g", funcs={"g": _identity},
+        tolerance=1e-4)])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+
+
+def test_a_declared_tolerance_still_admits_a_gap_within_it():
+    (p,) = check_conjectures(_big_plus, [claim(
+        "for x in [1e7, 1e8], f =:= g", funcs={"g": _identity},
+        tolerance=1e-2)])
+    assert p.verdict in ("proven", "holds"), (p.verdict, p.note)
