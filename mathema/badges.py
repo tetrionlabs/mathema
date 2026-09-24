@@ -444,25 +444,28 @@ def repo_badges(targets=None, root: str = ".",
     Notes:
         Implementation is the real union of all three sources, so it
         re-runs `check()` (under line tracing) for a function whose lines
-        the tests do not already fully cover; a function tests DO fully
-        cover is short-circuited (its union already equals its statement
-        set, so the traced pass is provably redundant and skipped),
-        keeping the identical number at lower cost. Clarity reads the
+        the tests do not already fully cover; a function a FRESH report
+        fully covers is short-circuited (its union already equals its
+        statement set, so the traced pass is provably redundant and
+        skipped), keeping the identical number at lower cost. A stale
+        report's lines never count (`inventory.coverage_freshness`).
+        Clarity reads the
         committed verified store (no re-adjudication) and is recorded with
         its algorithm version in `algo` (`CLARITY_ALGO`). A clarity
         None (source unavailable) drops out of the clarity roll-up.
     """
     from .centrality import centrality_weights
     from .docstring import docstring_sync
-    from .impl_coverage import (_external_lines, _statement_lines,
-                                function_coverage)
-    from .inventory import read_test_coverage
+    from .impl_coverage import (_external_lines, _line_range,
+                                _statement_lines, function_coverage)
+    from .inventory import coverage_freshness, read_test_coverage
     from .spec import load_verified
 
     functions = _population(targets, root)
     weights = centrality_weights(functions)
     verified = load_verified(root)
     coverage_data = read_test_coverage(root) if implementation else None
+    freshness = coverage_freshness(root) if implementation else None
 
     covered_lines = statement_lines = 0
     intent_pairs: list[tuple[float, float]] = []
@@ -474,11 +477,14 @@ def repo_badges(targets=None, root: str = ".",
         if implementation:
             stmts = _statement_lines(fn)
             test_cov = _external_lines(fn, coverage_data) & stmts
-            if stmts and not (stmts - test_cov):
-                covered, statements = stmts, stmts   # tests cover it all
+            rng = _line_range(fn)
+            fresh = rng is not None and not freshness.is_stale(rng[0])
+            if stmts and fresh and not (stmts - test_cov):
+                covered, statements = stmts, stmts   # fresh tests cover it all
             else:
                 fc = function_coverage(fn, root=root,
-                                       coverage_data=coverage_data)
+                                       coverage_data=coverage_data,
+                                       freshness=freshness)
                 covered = fc.covered & fc.statements
                 statements = fc.statements
             covered_lines += len(covered)

@@ -164,6 +164,36 @@ def test_repo_badges_implementation_is_a_raw_ratio_not_centrality(tmp_path):
     assert scores.algo == "entropy-dimensions@1"
 
 
+def test_repo_badges_gives_no_implementation_credit_from_a_stale_report(tmp_path):
+    # the report fully covers `load`, but its source changed since it was
+    # measured; those lines no longer describe the code, so they do not
+    # count, even though the report alone would say 100%
+    import sys
+
+    from mathema.inventory import stamp_coverage_sources
+    pkg = tmp_path / "stalepkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    mod = pkg / "mod.py"
+    mod.write_text(
+        "def load(path):\n"
+        "    with open(path) as fh:\n"
+        "        return fh.read()\n")
+    (tmp_path / "coverage.json").write_text(json.dumps(
+        {"files": {"stalepkg/mod.py": {"executed_lines": [2, 3]}}}))
+    stamp_coverage_sources(str(tmp_path))
+    with open(mod, "a") as fh:
+        fh.write("# edited after the report\n")
+    sys.path.insert(0, str(tmp_path))
+    try:
+        scores = repo_badges(["stalepkg"], root=str(tmp_path))
+    finally:
+        sys.path.remove(str(tmp_path))
+        for m in [m for m in sys.modules if m.startswith("stalepkg")]:
+            del sys.modules[m]
+    assert scores.per_function["stalepkg.mod.load"]["implementation"] < 100
+
+
 def test_write_badges_owns_its_directory(tmp_path):
     # the behavioural->clarity rename left behavioural.json and the
     # unpublished overall.json on disk, committed and served, frozen at
