@@ -100,7 +100,10 @@ other. Every verdict carries the route that reached it:
 
 Nothing is asserted and nothing is quietly upgraded. Evidence remains evidence,
 proof remains proof, and an unresolved claim remains unresolved.
-[The evidence ladder](evidence-ladder.md) sets out every rung.
+[The evidence ladder](evidence-ladder.md) sets out every rung. The same rule
+holds for this site: every output on it was produced by a real run, and the
+test suite parses every claim these pages show, so a claim cannot quietly fall
+out of the grammar.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">A worked finding</span><span class="brk r"></span></span>
 
@@ -206,22 +209,6 @@ from "where is the function that parses a docstring" to the exact lines in one
 step. `mathema audit --index` writes the same map for a whole codebase to
 `.mathema/index.yaml`, with each module's stated intent, every function's
 file, line and span, and a pointer to its verified record where one exists.
-
-<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Honest numbers</span><span class="brk r"></span></span>
-
-## Built with its own tools
-
-mathema's own source is 53,313 lines of Python in 92 files (counted
-with `find mathema -name '*.py' | xargs cat | wc -l`), exercised by 2,684
-tests (`python -m pytest --collect-only -q`). The suite also parses every claim
-shown anywhere in these docs, so a page cannot drift out of the grammar
-unnoticed, and the claims the README and the grammar page teach are drawn from
-a curated lexicon of 135 that it renders and adjudicates on every run.
-
-What mathema does not yet do is carry claims about its own functions.
-Turning its own tools on itself, so that the engine's claims live in its own
-record store and gate its own changes, is planned work rather than a present
-fact, and this page will say so until it is done.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Agents and people</span><span class="brk r"></span></span>
 
