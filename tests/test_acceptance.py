@@ -373,7 +373,8 @@ def test_superseded_claim_never_regrows_as_live(tmp_path):
     prior = {"identity": {"form": "abc"},
              "claims": [{"name": "kept", "verdict": "holds"}],
              "discoveries": [{"name": "old_belief", "verdict": "invalidated",
-                              "superseded_by": "old_belief_corrected"}]}
+                              "superseded_by": "old_belief_corrected",
+                              "accepted": {"as": "discovery"}}]}
     path = tmp_path / "prior.yaml"
     path.write_text(yaml.safe_dump({"k": prior}))
     carry_acceptance(entry, "k", str(path))

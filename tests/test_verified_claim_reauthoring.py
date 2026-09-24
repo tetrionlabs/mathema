@@ -200,3 +200,66 @@ def test_a_tolerance_spelled_differently_is_the_same_tolerance(tmp_path,
     verify_project(root=str(tmp_path))
     out = verify_project(root=str(tmp_path), all=True)
     assert not any("superseded" in p for p in out.problems), out.problems
+
+
+def _accept(root, key, name, as_):
+    from mathema.acceptance import apply_acceptance, plan_acceptance
+    apply_acceptance(plan_acceptance(str(root), key, name, as_, by="tester"))
+
+
+def test_a_superseding_version_survives_its_own_removal(tmp_path,
+                                                        monkeypatch):
+    # membership is append-only for the new version too: once the
+    # superseding claim is verified, deleting it from the claims file
+    # repopulates it from its row like any other verified claim
+    from mathema.verify import verify_project
+    key = "reauth_sup.offset"
+    _project(tmp_path, monkeypatch, "reauth_sup", f"""
+        {key}:
+          claims:
+            - name: bound
+              statement: 'for x in [0, 1], f(x) >= 0'
+        """)
+    verify_project(root=str(tmp_path))
+    _claims(tmp_path, "reauth_sup", f"""
+        {key}:
+          claims:
+            - name: bound
+              statement: 'for x in [0, 1], f(x) >= -1'
+        """)
+    verify_project(root=str(tmp_path))
+    _accept(tmp_path, key, "bound", "superseded")
+    verify_project(root=str(tmp_path))
+    assert "-1" in _row(tmp_path, key, "bound")["statement"]
+    _claims(tmp_path, "reauth_sup", f"{key}:\n  claims: []\n")
+    out = verify_project(root=str(tmp_path))
+    assert not out.problems, out.problems
+    assert "-1" in _row(tmp_path, key, "bound")["statement"]
+    out = verify_project(root=str(tmp_path), all=True)
+    assert "-1" in _row(tmp_path, key, "bound")["statement"]
+
+
+def test_a_new_law_under_a_discovered_name_survives_its_removal(
+        tmp_path, monkeypatch):
+    from mathema.verify import verify_project
+    key = "reauth_disc.offset"
+    _project(tmp_path, monkeypatch, "reauth_disc", f"""
+        {key}:
+          claims:
+            - name: bound
+              statement: 'for x in [0, 1], f(x) >= 1'
+        """)
+    verify_project(root=str(tmp_path))
+    _accept(tmp_path, key, "bound", "discovery")
+    _claims(tmp_path, "reauth_disc", f"""
+        {key}:
+          claims:
+            - name: bound
+              statement: 'for x in [0, 1], f(x) >= 0'
+        """)
+    verify_project(root=str(tmp_path))
+    assert _row(tmp_path, key, "bound")["verdict"] == "proven"
+    _claims(tmp_path, "reauth_disc", f"{key}:\n  claims: []\n")
+    verify_project(root=str(tmp_path))
+    verify_project(root=str(tmp_path), all=True)
+    assert _row(tmp_path, key, "bound")["statement"].endswith(">= 0")

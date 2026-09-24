@@ -480,10 +480,13 @@ def _union_verified_membership(current_claims: list,
     """Intent:
         The declared claim set, widened with every verified claim not
         present by name, reconstructed from its recorded statement and
-        fields so it keeps being adjudicated. Rows already superseded
-        (discoveries) or accepted as historical never resurrect;
-        suggestion rows (surface mathema) and rows with no
-        statement are not membership.
+        fields so it keeps being adjudicated. A law retired as a
+        discovery and a name accepted as historical never resurrect; a
+        live row under a superseded name is the superseding version,
+        and a live row stating a different law under a discovered name
+        is new authorship, so both are membership like any other.
+        Suggestion rows (surface mathema) and rows with no statement
+        are not membership.
 
     Notes:
         A declared claim with no written name is present under the name
@@ -495,13 +498,20 @@ def _union_verified_membership(current_claims: list,
         return current_claims
     have = {c.get("name") or _auto_claim_name(c) for c in current_claims}
     out = list(current_claims)
-    from .acceptance import RETIREMENT_SECTIONS, honoured_retirements
-    retired = {r.get("name") for section in RETIREMENT_SECTIONS
-               for r in honoured_retirements(verified_entry, section)}
+    from .acceptance import _same_law_as, honoured_retirements
+    historical = {r.get("name") for r in
+                  honoured_retirements(verified_entry, "historical")}
+    discovered = []
+    for r in honoured_retirements(verified_entry, "discoveries"):
+        law = r.get("statement") or r.get("law") or ""
+        discovered.append((r.get("name"), _same_law_as(law) if law else None))
     for row in verified_entry.get("claims") or []:
         name = row.get("name")
         statement = row.get("statement") or row.get("law")
-        if not name or not statement or name in have or name in retired:
+        if not name or not statement or name in have or name in historical:
+            continue
+        if any(n == name and (same is None or same(statement))
+               for n, same in discovered):
             continue
         meta = row.get("meta") or {}
         if meta.get("mathema.surface") in ("mathema", "builtin",
