@@ -282,8 +282,10 @@ def test_read_test_coverage_native_dotcoverage(tmp_path):
     mod = tmp_path / "sample.py"
     mod.write_text("def ran(x):\n    return x + 1\n\n"
                    "def never(y):\n    return y - 1\n")
+    # config_file=False: this run stands alone, whatever coverage settings
+    # the surrounding project declares (parallel data files, subprocesses)
     cov = coverage.Coverage(data_file=str(tmp_path / ".coverage"),
-                            source=[str(tmp_path)])
+                            source=[str(tmp_path)], config_file=False)
     cov.start()
     spec = importlib.util.spec_from_file_location("cov_sample", str(mod))
     m = importlib.util.module_from_spec(spec)

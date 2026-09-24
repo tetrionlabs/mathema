@@ -18,6 +18,9 @@ dist/
 build/
 .pytest_cache/
 .coverage
+.coverage.*
+coverage.json
+coverage.sources.json
 .mypy_cache/
 .ruff_cache/
 
