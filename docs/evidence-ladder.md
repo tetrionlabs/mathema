@@ -61,9 +61,9 @@ every input are different kinds of knowledge, and a report that blurs them is
 telling you what you want to hear. So every verdict carries its route, a
 `holds` always carries its trial count, a derive attempt that cannot close
 says `unknown` or `skipped` rather than falling back silently, and a symbolic
-disproof that nothing can reproduce against the real function comes back
-`unknown` and flagged instead of `falsified`, since it more likely points at
-a fault in the engine than in your code.
+disproof that nothing can reproduce against the real function, even compared
+exactly, comes back `unknown` and flagged instead of `falsified`, since it
+more likely points at a fault in the engine than in your code.
 
 [Claim-driven development](cdd.md) has the full verdict vocabulary, and
 [the derive route](derive-route.md) covers which functions can reach the top

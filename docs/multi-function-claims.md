@@ -70,6 +70,37 @@ mathematics, and climbs a ladder:
 3. **Code-versus-code sampling.** Both real functions executed on
    shared draws. Evidence ceiling `holds`: sampling never proves.
 
+`f =:= g` claims `f(x) == g(x)` at every point of the domain, so a
+point where one side raises and the other returns a value is a
+counterexample, and the executed raise is its witness. `x / x` and `1.0` agree everywhere
+except `x = 0`:
+
+```python
+import mathema
+
+
+def ratio(x: float) -> float:
+    return x / x
+
+
+def one(x: float) -> float:
+    return 1.0
+
+(p,) = mathema.claims.check(ratio, [mathema.claim("f =:= g", funcs={"g": one})])
+print(p.verdict, p.counterexample)
+```
+
+```text
+falsified x=0: f raised ZeroDivisionError, g returned 1
+```
+
+A point where both sides raise is not compared, and is counted in the
+record's sampling meta. A complex result from one side counts as a
+raise, unless that side is annotated `complex` or the claim is over
+`C`. A declared tolerance is the whole allowance the two values get;
+with none declared, they may differ by 1e-9 plus 1e-9 times the
+larger magnitude.
+
 The record annotates both sides' structural complexity, so an
 equivalence between a one-liner and a loop reads as what it is.
 

@@ -513,6 +513,13 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         was claimed. A disproof whose witness is already an executed
         call to the real function (a raise-region disproof ran the call
         and saw it raise) stands as it is.
+
+    Notes:
+        The search compares with the claim's tolerance, or the 1e-9
+        default. For a closed ordering with no declared tolerance, a
+        search that reproduces nothing is followed by one exact
+        comparison at derive's own witness: a violation there, however
+        small, is `falsified` with that witness.
     """
     from . import corroboration as C
     if proof.meta.get("mathema.witness_executed") and falsified.counterexample:

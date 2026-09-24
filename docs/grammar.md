@@ -172,6 +172,38 @@ The other relations use the same allowance where it makes sense: `<=` and
 none, since equality must not pass for strictly less, and `!=` with no
 declared tolerance fails only where the two sides are exactly equal.
 
+A probe `holds` that the allowance on `<=` or `>=` absorbed says so in its
+note, with the largest gap it absorbed. The derive route has no allowance
+to spend: when it disproves the claim, the real code is run at derive's
+witness and compared exactly, and a violation there, however small,
+falsifies the claim with that point as the witness. For a function that
+returns `-1e-10`:
+
+```python
+import mathema
+
+
+def just_below(x: float) -> float:
+    return -1e-10
+
+for route in ["probe", "derive"]:
+    (p,) = mathema.claims.check(
+        just_below, [mathema.claim("for x in [0, 1], f(x) >= 0", route=route)])
+    print(f"{route:7} {p.verdict:9} {p.counterexample or ''}")
+    print(f"        {p.note}")
+```
+
+```text
+probe   holds
+        fails by 1e-10 at (0), within the default tolerance (1e-09)
+derive  falsified x=0.0616333
+        reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
+```
+
+A declared tolerance is part of the claim, so it stays in force on both
+routes. A derive disproof that the executed code does not reproduce even
+compared exactly comes back `unknown`, flagged as a probable engine bug.
+
 ## Expressions
 
 | Spelling | Meaning |
@@ -249,6 +281,29 @@ The second form infers the domain from the literal arguments, so you do
 not restate what you already wrote. A function that raises inside a
 region a claim quantifies over falsifies that claim, on either evidence
 route, because a claim about a value is not satisfied by an exception.
+
+A complex result counts as a raise. A real claim reads the function as
+real-valued, and `x ** 0.5` of a negative float is a complex number in
+Python, not a real one:
+
+```python
+import mathema
+
+
+def half_power(x: float) -> float:
+    return x ** 0.5
+
+(p,) = mathema.claims.check(half_power, [mathema.claim("f(x)^2 >= 0", route="probe")])
+print(p.verdict, p.counterexample)
+```
+
+```text
+falsified (-1): f returned the complex value 6.12323e-17+1j, which a real claim reads as a raise; narrow the claim's domain to where every call is real, or annotate the function complex
+```
+
+The derive route falsifies it too, with an executed witness. A function
+annotated `complex` (its return or a parameter), or a claim over `C`,
+reads a complex result as an ordinary value.
 
 ## `let`: naming things
 
