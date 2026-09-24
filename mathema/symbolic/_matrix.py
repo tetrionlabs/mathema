@@ -173,6 +173,80 @@ def _assumptions(mat_syms: dict, structures: dict):
     return sympy.And(*facts) if len(facts) > 1 else facts[0]
 
 
+#: structure properties that make a square matrix invertible
+_INVERTIBLE_PROPERTIES = frozenset({"is_orthogonal", "is_positive_definite",
+                                    "is_identity"})
+
+
+def _nonsingular_premises(premises) -> set:
+    """The matrix names an `assuming` clause states a nonzero
+    determinant for: `det(A) != 0`, `det(A) > 0` or `det(A) < 0`."""
+    import re
+    names: set = set()
+    for lhs, rel, rhs in premises or ():
+        lhs, rhs = str(lhs).strip(), str(rhs).strip()
+        if rhs.startswith("det(") and lhs in ("0", "0.0"):
+            lhs, rhs = rhs, lhs
+            rel = {">": "<", "<": ">"}.get(rel, rel)
+        m = re.fullmatch(r"det\(\s*([A-Za-z_]\w*)\s*\)", lhs)
+        if m and rhs in ("0", "0.0") and rel in ("!=", ">", "<"):
+            names.add(m.group(1))
+    return names
+
+
+def _inverted_symbols(tree, env: dict) -> set:
+    """Every matrix symbol the claim text inverts (inside an `inv(...)`
+    call, or a power with a negative exponent), read off the source:
+    sympy cancels `Inverse(A) * A` to the identity as the product is
+    built, so the lifted expression no longer shows the inverse."""
+    out: set = set()
+    for node in ast.walk(tree):
+        inverted = None
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "inv" and node.args:
+            inverted = node.args[0]
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            try:
+                exponent = ast.literal_eval(node.right)
+            except (ValueError, SyntaxError):
+                exponent = None
+            if not isinstance(exponent, (int, float)) or exponent < 0:
+                inverted = node.left
+        if inverted is None:
+            continue
+        try:
+            term = _lift(inverted, env)
+        except (ValueError, KeyError):
+            continue
+        out |= getattr(term, "atoms", lambda *_: set())(sympy.MatrixSymbol)
+    return out
+
+
+def _expand_determinants(expr):
+    """`expr` with each determinant of a product, power, transpose or
+    inverse split into determinants of its factors, so that every
+    determinant left is of a single matrix symbol where it can be."""
+    def split(det):
+        arg = det.arg
+        if isinstance(arg, sympy.Transpose):
+            return sympy.Determinant(arg.arg)
+        if isinstance(arg, sympy.Inverse):
+            return 1 / sympy.Determinant(arg.arg)
+        if isinstance(arg, sympy.MatPow):
+            return sympy.Determinant(arg.base) ** arg.exp
+        if isinstance(arg, sympy.MatMul):
+            coeff, factors = arg.as_coeff_matrices()
+            if coeff == 1 and len(factors) > 1:
+                return sympy.Mul(*(sympy.Determinant(f) for f in factors))
+        return det
+    for _ in range(8):
+        new = expr.replace(lambda e: isinstance(e, sympy.Determinant), split)
+        if new == expr:
+            break
+        expr = new
+    return expr
+
+
 def _is_zero(expr) -> bool:
     """Whether a refined difference is the zero of its kind: a
     ZeroMatrix, or a scalar/collapsed 0 (the matrix difference of two
@@ -194,14 +268,22 @@ def _is_zero(expr) -> bool:
 
 def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
                      domain: dict, shapes: dict,
-                     structures: dict) -> "ProofResult | None":
+                     structures: dict,
+                     premises=None) -> "ProofResult | None":
     """Prove `lhs <relation> rhs` over matrix parameters, or return None
     when it is not a matrix claim or the lift cannot model it (the
     caller then falls back). An equality (`==`/`~=`) is decided by
     zeroing the refined difference; a scalar comparison of
     determinants/traces (`det(A) > 0`) is decided by sympy's assumption
     engine under the structure premises. A matrix ordering is not
-    defined and is declined."""
+    defined and is declined.
+
+    An inverse needs an invertible operand: every matrix inside one
+    must carry a structure that makes it invertible or an `assuming
+    det(A) != 0` premise (`premises`, the clause's (lhs, relation,
+    rhs) conjuncts), or the claim stays undecided. sympy reads an
+    orthogonal matrix's determinant as 1, which only rotations have,
+    so a claim involving one is decided for both signs, +1 and -1."""
     if relation not in ("==", "~=") and relation not in _ASK_FOR_RELATION:
         return None
     params, dim_syms = _matrix_params(facts, domain, shapes)
@@ -221,16 +303,40 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
         return ProofResult("undecided",
                            sketch=undeclared_operand_reason(undeclared))
     try:
-        lhs = _lift(ast.parse(lhs_src, mode="eval"), env)
-        rhs = _lift(ast.parse(rhs_src, mode="eval"), env)
+        lhs_tree = ast.parse(lhs_src, mode="eval")
+        rhs_tree = ast.parse(rhs_src, mode="eval")
+        lhs = _lift(lhs_tree, env)
+        rhs = _lift(rhs_tree, env)
     except (ValueError, SyntaxError):
         return None
+    nonsingular = _nonsingular_premises(premises)
+    invertible = {mat_syms[p] for p in mat_syms
+                  if p in nonsingular
+                  or set((structures or {}).get(p, ())) & _INVERTIBLE_PROPERTIES}
+    singular = sorted(str(m) for m in
+                      (_inverted_symbols(lhs_tree, env)
+                       | _inverted_symbols(rhs_tree, env))
+                      - invertible)
+    if singular:
+        names = ", ".join(singular)
+        return ProofResult(
+            "undecided",
+            sketch=f"the claim inverts {names}, which may be singular (inv "
+                   f"raises there); state it: assuming det({singular[0]}) "
+                   f"!= 0")
     context = _assumptions(mat_syms, structures)
+    extra = [sympy.Q.invertible(mat_syms[p]) for p in sorted(nonsingular)
+             if p in mat_syms]
+    if extra:
+        context = sympy.And(context, *extra) if context is not None \
+            else sympy.And(*extra)
     is_equality = relation in ("==", "~=")
+    orthogonal = [mat_syms[p] for p in sorted(mat_syms)
+                  if "is_orthogonal" in (structures or {}).get(p, ())]
 
-    def _decide():
-        lhs_r = sympy.refine(lhs.doit(), context) if context else lhs.doit()
-        rhs_r = sympy.refine(rhs.doit(), context) if context else rhs.doit()
+    def _decide_one(lhs_d, rhs_d):
+        lhs_r = sympy.refine(lhs_d, context) if context else lhs_d
+        rhs_r = sympy.refine(rhs_d, context) if context else rhs_d
         diff = lhs_r - rhs_r
         if is_equality:
             return _is_zero(diff)
@@ -238,6 +344,27 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
         if isinstance(diff, sympy.MatrixExpr):
             return None
         return sympy.ask(_ASK_FOR_RELATION[relation](diff), context)
+
+    def _decide():
+        lhs_d, rhs_d = lhs.doit(), rhs.doit()
+        if not orthogonal:
+            return _decide_one(lhs_d, rhs_d)
+        import itertools
+        lhs_d, rhs_d = _expand_determinants(lhs_d), _expand_determinants(rhs_d)
+        for det in lhs_d.atoms(sympy.Determinant) | rhs_d.atoms(sympy.Determinant):
+            if det.arg not in orthogonal and \
+                    det.arg.atoms(sympy.MatrixSymbol) & set(orthogonal):
+                return None
+        outcomes = []
+        for signs in itertools.product((1, -1), repeat=len(orthogonal)):
+            fix = {sympy.Determinant(A): s for A, s in zip(orthogonal, signs)}
+            outcomes.append(_decide_one(lhs_d.xreplace(fix),
+                                        rhs_d.xreplace(fix)))
+        if all(o is True for o in outcomes):
+            return True
+        if any(o is None for o in outcomes):
+            return None
+        return False
 
     # refine()/ask() can run unbounded on an expression sympy cannot
     # close; cap it and fall through to empirical checking on a timeout.

@@ -77,7 +77,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         declared per-element bound) and `admits` requires a list whose
         every element the bound admits.
     """
-    from .domain import bound_to_sympy_set, domain_contains, is_missing
+    from .domain import (_as_int_if_whole, bound_assumptions,
+                         bound_to_sympy_set, domain_contains, is_missing)
     from .probing import _synth
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
@@ -134,8 +135,23 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     else:
         cap_lo, cap_hi = -_EXTREME, _EXTREME
 
+    int_names = set()
+    for name in names:
+        try:
+            if (bound_assumptions(cj_domain.get(name)) or {}).get("integer"):
+                int_names.add(name)
+        except Exception:
+            continue
+
+    def _typed(point):
+        # a whole-number coordinate of an integer domain is passed as an
+        # int, the value the probe route draws there; a float would make
+        # `range(n)` raise where the claim is about integers
+        return {n: (_as_int_if_whole(v) if n in int_names else v)
+                for n, v in point.items()}
+
     def _values(point):
-        env = {**base_env, **point}
+        env = {**base_env, **_typed(point)}
         lv = eval(code_l, {"__builtins__": {}}, env)
         rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else 0
         return lv, rv

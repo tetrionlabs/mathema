@@ -21,7 +21,7 @@ the record's sampling meta rather than dropped silently.
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Protocol
 
 from .records import Probe
@@ -76,6 +76,7 @@ class _LadderState:
     proof: object | None = None
     executed: int = 0
     sampling_meta: dict | None = None
+    raise_note: str | None = None
 
 
 def _stamp(probe: Probe, rung: str) -> Probe:
@@ -262,11 +263,22 @@ def _rung_symbolic(case: _Case, state: _LadderState) -> Probe | None:
                    f"vanishes: {proof.sketch}",
             condition=proof.quantifier, note=case.note,
             meta=dict(case.annotations)), "symbolic")
+    if proof is not None and proof.status == "disproven" \
+            and (proof.meta or {}).get("mathema.witness_executed"):
+        # an executed raise, not a value disagreement: sampling compares
+        # values only, so the raise is recorded and the verdict is left
+        # to the value rungs
+        state.raise_note = proof.sketch
+        proof = replace(proof, status="undecided")
     state.proof = proof
     return None
 
 
 def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
+    if state.raise_note is not None or not (
+            _raise_free(case.fn, case.facts, case.cj_domain)
+            and _raise_free(case.gfn, case.gfacts, case.cj_domain)):
+        return None
     closed = _closed_forms_identical(case.fn, case.facts, case.gfn,
                                      case.gfacts, case.cj_domain)
     if closed is not None:
@@ -329,6 +341,8 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     skipped = discarded["not_compared"] + discarded["non_numeric"]
     aside = (f"; {skipped} of {state.executed} executed points were "
              f"not comparable" if skipped else "")
+    if state.raise_note:
+        aside += f"; not proven, since {state.raise_note}"
 
     if cx is not None:
         return _stamp(Probe(
@@ -388,8 +402,36 @@ def _fallthrough(case: _Case, state: _LadderState) -> Probe:
                          else None),
                  note=f"{case.note}; neither the canonical forms, the "
                       f"symbolic difference, nor sampling ({checked} "
-                      f"evaluable points) could settle equivalence",
+                      f"evaluable points) could settle equivalence"
+                      + (f"; {state.raise_note}" if state.raise_note
+                         else ""),
                  meta=meta)
+
+
+def _raise_free(fn, facts, cj_domain) -> bool:
+    """Intent:
+        Whether `fn` provably never raises on any input: the raise-
+        region walk read every statement and found no implicit raise
+        region, and the body holds no `raise` or `assert` of its own.
+        Two closed forms that agree say nothing about a point where
+        one side has no value, so the closed-form rung needs this of
+        both sides.
+    """
+    import ast
+
+    from .symbolic._partiality import partiality_walk
+    if facts.tree is None:
+        return False
+    if any(isinstance(n, (ast.Raise, ast.Assert))
+           for n in ast.walk(facts.tree)):
+        return False
+    try:
+        guards, unread = partiality_walk(fn, facts, cj_domain or {})
+    except TimeoutError:
+        raise
+    except Exception:
+        return False
+    return unread is None and not guards
 
 
 def _closed_forms_identical(fn, facts, gfn, gfacts, cj_domain) -> str | None:

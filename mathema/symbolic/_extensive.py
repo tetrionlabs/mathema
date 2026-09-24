@@ -173,7 +173,8 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
                 return ProofResult("disproven",
                                    sketch=f"{_humanize(diff)} has a real root on "
                                           "the declared interval (exact root isolation)",
-                                   counterexample=f"{pname} = {sympy.nsimplify(inside[0])}")
+                                   counterexample=f"{pname} = {sympy.nsimplify(inside[0])}",
+                                   witness={pname: inside[0]})
         return None
 
     # every maximal sign region between consecutive roots needs one
@@ -228,7 +229,8 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
         if witness is not None:
             return ProofResult("disproven", sketch=f"exact evaluation between the "
                                f"real roots of {_humanize(diff)} found the opposite sign",
-                               counterexample=f"{pname} = {witness}")
+                               counterexample=f"{pname} = {witness}",
+                               witness={pname: witness})
     return None
 
 
@@ -708,6 +710,7 @@ def extensive_ladder(lhs, rhs, relation: str, domain: dict, bound_context,
             return ProofResult(result.status,
                                sketch=f"decided after {name}: {result.sketch}",
                                counterexample=result.counterexample,
+                               witness=result.witness,
                                meta=meta), attempted
 
     if _over_budget():
@@ -761,5 +764,6 @@ def extensive_ladder(lhs, rhs, relation: str, domain: dict, bound_context,
         meta["mathema.derive_route"] = "widened_retry"
         return ProofResult(result.status, sketch=result.sketch,
                            counterexample=result.counterexample,
+                           witness=result.witness,
                            quantifier=result.quantifier, meta=meta), attempted
     return None, attempted

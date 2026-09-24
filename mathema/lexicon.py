@@ -116,7 +116,9 @@ LEXICON: dict[str, str] = {
         "for A in R^(n*n), B in R^(n*n), (A @ B).T == B.T @ A.T",
     "matrix_trace_additive":
         "for A in R^(n*n), B in R^(n*n), trace(A + B) == trace(A) + trace(B)",
-    "matrix_inverse_identity": "for A in R^(n*n), inv(A) @ A == I(n)",
+    # an inverse needs its premise: inv raises on a singular matrix
+    "matrix_inverse_identity":
+        "assuming det(A) != 0, for A in R^(n*n), inv(A) @ A == I(n)",
     # the postfix reading of an OUTPUT structure claim: `f(A) is
     # symmetric` folds to `is_symmetric(f(A))`
     "matrix_output_symmetric_postfix": "for A in R^(n*n), f(A) is symmetric",

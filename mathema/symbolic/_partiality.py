@@ -28,6 +28,7 @@ never decides, since guessing the origin wrong would falsify with a
 lemma about the wrong function.
 """
 import ast
+import contextvars
 import copy
 
 import sympy
@@ -153,6 +154,11 @@ def _inline_lambdas(stmt: ast.stmt, lambdas: dict) -> ast.stmt:
 
 _DBL_MAX = 1.7976931348623157e308
 
+# where the walk records the regions a fractional power of a negative
+# base returns a complex number, when a caller asked for them
+_COMPLEX_OUT: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_complex_regions", default=None)
+
 
 def _float_pow_region(base, exponent: float, int_syms: frozenset):
     """The regions where `base ** exponent` raises OverflowError, a float
@@ -234,6 +240,25 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
                 miss("call argument")
                 continue
             out.append((sympy.And(path_cond, region), exc_name))
+    complex_out = _COMPLEX_OUT.get()
+    if complex_out is not None and isinstance(node, ast.BinOp) \
+            and isinstance(node.op, ast.Pow):
+        # a constant non-integer exponent (0.5, 1/3): Python returns a
+        # complex number for a negative float base, no raise
+        try:
+            exponent = _expr_to_sympy(node.right, {})
+        except NotSymbolic:
+            exponent = None
+        if exponent is not None and not isinstance(exponent, tuple) \
+                and exponent.is_number and exponent.is_integer is False:
+            try:
+                base = _expr_to_sympy(node.left, dict(env))
+            except NotSymbolic:
+                base = None
+            if base is None or isinstance(base, tuple):
+                complex_out.append(path_cond)
+            elif base.free_symbols:
+                complex_out.append(sympy.And(path_cond, base < 0))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow) \
             and isinstance(node.right, ast.Constant) \
             and isinstance(node.right.value, (int, float)) \
@@ -264,12 +289,25 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
         _guards_in_expr(child, env, path_cond, out, scope, missed, int_syms)
 
 
+def _integer_bound(bound) -> bool:
+    """Whether a declared bound admits only integers (`subset Z`): a
+    parameter there is called with an int, whatever its annotation."""
+    if bound is None:
+        return False
+    from ..domain import bound_assumptions
+    try:
+        return bool((bound_assumptions(bound) or {}).get("integer"))
+    except Exception:
+        return False
+
+
 def partiality_guards(fn, facts) -> list:
     """The implicit raise regions of `fn`'s body; see partiality_walk."""
     return partiality_walk(fn, facts)[0]
 
 
-def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str | None]":
+def partiality_walk(fn, facts, domain: "dict | None" = None,
+                    complex_out: "list | None" = None) -> "tuple[list, str | None]":
     """Intent:
         The implicit raise regions of a straight-line (or simply
         branched) body, as (condition, exception name) guards over the
@@ -287,6 +325,11 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
         proof must not rely on it. A branch whose condition does not
         lift (a string comparison, say) is settled from `domain` when
         the declared domain decides it, and only the live side is walked.
+
+        When `complex_out` is a list, the walk also appends the regions
+        where a power with a constant non-integer exponent meets a
+        negative base (`x ** 0.5` at `x < 0`): Python returns a complex
+        number there rather than raising.
     """
     if facts.tree is None:
         return [], "no source"
@@ -302,7 +345,8 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
     unmodified = _unmodified_params(facts.tree, set(facts.params or ()))
     kinds = getattr(facts, "param_kinds", None) or {}
     int_syms = frozenset(sym for name, sym in params.items()
-                         if kinds.get(name) == "int"
+                         if (kinds.get(name) == "int"
+                             or _integer_bound((domain or {}).get(name)))
                          and isinstance(sym, sympy.Symbol))
 
     scope = dict(getattr(fn, "__globals__", None) or {})
@@ -481,6 +525,29 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
                 if (isinstance(stmt.iter, ast.Call)
                         and isinstance(stmt.iter.func, ast.Name)
                         and stmt.iter.func.id == "range"
+                        and scope.get("range", range) is range
+                        and not stmt.iter.keywords):
+                    # range() of a non-integer raises TypeError
+                    for arg in stmt.iter.args:
+                        _guards_in_expr(arg, env, path_cond, guards, scope,
+                                        missed, int_syms)
+                        try:
+                            bound_arg = _expr_to_sympy(arg, dict(env))
+                        except NotSymbolic:
+                            bound_arg = None
+                        if bound_arg is None or isinstance(bound_arg, tuple):
+                            missed.append(f"line {stmt.lineno}: range "
+                                          f"argument")
+                            continue
+                        if bound_arg.free_symbols \
+                                and not bound_arg.free_symbols <= int_syms:
+                            guards.append((sympy.And(
+                                path_cond,
+                                sympy.Ne(bound_arg, sympy.floor(bound_arg))),
+                                "TypeError"))
+                if (isinstance(stmt.iter, ast.Call)
+                        and isinstance(stmt.iter.func, ast.Name)
+                        and stmt.iter.func.id == "range"
                         and not stmt.iter.keywords
                         and len(stmt.iter.args) in (1, 2)):
                     try:
@@ -515,6 +582,10 @@ def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str
             else:
                 stop(stmt)
                 return
-    walk(strip_docstring(facts.tree.body), sympy.true, dict(params))
+    token = _COMPLEX_OUT.set(complex_out)
+    try:
+        walk(strip_docstring(facts.tree.body), sympy.true, dict(params))
+    finally:
+        _COMPLEX_OUT.reset(token)
     first = (unread or missed or [None])[0]
     return guards, first
