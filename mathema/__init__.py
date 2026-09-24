@@ -494,14 +494,14 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     see types.py) contributes its own claims automatically: a domain
     marker merges into `domain` (an explicitly passed bound for the same
     parameter wins), and a `Shape` marker adds a structural probe. Purely
-    additive, a function with no markers behaves exactly as before. The
-    docstring's own `Types:` block (see types.py) desugars to the same
-    markers and merges the same way; a docstring `Domain:` block (see
-    docstring.py, for a bound that isn't one of the established markers,
-    most commonly a fold's own accumulator/item name) is a third domain
-    source, between the two: signature markers, then the docstring's
-    `Domain:` block, then an explicitly passed `domain=` still wins on a
-    name collision, the most deliberate of the three.
+    additive, a function with no markers behaves exactly as before.
+
+    Domains are per claim. The signature markers and `domain=` together
+    are the function-level parent domain; each claim is adjudicated over
+    that parent with its own `for` bindings overriding it per parameter,
+    and one claim's bindings never reach another claim. A claim's record
+    states its own bindings in `domain`/`condition` and whatever the
+    parent supplied in `meta["mathema.parent_domain"]`.
 
     A `@claims_decorator(...)`-tagged function, or a docstring `Claims:`
     block (see authoring.py), also contributes its claims automatically,
