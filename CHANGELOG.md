@@ -24,6 +24,13 @@ dated on the day they are tagged and published.
 - `--run-tests` combines per-process coverage data files (a parallel-mode
   run, or subprocess measurement) before exporting, so lines executed in a
   subprocess are no longer lost.
+- Project root discovery stays inside the enclosing git repository. A
+  `.mathema/` above it (a parent project's store, or the per-user
+  `~/.mathema` directory) was taken as the root, so a command run
+  without `--root` could act on the wrong directory.
+- `mathema badges` gives no implementation credit from a stale coverage
+  report. A function the report showed as fully covered skipped the
+  freshness check.
 
 ### Changed
 

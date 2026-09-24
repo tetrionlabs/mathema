@@ -2347,28 +2347,42 @@ def _resolve_root(value: "str | None") -> str:
         Running from inside a package used to create a whole second
         store there; a store is the product, so it is found rather
         than scattered.
+    Notes:
+        The upward search stops at the enclosing repository's top: a
+        `.mathema/` above it belongs to something else. The home
+        directory's `.mathema/` is per-user configuration, never a
+        project store, unless the home directory is itself the
+        repository.
     """
     if value is not None:
         return os.path.abspath(value)
     here = os.path.abspath(os.getcwd())
-    path = here
-    while True:
-        if os.path.isdir(os.path.join(path, ".mathema")):
-            return path
-        parent = os.path.dirname(path)
-        if parent == path:
-            break
-        path = parent
+    top = None
     import subprocess
     try:
         out = subprocess.run(["git", "rev-parse", "--show-toplevel"],
                              capture_output=True, text=True, timeout=5)
-        top = out.stdout.strip()
-        if out.returncode == 0 and top and os.path.isdir(top):
-            return os.path.abspath(top)
+        found = out.stdout.strip()
+        if out.returncode == 0 and found and os.path.isdir(found):
+            top = os.path.abspath(found)
     except Exception:
         pass
-    return here
+    boundary = os.path.realpath(top) if top else None
+    home = os.path.realpath(os.path.expanduser("~"))
+    path = here
+    while True:
+        real = os.path.realpath(path)
+        if real == home and boundary != home:
+            break
+        if os.path.isdir(os.path.join(path, ".mathema")):
+            return path
+        if real == boundary:
+            break
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+    return top or here
 
 
 def main(argv: list[str] | None = None) -> int:
