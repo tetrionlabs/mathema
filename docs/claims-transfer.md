@@ -107,7 +107,7 @@ or trust them; nothing is promoted to proof by being published.
 The equivalence relation (`f =:= g`, and the call-form law
 `f(x) == g(x)`) accepts any callable for `g`, so the other
 implementation need not be Python.
-[`examples/cpp-equivalence/`](https://github.com/) checks a C++ `ema`
+[`examples/cpp-equivalence/`](https://github.com/tetrionlabs/mathema/tree/main/examples/cpp-equivalence) checks a C++ `ema`
 reached through a ctypes shim over the C ABI against the Python
 reference: `holds`, on shared draws, with no special integration.
 

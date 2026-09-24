@@ -328,19 +328,42 @@ go on to the Greeks, stated as the partial derivatives they are.
 ## Where this goes
 
 !!! note "Direction, not current capability"
-    This section describes where mathema is heading. Nothing in it should be
-    read as a feature of the current release beyond what the linked pages
-    document.
+    Each thread below starts from what mathema does today, then says where
+    it is heading. The heading part is direction: nothing beyond what the
+    linked pages document is a feature of the current release.
 
-Evidence is earned about one implementation, and the natural next step is
-letting it travel. Today, [claims transfer](claims-transfer.md) carries
-evidence in from curated knowledge about the libraries your code calls, across
-between implementations shown to be equivalent, and out as a compendium others
-can consume. The direction is to make that routine across languages, so the
-claims written once about a pricing function hold the Python prototype and the
-production port to the same statement, and to connect claims upward to the
-policies and requirements they exist to satisfy, so that a line of code can be
-traced to the reason it has to behave the way it does.
+### One claim, every implementation
+
+A claim is a statement about mathematics, not about Python, and mathema
+already treats it that way: [claims transfer](claims-transfer.md) checks a C++
+port of a function against its Python original by sampling shared inputs,
+today. The direction is to make every language a first-class citizen, so the
+claims written once about a pricing function or a signal filter hold the
+Python prototype, the C++ engine and the TypeScript front end to the same
+statement, and a port that drifts is caught the day it drifts rather than the
+day a number looks wrong.
+
+### Linear algebra as a first-class subject
+
+mathema already reads [matrix structure](matrix-structure.md), symmetric,
+orthogonal, positive definite, and proves identities such as `det(A @ B) ==
+det(A) * det(B)` over whole families of matrices. The direction is deeper:
+eigenvalue and decomposition claims, conditioning and numerical stability
+stated as claims, and matrix calculus, so the code at the heart of
+optimisation and machine learning can be held to the mathematics it
+implements.
+
+### Complex analysis
+
+Identities over the complex plane already prove: for `f(z) = z*z`, the claim
+`for z in C, f(-z) == f(z)` is settled for every complex `z`. The direction is
+the analysis itself, analyticity, branch cuts, poles and residues, and contour
+integrals, which is where signal processing, control and much of physics
+actually live.
+
+Each of these widens what can be stated and proven, while the rule stays the
+same as it is today: evidence remains evidence, proof remains proof, and
+whatever cannot yet be settled says so.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Start</span><span class="brk r"></span></span>
 
