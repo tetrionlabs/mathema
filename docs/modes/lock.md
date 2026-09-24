@@ -54,6 +54,11 @@ The verified baseline never moves onto code a human did not sanction,
 so a failing loop cannot accumulate `invalidated` noise against an
 implementation that was never supposed to change.
 
+A function can be locked before it has any record or declared claim.
+The sweep checks that lock too, and a changed body fails the same way,
+with the line saying `there is no record to compare` in place of
+`the record is unchanged`.
+
 ## Who locks, who unlocks
 
 **An agent may lock.** Locking is the safe direction: a settled

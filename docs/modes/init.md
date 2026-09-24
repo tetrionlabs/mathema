@@ -50,9 +50,9 @@ For every discovered function with zero claims, writes a bare
 claim, to `claims/<module>.claims.yaml`.
 
 ```yaml
-mypkg.mod.pure_fn:
-  claims: []
 mypkg.mod.branchy_fn:
+  claims: []
+mypkg.mod.pure_fn:
   claims: []
 ```
 
@@ -64,8 +64,8 @@ touched by a later re-run as the target package grows.
 ```
 $ mathema init mypkg
 mathema init: scaffolded git files:
-  .gitattributes
-  .mathema/.gitignore
+  /path/to/project/.gitattributes
+  /path/to/project/.mathema/.gitignore
 mathema init: wrote stub entries to:
   claims/mypkg.mod.claims.yaml
 ```

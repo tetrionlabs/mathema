@@ -78,7 +78,7 @@ partiality lemmas (below), then states it in the record behind an
 arrow:
 
 ```
-assuming f is defined --> b != 0, f(a, b) * b == a
+assuming f is defined --> b != 0, b*f(a, b) = a
 ```
 
 The region after `-->` is the resolved fact the claim was adjudicated

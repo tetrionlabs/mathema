@@ -193,7 +193,7 @@ mathema's own source (`mathema audit mathema --root .`) the summary line is
 honest about where things stand:
 
 ```text
-0/1258 claimed, 26/1258 derivable, 26/1258 lift unconditionally, 516/1258 fully typed, 3096/6101 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), 277/1258 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 45%.
+0/1268 claimed, 26/1268 derivable, 26/1268 lift unconditionally, 521/1268 fully typed, 3130/6152 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), 282/1268 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 45%.
 ```
 
 `mathema audit --index` writes the same map to `.mathema/index.yaml`, with each

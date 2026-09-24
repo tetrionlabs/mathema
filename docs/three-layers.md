@@ -28,10 +28,10 @@ and clarity at the apex, so a lopsided profile has a lopsided shape. The
 overall number is the share of the full triangle that the three scores fill,
 `clarity * (implementation + intent) / 2` on the fractions, which collapses
 toward zero when any layer is empty rather than averaging politely over it.
-An illustrative example:
+For a small two-function project after its first sweep:
 
 ```text
-        CLARITY 44
+        CLARITY 50
               ◆
              · ·
             ·   ·
@@ -39,21 +39,21 @@ An illustrative example:
           ·       ·
          ·         ·
         ·           ·
-       ·             ·
-      ·       ●       ·
-     ·      ···        ·
-    ·     ······        ·
-   ·   ·········         ·
-  ·  ············         ·
- · ···············         ·
+       ·      ●      ·
+      ·     ···       ·
+     ·    ······       ·
+    ·   ········        ·
+   ·  ···········        ·
+  · ·············         ·
+ ·················         ·
 ●·············+···●·········◆
   IMPL 100           INTENT 26
-        overall 28
+        overall 32
 ```
 
 Every line is exercised, a quarter of what the docstrings promise is pinned
-down, and the overall comes out at 28 where the mean of the three would have
-said 57.
+down, and the overall comes out at 32 where the mean of the three would have
+said 59.
 
 Intent and clarity roll up to the project by a mean weighted by how central
 each function is in the call graph, so a function the rest of the code leans

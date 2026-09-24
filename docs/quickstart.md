@@ -131,16 +131,19 @@ durable artifact: the claim, its verdict, the region it was proved
 over, the proof sketch, and the identity hash it binds to.
 
 ```yaml
-claims:
-  - name: "never_raises_price"
-    statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
-    verdict: "proven"
-    sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative"
-    condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
-    route: "derive"
-    authored:
-      surface: "docstring"
-      ref: "pricing.discounted:docstring:L1"
+pricing.discounted:
+  # ...
+  claims:
+    - name: "never_raises_price"
+      statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
+      verdict: "proven"
+      sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative"
+      condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
+      route: "derive"
+      authored:
+        surface: "docstring"
+        ref: "pricing.discounted:docstring:L1"
+      # ...
 ```
 
 The record binds to `form`, a hash of the function's *structure*, so

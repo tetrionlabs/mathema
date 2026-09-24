@@ -40,11 +40,14 @@ and in the record:
 
 ```yaml
       accepted:
-        as: evidence
-        at: "2026-09-16"
-        by: Alonzo Church
-        form: 206704b327da
-        verified_by: {method: pin, key: a3f2c1}
+        as: "evidence"
+        at: "2026-09-24"
+        n: 128
+        form: "206704b327da"
+        by: "Alonzo Church"
+        verified_by:
+          method: "pin"
+          key: "a3f2c1"
 ```
 
 `verified_by` names the method and the credential's **key id**. The

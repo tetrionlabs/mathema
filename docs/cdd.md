@@ -53,8 +53,10 @@ names.
   and check the claim numerically. Verdict: `holds (n=...)` or
   `falsified` with a counterexample. Evidence, not proof.
 - **`derive`**: lift the function's body to a symbolic expression and
-  decide the claim algebraically. Verdict: `proven` or `falsified`, and
-  never a false `proven`. When the body will not lift, or the proof
+  decide the claim algebraically. Verdict: `proven`, or `falsified`
+  with a witness the real function reproduced, and never a false
+  `proven`. A symbolic disproof with no point to execute (a derivative
+  or limit claim, say) stays `unknown`. When the body will not lift, or the proof
   cannot close, a scalar claim falls through to the probe route with
   the reason the derive attempt stopped kept in the record, while a
   matrix-algebra claim stays `unknown`. Only available
@@ -193,7 +195,7 @@ apart from a broken invocation without parsing output:
 | Code | Meaning |
 |---|---|
 | 0 | ran, and nothing gated: claims adjudicated as stated, or the verb only reports |
-| 1 | ran, and the gate failed: a claim is falsified or unknown, a claim is skipped or accepted as risk in strict mode, or a conflict is unresolved |
+| 1 | ran, and the gate failed: a claim is falsified, invalidated or unknown, a claim is skipped or accepted as risk in strict mode, or a conflict is unresolved |
 | 2 | could not run: a target that does not resolve, an unreadable or malformed file, a bad argument, a missing optional extra |
 | 130 | interrupted (Ctrl-C or EOF) |
 

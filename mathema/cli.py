@@ -2089,7 +2089,7 @@ def cmd_accept(args) -> int:
     exact write is printed first and nothing happens without a yes.
     Deliberately CLI-only: acceptance is a human act, never exposed to
     agent tooling or any MCP surface."""
-    from .acceptance import (AcceptanceError, apply_acceptance,
+    from .acceptance import (AcceptanceError, apply_acceptance, corrected_stub,
                              default_identity, plan_acceptance,
                              suggest_acceptance)
 
@@ -2181,13 +2181,20 @@ def cmd_accept(args) -> int:
             return 1
     summary = apply_acceptance(plan)
     print(f"written: {summary}")
-    if plan.get("corrected_statement"):
-        print("declared-layer stanza: REPLACE the old claim in your claims "
-              "file with this (the superseded claim stays retained in the "
-              "record's discoveries section):")
-        print(f"  - name: {plan['corrected_name']}")
-        print(f"    statement: \"{plan['corrected_statement']}\"")
-        print(f"    route: {plan['claim'].get('route') or 'best'}")
+    stub = corrected_stub(plan)
+    if stub is not None:
+        if plan.get("declared_edits"):
+            print(f"declared layer: {', '.join(plan['declared_edits'])} now "
+                  f"declares {stub['name']} in place of {args.claim} (the "
+                  "superseded claim stays in the record's discoveries "
+                  "section):")
+        else:
+            print("declared-layer stanza: add this to the claims file that "
+                  f"declares {args.claim}, in its place (the superseded "
+                  "claim stays in the record's discoveries section):")
+        print(f"  - name: {stub['name']}")
+        print(f"    statement: \"{stub['statement']}\"")
+        print(f"    route: {stub['route']}")
     return 0
 
 
@@ -2277,9 +2284,9 @@ def cmd_badges(args) -> int:
     CENTRALITY (a core function counts more than a leaf; implementation
     stays a raw line ratio). Renders them as a radar triangle whose area
     is the overall health number. Prints the triangle; with `--out [DIR]`
-    also writes the four artifacts (the ASCII triangle, one shields.io
-    JSON per badge, a colored SVG twin, and a JSON snapshot for CI to
-    diff) to DIR, defaulting to the standard `.mathema/badges/` under
+    also writes the artifacts (the ASCII triangle, one shields.io
+    JSON per badge, a colored SVG twin, a JSON snapshot for CI to
+    diff, and a paste-ready README snippet) to DIR, defaulting to the standard `.mathema/badges/` under
     `--root` so a README can embed `triangle.svg` by its in-repo path.
     Omit targets for the rootwide analogue of verify."""
     import os
@@ -2495,8 +2502,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="project root holding .mathema/")
     pb.add_argument("--out", nargs="?", default=None,
                     const=_badges.DEFAULT_BADGE_DIR, metavar="DIR",
-                    help="also write the four artifacts (ASCII triangle, "
-                         "shields JSON, SVG, snapshot); bare --out writes to "
+                    help="also write the artifacts (ASCII triangle, "
+                         "shields JSON per badge, SVG, snapshot, README "
+                         "snippet); bare --out writes to "
                          f"the standard {_badges.DEFAULT_BADGE_DIR}/ under "
                          "--root, or pass an explicit DIR")
     pb.set_defaults(fn=cmd_badges)
@@ -2727,7 +2735,8 @@ def main(argv: list[str] | None = None) -> int:
                           "comma-separated, lightweight, never gates")
     pac.add_argument("--dismiss-concepts", default=None, metavar="C,D",
                      help="dismiss suggested concepts so they never "
-                          "re-suggest (recorded in the declared layer)")
+                          "re-suggest (recorded in "
+                          ".mathema/meta/concepts.yaml)")
     pac.add_argument("--corrected", default=None, metavar="LAW",
                      help="with --as discovery: the corrected claim to "
                           "declare in place of the falsified one, "

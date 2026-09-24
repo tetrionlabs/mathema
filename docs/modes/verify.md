@@ -41,6 +41,7 @@ a bare-name key now fails as a clear per-key problem line).
 | Finding | Default (strict) | `--lenient` |
 |---|---|---|
 | `falsified` claim | fails | fails |
+| `invalidated` claim (held before, fails now) | fails | fails |
 | `unknown` claim, not accepted | fails | fails |
 | `unknown` claim, accepted as risk | fails (`N accepted-risk claim(s)`) | passes, named in the row |
 | `skipped` (unverifiable) claim | fails | passes, informational |
@@ -85,14 +86,14 @@ by the total) and re-run:
 
 ```
 $ mathema verify --root .
-FAIL functions.softmax: form changed; 1 proven, 1 holds, 1 falsified  <- 1 falsified claim(s)
+FAIL functions.softmax: form changed; 1 proven, 1 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
-`sums_to_one` is correctly falsified (the record stores it as
-`invalidated`, since it held before), the counterexample is kept in
-the record, and the exit code is 1. Restore the fix and re-verify:
+`sums_to_one` now fails, and because it held before it is reported
+as `invalidated` rather than `falsified`; the counterexample is kept
+in the record, and the exit code is 1. Restore the fix and re-verify:
 
 ```
 $ mathema verify --root .

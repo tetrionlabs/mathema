@@ -116,7 +116,7 @@ mathema verify --root .
 
 ```text
 ok   funcs.midpoint: fresh
-FAIL funcs.settle: form changed; 1 proven, 2 holds, 1 falsified  <- 1 falsified claim(s)
+FAIL funcs.settle: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -214,10 +214,10 @@ accepting funcs.settle :: negative_exposure_negative (verdict invalidated) as di
   - rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
 write this acceptance? [y/N] y
 written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 128 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
-declared-layer stanza: REPLACE the old claim in your claims file with this (the superseded claim stays retained in the record's discoveries section):
+declared layer: claims/demo.claims.yaml now declares negative_exposure_negative_corrected in place of negative_exposure_negative (the superseded claim stays in the record's discoveries section):
   - name: negative_exposure_negative_corrected
     statement: "for x in [-5.0, -1.0]:float|missing, f(x) > 0"
-    route: probe:semi_analytical
+    route: probe
 ```
 
 The old claim is not erased. It moves to the record's `discoveries`
@@ -232,6 +232,20 @@ the discovery with no replacement, and you state what is true yourself
 with `--corrected "<law>"`, which is adjudicated the same way before it
 is written. A year later the record still says someone believed the
 opposite, and why they stopped.
+
+With the bug fixed, the evidence accepted and the wrong belief corrected,
+the sweep passes:
+
+```bash
+mathema verify --root .
+```
+
+```text
+ok   funcs.midpoint: fresh
+ok   funcs.settle: claims changed; 1 proven, 3 holds, 0 falsified
+1 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+grammars detected: mathema; verified by this run: mathema
+```
 
 ## 6. Owning what nothing can settle
 

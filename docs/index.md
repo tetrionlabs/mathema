@@ -212,12 +212,12 @@ file, line and span, and a pointer to its verified record where one exists.
 Run over all of mathema, the summary line reads:
 
 ```text
-0/1258 claimed, 26/1258 derivable, 26/1258 lift unconditionally, 516/1258 fully typed, 3096/6101 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), 277/1258 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 45%.
+0/1268 claimed, 26/1268 derivable, 26/1268 lift unconditionally, 521/1268 fully typed, 3130/6152 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), 282/1268 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 45%.
 ```
 
 Those are unflattering numbers, and they are the point: not one of mathema's
-own 1,258 functions carries a claim yet, only 26 are in a shape the derive
-route can prove things about, and 277 depend on state outside their own
+own 1,268 functions carries a claim yet, only 26 are in a shape the derive
+route can prove things about, and 282 depend on state outside their own
 parameters. A report like that is where verification work starts, because it
 says exactly where the knowledge ends.
 
@@ -225,8 +225,8 @@ says exactly where the knowledge ends.
 
 ## Built with its own tools
 
-mathema's own source is 52,875 lines of Python in 92 files (counted
-with `find mathema -name '*.py' | xargs cat | wc -l`), exercised by 2,644
+mathema's own source is 53,313 lines of Python in 92 files (counted
+with `find mathema -name '*.py' | xargs cat | wc -l`), exercised by 2,684
 tests (`python -m pytest --collect-only -q`). The suite also parses every claim
 shown anywhere in these docs, so a page cannot drift out of the grammar
 unnoticed, and the claims the README and the grammar page teach are drawn from

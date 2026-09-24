@@ -718,7 +718,7 @@ def render_docstring(fn, root: str = ".") -> str:
     rec = verified.get(key)
     if rec is None:
         raise ValueError(f"no verified record for {key!r} under root {root!r} "
-                         "-- run mathema.write_spec(fn) first")
+                         "(run mathema.write_spec(fn) first)")
     entry = rec["entry"]
     claims = entry.get("claims") or []
 

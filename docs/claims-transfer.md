@@ -45,7 +45,7 @@ $ mathema accept numpy.clip clip_lower --as trusted
 
 takes the row at the level its curator claims, and every conclusion
 resting on it caps there, with the provenance
-(`compendium:numpy-2.2/clip_lower`) named in the record. Running
+(`compendium:numpy-2.5/clip_lower`) named in the record. Running
 `mathema verify` instead re-adjudicates the row against the installed
 library, and the local verdict replaces the testimony. Accepting is a
 statement of trust; reverifying removes the need for it.

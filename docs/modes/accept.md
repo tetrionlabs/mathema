@@ -230,7 +230,7 @@ A compendium row (curated knowledge about a library, materialised
 into the store at `declared` status when a premise first references
 it) accepted at the level its curator claims. The row's verdict
 becomes that level, the acceptance records the source
-(`compendium:numpy-2.2`), and every conclusion resting on the row
+(`compendium:numpy-2.5`), and every conclusion resting on the row
 caps there. The alternative needs no verb at all: `mathema verify`
 re-adjudicates the row against the installed library, and the local
 verdict replaces the testimony. See

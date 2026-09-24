@@ -123,7 +123,7 @@ def families() -> dict[str, ClaimFamily]:
     for name in _REGISTRY:
         if name in merged and merged[name] is not _REGISTRY[name]:
             warnings.warn(f"mathema: external claim family {name!r} ignored "
-                          "-- a built-in family already uses that name",
+                          "because a built-in family already uses that name",
                           stacklevel=2)
     merged.update(_REGISTRY)
     return merged

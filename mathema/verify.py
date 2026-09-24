@@ -559,16 +559,40 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     verified = load_verified(root)
     declared = load_declared(root)
     keys = sorted(set(verified) | set(declared))
+    # a function can be locked before it has any record or claims; its
+    # lock is still checked
+    lock_only = sorted(set(locks) - set(keys))
     if only:
         want = set(only)
         keys = [k for k in keys if k in want]
-    if not keys:
+        lock_only = [k for k in lock_only if k in want]
+    if not keys and not lock_only:
         out.nothing_declared = True
         return out
 
     # phase 1: freshness + adjudication + record writes. Gating waits
     # until every record is written (see the docstring note).
     lock_messages: dict = {}   # key -> the tripped-lock failure line
+    for key in lock_only:
+        fn = _resolve_func_ref(key, root=root)
+        if fn is None:
+            msg = (f"{key}: locked, but no function of that name resolves; "
+                   f"restore it, or a human runs: mathema unlock {key}")
+        elif lock_state(key, (form := analyze(fn).form), locks,
+                        {}) == "changed":
+            lk = locks.get(key) or {}
+            msg = (f"{key}: locked at form {lk.get('form')} but the code "
+                   f"is now {form}; there is no record to "
+                   f"compare. Restore the function, or a human runs: "
+                   f"mathema unlock {key}")
+        else:
+            continue
+        out.problems.append(msg)
+        out.lines.append(f"FAIL {msg}")
+        out.keys.append({"key": key, "why": "locked-changed",
+                         "passed": False, "problems": [msg],
+                         "integrity_mismatch": False, "counts": {},
+                         "claims": []})
     pending: list = []   # (key, why, claims_for_gate, rec_or_none,
                          #  deps, accepted, unresolved, source_line)
     for key in keys:

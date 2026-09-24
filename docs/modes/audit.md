@@ -126,14 +126,13 @@ def strength_to_distance(r: float, scale: str = "info") -> float:
 ```
 
 ```
-$ mathema audit mypkg
+$ mathema audit mypkg --deriv-report
 ...
 underivable functions:
   mypkg.strength_to_distance:
     line 2  branch:needs-domain(scale)
     line 4  branch:needs-domain(scale)
-codes explained: the reason-code reference in the docs, or
-`mathema describe --issue <key>` for the full hints
+codes explained: the reason-code reference in the docs, or `mathema describe --issue <key>` for the full details
 ```
 
 Both branches are resolvable once `scale` has a declared domain, a

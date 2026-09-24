@@ -86,3 +86,52 @@ def test_accepted_risk_on_a_fresh_record_is_reported_as_accepted_risk():
     fresh = gate([Probe("grows", "s", "proven"), Probe("owned", "s", "unknown")],
                  strict=True, accepted_risk=frozenset({"owned"}))
     assert (fresh.owned, fresh.skipped) == (strict.owned, strict.skipped)
+
+
+def test_a_lock_is_checked_even_without_a_record(tmp_path):
+    (tmp_path / "funcs.py").write_text(_SETTLE_OK)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    script = ("import sys; from mathema.cli import main; "
+              f"sys.exit(main(['lock', 'funcs.settle', '--root', {str(tmp_path)!r}]))")
+    locked = subprocess.run([sys.executable, "-c", script], cwd=str(tmp_path),
+                            capture_output=True, text=True,
+                            env=_env_with_repo_on_path())
+    assert locked.returncode == 0, locked.stdout + locked.stderr
+    untouched = _run(tmp_path)
+    assert untouched.returncode == 0, untouched.stdout
+    (tmp_path / "funcs.py").write_text(_SETTLE_BROKEN)
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout
+    rows = _rows_for(r.stdout, "funcs.settle")
+    assert len(rows) == 1 and rows[0].startswith("FAIL"), r.stdout
+    assert "locked at form" in rows[0]
+
+
+def test_a_discovery_reports_the_claims_file_it_rewrote(tmp_path):
+    (tmp_path / "funcs.py").write_text(_SETTLE_OK)
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "demo.claims.yaml").write_text(
+        "funcs.settle:\n  claims:\n"
+        "    - name: negative_exposure_negative\n"
+        "      statement: \"for x in [-5, -1], f(x) <= 0\"\n"
+        "      route: probe\n")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    first = _run(tmp_path)
+    assert first.returncode == 1, first.stdout
+    script = ("import sys; from mathema.cli import main; "
+              "sys.exit(main(['accept', 'funcs.settle', "
+              "'negative_exposure_negative', '--as', 'discovery', '--yes', "
+              f"'--by', 'Ada Lovelace', '--root', {str(tmp_path)!r}]))")
+    r = subprocess.run([sys.executable, "-c", script], cwd=str(tmp_path),
+                       capture_output=True, text=True,
+                       env=_env_with_repo_on_path())
+    assert r.returncode == 0, r.stdout + r.stderr
+    rewritten = (tmp_path / "claims" / "demo.claims.yaml").read_text()
+    assert "name: negative_exposure_negative\n" not in rewritten
+    assert "REPLACE" not in r.stdout
+    assert "claims/demo.claims.yaml" in r.stdout
+    printed = [ln.strip() for ln in r.stdout.splitlines()
+               if ln.strip().startswith("route:")]
+    written = [ln.strip() for ln in rewritten.splitlines()
+               if ln.strip().startswith("route:")]
+    assert printed == written

@@ -683,8 +683,8 @@ def _explain_branch(test: ast.AST, unmodified: set, affine_locals: dict | None =
                        "variable not traceable to unmodified parameters via "
                        "a straight-line chain of assignments before the "
                        "first branch (or is itself a reassigned parameter) "
-                       "-- branch pruning only resolves conditions over "
-                       "unmodified parameters or expressions built from them"}
+                       "(branch pruning only resolves conditions over "
+                       "unmodified parameters or expressions built from them)"}
             return {"kind": "blocked", "code": "opaque-expression",
                     "reason": f"neither side of "
                     f"{ast.unparse(test)!r} is a bare name, an affine local, "

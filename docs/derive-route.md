@@ -486,7 +486,7 @@ def rms(signal: list) -> float:
 ```
 
 ```
-f(signal) == f(signal)   # proven, sqrt(Sum(signal[k]**2, (k, 0, L-1)) / L)
+f(signal) == f(signal)   # proven, sqrt(Sum(signal[k]**2, (k, 0, L_signal - 1))/L_signal)
 ```
 
 **A dot product recognized directly from loop structure**, not only
@@ -723,8 +723,11 @@ nonnegative on the domain first, which is what makes squaring them
 sound. The sketch states that step, and the route says `extensive`.
 Two rows need a domain: `gram_schmidt_2d` divides by the squared norm
 of `v1`, and `projectile_range` divides by `g`. Unbounded, each claim
-reaches that division by zero and is `falsified`, since a raise is not
-a value.
+is `falsified`: `projectile_range` reaches the division by zero at
+`g = 0`, and a raise is not a value, while `gram_schmidt_2d` returns
+`0.00011723145853181904` instead of `0` at `v1x = -1e6, v2x = 1e6`,
+where floating-point cancellation leaves a residue the exact formula
+does not have.
 
 ## Multi-function claims
 
