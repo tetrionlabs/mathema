@@ -16,8 +16,11 @@ unioned:
   body as derive-covered when any claim on it proved on the derive route;
   a per-branch refinement is future work.
 
-A STALE external test report (one older than the source) does NOT count
-toward the score: its lines may not even map to the current code. Those
+A STALE external test report does NOT count toward the score: its lines
+may not even map to the current code. A report stamped with its sources'
+content hashes (`inventory.stamp_coverage_sources`) is stale for a file
+exactly when that file's content changed since measurement; an unstamped
+one falls back to file times (the source modified after the report). Those
 lines are surfaced as RECLAIMABLE instead, so a re-run of the tests folds
 them back in. The probe and derive sources are recomputed on every pass,
 so they are always current and carry the score.
@@ -39,7 +42,8 @@ import os
 import sys
 from dataclasses import dataclass, field
 
-from .inventory import read_test_coverage
+from .inventory import (ReportFreshness, coverage_freshness,
+                        read_test_coverage, stamp_coverage_sources)
 
 
 @dataclass
@@ -55,12 +59,14 @@ class FunctionCoverage:
     covered: set = field(default_factory=set)
     by_source: dict = field(default_factory=dict)   # "test"/"probe"/"derive" -> lines
     traced: bool = True
-    test_stale: bool = False   # the external coverage report predates the
-                               # source, so its "test" lines are unreliable
+    test_stale: bool = False   # the source changed since the external report
+                               # measured it, so its "test" lines are unreliable
     reclaimable: set = field(default_factory=set)   # stale-test lines the
                                # score excludes, re-runnable back into it
     derivable: "bool | None" = None   # the lift can model the body, so a
                                # claim would derive-cover it (None = unknown)
+    freshness: "str | None" = None   # how test_stale was judged: "hash"
+                               # (a stamped report), "mtime", or None (no report)
 
     @property
     def uncovered(self) -> set:
@@ -82,17 +88,6 @@ class FunctionCoverage:
             return 100
         reachable = (self.covered | self.reclaimable) & self.statements
         return round(100 * len(reachable) / len(self.statements))
-
-
-def _coverage_report_path(root: str) -> str | None:
-    """The external coverage report `read_test_coverage` reads, if one
-    exists, for its modification time (staleness): `coverage.json`
-    first, then a native `.coverage`."""
-    for name in ("coverage.json", ".coverage"):
-        path = os.path.join(root, name)
-        if os.path.exists(path):
-            return path
-    return None
 
 
 def _line_range(fn) -> tuple[str, int, int] | None:
@@ -199,21 +194,25 @@ def _derive_covered_lines(record, statements: set) -> set:
 
 def function_coverage(fn, key: str | None = None, root: str = ".",
                       coverage_data: dict | None = None,
-                      report_mtime: float | None = None) -> FunctionCoverage:
+                      report_mtime: float | None = None,
+                      freshness: ReportFreshness | None = None
+                      ) -> FunctionCoverage:
     """The merged implementation coverage of one function: test-executed
     ∪ probe-executed ∪ derive-modeled lines, over its executable
     statements. `coverage_data` (an already-read external report) is
-    reused when given, else read once from `root`; `report_mtime` (the
-    report file's own mtime) marks the test source stale when the
-    function's source is newer."""
+    reused when given, else read once from `root`. `freshness` decides
+    whether the report's lines for this function's file still describe
+    its code (`inventory.coverage_freshness`, by content hash when the
+    report is stamped, else by file time); read from `root` when not
+    given, and `report_mtime` alone forces the file-time check."""
     from .authoring import _fn_key
 
     key = key or _fn_key(fn)
     if coverage_data is None:
         coverage_data = read_test_coverage(root)
-    if report_mtime is None:
-        rp = _coverage_report_path(root)
-        report_mtime = os.path.getmtime(rp) if rp else None
+    if freshness is None:
+        freshness = (ReportFreshness(method="mtime", report_mtime=report_mtime)
+                     if report_mtime is not None else coverage_freshness(root))
 
     statements, probe_executed, record = _trace_check(fn)
     traced = statements is not None
@@ -228,10 +227,9 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
         record = _plain_check(fn)
 
     test_stale = False
-    if report_mtime is not None:
-        rng = _line_range(fn)
-        if rng is not None and os.path.exists(rng[0]):
-            test_stale = os.path.getmtime(rng[0]) > report_mtime
+    rng = _line_range(fn)
+    if rng is not None and os.path.exists(rng[0]):
+        test_stale = freshness.is_stale(rng[0])
 
     by_source: dict = {}
     if probe_executed and not _is_mathema_own(fn):
@@ -263,7 +261,8 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
     return FunctionCoverage(key=key, statements=set(statements),
                             covered=covered, by_source=by_source,
                             traced=traced, test_stale=test_stale,
-                            reclaimable=reclaimable, derivable=derivable)
+                            reclaimable=reclaimable, derivable=derivable,
+                            freshness=freshness.method)
 
 
 def _is_mathema_own(fn) -> bool:
@@ -390,7 +389,10 @@ def regenerate_test_coverage(root: str, test_command: str | None = None) -> bool
             _coverage("json", "-o", json_path)
     except Exception:
         return False
-    return _fresh(json_path)
+    if not _fresh(json_path):
+        return False
+    stamp_coverage_sources(root)
+    return True
 
 
 def project_coverage(targets, root: str = ".", run_tests: bool = False,
@@ -406,8 +408,7 @@ def project_coverage(targets, root: str = ".", run_tests: bool = False,
     if run_tests:
         regenerate_test_coverage(root, test_command)
     coverage_data = read_test_coverage(root)
-    _rp = _coverage_report_path(root)
-    report_mtime = os.path.getmtime(_rp) if _rp else None
+    freshness = coverage_freshness(root)
     funcs: dict = {}
     if targets:
         for t in targets:
@@ -421,7 +422,7 @@ def project_coverage(targets, root: str = ".", run_tests: bool = False,
                 funcs[key] = fn
     rows = [function_coverage(fn, key=key, root=root,
                               coverage_data=coverage_data,
-                              report_mtime=report_mtime)
+                              freshness=freshness)
             for key, fn in sorted(funcs.items())]
     return ProjectCoverage(functions=rows)
 

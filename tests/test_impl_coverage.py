@@ -125,6 +125,45 @@ def test_coverage_command_reports_and_exits_zero(tmp_path, capsys):
     assert "implementation coverage:" in out
 
 
+def test_coverage_stamp_command_writes_the_sidecar(tmp_path, capsys):
+    import json
+
+    from mathema.cli import main
+    (tmp_path / "m.py").write_text("def f(x):\n    return x + 1\n")
+    (tmp_path / "coverage.json").write_text(json.dumps(
+        {"files": {"m.py": {"executed_lines": [2]}}}))
+    rc = main(["coverage", "--stamp", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert (tmp_path / "coverage.sources.json").exists()
+    assert "coverage.sources.json" in out
+
+
+def test_coverage_command_states_how_freshness_was_judged(tmp_path, capsys):
+    import json
+    import sys
+
+    from mathema.cli import main
+    (tmp_path / "cproj").mkdir()
+    (tmp_path / "cproj" / "__init__.py").write_text("")
+    (tmp_path / "cproj" / "mod.py").write_text(
+        "def g(x: float) -> float:\n    return x\n")
+    (tmp_path / "coverage.json").write_text(json.dumps(
+        {"files": {"cproj/mod.py": {"executed_lines": [2]}}}))
+    sys.path.insert(0, str(tmp_path))
+    try:
+        main(["coverage", "cproj.mod", "--root", str(tmp_path)])
+        unstamped = capsys.readouterr().out
+        main(["coverage", "--stamp", "--root", str(tmp_path)])
+        capsys.readouterr()
+        main(["coverage", "cproj.mod", "--root", str(tmp_path)])
+        stamped = capsys.readouterr().out
+    finally:
+        sys.path.remove(str(tmp_path))
+    assert "file modification time" in unstamped
+    assert "content hash" in stamped
+
+
 def test_stale_test_is_excluded_but_reclaimable(tmp_path):
     import inspect
     import json
@@ -248,6 +287,108 @@ def test_regenerate_combines_parallel_data_files(tmp_path):
     assert ic.regenerate_test_coverage(str(tmp_path), cmd) is True
     report = json.loads((tmp_path / "coverage.json").read_text())
     assert any(name.endswith("m.py") for name in report["files"])
+
+
+def _fully_reported(tmp_path):
+    """A module whose one function the coverage report fully covers, and
+    the absolute path of its source file."""
+    import inspect
+    import json
+
+    mod = _load(tmp_path, '''
+        def route(n: int) -> int:
+            if n <= 0:
+                return 0
+            return n - 1
+    ''')
+    src = os.path.abspath(inspect.getsourcefile(mod.route))
+    lines, start = inspect.getsourcelines(mod.route)
+    (tmp_path / "coverage.json").write_text(json.dumps(
+        {"files": {src: {"executed_lines":
+                         list(range(start, start + len(lines)))}}}))
+    return mod, src
+
+
+def _age(path, seconds: float = 100.0) -> None:
+    import time
+    old = time.time() - seconds
+    os.utime(path, (old, old))
+
+
+def test_stamp_records_a_content_hash_per_measured_file(tmp_path):
+    import hashlib
+    import json
+
+    from mathema.inventory import stamp_coverage_sources
+    mod, src = _fully_reported(tmp_path)
+    path = stamp_coverage_sources(str(tmp_path))
+    data = json.loads(open(path).read())
+    with open(src, "rb") as fh:
+        expected = hashlib.sha256(fh.read()).hexdigest()
+    assert data["files"][os.path.relpath(src, str(tmp_path))] == expected
+
+
+def test_a_touched_but_unchanged_source_stays_fresh_under_a_stamp(tmp_path):
+    # a checkout rewrites file times without changing content; the hash
+    # sees the same code the report measured, so its lines still count
+    from mathema.inventory import stamp_coverage_sources
+    mod, src = _fully_reported(tmp_path)
+    stamp_coverage_sources(str(tmp_path))
+    _age(tmp_path / "coverage.json")
+    fc = function_coverage(mod.route, root=str(tmp_path))
+    assert fc.freshness == "hash"
+    assert fc.test_stale is False
+    assert "test" in fc.by_source
+
+
+def test_an_edited_source_is_stale_under_a_stamp_whatever_its_time(tmp_path):
+    from mathema.inventory import stamp_coverage_sources
+    mod, src = _fully_reported(tmp_path)
+    stamp_coverage_sources(str(tmp_path))
+    with open(src, "a") as fh:
+        fh.write("\n# edited\n")
+    _age(src, 1000.0)                   # older than the report, yet changed
+    fc = function_coverage(mod.route, root=str(tmp_path))
+    assert fc.freshness == "hash"
+    assert fc.test_stale is True
+    assert "test" not in fc.by_source
+
+
+def test_a_stamp_for_a_different_report_is_not_trusted(tmp_path):
+    # the report was regenerated after the stamp: the stamp describes other
+    # source, so freshness falls back to file times rather than trust it
+    from mathema.inventory import stamp_coverage_sources
+    mod, src = _fully_reported(tmp_path)
+    stamp_coverage_sources(str(tmp_path))
+    report = tmp_path / "coverage.json"
+    report.write_text(report.read_text().replace("executed_lines",
+                                                 "executed_lines", 1) + " ")
+    fc = function_coverage(mod.route, root=str(tmp_path))
+    assert fc.freshness == "mtime"
+
+
+def test_without_a_stamp_freshness_is_judged_by_file_time(tmp_path):
+    mod, src = _fully_reported(tmp_path)
+    fc = function_coverage(mod.route, root=str(tmp_path))
+    assert fc.freshness == "mtime"
+
+
+def test_regenerate_stamps_the_measured_sources(tmp_path):
+    import sys
+
+    import mathema.impl_coverage as ic
+    (tmp_path / "m.py").write_text("def f(x):\n    return x + 1\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_m.py").write_text(
+        "import sys, os\n"
+        "sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))\n"
+        "from m import f\n"
+        "def test_passes():\n    assert f(1) == 2\n")
+    cmd = (f"{sys.executable} -m coverage run -m pytest -q "
+           "-p no:cacheprovider -p no:xdist tests")
+    assert ic.regenerate_test_coverage(str(tmp_path), cmd) is True
+    assert (tmp_path / "coverage.sources.json").exists()
 
 
 def test_mathema_own_functions_get_no_probe_credit():

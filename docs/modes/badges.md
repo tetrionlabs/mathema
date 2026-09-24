@@ -26,6 +26,50 @@ repo by a centrality-weighted mean: a function the rest of the codebase
 depends on (by PageRank over the call graph) counts for more than a leaf
 helper.
 
+## The test report behind implementation
+
+The test source of implementation comes from a coverage report that
+already exists at the root, `coverage.json` first, then a native
+`.coverage`. mathema reads it and never runs your tests, unless you ask:
+
+```
+mathema coverage [targets] --run-tests   # re-run the tests under coverage first
+mathema coverage --stamp                 # stamp a report produced elsewhere
+```
+
+A report only counts while it still describes the code. Its lines are
+keyed by line number, so once a source file changes they can point at
+the wrong statements. Those lines are then left out of the score and
+reported as reclaimable by a re-run. Freshness is judged per source file,
+in one of two ways, and `mathema coverage` prints which one it used:
+
+- **by content hash**, when the report is stamped. `coverage.sources.json`
+  sits beside the report and holds the sha256 of every file it measured,
+  plus the report's own hash. A file's lines count exactly while its
+  content still matches. This holds anywhere the report travels: a fresh
+  checkout, a CI artifact, a cache. A stamp written for a different report
+  is ignored.
+- **by file modification time**, when there is no stamp. A file is stale
+  when it was modified after the report was written. That is only
+  reliable on the machine that ran the tests, because a checkout resets
+  file times.
+
+`--run-tests` stamps the report it produces. A report made by another
+tool, for example `pytest --cov` in CI, needs `mathema coverage --stamp`
+run once afterwards, in the same tree. Stamping costs a hash of each
+measured file, milliseconds even for a large package.
+
+When the tests run in parallel mode, or measure subprocesses, coverage
+writes one data file per process (`.coverage.<suffix>`). `--run-tests`
+combines them before exporting, so lines executed in a subprocess, such as
+a test that invokes the CLI, count. A test run that fails still produces
+the report: the lines every other test executed are kept.
+
+mathema's own functions get no probe source when mathema measures
+itself. Checking one of them runs mathema's machinery, which may call
+that same function, so a probe's lines cannot be told apart from the
+machinery's. Test and derive lines still count.
+
 ## How clarity is scored
 
 Clarity asks a single question: **of everything knowable about this
