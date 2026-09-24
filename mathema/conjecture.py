@@ -1379,7 +1379,8 @@ _KNOWN_VALUE_NAMES = frozenset(
 
 #: calls whose argument after the expression is a variable they bind
 #: (`d(f(x), x)`, `Sum(f(i), i, 1, n)`, `lim(f(x), x, 0)`)
-_BINDING_CALLS = frozenset({"d", "integrate", "Sum", "Prod", "lim"})
+_BINDING_CALLS = frozenset({"d", "integrate", "Sum", "Prod", "sum", "prod",
+                            "lim"})
 
 
 def _bound_by_calls(tree) -> set:
@@ -1437,7 +1438,8 @@ def _undeclared_names(cj, declared: set) -> list[str]:
     """Intent:
         The names a claim's statement, chain links and relational
         premise use as values that nothing declares, in the order they
-        first appear. Empty for a claim whose statement is not a
+        first appear. A name used as a subscript (`f(n)[i]`) is an
+        index, quantified over the valid positions, and so is bound. Empty for a claim whose statement is not a
         relation (a safety predicate, `f =:= g`), whose operands are
         read differently.
     """
@@ -1451,16 +1453,22 @@ def _undeclared_names(cj, declared: set) -> list[str]:
         parts = [_parse_assuming_relation(p) for p in _split_top_and(premise)]
         if all(p is not None for p in parts):
             sides += [s for p in parts for s in (p.lhs, p.rhs)]
-    found: list[str] = []
+    trees = []
     for src in sides:
         if not src:
             continue
         try:
-            tree = ast.parse(str(src), mode="eval")
+            trees.append(ast.parse(str(src), mode="eval"))
         except SyntaxError:
             continue
+    # a subscript index (`f(n)[i] == i`) binds its name on every side
+    indices = {n.id for tree in trees for sub in ast.walk(tree)
+               if isinstance(sub, ast.Subscript)
+               for n in ast.walk(sub.slice) if isinstance(n, ast.Name)}
+    found: list[str] = []
+    for tree in trees:
         call_funcs = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
-        bound = _bound_by_calls(tree)
+        bound = _bound_by_calls(tree) | indices
         for node in ast.walk(tree):
             if (isinstance(node, ast.Name) and id(node) not in call_funcs
                     and not node.id.startswith("__")

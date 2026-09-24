@@ -184,9 +184,10 @@ def test_float_cast_wrapping_return_value_does_not_block_lifting():
 def test_ito_drift_coefficient_matching():
     """V = x^2 under dX = mu dt + sigma dW: Ito's lemma implies drift
     d/dt V + mu d/dx V + 1/2 sigma^2 d^2/dx^2 V = 2*mu*x + sigma^2. This
-    is an ordinary equality claim over d(...) terms and free (aux) drift/
-    diffusion symbols, no stochastic-process machinery involved."""
+    is an ordinary equality claim over d(...) terms and a declared free
+    drift symbol, no stochastic-process machinery involved."""
     results = check_conjectures(sq, [claim(
+        "let mu be [-5, 5], "
         "2*mu*x + sigma**2 == d(f(t,x,sigma), t) + mu*d(f(t,x,sigma), x) "
         "+ 0.5*sigma**2*d(f(t,x,sigma), x, x)", route="derive", pseudo_infinity=1e100)])
     assert results[0].verdict == "proven"
@@ -2051,6 +2052,6 @@ def test_skipped_derive_claim_tags_unliftable_status_in_meta():
 def test_skipped_derive_claim_tags_undecided_status_in_meta():
     def cube_product(x: float) -> float:
         return x * x * x
-    results = check_conjectures(cube_product, [claim("f(x) <= f(y)", route="derive")])
+    results = check_conjectures(cube_product, [claim("let y be [-5, 5], f(x) <= f(y)", route="derive")])
     assert results[0].verdict == "falsified"   # x^3 <= y^3 is just false
     assert results[0].meta["mathema.derive_status"] == "undecided"

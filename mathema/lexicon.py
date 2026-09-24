@@ -295,9 +295,12 @@ LEXICON: dict[str, str] = {
     # a bare call name binds from f's module or the calling scope at
     # check time; `let g = <name>` aliases it; `funcs=` on claim() is
     # the explicit spelling (not expressible in claim text alone)
-    "second_function_by_name": "d(budget_line(x, I, px, py), x) == -px/py",
-    "let_function_bare_name": ("let g = budget_line, "
-                              "d(g(x, I, px, py), x) == -px/py"),
+    "second_function_by_name": (
+        "let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], "
+        "d(budget_line(x, I, px, py), x) == -px/py"),
+    "let_function_bare_name": (
+        "let g = budget_line, let I be [10, 1000], let px be [0.5, 20], "
+        "let py be [0.5, 20], d(g(x, I, px, py), x) == -px/py"),
     "two_function_equality": "f(x) == g(x)",
     "bound_function_nested_in_f": (
         "let I be [10,1000], let px be [0.5,20], let py be [0.5,20], "

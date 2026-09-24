@@ -44,7 +44,8 @@ def test_bare_name_binds_from_the_target_functions_module():
     # call it by name with no funcs= at all, and the note names the
     # binding explicitly
     r = _verdict(cobb_douglas_utility,
-                 "let py be [0.5, 20], d(budget_line(x,I,px,py),x) == -px/py",
+                 "let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], "
+                 "d(budget_line(x,I,px,py),x) == -px/py",
                  route="derive")
     assert r.verdict == "proven"
     assert "bound budget_line" in r.note
@@ -54,6 +55,7 @@ def test_bare_name_binds_from_the_target_functions_module():
     # a bound function's raise regions gate the claim exactly like
     # f's own (derive and probe agree here by design)
     r = _verdict(cobb_douglas_utility,
+                 "let I be [10, 1000], let px be [0.5, 20], let py be [-20, 20], "
                  "d(budget_line(x,I,px,py),x) == -px/py", route="derive")
     assert r.verdict == "falsified"
     assert "budget_line" in (r.sketch or "")
@@ -94,7 +96,8 @@ def test_let_alias_of_a_same_scope_function_resolves():
     # `let g = budget_line` substitutes the bare name into the law,
     # and the name then binds from the module like a direct call
     r = _verdict(cobb_douglas_utility,
-                 "let g = budget_line, let py be [0.5, 20], "
+                 "let g = budget_line, let I be [10, 1000], "
+                 "let px be [0.5, 20], let py be [0.5, 20], "
                  "d(g(x,I,px,py),x) == -px/py",
                  route="derive")
     assert r.verdict == "proven"

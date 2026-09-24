@@ -284,7 +284,7 @@ readable and lets you talk about things that are not parameters:
 | Spelling | Binds |
 |---|---|
 | `let g = math.sqrt, for x in (0,100], g(x) >= 0` | a real function, by dotted path |
-| `let g = budget_line, d(g(x, I, px, py), x) == -px/py` | another function in the same module, by bare name |
+| `let g = budget_line, let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(g(x, I, px, py), x) == -px/py` | another function in the same module, by bare name |
 | `let c be [-1e6,1e6], for x in [0,10], f(x) + c >= 0` | a free variable over a range |
 | `let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0` | a typed free variable |
 | `let compute_square_root = numpy.sqrt, for x in [0, 100], compute_square_root(x) >= 0` | a long name, kept readable |
@@ -392,9 +392,12 @@ mention:
 
 ```
 f(x) == g(x)
-d(budget_line(x, I, px, py), x) == -px/py
-let g = budget_line, d(g(x, I, px, py), x) == -px/py
+let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(budget_line(x, I, px, py), x) == -px/py
+let g = budget_line, let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(g(x, I, px, py), x) == -px/py
 ```
+
+Inputs of the second function that are not parameters of `f` (here the
+income and the two prices) are declared with `let`, like any other name.
 
 A second function named this way is a full participant, lifted and
 reasoned about like `f` rather than treated as an opaque call.

@@ -645,14 +645,14 @@
   "ascii": "for alpha in [0.01, 1.9]:float|missing, q in [0.5, 1.0]:float|missing, |f(alpha, q)| < 1"
  },
  "second_function_by_name": {
-  "input": "d(budget_line(x, I, px, py), x) == -px/py",
-  "unicode": "∂(budget_line(x, I, px, py)/∂x) = -px/py",
-  "ascii": "d(budget_line(x, I, px, py), x) = -px/py"
+  "input": "let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(budget_line(x, I, px, py), x) == -px/py",
+  "unicode": "let I be [10.0, 1000.0] ⊂ ℝ ∪ {∅}, let px be [0.5, 20.0] ⊂ ℝ ∪ {∅}, let py be [0.5, 20.0] ⊂ ℝ ∪ {∅}, ∂(budget_line(x, I, px, py)/∂x) = -px/py",
+  "ascii": "let I be [10.0, 1000.0]:float|missing, let px be [0.5, 20.0]:float|missing, let py be [0.5, 20.0]:float|missing, d(budget_line(x, I, px, py), x) = -px/py"
  },
  "let_function_bare_name": {
-  "input": "let g = budget_line, d(g(x, I, px, py), x) == -px/py",
-  "unicode": "∂(budget_line(x, I, px, py)/∂x) = -px/py",
-  "ascii": "d(budget_line(x, I, px, py), x) = -px/py"
+  "input": "let g = budget_line, let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(g(x, I, px, py), x) == -px/py",
+  "unicode": "let I be [10.0, 1000.0] ⊂ ℝ ∪ {∅}, let px be [0.5, 20.0] ⊂ ℝ ∪ {∅}, let py be [0.5, 20.0] ⊂ ℝ ∪ {∅}, ∂(budget_line(x, I, px, py)/∂x) = -px/py",
+  "ascii": "let I be [10.0, 1000.0]:float|missing, let px be [0.5, 20.0]:float|missing, let py be [0.5, 20.0]:float|missing, d(budget_line(x, I, px, py), x) = -px/py"
  },
  "two_function_equality": {
   "input": "f(x) == g(x)",
