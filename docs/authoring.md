@@ -204,23 +204,20 @@ for n in Z, ...                                # bare, unbounded, still a stated
 A sequence-typed parameter (a `list`/array/Series, not a scalar) can
 contain a missing value, `None`, NaN, or another library's own null
 sentinel. Whether that's allowed is governed by one rule, applied the
-same way regardless of which library produced the vector: **stating a
-type at all is a deliberate, precise choice, and defaults to excluding
-missing values; saying nothing about type leaves them allowed.**
+same way regardless of which library produced the vector: **a missing
+value is allowed unless the domain excludes it with `\ {∅}`.** Stating a
+type does not change this.
 
 ```
-for x in [0, 100], ...              # no type stated, missing allowed by default
-for x in [0, 100] ⊂ Z, ...          # explicit type, missing excluded by default
+for x in [0, 100], ...              # missing allowed
+for x in [0, 100] ⊂ Z, ...          # missing allowed
+for x in [0, 100] \ {∅}, ...        # missing excluded
+for x in [0, 100] ⊂ Z \ {∅}, ...    # missing excluded
 ```
 
-Either default can be overridden explicitly, using the same exclusion/
-union operators applied to the missing-value sentinel (`∅`, or the ASCII
-spellings `missing`/`NA`/`nan`):
-
-```
-for x in [0, 100] \ {∅}, ...              # no type stated, but missing explicitly excluded
-for x in [0, 100] ⊂ Z ∪ {missing}, ...    # explicit type, but missing explicitly allowed back in
-```
+The missing-value sentinel is `∅`, or the ASCII spellings
+`missing`/`NA`/`nan`. Writing `∪ {∅}` (or `∪ {missing}`) states the
+default explicitly and changes nothing.
 
 Detection is dependency-free: `None`, a Python/numpy/pandas float NaN
 (all ordinary IEEE-754 under the hood, caught by one self-inequality
@@ -237,8 +234,9 @@ always states the resolved missing-value policy explicitly, via the same
 absent:
 
 ```
-∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}     # missing allowed
-∀ x ∈ [0, 100] ⊂ ℤ \ {∅}     # missing excluded
+∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}     # from [0, 100]: missing allowed
+∀ x ∈ [0, 100] ⊂ ℤ ∪ {∅}         # from [0, 100] ⊂ Z: missing allowed
+∀ x ∈ [0, 100] ⊂ ℤ \ {∅}         # from [0, 100] ⊂ Z \ {∅}: missing excluded
 ```
 
 `enforce_domain()` (and, in `strict=True` probing, the `domain_enforced`

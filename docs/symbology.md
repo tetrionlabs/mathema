@@ -55,9 +55,10 @@ stands for which parameter, and reparsing it gives the claim back.
 The ASCII form writes `[0.0, 1.0]:float|missing` where the Unicode form
 writes `[0.0, 1.0] ⊂ ℝ ∪ {∅}`. Both say the same two things: the
 interval, and that a missing value is part of the declared input space.
-A domain that states its type explicitly excludes missing by default,
-and `∪ {missing}` puts it back; a domain that states no type allows it,
-and `\ {∅}` excludes it. The rendering always shows which of those you
+A missing value is allowed unless the domain excludes it with `\ {∅}`,
+whether or not a type is stated: `[0, 100] ⊂ Z` renders
+`[0, 100] ⊂ ℤ ∪ {∅}`, and `[0, 100] ⊂ Z \ {∅}` renders
+`[0, 100] ⊂ ℤ \ {∅}`. The rendering always shows which of those you
 got, because a silently different input space is the kind of thing that
 makes a proof mean less than a reader assumes.
 
