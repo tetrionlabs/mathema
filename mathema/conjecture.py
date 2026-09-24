@@ -3615,7 +3615,6 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
     checked, cx, cx_stratum = 0, None, None
-    fragile: list = []
     pinned = _pinned_arg_sets(cj, len(kinds))
     # a literal argument in the claim's own call (`f(values, "nope",
     # 0.35)`) fixes that parameter to the literal; the call passes it
@@ -3824,25 +3823,15 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # from a BOUND function is not excused: is_defined(f)
                 # says nothing about g, and the pedantic reading stands
                 continue
-            # a raise at a floating-point BOUNDARY is a different animal
-            # from a raise region: sin(m)^2 + cos(m)^2 can round to
-            # 1.0000000000000002 and push acos past its edge at an
-            # isolated unlucky float, however exact the mathematics is.
-            # The declared tolerance (epsilon) is the machine's own
-            # buffer: if every input nudged within it evaluates AND
-            # satisfies the claim, the raise is sub-epsilon fragility,
-            # counted as a within-tolerance pass, surfaced in the note
-            # (with the clamp remedy), never a counterexample. A raise
-            # that survives the nudge is a real region: falsified.
+            # a raise at a floating-point BOUNDARY: sin(m)^2 + cos(m)^2
+            # can round to 1.0000000000000002 and push acos past its
+            # edge at an isolated float, however exact the mathematics
+            # is. It is still a raise at an in-domain point, so it
+            # falsifies like any other; when every input nudged within
+            # the tolerance evaluates AND satisfies the claim, the
+            # counterexample names it as sub-epsilon fragility (stratum
+            # 5.6) with the clamp remedy instead of the domain one.
             slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
-            # a member registered as being ABOUT numerical fragility
-            # (is_numerically_stable's SafetyFamily) inverts the
-            # absorption below: for it the fragility IS the
-            # counterexample, not tolerated noise
-            base_family = families.families().get(cj.name.split("[", 1)[0])
-            stability_axis = bool(getattr(base_family,
-                                          "fragility_is_counterexample",
-                                          False))
             boundary = False
             for direction in (1.0, -1.0):
                 jenv = dict(env)
@@ -3865,13 +3854,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if jok:
                     boundary = True
                     break
-            if boundary and not stability_axis:
-                checked += 1
-                fragile.append(f"{_fmt(tuple(args))} raised {type(e).__name__}")
-                continue
-            if boundary and stability_axis:
-                # the stability axis exists to CATCH exactly this: the
-                # mathematics is fine within epsilon, the machine isn't
+            if boundary:
                 checked += 1
                 cx = (f"{_fmt(tuple(args))}: raised {type(e).__name__} at a "
                       f"floating-point boundary (the same inputs nudged "
@@ -3986,21 +3969,10 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                if assum_eval is not None else "; no evaluable inputs")
         return Probe(cj.name, statement, "skipped", route="probe",
                      note=note + why)
-    if fragile:
-        # numerically fragile boundary points, absorbed within epsilon:
-        # real knowledge about the implementation (is_numerically_stable's
-        # axis catches the raw raise), and the remedy is a clamp at the
-        # raising operation's argument, not a claims change
-        note = (f"{note}; {len(fragile)} sample(s) raised at a floating-point "
-                f"boundary but pass within ε (first: {fragile[0]}), a clamp "
-                f"at the raising operation's argument would remove the "
-                f"fragility")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
                            kinds, cj_domain, checked, critical_hints, truncated_hints),
-                      "mathema.confidence": _probe_density(risk, checked),
-                      **({"mathema.boundary_fragility": len(fragile)}
-                         if fragile else {})})
+                      "mathema.confidence": _probe_density(risk, checked)})
 
 
 
