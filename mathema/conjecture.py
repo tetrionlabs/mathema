@@ -678,6 +678,12 @@ def claim(law: str, name: str | None = None, source: str = "user",
         if rel.startswith("not "):
             rel, negated = rel[4:], True
     else:
+        section = _MISCASED_SECTION.match(text)
+        if section is not None:
+            raise InvalidConjecture(
+                f"section keywords are lowercase: write "
+                f"`{section.group(1).lower()}`, not `{section.group(1)}`, "
+                f"in {law.strip()!r}")
         # a residual top-level comma is a comma-joined relation pair
         # (`f >= 1, f <= 4`), ambiguous with the section-separator comma
         # (and parsing as a bare tuple, which no relation split would
@@ -815,6 +821,8 @@ _BITWISE_OPS = (ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
 
 
 _LATEX_COMMAND = re.compile(r"\\[A-Za-z]+")
+_MISCASED_SECTION = re.compile(
+    r"^\s*((?!for\b|let\b|assuming\b)(?i:for|let|assuming))\s")
 
 _SPECIAL_CALL_SHAPES = {
     "d": "d(expr, var, ...) or d(expr, var, order)",

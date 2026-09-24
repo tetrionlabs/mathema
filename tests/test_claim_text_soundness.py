@@ -427,3 +427,29 @@ def test_an_unknown_latex_command_is_named_in_the_refusal(law, command):
     with pytest.raises(InvalidConjecture,
                        match=re.escape(f"LaTeX command `{command}`")):
         claim(law)
+
+
+# -- refusals that say what is wrong ------------------------------------------------
+
+@pytest.mark.parametrize("law, message", [
+    ("For x in [0, 1], f(x) >= 0", "write `for`, not `For`"),
+    ("FOR x IN [0, 1], f(x) >= 0", "write `for`, not `FOR`"),
+    ("Let g = math.sqrt, g(x) >= 0", "write `let`, not `Let`"),
+    ("let a = b, let b = a, for a in [0, 1], f(a) >= 0", "cycle"),
+])
+def test_a_refusal_names_the_actual_problem(law, message):
+    with pytest.raises(InvalidConjecture, match=message):
+        claim(law)
+
+
+def test_a_parameter_named_equiv_is_a_name():
+    law = "for equiv in [0, 1], f(equiv) >= 0"
+    assert "equiv" in claim(law).domain
+    assert_round_trips(law, total)
+    assert claim("f equiv g").relation == "=:="
+
+
+def test_a_superscript_minus_is_a_negative_power():
+    assert canonical_claim_text(claim("for x in [1, 2], f(x) >= x⁻¹")) == \
+        canonical_claim_text(claim("for x in [1, 2], f(x) >= x^-1"))
+    assert_round_trips("for x in [1, 2], f(x) >= x⁻²", total)

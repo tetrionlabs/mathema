@@ -345,7 +345,7 @@ _SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉"
 _SUPERSCRIPT_TO_DIGIT = str.maketrans(_SUPERSCRIPT_DIGITS, "0123456789")
 _DIGIT_TO_SUPERSCRIPT = str.maketrans("0123456789", _SUPERSCRIPT_DIGITS)
 _DIGIT_TO_SUBSCRIPT = str.maketrans("0123456789", _SUBSCRIPT_DIGITS)
-_SUPERSCRIPT_RUN = re.compile(f"[{_SUPERSCRIPT_DIGITS}]+")
+_SUPERSCRIPT_RUN = re.compile(f"⁻?[{_SUPERSCRIPT_DIGITS}]+")
 
 _UNICODE = {
     "≤": "<=", "≥": ">=", "≠": "!=", "−": "-", "·": "*", "×": "*",
@@ -1102,6 +1102,11 @@ def extract_let_bindings(
                 f"`let {name} =` binds {name!r} to nothing: give it an "
                 f"expression or a dotted function path")
         _refuse_binding_subject(name)
+        if re.fullmatch(rf"[(\s]*{re.escape(name)}[)\s]*", expr):
+            raise InvalidDomain(
+                f"`let {name} = ...` resolves to {name!r} itself: the let "
+                f"bindings refer to each other in a cycle, so none of them "
+                f"names a value")
         rest = ",".join(segments[1:]).strip()
         if _LET_FUNC_VALUE.match(expr):
             funcs[name] = expr
@@ -1722,7 +1727,8 @@ def apply_unicode_synonyms(text: str) -> str:
             if sym not in _LATEX_COMMANDS:
                 masked = masked.replace(sym, repl)
         return _SUPERSCRIPT_RUN.sub(
-            lambda m: "^" + m.group(0).translate(_SUPERSCRIPT_TO_DIGIT),
+            lambda m: "^" + m.group(0).replace("⁻", "-").translate(
+                _SUPERSCRIPT_TO_DIGIT),
             masked)
 
     return outside_strings(substitute, text)
@@ -1875,10 +1881,16 @@ def _caret_to_power(text: str) -> str:
     return text.replace("**", "^").replace("^", "**")
 
 
+_EQUIV_WORD = re.compile(
+    r"([\w)\]])\s+equiv\s+(?!(?:in|be)\b|∈)(?=[\w(\[])")
+
+
 def _equiv_alias(text: str) -> str:
     """`f equiv g` -> `f =:= g`: the word alias for the equivalence
-    relation (canonical ascii spelling =:=, unicode ≡)."""
-    return re.sub(r"\bequiv\b", "=:=", text)
+    relation (canonical ascii spelling =:=, unicode ≡). Only the infix
+    word between two operands is the relation, so a parameter named
+    `equiv` (`for equiv in [0, 1]`, `f(equiv)`) stays a name."""
+    return _EQUIV_WORD.sub(r"\1 =:= ", text)
 
 
 def _lim_arrow(text: str) -> str:
