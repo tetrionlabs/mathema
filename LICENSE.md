@@ -4,7 +4,7 @@ Parameters
 
 Licensor:             Tetrion Ltd
 
-Licensed Work:        mathema
+Licensed Work:        mathema 0.6.0
                       The Licensed Work is (c) 2026 Tetrion Ltd.
 
 Additional Use Grant:
@@ -61,13 +61,9 @@ Additional Use Grant:
    Additional Use Grant requires a commercial licence from the Licensor.
    Enquiries: licensing@tetrion.co.
 
-Change Date:          Four years from the release date of each
-                      version of the Licensed Work. (The concrete
-                      date for each released version is computed at
-                      release and written into that release's copy
-                      of this file; for an unreleased working tree,
-                      the four-year term runs from the version's
-                      eventual public release date.)
+Change Date:          2030-09-24
+                      (four years from the 2026-09-24
+                      release of version 0.6.0)
 
 Change License:       GNU Affero General Public License v3.0 or
                       later (AGPL-3.0-or-later)
