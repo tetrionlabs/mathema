@@ -346,8 +346,9 @@ day a number looks wrong.
 ### Linear algebra as a first-class subject
 
 mathema already reads [matrix structure](matrix-structure.md), symmetric,
-orthogonal, positive definite, and proves identities such as `det(A @ B) ==
-det(A) * det(B)` over whole families of matrices. The direction is deeper:
+orthogonal, positive definite, and proves identities such as
+`det(A @ B) == det(A) * det(B)` over whole families of matrices. The direction
+is deeper:
 eigenvalue and decomposition claims, conditioning and numerical stability
 stated as claims, and matrix calculus, so the code at the heart of
 optimisation and machine learning can be held to the mathematics it
