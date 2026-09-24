@@ -77,7 +77,7 @@
 [x] README.md:parity                             file run output
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output
-[-] README.md:185
-[-] README.md:281
+[-] README.md:187
+[-] README.md:285
 
 # 67 examples checked, 4 output fences not yet marked

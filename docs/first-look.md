@@ -50,9 +50,6 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
            counterexample alpha=8.52571, h=0.0171: curvature estimate 3.64705e+06 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  FALSIFY is_deterministic[float]: f(x, alpha) = f(x, alpha)
-           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308
-           [mathematics sound, implementation:numerical-instability]
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=160)
   holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=12)
@@ -95,7 +92,9 @@ fast dev loop. Every verdict reports the exact `n` it used, plus a
 `meta["mathema.confidence"]` score capped below the derive route's own,
 since sampling is never proof.
 
-Each `proven` law also has a row with a `[float]` suffix. That is its
+Each proven algebraic law (the two equivariances) also has a row with a
+`[float]` suffix; a family fact such as `is_deterministic` is already a
+statement about the code, so it has none. That `[float]` row is the law's
 float companion, a separate claim that runs the same law through the
 real code in floating point, at the domain's corners and at sampled
 points inside it. Nothing here bounds `x` or `alpha`, so the corners
@@ -103,8 +102,6 @@ sit near `1e+308`, where `alpha * v` overflows to infinity and the next
 step of the loop gives `nan`. The proofs stand, and the companions
 record that the float code does not follow them out there, which is
 what `[mathematics sound, implementation:numerical-instability]` says.
-`is_deterministic[float]` fails for the same reason: both calls return
-`nan`, which does not compare equal to itself.
 
 ## Step 2: declare a domain
 

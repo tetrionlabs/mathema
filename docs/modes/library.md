@@ -96,9 +96,6 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
            counterexample alpha=8.52571, h=0.0171: curvature estimate 3.64705e+06 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  FALSIFY is_deterministic[float]: f(x, alpha) = f(x, alpha)
-           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308
-           [mathematics sound, implementation:numerical-instability]
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=160)
   holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=12)
