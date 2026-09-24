@@ -664,13 +664,14 @@ indexes into an array-valued result: a literal int for a boundary
 claim, or a bare name for a claim over the whole array (bound as a
 fresh variable, the same pattern `lim(...)`'s own bound variable
 already uses). No new claim-grammar syntax, no domain declaration
-needed for the index; the closed form is a single uniform formula,
+needed for the index (the count `n` still needs one, since
+`np.linspace` raises for a negative or non-integer count); the closed form is a single uniform formula,
 never piecewise per position, so it holds for any real index, not just
 an integer one:
 
 ```
-f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))   # proven
-f(cx, cy, a, b, n)[0][0] == cx + a                     # proven (boundary)
+for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))   # proven
+for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[0][0] == cx + a                     # proven (boundary)
 ```
 
 Declines rather than guessing on: two independently built arrays
@@ -767,9 +768,10 @@ enough:
    which always wins over scope resolution, and the only form that
    accepts an arbitrary callable.
 
-A bound function that doesn't lift makes the claim undecided with the
-blocking function named ("bound function g (loopy) is not liftable
-..."), never a silent skip; `raises(...)` claims still require a
+A bound function that doesn't lift makes the derive route report
+`underivable` with the blocking function named ("bound function g
+(loopy) is not derivable, likely reason: ..."), never a silent skip,
+and the probe route then adjudicates the claim; `raises(...)` claims still require a
 bare `f(...)` call. On the probe route the same bindings are simply
 called. Only a plain Python function ever binds automatically, a
 class or other callable needs the explicit `funcs=` form.

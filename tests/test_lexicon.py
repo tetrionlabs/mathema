@@ -149,14 +149,11 @@ def test_every_spelling_survives_the_declared_store():
     added to the grammar later cannot quietly skip the store."""
     from mathema.conjecture import claim
     from mathema.lexicon import LEXICON
-    from mathema.spec import declare, entry_claims
+    from mathema.spec import canonical_claim_text, declare, entry_claims
 
     lost = []
     for name, law in LEXICON.items():
-        try:
-            original = claim(law)
-        except Exception:
-            continue          # a spelling the grammar declines by design
+        original = claim(law)
         try:
             restored = entry_claims({"claims": [declare(original)]})[0]
         except Exception as exc:
@@ -170,6 +167,8 @@ def test_every_spelling_survives_the_declared_store():
             ("funcs", set(original.funcs), set(restored.funcs)),
             ("assuming", original.assuming, restored.assuming),
             ("tolerance", original.tolerance, restored.tolerance),
+            ("canonical text", canonical_claim_text(original),
+                               canonical_claim_text(restored)),
         ):
             if before != after:
                 lost.append(f"{name}: {what} {before!r} -> {after!r}")

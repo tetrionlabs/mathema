@@ -889,14 +889,18 @@ def domain_bound_to_json(b) -> str | dict:
     A `frozenset` -> `{"set": [sorted members]}`, so a discrete-value
     domain is never confused with an interval the way a bare
     `list(frozenset(...))` used to be. A `Domain` -> `{"base_type",
-    "pieces", "excluded", "explicit_type"}`, each piece/excluded-member
+    "pieces", "excluded", "explicit_type"}` plus `"dims"` for a vector or
+    matrix space (`R^(n*n)`), each piece/excluded-member
     recursively encoded the same way (with `MISSING` itself standing in
     as one fixed, JSON-safe token)."""
     if isinstance(b, Domain):
-        return {"base_type": b.base_type,
+        out = {"base_type": b.base_type,
                "pieces": [domain_bound_to_json(p) for p in b.pieces],
                "excluded": sorted((_json_value(v) for v in b.excluded), key=str),
                "explicit_type": b.explicit_type}
+        if b.dims:
+            out["dims"] = list(b.dims)
+        return out
     if isinstance(b, str):
         return b
     if isinstance(b, frozenset):
@@ -932,7 +936,8 @@ def domain_bound_from_json(v):
         return Domain(base_type=v["base_type"],
                       pieces=tuple(domain_bound_from_json(p) for p in v["pieces"]),
                       excluded=frozenset(_value_from_json(x) for x in v["excluded"]),
-                      explicit_type=v.get("explicit_type", False))
+                      explicit_type=v.get("explicit_type", False),
+                      dims=tuple(str(d) for d in v.get("dims", ())))
     if "set" in v:
         return frozenset(_value_from_json(x) for x in v["set"])
     return Interval(_endpoint_from_json(v["lo"]), _endpoint_from_json(v["hi"]),
