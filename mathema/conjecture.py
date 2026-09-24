@@ -2149,6 +2149,17 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         # family-owned name reaches the family's own empirical
         # technique rather than the generic sampling loop
         ctx.family = _claim_family(cj, fn, facts)
+        emptied = _empty_premise_parameter(ctx, facts)
+        if emptied is not None:
+            out.append(stamp(Probe(
+                cj.name, statement, "skipped", route=None,
+                note=f"{ctx.note}; the premise ({ctx.assumption_display}) "
+                     f"admits no value of {emptied} in its declared "
+                     f"domain, so the claim quantifies over nothing and "
+                     f"is vacuous; state a premise the domain can "
+                     f"satisfy",
+                meta={"mathema.empty_premise": emptied})))
+            continue
         if cj.relation == "=:=":
             # function equivalence has its own ladder (form hash ->
             # symbolic difference -> code-vs-code sampling); neither
@@ -2977,6 +2988,22 @@ def _derive_line_coverage(fn, facts, domain):
     except (OSError, TypeError):
         return None
     return {first_line - 1 + ln for ln in live}
+
+
+def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
+    """Intent:
+        The parameter whose declared range the claim's premises leave
+        with no point at all, or None when the premises (if any) leave
+        every range non-empty or cannot be read as bounds.
+    """
+    if not ctx.assumption:
+        return None
+    from .symbolic._prove import premise_empties_domain
+    try:
+        premises = [(a.lhs, a.relation, a.rhs) for a in ctx.assumption]
+    except AttributeError:
+        return None
+    return premise_empties_domain(ctx.cj_domain, set(facts.params), premises)
 
 
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,

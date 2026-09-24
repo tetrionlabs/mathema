@@ -1854,9 +1854,34 @@ def _tighten_domain_by_assumption(domain: dict, params: dict, assumption) -> dic
         narrowing a box by it would be wrong; the region is not a
         box. A strict bound tightens to an open endpoint, so `x > 0`
         and `(0, ...]` are the same region rather than nearly the same.
+
+        A premise that empties the region leaves `domain` unchanged;
+        `premise_empties_domain` is the question that reports it.
+    """
+    tightened, emptied = _premise_tightening(domain, params, assumption)
+    return domain if emptied is not None else tightened
+
+
+def premise_empties_domain(domain: dict, params, assumption) -> str | None:
+    """Intent:
+        The parameter whose declared range no point of which satisfies
+        the claim's single-parameter premises (`assuming x > 5` over
+        `for x in [0, 1]`), or None when every such range keeps at
+        least one point, or no premise bounds a parameter by a
+        constant.
+    """
+    return _premise_tightening(domain, params, assumption)[1]
+
+
+def _premise_tightening(domain: dict, params, assumption) -> tuple:
+    """Intent:
+        `(tightened, emptied)`: the domain narrowed by every premise
+        that bounds one parameter against a numeric literal, and the
+        first parameter whose range that narrowing empties (None when
+        none does; `tightened` is then complete).
     """
     if not assumption:
-        return domain
+        return domain, None
     from ..domain import Interval
     tightened = dict(domain)
     for lhs_src, rel, rhs_src in assumption:
@@ -1890,10 +1915,10 @@ def _tighten_domain_by_assumption(domain: dict, params: dict, assumption) -> dic
         else:
             if value < hi or (value == hi and strict):
                 hi, closed_hi = value, not strict
-        if lo > hi:
-            return domain     # the premise empties the region, say nothing here
+        if lo > hi or (lo == hi and not (closed_lo and closed_hi)):
+            return tightened, name
         tightened[name] = Interval(lo, hi, closed_lo, closed_hi)
-    return tightened
+    return tightened, None
 
 def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
              domain: dict | None = None, tolerance: float | None = None,
