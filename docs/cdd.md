@@ -69,7 +69,7 @@ names.
 
 | Verdict | Route | Means |
 |---|---|---|
-| `proven` | derive | Established by algebra over the whole declared domain, in exact real arithmetic. Where floating point breaks what the reals prove, running the real function falsifies the claim instead; see [the sigmoid case study](case-studies.md#where-it-gets-interesting-a-true-claim-that-falsifies). |
+| `proven` | derive | Established by algebra over the whole declared domain, in exact real arithmetic. That is all it says: the float implementation is its own claim, the `<name>[float]` companion every proof spawns (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)). A raise inside the domain still falsifies the claim itself; see [the sigmoid case study](case-studies.md#where-it-gets-interesting-a-true-claim-that-falsifies). |
 | `holds (n=...)` | probe | Held on every one of `n` seeded trials. Evidence, not proof. |
 | `falsified` | either | A counterexample exists and is kept, permanently. |
 | `unknown` | either | Adjudication ran but couldn't decide (an undecided proof, inconclusive sampling). |

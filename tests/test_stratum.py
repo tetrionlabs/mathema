@@ -17,8 +17,7 @@ import textwrap
 import pytest
 
 import mathema
-from mathema.conjecture import check_conjectures, claim, \
-    set_numerical_stability_check
+from mathema.conjecture import check_conjectures, claim
 from mathema.records import Probe, claim_row, stance
 from mathema.spec import to_spec
 from mathema.verify import gate
@@ -124,29 +123,24 @@ def test_an_overflow_raise_pins_implementation_blame(modfile):
     assert row["reason"] == "implementation:overflow"
 
 
-def test_the_stability_gate_states_mathematics_sound(modfile):
+def test_the_float_companion_states_mathematics_sound(modfile):
     mod = modfile("fragmod", '''
-        import math
-
-        def inv_shift(x: float) -> float:
-            """Reciprocal of a shifted square root."""
-            return 1.0 / math.sqrt(x + 1.0)
+        def plus_one_minus(x: float) -> float:
+            """One, computed the long way round."""
+            return (x + 1.0) - x
     ''')
-    set_numerical_stability_check(True)
-    try:
-        p = _one(mod.inv_shift,
-                 "let |inf| be 1e12, for x in [0, oo], f(x) >= 0",
-                 route="derive")
-    finally:
-        set_numerical_stability_check(False)
-    if p.verdict == "falsified":
-        assert p.stratum is not None
-        assert p.stratum["mathematics"] == "sound"
-        assert p.stratum["cause"] == "implementation:numerical-instability"
-    else:
-        # the sweep found no fragile point on this machine; the proof
-        # stands and no stratum is invented
-        assert p.verdict == "proven" and p.stratum is None
+    probes = {p.name: p for p in check_conjectures(
+        mod.plus_one_minus,
+        [claim("let |inf| be 1e17, for x in [0, oo], f(x) == 1",
+               name="one", route="derive")],
+        float_companions=True)}
+    assert probes["one"].verdict == "proven"
+    assert probes["one"].stratum is None
+    companion = probes["one[float]"]
+    assert companion.verdict == "falsified"
+    assert companion.stratum["mathematics"] == "sound"
+    assert companion.stratum["blame"] == "implementation"
+    assert companion.stratum["cause"] == "implementation:numerical-instability"
 
 
 # --- persistence ------------------------------------------------------------

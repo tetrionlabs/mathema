@@ -2,29 +2,24 @@
 # Copyright 2026 Tetrion Ltd
 """The corroboration gate: no derive `falsified` survives unless a
 concrete in-domain counterexample reproduces the failure against the
-real function; a proven-exact claim whose implementation is
-numerically unstable is falsified with the reason (the stability sweep
-is opt-in via set_numerical_stability_check; the disproof-reproduction
-half is always live)."""
+real function. A proven-exact claim whose implementation is
+numerically unstable stays proven; its `[float]` companion is what the
+instability falsifies."""
 import math
 
-import pytest
-
-from mathema import conjecture
 from mathema.conjecture import claim, check_conjectures
-
-
-@pytest.fixture(autouse=True)
-def _stability_on():
-    # this file exercises the default-on numerical-stability sweep that
-    # the suite-wide conftest fixture turns off
-    conjecture.set_numerical_stability_check(True)
-    yield
-    conjecture.set_numerical_stability_check(False)
 
 
 def _v(fn, law, **kw):
     return check_conjectures(fn, [claim(law, route="derive", **kw)])[0]
+
+
+def _pair(fn, law, **kw):
+    kw.setdefault("route", "derive")
+    probes = check_conjectures(fn, [claim(law, name="law", **kw)],
+                               float_companions=True)
+    by_name = {p.name: p for p in probes}
+    return by_name["law"], by_name.get("law[float]")
 
 
 def test_a_genuine_disproof_reproduces_and_stays_falsified():
@@ -86,69 +81,75 @@ def test_an_unbounded_exp_claim_is_falsified_by_its_overflow():
     assert _v(grow, "for x in [-700, 700], f(x) == exp(x)").verdict == "proven"
 
 
-def test_scoped_sweep_leaves_an_unbounded_uncapped_proof_alone():
+def test_an_unbounded_uncapped_proof_stands_and_its_companion_reaches_far():
     # exact in real arithmetic, and the float implementation collapses
-    # to 0 past 2^53, but with no operational infinity bound the scoped
-    # sweep never visits an extreme: the unbounded direction is
-    # is_extremity_safe's own job, so the proof stands
+    # to 0 past 2^53; with no operational infinity declared the
+    # companion runs the unbounded direction to a large magnitude, so
+    # the collapse falsifies the companion and the proof stands
     def plus_one_minus(x):
         return (x + 1.0) - x
-    p = _v(plus_one_minus, "f(x) == 1")
-    assert p.verdict == "proven"
+    proof, companion = _pair(plus_one_minus, "f(x) == 1")
+    assert proof.verdict == "proven"
+    assert companion.verdict == "falsified"
 
 
-def test_operational_infinity_opts_the_sweep_into_extremes():
+def test_operational_infinity_bounds_the_companion():
     def plus_one_minus(x):
         return (x + 1.0) - x
-    # bound comfortably inside exact float addition -> proven
-    p = _v(plus_one_minus, "f(x) == 1", pseudo_infinity=100.0)
-    assert p.verdict == "proven"
+    # bound comfortably inside exact float addition -> the companion holds
+    proof, companion = _pair(plus_one_minus, "f(x) == 1", pseudo_infinity=100.0)
+    assert proof.verdict == "proven"
+    assert companion.verdict == "holds"
     # bound past 2^53: the author DECLARED 1e17 as operational
-    # infinity, so the sweep visits it and the collapse to 0 there is
-    # a real finding
-    p2 = _v(plus_one_minus, "f(x) == 1", pseudo_infinity=1e17)
-    assert p2.verdict == "falsified"
-    assert "numerically unstable" in p2.sketch
-    assert p2.meta.get("mathema.numerically_unstable")
+    # infinity, so the companion visits it and the collapse to 0 there
+    # is a real finding, about the implementation only
+    proof, companion = _pair(plus_one_minus, "f(x) == 1", pseudo_infinity=1e17)
+    assert proof.verdict == "proven"
+    assert companion.verdict == "falsified"
+    assert "fails it at" in companion.sketch
 
 
-def test_scoped_sweep_still_catches_in_domain_fragility():
-    # the sweep's whole reason to exist, intact under scoping: the
-    # claim proves exactly in real arithmetic, and the declared
+def test_the_companion_catches_in_domain_fragility():
+    # the claim proves exactly in real arithmetic, and the declared
     # (finite) domain contains a point where the float implementation
     # breaks, (x + 1) - x collapses to 0 past 2^53
     def plus_one_minus(x: float) -> float:
         return (x + 1.0) - x
-    p = _v(plus_one_minus, "for x in [0, 1e16], f(x) == 1")
-    assert p.verdict == "falsified"
-    assert "numerically unstable" in p.sketch
-    assert "x=1e+16" in p.counterexample
+    proof, companion = _pair(plus_one_minus, "for x in [0, 1e16], f(x) == 1")
+    assert proof.verdict == "proven"
+    assert companion.verdict == "falsified"
+    assert "x=1e+16" in companion.counterexample
 
 
 def test_bounded_domain_proof_is_stable():
     def dbl(x):
         return 2 * x
-    assert _v(dbl, "for x in [1, 5], f(x) >= x").verdict == "proven"
+    proof, companion = _pair(dbl, "for x in [1, 5], f(x) >= x")
+    assert proof.verdict == "proven"
+    assert companion.verdict == "holds"
 
 
-def test_stability_check_off_leaves_the_proof():
-    conjecture.set_numerical_stability_check(False)
+def test_math_only_leaves_the_proof_without_a_companion():
     def plus_one_minus(x):
         return (x + 1.0) - x
-    assert _v(plus_one_minus, "f(x) == 1", pseudo_infinity=1e17).verdict \
-        == "proven"
+    proof, companion = _pair(plus_one_minus, "f(x) == 1", pseudo_infinity=1e17,
+                             route="derive:math_only")
+    assert proof.verdict == "proven"
+    assert companion is None
 
 
 def test_integer_kind_parameter_is_swept_at_integer_points():
     # a loop count is integer-kind (`int` annotation / `range(t)`); the
-    # stability sweep must feed it an int, not a float corner endpoint,
-    # or `range(0.0)` raises a TypeError that is a type mismatch, not
-    # numerical instability; the claim is exact and proves
+    # companion must feed it an int, not a float corner endpoint, or
+    # `range(0.0)` raises a TypeError that is a type mismatch, not
+    # numerical instability; the claim is exact and the code agrees
     def scale_loop(a0: float, r: float, t: int) -> float:
         a = a0
         for _ in range(t):
             a *= r
         return a
-    p = _v(scale_loop,
-           "for a0 in [0.1,10], r in [1,2], t in [0,20], f(a0,r,t) == a0*r**t")
-    assert p.verdict == "proven"
+    proof, companion = _pair(
+        scale_loop,
+        "for a0 in [0.1,10], r in [1,2], t in [0,20], f(a0,r,t) == a0*r**t")
+    assert proof.verdict == "proven"
+    assert companion.verdict == "holds", companion.sketch

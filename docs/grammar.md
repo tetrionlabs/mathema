@@ -403,7 +403,10 @@ and the proof then holds, with the region it holds over stated in the
 record rather than implied.
 
 The bound applies to both routes: the derive route proves over it, and
-the probe route samples out to it. A claim can also state a half-line
+the probe route samples out to it, as does a proof's `[float]`
+companion (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)).
+With none declared, the companion runs an unbounded direction out to
+`1e308`. A claim can also state a half-line
 explicitly, `let |inf| be 1e12, for x in [0, oo], f(x) >= 0`, where the
 `oo` endpoint stops at `1e12`. Nothing in the claim refers to `|inf|`
 by name, so it is not an ordinary binding, and in Python the same

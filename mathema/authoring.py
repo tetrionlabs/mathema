@@ -121,6 +121,7 @@ def claims(*items, source: str = "decorator"):
 #         Claims:
 #             odd: f(-x) == -f(x)
 #             nonneg [derive]: f(x) >= 0
+#             exact [derive:math_only]: f(x) - f(x) == 0
 #             bounded: for x in [0, 1], f(x) <= 1
 #         """
 # ---------------------------------------------------------------------------
@@ -128,7 +129,7 @@ def claims(*items, source: str = "decorator"):
 _CLAIMS_HEADER = "claims:"
 _CLAIM_LINE = re.compile(
     r"^\s*(?P<name>[A-Za-z_]\w*)"
-    r"(?:\s*\[\s*(?P<route>derive|probe)\s*\])?"
+    r"(?:\s*\[\s*(?P<route>derive:math_only|derive|probe)\s*\])?"
     r"\s*:\s*(?P<statement>.+?)\s*$"
 )
 

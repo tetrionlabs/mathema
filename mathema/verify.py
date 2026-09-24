@@ -15,7 +15,7 @@ alike. A suggestion mathema conjectured on its own never gates
 (adopting one is the human step that makes it count), and a claim in a
 foreign grammar is reported but is another tool's to adjudicate.
 
-(The derive-seam soundness gates; corroboration and stability; live
+(The derive-seam soundness gates, corroboration and the float companion, live
 in `gates.py`; this module gates adjudication OUTCOMES, not evidence.)
 """
 from __future__ import annotations
@@ -455,6 +455,10 @@ def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
         stmt = getattr(p, "statement", "") or ""
         if any(n == name and (same is None or same(stmt))
                for n, same in matchers):
+            if (getattr(p, "meta", None) or {}).get("mathema.companion_of"):
+                # a retired float companion is respawned by every proof
+                # of its parent; retirement is the standing disposition
+                continue
             if name not in already_noted:
                 notes.append(
                     f"note {key}: claim {name!r} is still declared on its "
@@ -525,6 +529,10 @@ def _union_verified_membership(current_claims: list,
         if name == "dependencies_current":
             # the per-record dependency freshness probe is synthesized
             # each sweep, never a declared claim
+            continue
+        if meta.get("mathema.companion_of"):
+            # a float companion is spawned by its parent's proof on every
+            # adjudication, never a declared claim of its own
             continue
         # the row's statement is the canonical text, self-contained,
         # and the structured fields ride beside it; reconstruction

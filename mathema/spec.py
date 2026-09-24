@@ -784,10 +784,13 @@ def _relativize_record_paths(spec: dict, root: str) -> None:
 
 def base_route(route: "str | None") -> str:
     """Intent:
-        A route as a claim is authored with it: `probe`, `derive` or
-        `best`, the subroute of an evidence route (`derive:extensive`)
-        dropped, and anything else read as `best`.
+        A route as a claim is authored with it: `probe`, `derive`,
+        `derive:math_only` or `best`, the subroute of an evidence route
+        (`derive:extensive`) dropped, and anything else read as `best`.
     """
+    from .gates import MATH_ONLY_ROUTE
+    if route == MATH_ONLY_ROUTE:
+        return route
     route = (route or "best").split(":", 1)[0]
     return route if route in ("probe", "derive") else "best"
 

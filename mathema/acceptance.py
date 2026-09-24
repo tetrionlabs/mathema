@@ -713,6 +713,17 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         if note:
             accepted["note"] = note
         plan["accepted"] = accepted
+        parent = (target.get("meta") or {}).get("mathema.companion_of")
+        if parent:
+            # a float companion is no authored law: nothing declares it
+            # and no corrected statement replaces it; retiring it records
+            # that the implementation does not carry the proven law there
+            plan["actions"].append(
+                f"{claim_name!r} is the float companion of {parent!r}, "
+                f"spawned by its proof; the discovery records where the "
+                f"implementation fails the proven law, and verify leaves "
+                f"it retired while the law stands")
+            return plan
         # the discovery itself is always recordable, whatever the
         # claim's shape. A corrected claim exists only when it is
         # VERIFIED here and now: the author's --corrected statement, or

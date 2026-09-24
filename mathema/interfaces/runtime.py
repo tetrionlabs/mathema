@@ -65,12 +65,16 @@ class PointRuntime(Protocol):
 
     `evaluate(point)` decides the claim's relation at a concrete
     point: `True` (holds there), `False` (a genuine counterexample),
-    `None` (inconclusive: the law's own plumbing failed, an infinite
-    result, a NaN propagated from a missing input). A NaN computed from
-    non-missing inputs is a value the relation is decided against:
-    no ordering holds for it, and it equals no number. `probe_finite(point)` reports an
-    implementation-instability detail string (a raise, a NaN, a
-    deviation past a magnitude-scaled tolerance) or `None`.
+    `None` (inconclusive: the law's own plumbing failed, an infinity
+    only the law's own arithmetic produced, a NaN propagated from a
+    missing input). An inf the callable itself returned is an executed
+    value like any other, so a relation that fails on it is a
+    counterexample; a NaN computed from non-missing inputs is a value
+    the relation is decided against: no ordering holds for it, and it
+    equals no number. `probe_finite(point)` reports an
+    implementation-failure detail string (a raise, a NaN, an inf or a
+    deviation past a magnitude-scaled tolerance where the relation
+    fails) or `None`.
     `admits(point)` is domain-and-assumption membership.
     `sample(name, rng)` draws a value respecting the parameter's
     declared bound. `corners` are the domain endpoint combinations,

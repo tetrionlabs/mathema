@@ -37,6 +37,67 @@ ladder is defined in the engine as `mathema.conjecture.EVIDENCE_LADDER`, and
 a route mathema does not recognise, such as one from a verification
 technique you have plugged in yourself, ranks below everything it does.
 
+## A proof is the mathematics; `[float]` is the code
+
+A `proven` from the derive route means the claim holds in exact real
+arithmetic over the declared domain, and nothing more. It does not say
+the float implementation gets the same answer. That is a separate
+claim, and mathema makes it for you: every claim the derive route
+proves spawns a companion named `<name>[float]`, in the numerical
+stability family, adjudicated on the probe route against the real code.
+The companion runs the relation at every corner of the declared domain
+and at sampled interior points. A raise, a `NaN`, or an `inf` or a loss
+of precision where the relation fails on the executed values falsifies
+it, with that point as the witness. An unbounded direction runs to the
+claim's `|inf|` when one is declared, and otherwise out to `1e308`,
+sampled log-uniformly so moderate magnitudes are visited too.
+
+```python
+import mathema
+from mathema.conjecture import claim
+
+
+def one(x: float) -> float:
+    """One, computed the long way round."""
+    return (x + 1.0) - x
+
+
+for law, route in [("for x in [0, 1e6], f(x) == 1", "derive"),
+                   ("f(x) == 1", "derive"),
+                   ("f(x) == 1", "derive:math_only")]:
+    rec = mathema.check(one, claims=[claim(law, name="one", route=route)])
+    for p in rec.probes:
+        print(f"{route:16} {p.name:10} {p.verdict:9} "
+              f"{p.counterexample or ''}".rstrip())
+```
+
+```text
+derive           one        proven
+derive           one[float] holds
+derive           one        proven
+derive           one[float] falsified x=-1e+308
+derive:math_only one        proven
+```
+
+`(x + 1) - x` is `1` for every real `x`, so all three proofs stand. In
+float64 the `+ 1` is lost once `|x|` passes `2^53`, so the companion of
+the unbounded claim is falsified, and its row names the stratum:
+mathematics sound, implementation numerically unstable. Two claims, two
+verdicts, and the companion gates `mathema verify` like any other claim.
+The remedies are the ordinary ones: narrow the domain, declare the
+`|inf|` the code has to reach, fix the code, accept the companion as a
+discovery with `mathema accept`, or state the claim with
+`route="derive:math_only"` (`[derive:math_only]` in a docstring), which
+proves the mathematics alone, spawns no companion, and records the
+opt-out on the proof's row.
+
+The companion is written to the verified record beside its parent, with
+`meta.mathema.companion_of` naming it. It is never part of the declared
+layer: it is respawned from its parent on every adjudication, so it does
+not enter the claims fingerprint and is not repopulated as a claim of
+its own. A limit or an integral is a statement about the mathematics and
+spawns no companion.
+
 ## What sits off the ladder
 
 The ladder ranks how a claim came to be *supported*. Four other outcomes are

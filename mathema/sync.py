@@ -143,6 +143,9 @@ def claim_conflicts(fn, file_entry: dict,
         if meta.get("mathema.surface") in ("mathema", "builtin",
                                                 "types"):
             continue
+        if meta.get("mathema.companion_of"):
+            # spawned by its parent's proof, never authored
+            continue
         if row.get("name") and row.get("name") != "dependencies_current":
             verified_rows[row["name"]] = row
     out = []

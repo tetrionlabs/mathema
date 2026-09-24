@@ -497,6 +497,8 @@ class Conjecture:
                                  # -> probe, with the output record naming whichever
                                  # mechanism actually settled it ("auto" is retired,
                                  # an unknown route now, skipped loudly).
+                                 # "derive:math_only" adjudicates as "derive" and
+                                 # spawns no `[float]` companion.
     grammar: str = GRAMMAR      # statement dialect (record-schema.md's `grammar` field).
                                  # this module implements exactly one: the
                                  # `f`-and-parameter-names law language it and
@@ -576,12 +578,13 @@ class Conjecture:
     # adjudication consults it. Empty string means no such section.
     pseudo_infinity: float | None = None
     # the domain approximation for infinity, parallel to tolerance: an
-    # unbounded (+-inf) domain is checked for implementation numerical
-    # stability only up to this magnitude, applied symmetrically
-    # (records.pseudo_infinity_range resolves it to the (-v, v)
-    # range consumers read). None means full float extremes are
-    # assumed (the pedantic default). Rendered in the claim text
-    # only when set (an ordinary bounded-domain claim never states it).
+    # unbounded (+-inf) direction stops at this magnitude on both
+    # routes, and the float companion runs to it, applied symmetrically
+    # (records.pseudo_infinity_range resolves it to the (-v, v) range
+    # consumers read). None means real infinity: no default, and the
+    # float companion then runs to a large sampled magnitude. Rendered
+    # in the claim text only when set (an ordinary bounded-domain claim
+    # never states it).
     links: list = field(default_factory=list)
     # a chained comparison's pairwise links, each an (lhs, rel, rhs)
     # triple (grammar.split_relation_chain); empty for an ordinary
@@ -649,7 +652,10 @@ def claim(law: str, name: str | None = None, source: str = "user",
     claim it cannot decide still falls through to probing, with the
     derive attempt's status kept in `meta["mathema.derive_status"]`.
     "probe" samples only (seeded, verdict `holds`/`falsified`) ("auto" is retired, not a
-    legacy spelling of "best"). the safety predicates always adjudicate on the examine route
+    legacy spelling of "best"). A derive proof is the mathematics in
+    exact arithmetic; `mathema.check` pairs it with a `<name>[float]`
+    companion claim about the implementation, and "derive:math_only"
+    asks for the proof alone, with no companion. the safety predicates always adjudicate on the examine route
     regardless of the route passed in. A
     leading `let name = expr, ...` (see grammar.extract_let_bindings)
     substitutes each name for `(expr)` everywhere later in the law,
@@ -2013,14 +2019,26 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
     return inst
 
 
-def _emit_position(probe, conjectures: list, declared_order: dict) -> int:
+def _emit_position(probe, conjectures: list, declared_order: dict) -> float:
     """Where a probe belongs in the returned list: its conjecture's own
     declared position, so dependency-driven adjudication order never
-    leaks into what the caller sees."""
+    leaks into what the caller sees. A float companion sits directly
+    after the claim it was spawned from."""
+    parent = (probe.meta or {}).get("mathema.companion_of")
+    name = parent if parent is not None else probe.name
     for cj in conjectures:
-        if cj.name == probe.name:
-            return declared_order.get(id(cj), 0)
+        if cj.name == name:
+            return declared_order.get(id(cj), 0) + (0.5 if parent else 0)
     return 0
+
+
+def _emit_companion(out: list, companion: "Probe", parent: str) -> None:
+    """Append a stamped float companion to the output, tagged with the
+    claim it was spawned from and the family it belongs to."""
+    companion.meta = {**(companion.meta or {}),
+                      "mathema.companion_of": parent,
+                      "mathema.family": FLOAT_FAMILY}
+    out.append(companion)
 
 
 def _lemma_conjuncts(lemmas: list, cj, cj_domain: dict) -> list:
@@ -2176,7 +2194,8 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                       domain: dict | None = None, trials: int | None = None,
                       trials_scale: float = 1.0, facts=None,
                       extensive: bool = False,
-                      known_premises: dict | None = None) -> list[Probe]:
+                      known_premises: dict | None = None,
+                      float_companions: bool = False) -> list[Probe]:
     """Adjudicate proposed claims against the live function.
 
     `trials` omitted (`None`) uses the same structural-risk-based
@@ -2208,11 +2227,23 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     `probing._prepare_sampling`). Default `False`, same as `probe()`'s
     own `extensive`.
 
-    Returns one Probe per conjecture: holds (n=…) / falsified (with the
-    counterexample) / skipped (invalid law, nothing evaluable, or a
-    different grammar entirely, see the `grammar` check below, tagged
-    in `meta["mathema.foreign_grammar"]` so a caller can tell the two
-    kinds of skip apart), each noting who proposed it.
+    `float_companions=True` makes every claim the derive route proves
+    (route "derive" or "best") spawn its implementation claim,
+    `<name>[float]`, emitted directly after it: a derive `proven` is
+    the mathematics in exact arithmetic, and the companion is the same
+    relation executed against the real code in float (see
+    `gates._float_companion`). A claim authored with route
+    `derive:math_only` adjudicates as a derive claim and spawns none,
+    which its proof's meta states. `check()`, and so every CLI and
+    store path, asks for companions; the default here keeps the
+    adjudicator at one probe per claim.
+
+    Returns one Probe per conjecture (plus any float companions): holds
+    (n=…) / falsified (with the counterexample) / skipped (invalid law,
+    nothing evaluable, or a different grammar entirely, see the
+    `grammar` check below, tagged in `meta["mathema.foreign_grammar"]`
+    so a caller can tell the two kinds of skip apart), each noting who
+    proposed it.
     """
     facts = _effective_facts(fn, facts)
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
@@ -2294,13 +2325,27 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                        (cj.name for cj in conjectures)
                        if [c.name for c in conjectures].count(name) > 1}
     for cj in ordered:
+        math_only = cj.route == MATH_ONLY_ROUTE
+        if math_only:
+            # the opt-out adjudicates exactly as a derive claim; only the
+            # companion it would spawn is withheld
+            cj = _dc_replace(cj, route="derive")
         if cj.links:
             # a chained comparison is the conjunction of its links: run
             # each link through the full ordinary adjudication (same
             # domain/funcs/assuming/route) and fold, so no proof path is
             # duplicated; the exact combination rule tuple claims use
-            out.append(_stamped(_adjudicate_chain(
-                cj, fn, facts, domain, trials, trials_scale, extensive), cj))
+            chained, companion = _adjudicate_chain(
+                cj, fn, facts, domain, trials, trials_scale, extensive,
+                float_companions=(float_companions and not math_only
+                                  and cj.route in ("derive", "best")))
+            if math_only and chained.verdict == "proven":
+                chained.meta = {**(chained.meta or {}),
+                                "mathema.float_companion":
+                                    "none (derive:math_only)"}
+            out.append(_stamped(chained, cj))
+            if companion is not None:
+                _emit_companion(out, _stamped(companion, cj), cj.name)
             continue
         if (cj.relation in routes.safety_predicates() and cj.lhs == "f"
                 and "f" not in facts.params):
@@ -2488,6 +2533,11 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                     f"{r.lhs} {r.relation} {r.rhs}" for r in lent)
         ctx.assume_defined = defined_mode
         ctx.premise_structures = premise_structures
+        ctx.companion_mode = (
+            "math_only" if math_only else
+            "spawn" if float_companions and cj.route in ("derive", "best")
+            else None)
+        ctx.companion_budget = trials
         def stamp(probe, _cap=None):
             # `condition` is rendered text that gets read back,
             # docsync compares a verified row by feeding
@@ -2552,6 +2602,9 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                 extensive or cj.route in ("best", "examine"))
             if derived is not None:
                 out.append(stamp(derived, _cap=verdict_cap))
+                if ctx.companion is not None:
+                    _emit_companion(out, _stamped(ctx.companion, cj),
+                                    derived.name)
                 continue
             # route == "best" and the derive stage couldn't settle it:
             # fall through to the probe stage, same as an ordinary
@@ -2653,7 +2706,8 @@ def _combine_conjunction(probes: list, name: str, statement: str,
 
 
 def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
-                      extensive) -> "Probe":
+                      extensive, float_companions=False,
+                      ) -> "tuple[Probe, Probe | None]":
     """Intent:
         Adjudicate a chained comparison by running each pairwise link
         through the ordinary single-relation path and folding the
@@ -2667,7 +2721,11 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         `check_conjectures` call so they share the caller's sampling
         setup. A named-reference `assuming` inside a chain is the one
         unsupported combination (the referenced sibling isn't in the
-        per-link batch), rare enough to leave to a future pass.
+        per-link batch), rare enough to leave to a future pass. Returns
+        the chain's verdict and, when `float_companions` is set and the
+        chain is proven with every link's float companion spawned, the
+        chain's own companion, `<name>[float]`, folded from theirs by
+        the same conjunction rule.
     """
     from dataclasses import replace as _replace
 
@@ -2679,17 +2737,34 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
                                  links=[], name=f"{cj.name}[link{i}]"))
     probes = check_conjectures(fn, link_cjs, domain=domain, trials=trials,
                                trials_scale=trials_scale, facts=facts,
-                               extensive=extensive)
+                               extensive=extensive,
+                               float_companions=float_companions)
+    link_names = {c.name for c in link_cjs}
+    links = [p for p in probes if p.name in link_names]
     # a link that does not read as a claim (an undeclared name, say)
     # makes the whole chain unreadable, whatever the other links decide
-    refused = next((p for p in probes
+    refused = next((p for p in links
                     if (p.meta or {}).get("mathema.invalid_conjecture")), None)
     if refused is not None:
         return Probe(cj.name, _chain_statement(cj), refused.verdict,
                      route=None, note=refused.note,
-                     meta={"mathema.invalid_conjecture": True})
-    return _combine_conjunction(probes, cj.name, _chain_statement(cj),
-                                labels)
+                     meta={"mathema.invalid_conjecture": True}), None
+    combined = _combine_conjunction(links, cj.name, _chain_statement(cj),
+                                    labels)
+    companions = [p for p in probes if p.name not in link_names]
+    if combined.verdict != "proven" or len(companions) != len(links):
+        return combined, None
+    companion = _combine_conjunction(
+        companions, companion_name(cj.name), _chain_statement(cj), labels,
+        what="float companion")
+    companion.note = (f"the implementation of {cj.name}, executed in "
+                      f"float link by link; {companion.note}")
+    broken = next((p for p in companions if p.verdict == "falsified"), None)
+    if broken is not None:
+        companion.stratum = broken.stratum
+    combined.meta = {**(combined.meta or {}),
+                     "mathema.float_companion": companion.name}
+    return combined, companion
 
 
 def _stamp_examine_route(probe, cj, fn, facts) -> None:
@@ -2901,6 +2976,15 @@ class _ClaimContext:
     # evidence (holds or falsified) supersedes an unknown, and this
     # fallback is what the loop reports when probe couldn't adjudicate
     # either
+
+    # whether a derive proof spawns its float companion: "spawn",
+    # "math_only" (the claim opted out with route derive:math_only), or
+    # None (companions not asked for); the staged companion rides
+    # `companion` until the orchestration loop emits it
+    companion_mode: "str | None" = None
+    companion: "Probe | None" = None
+    # the caller's explicit trials, which bound the companion's points too
+    companion_budget: "int | None" = None
 
 
 _REAL_KINDS = {"scalar", "float", "int"}
@@ -3304,10 +3388,6 @@ def _provenance_meta(proof) -> dict:
     return meta
 
 
-# infinity approximation for the numerical-stability sweep when a claim
-# declares no pseudo_infinity cap: the "full extreme" corner value. The
-# sampler's own 1e6 specials already probe overflow-prone functions
-# (exp overflows ~710); this caps an unbounded corner so it is finite.
 def _operational_domain(cj_domain: dict, magnitude: float):
     """Intent:
         The empirical-check reading of a `let |inf| be v` claim: every
@@ -3354,17 +3434,17 @@ def _operational_domain(cj_domain: dict, magnitude: float):
     return rewritten, changes
 
 
-# the soundness gates moved to mathema/gates.py (beside the
-# corroboration engine they drive); these re-imports keep the public
-# knob and every existing reference working unchanged
+# the soundness gates live in mathema/gates.py, beside the
+# corroboration engine they drive
 from .gates import (  # noqa: E402
+    FLOAT_FAMILY as FLOAT_FAMILY,
+    MATH_ONLY_ROUTE as MATH_ONLY_ROUTE,
+    companion_name as companion_name,
     _EXTREME as _EXTREME,
-    _STABILITY_CHECK as _STABILITY_CHECK,
     _corroboration_gate as _corroboration_gate,
+    _float_companion as _float_companion,
     _fmt_point as _fmt_point,
     _point_evaluator as _point_evaluator,
-    _stability_gate as _stability_gate,
-    set_numerical_stability_check as set_numerical_stability_check,
 )
 
 def _stmt_lines(nodes) -> set:
@@ -3433,6 +3513,41 @@ def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
     except AttributeError:
         return None
     return premise_empties_domain(ctx.cj_domain, set(facts.params), premises)
+
+
+def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
+                           facts, bound_funcs, assumption) -> None:
+    """Intent:
+        Stage the float companion of a derive proof on `ctx`, and state
+        on the proof's own meta what became of it: the companion's
+        name, `none (derive:math_only)` for a claim that opted out, or
+        `none (...)` when the claim has no point evaluation against the
+        code.
+
+    Notes:
+        Does nothing unless the caller asked for companions
+        (`ctx.companion_mode` is "spawn" or "math_only"); the math_only
+        opt-out is stated whether or not companions were asked for.
+    """
+    mode = ctx.companion_mode
+    if mode is None:
+        return
+    if mode == "math_only":
+        proven.meta = {**(proven.meta or {}),
+                       "mathema.float_companion": "none (derive:math_only)"}
+        return
+    companion = _float_companion(proven, ctx.cj, fn, facts, ctx.cj_domain,
+                                 bound_funcs, assum=assumption,
+                                 budget=ctx.companion_budget)
+    if companion is None:
+        proven.meta = {**(proven.meta or {}),
+                       "mathema.float_companion":
+                           "none (the claim has no point evaluation against "
+                           "the code)"}
+        return
+    proven.meta = {**(proven.meta or {}),
+                   "mathema.float_companion": companion.name}
+    ctx.companion = companion
 
 
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
@@ -3693,10 +3808,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        sketch=proof.sketch, note=note,
                        condition=proof.quantifier, route=route,
                        meta=meta)
-        # a derive proof is exact; the residual risk is NUMERICAL, so
-        # sweep the implementation for instability near the boundaries
-        return _stability_gate(proven, cj, fn, facts, cj_domain, bound_funcs,
-                               assum=assumption or [])
+        # a derive proof is exact arithmetic; the implementation is the
+        # float companion's claim
+        _spawn_float_companion(ctx, proven, fn, facts, bound_funcs,
+                               assumption or [])
+        return proven
     if proof.status == "disproven":
         # a brute-force disproof names its own mechanism for the same
         # reason the proof does: the witness came from executing the
@@ -3733,8 +3849,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                condition=swept.quantifier,
                                route="derive:brute_force",
                                meta=_provenance_meta(swept))
-                return _stability_gate(proven, cj, fn, facts, cj_domain,
-                                       bound_funcs, assum=assumption or [])
+                _spawn_float_companion(ctx, proven, fn, facts, bound_funcs,
+                                       assumption or [])
+                return proven
             if swept.status == "disproven":
                 return Probe(cj.name, statement, "falsified",
                              route="derive:brute_force", sketch=swept.sketch,
