@@ -335,3 +335,35 @@ def test_docsync_settles_a_claim_stated_two_ways(tmp_path, monkeypatch):
     out = verify_project(root=str(tmp_path))
     assert not out.problems, out.problems
     assert _row(tmp_path, key, "nonneg")["statement"].endswith(">= 0")
+
+
+def test_the_json_report_fails_a_key_whose_only_problem_is_a_conflict(
+        tmp_path, monkeypatch, capsys):
+    # every failure line the sweep raises for a key, not only the gate's
+    # own, marks that key failed in the structured report
+    import json
+
+    from mathema.cli import main
+    from mathema.verify import verify_project
+    key = "reauth_json.offset"
+    _project(tmp_path, monkeypatch, "reauth_json", f"""
+        {key}:
+          claims:
+            - name: bound
+              statement: 'for x in [0, 1], f(x) >= 0'
+        """)
+    verify_project(root=str(tmp_path))
+    _claims(tmp_path, "reauth_json", f"""
+        {key}:
+          claims:
+            - name: bound
+              statement: 'for x in [0, 1], f(x) >= -1'
+        """)
+    capsys.readouterr()
+    rc = main(["verify", "--root", str(tmp_path), "--format", "json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert doc["passed"] is False
+    (row,) = [k for k in doc["keys"] if k["key"] == key]
+    assert row["passed"] is False
+    assert any("superseded" in p for p in row["problems"])
