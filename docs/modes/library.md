@@ -82,57 +82,51 @@ def ema(x: list, alpha: float) -> float:
 
 <!-- example: ema repl -->
 ```python
->>> mathema.check(ema)
+>>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (-10, 10)})
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
-           counterexample alpha=1 -> 0.45118195841070374, alpha=3.09918 -> -349.0594689144083 (not increasing)
+           counterexample alpha=-5.44324 -> -504886.9526187774, alpha=9.99998 -> -2491045.924006212 (not increasing)
   FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
-           counterexample alpha=1e-09 -> 999999.9980000095, alpha=9.71405 -> 75934653.1750601 (not decreasing)
+           counterexample alpha=3.09918 -> 43.62072599569275, alpha=10 -> 21771.614551164577 (not decreasing)
   FALSIFY affine[alpha]: d(f(x, alpha), alpha, alpha) = 0
-           counterexample alpha=-2.00525, h=0.00401: curvature estimate 18.3289 does not settle affine
+           counterexample alpha=3.53765, h=0.02: curvature estimate 3.12726 does not settle affine
   FALSIFY convex[alpha]: d(f(x, alpha), alpha, alpha) >= 0
-           counterexample alpha=-0.220263, h=0.002: curvature estimate -208.106 does not settle convex
+           counterexample alpha=8.52571, h=0.02: curvature estimate -221.981 does not settle convex
   FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
-           counterexample alpha=8.52571, h=0.0171: curvature estimate 3.64705e+06 does not settle concave
+           counterexample alpha=-0.594668, h=0.02: curvature estimate 1222.99 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=160)
-  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=12)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=192)
+  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=20)
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([2.01488, 3.30692, -6.39418, 3.78355, 6.96564, 7.97935], -9.1034): -6.39418363288563 vs -45761.14174665739
+           counterexample ([0, 902023, 21859.3, 865038, -999998, 740637, -77557.7, 946318], -8.89934): -999998.0 vs -7639061686900.594
   FALSIFY bounded_upper: f(x, alpha) <= max(x)
-           counterexample ([2.59648, 2.09269], -7.84153): 6.5469484767516235 vs 2.596479621674405
+           counterexample ([103173, 1e+06, -993405, -514945, 606668, -999998], 6.56264): 6722876822.250346 vs 1000000.0
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([6.22429, 5.95714, 3.98826, -6.56235, 7.20359, 1.66103, -8.45295], -5.87836): 78066.38231536481 vs -1129152.7241483687
+           counterexample ([519138, 999998, 1e+06, 0, 917863, 745687, -818085], 10): -248319487748.5595 vs -814138493405.3986
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308, c=-5
-           [mathematics sound, implementation:numerical-instability]
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
+  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  FALSIFY translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308, c=-5
-           [mathematics sound, implementation:numerical-instability]
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
+  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=48)
 ```
 
 Read the `FALSIFY` rows as facts about `ema`, not as bugs in it. The
 suggestions ask standard questions of any function, and a falsified
 suggestion is an answer, with the witness to prove it: an exponential
 average really is neither monotone nor order-independent in its inputs.
-Each `[float]` row is the float companion of the proof above it: the
-algebra is sound, and at `-1e+308` the float implementation overflows
-to a non-finite value, which the row tags
-`implementation:numerical-instability`. Two of the answers change once
-the function's real domain is stated. Checked with
-`domain={"alpha": (0, 1)}`, the bounds that failed for an unbounded
-`alpha` are proven outright, and their float companions hold (an
-excerpt):
+Each `[float]` row is the float companion of the proof above it, the
+same law run through the real code in floating point inside the stated
+domain; both hold. Two of the answers change once the smoothing factor's
+real domain is stated. Checked with `alpha` in `(0, 1)`, the bounds that
+failed for an `alpha` outside it are proven outright, and their float
+companions hold (an excerpt):
 
 <!-- example: ema repl match=subset -->
 ```python
->>> mathema.check(ema, domain={"alpha": (0, 1)})
+>>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (0, 1)})
   proven  bounded_lower: min(x) ≤ f(x, alpha)
   holds   bounded_lower[float]: min(x) <= f(x, alpha) (n=44)
   proven  bounded_upper: f(x, alpha) ≤ max(x)

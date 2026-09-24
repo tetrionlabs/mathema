@@ -23,9 +23,13 @@ use mathema needs nothing special about the function at all.
 
 <!-- example: ema run -->
 ```python
-print(mathema.check(ema))
+print(mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (-10, 10)}))
 ```
 
+The `domain=` states a plausible range for the data and the smoothing
+factor. Without one, every claim ranges over all of the reals, out to the
+largest double, and a float implementation overflows long before it gets
+there (see [operational infinity](grammar.md#operational-infinity-let-inf-be)).
 With no `claims=` argument, mathema still runs the probes every
 function gets (`is_deterministic`, `is_state_safe`,
 `is_numerically_stable`, `is_representation_safe`), plus whichever
@@ -39,36 +43,32 @@ scalar parameter. This is the real, unedited result:
 ```text
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
-           counterexample alpha=1 -> 0.45118195841070374, alpha=3.09918 -> -349.0594689144083 (not increasing)
+           counterexample alpha=-5.44324 -> -504886.9526187774, alpha=9.99998 -> -2491045.924006212 (not increasing)
   FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
-           counterexample alpha=1e-09 -> 999999.9980000095, alpha=9.71405 -> 75934653.1750601 (not decreasing)
+           counterexample alpha=3.09918 -> 43.62072599569275, alpha=10 -> 21771.614551164577 (not decreasing)
   FALSIFY affine[alpha]: d(f(x, alpha), alpha, alpha) = 0
-           counterexample alpha=-2.00525, h=0.00401: curvature estimate 18.3289 does not settle affine
+           counterexample alpha=3.53765, h=0.02: curvature estimate 3.12726 does not settle affine
   FALSIFY convex[alpha]: d(f(x, alpha), alpha, alpha) >= 0
-           counterexample alpha=-0.220263, h=0.002: curvature estimate -208.106 does not settle convex
+           counterexample alpha=8.52571, h=0.02: curvature estimate -221.981 does not settle convex
   FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
-           counterexample alpha=8.52571, h=0.0171: curvature estimate 3.64705e+06 does not settle concave
+           counterexample alpha=-0.594668, h=0.02: curvature estimate 1222.99 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=160)
-  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=12)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=192)
+  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=20)
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([2.01488, 3.30692, -6.39418, 3.78355, 6.96564, 7.97935], -9.1034): -6.39418363288563 vs -45761.14174665739
+           counterexample ([0, 902023, 21859.3, 865038, -999998, 740637, -77557.7, 946318], -8.89934): -999998.0 vs -7639061686900.594
   FALSIFY bounded_upper: f(x, alpha) <= max(x)
-           counterexample ([2.59648, 2.09269], -7.84153): 6.5469484767516235 vs 2.596479621674405
+           counterexample ([103173, 1e+06, -993405, -514945, 606668, -999998], 6.56264): 6722876822.250346 vs 1000000.0
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([6.22429, 5.95714, 3.98826, -6.56235, 7.20359, 1.66103, -8.45295], -5.87836): 78066.38231536481 vs -1129152.7241483687
+           counterexample ([519138, 999998, 1e+06, 0, 917863, 745687, -818085], 10): -248319487748.5595 vs -814138493405.3986
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308, c=-5
-           [mathematics sound, implementation:numerical-instability]
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
+  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  FALSIFY translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308, c=-5
-           [mathematics sound, implementation:numerical-instability]
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
+  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=48)
 ```
 
 Every counterexample names the inputs that produced it, so a failure is
@@ -76,17 +76,17 @@ a thing you can paste into a REPL rather than a claim to take on faith.
 Two of these are genuinely informative rather than noise. The bounds
 fail because nothing here constrains `alpha` to `[0, 1]`, and outside
 that range `ema` is not a weighted average at all, which the sampler
-demonstrates at `alpha=-9.1`. `permutation_invariant` fails because
+demonstrates at `alpha=-8.9`. `permutation_invariant` fails because
 `ema` is order-sensitive by design, which is what "exponentially
 weighted" means. mathema does not know that is intentional, so it
 reports the counterexample and lets a reader judge it.
 
 Note `is_deterministic` came back `proven`, not `holds`. It did not need
 sampling: the body lifts to a closed symbolic form, and a closed form
-has no state to vary with. `n=160` elsewhere is not a flat constant
+has no state to vary with. `n=192` elsewhere is not a flat constant
 either, it is a trial budget decided once per call from `ema`'s own
-structure (128 by default, more for a structurally riskier function,
-here one loop, so +32). See [mathema check](modes/check.md#the-trial-budget)
+structure and the domain it is checked over (128 by default, +32 for
+the loop, +32 for a domain as wide as `x`'s). See [mathema check](modes/check.md#the-trial-budget)
 for how that is decided, and `--trials-scale` for turning it down in a
 fast dev loop. Every verdict reports the exact `n` it used, plus a
 `meta["mathema.confidence"]` score capped below the derive route's own,
@@ -97,20 +97,21 @@ Each proven algebraic law (the two equivariances) also has a row with a
 statement about the code, so it has none. That `[float]` row is the law's
 float companion, a separate claim that runs the same law through the
 real code in floating point, at the domain's corners and at sampled
-points inside it. Nothing here bounds `x` or `alpha`, so the corners
-sit near `1e+308`, where `alpha * v` overflows to infinity and the next
-step of the loop gives `nan`. The proofs stand, and the companions
-record that the float code does not follow them out there, which is
-what `[mathematics sound, implementation:numerical-instability]` says.
+points inside it. Both hold here. Drop the `domain=` and they do not:
+the corners then sit near `1e+308`, where `alpha * v` overflows to
+infinity and the next step of the loop gives `nan`, so each companion is
+falsified with that point as its witness, tagged `[mathematics sound,
+implementation:numerical-instability]`, while the proofs stand. A claim
+over all of the reals means all of them.
 
 ## Step 2: declare a domain
 
 <!-- example: ema run -->
 ```python
-print(mathema.check(ema, domain={"alpha": (0, 1)}))
+print(mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (0, 1)}))
 ```
 
-Restricting `alpha` to where `ema` is actually meant to be used changes
+Narrowing `alpha` to where `ema` is actually meant to be used changes
 the picture, not just the wording (an excerpt, from the bounds on):
 
 <!-- example: ema output match=subset -->
@@ -120,12 +121,10 @@ the picture, not just the wording (an excerpt, from the bounds on):
   proven  bounded_upper: f(x, alpha) ≤ max(x)
   holds   bounded_upper[float]: f(x, alpha) <= max(x) (n=44)
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([-3.03564, -8.20143, -0.353355], 0.593337): -2.6905828069734596 vs -3.8384996201656314
+           counterexample ([-673463, -60729.5, -94289.3, -931377, 0, 1e+06], 0.267296): -23166.535816151183 vs -92190.67916852141
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ ∪ {∅}
-  FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=0, c=-5
-           [mathematics sound, implementation:numerical-instability]
+  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ ∪ {∅}
   holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=48)
@@ -138,8 +137,6 @@ that failed a moment ago now passes, because the claim finally says
 where it applies, and their float companions hold as well.
 `permutation_invariant` stays falsified, as it should: narrowing the
 domain does not make an order-sensitive function order-insensitive.
-`scale_equivariant[float]` still fails, because `x` is still unbounded:
-scaling a `1e+308` element by `-5` overflows, and `0 * inf` is `nan`.
 
 A declared domain is documentation, not enforcement. Whether the code
 itself *rejects* an out-of-domain argument is a separate question, and

@@ -319,18 +319,21 @@ def ema(x: list, alpha: float) -> float:
         y = alpha * v + (1 - alpha) * y
     return y
 
-mathema.check(ema)                                  # built-in algebraic laws
+bounds = {"x": (-1e6, 1e6), "alpha": (-10, 10)}
+mathema.check(ema, domain=bounds)                   # built-in laws, inside a stated domain
 mathema.check(ema, claims=["f(x, 1.0) == x[-1]"])   # your own claim
-mathema.check(ema, domain={"alpha": (0, 1)})        # probe inside a domain
+mathema.check(ema, domain={"alpha": (0, 1)})        # narrow the domain
 mathema.write_spec(ema, claims=[...])               # check, then write the record
 mathema.status()                                    # fresh or stale, per tracked function
 ```
 
 Without anyone reading the code, the first call proves that the result is
 deterministic and that scaling or shifting every element of `x` scales or
-shifts the result the same way, its `[float]` companions show where the f64
-implementation overflows, and it finds that reordering `x` does *not* leave
-the result unchanged, with the counterexample kept. The
+shifts the result the same way, with the `[float]` companions of those proofs
+holding across the stated domain, and it finds that reordering `x` does *not*
+leave the result unchanged, with the counterexample kept. Leave the domain out
+and every claim ranges over all of the reals, where the companions report the
+overflow at `1e+308` instead. The
 [API reference](https://mathema.tetrionlabs.com/api/) has the rest.
 
 ## CI
