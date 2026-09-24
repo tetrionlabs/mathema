@@ -136,7 +136,8 @@ whichever is larger. So `x * (1 + 1e-8)` equals `x` everywhere, while a
 constant offset of `1e-7` is caught near zero, where the relative allowance
 shrinks below it. A claim sets its own absolute tolerance with the
 `tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
-and that value replaces the 1e-9.
+and that value replaces the whole allowance: the two sides must agree within
+it, with no relative tolerance on top.
 
 Inside the claim text, `ε` (also `eps`, `epsilon` or `\epsilon`) names that
 tolerance directly: the declared value when there is one, and the 1e-9

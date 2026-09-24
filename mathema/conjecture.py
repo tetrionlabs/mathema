@@ -285,6 +285,16 @@ DEFAULT_TOLERANCE = 1e-9    # this module's own statement dialect (record-schema
                        # `grammar` field), see mathema.data.grammar.GRAMMAR for
                        # the one other grammar in the codebase today.
 
+def _declared_rel_tol(cj) -> float:
+    """Intent:
+        The relative allowance an equality gets on the probe route: none
+        when the claim declared its tolerance, which is then the whole
+        allowance, and the default relative tolerance otherwise.
+    """
+    from .probing import DEFAULT_RELATIVE_TOLERANCE
+    return 0.0 if cj.tolerance is not None else DEFAULT_RELATIVE_TOLERANCE
+
+
 def _runtime_dim(value, axis):
     """`dim(value, axis)` at evaluation time: the size of the axis-th
     dimension of a nested-sequence value, descending first elements.
@@ -3532,10 +3542,13 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 a_code_l, a_aux_l = _validate(acj.lhs, set(kinds), extra)
                 a_code_r, a_aux_r = _validate(acj.rhs, set(kinds), extra)
                 a_tol = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
+                a_rel = _declared_rel_tol(cj)
                 a_op = {"<=": _operator.le, ">=": _operator.ge,
                         "<": _operator.lt, ">": _operator.gt,
-                        "==": lambda a, b, t=a_tol: _close(a, b, tolerance=t),
-                        "!=": lambda a, b, t=a_tol: not _close(a, b, tolerance=t)
+                        "==": lambda a, b, t=a_tol, r=a_rel:
+                            _close(a, b, tolerance=t, rel_tol=r),
+                        "!=": lambda a, b, t=a_tol, r=a_rel:
+                            not _close(a, b, tolerance=t, rel_tol=r)
                         }[acj.relation]
                 compiled.append((a_code_l, a_code_r, a_op))
                 aux_all |= a_aux_l | a_aux_r
@@ -3843,9 +3856,11 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 try:
                     jl = eval(code_l, {"__builtins__": {}}, jenv)
                     jr = eval(code_r, {"__builtins__": {}}, jenv)
-                    jok = (_close(jl, jr, tolerance=slack)
+                    jok = (_close(jl, jr, tolerance=slack,
+                                  rel_tol=_declared_rel_tol(cj))
                            if cj.relation in ("==", "~=") else
-                           not _close(jl, jr, tolerance=slack)
+                           not _close(jl, jr, tolerance=slack,
+                                      rel_tol=_declared_rel_tol(cj))
                            if cj.relation == "!=" else
                            jl <= jr + slack if cj.relation == "<=" else
                            jl >= jr - slack)
@@ -3943,7 +3958,8 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # a scalar broadcasting across the matrix.
         ok = relation_holds_elementwise(
             lv, rv, cj.relation, slack,
-            exact_inequality=cj.tolerance is None)
+            exact_inequality=cj.tolerance is None,
+            rel_tol=_declared_rel_tol(cj))
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex return), or two
