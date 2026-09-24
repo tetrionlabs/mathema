@@ -148,12 +148,16 @@ to trigger it, branch pruning evaluates the guard condition against the
 function's own declared parameter domains, before any `f(...)` call-site
 substitution even happens:
 
-```
+<!-- example: raises-guard run -->
+```python
 def f(a, b, c):
     if a == 0:
-        raise ValueError(...)
-    ...
+        raise ValueError("a must be nonzero")
+    return b / a + c
+```
 
+<!-- example: raises-guard verdicts fn=f -->
+```
 raises(f(a, b, 0), ValueError)              # falsified, a's own domain isn't declared, so a sampled a != 0 returns
 for a in [0, 0], raises(f(a, b, c), ValueError)   # proven
 ```
@@ -233,7 +237,7 @@ always states the resolved missing-value policy explicitly, via the same
 absent:
 
 ```
-∀ x ∈ [0, 100] ⊂ ℝ ∪ {∅}     # missing allowed
+∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}     # missing allowed
 ∀ x ∈ [0, 100] ⊂ ℤ \ {∅}     # missing excluded
 ```
 
@@ -518,8 +522,30 @@ says so the first time a claim falsifies on its first adjudication.
 `declared-schema.md`/`spec.declare()`, nothing downstream cares which
 surface a claim came from. `mathema.write_spec()`'s worked example below
 shows claims from three different sources adjudicated together with
-zero manual wiring:
+zero manual wiring, for this softmax:
 
+<!-- example: write-spec run -->
+```python
+import math
+from typing import Annotated
+
+import mathema
+from mathema.types import Shape
+
+
+def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+    """Normalised exponentials of a list of scores.
+
+    Claims:
+        sums_to_one: sum(f(scores)) == 1
+    """
+    top = max(scores)
+    exps = [math.exp(s - top) for s in scores]
+    total = sum(exps)
+    return [e / total for e in exps]
+```
+
+<!-- example: write-spec repl -->
 ```
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7302d34f1904

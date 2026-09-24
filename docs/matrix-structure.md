@@ -120,9 +120,9 @@ for A in R^(n*n), |A| >= 0          #  ->  det(A) >= 0
 ```
 
 Because the reading is per-operand, one expression can mix the two:
-with `A` a matrix and `c` a scalar, `inv(c * A) == c^-1 * A^-1` resolves
-to `inv(c * A) == c ** (-1) * inv(A)`, the `c^-1` a reciprocal and the
-`A^-1` an inverse.
+with `A` a matrix and `c` a scalar, `inv(c * A) == c^-1 * A^-1` reads
+`c^-1` as a reciprocal and `A^-1` as an inverse, and the record writes
+it `inv(A*c) = inv(A)/c`.
 
 When a claim uses the matrix vocabulary, the record's `grammar` field is
 stamped `mathema/linalg`. This is informative only, a note that the
@@ -138,8 +138,18 @@ about a function's body. mathema lifts the claim's own expressions to
 sympy assumptions (`Q.symmetric`, `Q.positive_definite`, ...), and
 decides the relation. Equalities are decided by simplifying the
 difference to zero; scalar comparisons of a determinant or trace are
-decided by sympy's assumption engine.
+decided by sympy's assumption engine. The identities below are checked
+against a function of two square matrices of a shared dimension:
 
+<!-- example: identities run -->
+```python
+from mathema.types import Mat
+
+def f(A: Mat("n", "n"), B: Mat("n", "n")):
+    return A
+```
+
+<!-- example: identities verdicts fn=f -->
 ```
 det(A @ B) == det(A) * det(B)   # proven
 (A @ B).T == B.T @ A.T   # proven
@@ -166,11 +176,17 @@ argument before the function runs. It auto-declares the matching
 predicate claim, so the precondition and its runtime guard are one
 statement.
 
+<!-- example: enforce-structure run inline requires=numpy -->
 ```python
+from typing import Annotated
+
+from mathema import enforce_structure
+from mathema.types import PositiveDefinite, Shape
+
 @enforce_structure()
 def cholesky(A: Annotated[list, Shape("n", "n"), PositiveDefinite]): ...
 
-cholesky(non_pd_matrix)   # ValueError: cholesky: A is not is_positive_definite (positive definite)
+cholesky([[1, 2], [2, 1]])   # ValueError: cholesky: A is not is_positive_definite (positive definite)
 ```
 
 A property the registry cannot decide (a spectral check with no numpy)

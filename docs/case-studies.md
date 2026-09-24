@@ -24,6 +24,7 @@ function whose body mentions volatility five times, and it is exactly
 the kind of claim worth checking against the implementation rather
 than against a textbook.
 
+<!-- example: parity verdicts fn=mathema.lexicon:put_call_parity_gap expect=proven -->
 ```
 for s in [50,150], k in [50,150], r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], f(s,k,r,t,sigma) == s - k*exp(-r*t)
 ```
@@ -37,10 +38,12 @@ Delta is the sensitivity of the price to the spot, which is to say it
 is the partial derivative of the price in `s`. The grammar says that
 directly:
 
+<!-- example: delta-lower verdicts fn=mathema.lexicon:black_scholes_call expect=proven -->
 ```
 for s in [50,150], k in [50,150], r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], ∂(f(s,k,r,t,sigma), s) >= 0
 ```
 
+<!-- example: delta-upper verdicts fn=mathema.lexicon:black_scholes_call expect=proven -->
 ```
 for s in [50,150], k in [50,150], r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], ∂(f(s,k,r,t,sigma), s) <= 1
 ```
@@ -70,22 +73,26 @@ Its defining properties are calculus facts, and each is a claim.
 **Its derivative is expressible in the function itself.** This is the
 identity backpropagation is built on:
 
+<!-- example: sigmoid-derivative verdicts fn=mathema.lexicon:logistic_standard expect=proven -->
 ```
 for x in [-700, 700], d(f(x), x) == f(x)*(1 - f(x))
 ```
 
 **It is symmetric about the origin:**
 
+<!-- example: sigmoid-symmetry verdicts fn=mathema.lexicon:logistic_standard expect=proven -->
 ```
 for x in [-700, 700], f(-x) == 1 - f(x)
 ```
 
 **It saturates, which limits state:**
 
+<!-- example: sigmoid-limit-upper verdicts fn=mathema.lexicon:logistic_standard expect=proven -->
 ```
 lim(f(x), x -> oo) == 1
 ```
 
+<!-- example: sigmoid-limit-lower verdicts fn=mathema.lexicon:logistic_standard expect=proven -->
 ```
 lim(f(x), x -> -oo) == 0
 ```
@@ -93,6 +100,7 @@ lim(f(x), x -> -oo) == 0
 **Its derivative is a probability density,** which an integral over
 the whole line states exactly:
 
+<!-- example: sigmoid-density verdicts fn=mathema.lexicon:logistic_standard expect=proven -->
 ```
 ∫(d(f(x), x), x, -oo, oo) == 1
 ```
@@ -129,10 +137,12 @@ mathematics is sound and the implementation is not total over the
 inputs the claim quantified. The fix is to say where you meant, which
 is usually what you meant anyway:
 
+<!-- example: sigmoid-above-zero verdicts fn=mathema.lexicon:logistic_standard expect=proven -->
 ```
 for x in [-30, 30], f(x) > 0
 ```
 
+<!-- example: sigmoid-below-one verdicts fn=mathema.lexicon:logistic_standard expect=proven -->
 ```
 for x in [-30, 30], f(x) < 1
 ```
@@ -147,6 +157,7 @@ Fixed-step gradient descent on the quadratic bowl `0.5*q*t^2`
 multiplies the iterate by `r = 1 - alpha*q` each step, so it converges
 exactly when `|r| < 1`. That condition is a claim about the step size:
 
+<!-- example: descent verdicts fn=mathema.lexicon:gd_convergence_factor expect=proven -->
 ```
 for alpha in [0.01,1.9], q in [0.5,1.0], |f(alpha,q)| < 1
 ```

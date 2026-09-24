@@ -1,0 +1,109 @@
+# Documentation examples checked by tests/test_docs_outputs.py
+# Regenerate: python tests/test_docs_outputs.py --write-inventory
+#
+# [x] page:id  roles         a marked example, run and compared
+# [ ] page:line               an unmarked fence that shows output
+# [-] page:line               marked as an illustration, not a run
+
+[x] docs/authoring.md:raises-guard               run verdicts
+[x] docs/authoring.md:write-spec                 run repl
+[x] docs/case-studies.md:parity                  verdicts
+[x] docs/case-studies.md:delta-lower             verdicts
+[x] docs/case-studies.md:delta-upper             verdicts
+[x] docs/case-studies.md:sigmoid-derivative      verdicts
+[x] docs/case-studies.md:sigmoid-symmetry        verdicts
+[x] docs/case-studies.md:sigmoid-limit-upper     verdicts
+[x] docs/case-studies.md:sigmoid-limit-lower     verdicts
+[x] docs/case-studies.md:sigmoid-density         verdicts
+[x] docs/case-studies.md:sigmoid-above-zero      verdicts
+[x] docs/case-studies.md:sigmoid-below-one       verdicts
+[x] docs/case-studies.md:descent                 verdicts
+[ ] docs/claims-transfer.md:42
+[ ] docs/claims-transfer.md:86
+[x] docs/conditional-claims.md:enforce-dimensions run
+[ ] docs/derive-route.md:62
+[ ] docs/derive-route.md:93
+[ ] docs/derive-route.md:244
+[ ] docs/derive-route.md:264
+[ ] docs/derive-route.md:285
+[ ] docs/derive-route.md:302
+[ ] docs/derive-route.md:348
+[ ] docs/derive-route.md:382
+[ ] docs/derive-route.md:435
+[ ] docs/derive-route.md:504
+[ ] docs/derive-route.md:522
+[ ] docs/derive-route.md:549
+[ ] docs/derive-route.md:570
+[ ] docs/derive-route.md:604
+[ ] docs/derive-route.md:688
+[ ] docs/extending.md:183
+[ ] docs/findings.md:30
+[ ] docs/findings.md:58
+[ ] docs/findings.md:84
+[ ] docs/findings.md:121
+[ ] docs/findings.md:147
+[ ] docs/first-look.md:36
+[ ] docs/first-look.md:95
+[ ] docs/first-look.md:123
+[ ] docs/first-look.md:150
+[ ] docs/grammar.md:162
+[ ] docs/grammar.md:299
+[ ] docs/index.md:127
+[ ] docs/index.md:148
+[ ] docs/index.md:174
+[ ] docs/index.md:194
+[ ] docs/index.md:241
+[ ] docs/index.md:248
+[ ] docs/index.md:360
+[x] docs/lemmas.md:chain                         run output
+[x] docs/lemmas.md:weakest                       run output  (after)
+[x] docs/lemmas.md:orphan                        run output  (after)
+[ ] docs/mathema-docstring.md:170
+[ ] docs/mathema-docstring.md:205
+[ ] docs/mathema-docstring.md:255
+[ ] docs/mathema-docstring.md:321
+[x] docs/matrix-structure.md:identities          run verdicts
+[x] docs/matrix-structure.md:enforce-structure   run  (requires)
+[ ] docs/modes/accept.md:110
+[ ] docs/modes/audit.md:128
+[ ] docs/modes/audit.md:192
+[ ] docs/modes/check.md:119
+[ ] docs/modes/check.md:130
+[ ] docs/modes/claims.md:50
+[ ] docs/modes/describe.md:21
+[ ] docs/modes/describe.md:42
+[ ] docs/modes/describe.md:81
+[ ] docs/modes/init.md:64
+[ ] docs/modes/init.md:76
+[ ] docs/modes/init.md:101
+[ ] docs/modes/library.md:59
+[ ] docs/modes/lock.md:41
+[ ] docs/modes/pin.md:30
+[ ] docs/modes/review.md:55
+[ ] docs/modes/verify.md:77
+[ ] docs/modes/verify.md:87
+[ ] docs/modes/verify.md:98
+[ ] docs/modes/verify.md:112
+[ ] docs/modes/verify.md:124
+[ ] docs/modes/verify.md:136
+[ ] docs/quickstart.md:40
+[ ] docs/quickstart.md:58
+[ ] docs/quickstart.md:80
+[ ] docs/quickstart.md:115
+[ ] docs/symbology.md:37
+[ ] docs/symbology.md:76
+[ ] docs/symbology.md:123
+[ ] docs/three-layers.md:33
+[ ] docs/tutorial.md:57
+[ ] docs/tutorial.md:117
+[ ] docs/tutorial.md:172
+[ ] docs/tutorial.md:192
+[ ] docs/tutorial.md:210
+[ ] docs/tutorial.md:243
+[x] README.md:parity                             file run output
+[x] README.md:sigmoid                            file run output
+[x] README.md:pole                               run output
+[-] README.md:171
+[-] README.md:246
+
+# 22 examples checked, 76 output fences not yet marked
