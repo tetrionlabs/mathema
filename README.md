@@ -97,6 +97,7 @@ verdicts apart so you always know which kind of answer you have:
 | `proven` | established mathematically over the claim's stated domain |
 | `holds (n=...)` | survived exactly `n` behavioural trials, which is evidence, not proof |
 | `falsified` | a counterexample was found by running the function, and is kept |
+| `invalidated` | was `proven` or `holds` in the previous record, and the current code no longer supports it |
 | `unknown` | nothing was decided, and the record keeps the reason |
 | `skipped` | the claim could not be adjudicated as stated, and the record says why |
 
@@ -321,10 +322,11 @@ mathema.write_spec(ema, claims=[...])               # check, then write the reco
 mathema.status()                                    # fresh or stale, per tracked function
 ```
 
-Without anyone reading the code, the first call reports that the result is
-deterministic and numerically stable, that scaling or shifting every element
-of `x` scales or shifts the result the same way, and that reordering `x` does
-*not* leave it unchanged, with the counterexample kept. The
+Without anyone reading the code, the first call proves that the result is
+deterministic and that scaling or shifting every element of `x` scales or
+shifts the result the same way, its `[float]` companions show where the f64
+implementation overflows, and it finds that reordering `x` does *not* leave
+the result unchanged, with the counterexample kept. The
 [API reference](https://mathema.tetrionlabs.com/api/) has the rest.
 
 ## CI
@@ -341,7 +343,7 @@ A failing claim exits 1 and a broken invocation exits 2, so a pipeline can
 tell a real finding from a broken run. `mathema init --ci` scaffolds the
 GitHub Actions or GitLab step, `--format github`, `junit` and `json` feed each
 platform's own reports, and fuller pipelines are in
-[examples/ci/](examples/ci/).
+[examples/ci/](https://github.com/tetrionlabs/mathema/tree/main/examples/ci).
 
 ## Intent
 
@@ -364,7 +366,8 @@ pip install "mathema[all]"    # numpy, z3, MCP server, coverage
 
 The extras can also be taken one at a time: `mcp` exposes mathema's tools to
 an agent, `smt` adds z3 as a fallback decision procedure, `numpy` enables
-array-shaped claims and `symbology` adds conventional notation.
+array-shaped claims, `coverage` reads a native `.coverage` report and
+`symbology` adds conventional notation.
 
 ## Documentation
 
@@ -385,7 +388,7 @@ The full documentation, including the command reference, is at
 **[mathema.tetrionlabs.com](https://mathema.tetrionlabs.com)**.
 
 mathema is at 0.6.0 and pre-1.0, feature-complete for its current scope and
-covered by over 3,200 tests; the claim grammar and record format are settled by
+covered by over 3,500 tests; the claim grammar and record format are settled by
 the spec, but the Python API is likely to change before 1.0.
 
 ## Related projects
@@ -402,14 +405,15 @@ renders claims in a field's conventional notation, and
 agents to drive the claim loop properly, vendored by an explicit, opt-in
 `mathema init --agents`.
 
-See also [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md),
-[SECURITY.md](SECURITY.md) and [SUPPORT.md](SUPPORT.md).
+See also [CHANGELOG.md](https://github.com/tetrionlabs/mathema/blob/main/CHANGELOG.md), [CONTRIBUTING.md](https://github.com/tetrionlabs/mathema/blob/main/CONTRIBUTING.md),
+[SECURITY.md](https://github.com/tetrionlabs/mathema/blob/main/SECURITY.md) and [SUPPORT.md](https://github.com/tetrionlabs/mathema/blob/main/SUPPORT.md).
 
 ## Licensing
 
 mathema is source-available under the [Business Source License
-1.1](LICENSE.md). Production use is free for organisations under USD 10
-million in revenue, for up to three repositories, for research, teaching,
-personal and other non-commercial use, and for a 90-day evaluation, and every
-released version converts to AGPL-3.0-or-later four years after its release. See [LICENSING.md](LICENSING.md) for the
-plain-language version.
+1.1](https://github.com/tetrionlabs/mathema/blob/main/LICENSE.md). Production use is free when any one of these applies:
+your organisation's revenue is under USD 10 million, mathema is used in no
+more than three of its repositories, the use is research, teaching, personal
+or otherwise non-commercial, or it is within a 90-day evaluation. Every
+released version converts to AGPL-3.0-or-later four years after its release.
+See [LICENSING.md](https://github.com/tetrionlabs/mathema/blob/main/LICENSING.md) for the plain-language version.
