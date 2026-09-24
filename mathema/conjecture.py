@@ -29,6 +29,7 @@ import math
 import operator as _operator
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from dataclasses import replace as _dc_replace
 
@@ -194,6 +195,33 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
     return [list(combo) for combo in itertools.product(*choices)]
 
 
+def _sample_in_domain(value, bound) -> bool:
+    """Intent:
+        Whether one sampled scalar lies inside its parameter's declared
+        bound, for the probe route's per-trial check. Only a real number
+        is judged here: a sequence, mapping, string or complex value
+        has its own sampler, and a missing value is the missing-value
+        policy's to decide. A whole float counts as the integer it
+        equals, and an infinity is inside exactly when the bound is
+        unbounded in its direction.
+    """
+    from .domain import domain_contains
+    if bound is None or isinstance(value, bool) \
+            or not isinstance(value, (int, float)) or value != value:
+        return True
+    try:
+        if math.isinf(value):
+            far = math.copysign(sys.float_info.max, value)
+            return bool(domain_contains(far, bound)
+                        or domain_contains(int(far), bound))
+        if domain_contains(value, bound):
+            return True
+        return (isinstance(value, float) and value.is_integer()
+                and bool(domain_contains(int(value), bound)))
+    except Exception:
+        return True
+
+
 def _pinned_arg_sets(cj, arity: int) -> list:
     """Intent:
         The claim's recorded counterexamples (`Conjecture.pins`) as
@@ -284,6 +312,16 @@ GRAMMAR = "mathema"
 DEFAULT_TOLERANCE = 1e-9    # this module's own statement dialect (record-schema.md's
                        # `grammar` field), see mathema.data.grammar.GRAMMAR for
                        # the one other grammar in the codebase today.
+
+def _declared_rel_tol(cj) -> float:
+    """Intent:
+        The relative allowance an equality gets on the probe route: none
+        when the claim declared its tolerance, which is then the whole
+        allowance, and the default relative tolerance otherwise.
+    """
+    from .probing import DEFAULT_RELATIVE_TOLERANCE
+    return 0.0 if cj.tolerance is not None else DEFAULT_RELATIVE_TOLERANCE
+
 
 def _runtime_dim(value, axis):
     """`dim(value, axis)` at evaluation time: the size of the axis-th
@@ -2599,7 +2637,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # canonical set (prover, records, and comparisons all use it); the
     # declared text stays the author's, and the collapse is rendered
     # here explicitly, never silently
-    from .domain import canonical_bound, render_domain_bound
+    from .domain import bound_is_empty, canonical_bound, render_domain_bound
     for p, b in list(cj_domain.items()):
         canonical, declared_text = canonical_bound(b)
         if declared_text is not None:
@@ -2623,6 +2661,13 @@ def _validate_claim(cj, statement: str, note: str, facts,
                          f"is empty (the lower bound exceeds the upper), so "
                          f"every claim over it is vacuously true; state the "
                          f"intended bounds")
+        if bound_is_empty(b):
+            return Probe(
+                cj.name, statement, "skipped:misspecified", route=None,
+                note=f"{note}; {p}'s declared domain "
+                     f"{render_domain_bound(b)} is empty (no value lies "
+                     f"inside it), so every claim over it is vacuously "
+                     f"true; state the intended bounds")
     free_var_collisions = sorted(set(cj.free_vars) & set(facts.params))
     if free_var_collisions:
         # `let name be bounds` (a free variable, no real parameter to
@@ -3532,10 +3577,13 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 a_code_l, a_aux_l = _validate(acj.lhs, set(kinds), extra)
                 a_code_r, a_aux_r = _validate(acj.rhs, set(kinds), extra)
                 a_tol = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
+                a_rel = _declared_rel_tol(cj)
                 a_op = {"<=": _operator.le, ">=": _operator.ge,
                         "<": _operator.lt, ">": _operator.gt,
-                        "==": lambda a, b, t=a_tol: _close(a, b, tolerance=t),
-                        "!=": lambda a, b, t=a_tol: not _close(a, b, tolerance=t)
+                        "==": lambda a, b, t=a_tol, r=a_rel:
+                            _close(a, b, tolerance=t, rel_tol=r),
+                        "!=": lambda a, b, t=a_tol, r=a_rel:
+                            not _close(a, b, tolerance=t, rel_tol=r)
                         }[acj.relation]
                 compiled.append((a_code_l, a_code_r, a_op))
                 aux_all |= a_aux_l | a_aux_r
@@ -3615,7 +3663,6 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
     checked, cx, cx_stratum = 0, None, None
-    fragile: list = []
     pinned = _pinned_arg_sets(cj, len(kinds))
     # a literal argument in the claim's own call (`f(values, "nope",
     # 0.35)`) fixes that parameter to the literal; the call passes it
@@ -3753,6 +3800,13 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 env[a_name] = _synth("float", rng, cj_domain[a_name], specials=specials)
             else:
                 env[a_name] = rng.uniform(-5, 5)
+        if not all(_sample_in_domain(env[p], cj_domain.get(p))
+                   for p in [*kinds, *aux] if p in env and p not in literal_args):
+            # a point outside the declared domain says nothing about the
+            # claim: a recorded counterexample from a wider domain, or a
+            # draw that rounded past an open or fractional end, is
+            # rejected before the function is called
+            continue
         if assum_solved is not None and trial >= len(pinned):
             # place the sample exactly on the assumed equality surface:
             # the solved-out coordinate is computed from the others,
@@ -3824,25 +3878,15 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # from a BOUND function is not excused: is_defined(f)
                 # says nothing about g, and the pedantic reading stands
                 continue
-            # a raise at a floating-point BOUNDARY is a different animal
-            # from a raise region: sin(m)^2 + cos(m)^2 can round to
-            # 1.0000000000000002 and push acos past its edge at an
-            # isolated unlucky float, however exact the mathematics is.
-            # The declared tolerance (epsilon) is the machine's own
-            # buffer: if every input nudged within it evaluates AND
-            # satisfies the claim, the raise is sub-epsilon fragility,
-            # counted as a within-tolerance pass, surfaced in the note
-            # (with the clamp remedy), never a counterexample. A raise
-            # that survives the nudge is a real region: falsified.
+            # a raise at a floating-point BOUNDARY: sin(m)^2 + cos(m)^2
+            # can round to 1.0000000000000002 and push acos past its
+            # edge at an isolated float, however exact the mathematics
+            # is. It is still a raise at an in-domain point, so it
+            # falsifies like any other; when every input nudged within
+            # the tolerance evaluates AND satisfies the claim, the
+            # counterexample names it as sub-epsilon fragility (stratum
+            # 5.6) with the clamp remedy instead of the domain one.
             slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
-            # a member registered as being ABOUT numerical fragility
-            # (is_numerically_stable's SafetyFamily) inverts the
-            # absorption below: for it the fragility IS the
-            # counterexample, not tolerated noise
-            base_family = families.families().get(cj.name.split("[", 1)[0])
-            stability_axis = bool(getattr(base_family,
-                                          "fragility_is_counterexample",
-                                          False))
             boundary = False
             for direction in (1.0, -1.0):
                 jenv = dict(env)
@@ -3854,9 +3898,11 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 try:
                     jl = eval(code_l, {"__builtins__": {}}, jenv)
                     jr = eval(code_r, {"__builtins__": {}}, jenv)
-                    jok = (_close(jl, jr, tolerance=slack)
+                    jok = (_close(jl, jr, tolerance=slack,
+                                  rel_tol=_declared_rel_tol(cj))
                            if cj.relation in ("==", "~=") else
-                           not _close(jl, jr, tolerance=slack)
+                           not _close(jl, jr, tolerance=slack,
+                                      rel_tol=_declared_rel_tol(cj))
                            if cj.relation == "!=" else
                            jl <= jr + slack if cj.relation == "<=" else
                            jl >= jr - slack)
@@ -3865,13 +3911,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if jok:
                     boundary = True
                     break
-            if boundary and not stability_axis:
-                checked += 1
-                fragile.append(f"{_fmt(tuple(args))} raised {type(e).__name__}")
-                continue
-            if boundary and stability_axis:
-                # the stability axis exists to CATCH exactly this: the
-                # mathematics is fine within epsilon, the machine isn't
+            if boundary:
                 checked += 1
                 cx = (f"{_fmt(tuple(args))}: raised {type(e).__name__} at a "
                       f"floating-point boundary (the same inputs nudged "
@@ -3925,16 +3965,19 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   "the raising region as its own raises(...) claim")
             cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args)))
             break
-        if is_missing(lv) or is_missing(rv):
+        if (is_missing(lv) or is_missing(rv)) and not (
+                not any(is_missing(v) for v in args)
+                and any(isinstance(v, float) and v != v for v in (lv, rv))):
             # a domain that includes missing by default (see
             # grammar.parse_binding's own policy) can sample the
             # missing sentinel itself as a candidate value; a
-            # function that rejects it outright already lands in
-            # the except above, but one that returns it unchanged
-            # (identity, say) leaves lv/rv genuinely non-comparable,
-            # neither confirms nor denies the claim, so this
-            # sample is inconclusive, the same as a raised
-            # exception already is, not a crash.
+            # function that returns it unchanged (identity, say)
+            # leaves lv/rv genuinely non-comparable, neither
+            # confirming nor denying the claim, so this sample is
+            # inconclusive. A NaN computed from non-missing inputs is
+            # different: it is the function's value at an in-domain
+            # point, and the comparison below reads it as IEEE does
+            # (no ordering holds, and it equals no number).
             continue
         checked += 1
         # a declared tolerance governs the comparison outright; the
@@ -3957,7 +4000,8 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # a scalar broadcasting across the matrix.
         ok = relation_holds_elementwise(
             lv, rv, cj.relation, slack,
-            exact_inequality=cj.tolerance is None)
+            exact_inequality=cj.tolerance is None,
+            rel_tol=_declared_rel_tol(cj))
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex return), or two
@@ -3986,21 +4030,10 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                if assum_eval is not None else "; no evaluable inputs")
         return Probe(cj.name, statement, "skipped", route="probe",
                      note=note + why)
-    if fragile:
-        # numerically fragile boundary points, absorbed within epsilon:
-        # real knowledge about the implementation (is_numerically_stable's
-        # axis catches the raw raise), and the remedy is a clamp at the
-        # raising operation's argument, not a claims change
-        note = (f"{note}; {len(fragile)} sample(s) raised at a floating-point "
-                f"boundary but pass within ε (first: {fragile[0]}), a clamp "
-                f"at the raising operation's argument would remove the "
-                f"fragility")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
                            kinds, cj_domain, checked, critical_hints, truncated_hints),
-                      "mathema.confidence": _probe_density(risk, checked),
-                      **({"mathema.boundary_fragility": len(fragile)}
-                         if fragile else {})})
+                      "mathema.confidence": _probe_density(risk, checked)})
 
 
 

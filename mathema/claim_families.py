@@ -1648,22 +1648,16 @@ class SafetyFamily(_NamedClaimFamily):
     trials; its presence is what makes route="best" meaningful for
     the member), and the optional suggestion gate naming the
     parameters the member is structurally relevant for. Both halves
-    run inside the family verdict contract (see the guards above).
-
-    `fragility_is_counterexample` marks a member whose claim is ABOUT
-    numerical fragility: the generic trial loop's sub-epsilon
-    boundary-raise absorption inverts for such a member (the fragility
-    IS the counterexample rather than tolerated noise)."""
+    run inside the family verdict contract (see the guards above)."""
 
     def __init__(self, base_name: str, *, derive, probe=None,
-                 suggest_targets=None, fragility_is_counterexample=False,
+                 suggest_targets=None,
                  probe_route="probe:algorithmic"):
         family_routes = {"derive": _guarded_safety_derive(derive)}
         if probe is not None:
             family_routes["probe:algorithmic"] = _guarded_safety_probe(probe)
         super().__init__(base_name, family_routes)
         self._suggest_targets = suggest_targets
-        self.fragility_is_counterexample = fragility_is_counterexample
         # the subroute a positive/negative empirical verdict is stamped
         # with: the probe is still found under the "probe:algorithmic"
         # key, but a member whose mechanism is more specific (fuzz +
@@ -2571,8 +2565,7 @@ def _register_builtin_claim_families() -> None:
     # (calling fn with a literal NaN) is empirical, so it reports
     # under a probe route, never relabeled as derive.
     _families.register("is_numerically_stable", SafetyFamily(
-        "is_numerically_stable", derive=_is_numerically_stable_derive,
-        fragility_is_counterexample=True))
+        "is_numerically_stable", derive=_is_numerically_stable_derive))
     _families.register("is_builtin_safe", SafetyFamily(
         "is_builtin_safe", derive=_is_builtin_safe_derive,
         probe=_builtin_probe,

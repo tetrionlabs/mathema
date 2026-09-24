@@ -345,23 +345,31 @@ def _probe_density(risk: dict, n_trials: int, policy: _RiskPolicy = _RISK) -> di
            "n": n_trials, "factors": dict(risk)}
 
 
-def _close(u, v, tolerance: float | None = None) -> bool:
+# the relative half of the default closeness allowance: with no declared
+# tolerance, two values are equal when they agree within this relative
+# tolerance or the absolute 1e-9, whichever is larger
+DEFAULT_RELATIVE_TOLERANCE = 1e-6
+
+
+def _close(u, v, tolerance: float | None = None,
+           rel_tol: float = DEFAULT_RELATIVE_TOLERANCE) -> bool:
     """`tolerance` overrides the default abs_tol, a claim's own declared
     tolerance (declared-schema.md) governs its own comparison outright;
     the 1e-9 default is only a floating-point-representation fudge factor
-    for claims that never declared one."""
+    for claims that never declared one. `rel_tol` is the relative
+    allowance on top of it, 0 for a claim that declared its tolerance."""
     if isinstance(u, bool) or isinstance(v, bool):
         return u == v
+    abs_tol = tolerance if tolerance is not None else 1e-9
     if isinstance(u, (int, float)) and isinstance(v, (int, float)):
         if math.isnan(u) and math.isnan(v):
             return True
-        return math.isclose(u, v, rel_tol=1e-6,
-                            abs_tol=tolerance if tolerance is not None else 1e-9)
+        return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
     if isinstance(u, (int, float, complex)) and isinstance(v, (int, float, complex)):
-        return cmath.isclose(u, v, rel_tol=1e-6,
-                             abs_tol=tolerance if tolerance is not None else 1e-9)
+        return cmath.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
     if isinstance(u, (list, tuple)) and isinstance(v, (list, tuple)):
-        return len(u) == len(v) and all(_close(a, b, tolerance) for a, b in zip(u, v))
+        return len(u) == len(v) and all(_close(a, b, tolerance, rel_tol)
+                                        for a, b in zip(u, v))
     return u == v
 
 
@@ -383,7 +391,8 @@ def _synth_dict(key_tree, rng: random.Random, specials=None) -> dict:
 
 
 def _scalar_relation(a, b, relation: str, slack: float,
-                     exact_inequality: bool = False):
+                     exact_inequality: bool = False,
+                     rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """One scalar comparison for the elementwise walk. A strict `<`/`>`
     gets no tolerance credit; a closed `<=`/`>=` gets the slack; `==`/
     `~=` go through `_close`, and so does `!=` when the claim declared a
@@ -391,13 +400,14 @@ def _scalar_relation(a, b, relation: str, slack: float,
     values are equal, so a representation tolerance never makes two
     different values a counterexample. Raises TypeError for values that
     do not order (a complex vs a real), which the caller reads as
-    'unanswerable', not 'false'."""
+    'unanswerable', not 'false'. `rel_tol` is `_close`'s relative
+    allowance."""
     if relation in ("==", "~="):
-        return _close(a, b, tolerance=slack)
+        return _close(a, b, tolerance=slack, rel_tol=rel_tol)
     if relation == "!=":
         if exact_inequality:
             return not (a == b or (a != a and b != b))
-        return not _close(a, b, tolerance=slack)
+        return not _close(a, b, tolerance=slack, rel_tol=rel_tol)
     if relation == "<=":
         return a <= b + slack
     if relation == ">=":
@@ -416,7 +426,8 @@ def _is_matrix_value(v) -> bool:
 
 
 def relation_holds_elementwise(lv, rv, relation: str, slack: float,
-                               exact_inequality: bool = False):
+                               exact_inequality: bool = False,
+                               rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """Whether `lv <relation> rv` holds: a scalar comparison, or, when a
     side is matrix/array-valued, the relation at EVERY element (a scalar
     broadcasts against a matrix). numpy fast path when either side is an
@@ -425,11 +436,12 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     meaningless (an ordering over non-orderable values, or mismatched
     shapes), which the caller reads as skip, never falsify.
     `exact_inequality` makes `!=` compare exactly (see
-    `_scalar_relation`)."""
+    `_scalar_relation`), and `rel_tol` is the relative allowance `==`
+    and a toleranced `!=` get on top of `slack`."""
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,
-                                         exact_inequality))
+                                         exact_inequality, rel_tol))
         except TypeError:
             return None
     from .matrices import _numpy
@@ -444,11 +456,11 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
             return None
         try:
             if relation in ("==", "~="):
-                return bool(np.allclose(a, b, rtol=1e-6, atol=slack))
+                return bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
             if relation == "!=":
                 if exact_inequality:
                     return not bool(np.array_equal(a, b, equal_nan=True))
-                return not bool(np.allclose(a, b, rtol=1e-6, atol=slack))
+                return not bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
             if relation == "<=":
                 return bool((a <= b + slack).all())
             if relation == ">=":
@@ -472,7 +484,7 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
         else:
             try:
                 return bool(_scalar_relation(x, y, relation, slack,
-                                             exact_inequality))
+                                             exact_inequality, rel_tol))
             except TypeError:
                 return None
         return None if any(pt is None for pt in parts) else all(parts)
@@ -500,6 +512,36 @@ def _sample_bare_named_set(rng: random.Random, name: str):
                                1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j])
         return complex(rng.uniform(-10, 10), rng.uniform(-10, 10))
     return rng.uniform(-10, 10)   # "R"
+
+
+def _integer_range(piece, base_type: str) -> "tuple[int, int]":
+    """Intent:
+        The first and last integers an interval piece admits, an open
+        end excluding its endpoint and a fractional end rounding inward
+        (`(0, 5]` gives 1..5, `[0.5, 5]` gives 1..5), with an unbounded
+        side capped the way `_finite_bounds` caps a real one. `first >
+        last` when no integer lies inside.
+    """
+    from .domain import _integer_span
+    first, last = _integer_span(piece, base_type)
+    flo, fhi = _finite_bounds(float(piece[0]), float(piece[1]))
+    if math.isinf(first):
+        first = math.ceil(flo)
+    if math.isinf(last):
+        last = math.floor(fhi)
+    return int(first), int(last)
+
+
+def _synth_int_in(rng: random.Random, piece, base_type: str) -> int:
+    """Intent:
+        One uniformly drawn integer inside an interval piece (see
+        `_integer_range`). A piece holding no integer gives its first
+        candidate, which the probe's own domain check then rejects.
+    """
+    first, last = _integer_range(piece, base_type)
+    if first > last:
+        return first
+    return rng.randint(first, last)
 
 
 def _sample_domain(rng: random.Random, dom: Domain,
@@ -538,9 +580,14 @@ def _sample_domain(rng: random.Random, dom: Domain,
         elif isinstance(piece, tuple):
             value = _synth_scalar(rng, piece, specials=specials)
             if dom.base_type in ("Z", "N"):
-                value = int(round(value))
-                if dom.base_type == "N":
-                    value = abs(value)
+                # rounded, then held inside the piece's own integers,
+                # so a draw just inside an open or fractional end never
+                # rounds onto a point outside the domain; an infinite
+                # draw is no integer, and stands for the capped end
+                first, last = _integer_range(piece, dom.base_type)
+                if not math.isfinite(value):
+                    value = last if value > 0 else first
+                value = min(max(int(round(value)), first), max(first, last))
         else:
             value = _sample_bare_named_set(rng, piece)
         if value not in dom.excluded:
@@ -642,8 +689,7 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         return rng.random() < 0.5
     if kind == "int":
         if bounds is not None:
-            lo, hi = _finite_bounds(*bounds)
-            return rng.randint(int(lo), int(hi))
+            return _synth_int_in(rng, bounds, "Z")
         return rng.choice([0, 1, 2]) if rng.random() < 0.3 else rng.randint(0, 10)
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
 

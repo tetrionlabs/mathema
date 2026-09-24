@@ -612,6 +612,81 @@ def finite_members(bound, limit: int):
     return tuple(sorted(out, key=_member_sort_key))
 
 
+def _integer_span(piece, base_type: str):
+    """Intent:
+        The first and last integers an interval piece admits under an
+        integer base type, as `(first, last)`, honouring open ends and
+        fractional endpoints; `N` starts no lower than 0. An infinite
+        end comes back infinite, and `first > last` means no integer
+        lies inside.
+    """
+    lo, hi = float(piece[0]), float(piece[1])
+    closed_lo = getattr(piece, "closed_lo", True)
+    closed_hi = getattr(piece, "closed_hi", True)
+    if math.isinf(lo):
+        first = lo
+    else:
+        first = math.ceil(lo) if closed_lo else math.floor(lo) + 1
+    if math.isinf(hi):
+        last = hi
+    else:
+        last = math.floor(hi) if closed_hi else math.ceil(hi) - 1
+    if base_type == "N":
+        first = max(first, 0)
+    return first, last
+
+
+def bound_is_empty(bound) -> bool:
+    """Intent:
+        Whether a declared bound admits no value at all: a reversed
+        interval, a degenerate one with an open end (`(1, 1)`,
+        `[1, 1)`), or an integer-typed domain none of whose pieces holds
+        an integer outside `excluded` (`(0, 1) ⊂ Z`).
+
+    Notes:
+        A vector or matrix space, a complex rectangle, a discrete set,
+        a bare named set and anything unrecognised read as non-empty:
+        the answer is `True` only when emptiness is certain. The
+        missing-value policy is not a member of the value set, so a
+        domain that admits only a missing value still counts as empty.
+    """
+    dom = bound if isinstance(bound, Domain) else None
+    excluded: frozenset
+    if dom is None:
+        if not (isinstance(bound, tuple) and not isinstance(bound, frozenset)
+                and len(bound) == 2):
+            return False
+        pieces, base_type, excluded = (bound,), "R", frozenset()
+    else:
+        if dom.dims or dom.base_type == "C" or not dom.pieces:
+            return False
+        pieces, base_type, excluded = dom.pieces, dom.base_type, dom.excluded
+    for piece in pieces:
+        if not (isinstance(piece, tuple) and not isinstance(piece, frozenset)
+                and len(piece) == 2):
+            return False
+        try:
+            lo, hi = float(piece[0]), float(piece[1])
+        except (TypeError, ValueError):
+            return False
+        if base_type in ("Z", "N"):
+            first, last = _integer_span(piece, base_type)
+            if first > last:
+                continue
+            if math.isinf(first) or math.isinf(last) \
+                    or last - first + 1 > len(excluded):
+                return False
+            if any(v not in excluded for v in range(int(first), int(last) + 1)):
+                return False
+            continue
+        if lo < hi:
+            return False
+        if lo == hi and getattr(piece, "closed_lo", True) \
+                and getattr(piece, "closed_hi", True) and lo not in excluded:
+            return False
+    return True
+
+
 def domain_contains(value, bound) -> bool:
     """Is `value` a member of the domain `bound` describes, the single
     source of truth every consumer (`authoring.enforce_domain`, the

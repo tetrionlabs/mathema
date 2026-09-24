@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Floating-point boundary fragility on the probe route: a raise the
-declared tolerance absorbs (the same inputs nudged within epsilon
-evaluate cleanly and satisfy the claim) is machine noise, not a
-mathematical counterexample, surfaced in the note with the clamp
-remedy, and caught as a real falsification by the is_numerically_stable
-axis, whose whole question is the raw machine."""
+"""Floating-point boundary raises on the probe route: a raise inside a
+value claim's domain falsifies it, even where the same inputs nudged
+within epsilon evaluate cleanly. That sub-epsilon case is named in the
+counterexample with the clamp remedy and stratum 5.6, the same way the
+is_numerically_stable axis reports it."""
+import math
+
+import pytest
+
 import mathema
 from mathema.conjecture import claim, check_conjectures
 
@@ -25,17 +28,42 @@ def hard_edge(x: float) -> float:
     return x
 
 
-def test_sub_epsilon_boundary_raise_is_absorbed_within_tolerance():
+def test_sub_epsilon_boundary_raise_falsifies_with_the_clamp_remedy():
     # the degenerate domain pins every sample to the knife edge itself:
-    # each call raises, each nudge within epsilon escapes and satisfies
-    # the claim, so every sample is absorbed fragility
+    # each call raises there, and each nudge within epsilon escapes,
+    # so the raise is sub-epsilon, yet still a raise in the domain
     (p,) = check_conjectures(
         knife_edge, [claim("for x in [1, 1], f(x) == 0", route="probe",
                            tolerance=1e-6)])
-    assert p.verdict == "holds"
-    assert "floating-point boundary" in p.note
-    assert "clamp" in p.note
-    assert p.meta.get("mathema.boundary_fragility", 0) >= 1
+    assert p.verdict == "falsified"
+    assert "floating-point boundary" in p.counterexample
+    assert "clamp" in p.counterexample
+    assert p.stratum["cause"] == "implementation:sub-epsilon-boundary"
+    assert p.meta["mathema.counterexample_args"] == [1.0]
+    with pytest.raises(ValueError):
+        knife_edge(*p.meta["mathema.counterexample_args"])
+
+
+def _reciprocal(x: float) -> float:
+    return 1.0 / x
+
+
+def _log(x: float) -> float:
+    return math.log(x)
+
+
+@pytest.mark.parametrize("fn, law", [
+    (_reciprocal, "for x in [0, 1], f(x) >= 1"),
+    (_log, "for x in [0, 1], f(x) <= 0"),
+])
+def test_a_raise_at_a_closed_endpoint_falsifies_on_the_probe_route(fn, law):
+    (p,) = check_conjectures(fn, [claim(law, route="probe")])
+    assert p.verdict == "falsified"
+    witness = p.meta["mathema.counterexample_args"]
+    assert witness == [0.0] or witness == [0]
+    with pytest.raises((ZeroDivisionError, ValueError)):
+        fn(*witness)
+    assert "mathema.boundary_fragility" not in p.meta
 
 
 def test_is_numerically_stable_still_falsifies_the_same_fragility():

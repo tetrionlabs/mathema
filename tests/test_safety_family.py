@@ -8,7 +8,6 @@ import random
 
 import pytest
 
-from mathema import families
 from mathema.claim_families import SafetyFamily
 from mathema.symbolic import ProofResult
 
@@ -96,14 +95,3 @@ def test_trials_may_prove_only_with_an_established_sketch():
     with pytest.raises(ValueError, match="exhaustive"):
         bad.routes()["probe:algorithmic"](None, None, None, {},
                                           random.Random(0), 3)
-
-
-def test_is_numerically_stable_registers_the_fragility_capability():
-    member = families.families().get("is_numerically_stable")
-    assert member is not None
-    assert getattr(member, "fragility_is_counterexample", False) is True
-    # and no other built-in member claims it
-    others = [name for name, fam in families.families().items()
-              if name != "is_numerically_stable"
-              and getattr(fam, "fragility_is_counterexample", False)]
-    assert others == []
