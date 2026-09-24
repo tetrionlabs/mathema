@@ -57,7 +57,7 @@ def labelled(m1: float, label: str) -> float:
     raise ValueError(label)
 
 
-# -- boolean connectives -------------------------------------------------
+# boolean connectives
 
 @pytest.mark.parametrize("law", [
     "for x in [0, 1], f(x) >= 1 and f(x) <= 2",
@@ -85,7 +85,7 @@ def test_a_parenthesised_boolean_value_is_still_a_value():
     assert "and" in canon
 
 
-# -- string literals ------------------------------------------------------
+# string literals
 
 def test_a_greek_word_inside_quotes_is_not_a_parameter():
     law = 'for r in [0, 1], f(r, "alpha") >= 0'
@@ -125,7 +125,7 @@ def test_an_ascii_greek_name_and_its_letter_stay_two_parameters():
     assert "theta" in canon and "θ" in canon
 
 
-# -- comment marks ---------------------------------------------------------
+# comment marks
 
 @pytest.mark.parametrize("law", [
     "for x in [0, 1], f(x) >= 1 # and f(x) <= 2",
@@ -140,7 +140,7 @@ def test_a_hash_inside_a_string_value_is_data():
     assert_round_trips('f(x, "a # b") >= 0')
 
 
-# -- bindings ---------------------------------------------------------------
+# bindings
 
 def negated(x: float) -> float:
     return -1.0 - x
@@ -189,7 +189,7 @@ def test_a_well_formed_let_run_still_reads():
     assert_round_trips("let c be [-1, 1], for x in [0, 1], f(x + c) >= -9")
 
 
-# -- radicals ---------------------------------------------------------------
+# radicals
 
 def square(x: float) -> float:
     return x * x
@@ -224,7 +224,7 @@ def test_a_radical_with_an_unclear_reach_is_refused(law):
         claim(law)
 
 
-# -- reserved call shapes -----------------------------------------------------
+# reserved call shapes
 
 @pytest.mark.parametrize("law, form", [
     ("d(f(x), 1) >= 0", "`d`"),
@@ -275,7 +275,7 @@ def test_python_syntax_with_no_claim_reading_is_refused(law):
         claim(law)
 
 
-# -- identity: limits ---------------------------------------------------------
+# identity: limits
 
 def shifted_up(x: float) -> float:
     return x + 1.0
@@ -298,7 +298,7 @@ def test_a_one_sided_limit_keeps_its_side_in_its_identity():
         == "lim(f(x), x, oo) = 0"
 
 
-# -- identity: the missing-value policy ---------------------------------------
+# identity: the missing-value policy
 
 def total(x: float) -> float:
     return x + 1.0
@@ -323,7 +323,7 @@ def test_excluding_missing_is_a_different_claim_from_allowing_it():
         != fingerprint_text(claim("for x in [0, 1], f(x) >= 0"))
 
 
-# -- identity: norm and absolute value ----------------------------------------
+# identity: norm and absolute value
 
 def magnitude(x: float) -> float:
     return abs(x)
@@ -337,7 +337,7 @@ def test_a_norm_and_an_absolute_value_are_different_claims():
     assert "|f(x)|" in assert_round_trips(abs_law, magnitude)
 
 
-# -- identity: a bare-name equation after a let run ----------------------------
+# identity: a bare-name equation after a let run
 
 @pytest.mark.parametrize("law", [
     "r == 1 - alpha*q",
@@ -351,7 +351,7 @@ def test_a_bare_name_equation_is_not_read_as_another_binding(law):
         assert (reparsed.lhs, reparsed.relation) == ("r", "==")
 
 
-# -- identity: function aliases -------------------------------------------------
+# identity: function aliases
 
 def test_the_display_of_a_long_function_alias_is_the_same_claim():
     law = ("let compute_square_root = numpy.sqrt, for x in [0, 100], "
@@ -360,7 +360,7 @@ def test_the_display_of_a_long_function_alias_is_the_same_claim():
     assert "compute_square_root(x)" in canon
 
 
-# -- the assuming section --------------------------------------------------------
+# the assuming section
 
 def test_an_empty_assuming_premise_is_refused():
     with pytest.raises(InvalidConjecture, match="no premise"):
@@ -371,7 +371,7 @@ def test_an_assuming_premise_round_trips():
     assert_round_trips("assuming x > 0, for x in [-1, 1], f(x) >= 0", total)
 
 
-# -- domains that denote no set --------------------------------------------------
+# domain endpoints
 
 @pytest.mark.parametrize("law", [
     "for x in [nan, 1], f(x) >= 0",
@@ -393,7 +393,7 @@ def test_an_unreadable_let_bound_says_what_is_wrong():
         claim("let c be banana, f(c) >= 0")
 
 
-# -- LaTeX commands ---------------------------------------------------------------
+# LaTeX commands
 
 @pytest.mark.parametrize("law, same_as", [
     (r"for x in [-1, 1], f(x) >= \left| x \right|", "for x in [-1, 1], f(x) >= |x|"),
@@ -429,7 +429,7 @@ def test_an_unknown_latex_command_is_named_in_the_refusal(law, command):
         claim(law)
 
 
-# -- refusals that say what is wrong ------------------------------------------------
+# refusals that say what is wrong
 
 @pytest.mark.parametrize("law, message", [
     ("For x in [0, 1], f(x) >= 0", "write `for`, not `For`"),
