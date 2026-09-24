@@ -404,6 +404,129 @@ def suggest_acceptance(root: str, key: str, claim_name: str) -> tuple:
     return kind, base, _AS_REASON.get(kind, "")
 
 
+def plan_rename(root: str, new_key: str, old_key: str,
+                by: "str | None" = None, note: "str | None" = None,
+                confirm_form_change: bool = False) -> dict:
+    """Intent:
+        Plan the record rename a moved function needs: `old_key`'s
+        verified record, whose key no longer resolves, becomes
+        `new_key`'s, carrying every claim row, its acceptance history,
+        the retirement sections, the lineage and any lock. The plan
+        states whether the record's form hash matches the live
+        function at `new_key`; `apply_acceptance` writes it only when
+        it does, or when `confirm_form_change` records that a human
+        accepted the difference.
+
+    Raises:
+        UnknownAcceptanceTarget: `old_key` has no record, or `new_key`
+            does not resolve to a live function.
+        AcceptanceError: `old_key` still resolves (a copy, not a move),
+            or `new_key` already has a record.
+    """
+    from . import analyze
+    from .conjecture import _resolve_func_ref
+    from .locks import load_locks
+    from .spec import verified_dir
+    if new_key == old_key:
+        raise AcceptanceError("--from names the same key; a rename needs "
+                              "two different keys")
+    old_path, doc = _load_record(root, old_key)
+    fn = _resolve_func_ref(new_key, root=root)
+    if fn is None:
+        raise UnknownAcceptanceTarget(
+            f"{new_key} does not resolve to a live function; the rename "
+            f"target is the function's new dotted key")
+    if _resolve_func_ref(old_key, root=root) is not None:
+        raise AcceptanceError(
+            f"{old_key} still resolves to a live function, so it has not "
+            f"moved; a rename would leave that function without its "
+            f"record")
+    new_path = os.path.join(verified_dir(root), f"{new_key}.yaml")
+    if os.path.exists(new_path):
+        raise AcceptanceError(
+            f"{new_key} already has a record ({os.path.relpath(new_path, root)}); "
+            f"a rename never writes over one. Remove it first if the "
+            f"orphan's history is the one to keep")
+    entry = doc[old_key]
+    recorded = (entry.get("identity") or {}).get("form")
+    live = analyze(fn).form
+    matches = recorded == live
+    actions = [f"rename the record {old_key} to {new_key}, carrying its "
+               f"claims, acceptance history, lineage and sign-offs",
+               f"remove {os.path.relpath(old_path, root)}",
+               "re-stamp the integrity and re-anchor it to HEAD"]
+    if not matches:
+        actions.insert(0, f"the record's form hash {recorded} differs from "
+                          f"{new_key}'s {live}: it may not be the same "
+                          f"function, and the next verify re-adjudicates it")
+    if old_key in load_locks(root):
+        actions.append(f"move the lock on {old_key} to {new_key}")
+    return {"path": old_path, "new_path": new_path, "doc": doc,
+            "key": new_key, "from": old_key, "root": root,
+            "as": "reconciled", "by": by, "note": note, "claim": None,
+            "verdict": None, "recorded_form": recorded, "live_form": live,
+            "form_matches": matches,
+            "confirm_form_change": confirm_form_change,
+            "new_name": getattr(fn, "__name__", None), "actions": actions}
+
+
+def _require_form_confirmed(plan: dict) -> None:
+    """Intent:
+        Refuse a rename whose recorded form hash differs from the live
+        function's unless a human confirmed the difference.
+
+    Raises:
+        AcceptanceError: the forms differ and nothing confirmed it.
+    """
+    if not plan["form_matches"] and not plan.get("confirm_form_change"):
+        raise AcceptanceError(
+            f"{plan['from']}'s record has form {plan['recorded_form']} but "
+            f"{plan['key']} is {plan['live_form']}; confirm the rename at "
+            f"the prompt, or pass --accept-form-change")
+
+
+def _apply_rename(plan: dict, attestation: "dict | None") -> str:
+    """Intent:
+        Write a `plan_rename` result: the record under its new key with
+        `identity.reconciled` naming where it came from, the old file
+        removed, the lock moved.
+
+    Raises:
+        AcceptanceError: the form hashes differ and no human confirmed
+            the difference.
+    """
+    from .spec import _git_commit
+    _require_form_confirmed(plan)
+    old_key, new_key = plan["from"], plan["key"]
+    entry = plan["doc"][old_key]
+    if plan.get("new_name"):
+        entry["name"] = plan["new_name"]
+    rec: dict = {"at": datetime.date.today().isoformat(),
+                 "by": plan.get("by"), "from": old_key}
+    if plan.get("note"):
+        rec["note"] = plan["note"]
+    if not plan["form_matches"]:
+        rec["form_changed"] = {"recorded": plan["recorded_form"],
+                               "live": plan["live_form"]}
+    if attestation:
+        rec["verified_by"] = dict(attestation)
+    root = plan.get("root", ".")
+    entry.setdefault("lineage", {})["commit"] = _git_commit(root)
+    entry.setdefault("identity", {})["reconciled"] = rec
+    _restamp_integrity(entry)
+    write_yaml(plan["new_path"], {new_key: entry},
+               header=f"machine record; reconciled {new_key} from {old_key}")
+    os.remove(plan["path"])
+    from .locks import _write_locks, load_locks
+    locks = load_locks(root)
+    if old_key in locks:
+        locks[new_key] = locks.pop(old_key)
+        _write_locks(root, locks)
+    who = ((rec.get("verified_by") or {}).get("key") or plan.get("by")
+           or "unpinned")
+    return f"reconciled: {old_key} renamed to {new_key} (by {who})"
+
+
 def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                     by: str | None = None, note: str | None = None,
                     corrected: str | None = None) -> dict:
@@ -679,20 +802,24 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
 
 def apply_acceptance(plan: dict) -> str:
     """Intent:
-        Execute a `plan_acceptance` result: mutate the record document
-        and write it back, appending the acceptance-history event so
+        Execute a `plan_acceptance` (or `plan_rename`) result: mutate
+        the record document and write it back, appending the acceptance-history event so
         every classification change stays tracked.
     """
     doc, key, target = plan["doc"], plan["key"], plan["claim"]
-    entry = doc[key]
+    entry = doc[plan.get("from") or key]
     # the human gate: when a PIN is configured, nothing below runs
     # without a person at a terminal, and the record says which
     # credential authorised it. Every acceptance path funnels through
     # an apply function, so gating here (not at the CLI prompts)
     # covers the JSON and scripted paths too.
+    if plan.get("from"):
+        _require_form_confirmed(plan)
     from . import auth
     attestation = auth.require_human(f"accept --as {plan['as']}")
     auth.enforce_policy(attestation, plan.get("root", "."))
+    if plan["as"] == "reconciled" and plan.get("from"):
+        return _apply_rename(plan, attestation)
     if plan["as"] == "reconciled":
         # re-stamp the integrity over the current contents and re-anchor
         # to HEAD, recording who vouched (and whether a pin backed it, so
