@@ -69,7 +69,11 @@ about.
      into the declared file structured (domain field), never as
      display text, and its route tag transfers only when the
      docstring stated one explicitly. `--yes` takes the docstring
-     everywhere.
+     everywhere. The declared file is rewritten from its parsed form,
+     so YAML `#` comments in it do not survive; docsync warns before
+     writing such a file. Keep a claim's annotation in its `note:`
+     field instead, which persists through every rewrite (see
+     [authoring](../authoring.md#4-a-claims-file-on-disk)).
    - Name **unknown everywhere**: added to declared, no ceremony.
    An unresolved conflict of either kind is a `verify` gate failure.
 3. Reports **docstring drift**: Claims:-block names unknown to

@@ -1266,11 +1266,20 @@ _CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
 _ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references")
 
 
+_ENTRY_ANNOTATIONS = ("an entry's annotations go in `meta:` (structured "
+                      "data, tags as `meta: {concepts: [...]}`) or "
+                      "`references:` (links); free text goes on a claim "
+                      "as `note:`")
+_CLAIM_ANNOTATIONS = ("a claim's annotations go in `note:` (free text) or "
+                      "`meta:` (structured data); links go in the entry's "
+                      "`references:` and tags in the entry's "
+                      "`meta: {concepts: [...]}`")
+
+
 def _misspelling(field_name: str, known: tuple) -> "str | None":
     """Intent:
         The known field an unknown one is a near miss of, or None when
-        it is not close to any. An unknown field that is no near miss
-        is the author's own annotation and is left alone.
+        it is not close to any.
     """
     import difflib
     if field_name in known:
@@ -1344,8 +1353,9 @@ def validate_claims_file(data, rel_path: str) -> None:
         `claims` is a list of mappings; each claim states its law as
         text under `statement` (or `law`), names it at most once per
         key, and gives a readable `domain` and a non-negative
-        `tolerance` when it gives them. A field that is a near miss of
-        a known one is refused, since it would otherwise be ignored.
+        `tolerance` when it gives them. A field mathema does not read
+        is refused: a near miss of a known one names that field, and
+        any other names the fields that hold annotations.
 
     Raises:
         ClaimsFileError: the first shape problem, naming the file, the
@@ -1369,10 +1379,14 @@ def validate_claims_file(data, rel_path: str) -> None:
             fail(key, f"the entry is a {type(entry).__name__}, not a "
                       f"mapping (expected `claims:` and the like under it)")
         for field_name in entry:
+            if field_name in _ENTRY_FIELDS:
+                continue
             near = _misspelling(str(field_name), _ENTRY_FIELDS)
             if near:
                 fail(key, f"unknown field {field_name!r} (did you mean "
                           f"{near!r}?)")
+            fail(key, f"unknown field {field_name!r}; "
+                      f"{_ENTRY_ANNOTATIONS}")
         claims = entry.get("claims")
         if claims is None:
             continue
@@ -1386,10 +1400,14 @@ def validate_claims_file(data, rel_path: str) -> None:
             label = f"claim {c.get('name')!r}" if c.get("name") \
                 else f"claim {i}"
             for field_name in c:
+                if field_name in _CLAIM_FIELDS:
+                    continue
                 near = _misspelling(str(field_name), _CLAIM_FIELDS)
                 if near:
                     fail(key, f"{label}: unknown field {field_name!r} (did "
                               f"you mean {near!r}?)")
+                fail(key, f"{label}: unknown field {field_name!r}; "
+                          f"{_CLAIM_ANNOTATIONS}")
             text = c.get("statement", c.get("law"))
             if text is None:
                 fail(key, f"{label} has no `statement`")

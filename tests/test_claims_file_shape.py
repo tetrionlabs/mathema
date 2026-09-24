@@ -84,12 +84,47 @@ def test_a_well_formed_file_still_verifies(project, capsys):
         capsys.readouterr()
 
 
-def test_unknown_fields_that_are_no_misspelling_are_left_alone(project,
-                                                               capsys):
-    # a field that is not close to any known one is the author's own
-    # annotation, and a file carrying one keeps loading
+def _refused(project, capsys, text):
+    (project / "shapefix.claims.yaml").write_text(text)
+    rc = main(["verify", "--root", str(project)])
+    err = capsys.readouterr().err
+    assert rc == 2, err
+    lines = err.strip().splitlines()
+    assert len(lines) == 1, err
+    assert "shapefix.claims.yaml" in lines[0] and "shapefix.sq" in lines[0]
+    return lines[0]
+
+
+def test_an_unknown_claim_field_is_refused_naming_the_annotation_fields(
+        project, capsys):
+    # a field mathema does not read would be silently dropped by the
+    # next rewrite; the refusal points at the fields that persist
+    line = _refused(project, capsys, _claim([_OK, "ticket: MATH-12"]))
+    assert "claim 'a'" in line and "'ticket'" in line
+    for field in ("`note:`", "`meta:`", "`references:`", "concepts"):
+        assert field in line, line
+    assert "did you mean" not in line
+
+
+def test_an_unknown_entry_field_is_refused_naming_the_annotation_fields(
+        project, capsys):
+    line = _refused(project, capsys,
+                    "shapefix.sq:\n  owner: turing\n  claims:\n"
+                    "    - name: a\n      " + _OK + "\n")
+    assert "'owner'" in line
+    for field in ("`meta:`", "`references:`", "`note:`", "concepts"):
+        assert field in line, line
+
+
+def test_the_annotation_fields_are_accepted(project, capsys):
     (project / "shapefix.claims.yaml").write_text(
-        _claim([_OK, "ticket: MATH-12"]))
+        "shapefix.sq:\n"
+        "  meta: {concepts: [square], owner: turing}\n"
+        "  references: [{title: Squares, url: 'https://example.org'}]\n"
+        "  claims:\n"
+        "    - name: a\n      " + _OK + "\n"
+        "      note: from ticket MATH-12\n"
+        "      meta: {ticket: MATH-12}\n")
     assert main(["verify", "--root", str(project)]) == 0, \
         capsys.readouterr()
 

@@ -85,6 +85,17 @@ visible trace: a missing credential, a key id mismatch, an integrity
 checksum failure (see [what the checksum covers](../governance.md#the-integrity-checksum)). Calibrate
 trust accordingly, the same way the evidence ladder asks you to.
 
+The record's integrity checksum is unkeyed. It catches accidental
+changes, a stray edit or a merge that combined two versions of a
+record, but anyone who can run mathema can recompute it, so it does
+not stop a record forged on purpose. The gate against a forged record
+is re-adjudication in CI: `mathema verify --all` re-checks every claim
+against the code instead of trusting the verdicts stored in the
+record, so a forged verdict does not survive the pipeline. A sign-off
+is a decision rather than a verdict and cannot be re-derived; its
+`verified_by` stamp names a public key id, so review of the store's
+changes (`mathema review`) is where a sign-off nobody made shows up.
+
 ## Project policy
 
 `.mathema/meta/policy.yaml`, committed and human-owned, holds the

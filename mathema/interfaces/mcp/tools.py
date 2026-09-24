@@ -517,18 +517,34 @@ def pending_decisions(root: str = ".") -> dict:
             `falsified-gating` (an unaccepted falsification awaiting a
             fix or `accept --as discovery`), and `locked-changed` (a
             locked function whose body moved: restore it, or a human
-            unlocks; unlocking, like acceptance, is CLI-only)."""
+            unlocks; unlocking, like acceptance, is CLI-only), and
+            `moved` (a record whose key no longer resolves while a
+            function with no record has its form hash: a human renames
+            the record with `mathema accept NEW --as reconciled --from
+            OLD`, named in the detail)."""
     from mathema.spec import load_declared, load_verified
 
     rows = []
     declared = load_declared(root)
+    verified = load_verified(root)
     for key, wrap in sorted(declared.items()):
         for c in (wrap.get("entry") or {}).get("claims") or []:
             pend = (c.get("meta") or {}).get("mathema.pending_supersession")
             if pend:
                 rows.append([key, c.get("name"), "supersession-pending",
                              str(pend)])
-    for key, wrap in sorted(load_verified(root).items()):
+    from mathema.conjecture import _resolve_func_ref
+    from mathema.moved import find_moved, rename_command
+    moved = find_moved(root, verified, declared,
+                       lambda k: _resolve_func_ref(k, root=root))
+    for old_key, new_keys in sorted(moved.items()):
+        rows.append([old_key, None, "moved",
+                     f"no longer resolves; its form hash matches "
+                     f"{', '.join(new_keys)}, which has no record. If it "
+                     f"moved, a human runs: "
+                     + " (or) ".join(rename_command(n, old_key)
+                                     for n in new_keys)])
+    for key, wrap in sorted(verified.items()):
         entry = wrap.get("entry") or {}
         ia = entry.get("intent_accepted") or {}
         if ia.get("stale"):

@@ -46,6 +46,7 @@ bare-name key fails as a clear per-key problem line.
 | `skipped` (unverifiable) claim | fails | passes, informational |
 | unresolved global name | fails | fails |
 | silently-unenforced declared domain | fails | passes, informational |
+| record whose function no longer resolves | fails (names the rename when an unrecorded function has its form hash) | fails |
 | [locked](lock.md) function whose body changed | fails, record untouched | fails, record untouched |
 | lock removed outside `mathema unlock` | fails | fails |
 | acceptance the [policy](pin.md#project-policy) rejects | fails | fails |
@@ -106,11 +107,40 @@ be fresh again until the code or the claim set actually changes.
 
 ## Unknown claims and accepted risk
 
-A claim neither route could decide stays `unknown` and fails the run:
+A claim neither route could decide stays `unknown` and fails the run.
+Add a running balance to `functions.py`, with three claims in a claims
+file:
+
+```python
+def running_total(xs: list, y0: float) -> float:
+    """Add every value in xs to a starting balance y0."""
+    total = y0
+    for v in xs:
+        total = v + total
+    return total
+```
+
+```yaml
+# claims/running_total.claims.yaml
+functions.running_total:
+  claims:
+    - name: shifts_with_start
+      statement: "f(xs, y0) == f(xs, 0) + y0"
+    - name: nonneg_for_nonneg_steps
+      statement: "for xs in [0, 1]^n, f(xs, 0) >= 0"
+    - name: never_overshoots_much
+      statement: "assuming nonneg_for_nonneg_steps is proven, for xs in [0, 1]^n, f(xs, 0) <= len(xs)"
+```
+
+`never_overshoots_much` rests on `nonneg_for_nonneg_steps` being
+proven, and that one only holds (the probe agrees; derive cannot settle
+the sign of the lifted sum), so the dependent claim is `unknown`. The
+second proven claim in the count is `dependencies_current`, which
+`verify` adds to every record:
 
 ```
 $ mathema verify --root .
-FAIL functions.running_total: no baseline record; 1 proven, 1 holds, 0 falsified, 1 unknown  <- 1 unknown claim(s)
+FAIL functions.running_total: no baseline record; 2 proven, 1 holds, 0 falsified, 1 unknown  <- 1 unknown claim(s)
 ok   functions.softmax: fresh
 1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
@@ -122,9 +152,9 @@ Naming the key re-checks it, so the row counts the accepted claim:
 
 ```
 $ mathema accept functions.running_total never_overshoots_much --as risk \
-      --note "loop shape is out of derive scope; monitored"
+      --note "the premise only holds empirically; monitored"
 $ mathema verify functions.running_total --root . --lenient
-ok   functions.running_total: targeted re-verify; 1 proven, 1 holds, 0 falsified, 1 accepted risk
+ok   functions.running_total: targeted re-verify; 2 proven, 1 holds, 0 falsified, 1 accepted risk
 0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -134,12 +164,47 @@ pipeline can choose whether owned gaps block it:
 
 ```
 $ mathema verify functions.running_total --root .
-FAIL functions.running_total: targeted re-verify; 1 proven, 1 holds, 0 falsified, 1 accepted risk  <- 1 accepted-risk claim(s)
+FAIL functions.running_total: targeted re-verify; 2 proven, 1 holds, 0 falsified, 1 accepted risk  <- 1 accepted-risk claim(s)
 0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
 See [`mathema accept`](accept.md).
+
+## Moved functions
+
+A record is keyed by the function's dotted name, so a function moved to
+another module leaves its record under a key that no longer resolves,
+and that key fails the run. When the orphan's form hash matches a
+function that has no record, the failure line says so and names the
+exact remedy, and the new key is held back rather than given a fresh
+record that would start its history over:
+
+```
+$ mathema verify --root .
+FAIL functions.running_total: cannot resolve to a live function (declared in .mathema/verified/functions.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from functions.running_total
+FAIL ledger.running_total: no record yet, and its form hash matches the orphan record functions.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from functions.running_total; if it is a different function, remove the orphan record instead
+ok   functions.softmax: fresh
+1 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
+grammars detected: mathema; verified by this run: mathema
+```
+
+The rename carries the whole record (claims, acceptances and their
+history, lineage, PIN stamp, lock) to the new key and removes the old
+file; see [moved functions](accept.md#moved-functions-as-reconciled-from).
+The project's source is parsed, never imported, to find the match, and
+only when an orphan exists. In `--format json` the orphan's entry
+carries `moved_to` and `remedy`, and the held-back key has `why:
+"moved-pending"` with `moved_from` and `remedy`.
+
+## A record's history
+
+A claim row's `meta` keeps `mathema.previous_verdict` when its verdict
+changes: one step, the verdict immediately before this one. There is no
+history field, because the verified layer is committed to git and git
+is the history. `mathema review [<ref>]` reads it by claim (which
+verdicts flipped, which claims were added, removed or reconciled), and
+`git log .mathema/verified` lists every commit that changed a record.
 
 ## `--status`: the fresh/stale report
 

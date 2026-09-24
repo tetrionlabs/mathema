@@ -1694,6 +1694,14 @@ def _accept_docstring_claim(root: str, conflict: dict) -> None:
                     # about the statement, never a silent evidence
                     # downgrade
                     c["route"] = raw["route"]
+                from .sync import yaml_has_comments
+                with open(path, encoding="utf-8") as fh:
+                    commented = yaml_has_comments(fh.read())
+                if commented:
+                    print(f"  WARN {os.path.relpath(path, root)} has YAML "
+                          f"comments, which do not survive this rewrite; "
+                          f"keep a claim's annotation in its `note:` "
+                          f"field, which persists through every rewrite")
                 with open(path, "w") as fh:
                     yaml.safe_dump(doc, fh, sort_keys=False,
                                    allow_unicode=True)
@@ -2167,6 +2175,86 @@ def cmd_pin(args) -> int:
     return 0
 
 
+def _accept_rename(args, by: "str | None", as_json: bool) -> int:
+    """Intent:
+        `mathema accept NEW --as reconciled --from OLD`: the human
+        rename of a moved function's record. Prints the plan, asks
+        once, and asks again when the record's form hash differs from
+        the live function's (`--accept-form-change` answers that one
+        ahead of time). JSON mode previews without `--yes`, like every
+        acceptance.
+    """
+    from .acceptance import (AcceptanceError, UnknownAcceptanceTarget,
+                             apply_acceptance, plan_rename)
+    if args.as_ != "reconciled":
+        _bad_argument("mathema accept: --from only accompanies --as "
+                      "reconciled (a record rename)")
+    if getattr(args, "all_records", False):
+        _bad_argument("mathema accept: --from renames one record and does "
+                      "not combine with --all")
+    if not args.key or args.claim:
+        _bad_argument("mathema accept: --from takes exactly one key, the "
+                      "function's new dotted key, and no claim name")
+    try:
+        plan = plan_rename(args.root, args.key, args.from_key, by=by,
+                           note=args.note,
+                           confirm_form_change=args.accept_form_change)
+    except UnknownAcceptanceTarget as e:
+        if as_json:
+            return _accept_json(args, kind="rename", error=str(e), code=2)
+        _bad_argument(f"mathema accept: {e}")
+    except AcceptanceError as e:
+        if as_json:
+            return _accept_json(args, kind="rename", error=str(e))
+        print(f"cannot accept: {e}")
+        return 1
+    extra = {"from": plan["from"], "form_matches": plan["form_matches"],
+             "recorded_form": plan["recorded_form"],
+             "live_form": plan["live_form"]}
+    if as_json:
+        if not args.yes:
+            return _accept_json(args, kind="rename", plan=plan,
+                                applied=False, extra=extra)
+        try:
+            summary = apply_acceptance(plan)
+        except AcceptanceError as e:
+            return _accept_json(args, kind="rename", error=str(e))
+        return _accept_json(args, kind="rename", plan=plan, applied=True,
+                            written=summary, extra=extra)
+    print(f"reconciling {args.key} from {args.from_key}: a record rename"
+          + (f", by {by}" if by else ""))
+    for action in plan["actions"]:
+        print(f"  - {action}")
+    if not plan["form_matches"] and not args.accept_form_change and args.yes:
+        print(f"cannot accept: the form hashes differ "
+              f"({plan['recorded_form']} recorded, {plan['live_form']} "
+              f"live); --yes does not answer that, pass "
+              f"--accept-form-change as well, or run without --yes and "
+              f"confirm at the prompt. Nothing written")
+        return 1
+    if not args.yes:
+        answer = input("write this rename? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("nothing written")
+            return 1
+        if not plan["form_matches"] and not args.accept_form_change:
+            answer = input("the record was made for different code; rename "
+                           "it anyway? [y/N] ").strip().lower()
+            if answer not in ("y", "yes"):
+                print("nothing written")
+                return 1
+            plan["confirm_form_change"] = True
+    try:
+        summary = apply_acceptance(plan)
+    except AcceptanceError as e:
+        print(f"cannot accept: {e}")
+        return 1
+    print(f"written: {summary}")
+    print(f"next: `mathema verify {args.key}` re-adjudicates it at its new "
+          f"location")
+    return 0
+
+
 def cmd_accept(args) -> int:
     """The human decision verb: annotate one adjudicated claim with an
     acceptance (`--as evidence | risk | discovery`). Prompted, the
@@ -2182,6 +2270,11 @@ def cmd_accept(args) -> int:
     if args.intent or args.concepts or args.dismiss_concepts:
         return _accept_context(args, by)
     as_json = getattr(args, "format", "text") == "json"
+    if getattr(args, "from_key", None):
+        return _accept_rename(args, by, as_json)
+    if getattr(args, "accept_form_change", False):
+        _bad_argument("mathema accept: --accept-form-change only "
+                      "accompanies --as reconciled --from OLD_KEY")
     if args.as_ == "reconciled" and getattr(args, "all_records", False):
         # batch reconcile: clear a whole merge/rebase in one human act
         from .acceptance import mismatched_records, reconcile_all
@@ -2521,9 +2614,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="declared parameter range (repeatable)")
     pc.add_argument("--trials-scale", type=float, default=1.0, metavar="FACTOR",
                     help="shrink the probe-route trial budget by this factor "
-                         "(0 < FACTOR <= 1, e.g. 0.25) for faster dev-loop "
-                         "iteration; never scales upward, and never below a "
-                         "floor that still guarantees real evidence")
+                         "(FACTOR > 0, e.g. 0.25) for faster dev-loop "
+                         "iteration; a value above 1 is clamped to 1, so it "
+                         "never scales upward, and never below a floor that "
+                         "still guarantees real evidence")
     pc.add_argument("--format", default="text",
                     choices=["text", "json", "junit", "github", "md",
                              "compact"],
@@ -2556,9 +2650,10 @@ def main(argv: list[str] | None = None) -> int:
                          "functions register")
     pv.add_argument("--trials-scale", type=float, default=1.0, metavar="FACTOR",
                     help="shrink the probe-route trial budget by this factor "
-                         "(0 < FACTOR <= 1, e.g. 0.25) for faster dev-loop "
-                         "iteration; never scales upward, and never below a "
-                         "floor that still guarantees real evidence")
+                         "(FACTOR > 0, e.g. 0.25) for faster dev-loop "
+                         "iteration; a value above 1 is clamped to 1, so it "
+                         "never scales upward, and never below a floor that "
+                         "still guarantees real evidence")
     pv.add_argument("--format", default="text", choices=["text", "json"],
                     help="report format: json emits the sweep as data "
                          "(per-key rows in the same claim vocabulary "
@@ -2853,6 +2948,15 @@ def main(argv: list[str] | None = None) -> int:
                           "claim. There is no accepting a bug: fix the code "
                           "and the recorded counterexample replays until the "
                           "claim proves.; historical: the code moved past this claim (signature change), keep it as history; trusted: accept a compendium row at its claimed level (testimony; `mathema verify` re-adjudicates it locally)")
+    pac.add_argument("--from", dest="from_key", default=None,
+                     metavar="OLD_KEY",
+                     help="with `--as reconciled`: rename OLD_KEY's record "
+                          "to KEY, for a function that moved (carries its "
+                          "claims, acceptance history, lineage and "
+                          "sign-offs; the old record is removed)")
+    pac.add_argument("--accept-form-change", action="store_true",
+                     help="with `--from`: rename even though the record's "
+                          "form hash differs from the live function's")
     pac.add_argument("--by", default=None,
                      help="who decided (default: git config user.name)")
     pac.add_argument("--note", default=None, help="free-text rationale")

@@ -646,6 +646,17 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          "integrity_mismatch": False, "counts": {},
                          "claims": []})
     key_problems: dict = {}   # key -> failure lines raised outside the gate
+    # an orphan record (its key no longer resolves) whose form hash
+    # matches a function with no record: old key -> new keys, and the
+    # reverse, so both sides of a likely move name the rename remedy
+    from .moved import find_moved, rename_command
+    moved = find_moved(root, {k: v for k, v in verified.items()
+                              if k not in broken}, declared,
+                       lambda k: _resolve_func_ref(k, root=root))
+    moved_here: dict = {}
+    for old_key, new_keys in moved.items():
+        for new_key in new_keys:
+            moved_here.setdefault(new_key, []).append(old_key)
 
     def _fail(key: str, msg: str) -> None:
         out.problems.append(msg)
@@ -709,13 +720,42 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 continue
             msg = f"{key}: cannot resolve to a live function"
             out.problems.append(msg)
-            out.lines.append(f"FAIL {key}: cannot resolve to a live function "
-                             f"(declared in {source})")
+            line = (f"FAIL {key}: cannot resolve to a live function "
+                    f"(declared in {source})")
+            row = {"key": key, "why": "unresolvable", "passed": False,
+                   "problems": ["cannot resolve to a live function"],
+                   "counts": {}, "claims": []}
+            if key in moved:
+                remedies = [rename_command(n, key) for n in moved[key]]
+                line += (f"; its form hash matches "
+                         f"{', '.join(moved[key])}, which has no record. "
+                         f"If it moved, a human keeps its history with: "
+                         + " (or) ".join(remedies))
+                row["moved_to"] = list(moved[key])
+                row["remedy"] = remedies
+            out.lines.append(line)
             # never reaches `pending`, so it gets its own structured
             # entry, nothing may be visible in prose alone
-            out.keys.append({"key": key, "why": "unresolvable",
+            out.keys.append(row)
+            continue
+        if key in moved_here and not verified_entry:
+            # a fresh record here would start the history over while the
+            # orphan still holds it; nothing is adjudicated or written
+            # for this key until a human renames the record or removes
+            # the orphan
+            remedies = [rename_command(key, o) for o in moved_here[key]]
+            _fail(key, f"{key}: no record yet, and its form hash matches "
+                       f"the orphan record {', '.join(moved_here[key])}; "
+                       f"nothing was adjudicated or written for this key. "
+                       f"If it moved, a human keeps its history with: "
+                       + " (or) ".join(remedies)
+                       + "; if it is a different function, remove the "
+                         "orphan record instead")
+            out.keys.append({"key": key, "why": "moved-pending",
                              "passed": False,
-                             "problems": ["cannot resolve to a live function"],
+                             "problems": list(key_problems[key]),
+                             "moved_from": list(moved_here[key]),
+                             "remedy": remedies,
                              "counts": {}, "claims": []})
             continue
         # file-declared claims win per claim name over decorator/

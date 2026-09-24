@@ -496,6 +496,34 @@ on where the claim sits in a list. Two different claims that would take
 the same name (two domains of one law, say) are refused, asking for an
 explicit `name:` on each.
 
+Claims files are the declared layer, and every field in one is a field
+mathema reads. A field it does not know is refused (exit 2, one line
+naming the file, the key and the field), with a "did you mean" when it
+is a near miss of a real one. Annotations have fields of their own:
+
+| Field | Where | Holds |
+|---|---|---|
+| `note:` | on a claim | free text |
+| `meta:` | on a claim or the entry | structured data |
+| `references:` | on the entry | links (`title`, `url`, `via`) |
+| `meta: {concepts: [...]}` | on the entry | tags |
+
+```yaml
+functions.softmax:
+  meta: {concepts: [probability]}
+  claims:
+    - name: sums_to_one
+      statement: "sum(f(scores)) == 1"
+      route: probe
+      note: "agreed with the modelling team; see the design doc"
+```
+
+Prefer `note:` to a YAML `#` comment. Some commands rewrite a claims
+file from its parsed form (`docsync --yes` resolving a conflict, an
+acceptance retiring a claim), and a comment does not survive that; a
+`note:` is part of the claim and persists through every rewrite.
+`docsync` warns before it rewrites a file that has comments.
+
 ## Experiment before you declare
 
 Try a spelling before it reaches an authoring surface. Both of these
