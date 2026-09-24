@@ -2382,7 +2382,7 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                 identity = False
     rng = random.Random(0)
     for target in targets:
-        args = []
+        args: list = []
         for p in facts.params:
             if p == target:
                 args.append([])
