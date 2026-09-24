@@ -520,13 +520,14 @@ _DEFAULT_ORDERING_SLACK = 1e-9
 def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
                              proof, seq_names):
     """Intent:
-        The point derive named as its witness, when the real code
-        executed there violates a closed ordering (`<=`/`>=`) or an
-        equality (`==`) compared exactly, with none of the default
-        allowance. None when the claim is not such a relation, declares
-        its own tolerance (which is then part of the claim), names no
-        in-domain witness, or the code satisfies the relation there
-        exactly.
+        `(point, compared)`: `point` is the point derive named as its
+        witness when the real code executed there violates a closed
+        ordering (`<=`/`>=`) or an equality (`==`) compared exactly,
+        with none of the default allowance, else None; `compared` is
+        whether the code was executed and compared there at all. No
+        comparison happens when the claim is not such a relation,
+        declares its own tolerance (which is then part of the claim),
+        or names no in-domain witness.
 
     Notes:
         `~=` is approximate equality by its own spelling, so it keeps
@@ -539,23 +540,26 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
     import random
     from . import corroboration as C
     if cj.relation not in ("<=", ">=", "==") or cj.tolerance is not None:
-        return None
+        return None, False
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
                             sequences=True, exact=True)
     if deps is None:
-        return None
+        return None, False
     seeds = C._seed_points(_sequence_witness(proof.witness, seq_names),
                            deps["names"])
     if not seeds:
-        return None
+        return None, False
     named = seeds[0]
     missing = [n for n in deps["names"] if n not in named]
     rng = random.Random(0)
     for _ in range(8 if missing else 1):
         point = {**named, **{n: deps["sample"](n, rng) for n in missing}}
         if deps["admits"](point):
-            return point if deps["evaluate"](point) is False else None
-    return None
+            holds = deps["evaluate"](point)
+            if holds is False:
+                return point, True
+            return None, holds is True
+    return None, False
 
 
 def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
@@ -637,9 +641,8 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             # evidence than was actually obtained.
             falsified.route = "probe:semi_analytical"
         return falsified
-    exact_point = _exact_witness_violation(cj, fn, facts, cj_domain,
-                                           bound_funcs, assum, proof,
-                                           seq_names)
+    exact_point, compared = _exact_witness_violation(
+        cj, fn, facts, cj_domain, bound_funcs, assum, proof, seq_names)
     if exact_point is not None:
         pt = _fmt_point(exact_point, deps["names"])
         falsified.meta = {**(falsified.meta or {}),
@@ -658,6 +661,18 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
     falsified.meta = {**(falsified.meta or {}),
                       "mathema.corroboration": "uncorroborated"}
     falsified.counterexample = None
+    if compared and proof.meta.get("mathema.exact_disproof"):
+        # derive's difference is exactly nonzero at the witness, and the
+        # code, executed there and compared exactly, agrees with the
+        # claim: floating point rounded the difference away
+        falsified.meta["mathema.corroboration_reason"] = \
+            C.EXACT_ARITHMETIC_ONLY
+        falsified.note = (
+            f"{falsified.note}; uncorroborated disproof: "
+            f"{C.EXACT_ARITHMETIC_ONLY_NOTE} (compared exactly at derive's "
+            f"witness, the executed values are equal), so the verdict "
+            f"stays unknown").lstrip("; ")
+        return falsified
     falsified.note = (
         f"{falsified.note}; uncorroborated disproof: the derive route "
         f"reported this false but no in-domain counterexample reproduced "

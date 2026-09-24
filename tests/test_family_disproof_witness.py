@@ -88,3 +88,23 @@ def test_missing_safe_guard_that_does_not_raise_on_missing_is_not_falsified():
     assert p.verdict != "falsified", (p.verdict, p.counterexample)
     assert p.meta.get("mathema.corroboration") == "uncorroborated"
     assert "UNCORROBORATED" in p.note
+
+
+def test_a_pole_floating_point_steps_over_is_labelled_exact_arithmetic_only():
+    cj = claim("for x in [0, 10], is_pole_safe(x)", name="is_pole_safe[x]",
+               route="derive")
+    for p in check_conjectures(reciprocal_irrational_pole,
+                               [cj, _stable_claim("derive")]):
+        assert p.meta.get("mathema.corroboration") == "uncorroborated"
+        assert p.meta.get("mathema.corroboration_reason") == \
+            "exact arithmetic only", (p.name, p.meta)
+        assert "engine bug" not in p.note, (p.name, p.note)
+        assert "floating point does not reproduce" in p.note, (p.name, p.note)
+
+
+def test_a_guard_that_never_fires_keeps_the_engine_bug_label():
+    cj = claim("for x in [0, 10], is_missing_safe(x)",
+               name="is_missing_safe[x]", route="derive")
+    (p,) = check_conjectures(guard_that_never_fires_on_missing, [cj])
+    assert "mathema.corroboration_reason" not in p.meta
+    assert "engine bug" in p.note

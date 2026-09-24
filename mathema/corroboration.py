@@ -14,7 +14,11 @@ corrupt) residual:
   `meta["mathema.corroboration"] = "uncorroborated"` and an engine-bug
   note (a symbolic sign error, e.g. sympy's `is_nonnegative`
   mis-signing an interval, must neither assert the falsification nor
-  hide that it was claimed).
+  hide that it was claimed). When the difference is known to exist in
+  exact arithmetic and the executed code was compared exactly at the
+  point that shows it, floating point simply does not reproduce it:
+  `meta["mathema.corroboration_reason"] = "exact arithmetic only"`, and
+  the note says that instead of naming an engine bug.
 - a `proven` is exact in real arithmetic and says nothing about the
   float implementation. That is a claim of its own, the `<name>[float]`
   companion a derive proof spawns (gates._float_companion): the sweep
@@ -34,6 +38,12 @@ from typing import Callable
 from ._sampling import _RNG_SEED
 
 _CORROBORATION_BUDGET = 40
+#: why a disproof is uncorroborated when the executed code, compared
+#: exactly where the exact difference is, agrees with the claim
+EXACT_ARITHMETIC_ONLY = "exact arithmetic only"
+#: the note an exact-arithmetic-only disproof carries
+EXACT_ARITHMETIC_ONLY_NOTE = ("the difference exists in exact arithmetic "
+                              "and floating point does not reproduce it")
 _PERTURBATIONS = (1e-6, -1e-6, 1e-3, -1e-3, 1e-9, -1e-9)
 
 

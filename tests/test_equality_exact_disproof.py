@@ -65,3 +65,13 @@ def test_a_declared_tolerance_on_equality_stays_part_of_the_claim():
     assert p.verdict == "holds", (p.verdict, p.note)
     assert "engine bug" not in (p.note or "")
     assert p.meta.get("mathema.corroboration") is None
+
+
+def test_rounding_to_exact_equality_is_labelled_exact_arithmetic_only():
+    for route in ("derive", "best"):
+        p = _v(rounded_away, "for x in [1, 2], f(x) == x", route)
+        assert p.meta.get("mathema.corroboration") == "uncorroborated"
+        assert p.meta.get("mathema.corroboration_reason") == \
+            "exact arithmetic only", (route, p.meta)
+        assert "engine bug" not in (p.note or ""), (route, p.note)
+        assert "floating point does not reproduce" in (p.note or "")

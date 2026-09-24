@@ -47,10 +47,10 @@
 [ ] docs/first-look.md:95
 [ ] docs/first-look.md:123
 [ ] docs/first-look.md:150
-[ ] docs/grammar.md:181
-[ ] docs/grammar.md:218
-[ ] docs/grammar.md:332
-[ ] docs/grammar.md:396
+[ ] docs/grammar.md:182
+[ ] docs/grammar.md:219
+[ ] docs/grammar.md:339
+[ ] docs/grammar.md:403
 [ ] docs/index.md:129
 [ ] docs/index.md:150
 [ ] docs/index.md:176

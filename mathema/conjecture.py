@@ -2924,10 +2924,16 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
         # later reader (or the maintainer) needs to see that. A claim
         # form with no point evaluation had no reproduction attempted,
         # so that note names the missing witness instead.
+        from .corroboration import (EXACT_ARITHMETIC_ONLY,
+                                    EXACT_ARITHMETIC_ONLY_NOTE)
         if (fallback.meta or {}).get("mathema.corroboration_unexecutable"):
             winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
                            f"disproof (the claim form has no point "
                            f"evaluation, so derive had no executed witness)")
+        elif ((fallback.meta or {}).get("mathema.corroboration_reason")
+              == EXACT_ARITHMETIC_ONLY):
+            winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
+                           f"disproof ({EXACT_ARITHMETIC_ONLY_NOTE})")
         else:
             winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
                            f"disproof (probable engine bug, worth reporting)")
@@ -3382,7 +3388,8 @@ def _provenance_meta(proof) -> dict:
     """
     meta = {}
     for key in ("mathema.derive_route", "mathema.engine_disagreement",
-                "mathema.corroboration", "mathema.corroboration_unexecutable"):
+                "mathema.corroboration", "mathema.corroboration_unexecutable",
+                "mathema.corroboration_reason"):
         if key in proof.meta:
             meta[key] = proof.meta[key]
     return meta

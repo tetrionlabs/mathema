@@ -283,18 +283,23 @@ def _executed_family_witness(fn, facts, target: str, value, domain: dict,
     return None, executed
 
 
-def _uncorroborated_family_disproof(sketch: str, why: str):
+def _uncorroborated_family_disproof(sketch: str, why: str,
+                                    reason: "str | None" = None):
     """Intent:
         A family's structural disproof that no executed call
         reproduced, as it may be reported: `undecided`, carrying the
-        corroboration flag every uncorroborated disproof carries.
+        corroboration flag every uncorroborated disproof carries, and
+        `reason` as `mathema.corroboration_reason` when given.
     """
     from .symbolic import ProofResult
+    meta = {"mathema.corroboration": "uncorroborated"}
+    if reason is not None:
+        meta["mathema.corroboration_reason"] = reason
     return ProofResult(
         "undecided",
         sketch=f"{sketch}; uncorroborated disproof: {why}, and a "
                f"falsification needs an executed witness",
-        meta={"mathema.corroboration": "uncorroborated"})
+        meta=meta)
 
 
 def _pole_exclusion_proof(fn, facts, domain: dict, params,
@@ -348,8 +353,9 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     Notes:
         An irrational pole (sqrt(2)) has no exact float spelling, so
         the call lands beside it, where the code may well return a
-        large finite value: the symbolic pole is then not reproduced
-        by the code, and the disproof is not reported as one.
+        large finite value: the pole exists in exact arithmetic and
+        floating point does not reproduce it, so the disproof is not
+        reported as one, and its reason says so.
     """
     import sympy
     from .hazards import _admitted_spelling
@@ -367,9 +373,13 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     what, executed = _executed_family_witness(
         fn, facts, param, value, domain, failure=_raise_or_nonfinite)
     if what is None:
+        from .corroboration import (EXACT_ARITHMETIC_ONLY,
+                                    EXACT_ARITHMETIC_ONLY_NOTE)
         return _uncorroborated_family_disproof(
-            sketch, f"the call at {param} = {value!r} returned a finite "
-                    f"value ({executed} call(s) made)")
+            sketch, f"{EXACT_ARITHMETIC_ONLY_NOTE}: the call at "
+                    f"{param} = {value!r} returned a finite value "
+                    f"({executed} call(s) made)",
+            reason=EXACT_ARITHMETIC_ONLY)
     spelled = (f"{param} = {value!r}" if pole_text == repr(value)
                else f"{param} = {value!r} (the pole {pole_text})")
     return ProofResult(
