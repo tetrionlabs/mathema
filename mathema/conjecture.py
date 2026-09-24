@@ -47,8 +47,9 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
 from . import linalg
 from ._scan import _split_commas, blank_strings
 from .domain import DuplicateBinding
-from .probing import (_close, _fmt, _prepare_sampling, _probe_density,
-                      _sampling_shorthand, _synth, _synth_dict,
+from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
+                      _probe_density, _sampling_shorthand, _synth,
+                      _synth_dict, complex_is_a_raise, is_complex_value,
                       ordering_shortfall, relation_holds_elementwise)
 from .records import _EXC_TYPES, Probe, classify_verdict, statement_text
 from .symbolic import (mentions_matrix_ops, try_prove, try_prove_matrix,
@@ -4142,6 +4143,9 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
             sig = inspect.signature(callee)
         except (TypeError, ValueError):
             sig = None
+        # a complex result under a real claim is no value at all, the
+        # same as a raise
+        complex_raises = complex_is_a_raise(callee, cj_domain)
 
         def _wrapped(*a, **k):
             if sig is not None:
@@ -4150,10 +4154,14 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 except TypeError:
                     raise   # the law called it wrong: untagged
             try:
-                return callee(*a, **k)
+                value = callee(*a, **k)
             except Exception:
                 call_raised[0] = label
                 raise
+            if complex_raises and is_complex_value(value):
+                call_raised[0] = label
+                raise ComplexResult(label, value)
+            return value
         return _wrapped
 
     fn_tagged = _tagged(fn, "f")
@@ -4415,6 +4423,11 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # ordering AT this in-domain point, and there is nothing on
             # one side to compare, pedantically, that falsifies it.
             checked += 1
+            if isinstance(e, ComplexResult):
+                cx = (f"{_fmt(tuple(args))}: {e}, which a real claim reads "
+                      f"as a raise; narrow the claim's domain to where every "
+                      f"call is real, or annotate the function complex")
+                break
             cx = (f"{_fmt(tuple(args))}: raised {type(e).__name__}, narrow "
                   "the claim's domain to where every call returns, or state "
                   "the raising region as its own raises(...) claim")

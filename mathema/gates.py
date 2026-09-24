@@ -82,7 +82,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     """
     from .domain import (_as_int_if_whole, bound_assumptions,
                          bound_to_sympy_set, domain_contains, is_missing)
-    from .probing import _synth
+    from .probing import (ComplexResult, _synth, complex_is_a_raise,
+                          is_complex_value)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     # the gates verify VALUE claims by calling fn at a point; a
@@ -114,17 +115,24 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # nothing about the claim
     calls_raised = [False]
 
-    def _tag(callee):
+    def _tag(callee, label):
+        # a complex result under a real claim counts as a raise too
+        complex_raises = complex_is_a_raise(callee, cj_domain)
+
         def _wrapped(*a, **kw):
             try:
-                return callee(*a, **kw)
+                value = callee(*a, **kw)
             except Exception:
                 calls_raised[0] = True
                 raise
+            if complex_raises and is_complex_value(value):
+                calls_raised[0] = True
+                raise ComplexResult(label, value)
+            return value
         return _wrapped
 
-    base_env = {"f": _tag(fn), **_SAFE_FUNCS, **MATH_CONSTANTS,
-                **{name: _tag(v) for name, v in bound_funcs.items()},
+    base_env = {"f": _tag(fn, "f"), **_SAFE_FUNCS, **MATH_CONSTANTS,
+                **{name: _tag(v, name) for name, v in bound_funcs.items()},
                 **{name: (cj.tolerance if cj.tolerance is not None else 1e-9)
                    for name in eps_names}}
     from .records import pseudo_infinity_range

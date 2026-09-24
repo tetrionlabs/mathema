@@ -492,6 +492,66 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     return _walk(lv, rv)
 
 
+class ComplexResult(ArithmeticError):
+    """A complex value returned by a function that a real claim reads as
+    real-valued. The claim treats it as a raise: the call has no real
+    value at that point. `callee` names the function, `value` is what
+    it returned."""
+
+    def __init__(self, callee: str, value):
+        super().__init__(f"{callee} returned the complex value "
+                         f"{_complex_text(value)}")
+        self.callee = callee
+        self.value = value
+
+
+def _complex_text(value) -> str:
+    try:
+        return _fmt_value(complex(value))
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def is_complex_value(v) -> bool:
+    """Whether `v` is a complex number, or a numpy value or array of
+    complex dtype."""
+    if isinstance(v, complex):
+        return True
+    return getattr(getattr(v, "dtype", None), "kind", None) == "c"
+
+
+def _bound_is_complex(bound) -> bool:
+    if isinstance(bound, str):
+        return bound == "C"
+    if getattr(bound, "base_type", None) == "C":
+        return True
+    if isinstance(bound, tuple):
+        return any(isinstance(v, complex) for v in bound)
+    pieces = getattr(bound, "pieces", None) or ()
+    return any(_bound_is_complex(p) for p in pieces if isinstance(p, tuple))
+
+
+def complex_is_a_raise(callee, cj_domain: dict | None) -> bool:
+    """Intent:
+        Whether a complex result from `callee` counts as a raise under a
+        claim with domain `cj_domain`: yes, unless the callee is
+        annotated `complex` (its return or any parameter) or the claim
+        quantifies some variable over the complex plane (`C`, or a
+        rectangle with complex corners).
+    """
+    import inspect
+    if any(_bound_is_complex(b) for b in (cj_domain or {}).values()):
+        return False
+    try:
+        sig = inspect.signature(callee)
+    except (TypeError, ValueError):
+        return True
+    annotations = [sig.return_annotation,
+                   *(prm.annotation for prm in sig.parameters.values())]
+    return not any(a is not inspect.Signature.empty and "complex" in str(a)
+                   for a in annotations)
+
+
 def ordering_shortfall(lv, rv, relation: str) -> float:
     """Intent:
         By how much `lv <relation> rv` fails when compared exactly, for
