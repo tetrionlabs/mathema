@@ -12,6 +12,7 @@ Two functions, in `funcs.py`. `settle` is meant to return a settlement
 amount for a signed exposure, and it has a bug: it should take the
 magnitude and instead returns its argument unchanged.
 
+<!-- example: loop file=funcs.py -->
 ```python
 def settle(x: float) -> float:
     """Settlement amount for a signed exposure x."""
@@ -25,6 +26,12 @@ def midpoint(a: float, b: float) -> float:
 
 And `claims/demo.claims.yaml`, stating what someone believed:
 
+<!-- example: loop run -->
+```bash
+mkdir claims
+```
+
+<!-- example: loop file=claims/demo.claims.yaml -->
 ```yaml
 funcs.settle:
   claims:
@@ -50,13 +57,15 @@ loop is for.
 
 ## 1. The first sweep
 
+<!-- example: loop run -->
 ```bash
 mathema verify --root .
 ```
 
+<!-- example: loop output -->
 ```text
 note funcs.settle: nonneg, symmetric_in_sign falsified on first adjudication. A declared claim is kept until a human decides it (fix the code, `mathema accept funcs.settle <claim> --as discovery`, or supersede it). To try a spelling first, `mathema check funcs.settle --claim "..."` adjudicates it and writes nothing.
-ok   funcs.midpoint: no baseline record; 2 proven, 0 holds, 0 falsified
+ok   funcs.midpoint: no baseline record; 2 proven, 1 holds, 0 falsified
 FAIL funcs.settle: no baseline record; 1 proven, 1 holds, 2 falsified  <- 2 falsified claim(s)
 0 fresh (form unchanged, skipped), 2 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
@@ -64,7 +73,8 @@ grammars detected: mathema; verified by this run: mathema
 
 `midpoint` proves on the derive route. Each row also counts one
 `proven` claim nobody wrote, `dependencies_current`, which `verify`
-adds itself. `settle` fails, and the record under
+adds itself, and `midpoint`'s `holds` is its proof's `[float]`
+companion, the proven claim run through the real code in floating point. `settle` fails, and the record under
 `.mathema/verified/funcs.settle.yaml` says precisely how (trimmed to
 the three declared claims):
 
@@ -104,16 +114,24 @@ structurally, not just as display text, which matters in a moment.
 
 ## 2. Fix the code
 
+<!-- example: loop file=funcs.py -->
 ```python
 def settle(x: float) -> float:
     """Settlement amount for a signed exposure x."""
     return abs(x)
+
+
+def midpoint(a: float, b: float) -> float:
+    """The midpoint of two values."""
+    return (a + b) / 2.0
 ```
 
+<!-- example: loop run -->
 ```bash
 mathema verify --root .
 ```
 
+<!-- example: loop output -->
 ```text
 ok   funcs.midpoint: fresh
 FAIL funcs.settle: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
@@ -171,18 +189,21 @@ that changed a record.
 `nonneg` holds empirically, over 130 seeded trials. Whether that is
 enough is a human decision, so there is a verb for making it:
 
+<!-- example: loop run -->
 ```bash
-mathema accept funcs.settle nonneg --as evidence --by "Ada Lovelace"
+echo y | mathema accept funcs.settle nonneg --as evidence --by "Ada Lovelace"
 ```
 
+<!-- example: loop output -->
 ```text
 accepting funcs.settle :: nonneg (verdict holds) as evidence, by Ada Lovelace
   - annotate nonneg as accepted evidence at n=130 (bound to form 3eb01e1d9919...)
-write this acceptance? [y/N] y
-written: annotate nonneg as accepted evidence at n=130 (bound to form 3eb01e1d9919...)
+write this acceptance? [y/N] written: annotate nonneg as accepted evidence at n=130 (bound to form 3eb01e1d9919...)
 ```
 
-`accept` prints exactly what it will write and waits for a yes. The
+`accept` prints exactly what it will write and waits for a yes, here
+piped in with `echo y`, which is why the answer does not show after the
+prompt. The
 acceptance binds to the form hash, so changing `settle` later drops the
 acceptance and asks again: you accepted evidence about *that* code.
 
@@ -191,10 +212,12 @@ acceptance and asks again: you accepted evidence about *that* code.
 The invalidated claim is still sitting there. The obvious move is to
 wave it through as a known risk, and mathema refuses:
 
+<!-- example: loop run -->
 ```bash
 mathema accept funcs.settle negative_exposure_negative --as risk
 ```
 
+<!-- example: loop output -->
 ```text
 cannot accept: negative_exposure_negative is invalidated: a falsification is never accepted as risk, diagnose it (--as discovery), or fix the code until it stops falsifying
 ```
@@ -209,17 +232,18 @@ Here the belief was wrong: settlements are magnitudes, so a negative
 exposure settles *positive*. That is a real discovery about the domain,
 and accepting it as one corrects the claim rather than deleting it:
 
+<!-- example: loop run -->
 ```bash
-mathema accept funcs.settle negative_exposure_negative --as discovery --by "Ada Lovelace"
+echo y | mathema accept funcs.settle negative_exposure_negative --as discovery --by "Ada Lovelace"
 ```
 
+<!-- example: loop output -->
 ```text
 accepting funcs.settle :: negative_exposure_negative (verdict invalidated) as discovery, by Ada Lovelace
   - move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness
   - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 130 trials
   - rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
-write this acceptance? [y/N] y
-written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 130 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
+write this acceptance? [y/N] written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 130 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
 declared layer: claims/demo.claims.yaml now declares negative_exposure_negative_corrected in place of negative_exposure_negative (the superseded claim stays in the record's discoveries section):
   - name: negative_exposure_negative_corrected
     statement: "for x in [-5.0, -1.0]:float|missing, f(x) > 0"
@@ -242,10 +266,12 @@ opposite, and why they stopped.
 With the bug fixed, the evidence accepted and the wrong belief corrected,
 the sweep passes:
 
+<!-- example: loop run -->
 ```bash
 mathema verify --root .
 ```
 
+<!-- example: loop output -->
 ```text
 ok   funcs.midpoint: fresh
 ok   funcs.settle: claims changed; 1 proven, 3 holds, 0 falsified
