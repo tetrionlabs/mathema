@@ -651,6 +651,7 @@ def bound_is_empty(bound) -> bool:
         domain that admits only a missing value still counts as empty.
     """
     dom = bound if isinstance(bound, Domain) else None
+    excluded: frozenset
     if dom is None:
         if not (isinstance(bound, tuple) and not isinstance(bound, frozenset)
                 and len(bound) == 2):
