@@ -244,8 +244,8 @@ def _try_derive_lift(fn, facts, extra_domain: dict | None = None):
     not verify anything about it. `lift_conditioned()` is only attempted
     when the function actually branches (mirrors `lift()`'s own
     branch-free precondition) and a domain can be found at all (the
-    same two sources `types.domain_from_signature()`/the docstring's own
-    `Domain:` block already merge elsewhere), with no domain, a
+    signature's bound markers, `types.domain_from_signature()`, topped
+    up by the caller's `extra_domain`), with no domain, a
     branchy function has nothing for `lift_conditioned()` to prune
     against, so trying it would only ever return `None` anyway. Returns
     the bare `sympy.Expr`, or `None` if nothing in the chain resolves."""
@@ -665,7 +665,7 @@ def audit_rows(targets: list[str], root: str = ".",
             "key": key,
             "_fn": fn,
             # the lock entry when this function's form is pinned: a
-            # person's assurance that the body cannot change under a
+            # person's guarantee that the body cannot change under a
             # CDD loop until a human unlocks
             "locked": locks.get(key),
             "module": getattr(fn, "__module__", None),
@@ -782,7 +782,7 @@ COMPACT_COLUMNS = {
     "callees_docsync": lambda r: (r["docsync"]["callees_docsync"]
                                   if r.get("docsync") else None),
     "concepts": lambda r: len(r["concepts"]),
-    # the pinned form hash when locked, "" when not: assurance that
+    # the pinned form hash when locked, "" when not: a guarantee that
     # the body cannot change until a human runs mathema unlock
     "locked": lambda r: ((r.get("locked") or {}).get("form") or ""),
     "global_vars": lambda r: (None if r.get("_scope_excluded")

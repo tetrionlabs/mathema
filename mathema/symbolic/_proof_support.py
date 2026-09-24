@@ -695,7 +695,7 @@ def _piecewise_seed_points(diff, free: list, bounds: dict) -> list[dict]:
 
 def _corroborate_disproof(diff, domain: dict, params: dict,
                           bound_context=None, tolerance: float = 1e-9,
-                          exact: bool = False):
+                          exact: bool = False, negative: bool = False):
     """A concrete counterexample point for `diff != 0`, found by the
     same seeded scalar sampler `probing.py`'s own probes use
     (`_synth_scalar`, `.._sampling`), `None` if none of
@@ -727,16 +727,22 @@ def _corroborate_disproof(diff, domain: dict, params: dict,
 
     With `exact=True` a point qualifies when `diff`, evaluated in exact
     arithmetic at the sampled floats' own exact values, is provably
-    nonzero there, however small; `tolerance` is then unused."""
+    nonzero there, however small; `tolerance` is then unused.
+
+    With `negative=True` a point qualifies only where `diff` is below
+    zero: by more than `tolerance`, or, with `exact=True`, negative in
+    exact arithmetic as `_verified_sign` settles it."""
     free = sorted(diff.free_symbols, key=str)
     if not free:
         if exact:
-            return {} if diff.is_zero is False else None
+            settled = (_verified_sign(diff) == -1 if negative
+                       else diff.is_zero is False)
+            return {} if settled is True else None
         try:
             value = complex(diff.evalf())
         except (TypeError, ValueError):
             return None
-        return {} if abs(value) > tolerance else None
+        return {} if _beyond(value, tolerance, negative) else None
     # an equality-shaped `assuming` clause makes the feasible set a
     # measure-zero surface: random draws essentially never land on it,
     # so rather than sampling blind, solve ONE variable out of one
@@ -834,16 +840,64 @@ def _corroborate_disproof(diff, domain: dict, params: dict,
                                 for sym, v in point.items()})
             except (TypeError, ValueError):
                 continue
-            if at.is_zero is False:
+            settled = (_verified_sign(at) == -1 if negative
+                       else at.is_zero is False)
+            if settled is True:
                 return full_point
             continue
         try:
             value = complex(diff.subs(point).evalf())
         except (TypeError, ValueError):
             continue
-        if abs(value) > tolerance:
+        if _beyond(value, tolerance, negative):
             return full_point
     return None
+
+
+def _beyond(value: complex, tolerance: float, negative: bool) -> bool:
+    """Intent:
+        Whether a sampled difference counts as a violation: its
+        magnitude exceeds `tolerance`, or, with `negative`, it is a
+        real value below `-tolerance`.
+    """
+    if negative:
+        return abs(value.imag) <= tolerance and value.real < -tolerance
+    return abs(value) > tolerance
+
+
+def _ordering_disproof_witness(target, domain: dict, params: dict,
+                               bound_context=None,
+                               tolerance: float = 1e-9) -> "tuple[dict | None, dict]":
+    """Intent:
+        `(witness, meta)` for a disproof of `target >= 0`: a complete
+        in-domain point where `target` is below `-tolerance`, keyed by
+        symbol name, with empty meta; failing that, a point where
+        `target` is provably negative in exact arithmetic, with meta
+        `{"mathema.exact_disproof": True}`; failing both, `(None, {})`.
+
+    Notes:
+        The exact point is sought only after the tolerance-bounded
+        search found nothing, the criterion `_decide_equality` applies
+        to `==`: a violation there is smaller than the tolerance, so it
+        stands only once the real code, compared exactly at that point,
+        violates the relation too. A target with no free symbols is
+        negative everywhere, so any admissible point is its witness.
+    """
+    exact = False
+    point = _corroborate_disproof(target, domain, params, bound_context,
+                                  tolerance, negative=True)
+    if point is None:
+        point = _corroborate_disproof(target, domain, params, bound_context,
+                                      exact=True, negative=True)
+        exact = point is not None
+    if point is None:
+        return None, {}
+    witness = ({str(sym): v for sym, v in point.items()} if point
+               else _representative_point(target, domain, params,
+                                          bound_context))
+    if witness is None:
+        return None, {}
+    return witness, ({"mathema.exact_disproof": True} if exact else {})
 
 
 def _representative_point(expr, domain: dict, params: dict,
@@ -2301,12 +2355,15 @@ def _decide_ordering(lhs, rhs, diff, relation, domain, bound_context, params,
                                sketch=f"interval evaluation over the declared "
                                       f"domain: {_humanize(target)} ∈ {box}, "
                                       "never negative")
+        witness, meta = _ordering_disproof_witness(
+            target, domain, params, bound_context, tolerance)
         return ProofResult("disproven",
                            sketch=f"interval evaluation over the declared "
                                   f"domain: {_humanize(target)} ∈ {box}, "
                                   "always negative",
-                           witness=_representative_point(
-                               target, domain, params, bound_context))
+                           witness=witness or _representative_point(
+                               target, domain, params, bound_context),
+                           meta=meta)
 
     def _is_nonneg(expr):
         # .is_nonnegative only ever consults assumptions baked
@@ -2359,13 +2416,17 @@ def _decide_ordering(lhs, rhs, diff, relation, domain, bound_context, params,
                 if factored_sign is not None:
                     box = _interval_bounds(factored, domain, params)
                     verdict = "proven" if factored_sign else "disproven"
+                    witness, meta = (None, {}) if factored_sign else \
+                        _ordering_disproof_witness(factored, domain, params,
+                                                   bound_context, tolerance)
                     return ProofResult(
                         verdict,
                         sketch=f"interval evaluation over the declared domain, "
                                f"after factoring: {_humanize(factored)} ∈ "
                                f"{box}, "
                                f"{'never' if factored_sign else 'always'} "
-                               f"negative")
+                               f"negative",
+                        witness=witness, meta=meta)
     if is_nonneg is True:
         return ProofResult("proven", sketch=f"{_humanize(target)} is nonnegative "
                            "under the declared domain")
@@ -2375,17 +2436,15 @@ def _decide_ordering(lhs, rhs, diff, relation, domain, bound_context, params,
         # the offending target as a machine-readable hint and a witness
         # if the seeded search finds one, so the corroboration gate
         # re-checks this against the real function before trusting it.
-        witness = _corroborate_disproof(-target, domain, params,
-                                        bound_context, tolerance)
+        witness, meta = _ordering_disproof_witness(
+            target, domain, params, bound_context, tolerance)
         if witness is not None or not _has_equality_constraint(bound_context):
             # under an assumed EQUALITY the sign fact was computed over
             # the whole box, not the feasible surface, without an
             # on-surface witness it proves nothing, so fall through
             return ProofResult(
                 "disproven", sketch=f"{_humanize(target)} can be negative",
-                witness=({str(s): v for s, v in witness.items()}
-                         if witness else None),
-                disproof_hint=target)
+                witness=witness, disproof_hint=target, meta=meta)
     certificate = _nonneg_certificate(sympy.expand(target), domain, params)
     if certificate is not None:
         return ProofResult("proven", sketch=certificate)

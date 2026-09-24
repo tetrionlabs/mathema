@@ -34,7 +34,7 @@ def _counting_prepare_sampling(monkeypatch):
 
 def test_all_derive_route_batch_never_prepares_sampling(monkeypatch):
     # both claims' proofs decide, so nothing ever falls back to probing
-    # and the sampling setup is never paid for. An undecided derive
+    # and the sampling setup never runs. An undecided derive
     # claim would now probe, deliberately, per the
     # unknown-superseded-by-evidence ruling, so only a fully-deciding
     # batch keeps this guarantee.

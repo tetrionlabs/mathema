@@ -3644,14 +3644,31 @@ def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
     return premise_empties_domain(ctx.cj_domain, set(facts.params), premises)
 
 
+def _family_owns_claim(family) -> bool:
+    """Intent:
+        Whether `family` adjudicates the claim under its own name (a
+        safety or self-agreement predicate, a derivative-sign fact, a
+        matrix or output predicate), rather than dispatching on the
+        function's shape and deciding whatever relation the claim
+        states (the dot-product, sum and fold lifters).
+    """
+    if family is None:
+        return False
+    from .claim_families import (MatrixPropertyFamily, OutputPredicateFamily,
+                                 _NamedClaimFamily)
+    return isinstance(family, (_NamedClaimFamily, MatrixPropertyFamily,
+                               OutputPredicateFamily))
+
+
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            facts, bound_funcs, assumption) -> None:
     """Intent:
         Stage the float companion of a derive proof on `ctx`, and state
         on the proof's own meta what became of it: the companion's
-        name, `none (derive:math_only)` for a claim that opted out, or
-        `none (...)` when the claim has no point evaluation against the
-        code.
+        name, `none (derive:math_only)` for a claim that opted out,
+        `none (...)` for a claim a family adjudicates under its own
+        name (whichever mechanism proved it), or `none (...)` when the
+        claim has no point evaluation against the code.
 
     Notes:
         Does nothing unless the caller asked for companions
@@ -3664,6 +3681,14 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     if mode == "math_only":
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion": "none (derive:math_only)"}
+        return
+    if _family_owns_claim(ctx.family):
+        # a family claim states a fact about the code itself
+        # (determinism, state, safety, structure), not a relation the
+        # float sweep could re-execute as the same question
+        proven.meta = {**(proven.meta or {}),
+                       "mathema.float_companion":
+                           "none (a claim family adjudicates this claim)"}
         return
     companion = _float_companion(proven, ctx.cj, fn, facts, ctx.cj_domain,
                                  bound_funcs, assum=assumption,

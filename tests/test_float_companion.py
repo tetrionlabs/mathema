@@ -262,3 +262,25 @@ def test_a_docstring_claim_can_opt_out_with_math_only():
     (row,) = parse_docstring_claims(
         "Claims:\n    exact [derive:math_only]: f(x) == 1\n")
     assert row["route"] == "derive:math_only"
+
+
+def ema(x: list, alpha: float) -> float:
+    y = x[0]
+    for v in x[1:]:
+        y = alpha * v + (1 - alpha) * y
+    return y
+
+
+def test_a_family_claim_spawns_no_float_companion():
+    from mathema import families
+    rec = mathema.check(ema)
+    probes = {p.name: p for p in rec.probes}
+    registered = set(families.families())
+    spawned = [n for n in probes if n.endswith("[float]")
+               and n[:-len("[float]")].split("[", 1)[0] in registered]
+    assert not spawned, spawned
+    assert probes["is_deterministic"].meta["mathema.float_companion"] == \
+        "none (a claim family adjudicates this claim)"
+    for law in ("scale_equivariant", "translation_equivariant"):
+        assert probes[law].verdict == "proven"
+        assert probes[f"{law}[float]"].verdict == "falsified", law

@@ -867,16 +867,16 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     bare type name/glyph instead of an infinite-looking interval,
     `R`/`ℝ`, not `(-oo, oo) subset R`/`(-oo, oo) ⊂ ℝ`. `always_show_type`
     is this behavior's own off switch: `render_domain_bound()`'s own,
-    narrower surface (an always-hand-typed docstring `Domain:` block,
-    not a caller-facing claim rendering) passes `False`, keeping its
-    own longstanding terse-when-unstated spelling.
+    narrower surface (a hand-editable `let <name> be <bound>` line, not
+    a caller-facing claim rendering) passes `False`, keeping its
+    terse-when-unstated spelling.
 
     `show_missing` defaults to `True`: a claim is the one place
     mathematics and code meet, so a rendered domain never leaves the
     resolved missing-value policy unstated by default, explicitly
     opt out (`show_missing=False`) only for a surface that's never
     meant to state it at all, like `render_domain_bound()`'s own
-    docstring-block spelling. Renders the *resolved* missing-value
+    hand-editable spelling. Renders the *resolved* missing-value
     policy explicitly, whether or not the caller's domain text ever
     mentioned it. In unicode mode this is the
     same trailing `∪ {∅}`/`\\ {∅}` clause input already uses; in ascii
@@ -1083,9 +1083,9 @@ def _endpoint_from_json(v):
 def render_domain_bound(b) -> str:
     """One domain bound -> the text a person would type for it, an
     alias for `render_domain()` with its missing-value clause left off
-    (this is the docstring-`Domain:`-block round-trip path, `to_domain_
-    block()`, where a bare `x: [0, 1]` line has never needed to say
-    anything about missing values and shouldn't start now), its type
+    (a hand-editable bound, such as a spec's `let x be [0, 1]` line or
+    a diagnostic's `declared:` bound, states nothing about missing
+    values), its type
     names spelled plain (`Z`, not `ℤ`), and its resolved type left
     unstated for the common, unrefined case (`[0, 1]`, not
     `[0, 1]:float`), a hand-editable surface, typeable without

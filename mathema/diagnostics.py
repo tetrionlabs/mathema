@@ -424,11 +424,10 @@ def _critical_points_cache_clear() -> None:
 def operations_of_interest(expr: "sympy.Expr") -> dict[str, int]:
     """A raw bag-of-operation-kind count over `expr`'s own tree,
     distinct from the curated, named motif library above (which is
-    containment-based and legible); this is just counts, feeding
-    further analysis (a future pro-tier cyclomatic-complexity feature
-    is expected to use this alongside the motif library and mathema's
-    own existing branch/loop counts, `inventory.structural_complexity`)
-    rather than trying to explain anything on its own."""
+    containment-based and legible); this is just counts, input for
+    further analysis alongside the motif library and the branch/loop
+    counts of `inventory.structural_complexity`, not an explanation
+    on its own."""
     counts = {
         "negative_or_fractional_powers": 0,
         "log_or_exp": 0,
