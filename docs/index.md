@@ -293,6 +293,49 @@ no `--yes` flag and, when set, the PIN.
 - **If you answer to an auditor**, every acceptance, unlock and lock is in the
   record with who made it and when, PIN-stamped when a PIN is set.
 
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Case study</span><span class="brk r"></span></span>
+
+## A harder case
+
+The same machinery reaches much further than a midpoint. Here is a European
+call minus a European put on the same strike, both priced by Black-Scholes,
+with a square root, a logarithm, an exponential and the Gaussian CDF:
+
+```python
+import math
+
+def put_call_parity_gap(s: float, k: float, r: float, t: float,
+                        sigma: float) -> float:
+    """A European call minus a European put on the same strike."""
+    root_t = math.sqrt(t)
+    d1 = (math.log(s / k) + (r + 0.5 * sigma * sigma) * t) / (sigma * root_t)
+    d2 = d1 - sigma * root_t
+    phi = lambda z: 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+    call = s * phi(d1) - k * math.exp(-r * t) * phi(d2)
+    put = k * math.exp(-r * t) * phi(-d2) - s * phi(-d1)
+    return call - put
+```
+
+Put-call parity says that difference is `s - k*exp(-r*t)` whatever the
+volatility, a surprising thing to claim about a function in which `sigma`
+appears five times:
+
+```bash
+mathema check options.py --claim "for s in [50,150], k in [50,150], \
+    r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], \
+    f(s,k,r,t,sigma) == s - k*exp(-r*t)"
+```
+
+```text
+ok   options.put_call_parity_gap: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+```
+
+`proven`, over every point of a five-dimensional region of prices, rates,
+maturities and volatilities: mathema read the body as mathematics, both
+Gaussian terms cancelled, and `sigma` disappeared. No number of test cases
+could establish that. The [case studies](case-studies.md#put-call-parity-and-the-greeks)
+go on to the Greeks, stated as the partial derivatives they are.
+
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Direction</span><span class="brk r"></span></span>
 
 ## Where this goes
