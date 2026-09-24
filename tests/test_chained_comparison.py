@@ -95,6 +95,7 @@ def test_body_chained_comparison_is_derivable():
     assert outside.route == "derive"
 
 
+@pytest.mark.needs_full_proof_budget
 def test_body_chain_indicator_is_bounded_zero_one():
     p = _verdict(_unit, "for x in [-5, 5], 0 <= f(x) <= 1")
     assert p.verdict == "proven"
