@@ -285,10 +285,10 @@ the domain, a gallery of equivalent rewrites, a library of changes of
 variable, and z3's nonlinear real arithmetic when the `smt` extra is
 installed, followed by one more try of the ordinary attempt at 15 seconds.
 Behind all of that sits a failsafe: whatever happens, the ladder stops at 45
-seconds, so a single claim can never hold up a run indefinitely. Probing searches harder at the
-same time, spending the wider cap on finding the critical points worth
-sampling, and a proof found this way records its route as `derive:extensive`,
-so the extra effort is visible in the record.
+seconds, so a single claim can never hold up a run indefinitely. Probing
+searches harder at the same time, spending the wider cap on finding the
+critical points worth sampling, and a proof found this way records its route
+as `derive:extensive`, so the extra effort is visible in the record.
 
 That is the division of labour the rest of this page assumes. Let a model
 propose the code and the claims, which is what models are good at, and let
