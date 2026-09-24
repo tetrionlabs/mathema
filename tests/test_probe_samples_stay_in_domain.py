@@ -71,3 +71,15 @@ def test_a_range_with_no_members_is_refused_as_misspecified(law, route):
     (p,) = check_conjectures(identity, [claim(law, route=route)])
     assert p.verdict == "skipped:misspecified"
     assert "empty" in p.note
+
+
+def count(n: int) -> int:
+    return n
+
+
+def test_an_unbounded_integer_range_samples_and_states_its_real_range():
+    from mathema._sampling import _LARGE
+    (p,) = check_conjectures(count, [claim("for n in [1, oo), f(n) >= 1",
+                                           route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.note)
+    assert f"n~U{{1..{int(_LARGE) + 1}}}" in p.meta["mathema.sampling"]

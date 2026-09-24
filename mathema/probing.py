@@ -861,8 +861,14 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             # Domain-typed bound (a `⊂ Z` refinement) falls through to
             # the set-notation rendering below, subscripting it blind
             # was a real crash on the empirical-fallback path
-            parts.append(f"{p}~U{{{int(bounds[0])}..{int(bounds[1])}}}" if bounds
-                         else f"{p}~{{0,1,2}}[p=.3]⊔U{{0..10}}")
+            # the integers actually drawn: an open or fractional end
+            # rounds inward and an unbounded end is capped, as
+            # `_synth_int_in` samples them
+            if bounds:
+                first, last = _integer_range(bounds, "Z")
+                parts.append(f"{p}~U{{{first}..{last}}}")
+            else:
+                parts.append(f"{p}~{{0,1,2}}[p=.3]⊔U{{0..10}}")
         elif bound_shape == "interval":
             lo, hi = bounds
             parts.append(f"{p}~U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]{crit_suffix(p)}")
