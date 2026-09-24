@@ -1297,7 +1297,7 @@ def declare(cj) -> dict:
 # the candidate name set before it decides whether to call
 # render_law_expr at all, so a lightweight regex pass is simpler than
 # parsing twice.
-_IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+_IDENTIFIER = re.compile(r"[^\W\d]\w*")
 
 
 def _ordered_real_param_names(cj, excluded: set) -> list:
@@ -1309,10 +1309,12 @@ def _ordered_real_param_names(cj, excluded: set) -> list:
     already found in the text. Both auto-let mechanisms below (a Greek-
     word exact match, the long-name pool) depend on this order being
     identical every time the same claim is rendered, in any process."""
+    from ._scan import blank_strings
+
     seen: list = []
     for text in (cj.lhs, cj.rhs):
         if isinstance(text, str):
-            for name in _IDENTIFIER.findall(text):
+            for name in _IDENTIFIER.findall(blank_strings(text)):
                 if name not in excluded and name not in seen:
                     seen.append(name)
     for name in cj.domain:
@@ -1473,7 +1475,7 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
             if name in param_renames:
                 continue
             symbol = greek_symbol_for_name(name)
-            if symbol is not None:
+            if symbol is not None and symbol not in taken:
                 param_renames[name] = symbol
                 taken.add(symbol)
         long_params = [n for n in real_params if n not in param_renames
@@ -1627,6 +1629,7 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     here."""
     from .grammar import get_unicode_output, render_domain, render_law_expr
     from ._providers import get_provider
+    from ._scan import sub_outside_strings
 
     if unicode is None:
         unicode = get_unicode_output()
@@ -1704,14 +1707,15 @@ def render_claim_text(cj, *, unicode: bool | None = None,
 
     def apply_safe_renames(text: str) -> str:
         for name, symbol in func_renames.items():
-            text = re.sub(rf"\b{re.escape(name)}\b", symbol, text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b", symbol, text)
         for name, symbol in safe_param_renames.items():
-            text = re.sub(rf"\b{re.escape(name)}\b", symbol, text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b", symbol, text)
         return text
 
     def apply_unsafe_backticks(text: str) -> str:
         for name, symbol in unsafe_param_renames.items():
-            text = re.sub(rf"\b{re.escape(name)}\b", f"`{symbol}`", text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b",
+                                       f"`{symbol}`", text)
         return text
 
     _REL_GLYPH = {"==": "=", "<=": "≤" if unicode else "<=",

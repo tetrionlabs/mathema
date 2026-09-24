@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from dataclasses import replace as _dc_replace
 
 from . import families, routes
-from ._math_vocab import MATH_CONSTANTS
+from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
 from .analysis import analyze_source
 from .grammar import (Domain, InvalidDomain, NoRelation,
                       is_missing, extract_assuming_clause,
@@ -43,7 +43,7 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       parse_domain_safety, parse_raises, split_quantifier,
                       split_relation_chain, unexpanded_prime_message)
 from . import linalg
-from ._scan import _split_commas
+from ._scan import _split_commas, blank_strings
 from .probing import (_close, _fmt, _prepare_sampling, _probe_density,
                       _sampling_shorthand, _synth, _synth_dict,
                       relation_holds_elementwise)
@@ -558,6 +558,11 @@ def claim(law: str, name: str | None = None, source: str = "user",
     # empirical cascade, and the record reports which mechanism
     # decided (the examine route). That normalization happens after
     # parsing, once the relation is known, see below.
+    if "#" in blank_strings(law):
+        raise InvalidConjecture(
+            f"`#` has no meaning in a claim and would silently cut off "
+            f"everything after it; remove it (a comment belongs outside "
+            f"the claim text): {law.strip()!r}")
     text, ambiguous_diff_vars = extract_diff_fraction_sugar(law.strip())
     # outcome section: stripped first, on raw text, extract_outcome_
     # clause recognizes any accepted "implies" spelling directly rather
@@ -682,7 +687,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
     # a residual `|` is a bar the grammar could not pair with another,
     # and left in place it reaches rendering as unparseable text
     for _side in (lhs, rhs):
-        if _side and "|" in _side:
+        if _side and "|" in blank_strings(_side):
             raise InvalidConjecture(
                 f"the bars in {_side!r} do not pair up. Each opening bar "
                 f"needs a closing one; abs(...), norm(...) and det(...) "
@@ -710,6 +715,11 @@ def claim(law: str, name: str | None = None, source: str = "user",
                     raise InvalidConjecture(
                         f"cannot read {_side.strip()!r} as an expression "
                         f"in the claim {law.strip()!r}") from None
+                problem = _unreadable_side(_side)
+                if problem is not None:
+                    raise InvalidConjecture(
+                        f"{problem} (in {_side.strip()!r}, claim "
+                        f"{law.strip()!r})")
     # the record's grammar names the linear-algebra dialect when the
     # claim uses the matrix vocabulary: informative only (a reader sees
     # the parsing was matrix-aware), never required to round-trip, the
@@ -756,6 +766,73 @@ def claim(law: str, name: str | None = None, source: str = "user",
                       negated=negated, assuming=assuming, outcome=outcome or "",
                       links=links, pseudo_infinity=pseudo_infinity,
                       meta=dict(meta or {}), raw=law)
+
+
+_NOT_CLAIM_SYNTAX = {
+    ast.Lambda: "a lambda",
+    ast.IfExp: "a conditional expression (`a if c else b`)",
+    ast.Yield: "`yield`",
+    ast.YieldFrom: "`yield`",
+    ast.Await: "`await`",
+    ast.ListComp: "a comprehension",
+    ast.SetComp: "a comprehension",
+    ast.DictComp: "a comprehension",
+    ast.GeneratorExp: "a comprehension",
+    ast.NamedExpr: "an assignment expression (`:=`)",
+    ast.JoinedStr: "an f-string",
+    ast.Starred: "argument unpacking (`*`)",
+    ast.Set: "a set literal",
+}
+_BITWISE_OPS = (ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
+
+
+def _unreadable_side(side: str) -> str | None:
+    """Intent:
+        Why one side of a relation is not claim syntax, or None when it
+        is. The side is Python expression text that already parses.
+
+    Notes:
+        An unparenthesised `and`/`or`/`not` heading a side means the
+        author joined two relations: Python precedence would read
+        `f(x) >= 1 and f(x) <= 2` as `f(x) >= (1 and f(x) <= 2)`, a
+        different and usually vacuous claim. A parenthesised boolean
+        (`f(a, b) == (a <= b)`) is a truth value and stays readable.
+        Keyword arguments, bitwise operators and the other refused
+        constructs have no reading in the claim grammar; accepting them
+        would drop or reinterpret part of what the author wrote.
+    """
+    tree = ast.parse(side.strip(), mode="eval").body
+    top_boolean = (isinstance(tree, ast.BoolOp)
+                   or (isinstance(tree, ast.UnaryOp)
+                       and isinstance(tree.op, ast.Not)))
+    if top_boolean and tree.col_offset == 0:
+        return ("`and`, `or` and `not` cannot join relations inside one "
+                "claim: state each relation as its own claim, or write a "
+                "bounded quantity as a chained comparison (`1 <= f(x) <= 2`); "
+                "a boolean value needs its own parentheses")
+    for node in ast.walk(tree):
+        what = _NOT_CLAIM_SYNTAX.get(type(node))
+        if what is not None:
+            return f"{what} is not claim syntax"
+        if isinstance(node, ast.Call) and node.keywords:
+            if any(k.arg is None for k in node.keywords):
+                return "argument unpacking (`**`) is not claim syntax"
+            return ("keyword arguments are not claim syntax: pass each "
+                    "argument by position")
+        if isinstance(node, ast.Constant) and (
+                isinstance(node.value, bytes) or node.value is Ellipsis):
+            return f"the literal {ast.unparse(node)} is not claim syntax"
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+            return ("`~` is not claim syntax; approximate equality is "
+                    "written `~=` (or `≈`)")
+        if isinstance(node, ast.BinOp) and isinstance(node.op, _BITWISE_OPS):
+            return "bitwise operators are not claim syntax"
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            return f"the attribute {node.attr!r} is not claim syntax"
+        if (isinstance(node, ast.Name) and node.id.startswith("__")
+                and node.id != _D_AT_SENTINEL):
+            return f"the name {node.id!r} is not claim syntax"
+    return None
 
 
 def _find_bare_reserved_name(src: str, param_names: set[str]) -> str | None:

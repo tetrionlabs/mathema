@@ -107,7 +107,8 @@ from sympy.printing.str import StrPrinter
 from ._math_vocab import _BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _SYMPY_FUNCS, _call_name
 from ._render_mode import (get_unicode_output as get_unicode_output,
                            set_unicode_output as set_unicode_output)
-from ._scan import _split_commas
+from ._scan import (_split_commas, mask_strings, outside_strings,
+                    sub_outside_strings, unmask_strings)
 # The domain model moved wholesale to domain.py (a sympy-free leaf);
 # these re-exports keep every `from .grammar import <name>` consumer
 # working. New code should import from mathema.domain directly.
@@ -604,7 +605,8 @@ def _expand_let(text: str) -> str:
         for part in _split_commas(bindings):
             name, _, expr = part.partition("=")
             name, expr = name.strip(), expr.strip()
-            rest = re.sub(rf"\b{re.escape(name)}\b", f"({expr})", rest)
+            rest = sub_outside_strings(
+                rf"\b{re.escape(name)}\b", f"({expr})", rest)
         text = rest
         m = _LET.match(text)
     return text
@@ -778,7 +780,9 @@ def extract_diff_fraction_sugar(text: str) -> tuple[str, frozenset[str]]:
                 ambiguous.add(f"d{name}")
         return f"d({expr}, {', '.join(expanded_vars)})"
 
-    rewritten = _rewrite_balanced_calls(text, _DIFF_FRAC_OPEN, rewrite)
+    rewritten = outside_strings(
+        lambda masked: _rewrite_balanced_calls(masked, _DIFF_FRAC_OPEN,
+                                               rewrite), text)
     return rewritten, frozenset(ambiguous)
 
 
@@ -904,6 +908,9 @@ def extract_let_bindings(
     text = apply_unicode_synonyms(text)
     if _LET_RUN_STARTS.match(text) is None:
         return {}, {}, text, {}, None
+    # quoted literals are data: masked for the whole run, so no binding
+    # substitutes into a string value
+    text, literals = mask_strings(text)
     funcs: dict[str, str] = {}
     free_domain: dict = {}
     aliases: dict[str, str] = {}
@@ -928,7 +935,8 @@ def extract_let_bindings(
                 continue
             dm = _LET_DECLARE.match(stripped)
             if dm is not None:
-                fname, bounds = dm.group(1), dm.group(2).strip()
+                fname = dm.group(1)
+                bounds = unmask_strings(dm.group(2).strip(), literals)
                 if fname in _BASE_SET_NAMES or bounds in _RESERVED_CARRIERS:
                     # the representation-declaration spelling: rebinding
                     # a named set's machine carrier, the same shape as
@@ -1017,7 +1025,8 @@ def extract_let_bindings(
     for target in aliases.values():
         text = re.sub(rf"\({re.escape(target)}\)(\s*{_MEMBERSHIP_OPS}\s)",
                       rf"{target}\1", text)
-    return funcs, free_domain, text, aliases, pseudo_infinity
+    return (funcs, free_domain, unmask_strings(text, literals), aliases,
+            pseudo_infinity)
 
 
 def _find_balanced_call(text: str, name_pattern: "re.Pattern", start: int):
@@ -1601,12 +1610,15 @@ def apply_unicode_synonyms(text: str) -> str:
     plain word `integral` before its own superscript half could
     otherwise be converted to `^<digits>` and glued onto `integral`
     with no separator."""
-    text = _collapse_integral_marks(text)
-    for sym, repl in _UNICODE.items():
-        text = text.replace(sym, repl)
-    text = _SUPERSCRIPT_RUN.sub(
-        lambda m: "^" + m.group(0).translate(_SUPERSCRIPT_TO_DIGIT), text)
-    return text
+    def substitute(masked: str) -> str:
+        masked = _collapse_integral_marks(masked)
+        for sym, repl in _UNICODE.items():
+            masked = masked.replace(sym, repl)
+        return _SUPERSCRIPT_RUN.sub(
+            lambda m: "^" + m.group(0).translate(_SUPERSCRIPT_TO_DIGIT),
+            masked)
+
+    return outside_strings(substitute, text)
 
 
 def normalize(text: str) -> str:
@@ -1649,9 +1661,12 @@ def normalize(text: str) -> str:
     meaning (the tuple's own comments state each constraint); a new
     sugar is added as a new entry in the right position, never by
     editing an existing pass."""
-    for sugar_pass in _NORMALIZE_PASSES:
-        text = sugar_pass(text)
-    return text
+    def run_passes(masked: str) -> str:
+        for sugar_pass in _NORMALIZE_PASSES:
+            masked = sugar_pass(masked)
+        return masked
+
+    return outside_strings(run_passes, text)
 
 
 def _replace_sigma_pi(text: str) -> str:
@@ -2081,18 +2096,21 @@ def _split_top_level(text: str, tokens: tuple) -> "tuple | None":
         every bracket pair, so a comparison inside parentheses (a
         generator expression's filter, a call argument) can never be
         mistaken for the law's own relation. None when no token occurs
-        at the top level.
+        at the top level. A token inside a quoted literal is data and
+        never splits.
     """
+    masked, literals = mask_strings(text)
     depth = 0
-    for i, ch in enumerate(text):
+    for i, ch in enumerate(masked):
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
             depth -= 1
         elif depth == 0:
             for tok in tokens:
-                if text.startswith(tok, i):
-                    return text[:i], tok, text[i + len(tok):]
+                if masked.startswith(tok, i):
+                    return (unmask_strings(masked[:i], literals), tok,
+                            unmask_strings(masked[i + len(tok):], literals))
     return None
 
 
@@ -2790,9 +2808,12 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     render_claim_text) would ever pass `{"pi"}`/`{"oo"}` here."""
     funcs = funcs | {"f"}
     expr = _node_to_sympy(ast.parse(text, mode="eval"), funcs)
-    s = to_canonical(expr, funcs, unicode, suppress_glyphs).replace("**", "^")
-    s = _abs_calls_to_bars(s)
-    if not unicode:
-        for symbol, backslash_name in _GREEK_TO_BACKSLASH.items():
-            s = s.replace(symbol, backslash_name)
-    return s
+    def respell(s: str) -> str:
+        s = _abs_calls_to_bars(s.replace("**", "^"))
+        if not unicode:
+            for symbol, backslash_name in _GREEK_TO_BACKSLASH.items():
+                s = s.replace(symbol, backslash_name)
+        return s
+
+    return outside_strings(
+        respell, to_canonical(expr, funcs, unicode, suppress_glyphs))
