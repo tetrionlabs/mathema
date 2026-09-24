@@ -391,3 +391,39 @@ def test_a_single_point_domain_still_reads():
 def test_an_unreadable_let_bound_says_what_is_wrong():
     with pytest.raises(InvalidConjecture, match="'banana' isn't a recognized"):
         claim("let c be banana, f(c) >= 0")
+
+
+# -- LaTeX commands ---------------------------------------------------------------
+
+@pytest.mark.parametrize("law, same_as", [
+    (r"for x in [-1, 1], f(x) >= \left| x \right|", "for x in [-1, 1], f(x) >= |x|"),
+    (r"for x in [0, 1], f(x) \leqslant 9", "for x in [0, 1], f(x) <= 9"),
+    (r"for x in [0, 1], f(x) \geqslant 0", "for x in [0, 1], f(x) >= 0"),
+    (r"for x in [0, 1], f(x) \le 9", "for x in [0, 1], f(x) <= 9"),
+    (r"for x in [0, 1], f(x) \ne -9", "for x in [0, 1], f(x) != -9"),
+    (r"for x in [0, 1], f(x) \neq -9", "for x in [0, 1], f(x) != -9"),
+    (r"\forall x \in [0, 1], f(x) \geq 0", "for x in [0, 1], f(x) >= 0"),
+    (r"f(\varphi) >= 0", "f(φ) >= 0"),
+    (r"f(\varepsilon) >= 0", "f(ε) >= 0"),
+])
+def test_a_latex_command_is_read_as_the_whole_command(law, same_as):
+    canon = assert_round_trips(law, total)
+    assert canon == canonical_claim_text(claim(same_as))
+
+
+def test_latex_equiv_reads_as_the_equivalence_relation():
+    assert claim(r"f \equiv g").relation == "=:="
+    assert canonical_claim_text(claim(r"f \equiv g")) == \
+        canonical_claim_text(claim("f =:= g"))
+
+
+@pytest.mark.parametrize("law, command", [
+    (r"f(\neg) >= 0", r"\neg"),
+    (r"f(\int) >= 0", r"\int"),
+    (r"f(x) >= \frob", r"\frob"),
+])
+def test_an_unknown_latex_command_is_named_in_the_refusal(law, command):
+    import re
+    with pytest.raises(InvalidConjecture,
+                       match=re.escape(f"LaTeX command `{command}`")):
+        claim(law)

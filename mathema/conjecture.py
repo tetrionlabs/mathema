@@ -733,6 +733,12 @@ def claim(law: str, name: str | None = None, source: str = "user",
                 try:
                     ast.parse(_side, mode="eval")
                 except SyntaxError:
+                    command = _LATEX_COMMAND.search(blank_strings(_side))
+                    if command is not None:
+                        raise InvalidConjecture(
+                            f"the LaTeX command `{command.group(0)}` has no "
+                            f"meaning in the claim grammar (in the claim "
+                            f"{law.strip()!r})") from None
                     raise InvalidConjecture(
                         f"cannot read {_side.strip()!r} as an expression "
                         f"in the claim {law.strip()!r}") from None
@@ -807,6 +813,8 @@ _NOT_CLAIM_SYNTAX = {
 }
 _BITWISE_OPS = (ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
 
+
+_LATEX_COMMAND = re.compile(r"\\[A-Za-z]+")
 
 _SPECIAL_CALL_SHAPES = {
     "d": "d(expr, var, ...) or d(expr, var, order)",

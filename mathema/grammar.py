@@ -398,6 +398,11 @@ _UNICODE = {
     # docstring.
     "\\neq": "!=", "\\ne": "!=", "\\approx": "~=", "\\infty": "oo",
     "\\leq": "<=", "\\le": "<=", "\\geq": ">=", "\\ge": ">=",
+    "\\leqslant": "<=", "\\geqslant": ">=", "\\equiv": "=:=",
+    "\\varepsilon": "ε", "\\varphi": "φ",
+    # sizing commands carry no meaning of their own: `\left| x \right|`
+    # is the bars it sizes
+    "\\left": "", "\\right": "",
     "\\cdot": "*", "\\times": "*", "\\pi": "pi", "\\forall": "for ",
     "\\in": " in ",
     # \partial(...)/\lim(...): call-prefix aliases only, same narrow
@@ -424,6 +429,12 @@ _UNICODE = {
     "𝜓": "ψ", "𝜔": "ω", "ς": "σ", "𝛤": "Γ", "𝛥": "Δ", "𝛩": "Θ", "𝛬": "Λ",
     "𝛯": "Ξ", "𝛴": "Σ", "𝛶": "Υ", "𝛷": "Φ", "𝛹": "Ψ", "𝛺": "Ω",
 }
+
+# a LaTeX command is the whole run of letters after its backslash, so
+# `\left` is never read as `\le` followed by `ft`
+_LATEX_COMMAND = re.compile(r"\\[A-Za-z]+")
+_LATEX_COMMANDS = {k: v for k, v in _UNICODE.items()
+                   if _LATEX_COMMAND.fullmatch(k)}
 
 RELATIONS = ("<=", ">=", "!=", "~=", "=:=", "==", "<", ">")
 _REL_LATEX = {"==": "=", "<=": r"\leq", ">=": r"\geq", "!=": r"\neq",
@@ -1705,8 +1716,11 @@ def apply_unicode_synonyms(text: str) -> str:
     with no separator."""
     def substitute(masked: str) -> str:
         masked = _radical_to_call(_collapse_integral_marks(masked))
+        masked = _LATEX_COMMAND.sub(
+            lambda m: _LATEX_COMMANDS.get(m.group(0), m.group(0)), masked)
         for sym, repl in _UNICODE.items():
-            masked = masked.replace(sym, repl)
+            if sym not in _LATEX_COMMANDS:
+                masked = masked.replace(sym, repl)
         return _SUPERSCRIPT_RUN.sub(
             lambda m: "^" + m.group(0).translate(_SUPERSCRIPT_TO_DIGIT),
             masked)
