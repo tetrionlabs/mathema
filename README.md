@@ -17,6 +17,10 @@ unresolved and says so.
 
 The name is Greek: μάθημα, a thing learned.
 
+Why it matters: [The bottleneck moved](https://tetrionlabs.com/why/), on how
+AI moves the bottleneck from writing code to reviewing it, and what mathema
+does about it.
+
 ## See it in action
 
 Here is a European call minus a European put on the same strike, both legs
@@ -316,6 +320,8 @@ array-shaped claims and `symbology` adds conventional notation.
 
 ## Documentation
 
+- [The bottleneck moved](https://tetrionlabs.com/why/): why verification, not
+  generation, is now the hard part of shipping AI-assisted code.
 - **[Quick start](https://mathema.tetrionlabs.com/quickstart/)**: five minutes,
   one function, and a claim that goes from falsified to proven.
 - [Claim-driven development](https://mathema.tetrionlabs.com/cdd/): the
