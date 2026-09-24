@@ -782,6 +782,45 @@ def _relativize_record_paths(spec: dict, root: str) -> None:
             fix(row)
 
 
+def base_route(route: "str | None") -> str:
+    """Intent:
+        A route as a claim is authored with it: `probe`, `derive` or
+        `best`, the subroute of an evidence route (`derive:extensive`)
+        dropped, and anything else read as `best`.
+    """
+    route = (route or "best").split(":", 1)[0]
+    return route if route in ("probe", "derive") else "best"
+
+
+def _stamp_authored_routes(spec: dict, claims: list) -> None:
+    """Intent:
+        Record on each claim row the route its claim was authored
+        with, as `authored.route`, beside the evidence route in
+        `route`. A claim authored with the default route is proven or
+        held by whichever route decided it, so the evidence route
+        alone cannot say how the claim was written.
+    """
+    authored = {c.get("name"): base_route(c.get("route"))
+                for c in claims if isinstance(c, dict) and c.get("name")
+                and (c.get("statement") or c.get("law"))}
+    for row in spec.get("claims") or []:
+        route = authored.get(row.get("name"))
+        if route is not None and row.get("statement"):
+            row.setdefault("authored", {})["route"] = route
+
+
+def authored_route(row: dict) -> str:
+    """Intent:
+        The route a verified row's claim was authored with: its
+        `authored.route` when the row records one, otherwise the base
+        of its evidence route, which is how a row written before the
+        authored route was kept reads.
+    """
+    stated = (row.get("authored") or {}).get("route") \
+        if isinstance(row.get("authored"), dict) else None
+    return base_route(stated or row.get("route"))
+
+
 def record(ex, key: str | None = None, root: str = ".",
           claims: list | None = None, declared_intent: str | None = None) -> str:
     """Write this explanation into the machine layer of the project store:
@@ -804,6 +843,7 @@ def record(ex, key: str | None = None, root: str = ".",
     path = os.path.join(verified_dir(root), f"{key}.yaml")
     spec = to_spec(ex)
     spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [])
+    _stamp_authored_routes(spec, claims or [])
     if declared_intent and not spec.get("intent"):
         # the declared layer's intent is the skeleton when the
         # docstring provides none, still the declared rung

@@ -516,10 +516,9 @@ def _union_verified_membership(current_claims: list,
         # reads them directly, never a rendered condition (`condition`
         # is the region the EVIDENCE covered, which on the derive
         # route may be narrower than the claim's own domain)
-        route = (row.get("route") or "best").split(":", 1)[0]
+        from .spec import authored_route
         rebuilt = {"name": name, "statement": statement,
-                   "route": route if route in ("derive", "probe")
-                   else "best"}
+                   "route": authored_route(row)}
         for field_name in ("domain", "grammar", "tolerance"):
             if row.get(field_name) is not None:
                 rebuilt[field_name] = row[field_name]

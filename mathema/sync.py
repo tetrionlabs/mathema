@@ -75,6 +75,34 @@ def _row_identity(row: dict) -> "tuple | None":
     return _claim_identity(row)
 
 
+def _checked_differently(c: dict, row: dict) -> bool:
+    """Intent:
+        Whether an authored claim asks to be checked differently from
+        its verified row, with the same statement: another tolerance,
+        or another route. A row that records its authored route is
+        compared with it directly; a row that does not (written before
+        the authored route was kept) differs only when the claim names
+        an explicit route its evidence route does not match, since a
+        default-route claim may have been decided by either route.
+    """
+    from .spec import base_route
+
+    def _tolerance(v):
+        try:
+            return None if v is None else float(v)
+        except (TypeError, ValueError):
+            return v
+
+    if _tolerance(c.get("tolerance")) != _tolerance(row.get("tolerance")):
+        return True
+    want = base_route(c.get("route"))
+    stated = (row.get("authored") or {}).get("route") \
+        if isinstance(row.get("authored"), dict) else None
+    if stated:
+        return want != base_route(stated)
+    return want != "best" and want != base_route(row.get("route"))
+
+
 def _display_claim(c: dict) -> str:
     """The one canonical spelling of a declared claim dict, for a
     conflict report; text that does not parse displays verbatim (the
@@ -126,7 +154,8 @@ def claim_conflicts(fn, file_entry: dict,
             if v is None or (name, "supersession") in seen:
                 continue
             fp_a, fp_v = _claim_identity(c), _row_identity(v)
-            if fp_a and fp_v and fp_a != fp_v:
+            if fp_a and fp_v and (fp_a != fp_v
+                                  or _checked_differently(c, v)):
                 seen.add((name, "supersession"))
                 out.append({"kind": "supersession", "claim": name,
                             "surface": surface,
@@ -175,11 +204,9 @@ def apply_verified_wins(claims: list, conflicts: list,
             # the row's statement is the canonical text, self-
             # contained; the structured fields ride beside it, so
             # nothing here re-parses a rendered condition
+            from .spec import authored_route
             rebuilt = {"name": name, "statement": row.get("statement"),
-                       "route": (row.get("route") or "best"
-                                 ).split(":", 1)[0]}
-            if rebuilt["route"] not in ("derive", "probe"):
-                rebuilt["route"] = "best"
+                       "route": authored_route(row)}
             for field_name in ("domain", "grammar", "tolerance"):
                 if row.get(field_name) is not None:
                     rebuilt[field_name] = row[field_name]
