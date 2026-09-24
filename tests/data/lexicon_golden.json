@@ -311,8 +311,8 @@
  },
  "named_under_test": {
   "input": "for price in [0,1000], rate in [0,1], discounted_price(price, rate) <= price",
-  "unicode": "let g = discounted_price, ∀ price ∈ [0.0, 1000.0] ⊂ ℝ ∪ {∅}, rate ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, g(price, rate) ≤ price",
-  "ascii": "let g = discounted_price, for price in [0.0, 1000.0]:float|missing, rate in [0.0, 1.0]:float|missing, g(price, rate) <= price"
+  "unicode": "∀ price ∈ [0.0, 1000.0] ⊂ ℝ ∪ {∅}, rate ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, discounted_price(price, rate) ≤ price",
+  "ascii": "for price in [0.0, 1000.0]:float|missing, rate in [0.0, 1.0]:float|missing, discounted_price(price, rate) <= price"
  },
  "let_alias_for_under_test": {
   "input": "let net = f, for price in [0,1000], rate in [0,1], net(price, rate) <= price",
@@ -356,8 +356,8 @@
  },
  "auto_let_long_func": {
   "input": "let compute_square_root = numpy.sqrt, for x in [0, 100], compute_square_root(x) >= 0",
-  "unicode": "let g = numpy.sqrt, ∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, g(x) ≥ 0",
-  "ascii": "let g = numpy.sqrt, for x in [0.0, 100.0]:float|missing, g(x) >= 0"
+  "unicode": "let compute_square_root = numpy.sqrt, ∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, compute_square_root(x) ≥ 0",
+  "ascii": "let compute_square_root = numpy.sqrt, for x in [0.0, 100.0]:float|missing, compute_square_root(x) >= 0"
  },
  "mixed_membership_and_relation": {
   "input": "for x ∈ [0, 1], f(x) <= 1",
@@ -606,13 +606,13 @@
  },
  "second_function_by_name": {
   "input": "d(budget_line(x, I, px, py), x) == -px/py",
-  "unicode": "let g = budget_line, ∂(g(x, I, px, py)/∂x) = -px/py",
-  "ascii": "let g = budget_line, d(g(x, I, px, py), x) = -px/py"
+  "unicode": "∂(budget_line(x, I, px, py)/∂x) = -px/py",
+  "ascii": "d(budget_line(x, I, px, py), x) = -px/py"
  },
  "let_function_bare_name": {
   "input": "let g = budget_line, d(g(x, I, px, py), x) == -px/py",
-  "unicode": "let g = budget_line, ∂(g(x, I, px, py)/∂x) = -px/py",
-  "ascii": "let g = budget_line, d(g(x, I, px, py), x) = -px/py"
+  "unicode": "∂(budget_line(x, I, px, py)/∂x) = -px/py",
+  "ascii": "d(budget_line(x, I, px, py), x) = -px/py"
  },
  "two_function_equality": {
   "input": "f(x) == g(x)",
@@ -621,8 +621,8 @@
  },
  "bound_function_nested_in_f": {
   "input": "let I be [10,1000], let px be [0.5,20], let py be [0.5,20], for a in [0.1,0.9], d(f(x, budget_line(x,I,px,py), a), x) @ {x = a*I/px} == 0",
-  "unicode": "let g = budget_line, let I be [10.0, 1000.0] ⊂ ℝ ∪ {∅}, let px be [0.5, 20.0] ⊂ ℝ ∪ {∅}, let py be [0.5, 20.0] ⊂ ℝ ∪ {∅}, ∀ a ∈ [0.1, 0.9] ⊂ ℝ ∪ {∅}, ∂(f(x, g(x, I, px, py), a)/∂x) at {x=I*a/px} = 0",
-  "ascii": "let g = budget_line, let I be [10.0, 1000.0]:float|missing, let px be [0.5, 20.0]:float|missing, let py be [0.5, 20.0]:float|missing, for a in [0.1, 0.9]:float|missing, d(f(x, g(x, I, px, py), a), x) @ {x=I*a/px} = 0"
+  "unicode": "let I be [10.0, 1000.0] ⊂ ℝ ∪ {∅}, let px be [0.5, 20.0] ⊂ ℝ ∪ {∅}, let py be [0.5, 20.0] ⊂ ℝ ∪ {∅}, ∀ a ∈ [0.1, 0.9] ⊂ ℝ ∪ {∅}, ∂(f(x, budget_line(x, I, px, py), a)/∂x) at {x=I*a/px} = 0",
+  "ascii": "let I be [10.0, 1000.0]:float|missing, let px be [0.5, 20.0]:float|missing, let py be [0.5, 20.0]:float|missing, for a in [0.1, 0.9]:float|missing, d(f(x, budget_line(x, I, px, py), a), x) @ {x=I*a/px} = 0"
  },
  "recurrence_identity": {
   "input": "for n in [2, 30] subset Z, f(n) == f(n-1) + f(n-2)",

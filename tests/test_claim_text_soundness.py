@@ -349,3 +349,12 @@ def test_a_bare_name_equation_is_not_read_as_another_binding(law):
     for unicode in (True, False):
         reparsed = claim(render_claim_text(claim(law), unicode=unicode))
         assert (reparsed.lhs, reparsed.relation) == ("r", "==")
+
+
+# -- identity: function aliases -------------------------------------------------
+
+def test_the_display_of_a_long_function_alias_is_the_same_claim():
+    law = ("let compute_square_root = numpy.sqrt, for x in [0, 100], "
+           "compute_square_root(x) >= 0")
+    canon = assert_round_trips(law, square)
+    assert "compute_square_root(x)" in canon
