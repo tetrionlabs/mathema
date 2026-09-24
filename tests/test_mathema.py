@@ -666,7 +666,7 @@ def test_conjecture_derive_route_proves_symbolically():
     def cube(x: float) -> float:
         return x * x * x
 
-    from mathema import Conjecture, check_conjectures, claim
+    from mathema import Conjecture, check_conjectures
     results = check_conjectures(cube, [Conjecture("odd", "f(-x)", "-f(x)", route="derive")])
     assert results[0].verdict == "proven"
     assert results[0].sketch is not None
@@ -684,7 +684,7 @@ def test_conjecture_derive_route_unliftable_is_skipped():
             total = total * v
         return total
 
-    from mathema import Conjecture, check_conjectures, claim
+    from mathema import Conjecture, check_conjectures
     results = check_conjectures(
         looped, [Conjecture("scale", "f(xs) * 2", "f(xs) * 2", route="derive")])
     # the loop stays unliftable (named in the note); the tautology then
