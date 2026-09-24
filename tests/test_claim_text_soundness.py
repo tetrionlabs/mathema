@@ -273,3 +273,26 @@ def test_a_reserved_form_with_its_shape_still_reads(law):
 def test_python_syntax_with_no_claim_reading_is_refused(law):
     with pytest.raises(InvalidConjecture, match="claim syntax"):
         claim(law)
+
+
+# -- identity: limits ---------------------------------------------------------
+
+def shifted_up(x: float) -> float:
+    return x + 1.0
+
+
+def test_a_one_sided_limit_keeps_its_side_in_its_identity():
+    right = claim("lim(f(x), x -> 0+) == 1")
+    left = claim("lim(f(x), x -> 0-) == 1")
+    both = claim("lim(f(x), x -> 0) == 1")
+    prints = {fingerprint_text(right), fingerprint_text(left),
+              fingerprint_text(both)}
+    assert len(prints) == 3
+    assert assert_round_trips("lim(f(x), x -> 0+) == 1", shifted_up) \
+        == "lim(f(x), x, 0+) = 1"
+    assert assert_round_trips("lim(f(x), x -> 0-) == 1") \
+        == "lim(f(x), x, 0-) = 1"
+    assert assert_round_trips("lim(f(x), x -> 0) == 1") \
+        == "lim(f(x), x, 0) = 1"
+    assert assert_round_trips("lim(f(x), x -> oo) == 0") \
+        == "lim(f(x), x, oo) = 0"

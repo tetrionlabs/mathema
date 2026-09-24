@@ -2426,7 +2426,9 @@ def _render_lim_call(node, args):
         # sympy conversion (a bare string, not an expression) and is
         # read off the AST here; sympy.Limit renders it as 0^+/0^-
         return sympy.Limit(args[0], args[1], args[2], dir=node.args[3].value)
-    return sympy.Limit(args[0], args[1], args[2])   # unevaluated: lim notation
+    # sympy's own default direction is "+", so a two-sided limit states
+    # "+-" explicitly and stays distinct from the one-sided one
+    return sympy.Limit(args[0], args[1], args[2], dir="+-")
 
 
 def _render_integrate_call(node, args):
@@ -2726,8 +2728,14 @@ class _CanonicalPrinter(StrPrinter):
         return f"{self._print(inner)}{marker}{{{pairs}}}"
 
     def _print_Limit(self, expr):
-        e, z, z0, _dir = expr.args
-        return f"lim({self.stringify((e, z, z0), ', ')})"
+        # a one-sided limit carries its side as a sign trailing the
+        # point (`lim(f(x), x, 0+)`), the same spelling the input reads;
+        # a limit at infinity has only one side to approach from
+        e, z, z0, direction = expr.args
+        side = (str(direction) if str(direction) in ("+", "-")
+                and not z0.is_infinite else "")
+        return (f"lim({self._print(e)}, {self._print(z)}, "
+                f"{self._print(z0)}{side})")
 
     def _print_Integral(self, expr):
         parts = [expr.function]
