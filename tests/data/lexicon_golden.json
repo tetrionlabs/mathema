@@ -309,6 +309,46 @@
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
   "ascii": "for x in [0.0, 1.0]:float|missing, f(x) >= 0"
  },
+ "sqrt_bare_radical": {
+  "input": "∀ x ∈ [1, 4], f(x) ≥ √x",
+  "unicode": "∀ x ∈ [1.0, 4.0] ⊂ ℝ ∪ {∅}, f(x) ≥ sqrt(x)",
+  "ascii": "for x in [1.0, 4.0]:float|missing, f(x) >= sqrt(x)"
+ },
+ "power_superscript_negative": {
+  "input": "∀ x ∈ [1, 2], f(x) ≥ x⁻¹",
+  "unicode": "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 1/x",
+  "ascii": "for x in [1.0, 2.0]:float|missing, f(x) >= 1/x"
+ },
+ "latex_equiv": {
+  "input": "let g = mathema.lexicon.double, f \\equiv g",
+  "unicode": "let g = mathema.lexicon.double, f ≡ g",
+  "ascii": "let g = mathema.lexicon.double, f =:= g"
+ },
+ "latex_leqslant": {
+  "input": "\\forall x \\in [0, 1], f(x) \\leqslant 2",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≤ 2",
+  "ascii": "for x in [0.0, 1.0]:float|missing, f(x) <= 2"
+ },
+ "latex_geqslant": {
+  "input": "\\forall x \\in [0, 1], f(x) \\geqslant 0",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in [0.0, 1.0]:float|missing, f(x) >= 0"
+ },
+ "latex_varepsilon": {
+  "input": "for x in [0, 1], abs(f(x) - x) \\leq \\varepsilon",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ ε",
+  "ascii": "for x in [0.0, 1.0]:float|missing, abs(x - f(x)) <= \\epsilon"
+ },
+ "latex_varphi": {
+  "input": "for \\varphi in [0, 1], f(\\varphi) \\leq 1",
+  "unicode": "∀ φ ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(φ) ≤ 1",
+  "ascii": "for φ in [0.0, 1.0]:float|missing, f(\\phi) <= 1"
+ },
+ "latex_left_right_bars": {
+  "input": "for x in [-1, 1], \\left| f(x) \\right| \\leq 2",
+  "unicode": "∀ x ∈ [-1.0, 1.0] ⊂ ℝ ∪ {∅}, |f(x)| ≤ 2",
+  "ascii": "for x in [-1.0, 1.0]:float|missing, |f(x)| <= 2"
+ },
  "named_under_test": {
   "input": "for price in [0,1000], rate in [0,1], discounted_price(price, rate) <= price",
   "unicode": "∀ price ∈ [0.0, 1000.0] ⊂ ℝ ∪ {∅}, rate ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, discounted_price(price, rate) ≤ price",

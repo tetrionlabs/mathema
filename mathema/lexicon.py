@@ -150,6 +150,18 @@ LEXICON: dict[str, str] = {
     "infinity_symbol": "∀ x ∈ [0, ∞), f(x) ≥ 0",
     "floor_brackets_unicode": "∀ x ∈ [0, 1], ⌊f(x)⌋ ≥ 0",
     "latex_command_forall": "\\forall x \\in [0, 1], f(x) \\geq 0",
+    # more accepted input spellings, each the same claim as its ascii
+    # form: a radical without parentheses takes the atom after it, a
+    # superscript minus is a negative power, and these LaTeX commands
+    # read as their symbols
+    "sqrt_bare_radical": "∀ x ∈ [1, 4], f(x) ≥ √x",
+    "power_superscript_negative": "∀ x ∈ [1, 2], f(x) ≥ x⁻¹",
+    "latex_equiv": "let g = mathema.lexicon.double, f \\equiv g",
+    "latex_leqslant": "\\forall x \\in [0, 1], f(x) \\leqslant 2",
+    "latex_geqslant": "\\forall x \\in [0, 1], f(x) \\geqslant 0",
+    "latex_varepsilon": "for x in [0, 1], abs(f(x) - x) \\leq \\varepsilon",
+    "latex_varphi": "for \\varphi in [0, 1], f(\\varphi) \\leq 1",
+    "latex_left_right_bars": "for x in [-1, 1], \\left| f(x) \\right| \\leq 2",
 
     # `f` is shorthand, never a requirement: the function under test
     # answers to its own name, and `let` renames it to whatever reads
@@ -394,7 +406,10 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "domain_blackboard_reals", "relation_approx_unicode",
         "power_superscript", "sqrt_symbol", "multiply_dot",
         "infinity_symbol", "floor_brackets_unicode",
-        "latex_command_forall"),
+        "latex_command_forall", "sqrt_bare_radical",
+        "power_superscript_negative", "latex_equiv", "latex_leqslant",
+        "latex_geqslant", "latex_varepsilon", "latex_varphi",
+        "latex_left_right_bars"),
     "domains": (
         "domain_excluded_point", "domain_discrete_strings",
         "domain_natural_numbers", "domain_complex", "relation_approx",
@@ -633,6 +648,14 @@ def add_two(x: float, y: float) -> float:
 def matmul(A, B):
     """The matrix product."""
     return A @ B
+
+
+def cosine_phase(φ: float) -> float:
+    """The cosine of a phase angle, written with the Greek letter as its
+    parameter name, what "latex_varphi" demonstrates: `\\varphi` in a
+    claim is that same parameter."""
+    import math
+    return math.cos(φ)
 
 
 def nearly_identity(x: float) -> float:
@@ -932,7 +955,7 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
     "nearly_identity": (nearly_identity, [
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
-        "tolerance_epsilon_latex",
+        "tolerance_epsilon_latex", "latex_varepsilon",
     ]),
     "double": (double, [
         "relation_eq", "relation_le_unicode", "power_caret", "abs_bars",
@@ -942,8 +965,11 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "domain_blackboard_reals", "relation_approx_unicode",
         "power_superscript", "sqrt_symbol", "multiply_dot",
         "infinity_symbol", "floor_brackets_unicode",
-        "latex_command_forall",
+        "latex_command_forall", "sqrt_bare_radical",
+        "power_superscript_negative", "latex_equiv", "latex_leqslant",
+        "latex_geqslant", "latex_left_right_bars",
     ]),
+    "cosine_phase": (cosine_phase, ["latex_varphi"]),
     "discount": (discount, ["raises_typed", "inferred_literal_domain"]),
     "center_of_mass_two_body": (center_of_mass_two_body, ["let_alias"]),
     "gibbs_free_energy": (gibbs_free_energy, [

@@ -87,6 +87,22 @@ symbol has a plain LaTeX command with no braces, that is accepted typed
 literally too, so `\forall x \in [0,1], f(x) \geq 0` is the same claim as
 its Unicode and ASCII forms.
 
+A few more spellings are accepted and read as their ascii forms:
+
+| Spelling | Reads as |
+|---|---|
+| `∀ x ∈ [1, 4], f(x) ≥ √x` | `√` without parentheses, the root of the atom after it |
+| `∀ x ∈ [1, 2], f(x) ≥ x⁻¹` | a superscript minus, a negative power |
+| `let g = mathema.lexicon.double, f \equiv g` | `\equiv`, function equivalence |
+| `\forall x \in [0, 1], f(x) \leqslant 2` | `\leqslant`, the slanted `<=` |
+| `\forall x \in [0, 1], f(x) \geqslant 0` | `\geqslant`, the slanted `>=` |
+| `for x in [0, 1], abs(f(x) - x) \leq \varepsilon` | `\varepsilon`, the claim's tolerance like `ε` |
+| `for \varphi in [0, 1], f(\varphi) \leq 1` | `\varphi`, the letter `φ` |
+| `for x in [-1, 1], \left| f(x) \right| \leq 2` | `\left`/`\right` sizing, dropped |
+
+A radical whose reach would be unclear (`√x^2`) is refused; write
+`√(x^2)` or `(√x)^2`.
+
 ### The look-alikes worth knowing about
 
 `⊂` (U+2282) is the subset operator the grammar accepts. **`⊆` (U+2286) is
