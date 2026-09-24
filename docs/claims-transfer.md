@@ -39,8 +39,8 @@ first reference the row materialises into the verified store at
 `declared` status; the resting claim stays `unknown` and its note
 names both paths forward:
 
-```
-$ mathema accept numpy.clip clip_lower --as trusted
+```bash
+mathema accept numpy.clip clip_lower --as trusted
 ```
 
 takes the row at the level its curator claims, and every conclusion
@@ -84,8 +84,8 @@ the guard exists.
 A library author who has run `mathema verify` on their own package can
 publish that evidence as a compendium others consume:
 
-```
-$ mathema compendium export mylib --out compendium/mylib/
+```bash
+mathema compendium export mylib --out compendium/mylib/
 ```
 
 reads the verified store, filters to `mylib`'s functions, and writes a
