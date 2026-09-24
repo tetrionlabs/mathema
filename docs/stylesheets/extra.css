@@ -163,3 +163,10 @@
 
 .md-typeset .mx-actions { display: flex; flex-wrap: wrap; gap: .8rem; margin: 1.5rem 0 1rem; }
 .md-typeset .mx-actions .md-button { margin: 0; }
+
+/* A table's first column names the row (a verdict, a spelling): its
+   code breaks only at spaces, never inside a word. */
+.md-typeset table:not([class]) td:first-child code {
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
