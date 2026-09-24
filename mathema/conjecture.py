@@ -721,7 +721,8 @@ def claim(law: str, name: str | None = None, source: str = "user",
                     f"`assuming` has no premise before its comma: state "
                     f"one (`assuming x > 0, ...`) or drop the keyword: "
                     f"{law.strip()!r}")
-            assuming = new_assuming
+            assuming = (_conjoin_assuming(assuming, new_assuming, law)
+                        if assuming else new_assuming)
         try:
             (new_funcs, new_free_domain, text, new_aliases,
              new_pseudo_inf) = extract_let_bindings(text)
@@ -1120,6 +1121,30 @@ def _parse_assuming_relation(part: str):
     return None
 
 
+def _conjoin_assuming(first: str, second: str, law: str) -> str:
+    """Intent:
+        Two `assuming` clauses of one claim as the single clause that is
+        their conjunction, in the order written:
+        `assuming m >= 3`, `assuming n >= 3` -> `assuming m >= 3 and n >= 3`.
+
+    Raises:
+        InvalidConjecture: when either clause is not a relation (or an
+            `and` of relations), since a definedness, lemma or structure
+            premise has its own clause shape and joining it to another
+            with `and` would change what it says.
+    """
+    bodies = [re.sub(r"^assuming\s+", "", c.strip()) for c in (first, second)]
+    for body in bodies:
+        if "-->" in body or any(_parse_assuming_relation(part) is None
+                                for part in _split_top_and(body)):
+            raise InvalidConjecture(
+                f"two `assuming` clauses are joined only when both are "
+                f"relations; state the premises in one `assuming` clause, "
+                f"joined with `and` (a bound on two dimensions can be "
+                f"`assuming min(m, n) >= 3`): {law.strip()!r}")
+    return "assuming " + " and ".join(bodies)
+
+
 def _split_top_and(text: str) -> list[str]:
     """A relation conjunction split at top-level ` and ` only, an
     `and` nested inside brackets never splits."""
@@ -1210,6 +1235,13 @@ def _interpret_assumption(cj, conjectures):
         parsed_list = []
         for part in _split_top_and(region_text):
             parsed = _parse_assuming_relation(part)
+            inner = part.strip()[1:-1].strip()
+            if (parsed is None and part.strip().startswith("(")
+                    and part.strip().endswith(")")
+                    and len(_split_top_and(inner)) > 1):
+                return skip(f"a parenthesised conjunction in an assuming "
+                            f"clause is not supported yet: write it without "
+                            f"the parentheses, `assuming {inner}`")
             if parsed is None:
                 return skip(f"assuming clause must be a plain relation "
                             f"(==, !=, >=, <=, >, <): {part!r}")

@@ -340,6 +340,14 @@ LEXICON: dict[str, str] = {
     # a premise relating two PARAMETERS is not a box at all, so it
     # reaches the prover as an assumption rather than by narrowing
     "premise_relates_two_params": "assuming hi >= lo, f(xs, lo, hi) >= 0",
+    # a dimension bound as a premise. `R^n` already means at least one
+    # element; anything beyond that is stated, and names the space's
+    # own dimensions. A rectangular bound on both axes is `min(m, n)`
+    "dim_premise_vector_bound": "assuming n >= 5, for xs in R^n, f(xs) == xs[4]",
+    "dim_premise_square_matrix": ("assuming n >= 3, for a in R^(n,n), "
+                                  "f(a) == a[2][2]"),
+    "dim_premise_rectangular_matrix": ("assuming min(m, n) >= 3, "
+                                       "for a in R^(m,n), f(a) == a[2][2]"),
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -419,7 +427,8 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "assuming_is_defined",
         "assuming_is_defined_postfix", "assuming_is_defined_pinned",
         "dim_premise_pins_length", "dim_premise_ties_two_lengths",
-        "premise_relates_two_params"),
+        "premise_relates_two_params", "dim_premise_vector_bound",
+        "dim_premise_square_matrix", "dim_premise_rectangular_matrix"),
     "functions": (
         "second_function_by_name", "let_function_bare_name",
         "two_function_equality", "bound_function_nested_in_f"),
@@ -456,6 +465,10 @@ TAGS: dict[str, tuple[str, ...]] = {
     "dim_conformability": ("shape", "conformable", "matching lengths"),
     "space_vector_real": ("vector space", "free dimension", "R^n"),
     "space_matrix": ("matrix space", "shape", "R^(m,n)"),
+    "dim_premise_vector_bound": ("minimum length", "at least", "vector size"),
+    "dim_premise_square_matrix": ("square matrix", "minimum size", "at least"),
+    "dim_premise_rectangular_matrix": ("rectangular matrix", "rows", "columns",
+                                       "minimum size"),
     "let_alias": ("alias", "abbreviation", "shorthand", "naming"),
     "let_pseudo_infinity": ("infinity", "unbounded", "limit of the range"),
     "derivative_call": ("derivative", "differentiate", "gradient", "slope"),
@@ -813,6 +826,20 @@ def spread_total(xs: list, lo: float, hi: float) -> float:
     return total
 
 
+def fifth_element(xs: list) -> float:
+    """The fifth element of a vector. It raises on anything shorter, so
+    "dim_premise_vector_bound" holds only under its premise `n >= 5`."""
+    return xs[4]
+
+
+def third_diagonal(a: list) -> float:
+    """The third diagonal entry of a matrix. It raises unless the matrix
+    has at least three rows and three columns, which is the premise
+    "dim_premise_square_matrix" and "dim_premise_rectangular_matrix"
+    state."""
+    return a[2][2]
+
+
 def weighted_average(x: list, alpha: float) -> float:
     """An exponentially weighted moving average: each step is a convex
     combination of the new element and the accumulator. What the
@@ -962,6 +989,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "sum_of_squares": (sum_of_squares, ["dim_premise_pins_length"]),
     "dot_product": (dot_product, ["dim_premise_ties_two_lengths"]),
     "spread_total": (spread_total, ["premise_relates_two_params"]),
+    "fifth_element": (fifth_element, ["dim_premise_vector_bound"]),
+    "third_diagonal": (third_diagonal, ["dim_premise_square_matrix",
+                                        "dim_premise_rectangular_matrix"]),
 }
 
 

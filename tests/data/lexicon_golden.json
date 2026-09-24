@@ -703,5 +703,20 @@
   "input": "assuming hi >= lo, f(xs, lo, hi) >= 0",
   "unicode": "assuming hi >= lo, f(xs, lo, hi) ≥ 0",
   "ascii": "assuming hi >= lo, f(xs, lo, hi) >= 0"
+ },
+ "dim_premise_vector_bound": {
+  "input": "assuming n >= 5, for xs in R^n, f(xs) == xs[4]",
+  "unicode": "assuming n >= 5, ∀ xs ∈ ℝⁿ ∪ {∅}, f(xs) = xs[4]",
+  "ascii": "assuming n >= 5, for xs in R^n|missing, f(xs) = xs[4]"
+ },
+ "dim_premise_square_matrix": {
+  "input": "assuming n >= 3, for a in R^(n,n), f(a) == a[2][2]",
+  "unicode": "assuming n >= 3, ∀ a ∈ ℝⁿˣⁿ ∪ {∅}, f(a) = a[2][2]",
+  "ascii": "assuming n >= 3, for a in R^(n,n)|missing, f(a) = a[2][2]"
+ },
+ "dim_premise_rectangular_matrix": {
+  "input": "assuming min(m, n) >= 3, for a in R^(m,n), f(a) == a[2][2]",
+  "unicode": "assuming min(m, n) >= 3, ∀ a ∈ ℝᵐˣⁿ ∪ {∅}, f(a) = a[2][2]",
+  "ascii": "assuming min(m, n) >= 3, for a in R^(m,n)|missing, f(a) = a[2][2]"
  }
 }

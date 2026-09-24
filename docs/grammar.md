@@ -343,10 +343,21 @@ watered down:
 | `assuming base_case is proven, for n in [2, 30] subset Z, f(n) == f(n-1) + f(n-2)` | that claim reached `proven` specifically |
 | `assuming is_defined(f), for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)` | that the function is defined there at all |
 | `assuming f is defined, for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)` | the postfix spelling of the same |
+| `assuming n >= 5, for xs in R^n, f(xs) == xs[4]` | a vector at least five long |
+| `assuming n >= 3, for a in R^(n,n), f(a) == a[2][2]` | a square matrix at least 3 by 3 |
+| `assuming min(m, n) >= 3, for a in R^(m,n), f(a) == a[2][2]` | a rectangular matrix with at least three rows and three columns |
 
-The last of these is how compositional claims are built: prove that a
-function is defined on a region, then assume it in the claims that
-depend on it, and the record keeps the dependency.
+A vector or matrix space is never empty, since `R^n` already means at
+least one element, so a dimension premise is needed only for a bound
+beyond that. Two `assuming` clauses in one claim are one premise, their
+conjunction: `assuming m >= 3, assuming n >= 3, ...` is stored as
+`assuming m >= 3 and n >= 3, ...`. Only relations are joined this way;
+a definedness, lemma or matrix structure premise is written as one
+clause of its own.
+
+The `f is defined` premise is how compositional claims are built:
+prove that a function is defined on a region, then assume it in the
+claims that depend on it, and the record keeps the dependency.
 
 ## Several functions in one claim
 
