@@ -1953,6 +1953,27 @@ def _guard_condition_params(facts) -> set:
                 named.add(sub.id)
     return named
 
+def _piece_point(piece):
+    """One point of a split piece: its single value when it has one,
+    else the midpoint of a finite interval, else a point one unit in
+    from its finite end. None for a piece with no such point."""
+    if isinstance(piece, frozenset):
+        return next(iter(piece)) if len(piece) == 1 else None
+    if isinstance(piece, tuple) and len(piece) == 2:
+        lo, hi = float(piece[0]), float(piece[1])
+        inf = float("inf")
+        if lo == hi:
+            return lo
+        if abs(lo) != inf and abs(hi) != inf:
+            return (lo + hi) / 2
+        if abs(lo) != inf:
+            return lo + 1.0
+        if abs(hi) != inf:
+            return hi - 1.0
+        return 0.0
+    return None
+
+
 def _has_calculus_call(src: str) -> bool:
     """Whether claim text calls `d`, `lim` or `integrate`."""
     try:
@@ -2019,8 +2040,16 @@ def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                                extensive=extensive, _split_depth=depth + 1)
             if result.status == "disproven":
                 piece_text = render_domain_bound(piece)
+                witness = dict(result.witness or {})
+                if p not in witness:
+                    # the piece fixed or narrowed p, so the sub-proof's
+                    # witness may not name it; a point of the piece does
+                    point = _piece_point(piece)
+                    if point is not None:
+                        witness[p] = point
                 return replace(result, sketch=f"on the sub-domain {p} in "
-                               f"{piece_text}: {result.sketch}")
+                               f"{piece_text}: {result.sketch}",
+                               witness=witness or result.witness)
             if result.status != "proven":
                 return None
             results.append((piece, result))
