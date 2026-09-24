@@ -567,7 +567,23 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     `assumption` is the claim's own premises as `(lhs, relation, rhs)`
     triples, the same form the scalar route takes: each one narrows the
     domain box, so a claim made under `assuming n >= 3` is adjudicated
-    over that region rather than over every `n`."""
+    over that region rather than over every `n`.
+
+    A premise that admits the empty list for a sequence the code cannot
+    fold when empty (it reads `xs[0]`, or divides by `len(xs)`) is
+    adjudicated on the executed call first; see
+    `_prove._empty_sequence_raise`."""
+    from ..analysis import analyze_source
+    from ._prove import _empty_sequence_raise
+    try:
+        empty = _empty_sequence_raise(fn, analyze_source(fn), lhs_src,
+                                      rhs_src, domain, assumption)
+    except TimeoutError:
+        raise
+    except Exception:
+        empty = None
+    if empty is not None:
+        return empty
     domain = dict(domain or {})
     if view.other_params:
         # the claim's own quantifier wins; the signature's

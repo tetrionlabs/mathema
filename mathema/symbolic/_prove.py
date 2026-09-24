@@ -2213,6 +2213,10 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                     f"pass stops at {notes['unread']}, so a raise inside the "
                     "domain is not ruled out"),
             meta=dict(result.meta))
+    empty = _empty_sequence_raise(fn, facts, lhs_src, rhs_src, domain,
+                                  assumption)
+    if empty is not None:
+        return empty
     if result.status == "proven":
         kink = _derivative_kink(fn, facts, lhs_src, rhs_src, domain)
         if kink is not None:
@@ -2223,6 +2227,114 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                         f"domain does not exclude"),
                 meta=dict(result.meta))
     return result
+
+
+def _first_axis_length(seq, axis):
+    """`dim(seq, 0)` of a plain list, its length."""
+    if axis != 0:
+        raise ValueError("only the first axis of a list has a length")
+    return len(seq)
+
+
+def _premises_admit_empty(name: str, assumption) -> bool:
+    """Whether the `assuming` conjuncts put the empty list in `name`'s
+    domain: at least one of them reads `len(name)` (canonically
+    `dim(name, 0)`), and every one that reads it holds at length
+    zero."""
+    import re
+    pattern = re.compile(rf"\b(?:len\(\s*{re.escape(name)}\s*\)"
+                         rf"|dim\(\s*{re.escape(name)}\s*,\s*0\s*\))")
+    ops = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
+           "<=": lambda a, b: a <= b, ">=": lambda a, b: a >= b,
+           "<": lambda a, b: a < b, ">": lambda a, b: a > b}
+    mentioned = False
+    for lhs, rel, rhs in assumption or ():
+        text = f"{lhs} {rhs}"
+        if not pattern.search(text):
+            continue
+        mentioned = True
+        try:
+            env = {"len": len, "dim": _first_axis_length, name: []}
+            lv = eval(compile(str(lhs), "<premise>", "eval"),
+                      {"__builtins__": {}}, env)
+            rv = eval(compile(str(rhs), "<premise>", "eval"),
+                      {"__builtins__": {}}, env)
+            holds = ops[rel](lv, rv)
+        except Exception:
+            continue
+        if not holds:
+            return False
+    return mentioned
+
+
+def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
+                          assumption) -> "ProofResult | None":
+    """Intent:
+        A disproof with an executed witness when the claim's premises
+        admit the empty list for a sequence parameter, the claim calls
+        f at its own parameters, and f raises when called with the
+        empty list there; an undecided result when f raises but the
+        claim calls it at other arguments; None otherwise.
+
+    Notes:
+        A fold's closed form has a value at length zero (the initial
+        value, or a sum over nothing), while the code may read
+        `xs[0]` or divide by `len(xs)` and raise. The other arguments
+        are drawn from the declared domain.
+    """
+    import random
+
+    from ..probing import _synth
+    seqs = [p for p in facts.params
+            if facts.param_kinds.get(p) == "sequence"]
+    targets = [p for p in seqs if _premises_admit_empty(p, assumption)]
+    if not targets:
+        return None
+    identity = True
+    for src in (lhs_src, rhs_src):
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            return None
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+                    and n.func.id == "f" and [getattr(a, "id", None)
+                                              for a in n.args] != list(facts.params):
+                identity = False
+    rng = random.Random(0)
+    for target in targets:
+        args = []
+        for p in facts.params:
+            if p == target:
+                args.append([])
+                continue
+            kind = facts.param_kinds.get(p, "float")
+            try:
+                args.append(_synth(kind, rng, (domain or {}).get(p)))
+            except Exception:
+                return None
+        try:
+            fn(*args)
+        except Exception as e:
+            exc = type(e).__name__
+        else:
+            continue
+        where = ", ".join(f"{p} = {a!r}" for p, a in zip(facts.params, args))
+        if not identity:
+            return ProofResult(
+                "undecided",
+                sketch=f"f raises {exc} on the empty list the premises admit "
+                       f"for {target} ({where}), and the claim calls f at "
+                       f"other arguments")
+        return ProofResult(
+            "disproven",
+            sketch=f"f raises {exc} at {where}, an empty list the premises "
+                   f"admit, so the claim has no value there; narrow the "
+                   f"premise to len({target}) >= 1, or state the raising "
+                   f"case as its own raises(...) claim",
+            counterexample=where,
+            meta={"mathema.witness_executed": True})
+    return None
 
 
 def _derivative_kink(fn, facts, lhs_src: str, rhs_src: str,
