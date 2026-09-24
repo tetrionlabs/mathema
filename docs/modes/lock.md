@@ -38,13 +38,72 @@ function's alpha-normalised AST with the docstring stripped, so:
 
 ## What verify does with a tripped lock
 
-```text
-$ mathema verify
+Take the [tutorial](../tutorial.md) project once `settle` is fixed:
+
+<!-- example: tripped file=funcs.py -->
+```python
+def settle(x: float) -> float:
+    """Settlement amount for a signed exposure x."""
+    return abs(x)
+
+
+def midpoint(a: float, b: float) -> float:
+    """The midpoint of two values."""
+    return (a + b) / 2.0
+```
+
+<!-- example: tripped file=demo.claims.yaml -->
+```yaml
+funcs.settle:
+  claims:
+    - name: nonneg
+      statement: "for x in [-5, 5], f(x) >= 0"
+      route: probe
+    - name: symmetric_in_sign
+      statement: "for x in [-5, 5], f(x) == f(-x)"
+      route: probe
+funcs.midpoint:
+  claims:
+    - name: commutative
+      statement: "f(a, b) == f(b, a)"
+      route: derive
+```
+
+Verify it, and lock `settle`:
+
+<!-- example: tripped run -->
+```bash
+mathema verify
+```
+
+<!-- example: tripped session -->
+```
+$ mathema lock funcs.settle --note "settled implementation"
+locked funcs.settle at form 3eb01e1d9919
+the body can no longer change under a CDD loop; docstring edits are unaffected. A human unlocks with: mathema unlock funcs.settle
+```
+
+A later loop iteration rewrites the body:
+
+<!-- example: tripped file=funcs.py -->
+```python
+def settle(x: float) -> float:
+    """Settlement amount for a signed exposure x."""
+    return x if x > 0 else -x
+
+
+def midpoint(a: float, b: float) -> float:
+    """The midpoint of two values."""
+    return (a + b) / 2.0
+```
+
+<!-- example: tripped session -->
+```
+$ mathema verify; echo $?
 ok   funcs.midpoint: fresh
-FAIL funcs.settle: locked at form 3eb01e1d9919 but the code is now d70deb99df0e; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
+FAIL funcs.settle: locked at form 3eb01e1d9919 but the code is now 1ce1c0e16be4; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
 1 fresh (form unchanged, skipped), 0 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
-$ echo $?
 1
 ```
 

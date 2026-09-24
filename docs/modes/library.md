@@ -65,8 +65,22 @@ declared surfaces only: type markers, decorator, and docstring claims
 still run, but no suggestions are added.
 
 Returns a `Record`: the facts read off the function, and one `Probe`
-per claim adjudicated.
+per claim adjudicated. For the exponential moving average of the
+[first look](../first-look.md):
 
+<!-- example: ema run slow -->
+```python
+import mathema
+
+def ema(x: list, alpha: float) -> float:
+    """Exponentially weighted moving average."""
+    y = x[0]
+    for v in x[1:]:
+        y = alpha * v + (1 - alpha) * y
+    return y
+```
+
+<!-- example: ema repl -->
 ```python
 >>> mathema.check(ema)
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
@@ -82,6 +96,9 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
            counterexample alpha=8.52571, h=0.0171: curvature estimate 3.64705e+06 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
+  FALSIFY is_deterministic[float]: f(x, alpha) = f(x, alpha)
+           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308
+           [mathematics sound, implementation:numerical-instability]
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=160)
   holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=12)
@@ -91,23 +108,38 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
            counterexample ([2.59648, 2.09269], -7.84153): 6.5469484767516235 vs 2.596479621674405
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
            counterexample ([6.22429, 5.95714, 3.98826, -6.56235, 7.20359, 1.66103, -8.45295], -5.87836): 78066.38231536481 vs -1129152.7241483687
-  proven  scale_equivariant: let g = mathema.f.scale_seq, c*f(x, alpha) = f(g(x, c), alpha)
+  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  proven  translation_equivariant: let g = mathema.f.shift_seq, c + f(x, alpha) = f(g(x, c), alpha)
+  FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
+           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308, c=-5
+           [mathematics sound, implementation:numerical-instability]
+  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
+  FALSIFY translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
+           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308, c=-5
+           [mathematics sound, implementation:numerical-instability]
 ```
 
 Read the `FALSIFY` rows as facts about `ema`, not as bugs in it. The
 suggestions ask standard questions of any function, and a falsified
 suggestion is an answer, with the witness to prove it: an exponential
 average really is neither monotone nor order-independent in its inputs.
-Two of the answers change once the function's real domain is stated.
-Checked with `domain={"alpha": (0, 1)}`, the bounds that failed for an
-unbounded `alpha` are proven outright:
+Each `[float]` row is the float companion of the proof above it: the
+algebra is sound, and at `-1e+308` the float implementation overflows
+to a non-finite value, which the row tags
+`implementation:numerical-instability`. Two of the answers change once
+the function's real domain is stated. Checked with
+`domain={"alpha": (0, 1)}`, the bounds that failed for an unbounded
+`alpha` are proven outright, and their float companions hold (an
+excerpt):
 
-```text
+<!-- example: ema repl match=subset -->
+```python
+>>> mathema.check(ema, domain={"alpha": (0, 1)})
   proven  bounded_lower: min(x) ≤ f(x, alpha)
+  holds   bounded_lower[float]: min(x) <= f(x, alpha) (n=44)
   proven  bounded_upper: f(x, alpha) ≤ max(x)
+  holds   bounded_upper[float]: f(x, alpha) <= max(x) (n=44)
 ```
 
 That is the loop in miniature: the suggestion found the assumption the
