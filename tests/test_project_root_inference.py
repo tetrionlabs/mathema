@@ -29,7 +29,7 @@ def _git_init(path):
 def fake_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / ".mathema").mkdir(parents=True)
-    (home / ".mathema" / "pro-license.json").write_text("{}")
+    (home / ".mathema" / "config.json").write_text("{}")
     monkeypatch.setenv("HOME", str(home))
     return home
 

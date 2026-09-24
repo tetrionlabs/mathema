@@ -24,8 +24,8 @@ Two methods share one prompt and one stamp:
   (the 6-digit codes that change every 30 seconds). Implemented and
   tested; not yet the promoted path.
 
-The ``verified_by: {method, key}`` stamp is an open shape: an
-enterprise deployment verifying against its own security layer (SSO,
+The ``verified_by: {method, key}`` stamp is an open shape: a
+deployment verifying against its own security layer (SSO,
 hardware keys) stamps the same two facts its own way.
 """
 from __future__ import annotations

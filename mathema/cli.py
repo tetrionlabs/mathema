@@ -851,7 +851,7 @@ def cmd_audit(args) -> int:
         ]),
         ("tested", [("tested", lambda r: r["test_covered"] or "?")]),
         # a locked function's body cannot change until a human unlocks:
-        # the assurance column, showing who pinned it
+        # the guarantee column, showing who pinned it
         ("locked", [("locked", lambda r: "-" if not r.get("locked")
                      else "yes" + (f" ({r['locked']['by']})"
                                    if r["locked"].get("by") else ""))]),

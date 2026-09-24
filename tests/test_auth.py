@@ -203,7 +203,7 @@ def test_policy_requires_verification(project):
 
 
 def test_policy_can_disable_the_static_pin(project, tty):
-    # the enterprise ruling: methods: [totp] means a static PIN, even
+    # the ruling: methods: [totp] means a static PIN, even
     # correctly entered, does not satisfy the policy
     from mathema.acceptance import apply_acceptance, plan_acceptance
     _write_policy(project,

@@ -712,7 +712,7 @@ def test_audit_tree_layout_nests_module_class_function(tmp_path):
     # the default layout: one line for the module, one per enclosing
     # class, functions indented under their own scope, the key
     # column carries only the leaf name, so the dotted prefix's width
-    # is paid once, not per row
+    # is spent once, not per row
     root = _write_pkg(tmp_path, _CLASS_BODY)
     r = _run(root, "audit", "trialpkg")
     assert r.returncode == 0, r.stdout + r.stderr
