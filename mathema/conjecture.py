@@ -1065,12 +1065,21 @@ def _interpret_assumption(cj, conjectures):
     return conjuncts_of(text, text)
 
 
+#: how to write each math constant when a parameter of the same name
+#: takes the bare token
+_CONSTANT_SPELLINGS = {
+    "e": "write exp(1) for Euler's number",
+    "pi": "write acos(-1) for pi",
+}
+
+
 def _shadowed_constants(lhs: str, rhs: str, param_names: set) -> list[str]:
     """Intent:
         Math-constant names (`e`/`pi`) that a real parameter shadows: a
         bare `ast.Name` in the law that is both a `MATH_CONSTANTS` name
         AND a parameter. The parameter wins (unchanged), but the caller
-        warns, pointing at `exp(1)`, so the reading is never silent.
+        warns, naming the spelling that still reaches the constant
+        (`_CONSTANT_SPELLINGS`), so the reading is never silent.
 
     Notes:
         Value position only: a name in a call's function slot (there is
@@ -1950,7 +1959,8 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         if shadowed:
             note += (f"; {', '.join(shadowed)} read as the parameter"
                      f"{'s' if len(shadowed) > 1 else ''}, not the math "
-                     f"constant, write exp(1) for Euler's number")
+                     f"constant, "
+                     + ", ".join(_CONSTANT_SPELLINGS[c] for c in shadowed))
         assumption = _interpret_assumption(cj, conjectures)
         if isinstance(assumption, Probe):
             out.append(_stamped(assumption, cj))
