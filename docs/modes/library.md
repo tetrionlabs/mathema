@@ -37,6 +37,17 @@ Whether the code itself *rejects* an out-of-domain input is a separate
 question: opt into it with the `excluding` keyword, which adds an
 `excluded_outside_domain[param]` claim per declared parameter.
 
+Domains are per claim. `domain=` and the signature's `Annotated`
+markers form the function-level parent domain, which every claim
+inherits; a claim's own `for` binding overrides the parent for that
+parameter. One claim's quantifier never reaches another claim, so
+`f(x) >= 0` checked beside `for x in [0, 1e6], f(x) >= 0` still means
+every x. Each record states what it was adjudicated over: the claim's
+own bindings in its `domain` and `condition`, the parent's share in
+`meta["mathema.parent_domain"]`. The `excluding` keyword reads the
+parent domain only: a parameter bounded only inside one claim has no
+function-level outside to exclude.
+
 A parameter or return type hinted with a mathema type marker
 (`Annotated[float, Probability]`, `Annotated[list, Shape("m", "n")]`)
 contributes its own claims automatically; see

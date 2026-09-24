@@ -654,6 +654,45 @@ def _has_equality_constraint(bound_context) -> bool:
                for atom in bound_context.atoms(AppliedPredicate))
 
 
+def _piecewise_seed_points(diff, free: list, bounds: dict) -> list[dict]:
+    """Intent:
+        Points on the switching surfaces of `diff`'s Piecewise
+        conditions, one coordinate per symbol in `free`: the surface
+        solved for one symbol, the rest at the midpoint and ends of
+        their sampling hull (0, 1 and -1 when unbounded). An integer
+        symbol keeps only integer values. Empty when `diff` has no
+        Piecewise, or the solve outruns the fast wall-clock cap.
+    """
+    if not diff.has(sympy.Piecewise):
+        return []
+    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from ._guard_points import diff_surfaces, surface_points
+
+    candidates: dict = {}
+    for sym in free:
+        hull = bounds.get(sym)
+        values = ([(hull[0] + hull[1]) / 2, hull[0], hull[1]]
+                  if hull is not None else [0.0, 1.0, -1.0])
+        if getattr(sym, "is_integer", False):
+            values = [round(v) for v in values]
+        candidates[str(sym)] = list(dict.fromkeys(values))
+    symbols = {str(sym): sym for sym in free}
+    try:
+        found = _with_timeout(
+            lambda: surface_points(diff_surfaces(diff), symbols, candidates),
+            FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return []
+    out = []
+    for point in found:
+        full = {sym: point.get(str(sym), candidates[str(sym)][0])
+                for sym in free}
+        if all(not getattr(sym, "is_integer", False)
+               or float(v).is_integer() for sym, v in full.items()):
+            out.append(full)
+    return out
+
+
 def _corroborate_disproof(diff, domain: dict, params: dict,
                           bound_context=None, tolerance: float = 1e-9):
     """A concrete counterexample point for `diff != 0`, found by the
@@ -745,13 +784,23 @@ def _corroborate_disproof(diff, domain: dict, params: dict,
             except (TypeError, ValueError, NotImplementedError):
                 pass
     rng = random.Random(_RNG_SEED)
-    for _ in range(_DISPROOF_CORROBORATION_TRIALS):
+
+    def _drawn():
         point = {}
         for sym in free:
             v = _synth_scalar(rng, bounds[sym])
             if getattr(sym, "is_integer", False):
                 v = round(v)
             point[sym] = v
+        return point
+
+    # a case-split difference can be nonzero only where one of its
+    # Piecewise conditions switches arm (`Eq(x*y, 0)`), a set random
+    # draws never land on: the solutions of those conditions inside the
+    # domain are tried first
+    seeds = _piecewise_seed_points(diff, free, bounds)
+    for trial in range(len(seeds) + _DISPROOF_CORROBORATION_TRIALS):
+        point = seeds[trial] if trial < len(seeds) else _drawn()
         if any(member_of[sym] is not None and not domain_contains(v, member_of[sym])
                for sym, v in point.items()):
             continue

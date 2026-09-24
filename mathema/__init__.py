@@ -285,7 +285,7 @@ def _doc_only_facts(fn) -> Facts:
     )
 
 
-def _expand_claim_keywords(claims: list, fn, facts, merged_domain: dict,
+def _expand_claim_keywords(claims: list, fn, facts, parent_domain: dict,
                            extensive: bool) -> list:
     """Intent:
         Replace battery keywords inside a claims list with the hazard
@@ -351,8 +351,10 @@ def _expand_claim_keywords(claims: list, fn, facts, merged_domain: dict,
                 out.append(_replace(cj, source="user"))
         if "excluded_outside_domain" in member_names:
             # never battery-suggested: generated here per parameter
-            # with a declared bound (there is no outside otherwise)
-            for p in sorted(merged_domain):
+            # the function-level parent domain bounds (there is no
+            # outside otherwise); a claim's own quantifier is not a
+            # function-level domain and generates nothing here
+            for p in sorted(parent_domain):
                 if p in facts.params:
                     out.append(claim(f"excluded_outside_domain({p})"))
     return out
@@ -411,7 +413,9 @@ def _domains_from_claims(claims) -> dict:
         caller sees. Where two claims bound the same parameter, the
         first stands: the battery only needs one legal region to
         synthesise a call in, and each claim is still adjudicated
-        against its own domain regardless.
+        against its own domain regardless. The built-in battery is the
+        only reader: these regions never become a function-level domain
+        for any claim.
     """
     from .conjecture import claim as _claim
 
@@ -490,14 +494,14 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     see types.py) contributes its own claims automatically: a domain
     marker merges into `domain` (an explicitly passed bound for the same
     parameter wins), and a `Shape` marker adds a structural probe. Purely
-    additive, a function with no markers behaves exactly as before. The
-    docstring's own `Types:` block (see types.py) desugars to the same
-    markers and merges the same way; a docstring `Domain:` block (see
-    docstring.py, for a bound that isn't one of the established markers,
-    most commonly a fold's own accumulator/item name) is a third domain
-    source, between the two: signature markers, then the docstring's
-    `Domain:` block, then an explicitly passed `domain=` still wins on a
-    name collision, the most deliberate of the three.
+    additive, a function with no markers behaves exactly as before.
+
+    Domains are per claim. The signature markers and `domain=` together
+    are the function-level parent domain; each claim is adjudicated over
+    that parent with its own `for` bindings overriding it per parameter,
+    and one claim's bindings never reach another claim. A claim's record
+    states its own bindings in `domain`/`condition` and whatever the
+    parent supplied in `meta["mathema.parent_domain"]`.
 
     A `@claims_decorator(...)`-tagged function, or a docstring `Claims:`
     block (see authoring.py), also contributes its claims automatically,
@@ -512,16 +516,16 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     from .types import _TYPE_PROBE_TRIALS, domain_from_signature, type_probes
 
     facts = analyze(fn)
-    # a claim's own quantifier is where a domain is stated; the
-    # signature markers are the only other source, and an explicit
-    # domain= wins over both. The quantifier has to reach the built-in
-    # battery too, not only the claim it was written on: sampling a
-    # parameter outside the region the author declared and then
-    # reporting that the function raised there manufactures a gap that
-    # is an artefact of the battery rather than a fact about the code.
-    merged_domain = {**domain_from_signature(fn),
-                     **_domains_from_claims(claims),
-                     **(domain or {})}
+    # the function-level parent domain: signature markers, then an
+    # explicit domain= winning per parameter. Each claim is adjudicated
+    # over this parent with its own `for` bindings overriding it per
+    # parameter; one claim's bindings never reach another claim.
+    parent_domain = {**domain_from_signature(fn), **(domain or {})}
+    # the built-in battery only needs somewhere the function can be
+    # called: a parameter the parent leaves open is synthesised inside
+    # a region some claim declared for it, so the battery never reports
+    # a raise outside every region the author stated
+    battery_domain = {**_domains_from_claims(claims), **parent_domain}
 
     from .inventory import function_dependencies
     deps = function_dependencies(fn, facts)
@@ -537,7 +541,7 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         return ps
 
     probes = _stamp_surface(
-        probe(fn, facts, domain=merged_domain or None,
+        probe(fn, facts, domain=battery_domain or None,
               trials=trials, trials_scale=trials_scale, extensive=extensive),
         "builtin")
 
@@ -555,7 +559,7 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     suggested = claims is None
     if suggested:
         claims = suggest_claims(fn, facts=facts, extensive=extensive)
-    claims = _expand_claim_keywords(claims, fn, facts, merged_domain,
+    claims = _expand_claim_keywords(claims, fn, facts, parent_domain,
                                     extensive)
     built = [claim(c) if isinstance(c, str) else c for c in claims]
     explicit = []
@@ -594,7 +598,7 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                                      on_conflict="silent")
     all_claims = entry_claims(merged_entry)
     if all_claims:
-        probes = probes + check_conjectures(fn, all_claims, domain=merged_domain or None,
+        probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
                                             trials=trials, trials_scale=trials_scale,
                                             facts=facts, extensive=extensive,
                                             known_premises=known_premises,

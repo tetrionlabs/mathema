@@ -172,9 +172,11 @@ def test_stale_test_is_excluded_but_reclaimable(tmp_path):
 
     from mathema.impl_coverage import remedy
 
+    # the first guard is a string comparison: no guard solution the
+    # probe pins reaches it, so only a test covers that line
     mod = _load(tmp_path, '''
         def route(n: int) -> int:
-            if n == 999999:
+            if str(n) == "999999":
                 return -1
             if n <= 0:
                 return 0

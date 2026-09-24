@@ -82,8 +82,8 @@
 [ ] docs/modes/init.md:64
 [ ] docs/modes/init.md:76
 [ ] docs/modes/init.md:101
-[ ] docs/modes/library.md:59
-[ ] docs/modes/library.md:97
+[ ] docs/modes/library.md:70
+[ ] docs/modes/library.md:108
 [ ] docs/modes/lock.md:41
 [ ] docs/modes/pin.md:30
 [ ] docs/modes/review.md:55

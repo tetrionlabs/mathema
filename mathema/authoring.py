@@ -324,23 +324,21 @@ class DomainError(ValueError):
 
 
 def _domain_from_declared_claims(fn, key: str | None, root: str) -> dict:
-    """Every `for p in [lo, hi]: ...`-quantified interval already declared
-    on `fn`'s own claims (decorator, docstring, and; if `key` is given,
-    a claims.yaml file too, via `resolve_declared()`), collapsed to a
-    single `{param: (lo, hi)}` dict. This is `enforce_domain()`'s real
+    """Every `for p in ...`-quantified domain already declared on `fn`'s
+    own claims (decorator, docstring, and, if `key` is given, a
+    claims.yaml file too, via `resolve_declared()`), collapsed to a
+    single `{param: bound}` dict. This is `enforce_domain()`'s real
     source of truth: a claim's own stated domain and the runtime guard
-    both come from here, never two independently-typed numbers. Only an
-    unambiguous interval bound is picked up, either `declare()`'s
-    current `{"lo", "hi", ...}` dict encoding, or the legacy `[lo, hi]`
-    list shape a claim declared before this encoding changed may still
-    carry, a `"Z"`/`"N"`/discrete-set claim domain isn't auto-derived
-    this way (`enforce_domain()`'s own runtime guard only ever checks
-    numeric-range containment; picking those up here would need new
-    guard logic this function doesn't add). Raises immediately if two
-    declared claims disagree on the same parameter's interval; that
-    disagreement is exactly the kind of divergence this function exists
-    to catch before it reaches a runtime guard."""
-    from .grammar import Interval
+    both come from here, never two independently-typed copies. Every
+    stored shape is read back with `domain_bound_from_json`: an
+    interval (the `{"lo", "hi", ...}` dict or the legacy `[lo, hi]`
+    list), `"Z"`/`"N"`, a discrete set, and a composite `Domain` (a
+    union, an exclusion such as `\\ {∅}`, an explicit base type).
+    Raises immediately if two declared claims disagree on the same
+    parameter's domain; that disagreement is exactly the kind of
+    divergence this function exists to catch before it reaches a
+    runtime guard."""
+    from .domain import domain_bound_from_json
 
     entries = declared_from_function(fn)
     if key is not None:
@@ -350,21 +348,13 @@ def _domain_from_declared_claims(fn, key: str | None, root: str) -> dict:
                                  file_entry)["claims"]
     out: dict = {}
     for c in entries:
-        for p, bounds in (c.get("domain") or {}).items():
-            if isinstance(bounds, list) and len(bounds) == 2 \
-                    and all(isinstance(v, (int, float)) for v in bounds):
-                interval = tuple(bounds)
-            elif isinstance(bounds, dict) and "lo" in bounds and "hi" in bounds:
-                interval = Interval(bounds["lo"], bounds["hi"],
-                                    closed_lo=bounds.get("closed_lo", True),
-                                    closed_hi=bounds.get("closed_hi", True))
-            else:
-                continue
-            if p in out and out[p] != interval:
+        for p, stored in (c.get("domain") or {}).items():
+            bound = domain_bound_from_json(stored)
+            if p in out and out[p] != bound:
                 raise DomainError(
                     f"enforce_domain(): declared claims on {fn.__name__!r} "
-                    f"disagree on {p!r}'s domain ({out[p]} vs {interval})")
-            out[p] = interval
+                    f"disagree on {p!r}'s domain ({out[p]} vs {bound})")
+            out[p] = bound
     return out
 
 
@@ -396,10 +386,10 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
     exactly, or this raises at decoration time rather than silently
     picking a value and letting the two drift apart. Every domain shape
     `check()` accepts is enforced here too: an `(lo, hi)` interval,
-    `"Z"`/`"N"` (integer / non-negative integer), and an explicit
-    discrete set (only reachable via an explicit `domain=`, since a
-    declared claim's own set-shaped domain isn't auto-derived, see
-    `_domain_from_declared_claims()`). A parameter no source says
+    `"Z"`/`"N"` (integer / non-negative integer), an explicit
+    discrete set, and a composite domain (`[0, 100] \\ {∅}`,
+    `[0, 100] ⊂ Z`, a union), whether declared on a claim or passed
+    explicitly. A parameter no source says
     anything about is left unchecked; this only ever narrows what a
     function accepts, never widens it, so composing it with the
     function's own existing guards (if any) is always safe."""
@@ -413,9 +403,11 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
         declared_domain = _domain_from_declared_claims(fn, key, root)
         explicit = domain or {}
         for p, bounds in explicit.items():
-            if p in declared_domain and declared_domain[p] != tuple(bounds):
+            given = (tuple(bounds) if isinstance(bounds, (list, tuple))
+                     else bounds)
+            if p in declared_domain and declared_domain[p] != given:
                 raise DomainError(
-                    f"enforce_domain(): explicit domain for {p!r} {tuple(bounds)} "
+                    f"enforce_domain(): explicit domain for {p!r} {given} "
                     f"conflicts with the declared claim domain "
                     f"{declared_domain[p]} on {fn.__name__!r}; these must "
                     "not diverge")
