@@ -1448,7 +1448,7 @@ def load_declared(root: str = ".") -> dict:
             mark = getattr(e, "problem_mark", None)
             where = f" at line {mark.line + 1}" if mark is not None else ""
             raise ClaimsFileError(
-                f"{rel_path}: does not parse as YAML{where}") from None
+                f"{rel_path}: malformed YAML{where}") from None
         if data is None:
             continue
         validate_claims_file(data, rel_path)
