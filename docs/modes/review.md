@@ -69,8 +69,10 @@ it is the proof's own quantifier) but not a probe row (where it merely
 restates the statement and domain); a per-row `grammar` appears only when
 it differs from the record's grammar. Claim rows are sorted by name, so a
 non-deterministic probe order never shows up as a diff. None of this
-touches the integrity checksum, which covers only each claim's name,
-verdict, and acceptance, plus the identity and lock forms.
+touches the integrity checksum, which covers each claim's name,
+statement, domain, route, tolerance, verdict and acceptance, the rows
+of the `discoveries`, `historical` and `superseded` sections, plus the
+identity and lock forms.
 
 **Surface versus author.** Two provenance facts are kept apart, because
 they answer different questions:

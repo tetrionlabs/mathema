@@ -285,16 +285,21 @@ def enforce_policy(attestation: dict | None, root: str = ".") -> None:
 def acceptance_policy_problems(key: str, entry: dict,
                                policy: dict) -> list[str]:
     """The verify-time check (the CI gate): every non-stale acceptance
-    in a record must carry a `verified_by` the policy accepts. Returns
-    problem strings; empty without a policy."""
+    on a live claim, every acceptance on a retirement row (`discoveries`,
+    `historical`, `superseded`), and the intent acceptance must carry a
+    `verified_by` the policy accepts. Returns problem strings; empty
+    without a policy."""
     if not policy or not policy.get("require_verification"):
         return []
     problems = []
     methods = policy.get("methods")
     keys = policy.get("keys")
 
-    def _check(owner: str, accepted: dict) -> None:
-        if not isinstance(accepted, dict) or accepted.get("stale"):
+    def _check(owner: str, accepted: dict, *, retired: bool = False) -> None:
+        # a stale acceptance on a live claim no longer exempts anything;
+        # a retirement row keeps retiring its claim whatever it says
+        if not isinstance(accepted, dict) or (
+                accepted.get("stale") and not retired):
             return
         vb = accepted.get("verified_by")
         if not isinstance(vb, dict):
@@ -315,6 +320,15 @@ def acceptance_policy_problems(key: str, entry: dict,
     for c in entry.get("claims") or []:
         if c.get("accepted"):
             _check(f"claim {c.get('name')!r}", c["accepted"])
+    # a retirement row takes its claim out of the gate, so its
+    # acceptance is held to the same policy; a row carrying no
+    # acceptance at all retires nothing, and the sweep reports it apart
+    for section in ("discoveries", "historical", "superseded"):
+        for row in entry.get(section) or []:
+            if isinstance(row, dict) and isinstance(row.get("accepted"),
+                                                    dict):
+                _check(f"{section} row {row.get('name')!r}",
+                       row["accepted"], retired=True)
     if entry.get("intent_accepted"):
         _check("intent", entry["intent_accepted"])
     return problems

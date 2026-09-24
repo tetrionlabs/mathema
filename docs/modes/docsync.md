@@ -31,7 +31,8 @@ mathema docsync [mypkg ...] [--root .] [--yes] [--write-docstrings] [--report] [
   (`∀ x ∈ [0.0, 5.0] ⊂ ℝ ∪ {∅}`), grammar output round-trips, so
   that one string IS the canonical region form, and repopulation
   parses it back. Records carry the git commit at adjudication and
-  an integrity checksum over (claim, verdict) pairs; a hand-edit is
+  an integrity checksum over each claim's statement, verdict and
+  acceptance, and over the retirement rows; a hand-edit is
   reported as "altered outside mathema" (an acceptance write is
   mathema's own hand and restamps). Concepts are the one deliberate
   exception to append-only: recomputed fresh each run, since tags

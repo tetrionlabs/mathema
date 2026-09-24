@@ -6,7 +6,8 @@ MEMBERSHIP; a claim deleted from every authoring surface is
 repopulated from its verified row and keeps being adjudicated; its
 exits are supersession or the human `historical` acceptance, never
 silent removal. Records stamp the git commit and an integrity
-checksum over (claim, verdict) pairs so hand-edits are detectable."""
+checksum over each claim's statement and verdict so hand-edits are
+detectable."""
 import os
 import shutil
 import subprocess

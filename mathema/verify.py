@@ -361,10 +361,10 @@ def _drop_retired_declared(key: str, current_claims: list,
         remedy; a different law under the same name is new authorship
         and adjudicates normally.
     """
-    discoveries = (verified_entry or {}).get("discoveries") or []
+    from .acceptance import _same_law_as, honoured_retirements
+    discoveries = honoured_retirements(verified_entry, "discoveries")
     if not discoveries or not current_claims:
         return current_claims, []
-    from .acceptance import _same_law_as
     matchers = []
     for row in discoveries:
         if not row.get("name"):
@@ -431,10 +431,10 @@ def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
         again on the way out, before gating and the record write. The
         note is emitted once per name per key.
     """
-    discoveries = (verified_entry or {}).get("discoveries") or []
+    from .acceptance import _same_law_as, honoured_retirements
+    discoveries = honoured_retirements(verified_entry, "discoveries")
     if not discoveries or not probes:
         return probes, []
-    from .acceptance import _same_law_as
     matchers = []
     for row in discoveries:
         if not row.get("name"):
@@ -495,12 +495,9 @@ def _union_verified_membership(current_claims: list,
         return current_claims
     have = {c.get("name") or _auto_claim_name(c) for c in current_claims}
     out = list(current_claims)
-    retired = {d.get("name") for d in
-               (verified_entry.get("discoveries") or [])} | \
-              {h.get("name") for h in
-               (verified_entry.get("historical") or [])} | \
-              {h.get("name") for h in
-               (verified_entry.get("superseded") or [])}
+    from .acceptance import RETIREMENT_SECTIONS, honoured_retirements
+    retired = {r.get("name") for section in RETIREMENT_SECTIONS
+               for r in honoured_retirements(verified_entry, section)}
     for row in verified_entry.get("claims") or []:
         name = row.get("name")
         statement = row.get("statement") or row.get("law")
@@ -632,6 +629,13 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          "passed": False, "problems": [msg],
                          "integrity_mismatch": False, "counts": {},
                          "claims": []})
+    key_problems: dict = {}   # key -> failure lines raised outside the gate
+
+    def _fail(key: str, msg: str) -> None:
+        out.problems.append(msg)
+        out.lines.append(f"FAIL {msg}")
+        key_problems.setdefault(key, []).append(msg)
+
     pending: list = []   # (key, why, claims_for_gate, rec_or_none,
                          #  deps, accepted, unresolved, source_line)
     for key in keys:
@@ -644,8 +648,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # the policy would refuse to write today fails the sweep, so an
         # unverified sign-off cannot ride in through the record file
         for msg in acceptance_policy_problems(key, verified_entry, policy):
-            out.problems.append(msg)
-            out.lines.append(f"FAIL {msg}")
+            _fail(key, msg)
+        from .acceptance import unaccepted_retirements
+        for section, name in unaccepted_retirements(verified_entry):
+            _fail(key, f"{key}: the {section} row {name!r} carries no "
+                       f"acceptance, and only `mathema accept` retires a "
+                       f"claim, so it retires nothing; remove the row, or "
+                       f"accept the claim with `mathema accept {key} "
+                       f"{name} --as ...`")
         recorded_form = (verified_entry.get("identity") or {}).get("form")
         declared_info = declared.get(key)
         source = (declared_info or verified_info)["source"]
@@ -681,13 +691,19 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # authoring.py's three-surface precedence), merge before
         # adjudicating or fingerprinting, so both see the same,
         # complete claim set
-        stored_integrity = (verified_entry.get("identity") or {}).get(
-            "integrity")
-        if stored_integrity:
-            from .spec import integrity_checksum, integrity_diagnosis
-            if integrity_checksum(verified_entry) != stored_integrity:
-                out.lines.append(integrity_diagnosis(key, verified_entry, root))
-                integrity_warned.add(key)
+        from .spec import integrity_diagnosis, integrity_matches
+        if integrity_matches(verified_entry) is False:
+            integrity_warned.add(key)
+            diagnosis = integrity_diagnosis(key, verified_entry, root)
+            if policy.get("require_verification"):
+                # under a policy that requires human-verified sign-offs
+                # the record's own contents are part of the evidence,
+                # so a mismatch fails the sweep rather than warning
+                _fail(key, diagnosis.replace("WARN ", "", 1)
+                      + " This project's policy requires verification, "
+                        "so the mismatch fails the run.")
+            else:
+                out.lines.append(diagnosis)
         file_entry = declared_info["entry"] if declared_info else {}
         # a record the running version cannot parse (a claim whose
         # statement no longer reads as a law) is a per-key finding
@@ -708,8 +724,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                     msg = (f"{key}: claim {conflict['claim']!r} differs "
                            f"between the docstring and the declared file, "
                            f"run `mathema docsync` to resolve")
-                out.problems.append(msg)
-                out.lines.append(f"FAIL {msg}")
+                _fail(key, msg)
             merged_entry = resolve_declared(fn, file_entry=file_entry)
             current_claims = merged_entry.get("claims") or []
             if verified_entry:
@@ -784,8 +799,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                    f".mathema/meta/locks.yaml has no entry; a lock is "
                    f"only removed by a human running `mathema unlock "
                    f"{key}` (restore the entry, or unlock properly)")
-            out.problems.append(msg)
-            out.lines.append(f"FAIL {msg}")
+            _fail(key, msg)
         from .compendium import premise_state as _premise_state
         premise_now = _premise_state(current_claims, stub_premises)
         recorded_premises = (verified_entry.get("meta") or {}).get(
@@ -833,9 +847,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 entry_now = verified_info["entry"]
                 if entry_now.get("locked") != want:
                     entry_now["locked"] = want
-                    from .spec import integrity_checksum
-                    entry_now.setdefault("identity", {})["integrity"] = \
-                        integrity_checksum(entry_now)
+                    if key not in integrity_warned:
+                        from .spec import integrity_checksum
+                        entry_now.setdefault("identity", {})["integrity"] = \
+                            integrity_checksum(entry_now)
                     write_yaml(os.path.join(root, verified_info["source"]),
                                {key: entry_now},
                                header=f"machine record; binds to form "
@@ -887,6 +902,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # record where the verdict moved (the memoization rung's verdict
     # depends on the STORE, never on this function's own form)
     settled = load_verified(root)
+    from .spec import integrity_checksum
     for key, why, claims_for_gate, rec, deps, _accepted, _unres, vinfo in pending:
         if deps is None:
             continue
@@ -906,6 +922,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             entry = vinfo["entry"] if vinfo else None
             if entry is not None:
                 recorded_form = (entry.get("identity") or {}).get("form")
+                if key not in integrity_warned:
+                    # restamp only a record that matched before this
+                    # write, so settling never clears a mismatch
+                    entry.setdefault("identity", {})["integrity"] = \
+                        integrity_checksum(entry)
                 write_yaml(os.path.join(root, vinfo["source"]), {key: entry},
                            header=f"machine record; binds to form "
                                   f"{recorded_form}")
@@ -921,6 +942,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         c["sketch"] = dc_now.sketch
                         c["counterexample"] = dc_now.counterexample
                 recorded_form = (entry["entry"].get("identity") or {}).get("form")
+                entry["entry"].setdefault("identity", {})["integrity"] = \
+                    integrity_checksum(entry["entry"])
                 write_yaml(os.path.join(root, entry["source"]),
                            {key: entry["entry"]},
                            header=f"machine record; binds to form "
@@ -930,7 +953,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     for key, why, claims_for_gate, rec, deps, accepted, unres, _vinfo in pending:
         report = gate(claims_for_gate, strict=strict,
                       accepted_risk=accepted, unresolved=unres)
-        state = "FAIL" if report.problems else "ok"
+        state = "FAIL" if report.problems or key_problems.get(key) else "ok"
         if why == "locked-changed":
             # the record is left as it was, so its counts describe code
             # that no longer exists: the row is the lock failure alone
@@ -956,9 +979,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.keys.append({
             "key": key,
             "why": why,
-            "passed": not report.problems and key not in lock_messages,
+            "passed": (not report.problems and key not in lock_messages
+                       and not key_problems.get(key)),
             "problems": ([lock_messages[key]] if key in lock_messages
-                         else []) + list(report.problems),
+                         else []) + key_problems.get(key, [])
+                        + list(report.problems),
             "integrity_mismatch": key in integrity_warned,
             "counts": {"proven": report.proven, "holds": report.holds,
                        "refuted": report.refuted,

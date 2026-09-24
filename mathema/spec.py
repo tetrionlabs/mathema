@@ -555,27 +555,33 @@ def _git_commit(root: str) -> "str | None":
     return sha if out.returncode == 0 and len(sha) == 40 else None
 
 
-def integrity_checksum(entry: dict) -> str:
+_INTEGRITY_SCHEME = "v2"
+
+
+def _acceptance_summary(row: dict) -> str:
     """Intent:
-        The tamper-evidence checksum over a verified entry's key
-        fields: sorted (claim name, verdict, acceptance) triples plus
-        the form hash and any lock stamp. Acceptance is summarized as
-        (as, verified_by key, staleness), so a hand-forged or
-        hand-stripped sign-off trips the mismatch the same way an
-        edited verdict does. Deliberately narrow otherwise;
-        notes/sketches/meta are free to be reformatted. Advisory: a
-        mismatch warns and points at the fix, it does not block.
+        A claim row's acceptance as the checksum sees it: the
+        disposition, the key id of any credential that verified it, and
+        whether it has gone stale.
+    """
+    accepted = row.get("accepted")
+    if not isinstance(accepted, dict):
+        return ""
+    vb = accepted.get("verified_by") or {}
+    return (f"{accepted.get('as', '')}:{vb.get('key', '')}"
+            f":{1 if accepted.get('stale') else 0}")
+
+
+def _legacy_integrity_checksum(entry: dict) -> str:
+    """Intent:
+        The checksum a record carries when it was stamped before the
+        current scheme: sorted (claim name, verdict, acceptance) triples
+        plus the form hash and any lock stamp, as a bare 16-hex digest.
+        Kept so a record stamped that way still verifies unchanged.
     """
     import hashlib
-    def _acc(c: dict) -> str:
-        accepted = c.get("accepted")
-        if not isinstance(accepted, dict):
-            return ""
-        vb = accepted.get("verified_by") or {}
-        return (f"{accepted.get('as', '')}:{vb.get('key', '')}"
-                f":{1 if accepted.get('stale') else 0}")
-
-    rows = sorted((c.get("name") or "", c.get("verdict") or "", _acc(c))
+    rows = sorted((c.get("name") or "", c.get("verdict") or "",
+                   _acceptance_summary(c))
                   for c in entry.get("claims") or [])
     basis = "|".join(f"{n}={v};{a}" for n, v, a in rows)
     basis += f"#form={(entry.get('identity') or {}).get('form', '')}"
@@ -583,6 +589,76 @@ def integrity_checksum(entry: dict) -> str:
     if isinstance(locked, dict):
         basis += f"#locked={locked.get('form', '')}"
     return hashlib.sha256(basis.encode()).hexdigest()[:16]
+
+
+def integrity_checksum(entry: dict) -> str:
+    """Intent:
+        The tamper-evidence checksum over a verified entry's material
+        content, spelled `v2:<16 hex>`. It covers, for every live claim
+        row, what the claim states (name, statement, domain, route,
+        tolerance), its verdict and its acceptance (as, verified_by
+        key, staleness); every row of the `discoveries`, `historical`
+        and `superseded` sections the same way; the form hash, the
+        claims fingerprint, the intent acceptance and any lock stamp.
+        A hand edit to any of these, including a row added to a
+        retirement section, trips the mismatch. Notes, sketches and
+        meta are free to be reformatted.
+    Notes:
+        The digest is unkeyed, so it detects an edit made without
+        recomputing it; anyone who can run the computation can restamp
+        a record. A mismatch warns, and under a policy with
+        `require_verification` it fails the sweep.
+    """
+    import hashlib
+    import json
+
+    def _row(section: str, c: dict) -> str:
+        if not isinstance(c, dict):
+            return f"{section}|{json.dumps(c, sort_keys=True, default=str)}"
+        fields = {"name": c.get("name") or "",
+                  "statement": c.get("statement") or c.get("law") or "",
+                  "verdict": c.get("verdict") or "",
+                  "route": c.get("route") or "",
+                  "tolerance": c.get("tolerance"),
+                  "domain": c.get("domain"),
+                  "superseded_by": c.get("superseded_by"),
+                  "accepted": _acceptance_summary(c)}
+        return f"{section}|" + json.dumps(fields, sort_keys=True,
+                                          default=str)
+
+    parts = sorted(_row("claims", c) for c in entry.get("claims") or [])
+    for section in ("discoveries", "historical", "superseded"):
+        parts.extend(sorted(_row(section, c)
+                            for c in entry.get(section) or []))
+    identity = entry.get("identity") or {}
+    parts.append(f"#form={identity.get('form', '')}")
+    parts.append(f"#claims_fingerprint="
+                 f"{identity.get('claims_fingerprint', '')}")
+    intent_accepted = entry.get("intent_accepted")
+    if isinstance(intent_accepted, dict):
+        parts.append("#intent=" + _acceptance_summary(
+            {"accepted": {"as": "documented", **intent_accepted}}))
+    locked = entry.get("locked")
+    if isinstance(locked, dict):
+        parts.append(f"#locked={locked.get('form', '')}")
+    digest = hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+    return f"{_INTEGRITY_SCHEME}:{digest}"
+
+
+def integrity_matches(entry: dict) -> "bool | None":
+    """Intent:
+        Whether a verified entry's contents match its stored integrity
+        checksum, under whichever scheme stamped it: a `v2:` checksum
+        is compared with `integrity_checksum`, a bare digest with the
+        earlier scheme. None when the entry carries no checksum at all.
+    """
+    stored = (entry.get("identity") or {}).get("integrity")
+    if not stored:
+        return None
+    stored = str(stored)
+    if stored.startswith(f"{_INTEGRITY_SCHEME}:"):
+        return integrity_checksum(entry) == stored
+    return _legacy_integrity_checksum(entry) == stored
 
 
 def pin_summary(entry: dict) -> "dict | str":
@@ -781,8 +857,10 @@ def record(ex, key: str | None = None, root: str = ".",
         except Exception:
             prior = None
     prior_lineage = (prior or {}).get("lineage") or {}
-    if prior is not None and \
-            ((prior.get("identity") or {}).get("integrity") == new_integrity):
+    prior_stamp = ((prior or {}).get("identity") or {}).get("integrity")
+    if prior is not None and prior_stamp and integrity_matches(
+            {**spec, "identity": {**spec["identity"],
+                                  "integrity": prior_stamp}}):
         if prior_lineage.get("date"):
             spec.setdefault("lineage", {})["date"] = prior_lineage["date"]
         spec.setdefault("lineage", {})["commit"] = \
@@ -804,10 +882,11 @@ def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
         provenance) rather than re-recording from a live check.
 
     Notes:
-        The checksum covers claim names, verdicts, acceptance and the
-        form hash, so an amendment touching any of those recomputes it
-        honestly; everything else in the entry is written exactly as
-        given.
+        The checksum covers what each claim states, its verdict and
+        acceptance, the retirement rows and the form hash (see
+        `integrity_checksum`), so an amendment touching any of those
+        recomputes it honestly; everything else in the entry is
+        written exactly as given.
     """
     entry.setdefault("identity", {})["integrity"] = integrity_checksum(entry)
     form = (entry.get("identity") or {}).get("form", "")

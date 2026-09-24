@@ -80,12 +80,10 @@ def mismatched_records(root: str = ".") -> list:
     """The verified records whose contents no longer match their stored
     integrity checksum: the ones a reconcile (or a re-verify) addresses
     after a merge, rebase, or a declared-claim edit."""
-    from .spec import integrity_checksum, load_verified
+    from .spec import integrity_matches, load_verified
     out = []
     for key, info in load_verified(root).items():
-        entry = info.get("entry") or {}
-        stored = (entry.get("identity") or {}).get("integrity")
-        if stored and integrity_checksum(entry) != stored:
+        if integrity_matches(info.get("entry") or {}) is False:
             out.append(key)
     return sorted(out)
 
@@ -212,6 +210,37 @@ def _adjudicate_candidate(root: str, key: str, statement: str,
     if not probes:
         return None, "the candidate did not adjudicate"
     return probes[0], None
+
+
+RETIREMENT_SECTIONS = ("discoveries", "historical", "superseded")
+
+
+def honoured_retirements(entry: dict, section: str) -> list:
+    """Intent:
+        The rows of one retirement section (`discoveries`, `historical`
+        or `superseded`) that retire a claim: those carrying an
+        `accepted` block, which every acceptance writes as it moves a
+        row there. A row without one did not come through `mathema
+        accept` and retires nothing.
+    """
+    return [r for r in (entry or {}).get(section) or []
+            if isinstance(r, dict) and isinstance(r.get("accepted"), dict)]
+
+
+def unaccepted_retirements(entry: dict) -> list:
+    """Intent:
+        The retirement rows that carry no `accepted` block, as
+        `(section, name)` pairs: rows `honoured_retirements` leaves
+        out, which the sweep reports.
+    """
+    out = []
+    for section in RETIREMENT_SECTIONS:
+        for r in (entry or {}).get(section) or []:
+            if not (isinstance(r, dict)
+                    and isinstance(r.get("accepted"), dict)):
+                name = r.get("name") if isinstance(r, dict) else None
+                out.append((section, name))
+    return out
 
 
 def _same_law_as(statement: str):
@@ -810,10 +839,12 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
         return
     prior_claims = {c.get("name"): c for c in prior_entry.get("claims") or []
                     if c.get("name")}
-    discovery_rows = [d for d in prior_entry.get("discoveries") or []
+    discovery_rows = [d for d in honoured_retirements(prior_entry,
+                                                      "discoveries")
                       if d.get("name")]
     historical_names = {h.get("name")
-                        for h in prior_entry.get("historical") or []
+                        for h in honoured_retirements(prior_entry,
+                                                      "historical")
                         if h.get("name")}
     if discovery_rows or historical_names:
         # a claim accepted as historical is retained under its own

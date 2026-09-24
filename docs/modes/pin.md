@@ -82,7 +82,8 @@ agent with unrestricted shell could delete the credential file or edit
 mathema itself; what it cannot do is produce a valid `verified_by`
 stamp in the normal course of work, and every subversion leaves a
 visible trace: a missing credential, a key id mismatch, an integrity
-checksum failure (the checksum covers the acceptance block). Calibrate
+checksum failure (the checksum covers the acceptance block and every
+retirement row). Calibrate
 trust accordingly, the same way the evidence ladder asks you to.
 
 ## Project policy
@@ -102,7 +103,12 @@ refused: no credential when one is required, a static PIN where only
 stronger methods are allowed, a key outside the allowlist. At
 **verify time**, every *standing* acceptance in the record is checked
 too, so an unverified sign-off cannot ride in through a hand-edited
-YAML file: `mathema verify` fails the run, which is the CI gate.
+YAML file: `mathema verify` fails the run, which is the CI gate. That
+includes the rows of the `discoveries`, `historical` and `superseded`
+sections, since each one takes a claim out of the gate. Under
+`require_verification` a record whose integrity checksum no longer
+matches its contents also fails the run, where without a policy it
+only warns.
 
 ### CI, GitHub, GitLab
 
