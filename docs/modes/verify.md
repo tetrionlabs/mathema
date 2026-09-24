@@ -177,8 +177,8 @@ be fresh again until the code or the claim set actually changes.
 ## Unknown claims and accepted risk
 
 A claim neither route could decide stays `unknown` and fails the run.
-Add a running balance in `balances.py`, with three claims in a claims
-file:
+Add a running balance in `balances.py`, with three claims in
+`claims/running_total.claims.yaml`:
 
 <!-- example: sweep file=balances.py -->
 ```python
@@ -190,7 +190,7 @@ def running_total(xs: list, y0: float) -> float:
     return total
 ```
 
-<!-- example: sweep file=running_total.claims.yaml -->
+<!-- example: sweep file=claims/running_total.claims.yaml -->
 ```yaml
 balances.running_total:
   claims:
@@ -263,7 +263,7 @@ and that key fails the run. Move `running_total` from `balances.py` to
 mv balances.py ledger.py
 ```
 
-<!-- example: sweep file=running_total.claims.yaml -->
+<!-- example: sweep file=claims/running_total.claims.yaml -->
 ```yaml
 ledger.running_total:
   claims:

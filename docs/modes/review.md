@@ -53,7 +53,7 @@ summary, and a `--format json` a pipeline can post on the pull request.
 ## Worked example
 
 The `softmax` of the [`check` worked example](check.md#worked-example-softmax-start-to-finish),
-with its claim in a claims file:
+with its claim in `claims/softmax.claims.yaml`:
 
 <!-- example: delta file=functions.py -->
 ```python
@@ -69,7 +69,7 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
     return [e / total for e in exps]
 ```
 
-<!-- example: delta file=softmax.claims.yaml -->
+<!-- example: delta file=claims/softmax.claims.yaml -->
 ```yaml
 functions.softmax:
   claims:
@@ -113,7 +113,7 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
     return exps
 ```
 
-<!-- example: delta file=softmax.claims.yaml -->
+<!-- example: delta file=claims/softmax.claims.yaml -->
 ```yaml
 functions.softmax:
   claims:

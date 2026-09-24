@@ -52,7 +52,10 @@ def midpoint(a: float, b: float) -> float:
     return (a + b) / 2.0
 ```
 
-<!-- example: tripped file=demo.claims.yaml -->
+with its `claims/demo.claims.yaml` (the tutorial's, less the claim that
+was simply wrong):
+
+<!-- example: tripped file=claims/demo.claims.yaml -->
 ```yaml
 funcs.settle:
   claims:

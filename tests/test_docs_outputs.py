@@ -20,7 +20,8 @@ rendered):
 Blocks sharing an ID form one example and run in page order, in one
 Python namespace and one working directory. The roles:
 
-- `file=NAME`: write the block to NAME in the working directory.
+- `file=NAME`: write the block to NAME in the working directory,
+  creating any directories NAME names.
 - `run`: run the block. A `python` fence executes in the example's
   namespace; a `bash`/`sh`/`shell` fence runs through bash, with
   `mathema` and `python` on PATH. What it prints is captured.
@@ -327,7 +328,9 @@ class _Driver:
     def run_part(self, part, silent=False):
         role, lang, body = part["role"], part["lang"], part["body"]
         if role == "file":
-            with open(os.path.join(self.workdir, part["value"]), "w") as fh:
+            path = os.path.join(self.workdir, part["value"])
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
                 fh.write(body)
             return None
         if role == "run" and lang == "python":

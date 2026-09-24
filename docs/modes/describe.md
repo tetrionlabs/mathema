@@ -51,10 +51,10 @@ you meant before pointing an expensive verb at it.
 
 ## The detail view
 
-Here the tutorial's claims file also gives `midpoint` a
+Here the tutorial's `claims/demo.claims.yaml` also gives `midpoint` a
 `mean_bound` claim:
 
-<!-- example: tutorial file=demo.claims.yaml -->
+<!-- example: tutorial file=claims/demo.claims.yaml -->
 ```yaml
 funcs.settle:
   claims:

@@ -119,7 +119,8 @@ so the claim fails the gate again until someone re-decides.
 
 ## Worked example
 
-A running balance in `balances.py`, with three claims in a claims file:
+A running balance in `balances.py`, with three claims in
+`claims/running_total.claims.yaml`:
 
 <!-- example: balance file=balances.py -->
 ```python
@@ -131,7 +132,7 @@ def running_total(xs: list, y0: float) -> float:
     return total
 ```
 
-<!-- example: balance file=running_total.claims.yaml -->
+<!-- example: balance file=claims/running_total.claims.yaml -->
 ```yaml
 balances.running_total:
   claims:
@@ -254,7 +255,7 @@ as the remedy. Moving `running_total` from `balances.py` to
 mv balances.py ledger.py
 ```
 
-<!-- example: balance file=running_total.claims.yaml -->
+<!-- example: balance file=claims/running_total.claims.yaml -->
 ```yaml
 ledger.running_total:
   claims:

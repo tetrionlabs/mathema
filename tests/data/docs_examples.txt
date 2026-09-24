@@ -74,8 +74,8 @@
 [x] docs/modes/check.md:softmax                  file session file session
 [x] docs/modes/claims.md:adopt                   file session run output
 [x] docs/modes/describe.md:tutorial              file run output file run session session
-[x] docs/modes/init.md:stubs                     file session session
-[ ] docs/modes/init.md:114
+[x] docs/modes/init.md:stubs                     file file session session
+[ ] docs/modes/init.md:119
 [x] docs/modes/library.md:ema                    run repl repl  (slow)
 [x] docs/modes/lock.md:tripped                   file file run session file session
 [ ] docs/modes/pin.md:30

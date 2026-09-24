@@ -47,10 +47,15 @@ all of `.mathema/` instead; that is a local choice, not the default.
 
 For every discovered function with zero claims, writes a bare
 `claims: []` declared entry, an explicit, empty placeholder, not a
-claim, to `claims/<module>.claims.yaml`. Given a module with two
-unclaimed functions:
+claim, to `claims/<module>.claims.yaml`. Given a package whose one
+module holds two unclaimed functions:
 
-<!-- example: stubs file=mypkg.py -->
+<!-- example: stubs file=mypkg/__init__.py -->
+```python
+"""A small package."""
+```
+
+<!-- example: stubs file=mypkg/mod.py -->
 ```python
 def pure_fn(x: float) -> float:
     return 2.0 * x + 1.0
@@ -69,12 +74,12 @@ mathema init: scaffolded git files:
   .gitattributes
   .mathema/.gitignore
 mathema init: wrote stub entries to:
-  claims/mypkg.claims.yaml
-$ cat claims/mypkg.claims.yaml
-# mathema init: bare declared stubs for mypkg (fill in claims; an empty list means nothing declared yet)
-mypkg.branchy_fn:
+  claims/mypkg.mod.claims.yaml
+$ cat claims/mypkg.mod.claims.yaml
+# mathema init: bare declared stubs for mypkg.mod (fill in claims; an empty list means nothing declared yet)
+mypkg.mod.branchy_fn:
   claims: []
-mypkg.pure_fn:
+mypkg.mod.pure_fn:
   claims: []
 ```
 
