@@ -219,6 +219,10 @@ class VerifyResult:
     means the run passes), how many keys were fresh vs re-adjudicated,
     and every claim grammar seen in the project.
 
+    `authoring_errors` lists the problems that are the author's to fix
+    on an authoring surface (a declared claim that does not parse),
+    which the CLI exits 2 on rather than 1.
+
     `keys` is the same sweep as structured data rather than prose;
     one entry per key with `why` it was looked at, its gate counts,
     and its claim rows in `records.claim_row()`'s vocabulary. `lines`
@@ -232,6 +236,7 @@ class VerifyResult:
     grammars_seen: set = field(default_factory=set)
     nothing_declared: bool = False
     keys: list = field(default_factory=list)
+    authoring_errors: list = field(default_factory=list)
 
 
 def _declared_reference_triples(refs) -> list:
@@ -797,6 +802,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          or "its docstring or claims file")
                 msg = (f"{key}: a claim declared in {where} does not "
                        f"parse ({e}); correct it there and re-run verify")
+                out.authoring_errors.append(msg)
             out.problems.append(msg)
             out.lines.append(f"FAIL {msg}")
             out.keys.append({"key": key, "why": "unreadable-record",

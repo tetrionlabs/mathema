@@ -246,7 +246,7 @@ def cmd_verify(args) -> int:
     """The test-runner sweep, printed: `verify.verify_project` does the
     work (freshness, re-adjudication, record refresh, the one gate);
     this command renders its lines and the run summary, and exits 1 on
-    any problem. The NOTE for authors: a function whose only declared
+    any problem, 2 when a declared claim does not parse. The NOTE for authors: a function whose only declared
     claims live on a @claims_decorator or docstring Claims: block, with
     no prior verified record and no claims file anywhere, has no key
     the sweep can discover, the stores enumerate the population."""
@@ -308,7 +308,7 @@ def cmd_verify(args) -> int:
                        "adjudicated": result.adjudicated,
                        "problems": len(result.problems)},
         }, getattr(args, "output", None))
-        return 1 if result.problems else 0
+        return 2 if result.authoring_errors else 1 if result.problems else 0
     lines = list(result.lines)
     lines.append(f"{result.fresh} fresh (form unchanged, skipped), "
                  f"{result.adjudicated} adjudicated, "
@@ -321,7 +321,7 @@ def cmd_verify(args) -> int:
         + (f"; not verified here (different grammar, needs its own tool): "
            f"{', '.join(other_grammars)}" if other_grammars else ""))
     print("\n".join(lines))
-    return 1 if result.problems else 0
+    return 2 if result.authoring_errors else 1 if result.problems else 0
 
 
 def _typed_status(ti: dict) -> str:
@@ -2848,9 +2848,11 @@ def main(argv: list[str] | None = None) -> int:
     from .auth import HumanVerificationError
     from .conjecture import InvalidConjecture
     from .locks import LockError
+    from .spec import ClaimsFileError
     try:
         return args.fn(args)
-    except (DiscoveryError, TargetError, InvalidConjecture, LockError) as e:
+    except (DiscoveryError, TargetError, InvalidConjecture, LockError,
+            ClaimsFileError) as e:
         print(f"mathema: {e}", file=sys.stderr)
         return 2
     except HumanVerificationError as e:

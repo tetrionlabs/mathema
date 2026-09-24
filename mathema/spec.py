@@ -1255,6 +1255,164 @@ def unreadable_verified(root: str = ".") -> dict:
     return out
 
 
+class ClaimsFileError(ValueError):
+    """A claims file whose shape mathema cannot read: the message names
+    the file, the function key and the field at fault."""
+
+
+_CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
+                 "grammar", "funcs", "pseudo_infinity", "meta", "authored",
+                 "source", "family", "note")
+_ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references")
+
+
+def _misspelling(field_name: str, known: tuple) -> "str | None":
+    """Intent:
+        The known field an unknown one is a near miss of, or None when
+        it is not close to any. An unknown field that is no near miss
+        is the author's own annotation and is left alone.
+    """
+    import difflib
+    if field_name in known:
+        return None
+    close = difflib.get_close_matches(field_name, known, n=1, cutoff=0.8)
+    return close[0] if close else None
+
+
+def _domain_problem(bound) -> "str | None":
+    """Intent:
+        Why one claims-file domain bound does not read, or None when it
+        does: `[lo, hi]`, `{lo, hi, closed_lo, closed_hi}`, `{set: [...]}`,
+        a stored `Domain` mapping, or the type names `Z` and `N`. An
+        interval needs real endpoints, neither NaN, with lo <= hi.
+    """
+    import math
+    if isinstance(bound, str):
+        return None if bound in ("Z", "N") else (
+            f"{bound!r} is not a bound (use [lo, hi], "
+            f"{{lo: .., hi: ..}}, {{set: [...]}}, Z or N)")
+    if isinstance(bound, list):
+        if len(bound) != 2:
+            return f"{bound!r} is not a [lo, hi] pair"
+        ends = bound
+    elif isinstance(bound, dict):
+        if "base_type" in bound or "set" in bound:
+            from .domain import domain_bound_from_json
+            try:
+                domain_bound_from_json(bound)
+            except (KeyError, TypeError, ValueError) as e:
+                return f"{bound!r} does not read ({e})"
+            return None
+        if "lo" not in bound or "hi" not in bound:
+            return f"{bound!r} needs both lo and hi"
+        ends = [bound["lo"], bound["hi"]]
+    else:
+        return f"{bound!r} is not a bound"
+    try:
+        lo, hi = (complex(e) if isinstance(e, str) and "j" in e.lower()
+                  else float(e) for e in ends)
+    except (TypeError, ValueError):
+        return f"{bound!r} has an endpoint that is not a number"
+    if isinstance(lo, complex) or isinstance(hi, complex):
+        return None
+    if math.isnan(lo) or math.isnan(hi):
+        return f"{bound!r} has a NaN endpoint"
+    if lo > hi:
+        return f"{bound!r} is inverted (lo > hi)"
+    return None
+
+
+def validate_claims_file(data, rel_path: str) -> None:
+    """Intent:
+        Check one parsed claims file's shape, and normalize a tolerance
+        written as numeric text (YAML reads `1e-6` as a string) to its
+        number. The shape: a mapping of function keys (plus an optional
+        file-level `grammar`) to entries; an entry is a mapping whose
+        `claims` is a list of mappings; each claim states its law as
+        text under `statement` (or `law`), names it at most once per
+        key, and gives a readable `domain` and a non-negative
+        `tolerance` when it gives them. A field that is a near miss of
+        a known one is refused, since it would otherwise be ignored.
+
+    Raises:
+        ClaimsFileError: the first shape problem, naming the file, the
+            key and the claim.
+    """
+    import math
+
+    def fail(where: str, problem: str):
+        raise ClaimsFileError(f"{rel_path}: {where}: {problem}")
+
+    if not isinstance(data, dict):
+        raise ClaimsFileError(
+            f"{rel_path}: the top level is a {type(data).__name__}, not a "
+            f"mapping of function keys to entries")
+    for key, entry in data.items():
+        if key == "grammar":
+            continue
+        if entry is None:
+            continue
+        if not isinstance(entry, dict):
+            fail(key, f"the entry is a {type(entry).__name__}, not a "
+                      f"mapping (expected `claims:` and the like under it)")
+        for field_name in entry:
+            near = _misspelling(str(field_name), _ENTRY_FIELDS)
+            if near:
+                fail(key, f"unknown field {field_name!r} (did you mean "
+                          f"{near!r}?)")
+        claims = entry.get("claims")
+        if claims is None:
+            continue
+        if not isinstance(claims, list):
+            fail(key, f"`claims` is a {type(claims).__name__}, not a list")
+        seen: set = set()
+        for i, c in enumerate(claims, 1):
+            if not isinstance(c, dict):
+                fail(key, f"claim {i} is a {type(c).__name__}, not a mapping "
+                          f"(write it as `- statement: ...`)")
+            label = f"claim {c.get('name')!r}" if c.get("name") \
+                else f"claim {i}"
+            for field_name in c:
+                near = _misspelling(str(field_name), _CLAIM_FIELDS)
+                if near:
+                    fail(key, f"{label}: unknown field {field_name!r} (did "
+                              f"you mean {near!r}?)")
+            text = c.get("statement", c.get("law"))
+            if text is None:
+                fail(key, f"{label} has no `statement`")
+            if not isinstance(text, str) or not text.strip():
+                fail(key, f"{label}: `statement` must be the claim's text, "
+                          f"not {text!r}")
+            name = c.get("name")
+            if name is not None:
+                if not isinstance(name, str) or not name.strip():
+                    fail(key, f"claim {i}: `name` must be text, not {name!r}")
+                if name in seen:
+                    fail(key, f"claim name {name!r} is used twice; each "
+                              f"claim under one key needs its own name")
+                seen.add(name)
+            tol = c.get("tolerance")
+            if tol is not None:
+                try:
+                    value = float(tol)
+                except (TypeError, ValueError):
+                    value = float("nan")
+                if isinstance(tol, bool) or math.isnan(value) or value < 0:
+                    fail(key, f"{label}: `tolerance` must be a non-negative "
+                              f"number, not {tol!r}")
+                if isinstance(tol, str):
+                    c["tolerance"] = value
+            domain = c.get("domain")
+            if domain is not None:
+                if not isinstance(domain, dict):
+                    fail(key, f"{label}: `domain` must map each parameter "
+                              f"to its bound, not {domain!r}")
+                for param, bound in domain.items():
+                    problem = _domain_problem(bound)
+                    if problem:
+                        fail(key, f"{label}: `domain` for {param}: {problem}")
+
+
 def load_declared(root: str = ".") -> dict:
     """The declared layer only: human-authored claim intent
     (declared-schema.md), *.claims.yaml, claims/*.yaml, claimspec.yaml,
@@ -1282,12 +1440,21 @@ def load_declared(root: str = ".") -> dict:
 
     merged: dict = {}
     for _, path in sorted(files):          # shallow first, deep last → deep wins
-        data = yaml.safe_load(open(path)) or {}
-        if not isinstance(data, dict):
+        rel_path = os.path.relpath(path, root)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = yaml.safe_load(fh)
+        except yaml.YAMLError as e:
+            mark = getattr(e, "problem_mark", None)
+            where = f" at line {mark.line + 1}" if mark is not None else ""
+            raise ClaimsFileError(
+                f"{rel_path}: does not parse as YAML{where}") from None
+        if data is None:
             continue
+        validate_claims_file(data, rel_path)
         file_grammar = data.pop("grammar", None)
         for key, entry in data.items():
-            if not isinstance(entry, dict):
+            if entry is None:
                 continue
             entry.pop("identity", None)    # a declared file never states one
             if file_grammar:
