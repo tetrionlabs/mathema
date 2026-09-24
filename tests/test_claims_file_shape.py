@@ -102,3 +102,18 @@ def test_the_same_name_in_two_files_still_merges(project, capsys):
         _claim(['statement: "for x in [0, 2], sq(x) >= 0"']))
     assert main(["verify", "--root", str(project)]) == 0, \
         capsys.readouterr()
+
+
+def test_the_materialized_view_says_edits_to_it_are_not_read(project):
+    # `.mathema/declared/` is regenerated and never read back, so its
+    # header points at the surfaces that are
+    from mathema.sync import materialize_entry
+    (project / "shapefix.claims.yaml").write_text(_claim([_OK]))
+    import shapefix
+    materialize_entry(shapefix.sq, "shapefix.sq", root=str(project))
+    text = (project / ".mathema" / "declared"
+            / "shapefix.sq.yaml").read_text()
+    header = "".join(ln for ln in text.splitlines(True)
+                     if ln.startswith("#"))
+    assert "are read" not in header
+    assert "overwritten" in header
