@@ -102,6 +102,15 @@ A few consequences worth knowing:
   plain random sampling, because it leaves less of the input surface
   unexplored. A witnessed falsification still counts as knowledge (you
   now know where it fails); correctness is reported separately.
+- **A `[float]` companion that holds counts as numerical stability.** A
+  claim the derive route proves spawns a
+  [`<name>[float]` companion](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code),
+  the relation executed against the code in float, in the
+  `is_numerically_stable` family. A companion that holds or is proven
+  credits that family for its function, as a verified
+  `is_numerically_stable` claim with the same verdict and route would. A
+  falsified companion credits nothing: it records one relation the float
+  code breaks, not the function's stability.
 - **A black-box dependency lowers clarity, and caps it.** When a function
   calls a library that has a [compendium](../claims-transfer.md), mathema
   has a model of where that call can fail, and `is_compendium_safe` can
@@ -117,10 +126,15 @@ A few consequences worth knowing:
   floors much closer to zero. Declaring and verifying claims is what
   raises the score.
 
-The scoring algorithm is versioned (`entropy-dimensions@1`) and recorded
+The scoring algorithm is versioned (`entropy-dimensions@1.1`) and recorded
 beside the scores, so a number is only ever compared against one computed
 the same way; a change to the algorithm reads as an algorithm change, not
-a regression.
+a regression. `@1.1` made two changes, and both raise clarity and overall
+against `@1`. It added the `[float]` companion credit above. It also reads
+the relation of a verified claim the way the claim grammar does, so a
+stored identity (the store writes `f(x) = 2*x`, with a single `=`), or an
+approximate one (`~=`), now counts toward *what it computes*. Under `@1`
+it counted only toward *bounds & shape*.
 
 ## The triangle
 
