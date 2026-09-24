@@ -2218,6 +2218,15 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     if empty is not None:
         return empty
     if result.status == "proven":
+        region = _complex_value_region(fn, facts, lhs_src, rhs_src, domain)
+        if region is not None:
+            return ProofResult(
+                "undecided",
+                sketch=(f"{result.sketch}; not kept as a proof: f returns a "
+                        f"complex number where {region} (a fractional power "
+                        f"of a negative base), which the declared domain "
+                        f"does not exclude, and the proof reads f as real"),
+                meta=dict(result.meta))
         kink = _derivative_kink(fn, facts, lhs_src, rhs_src, domain)
         if kink is not None:
             return ProofResult(
@@ -2227,6 +2236,47 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                         f"domain does not exclude"),
                 meta=dict(result.meta))
     return result
+
+
+def _calls_f_at_its_parameters(facts, lhs_src: str, rhs_src: str) -> bool:
+    """Whether every call to f in the claim passes f's own parameters,
+    in order."""
+    for src in (lhs_src, rhs_src):
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            return False
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+                    and n.func.id == "f" and [getattr(a, "id", None)
+                                              for a in n.args] != list(facts.params):
+                return False
+    return True
+
+
+def _complex_value_region(fn, facts, lhs_src: str, rhs_src: str,
+                          domain) -> "str | None":
+    """The first region where f returns a complex number (a fractional
+    power of a negative base) that the declared domain does not
+    exclude, as text; None when there is none."""
+    from ._partiality import partiality_walk
+    regions: list = []
+    try:
+        partiality_walk(fn, facts, domain or {}, complex_out=regions)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    regions = [r for r in regions if r is not sympy.false]
+    if not regions:
+        return None
+    if not _calls_f_at_its_parameters(facts, lhs_src, rhs_src):
+        return _cond_text(regions[0])
+    from ._fold import _cond_truth_over
+    for region in regions:
+        if _cond_truth_over(region, domain or {}) is not True:
+            return _cond_text(region)
+    return None
 
 
 def _first_axis_length(seq, axis):
