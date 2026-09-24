@@ -112,18 +112,32 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">"):
         return None
     extra = frozenset(bound_funcs)
+    from . import _indexed
+    indexed = _indexed.uses_indexed_form(cj.lhs) or _indexed.uses_indexed_form(cj.rhs)
+    bound_indices: set = set()
     try:
+        if indexed:
+            extra = extra | frozenset(_indexed.INDEXED_FORMS)
         code_l, aux_l = _validate(cj.lhs, set(kinds), extra)
         code_r, aux_r = _validate(cj.rhs, set(kinds), extra) if cj.rhs else (None, set())
-    except InvalidConjecture:
+        if indexed:
+            # a Sum/Prod index is bound over its summand: it is no
+            # coordinate of the point, even when a parameter shares its
+            # name
+            code_l, aux_l, bound_l = _indexed.compile_indexed(cj.lhs, aux_l)
+            bound_r: set = set()
+            if cj.rhs:
+                code_r, aux_r, bound_r = _indexed.compile_indexed(cj.rhs, aux_r)
+            bound_indices = bound_l | bound_r
+    except (InvalidConjecture, ValueError):
         return None
     slack = (cj.tolerance if cj.tolerance is not None
              else 0.0 if exact else 1e-9)
     # `ε`/`eps`/`epsilon` in a law is the claim's tolerance, a fixed
     # value, never a free variable to sample
     eps_names = (aux_l | aux_r) & {"eps", "epsilon", "ε"}
-    names = list(kinds) + sorted((aux_l | aux_r) - MATH_CONSTANTS.keys()
-                                 - eps_names)
+    names = [p for p in kinds if p not in bound_indices] + sorted(
+        (aux_l | aux_r) - MATH_CONSTANTS.keys() - eps_names)
     # raises from the function under test (or a bound function) are
     # tagged so the evaluators below can tell a genuine in-domain raise,
     # which IS a failure of a value claim, per the pedantic raise
@@ -160,7 +174,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     base_env = {"f": _tag(fn, "f"), **_SAFE_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
                 **{name: (cj.tolerance if cj.tolerance is not None else 1e-9)
-                   for name in eps_names}}
+                   for name in eps_names},
+                **(_indexed.indexed_env() if indexed else {})}
     from .records import pseudo_infinity_range
     if cap is not None:
         cap_lo, cap_hi = pseudo_infinity_range(cap)
@@ -181,9 +196,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 for n, v in point.items()}
 
     def _values(point):
-        env = {**base_env, **_typed(point)}
-        lv = eval(code_l, {"__builtins__": {}}, env)
-        rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else 0
+        # the bindings are the globals, so a Sum/Prod term (a lambda)
+        # resolves f and the point's coordinates too
+        env = {"__builtins__": {}, **base_env, **_typed(point)}
+        lv = eval(code_l, env)
+        rv = eval(code_r, env) if code_r is not None else 0
         return lv, rv
 
     def _relation_holds(lv, rv, tol):

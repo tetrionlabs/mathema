@@ -1356,6 +1356,36 @@ def _interval_bounds(expr, domain: dict, params: dict):
     return _interval_hull(expr, box)
 
 
+def _min_max_hull(e):
+    """Intent:
+        The interval hull of a `Min`/`Max` whose arguments are each an
+        `AccumBounds` [lo_k, hi_k] or a comparable real number (the
+        interval [c, c]): `Min` lies in [min lo_k, min hi_k], `Max` in
+        [max lo_k, max hi_k].
+
+    Notes:
+        Both ends are attained (every argument at its low end gives the
+        low end, every argument at its high end the high end), so the
+        hull is exact for independent arguments and contains the true
+        range otherwise. `None` when an argument is neither, an
+        unevaluated function of an interval, say, which bounds nothing.
+    """
+    lows, highs = [], []
+    for arg in e.args:
+        if isinstance(arg, sympy.AccumBounds):
+            lo, hi = arg.min, arg.max
+        else:
+            lo = hi = arg
+        for end in (lo, hi):
+            if not (end.is_comparable or end in (-sympy.oo, sympy.oo)):
+                return None
+        lows.append(lo)
+        highs.append(hi)
+    pick = sympy.Min if isinstance(e, sympy.Min) else sympy.Max
+    lo, hi = pick(*lows), pick(*highs)
+    return sympy.AccumBounds(lo, hi) if lo != hi else lo
+
+
 def _interval_hull(expr, box: dict):
     """Intent:
         The AccumBounds hull of `expr` over an explicit box of
@@ -1384,8 +1414,10 @@ def _interval_hull(expr, box: dict):
     try:
         result = expr.subs(box, simultaneous=True)
         if result.has(sympy.AccumBounds) and not isinstance(result, sympy.AccumBounds):
-            # Abs propagates by hand (sympy leaves Abs(AccumBounds)
-            # unevaluated): the image of [lo, hi] under |.| exactly.
+            # Abs, Min and Max propagate by hand (sympy leaves them
+            # unevaluated over an AccumBounds), innermost first. Abs is
+            # the image of [lo, hi] under |.| exactly; Min and Max are
+            # `_min_max_hull`.
             def _abs_swap(e):
                 ab = e.args[0]
                 lo, hi = ab.min, ab.max
@@ -1394,9 +1426,17 @@ def _interval_hull(expr, box: dict):
                 if hi <= 0:
                     return sympy.AccumBounds(-hi, -lo)
                 return sympy.AccumBounds(0, sympy.Max(-lo, hi))
+
+            def _swap_one(e):
+                if isinstance(e, sympy.Abs):
+                    return _abs_swap(e)
+                hull = _min_max_hull(e)
+                return e if hull is None else hull
             result = result.replace(
-                lambda e: isinstance(e, sympy.Abs)
-                and isinstance(e.args[0], sympy.AccumBounds), _abs_swap)
+                lambda e: (isinstance(e, sympy.Abs)
+                           and isinstance(e.args[0], sympy.AccumBounds))
+                or (isinstance(e, (sympy.Min, sympy.Max))
+                    and e.has(sympy.AccumBounds)), _swap_one)
         if result.has(sympy.AccumBounds) and not isinstance(result, sympy.AccumBounds):
             # a bounded call sympy left unevaluated (erf(AccumBounds(...))
             # and friends): swap in the function's global range and let
