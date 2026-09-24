@@ -202,7 +202,25 @@ def _resolve_clamps(expr, domain: dict, params: dict):
         if node.is_number:
             c = float(node)
             return c, c
-        return bounds.get(node)
+        if node in bounds:
+            return bounds[node]
+        # a compound side (`n - 1`, the trip count of a range loop) is
+        # bounded by its interval hull, which contains its true range
+        try:
+            hull = _interval_bounds(node, domain, params)
+        except TimeoutError:
+            raise
+        except Exception:
+            return None
+        if isinstance(hull, sympy.AccumBounds):
+            lo, hi = hull.min, hull.max
+        elif hull is not None and getattr(hull, "is_number", False):
+            lo = hi = hull
+        else:
+            return None
+        if not (lo.is_finite and hi.is_finite):
+            return None
+        return float(lo), float(hi)
 
     subs = {}
     for node in expr.atoms(sympy.Min, sympy.Max):

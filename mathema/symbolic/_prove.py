@@ -1974,15 +1974,34 @@ def _piece_point(piece):
     return None
 
 
-def _has_calculus_call(src: str) -> bool:
-    """Whether claim text calls `d`, `lim` or `integrate`."""
+def _calculus_vars(src: str) -> set:
+    """The names claim text differentiates by, takes a limit in, or
+    integrates over (every name for a call whose variable is not a
+    plain name)."""
     try:
-        tree = ast.parse(src or "", mode="eval")
+        tree = ast.parse(src or "0", mode="eval")
     except SyntaxError:
-        return False
-    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-               and n.func.id in ("d", "lim", "integrate")
-               for n in ast.walk(tree))
+        return set()
+    names: set = set()
+    everything = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    for n in ast.walk(tree):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id in ("d", "lim", "integrate")):
+            continue
+        if n.func.id == "d":
+            variables = []
+            for a in n.args[1:]:
+                if isinstance(a, ast.Name) and a.id == _D_AT_SENTINEL:
+                    break
+                variables.append(a)
+        else:
+            variables = n.args[1:2]
+        for a in variables:
+            if isinstance(a, ast.Name):
+                names.add(a.id)
+            else:
+                names |= everything
+    return names
 
 
 def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
@@ -2008,14 +2027,15 @@ def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     """
     if depth >= 2 or not domain:
         return None
-    if _has_calculus_call(lhs_src) or _has_calculus_call(rhs_src):
-        # a derivative, limit or integral reads the function around a
-        # point or across an interval, which a piece's pruned lift
-        # (one branch, fixed by the piece) no longer describes
-        return None
+    # a derivative, limit or integral reads the function around a point
+    # or across an interval of its variable, which a piece's pruned lift
+    # (one branch, fixed by the piece) no longer describes
+    calculus_vars = _calculus_vars(lhs_src) | _calculus_vars(rhs_src)
     cuts = _guard_cut_points(facts)
     guard_named = _guard_condition_params(facts)
     for p in facts.params:
+        if p in calculus_vars:
+            continue
         b = domain.get(p)
         if (isinstance(b, frozenset) and 1 < len(b) <= 8
                 and p in guard_named):
@@ -2340,7 +2360,9 @@ def _premises_admit_empty(name: str, assumption) -> bool:
                       {"__builtins__": {}}, env)
             holds = ops[rel](lv, rv)
         except Exception:
-            continue
+            # it reads more than this one length: whether it holds at
+            # length zero depends on values this check does not choose
+            return False
         if not holds:
             return False
     return mentioned

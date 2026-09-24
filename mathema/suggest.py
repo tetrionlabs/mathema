@@ -269,9 +269,10 @@ def _sum_like_fold(fn, facts):
         return None
 
 
-def _loop_closed_form(fn, facts) -> "str | None":
+def _loop_closed_form(fn, facts) -> "tuple[str, str] | None":
     """The compact closed form of a pure-sum scalar loop, as claim
-    text, or None. This is where the well-known series land: the sum
+    text with the premise (possibly empty) that keeps every trip count
+    nonnegative, or None. This is where the well-known series land: the sum
     of the first n integers suggests `f(n) == n*(n + 1)/2`, squares
     suggest the cubic, a constant body suggests the product, each
     proven by the same machinery that closed it. Only a SMALL closed
@@ -290,15 +291,27 @@ def _loop_closed_form(fn, facts) -> "str | None":
             sl = lift_sum(fn, facts)
             if sl is None or isinstance(sl.expr, tuple):
                 return None
-            closed = sympy.simplify(sl.expr.doit())
-            if closed.has(sympy.Sum) or closed.has(sympy.Piecewise):
+            closed = sl.expr.doit()
+            # a range(t) loop runs max(t, 0) times; the closed form is
+            # stated where every trip count is nonnegative
+            trips = sorted({a for m in closed.atoms(sympy.Max)
+                            if len(m.args) == 2 and 0 in m.args
+                            for a in m.args if a != 0}, key=str)
+            closed = sympy.simplify(closed.replace(
+                lambda e: isinstance(e, sympy.Max) and len(e.args) == 2
+                and 0 in e.args,
+                lambda e: next(a for a in e.args if a != 0)))
+            if closed.has(sympy.Sum) or closed.has(sympy.Piecewise) \
+                    or closed.has(sympy.Max):
                 return None
             names = {sym.name for sym in closed.free_symbols}
             if not names <= set(facts.params):
                 return None
             if sympy.count_ops(closed) > 12:
                 return None
-            return str(closed).replace("**", "^")
+            premise = " and ".join(f"{str(t).replace('**', '^')} >= 0"
+                                   for t in trips)
+            return str(closed).replace("**", "^"), premise
         return _with_timeout(build, FAST_TIMEOUT_SECONDS)
     except TimeoutError:
         return None
@@ -440,7 +453,9 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
                    and all(facts.param_kinds.get(q) in ("scalar", "int")
                            for q in facts.params) else None)
     if closed_form is not None:
-        out.append(claim(f"{call} == {closed_form}",
+        text, premise = closed_form
+        out.append(claim((f"assuming {premise}, " if premise else "")
+                         + f"{call} == {text}",
                          name="closed_form", source="mathema",
                          route="best"))
     if (scalar_params and len(scalar_params) == len(facts.params)
