@@ -82,7 +82,7 @@ id is never renumbered.
 | 2.7 | `loop:wrong-sequence-param-count` | limitation | not exactly one sequence parameter | the fold read needs one sequence parameter to iterate |
 | 1.3 | `no-parameters` | N/A | nothing to quantify over | a zero-parameter function has no input space to state claims about; probing can still check a constant value claim |
 | 1.4 | `non-scalar-parameters` | limitation | a sequence parameter outside the recognized shapes | sequence functions derive only through the recognized loop shapes (fold, dot product, pure sum); anything else stays empirical |
-| 1.2 | `recursion` | limitation | the function calls itself | recursive definitions are not derivable today; an iterative or closed-form equivalent is |
+| 1.2 | `recursion` | limitation | the function calls itself | a single-parameter recurrence of the recognized shape is solved, and a claim over a small integer range is checked exhaustively; any other recursion is not derivable, and an iterative or closed-form equivalent is |
 | 1.1 | `stateful` | N/A | the method modifies instance state, or lets self escape the read-only field/sibling-call vocabulary | reading fields and calling sibling methods derives fine; a write to self (or passing self elsewhere) does not; keep the numeric core read-only, or extract it into a stateless function |
 | 4.10 | `unsupported:array-index-mismatch` | limitation | an array indexed inconsistently with its construction | only same-length elementwise array reads derive |
 | 4.9 | `unsupported:invalid-tuple-index` | limitation | a tuple indexed outside its known length | usually a real bug in the code being read |

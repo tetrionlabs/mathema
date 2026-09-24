@@ -37,7 +37,7 @@ remain viable regardless of any of this, see [CDD in one page](cdd.md).
 | A call to a plain function this one calls (`_scale(x)`, not a method or module-qualified call) | ✅ up to 3 levels deep by default, including a callee with its own branch if the caller's domain settles it, see below |
 | A claim relating two (or more) functions, `f(x) == g(x)`, `d(f(x, g(x,I,px,py), a), x) == 0` | ✅ each bound function lifts to its own closed form and substitutes like `f`, see "Multi-function claims" below |
 | A non-scalar parameter | ❌ for `lift()` itself, with two independent exceptions: a whole body that's exactly `return np.dot(a, b)` (see "Dot products"), or a loop that sums over it; any loop, nested or sequential, whose accumulator is purely additive (see "General sum accumulation") |
-| A parameter typed as a matrix/vector | ❌, no matrix type in the grammar yet |
+| A parameter typed as a matrix/vector | ❌ for lifting the body; a matrix claim declares its domain as `R^(m*n)` and is adjudicated by probing and the linear-algebra identities in [Matrix structure](matrix-structure.md) |
 | A *local* array built from `np.linspace`/`np.arange`, transformed elementwise, returned bare or as one element of a tuple | ✅; index it in claim text via `f(...)[i]`, see "Local symbolic arrays" below |
 
 ## Callees

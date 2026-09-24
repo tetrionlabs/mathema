@@ -252,6 +252,34 @@ An agent is allowed to lock a function it has finished, which narrows what it
 can break on its next pass. Only a person can unlock one, behind a prompt with
 no `--yes` flag and, when set, the PIN.
 
+<span class="brkw eyebrow"><span class="brk l"></span><span class="bin">System 0</span><span class="brk r"></span></span>
+
+## No model in the loop
+
+In the familiar framing, a language model answering at once is System 1,
+fast and fluent, and a reasoning model working through steps is System 2,
+slower and more deliberate. Both generate, and both can be wrong in ways that
+read as right. mathema sits underneath them as System 0: it generates
+nothing, guesses nothing and spends no tokens. Everything it concludes comes
+from reading the function's syntax tree, doing algebra on what it finds, and
+running the real code on inputs it chooses, the same kind of deterministic
+machinery as a compiler or a test runner. Its only required dependencies are
+sympy and pyyaml.
+
+That changes what a verdict is worth next to an agent. The agent cannot talk
+mathema round, because there is no prompt to talk to; the answer depends on
+the code and the claim and nothing else. A check costs CPU seconds rather
+than tokens, so it runs on every commit in CI, offline, on a machine with no
+account and no API key. And the same code, claims and version give the same
+verdicts on every run: sampling is seeded, and the one thing that can vary
+between machines, whether a proof finishes inside its time cap, is written
+into the record whenever the cap was hit, so a `holds` that would have been
+a `proven` on a quieter machine says so.
+
+That is the division of labour the rest of this page assumes. Let a model
+propose the code and the claims, which is what models are good at, and let
+something that cannot be persuaded decide which of them are true.
+
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Who it's for</span><span class="brk r"></span></span>
 
 ## One engine, several jobs
