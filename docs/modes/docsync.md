@@ -26,11 +26,13 @@ mathema docsync [mypkg ...] [--root .] [--yes] [--write-docstrings] [--report] [
   vanishes. Deleting it from every authoring surface just means the
   next sweep repopulates it from the record and keeps adjudicating
   (its exits are the discovery flow, `mathema accept --as
-  historical`, or `--as superseded`, never silent removal). Every
-  quantified row carries its region as a rendered `condition`
-  (`∀ x ∈ [0.0, 5.0] ⊂ ℝ ∪ {∅}`), grammar output round-trips, so
-  that one string IS the canonical region form, and repopulation
-  parses it back. Records carry the git commit at adjudication and
+  historical`, or `--as superseded`, never silent removal). A
+  quantified derive row carries its region as a rendered `condition`
+  (`∀ x ∈ [0.0, 5.0] ⊂ ℝ ∪ {∅}`), the proof's own quantifier; a
+  probe row carries none, since there it would only restate the
+  statement and domain. Grammar output round-trips, so the rendered
+  region is the canonical form and repopulation parses it back.
+  Records carry the git commit at adjudication and
   an integrity checksum over each claim's statement, verdict and
   acceptance, and over the retirement rows; a hand-edit is
   reported as "altered outside mathema" (an acceptance write is

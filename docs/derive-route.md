@@ -27,8 +27,8 @@ remain viable regardless of any of this, see [CDD in one page](cdd.md).
 | A comprehension VALUE (`return [v*2 for v in xs]`, dict/set comps) | ❌ vector-valued |
 | A body-local `g = lambda t: ...` called in the same body, or a lambda bound via `funcs=` | ✅ applied by substitution |
 | A branch, condition over a signature parameter | ✅ if a claim's declared domain settles which side runs |
-| A branch, condition over a local variable, or an equivalent expression written directly in the `if` | ✅ if it's *affine* in unmodified parameters (`denom = x + y`, or `if x + y == 0:` inline) |
-| A branch, condition over a *non-affine* local or expression (`denom = x * y`) | ❌ |
+| A branch, condition over a local variable, or an equivalent expression written directly in the `if` | ✅ if it traces back to unmodified parameters and the declared domain settles it: exactly by corner evaluation when it's *affine* (`denom = x + y`, or `if x + y == 0:` inline), by an interval hull otherwise (`denom = x * y`) |
+| A branch whose condition the declared domain does not settle (`denom = x * y` with `x` ranging across zero) | ❌ undecided on the derive route |
 | A ternary (`x if cond else y`) | ✅ if the condition is a comparison or a boolean combination of them |
 | A ternary with a bare boolean-name condition (`x if flag else y`) | ✅ if the declared domain pins the name to exactly `True` or `False`, see below |
 | `return a, b` (a tuple) | ✅, compare elementwise or index a single element |
@@ -141,9 +141,25 @@ still resolve one two ways:
   for x in [1, 1], y in [-1, -1], f(x, y) == 0.0   # proven
   ```
 
-  A **non-affine** local (`denom = x * y`) can't be resolved this way;
-  corner-evaluation over a domain box is only exact for affine
-  expressions.
+  A **non-affine** local (`denom = x * y`) resolves too, but not by
+  corners: corner evaluation over a domain box is only exact for affine
+  expressions, so a non-affine condition is decided by the interval
+  hull of its expression over the box instead. The hull contains the
+  true range, so what it settles is settled soundly; a box it cannot
+  settle (one where `x * y` can be zero and can be nonzero) leaves the
+  branch undecided.
+
+  ```python
+  def ratio(x: float, y: float) -> float:
+      denom = x * y
+      if denom == 0.0:
+          return 0.0
+      return x / denom
+  ```
+
+  ```
+  for x in [1, 2], y in [1, 3], f(x, y) == 1/y   # proven
+  ```
 
   The condition doesn't have to be bound to a name first, an
   expression written directly in the `if` resolves exactly the same
@@ -835,7 +851,7 @@ several of those mechanisms are certificates: sound rules whose side
 conditions are each verified, never a "probably".
 
 - **Interval evaluation.** The expression's hull over the declared
-  box already settles the relation (`2*r ∈ [0, 2], never negative`).
+  box already settles the relation (`2*r ∈ AccumBounds(0, 2), never negative`).
   The cheapest certificate, and the first one tried.
 - **Positivity certificates.** For a strict inequality the hull often
   straddles zero even when the claim is true. The strict certificate
