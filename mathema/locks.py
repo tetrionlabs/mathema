@@ -107,14 +107,20 @@ def lock_state(key: str, current_form: str | None, locks: dict,
     """Intent:
         One key's lock condition, for the sweep: `None` (not locked,
         nothing stamped), "held" (locked, form unchanged), "changed"
-        (locked, the body moved), or "removed-outside" (the record
+        (locked, the body moved), "removed-outside" (the record
         still carries a lock stamp but the meta entry is gone, i.e.
-        someone deleted the lock without `mathema unlock`).
+        someone deleted the lock without `mathema unlock`), or
+        "moved-outside" (the meta entry pins a different form from the
+        record's lock stamp, i.e. someone edited the lock file rather
+        than unlocking and re-locking).
     """
     meta_entry = locks.get(key)
     stamped = (verified_entry or {}).get("locked")
     if meta_entry is None:
         return "removed-outside" if isinstance(stamped, dict) else None
+    if isinstance(stamped, dict) and stamped.get("form") \
+            and stamped.get("form") != meta_entry.get("form"):
+        return "moved-outside"
     if current_form is not None and meta_entry.get("form") != current_form:
         return "changed"
     return "held"

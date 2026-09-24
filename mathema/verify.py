@@ -819,14 +819,33 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                             _accepted_risk(verified_entry), (),
                             verified_info))
             continue
-        if state == "removed-outside":
-            # the record still says locked; the meta entry is gone
-            # without `mathema unlock` having run
-            msg = (f"{key}: the verified record carries a lock stamp but "
-                   f".mathema/meta/locks.yaml has no entry; a lock is "
-                   f"only removed by a human running `mathema unlock "
-                   f"{key}` (restore the entry, or unlock properly)")
-            _fail(key, msg)
+        if state in ("removed-outside", "moved-outside"):
+            # the meta entry no longer matches the record's lock stamp
+            # without `mathema unlock` having run. The record, stamp
+            # included, is left exactly as it was, so the finding
+            # stands on every sweep until the lock is put right.
+            if state == "removed-outside":
+                msg = (f"{key}: the verified record carries a lock stamp "
+                       f"but .mathema/meta/locks.yaml has no entry; a "
+                       f"lock is only removed by a human running "
+                       f"`mathema unlock {key}` (restore the entry, or "
+                       f"unlock properly)")
+            else:
+                stamped = (verified_entry.get("locked") or {}).get("form")
+                lk = locks.get(key) or {}
+                msg = (f"{key}: .mathema/meta/locks.yaml pins form "
+                       f"{lk.get('form')} but the record was locked at "
+                       f"{stamped}; the lock was moved without `mathema "
+                       f"unlock {key}`, and the record is unchanged "
+                       f"(restore the entry, or a human unlocks and "
+                       f"re-locks)")
+            out.problems.append(msg)
+            lock_messages[key] = msg
+            pending.append((key, "lock-" + state,
+                            verified_entry.get("claims") or [], None, None,
+                            _accepted_risk(verified_entry), (),
+                            verified_info))
+            continue
         from .compendium import premise_state as _premise_state
         premise_now = _premise_state(current_claims, stub_premises)
         recorded_premises = (verified_entry.get("meta") or {}).get(
@@ -981,7 +1000,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         report = gate(claims_for_gate, strict=strict,
                       accepted_risk=accepted, unresolved=unres)
         state = "FAIL" if report.problems or key_problems.get(key) else "ok"
-        if why == "locked-changed":
+        if key in lock_messages:
             # the record is left as it was, so its counts describe code
             # that no longer exists: the row is the lock failure alone
             line = f"FAIL {lock_messages[key]}"
