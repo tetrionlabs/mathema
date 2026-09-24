@@ -190,13 +190,7 @@ this sends your source or your claims anywhere.
 function a row: its location as a ready-made `sed -n` line range, its
 branching, whether it carries claims, whether the derive route could prove
 things about it, the state outside its parameters it reads or writes, whether
-a test report covers it, and how well its docstring states its intent. Over
-mathema's own source (`mathema audit mathema --root .`) the summary line is
-honest about where things stand:
-
-```text
-0/1268 claimed, 26/1268 derivable, 26/1268 lift unconditionally, 521/1268 fully typed, 3130/6152 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), 282/1268 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 45%.
-```
+a test report covers it, and how well its docstring states its intent.
 
 `mathema audit --index` writes the same map to `.mathema/index.yaml`, with each
 module's stated intent and every function's file, line and span, which is the

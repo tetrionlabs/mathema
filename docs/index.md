@@ -185,41 +185,27 @@ whether any test report covers it, and how well its docstring states its
 intent. Here is one module of mathema's own source:
 
 ```bash
-mathema audit mathema.locks --root .
+mathema audit mathema.intent --root .
 ```
 
 ```text
-                          ||              || derive route                                                                     || typing                || globals                                              ||           || docs    ||
-key            | span     || claims       || derives | cx | reason                             | code                         || typed | finite_domain || vars | mutates | funcs                               || tested    || quality || docsync
-mathema.locks
- ._write_locks | 58:66p   || {6 | 0 | -}  || no      | 1  | uses unsupported expression syntax | unsupported:unsupported-call || yes   | -             || -    | -       | locks_path                          || no-report || 0/3     || 50%
- .load_locks   | 45:55p   || {5 | 0 | -}  || no      | 2  | 1 branch                           | branch:unrecognized-shape    || yes   | -             || -    | -       | locks_path                          || no-report || 2/3     || 50%
- .lock         | 69:90p   || {13 | 0 | -} || no      | 5  | 4 branches                         | branch:bare-local-name+1     || yes   | -             || -    | -       | load_locks, LockError, _write_locks || no-report || 4/9     || 40%
- .lock_state   | 105:120p || {9 | 0 | -}  || no      | 3  | 2 branches                         | branch:untraceable-local+1   || yes   | -             || -    | -       | -                                   || no-report || 3/7     || 92%
- .locks_path   | 38:42p   || {5 | 0 | -}  || no      | 1  | uses unsupported expression syntax | unsupported:unsupported-call || yes   | -             || -    | -       | -                                   || no-report || 2/3     || 44%
- .unlock       | 93:102p  || {7 | 0 | -}  || no      | 2  | 1 branch                           | branch:two-names-compare     || yes   | -             || -    | -       | load_locks, LockError, _write_locks || no-report || 3/6     || 40%
+                         ||             || derive route                                                        || typing                || globals                                                                  ||           || docs    ||
+key           | span     || claims      || derives | cx | reason                         | code                || typed | finite_domain || vars                      | mutates | funcs                              || tested    || quality || docsync
+mathema.intent
+ ._references | 93:146p  || {6 | 0 | -} || no      | 15 | 9 branches, 3 loops (1 nested) | loop:multiple-loops || yes   | -             || _REF_SECTIONS, _URL, _DOI | -       | re                                 || no-report || 0/4     || 58%
+ ._sections   | 68:74p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION                  | -       | -                                  || no-report || 0/3     || 58%
+ ._summary    | 77:81p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION, _GOOGLE_HEADER  | -       | -                                  || no-report || 0/2     || 53%
+ .parse_doc   | 149:163p || {5 | 0 | -} || no      | 4  | 2 branches, 1 loop             | loop:not-a-fold     || yes   | -             || KEYWORDS                  | -       | DocIntent, _sections, _summary, +1 || no-report || 2/3     || 48%
 
-0/6 claimed, 0/6 derivable, 0/6 lift unconditionally, 6/6 fully typed, 14/31 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), mean docsync 53%.
+0/4 claimed, 0/4 derivable, 0/4 lift unconditionally, 4/4 fully typed, 2/12 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest; python -m coverage json`), 4/4 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 54%.
 ```
 
-`sed -n 69,90p mathema/locks.py` prints `lock` and nothing else, which is what
-makes the table useful to an agent as much as to a person: it can go from
-"where is the function that writes the lock file" to the exact lines in one
+`sed -n 149,163p mathema/intent.py` prints `parse_doc` and nothing else, which
+is what makes the table useful to an agent as much as to a person: it can go
+from "where is the function that parses a docstring" to the exact lines in one
 step. `mathema audit --index` writes the same map for a whole codebase to
 `.mathema/index.yaml`, with each module's stated intent, every function's
 file, line and span, and a pointer to its verified record where one exists.
-
-Run over all of mathema, the summary line reads:
-
-```text
-0/1268 claimed, 26/1268 derivable, 26/1268 lift unconditionally, 521/1268 fully typed, 3130/6152 docstring quality criteria met, no coverage.json/.coverage report found (try `python -m coverage run -m pytest && python -m coverage json`), 282/1268 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 45%.
-```
-
-Those are unflattering numbers, and they are the point: not one of mathema's
-own 1,268 functions carries a claim yet, only 26 are in a shape the derive
-route can prove things about, and 282 depend on state outside their own
-parameters. A report like that is where verification work starts, because it
-says exactly where the knowledge ends.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Honest numbers</span><span class="brk r"></span></span>
 
@@ -232,10 +218,10 @@ shown anywhere in these docs, so a page cannot drift out of the grammar
 unnoticed, and the claims the README and the grammar page teach are drawn from
 a curated lexicon of 135 that it renders and adjudicates on every run.
 
-What mathema does not yet do is carry claims about its own functions, as the
-audit above shows. Turning its own tools on itself, so that the engine's
-claims live in its own record store and gate its own changes, is planned work
-rather than a present fact, and this page will say so until it is done.
+What mathema does not yet do is carry claims about its own functions.
+Turning its own tools on itself, so that the engine's claims live in its own
+record store and gate its own changes, is planned work rather than a present
+fact, and this page will say so until it is done.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Agents and people</span><span class="brk r"></span></span>
 
