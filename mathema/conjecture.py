@@ -198,6 +198,117 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
     return [list(combo) for combo in itertools.product(*choices)]
 
 
+def _representative_values(kind: str, bound) -> list:
+    """Intent:
+        A few in-domain values for one scalar parameter: the midpoint
+        and the included finite endpoints of each piece of its bound,
+        or 0, 1 and -1 when it is unbounded. An integer parameter keeps
+        only integer values. Empty for a bound shape with no interval
+        pieces.
+    """
+    from .domain import Domain, domain_contains
+
+    if bound is None or isinstance(bound, str):
+        raw = [0.0, 1.0, -1.0]
+    else:
+        pieces = bound.pieces if isinstance(bound, Domain) else (bound,)
+        raw = []
+        for piece in pieces:
+            if not (isinstance(piece, tuple) and len(piece) == 2):
+                continue
+            lo, hi = piece
+            try:
+                finite_lo, finite_hi = math.isfinite(lo), math.isfinite(hi)
+            except TypeError:
+                continue
+            if finite_lo and finite_hi:
+                raw.append((lo + hi) / 2)
+            if finite_lo and getattr(piece, "closed_lo", True):
+                raw.append(lo)
+            if finite_hi and getattr(piece, "closed_hi", True):
+                raw.append(hi)
+            if not (finite_lo or finite_hi):
+                raw.extend([0.0, 1.0, -1.0])
+    if kind == "int":
+        raw = [int(round(v)) for v in raw]
+    return [v for v in dict.fromkeys(raw)
+            if bound is None or domain_contains(v, bound)]
+
+
+def _guard_points(fn, facts, kinds: dict, domain: dict,
+                  literal_args: dict) -> list:
+    """Intent:
+        Argument lists, in `kinds` order, that sit on the switching
+        surfaces of the function's own guards inside the claim's
+        domain: `if x * y == 0.0:` over `x in [-1, 2]` yields points
+        with `x = 0`. A coordinate the surface does not fix takes its
+        parameter's midpoint (or first representative value), a literal
+        argument its literal. Empty unless every parameter is a real or
+        integer scalar (or fixed by a literal).
+
+    Notes:
+        An equality guard holds on a set of measure zero, which random
+        sampling never lands on, so these points are pinned the way the
+        domain's corners are. Wall-clock capped at the fast budget; a
+        cap that fires yields no points.
+    """
+    from . import _timeout as _timeout_mod
+    from ._timeout import _with_timeout
+    from .domain import domain_contains
+    from .symbolic._guard_points import guard_surfaces, surface_points
+
+    if facts.tree is None or not (
+            facts.branch_count
+            or any(isinstance(n, ast.IfExp) for n in ast.walk(facts.tree))):
+        return []
+    candidates: dict = {}
+    for p, k in kinds.items():
+        if p in literal_args:
+            continue
+        if k not in ("scalar", "float", "int"):
+            return []
+        values = _representative_values(k, domain.get(p))
+        if not values:
+            return []
+        candidates[p] = values
+
+    def compute():
+        surfaces, symbols = guard_surfaces(fn, facts)
+        if not surfaces:
+            return []
+        fixed = {symbols[p]: v for p, v in literal_args.items()
+                 if p in symbols and isinstance(v, (int, float))
+                 and not isinstance(v, bool)}
+        if fixed:
+            surfaces = [sf.subs(fixed) for sf in surfaces]
+        return surface_points(surfaces, symbols, candidates)
+
+    try:
+        points = _with_timeout(compute, _timeout_mod.FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return []
+    out: list = []
+    for point in points:
+        args = []
+        for p, k in kinds.items():
+            if p in literal_args:
+                args.append(literal_args[p])
+                continue
+            v = point.get(p, candidates[p][0])
+            if k == "int":
+                if not float(v).is_integer():
+                    break
+                v = int(v)
+            bound = domain.get(p)
+            if bound is not None and not domain_contains(v, bound):
+                break
+            args.append(v)
+        else:
+            if args not in out:
+                out.append(args)
+    return out
+
+
 def _sample_in_domain(value, bound) -> bool:
     """Intent:
         Whether one sampled scalar lies inside its parameter's declared
@@ -4439,6 +4550,10 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the domain box's corners replay with the recorded counterexamples,
     # before any random sampling
     pinned += [c for c in _domain_corners(kinds, cj_domain, literal_args)
+               if c not in pinned]
+    # and the solutions of the function's own guards inside the domain
+    pinned += [c for c in _guard_points(fn, facts, kinds, cj_domain,
+                                        literal_args)
                if c not in pinned]
     call_raised = [None]   # the LABEL of the callee that raised, or None
 
