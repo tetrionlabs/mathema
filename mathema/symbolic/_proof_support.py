@@ -114,12 +114,10 @@ def _provably_signed(expr, domain: dict, params: dict, bound_context) -> bool | 
     if bound_context is not None:
         try:
             with sympy.assuming(bound_context):
-                decided = sympy.ask(sympy.Q.positive(expr))
-                if decided is not None:
-                    return decided
-                decided = sympy.ask(sympy.Q.negative(expr))
-                if decided is not None:
-                    return not decided
+                if sympy.ask(sympy.Q.nonnegative(expr)) is True:
+                    return True
+                if sympy.ask(sympy.Q.negative(expr)) is True:
+                    return False
         except TimeoutError:
             raise
         except Exception:
@@ -133,13 +131,19 @@ def _provably_signed(expr, domain: dict, params: dict, bound_context) -> bool | 
         return corners
     if expr.is_Mul:
         negatives = 0
+        may_vanish = False
         for factor in expr.args:
             sign = _provably_signed(factor, domain, params, bound_context)
             if sign is None:
                 return None
             if sign is False:
                 negatives += 1
-        return negatives % 2 == 0
+            else:
+                # nonnegative includes zero, so the product may be zero
+                may_vanish = True
+        if negatives % 2 == 0:
+            return True
+        return None if may_vanish else False
     return None
 
 

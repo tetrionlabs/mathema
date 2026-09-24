@@ -1634,24 +1634,24 @@ def array_sum_reduction(a: float, n: float) -> float:
 
 def test_linspace_bare_array_return_proves_symbolic_index():
     results = check_conjectures(
-        sine_wave, [claim("f(amp, freq, n)[i] == amp*sin(2*pi*freq*i/(n-1))",
+        sine_wave, [claim("for n in [2, 50] ⊂ Z, f(amp, freq, n)[i] == amp*sin(2*pi*freq*i/(n-1))",
                          route="derive")])
     assert results[0].verdict == "proven"
 
 
 def test_linspace_bare_array_return_proves_literal_index_boundary():
     results = check_conjectures(
-        sine_wave, [claim("f(amp, freq, n)[0] == 0", route="derive")])
+        sine_wave, [claim("for n in [2, 50] ⊂ Z, f(amp, freq, n)[0] == 0", route="derive")])
     assert results[0].verdict == "proven"
 
 
 def test_linspace_tuple_of_arrays_return_proves_both_elements():
     results = check_conjectures(
-        ellipse_path, [claim("f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))",
+        ellipse_path, [claim("for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[0][i] == cx + a*cos(2*pi*i/(n-1))",
                             route="derive")])
     assert results[0].verdict == "proven"
     results = check_conjectures(
-        ellipse_path, [claim("f(cx, cy, a, b, n)[1][i] == cy + b*sin(2*pi*i/(n-1))",
+        ellipse_path, [claim("for n in [2, 50] ⊂ Z, f(cx, cy, a, b, n)[1][i] == cy + b*sin(2*pi*i/(n-1))",
                             route="derive")])
     assert results[0].verdict == "proven"
 
@@ -1682,7 +1682,7 @@ def test_reduction_over_a_local_array_declines_not_crash():
 
 def test_unindexed_array_valued_claim_is_unliftable_not_a_crash():
     results = check_conjectures(
-        sine_wave, [claim("f(amp, freq, n) == 0", route="derive")])
+        sine_wave, [claim("for n in [2, 50] ⊂ Z, f(amp, freq, n) == 0", route="derive")])
     assert results[0].verdict == "falsified"   # raises on sampled inputs
     assert "indexed" in results[0].note
 

@@ -28,6 +28,7 @@ never decides, since guessing the origin wrong would falsify with a
 lemma about the wrong function.
 """
 import ast
+import copy
 
 import sympy
 
@@ -48,6 +49,13 @@ _PARTIALITY_LEMMAS: dict = {
     "math.log10": [(lambda u: sympy.Le(u, 0), "ValueError")],
     "math.asin": [(lambda u: sympy.Gt(sympy.Abs(u), 1), "ValueError")],
     "math.acos": [(lambda u: sympy.Gt(sympy.Abs(u), 1), "ValueError")],
+    # numpy.linspace(start, stop, num): num must be a nonnegative integer
+    "numpy.linspace": [
+        (lambda *a: sympy.Ne(a[2], sympy.floor(a[2])) if len(a) > 2
+         else sympy.false, "TypeError"),
+        (lambda *a: sympy.Lt(a[2], 0) if len(a) > 2 else sympy.false,
+         "ValueError"),
+    ],
 }
 
 
@@ -104,8 +112,43 @@ def _lemmas_for_call(node: ast.Call, scope: dict) -> list:
     return []
 
 
+def _plain_lambda(lam: ast.Lambda) -> bool:
+    """A lambda with only plain positional parameters."""
+    a = lam.args
+    return not (a.vararg or a.kwarg or a.kwonlyargs or a.defaults
+                or a.posonlyargs)
+
+
+class _LambdaInliner(ast.NodeTransformer):
+    """Replace each call `g(e1, e2)` of a local `g = lambda a, b: body`
+    with `body`, its parameters replaced by the argument expressions."""
+
+    def __init__(self, lambdas: dict):
+        self.lambdas = lambdas
+
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        lam = (self.lambdas.get(node.func.id)
+               if isinstance(node.func, ast.Name) else None)
+        if lam is None or node.keywords \
+                or len(node.args) != len(lam.args.args):
+            return node
+        mapping = {a.arg: v for a, v in zip(lam.args.args, node.args)}
+
+        class _Sub(ast.NodeTransformer):
+            def visit_Name(self, n):
+                return mapping.get(n.id, n) if isinstance(n.ctx, ast.Load) \
+                    else n
+        body = _Sub().visit(copy.deepcopy(lam.body))
+        return ast.copy_location(body, node)
+
+
+def _inline_lambdas(stmt: ast.stmt, lambdas: dict) -> ast.stmt:
+    return _LambdaInliner(lambdas).visit(copy.deepcopy(stmt))
+
+
 def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
-                    scope: dict) -> None:
+                    scope: dict, missed: "list | None" = None) -> None:
     """Intent:
         Collect every implicit raise region inside one expression: a
         call with a registered partiality lemma (math.sqrt's negative
@@ -114,53 +157,84 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
         under.
 
     Notes:
-        An argument that doesn't lift contributes no guard, a missed
-        guard leaves today's behavior (no new falsification), never a
-        wrong one. The recursion is manual, never a blind ast.walk: a
+        An operation whose raise region cannot be stated exactly (an
+        argument or denominator that doesn't lift, a ternary or and/or
+        whose condition doesn't lift) contributes no guard and is
+        appended to `missed` instead, so the caller knows the region it
+        reports is incomplete. The recursion is manual, never a blind ast.walk: a
         guard's condition must be EXACT about whether its operation
         executes, so a ternary's arms carry the ternary's own condition
         (`0.0 if x == 0 else 1/x` divides only where x != 0, an
         unconditional guard there falsified a true claim in dev), and
         short-circuited operands of and/or, whose execution this pass
-        can't condition exactly, contribute no guards at all.
+        can't condition exactly, are reported as missed.
     """
+    def miss(what: str) -> None:
+        if missed is not None:
+            missed.append(f"line {getattr(node, 'lineno', '?')}: {what}")
+
+    def has_partial(sub: ast.AST) -> bool:
+        return any(isinstance(n, ast.BinOp)
+                   and isinstance(n.op, (ast.Div, ast.FloorDiv, ast.Mod))
+                   or isinstance(n, ast.Call) and _lemmas_for_call(n, scope)
+                   for n in ast.walk(sub))
+
     if isinstance(node, ast.IfExp):
         from ._conditioned import _condition_to_sympy
-        _guards_in_expr(node.test, env, path_cond, out, scope)
+        _guards_in_expr(node.test, env, path_cond, out, scope, missed)
         cond = _condition_to_sympy(node.test, dict(env))
         if cond is not None:
             _guards_in_expr(node.body, env, sympy.And(path_cond, cond),
-                            out, scope)
+                            out, scope, missed)
             _guards_in_expr(node.orelse, env,
-                            sympy.And(path_cond, sympy.Not(cond)), out, scope)
+                            sympy.And(path_cond, sympy.Not(cond)), out,
+                            scope, missed)
+        elif has_partial(node.body) or has_partial(node.orelse):
+            miss("conditional expression")
         return
     if isinstance(node, ast.BoolOp):
         # only the first operand is unconditionally evaluated
         if node.values:
-            _guards_in_expr(node.values[0], env, path_cond, out, scope)
+            _guards_in_expr(node.values[0], env, path_cond, out, scope,
+                            missed)
+        if any(has_partial(v) for v in node.values[1:]):
+            miss("and/or operand")
         return
-    if isinstance(node, ast.Call) and not node.keywords:
+    if isinstance(node, ast.Call):
         for condition, exc_name in _lemmas_for_call(node, scope):
+            if node.keywords:
+                miss("keyword call")
+                break
             try:
                 args = [_expr_to_sympy(a, dict(env)) for a in node.args]
                 region = condition(*args)
+            except TimeoutError:
+                raise
             except Exception:
+                miss("call argument")
                 continue
             out.append((sympy.And(path_cond, region), exc_name))
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+    if isinstance(node, ast.BinOp) \
+            and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
         try:
             denom = _expr_to_sympy(node.right, dict(env))
         except NotSymbolic:
             denom = None
-        if denom is not None and not isinstance(denom, tuple) \
-                and denom.free_symbols:
+        if denom is None or isinstance(denom, tuple):
+            miss("divisor")
+        elif denom.free_symbols:
             out.append((sympy.And(path_cond, sympy.Eq(denom, 0)),
                         "ZeroDivisionError"))
     for child in ast.iter_child_nodes(node):
-        _guards_in_expr(child, env, path_cond, out, scope)
+        _guards_in_expr(child, env, path_cond, out, scope, missed)
 
 
 def partiality_guards(fn, facts) -> list:
+    """The implicit raise regions of `fn`'s body; see partiality_walk."""
+    return partiality_walk(fn, facts)[0]
+
+
+def partiality_walk(fn, facts, domain: "dict | None" = None) -> "tuple[list, str | None]":
     """Intent:
         The implicit raise regions of a straight-line (or simply
         branched) body, as (condition, exception name) guards over the
@@ -171,23 +245,77 @@ def partiality_guards(fn, facts) -> list:
         Walks docstring-stripped statements with local assignments
         threaded into the environment, so `disc = b*b - 4*a*c;
         math.sqrt(disc)` guards on the full discriminant expression.
-        Declines to an empty list on any shape it doesn't recognize
-        past the statements it already processed, partial coverage
-        only ever under-reports.
+        Returns `(guards, unread)`. `unread` is `None` when every
+        statement on every path was read, else a short description of
+        the first statement the walk stopped at: guards past that point
+        are missing, so an empty raise region is not established and a
+        proof must not rely on it. A branch whose condition does not
+        lift (a string comparison, say) is settled from `domain` when
+        the declared domain decides it, and only the live side is walked.
     """
     if facts.tree is None:
-        return []
+        return [], "no source"
     try:
         params, aggregate = _bind_params(fn, facts)
     except Exception:
-        return []
+        return [], "parameters not bound"
     # bundled (dataclass/dict/self) parameters are fine now: their
     # fields are ordinary composite symbols, so a guard over
     # `self.rate` or `cfg.a` reads like any scalar guard
-    from ._conditioned import _condition_to_sympy
+    from ._conditioned import (_branch_condition_truth, _condition_to_sympy,
+                               _unmodified_params)
+    unmodified = _unmodified_params(facts.tree, set(facts.params or ()))
 
-    scope = getattr(fn, "__globals__", None) or {}
+    scope = dict(getattr(fn, "__globals__", None) or {})
     guards: list = []
+    unread: list = []
+    missed: list = []
+    lambdas: dict = {}
+
+    def stop(stmt) -> None:
+        if not unread:
+            unread.append(f"line {getattr(stmt, 'lineno', '?')}: "
+                          f"{type(stmt).__name__}")
+
+    def bind_import(stmt) -> bool:
+        import importlib
+        try:
+            if isinstance(stmt, ast.Import):
+                for alias in stmt.names:
+                    if alias.asname:
+                        scope[alias.asname] = importlib.import_module(alias.name)
+                    else:
+                        head = alias.name.split(".")[0]
+                        scope[head] = importlib.import_module(head)
+                return True
+            if stmt.level or not stmt.module:
+                return False
+            module = importlib.import_module(stmt.module)
+            for alias in stmt.names:
+                if alias.name == "*":
+                    return False
+                scope[alias.asname or alias.name] = getattr(module, alias.name)
+            return True
+        except Exception:
+            return False
+
+    def bind(env, name, value_node, stmt):
+        # a name whose value does not lift is dropped from the
+        # environment: any later raise region that reads it fails to
+        # lift and is reported as missed
+        _guards_in_expr(value_node, env, path_cond_box[0], guards, scope,
+                        missed)
+        env = {k: v for k, v in env.items() if k != name}
+        lambdas.pop(name, None)
+        try:
+            value = _expr_to_sympy(value_node, dict(env))
+        except NotSymbolic:
+            return env
+        if not isinstance(value, tuple):
+            env[name] = value
+        return env
+
+    path_cond_box = [sympy.true]
 
     def always_exits(stmts) -> bool:
         if not stmts:
@@ -202,26 +330,85 @@ def partiality_guards(fn, facts) -> list:
 
     def walk(stmts, path_cond, env):
         for stmt in stmts:
+            path_cond_box[0] = path_cond
+            if lambdas:
+                stmt = _inline_lambdas(stmt, lambdas)
             if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 \
-                    and isinstance(stmt.targets[0], ast.Name):
-                _guards_in_expr(stmt.value, env, path_cond, guards, scope)
-                try:
-                    value = _expr_to_sympy(stmt.value, dict(env))
-                except NotSymbolic:
+                    and isinstance(stmt.targets[0], ast.Name) \
+                    and isinstance(stmt.value, ast.Lambda) \
+                    and _plain_lambda(stmt.value):
+                name = stmt.targets[0].id
+                env = {k: v for k, v in env.items() if k != name}
+                lambdas[name] = stmt.value
+                continue
+            target = None
+            value_node = None
+            if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+                target, value_node = stmt.targets[0], stmt.value
+            elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                target, value_node = stmt.target, stmt.value
+            elif isinstance(stmt, ast.AugAssign) \
+                    and isinstance(stmt.target, ast.Name):
+                target = stmt.target
+                value_node = ast.BinOp(
+                    left=ast.Name(id=stmt.target.id, ctx=ast.Load()),
+                    op=stmt.op, right=stmt.value)
+                ast.copy_location(value_node, stmt)
+            if isinstance(target, ast.Name):
+                env = bind(env, target.id, value_node, stmt)
+                if env is None:
                     return
-                if isinstance(value, tuple):
+            elif isinstance(target, ast.Tuple) \
+                    and isinstance(value_node, ast.Tuple) \
+                    and len(target.elts) == len(value_node.elts) \
+                    and all(isinstance(t, ast.Name) for t in target.elts):
+                # every right-hand side is evaluated before any name binds
+                new_env = dict(env)
+                for t, v in zip(target.elts, value_node.elts):
+                    bound = bind(env, t.id, v, stmt)
+                    if bound is None:
+                        return
+                    new_env[t.id] = bound[t.id]
+                env = new_env
+            elif target is not None:
+                stop(stmt)
+                return
+            elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
+                if not bind_import(stmt):
+                    stop(stmt)
                     return
-                env = dict(env)
-                env[stmt.targets[0].id] = value
+            elif isinstance(stmt, ast.Assert):
+                cond = _condition_to_sympy(stmt.test, env)
+                if cond is None:
+                    stop(stmt)
+                    return
+                _guards_in_expr(stmt.test, env, path_cond, guards, scope, missed)
+                guards.append((sympy.And(path_cond, sympy.Not(cond)),
+                               "AssertionError"))
+                path_cond = sympy.And(path_cond, cond)
             elif isinstance(stmt, ast.Return):
                 if stmt.value is not None:
-                    _guards_in_expr(stmt.value, env, path_cond, guards, scope)
+                    _guards_in_expr(stmt.value, env, path_cond, guards, scope, missed)
                 return   # nothing after a return executes
             elif isinstance(stmt, ast.If):
                 cond = _condition_to_sympy(stmt.test, env)
                 if cond is None:
-                    return
-                _guards_in_expr(stmt.test, env, path_cond, guards, scope)
+                    truth = None
+                    if domain:
+                        try:
+                            truth = _branch_condition_truth(
+                                stmt.test, domain, unmodified, None, params)
+                        except Exception:
+                            truth = None
+                    if truth is None:
+                        stop(stmt)
+                        return
+                    live = stmt.body if truth else stmt.orelse
+                    walk(live, path_cond, env)
+                    if always_exits(live):
+                        return
+                    continue
+                _guards_in_expr(stmt.test, env, path_cond, guards, scope, missed)
                 walk(stmt.body, sympy.And(path_cond, cond), env)
                 if stmt.orelse:
                     walk(stmt.orelse, sympy.And(path_cond, sympy.Not(cond)), env)
@@ -267,11 +454,13 @@ def partiality_guards(fn, facts) -> list:
                             body_cond = sympy.And(path_cond, trip >= 1)
                     except NotSymbolic:
                         body_cond = None
+                if body_cond is None:
+                    stop(stmt)
                 if body_cond is not None:
                     for node in ast.walk(stmt):
                         if isinstance(node, (ast.Assign, ast.AugAssign)):
                             _guards_in_expr(node.value, env, body_cond,
-                                            guards, scope)
+                                            guards, scope, missed)
                 loop_names = set()
                 for node in ast.walk(stmt):
                     if isinstance(node, ast.Name) and isinstance(
@@ -280,9 +469,13 @@ def partiality_guards(fn, facts) -> list:
                 if isinstance(stmt.target, ast.Name):
                     loop_names.add(stmt.target.id)
                 env = {k: v for k, v in env.items() if k not in loop_names}
-            elif isinstance(stmt, (ast.Pass, ast.Expr)):
+            elif isinstance(stmt, ast.Pass):
                 continue
+            elif isinstance(stmt, ast.Expr):
+                _guards_in_expr(stmt.value, env, path_cond, guards, scope, missed)
             else:
+                stop(stmt)
                 return
     walk(strip_docstring(facts.tree.body), sympy.true, dict(params))
-    return guards
+    first = (unread or missed or [None])[0]
+    return guards, first

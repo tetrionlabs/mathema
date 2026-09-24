@@ -1865,6 +1865,31 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
              _split_depth: int = 0, funcs: dict | None = None,
              assumption: "list | None" = None,
              assume_defined: bool = False) -> ProofResult:
+    """See `_try_prove`. A proof is kept only when every raise region
+    of the functions it reads was read too: a statement the raise-region
+    pass stops at could hide a raise in the domain, and a value claim is
+    false wherever the code raises."""
+    notes: dict = {}
+    result = _try_prove(fn, facts, lhs_src, rhs_src, relation, domain,
+                        tolerance, max_callee_depth, extensive, _split_depth,
+                        funcs, assumption, assume_defined, _walk_notes=notes)
+    if result.status == "proven" and notes.get("unread") and not assume_defined:
+        return ProofResult(
+            "undecided",
+            sketch=(f"{result.sketch}; not kept as a proof: the raise-region "
+                    f"pass stops at {notes['unread']}, so a raise inside the "
+                    "domain is not ruled out"),
+            meta=dict(result.meta))
+    return result
+
+
+def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
+               domain: dict | None = None, tolerance: float | None = None,
+               max_callee_depth: int = 3, extensive: bool = False,
+               _split_depth: int = 0, funcs: dict | None = None,
+               assumption: "list | None" = None,
+               assume_defined: bool = False,
+               _walk_notes: dict | None = None) -> ProofResult:
     """Attempt a symbolic proof of `lhs <relation> rhs` over the function's
     lifted body, honoring a declared domain as sympy assumptions.
 
@@ -2012,13 +2037,16 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             # a bound function's own raise regions gate the claim
             # exactly like f's do; without this, derive could prove
             # an identity probe falsifies at g's first raising sample
-            from ._partiality import partiality_guards as _pguards
+            from ._partiality import partiality_walk as _pwalk
             try:
-                g_guards = list(_pguards(gfn, gfacts))
+                g_guards, g_unread = _pwalk(gfn, gfacts)
+                g_guards = list(g_guards)
             except TimeoutError:
                 raise
             except Exception:
-                g_guards = []
+                g_guards, g_unread = [], "raise-region pass failed"
+            if g_unread and _walk_notes is not None:
+                _walk_notes.setdefault("unread", f"{gname} {g_unread}")
             g_guards.extend(conditioned_guards)
             if g_guards:
                 aux_funcs_guards[gname] = g_guards
@@ -2245,13 +2273,15 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     # zero, join whatever explicit guards the lift itself found: the
     # standard library's partiality is a raise like any other, and the
     # same pedantic raise-region verdict below adjudicates both
-    from ._partiality import partiality_guards
+    from ._partiality import partiality_walk
     try:
-        implicit = partiality_guards(fn, facts)
+        implicit, unread = partiality_walk(fn, facts, domain or {})
     except TimeoutError:
         raise
     except Exception:
-        implicit = []
+        implicit, unread = [], "raise-region pass failed"
+    if unread and _walk_notes is not None:
+        _walk_notes.setdefault("unread", f"{fn.__name__} {unread}")
     if implicit:
         piecewise_guards = list(piecewise_guards) + implicit
 

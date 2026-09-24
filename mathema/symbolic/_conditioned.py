@@ -341,7 +341,12 @@ def _compare_truth_literal(param: str, op: ast.AST, lit_node: ast.AST,
             return None   # e.g. comparing a string domain with < /<=
         return results.pop() if len(results) == 1 else None
 
-    if isinstance(dom, tuple) and isinstance(lit, (int, float)):
+    if (isinstance(dom, tuple) and isinstance(lit, (int, float))
+            and py_op not in (operator.eq, operator.ne)):
+        # an ordering comparison is monotone in the parameter, so its
+        # value at the two endpoints bounds its value everywhere
+        # between them; `==`/`!=` are not, and are decided by the
+        # exact set test below
         lo, hi = dom
         try:
             # bool() normalizes sympy's BooleanTrue/BooleanFalse (exact
