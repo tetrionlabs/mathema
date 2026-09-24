@@ -113,8 +113,13 @@ mathema check pricing.py
 ```
 
 ```text
-ok   pricing.discounted: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+ok   pricing.discounted: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 ```
+
+The second claim is the proof's `[float]` companion: every claim the derive
+route proves also runs through the real code in floating point, since a
+proof is about the mathematics and whether the implementation keeps up in
+f64 is a separate question. See [the evidence ladder](evidence-ladder.md).
 
 The docstring is one of four places a claim can live, alongside a
 decorator, a claims file, and an annotation. See [authoring

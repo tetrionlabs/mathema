@@ -51,8 +51,8 @@ For a small two-function project after its first sweep:
         overall 32
 ```
 
-Every line is exercised, intent is a quarter specified, and the overall comes out at 32 where the mean of the three would have
-said 59.
+Every line is exercised, intent is a quarter specified, and the overall
+comes out at 32 where the mean of the three would have said 59.
 
 Intent and clarity roll up to the project by a mean weighted by how central
 each function is in the call graph, so a function the rest of the code leans

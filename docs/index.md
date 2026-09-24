@@ -151,6 +151,7 @@ print(mathema.check(midpoint, claims=[
 mathema.Record(midpoint) · source, no side effects · form 3f045b3e5b8d
   proven  between_integers: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) ≤ f(a, b) ≤ max(a, b)
            for a in [0, 100]:int|missing, b in [0, 100]:int|missing
+  holds   between_integers[float]: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) <= f(a, b) <= max(a, b) (n=44)
   FALSIFY between_reals: for a in [0.0, 100.0]:float|missing, b in [0.0, 100.0]:float|missing, min(a, b) <= f(a, b) <= max(a, b)
            counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
 ```
@@ -174,7 +175,7 @@ mathema check mid.py:midpoint --claim "for a in [0, 100], b in [0, 100], min(a, 
 ```
 
 ```text
-ok   mid.midpoint: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+ok   mid.midpoint: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 ```
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">A whole codebase</span><span class="brk r"></span></span>
@@ -371,7 +372,7 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 ```
 
 ```text
-ok   options.put_call_parity_gap: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+ok   options.put_call_parity_gap: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
 ```
 
 `proven`, over every point of a five-dimensional region of prices, rates,
