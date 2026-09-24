@@ -606,11 +606,21 @@ def render_triangle(a: int, b: int, c: int) -> str:
 
 
 # --- emission ---------------------------------------------------------
-# Distinct brand colors, one per layer; the overall badge scales its
-# color with the value so a glance reads health.
-_BADGE_COLOR = {"implementation": "#1f6feb",     # blue  (code)
-                "intent": "#2da44e",             # green (spec)
-                "clarity": "#8250df"}            # purple (clarity)
+# The Tetrion Labs identity (brand tokens v1): warm ink and paper
+# neutrals with a single green accent. The accent is legible on the ink
+# ground only; its darker companion carries white text in the shields.
+_INK = "#1A1714"            # card ground
+_LINE = "#33302B"           # rules and spokes on dark
+_GRAPHITE = "#4A443E"       # the faint 100/100/100 frame
+_DMUTE = "#8A837B"          # secondary type on dark
+_PAPER = "#FAF8F5"          # primary type on dark
+_ACCENT = "#3ECF8E"         # the scored triangle and its vertices
+_ACCENT_STRONG = "#0E7A47"  # shields message fill, white text on it
+_SVG_PALETTE = frozenset({_INK, _LINE, _GRAPHITE, _DMUTE, _PAPER, _ACCENT})
+_DISPLAY_FONT = ("'Space Grotesk',-apple-system,BlinkMacSystemFont,"
+                 "'Segoe UI',sans-serif")
+_MONO_FONT = "'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace"
+
 _BADGE_LABEL = {"implementation": "implementation",
                 "intent": "intent",
                 "clarity": "clarity"}
@@ -628,13 +638,15 @@ def _value_color(pct: int) -> str:
 
 def shields_payloads(scores: BadgeScores) -> dict:
     """The three shields.io endpoint payloads (`schemaVersion`/`label`/
-    `message`/`color`), keyed implementation/intent/clarity.
-    Each renders as a badge a README references by its raw URL."""
+    `message`/`color`/`labelColor`), keyed implementation/intent/clarity.
+    Each renders as a badge a README references by its raw URL, in the
+    Tetrion Labs colours: an ink label and a deep green message."""
     out = {}
     for dim in ("implementation", "intent", "clarity"):
         out[dim] = {"schemaVersion": 1, "label": _BADGE_LABEL[dim],
                     "message": f"{getattr(scores, dim)}%",
-                    "color": _BADGE_COLOR[dim]}
+                    "color": _ACCENT_STRONG,
+                    "labelColor": _INK}
     return out
 
 
@@ -646,85 +658,72 @@ def _svg_score_point(origin, corner, score):
             origin[1] + f * (corner[1] - origin[1]))
 
 
-def _blend_fill(intent: int, clarity: int, implementation: int) -> tuple:
-    """The inner fill colour is the three scores AS a colour: red is
-    intent, green is clarity, blue is implementation, each 0-100 mapped
-    onto 0-255. All three high reads near white, all low near black, and
-    a lopsided profile takes on the colour of its strongest layer.
-    Returns `(hex, text_colour)`, the text picked for contrast by
-    luminance so the overall number stays legible on the fill."""
-    r = round(255 * max(0, min(100, intent)) / 100)
-    g = round(255 * max(0, min(100, clarity)) / 100)
-    b = round(255 * max(0, min(100, implementation)) / 100)
-    lum = 0.299 * r + 0.587 * g + 0.114 * b
-    return f"#{r:02x}{g:02x}{b:02x}", ("#111111" if lum > 140 else "#ffffff")
-
-
 def render_svg(scores: BadgeScores) -> str:
-    """A colored twin of the ASCII triangle, same layout so the two read
+    """A dark-card twin of the ASCII triangle, same layout so the two read
     alike: CLARITY at the apex, IMPL and INTENT the bottom nodes, the full
-    100/100/100 triangle as a faint frame, and each score a vertex on its
-    spoke from the bottom centre (all-zero) out to its corner, with the
-    triangle they span filled. The fill colour encodes the scores: red
-    intent, green clarity, blue implementation. For a slicker README embed
-    than the ASCII (whose job is the git diff)."""
+    100/100/100 triangle as a faint dashed frame, and each score a vertex
+    on its spoke from the bottom centre (all-zero) out to its corner, with
+    the triangle they span filled in the accent. The overall number sits
+    top right. Self-contained (no external CSS or fonts), so it reads
+    the same on a light or a dark README."""
     w, h = 360, 300
-    apex = (180.0, 64.0)          # CLARITY, top
-    left = (56.0, 246.0)          # IMPL, bottom-left
-    right = (304.0, 246.0)        # INTENT, bottom-right
-    origin = (180.0, 246.0)       # all-zero sits at the base centre
+    apex = (180.0, 72.0)          # CLARITY, top
+    left = (56.0, 240.0)          # IMPL, bottom-left
+    right = (304.0, 240.0)        # INTENT, bottom-right
+    origin = (180.0, 240.0)       # all-zero sits at the base centre
     frame = {"CLARITY": apex, "IMPL": left, "INTENT": right}
-    dims = (("CLARITY", "clarity", scores.clarity),
-            ("IMPL", "implementation", scores.implementation),
-            ("INTENT", "intent", scores.intent))
-    fill, text_color = _blend_fill(scores.intent, scores.clarity,
-                                   scores.implementation)
+    dims = (("CLARITY", scores.clarity),
+            ("IMPL", scores.implementation),
+            ("INTENT", scores.intent))
     ghost = " ".join(f"{p[0]:.1f},{p[1]:.1f}" for p in (apex, left, right))
     pts = {name: _svg_score_point(origin, frame[name], sc)
-           for name, _, sc in dims}
+           for name, sc in dims}
     cur = " ".join(f"{pts[n][0]:.1f},{pts[n][1]:.1f}"
                    for n in ("CLARITY", "IMPL", "INTENT"))
-    ctr = (sum(p[0] for p in pts.values()) / 3.0,
-           sum(p[1] for p in pts.values()) / 3.0 + 5)
-    font = ("system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,"
-            "Arial,sans-serif")
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-        f'viewBox="0 0 {w} {h}" font-family="{font}">',
-        # a self-contained light card, so the badge reads on any README
-        # theme without depending on external CSS or fonts
-        f'<rect x="1" y="1" width="{w - 2}" height="{h - 2}" rx="14" '
-        'fill="#ffffff" stroke="#d0d7de"/>',
+        f'viewBox="0 0 {w} {h}" font-family="{_MONO_FONT}">',
+        f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1}" rx="10" '
+        f'fill="{_INK}" stroke="{_LINE}"/>',
+        # the header: the product name in the bracket-label motif
+        f'<text x="20" y="28" fill="{_DMUTE}" font-size="11" '
+        f'letter-spacing="1.2">[ mathema ]</text>',
         # the full 100/100/100 frame: a faint dashed triangle with open
         # corner pips, the room to grow
-        f'<polygon points="{ghost}" fill="none" stroke="#afb8c1" '
+        f'<polygon points="{ghost}" fill="none" stroke="{_GRAPHITE}" '
         'stroke-dasharray="2 5" stroke-width="1.25"/>',
     ]
-    for p in (apex, left, right):
-        parts.append(f'<circle cx="{p[0]:.1f}" cy="{p[1]:.1f}" r="3" '
-                     'fill="none" stroke="#afb8c1" stroke-width="1.25"/>')
-    parts.append(f'<polygon points="{cur}" fill="{fill}" stroke="#57606a" '
-                 'stroke-width="1.5" stroke-linejoin="round"/>')
-    label_pos = {"CLARITY": (apex[0], apex[1] - 14, "middle"),
-                 "IMPL": (left[0] - 10, left[1] + 26, "start"),
-                 "INTENT": (right[0] + 10, right[1] + 26, "end")}
-    for name, layer, sc in dims:
-        vx, vy = pts[name]
-        color = _BADGE_COLOR[layer]
+    for name in ("CLARITY", "IMPL", "INTENT"):
         parts.append(f'<line x1="{origin[0]:.0f}" y1="{origin[1]:.0f}" '
                      f'x2="{frame[name][0]:.1f}" y2="{frame[name][1]:.1f}" '
-                     f'stroke="{color}" stroke-width="1" opacity="0.3"/>')
-        parts.append(f'<circle cx="{vx:.1f}" cy="{vy:.1f}" r="5.5" '
-                     f'fill="{color}"/>')
+                     f'stroke="{_LINE}" stroke-width="1"/>')
+    for p in (apex, left, right):
+        parts.append(f'<circle cx="{p[0]:.1f}" cy="{p[1]:.1f}" r="3" '
+                     f'fill="{_INK}" stroke="{_GRAPHITE}" stroke-width="1.25"/>')
+    parts.append(f'<polygon points="{cur}" fill="{_ACCENT}" '
+                 f'fill-opacity="0.16" stroke="{_ACCENT}" stroke-width="1.5" '
+                 'stroke-linejoin="round"/>')
+    label_pos = {"CLARITY": (apex[0], apex[1] - 16, "middle"),
+                 "IMPL": (left[0] - 8, left[1] + 30, "start"),
+                 "INTENT": (right[0] + 8, right[1] + 30, "end")}
+    for name, sc in dims:
+        vx, vy = pts[name]
+        parts.append(f'<circle cx="{vx:.1f}" cy="{vy:.1f}" r="4.5" '
+                     f'fill="{_ACCENT}" stroke="{_INK}" stroke-width="2"/>')
         lx, ly, anchor = label_pos[name]
-        parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" fill="{color}" '
-                     f'font-size="14" font-weight="600" '
-                     f'text-anchor="{anchor}">{name} {sc}</text>')
-    # the overall (shaded-area) number, at the filled triangle's centroid
-    # so it always sits on the fill, coloured for contrast against it
-    parts.append(f'<text x="{ctr[0]:.1f}" y="{ctr[1]:.1f}" fill="{text_color}" '
-                 f'font-size="17" font-weight="700" text-anchor="middle">'
+        parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="11" '
+                     f'letter-spacing="1.2" text-anchor="{anchor}">'
+                     f'<tspan fill="{_DMUTE}">{name}</tspan> '
+                     f'<tspan fill="{_PAPER}" font-weight="600">{sc}%</tspan>'
+                     '</text>')
+    # the overall (shaded-area) number, top right, clear of the shape at
+    # every score
+    parts.append(f'<text x="{w - 20}" y="37" fill="{_PAPER}" '
+                 f'font-family="{_DISPLAY_FONT}" font-size="20" '
+                 f'font-weight="600" text-anchor="end">'
                  f'{scores.overall}%</text>')
+    parts.append(f'<text x="{w - 20}" y="51" fill="{_DMUTE}" font-size="10" '
+                 'letter-spacing="1.2" text-anchor="end">overall</text>')
     parts.append("</svg>")
     return "\n".join(parts)
 
