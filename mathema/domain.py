@@ -1018,6 +1018,26 @@ def _parse_piece(text: str):
     return None
 
 
+def _interval_problem(piece) -> str | None:
+    """Intent:
+        Why an interval piece cannot be read as a set of reals, or None:
+        an endpoint that is not a number (NaN) orders against nothing.
+
+    Notes:
+        An empty interval (`[2, 1]`, `(1, 1]`) is readable and is
+        refused at adjudication as `skipped:misspecified`, so one such
+        claim does not stop the rest of a claims file from loading.
+    """
+    if not isinstance(piece, Interval):
+        return None
+    lo, hi = piece
+    if not all(isinstance(v, (int, float)) for v in (lo, hi)):
+        return None
+    if lo != lo or hi != hi:
+        return "has an endpoint that is not a number"
+    return None
+
+
 def _merge_exclude_keyword_parts(parts: list[str]) -> list[str]:
     """`exclude={...}` as its own top-level comma-part (the keyword
     form, `x in [0,10], exclude={-1}`) refers to whichever binding
@@ -1131,7 +1151,11 @@ def _parse_binding(part: str):
         if not pt or _parse_piece(pt) is None:
             return (f"{part!r}: {pt!r} isn't a recognized interval, discrete "
                     f"set, or named set (R/Z/N) for {name!r}")
-        pieces.append(_parse_piece(pt))
+        piece = _parse_piece(pt)
+        problem = _interval_problem(piece)
+        if problem is not None:
+            return f"{part!r}: {pt.strip()!r} {problem} for {name!r}"
+        pieces.append(piece)
 
     # a single bare named-set piece ("x in Z", "x in R") sets the base
     # type directly, the same as an explicit ⊂ clause would; it isn't

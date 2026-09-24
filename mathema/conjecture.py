@@ -599,6 +599,11 @@ def claim(law: str, name: str | None = None, source: str = "user",
         prev = text
         new_assuming, text = extract_assuming_clause(text)
         if new_assuming is not None:
+            if not new_assuming.strip()[len("assuming"):].strip():
+                raise InvalidConjecture(
+                    f"`assuming` has no premise before its comma: state "
+                    f"one (`assuming x > 0, ...`) or drop the keyword: "
+                    f"{law.strip()!r}")
             assuming = new_assuming
         try:
             (new_funcs, new_free_domain, text, new_aliases,

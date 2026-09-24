@@ -358,3 +358,36 @@ def test_the_display_of_a_long_function_alias_is_the_same_claim():
            "compute_square_root(x) >= 0")
     canon = assert_round_trips(law, square)
     assert "compute_square_root(x)" in canon
+
+
+# -- the assuming section --------------------------------------------------------
+
+def test_an_empty_assuming_premise_is_refused():
+    with pytest.raises(InvalidConjecture, match="no premise"):
+        claim("assuming , f(x) >= 0")
+
+
+def test_an_assuming_premise_round_trips():
+    assert_round_trips("assuming x > 0, for x in [-1, 1], f(x) >= 0", total)
+
+
+# -- domains that denote no set --------------------------------------------------
+
+@pytest.mark.parametrize("law", [
+    "for x in [nan, 1], f(x) >= 0",
+    "for x in [0, nan), f(x) >= 0",
+    "for x in [0, 1] | [nan, 2], f(x) >= 0",
+    "let c be [nan, 1], f(x) + c >= 0",
+])
+def test_a_nan_domain_endpoint_is_refused(law):
+    with pytest.raises(InvalidConjecture, match="not a number"):
+        claim(law)
+
+
+def test_a_single_point_domain_still_reads():
+    assert_round_trips("for x in [1, 1], f(x) >= 0", total)
+
+
+def test_an_unreadable_let_bound_says_what_is_wrong():
+    with pytest.raises(InvalidConjecture, match="'banana' isn't a recognized"):
+        claim("let c be banana, f(c) >= 0")

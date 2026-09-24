@@ -1032,6 +1032,13 @@ def extract_let_bindings(
                         point = None
                     if point is not None:
                         parsed_binding = (fname, (point, point))
+                if parsed_binding is None:
+                    from .domain import _parse_binding
+                    reason = _parse_binding(f"{fname} in {bounds}")
+                    raise InvalidDomain(
+                        reason if isinstance(reason, str) else
+                        f"cannot read the bounds of `let {fname} be "
+                        f"{bounds}`")
                 if parsed_binding is not None:
                     _, value = parsed_binding
                     # a real parameter's own kind is already knowable
