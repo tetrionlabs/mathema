@@ -321,3 +321,38 @@ def test_scalar_division_lifts_in_a_matrix_claim():
     A = sympy.MatrixSymbol("A", 2, 2)
     lifted = _lift(ast.parse("1/det(A)", mode="eval"), {"A": A})
     assert lifted == 1 / sympy.Determinant(A)
+
+
+# --- orthogonal determinants and inverses -----------------------------------
+
+def test_an_orthogonal_determinant_is_not_proven_one(mats):
+    """A reflection is orthogonal with determinant -1: sympy's refine
+    reads det(A) as 1 under Q.orthogonal, which is only true of
+    rotations."""
+    for law in ("det(A) == 1", "det(A) >= 0", "det(A) > 0"):
+        pr = _one(mats.orth, law)
+        assert pr.verdict != "proven", (law, pr.sketch)
+
+
+def test_what_holds_of_every_orthogonal_matrix_still_proves(mats):
+    for law in ("det(A)**2 == 1", "A.T @ A == I(n)", "det(A.T @ A) == 1"):
+        pr = _one(mats.orth, law)
+        assert pr.verdict == "proven", (law, pr.sketch, pr.note)
+
+
+def test_an_inverse_needs_an_invertible_operand(mats):
+    """`inv(A) @ A == I(n)` is false for a singular A, where inv raises."""
+    for fn, law in ((mats.one, "inv(A) @ A == I(n)"),
+                    (mats.one, "det(inv(A)) == 1/det(A)"),
+                    (mats.f, "inv(A @ B) == inv(B) @ inv(A)")):
+        pr = _one(fn, law)
+        assert pr.verdict != "proven", (law, pr.sketch)
+
+
+def test_an_invertibility_premise_proves_the_inverse_identity(mats):
+    for fn, law in ((mats.one, "assuming det(A) != 0, inv(A) @ A == I(n)"),
+                    (mats.one, "assuming det(A) != 0, det(inv(A)) == 1/det(A)"),
+                    (mats.orth, "inv(A) @ A == I(n)"),
+                    (mats.pd, "inv(A) @ A == I(n)")):
+        pr = _one(fn, law)
+        assert pr.verdict == "proven", (law, pr.sketch, pr.note)

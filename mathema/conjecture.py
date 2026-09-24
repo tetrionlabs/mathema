@@ -2972,7 +2972,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                 _structs[_pp] = tuple(sorted(
                     set(_structs.get(_pp, ())) | set(_props)))
             mproof = try_prove_matrix(cj.lhs, cj.rhs, cj.relation, facts,
-                                      cj_domain, _shapes, _structs)
+                                      cj_domain, _shapes, _structs,
+                                      premises=assumption)
             if mproof is not None and mproof.status == "proven":
                 return Probe(cj.name, statement, "proven",
                              sketch=mproof.sketch, note=note, route="derive",
