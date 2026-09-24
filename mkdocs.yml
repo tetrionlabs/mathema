@@ -37,6 +37,12 @@ theme:
     - content.code.copy
     - content.code.annotate
 
+extra:
+  social:
+    - icon: octicons/globe-24
+      link: https://tetrionlabs.com
+      name: Tetrion Labs
+
 extra_css:
   - stylesheets/tokens.css
   - stylesheets/extra.css

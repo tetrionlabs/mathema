@@ -42,19 +42,15 @@ treated as a correctness bug, not a support question.
 Do not open a public issue for a security vulnerability. See
 [SECURITY.md](SECURITY.md) for private disclosure.
 
-## Commercial licensing and support
+## Licensing
 
 mathema is source-available under the Business Source License 1.1.
 Production use is free for organisations under the thresholds set out
 in [LICENSING.md](LICENSING.md); beyond them it requires a commercial
-licence.
-
-For commercial licensing, or for support arrangements beyond
-best-effort issue response, contact **licensing@tetrion.co**.
+licence, for which contact **licensing@tetrion.co**.
 
 ## What to expect
 
 This is a small project. Issues are read, and bugs affecting
 correctness of a verdict take priority over everything else. There is
-no response-time commitment on the free tier; a commercial agreement
-is where response times get contractual.
+no response-time commitment.
