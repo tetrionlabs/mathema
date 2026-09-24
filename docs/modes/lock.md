@@ -103,7 +103,11 @@ funcs.settle:
 The verified record carries a `locked` reflection of the same entry,
 covered by the integrity checksum, which is what makes hand-deletion
 detectable: a record that says locked with no meta entry behind it
-fails the sweep as a lock removed outside `mathema unlock`.
+fails the sweep as a lock removed outside `mathema unlock`, and a meta
+entry whose `form` no longer matches the record's stamp fails it as a
+lock moved outside `mathema unlock`. Either way the record is left as
+it was, stamp included, so the failure stands on every sweep until the
+entry is restored or a human unlocks.
 
 ## The honest threat model
 

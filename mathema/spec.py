@@ -367,15 +367,52 @@ def write_yaml(path: str, data: dict, header: str | None = None) -> str:
     block (one `# ` line per header line, so a multi-line header stays
     a comment), creating the parent directory first, the one shared
     spelling of every store write (specs, machine records, declared
-    stubs, suggested claims). Returns `path`."""
+    stubs, suggested claims). Returns `path`.
+
+    The write is atomic (see `atomic_write_text`): an interrupted or
+    failed write leaves the previous file exactly as it was."""
+    text = ""
+    if header:
+        text = "".join(f"# {line}\n" if line else "#\n"
+                       for line in header.splitlines())
+    return atomic_write_text(path, text + dump_yaml(data))
+
+
+def atomic_write_text(path: str, text: str) -> str:
+    """Intent:
+        Replace the file at `path` with `text` all at once, creating
+        the parent directory first. The text goes to a temporary file
+        in the same directory, is flushed to disk, and is renamed over
+        `path`; a rename within one filesystem is atomic, so a reader
+        (or an interrupted run) sees either the old file or the new
+        one, never a truncated one. An existing file's permission
+        bits carry over. Returns `path`.
+    """
+    import tempfile
     d = os.path.dirname(path)
     if d:
         os.makedirs(d, exist_ok=True)
-    with open(path, "w") as fh:
-        if header:
-            for line in header.splitlines():
-                fh.write(f"# {line}\n" if line else "#\n")
-        fh.write(dump_yaml(data))
+    fd, tmp = tempfile.mkstemp(dir=d or ".",
+                               prefix=f".{os.path.basename(path)}.",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if os.path.exists(path):
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp, 0o666 & ~umask)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     return path
 
 
@@ -518,27 +555,33 @@ def _git_commit(root: str) -> "str | None":
     return sha if out.returncode == 0 and len(sha) == 40 else None
 
 
-def integrity_checksum(entry: dict) -> str:
+_INTEGRITY_SCHEME = "v2"
+
+
+def _acceptance_summary(row: dict) -> str:
     """Intent:
-        The tamper-evidence checksum over a verified entry's key
-        fields: sorted (claim name, verdict, acceptance) triples plus
-        the form hash and any lock stamp. Acceptance is summarized as
-        (as, verified_by key, staleness), so a hand-forged or
-        hand-stripped sign-off trips the mismatch the same way an
-        edited verdict does. Deliberately narrow otherwise;
-        notes/sketches/meta are free to be reformatted. Advisory: a
-        mismatch warns and points at the fix, it does not block.
+        A claim row's acceptance as the checksum sees it: the
+        disposition, the key id of any credential that verified it, and
+        whether it has gone stale.
+    """
+    accepted = row.get("accepted")
+    if not isinstance(accepted, dict):
+        return ""
+    vb = accepted.get("verified_by") or {}
+    return (f"{accepted.get('as', '')}:{vb.get('key', '')}"
+            f":{1 if accepted.get('stale') else 0}")
+
+
+def _legacy_integrity_checksum(entry: dict) -> str:
+    """Intent:
+        The checksum a record carries when it was stamped before the
+        current scheme: sorted (claim name, verdict, acceptance) triples
+        plus the form hash and any lock stamp, as a bare 16-hex digest.
+        Kept so a record stamped that way still verifies unchanged.
     """
     import hashlib
-    def _acc(c: dict) -> str:
-        accepted = c.get("accepted")
-        if not isinstance(accepted, dict):
-            return ""
-        vb = accepted.get("verified_by") or {}
-        return (f"{accepted.get('as', '')}:{vb.get('key', '')}"
-                f":{1 if accepted.get('stale') else 0}")
-
-    rows = sorted((c.get("name") or "", c.get("verdict") or "", _acc(c))
+    rows = sorted((c.get("name") or "", c.get("verdict") or "",
+                   _acceptance_summary(c))
                   for c in entry.get("claims") or [])
     basis = "|".join(f"{n}={v};{a}" for n, v, a in rows)
     basis += f"#form={(entry.get('identity') or {}).get('form', '')}"
@@ -546,6 +589,76 @@ def integrity_checksum(entry: dict) -> str:
     if isinstance(locked, dict):
         basis += f"#locked={locked.get('form', '')}"
     return hashlib.sha256(basis.encode()).hexdigest()[:16]
+
+
+def integrity_checksum(entry: dict) -> str:
+    """Intent:
+        The tamper-evidence checksum over a verified entry's material
+        content, spelled `v2:<16 hex>`. It covers, for every live claim
+        row, what the claim states (name, statement, domain, route,
+        tolerance), its verdict and its acceptance (as, verified_by
+        key, staleness); every row of the `discoveries`, `historical`
+        and `superseded` sections the same way; the form hash, the
+        claims fingerprint, the intent acceptance and any lock stamp.
+        A hand edit to any of these, including a row added to a
+        retirement section, trips the mismatch. Notes, sketches and
+        meta are free to be reformatted.
+    Notes:
+        The digest is unkeyed, so it detects an edit made without
+        recomputing it; anyone who can run the computation can restamp
+        a record. A mismatch warns, and under a policy with
+        `require_verification` it fails the sweep.
+    """
+    import hashlib
+    import json
+
+    def _row(section: str, c: dict) -> str:
+        if not isinstance(c, dict):
+            return f"{section}|{json.dumps(c, sort_keys=True, default=str)}"
+        fields = {"name": c.get("name") or "",
+                  "statement": c.get("statement") or c.get("law") or "",
+                  "verdict": c.get("verdict") or "",
+                  "route": c.get("route") or "",
+                  "tolerance": c.get("tolerance"),
+                  "domain": c.get("domain"),
+                  "superseded_by": c.get("superseded_by"),
+                  "accepted": _acceptance_summary(c)}
+        return f"{section}|" + json.dumps(fields, sort_keys=True,
+                                          default=str)
+
+    parts = sorted(_row("claims", c) for c in entry.get("claims") or [])
+    for section in ("discoveries", "historical", "superseded"):
+        parts.extend(sorted(_row(section, c)
+                            for c in entry.get(section) or []))
+    identity = entry.get("identity") or {}
+    parts.append(f"#form={identity.get('form', '')}")
+    parts.append(f"#claims_fingerprint="
+                 f"{identity.get('claims_fingerprint', '')}")
+    intent_accepted = entry.get("intent_accepted")
+    if isinstance(intent_accepted, dict):
+        parts.append("#intent=" + _acceptance_summary(
+            {"accepted": {"as": "documented", **intent_accepted}}))
+    locked = entry.get("locked")
+    if isinstance(locked, dict):
+        parts.append(f"#locked={locked.get('form', '')}")
+    digest = hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+    return f"{_INTEGRITY_SCHEME}:{digest}"
+
+
+def integrity_matches(entry: dict) -> "bool | None":
+    """Intent:
+        Whether a verified entry's contents match its stored integrity
+        checksum, under whichever scheme stamped it: a `v2:` checksum
+        is compared with `integrity_checksum`, a bare digest with the
+        earlier scheme. None when the entry carries no checksum at all.
+    """
+    stored = (entry.get("identity") or {}).get("integrity")
+    if not stored:
+        return None
+    stored = str(stored)
+    if stored.startswith(f"{_INTEGRITY_SCHEME}:"):
+        return integrity_checksum(entry) == stored
+    return _legacy_integrity_checksum(entry) == stored
 
 
 def pin_summary(entry: dict) -> "dict | str":
@@ -669,6 +782,45 @@ def _relativize_record_paths(spec: dict, root: str) -> None:
             fix(row)
 
 
+def base_route(route: "str | None") -> str:
+    """Intent:
+        A route as a claim is authored with it: `probe`, `derive` or
+        `best`, the subroute of an evidence route (`derive:extensive`)
+        dropped, and anything else read as `best`.
+    """
+    route = (route or "best").split(":", 1)[0]
+    return route if route in ("probe", "derive") else "best"
+
+
+def _stamp_authored_routes(spec: dict, claims: list) -> None:
+    """Intent:
+        Record on each claim row the route its claim was authored
+        with, as `authored.route`, beside the evidence route in
+        `route`. A claim authored with the default route is proven or
+        held by whichever route decided it, so the evidence route
+        alone cannot say how the claim was written.
+    """
+    authored = {c.get("name"): base_route(c.get("route"))
+                for c in claims if isinstance(c, dict) and c.get("name")
+                and (c.get("statement") or c.get("law"))}
+    for row in spec.get("claims") or []:
+        route = authored.get(row.get("name"))
+        if route is not None and row.get("statement"):
+            row.setdefault("authored", {})["route"] = route
+
+
+def authored_route(row: dict) -> str:
+    """Intent:
+        The route a verified row's claim was authored with: its
+        `authored.route` when the row records one, otherwise the base
+        of its evidence route, which is how a row written before the
+        authored route was kept reads.
+    """
+    stated = (row.get("authored") or {}).get("route") \
+        if isinstance(row.get("authored"), dict) else None
+    return base_route(stated or row.get("route"))
+
+
 def record(ex, key: str | None = None, root: str = ".",
           claims: list | None = None, declared_intent: str | None = None) -> str:
     """Write this explanation into the machine layer of the project store:
@@ -689,8 +841,18 @@ def record(ex, key: str | None = None, root: str = ".",
     accepting it (`mathema accept --intent`)."""
     key = key or getattr(ex.facts, "name", "unknown")
     path = os.path.join(verified_dir(root), f"{key}.yaml")
+    if os.path.exists(path):
+        _data, reason = read_verified_file(path)
+        if reason is not None:
+            raise UnreadableRecord(
+                f"{os.path.relpath(path, root)} {reason}; it is left as it "
+                f"is, since writing over it would drop the history it "
+                f"holds. Repair it (keep every discoveries, historical "
+                f"and superseded row from both sides of a merge), or "
+                f"restore it from git, and run again")
     spec = to_spec(ex)
     spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [])
+    _stamp_authored_routes(spec, claims or [])
     if declared_intent and not spec.get("intent"):
         # the declared layer's intent is the skeleton when the
         # docstring provides none, still the declared rung
@@ -744,8 +906,10 @@ def record(ex, key: str | None = None, root: str = ".",
         except Exception:
             prior = None
     prior_lineage = (prior or {}).get("lineage") or {}
-    if prior is not None and \
-            ((prior.get("identity") or {}).get("integrity") == new_integrity):
+    prior_stamp = ((prior or {}).get("identity") or {}).get("integrity")
+    if prior is not None and prior_stamp and integrity_matches(
+            {**spec, "identity": {**spec["identity"],
+                                  "integrity": prior_stamp}}):
         if prior_lineage.get("date"):
             spec.setdefault("lineage", {})["date"] = prior_lineage["date"]
         spec.setdefault("lineage", {})["commit"] = \
@@ -767,10 +931,11 @@ def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
         provenance) rather than re-recording from a live check.
 
     Notes:
-        The checksum covers claim names, verdicts, acceptance and the
-        form hash, so an amendment touching any of those recomputes it
-        honestly; everything else in the entry is written exactly as
-        given.
+        The checksum covers what each claim states, its verdict and
+        acceptance, the retirement rows and the form hash (see
+        `integrity_checksum`), so an amendment touching any of those
+        recomputes it honestly; everything else in the entry is
+        written exactly as given.
     """
     entry.setdefault("identity", {})["integrity"] = integrity_checksum(entry)
     form = (entry.get("identity") or {}).get("form", "")
@@ -1017,20 +1182,235 @@ def load_verified(root: str = ".") -> dict:
     function. This
     is the sole source of the `identity.form` hash `mathema verify` diffs
     the live code against; a declared entry never has one, so it must
-    never be consulted here."""
-    import yaml
+    never be consulted here.
+
+    A record file that does not read as a mapping (a merge left
+    conflict markers, the file is empty) is left out here and listed
+    by `unreadable_verified`."""
     merged: dict = {}
-    for machine_dir in (verified_dir(root),):
-        if not os.path.isdir(machine_dir):
-            continue
-        for name in sorted(os.listdir(machine_dir)):
-            if not name.endswith(".yaml"):
-                continue
-            path = os.path.join(machine_dir, name)
-            data = yaml.safe_load(open(path)) or {}
-            for key, entry in data.items():
-                merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
+    for path in _verified_files(root):
+        data, _reason = read_verified_file(path)
+        for key, entry in (data or {}).items():
+            merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
     return merged
+
+
+class UnreadableRecord(ValueError):
+    """A verified record file exists but does not read as a record, so
+    nothing may be written over it until a person repairs it."""
+
+
+def _verified_files(root: str) -> list:
+    machine_dir = verified_dir(root)
+    if not os.path.isdir(machine_dir):
+        return []
+    return [os.path.join(machine_dir, name)
+            for name in sorted(os.listdir(machine_dir))
+            if name.endswith(".yaml")]
+
+
+def read_verified_file(path: str) -> "tuple[dict | None, str | None]":
+    """Intent:
+        One verified record file as `(data, None)`, or `(None, reason)`
+        when it does not read as a record: it does not parse as YAML
+        (a merge left conflict markers), it is empty, or its top level
+        is not a mapping.
+    """
+    import yaml
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as e:
+        return None, f"cannot be read ({e.strerror or e})"
+    if not text.strip():
+        return None, "is empty"
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        where = f" at line {mark.line + 1}" if mark is not None else ""
+        conflict = ("; it holds merge conflict markers" if "\n<<<<<<< "
+                    in "\n" + text else "")
+        return None, f"does not parse as YAML{where}{conflict}"
+    if data is None:
+        return None, "is empty"
+    if not isinstance(data, dict):
+        return None, "is not a mapping of function keys to records"
+    return data, None
+
+
+def unreadable_verified(root: str = ".") -> dict:
+    """Intent:
+        Every verified record file that does not read as a record, as
+        `{key: {"source": relpath, "reason": text}}`, the key being the
+        file's name without `.yaml` (the name `record()` gives it).
+    """
+    out: dict = {}
+    for path in _verified_files(root):
+        data, reason = read_verified_file(path)
+        if reason is not None:
+            key = os.path.basename(path)[:-len(".yaml")]
+            out[key] = {"source": os.path.relpath(path, root),
+                        "reason": reason}
+    return out
+
+
+class ClaimsFileError(ValueError):
+    """A claims file whose shape mathema cannot read: the message names
+    the file, the function key and the field at fault."""
+
+
+_CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
+                 "grammar", "funcs", "pseudo_infinity", "meta", "authored",
+                 "source", "family", "note")
+_ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references")
+
+
+def _misspelling(field_name: str, known: tuple) -> "str | None":
+    """Intent:
+        The known field an unknown one is a near miss of, or None when
+        it is not close to any. An unknown field that is no near miss
+        is the author's own annotation and is left alone.
+    """
+    import difflib
+    if field_name in known:
+        return None
+    close = difflib.get_close_matches(field_name, known, n=1, cutoff=0.8)
+    return close[0] if close else None
+
+
+def _domain_problem(bound) -> "str | None":
+    """Intent:
+        Why one claims-file domain bound does not read, or None when it
+        does: `[lo, hi]`, `{lo, hi, closed_lo, closed_hi}`, `{set: [...]}`,
+        a stored `Domain` mapping, or the type names `Z` and `N`. An
+        interval needs real endpoints, neither NaN, with lo <= hi.
+    """
+    import math
+    if isinstance(bound, str):
+        return None if bound in ("Z", "N") else (
+            f"{bound!r} is not a bound (use [lo, hi], "
+            f"{{lo: .., hi: ..}}, {{set: [...]}}, Z or N)")
+    if isinstance(bound, list):
+        if len(bound) != 2:
+            return f"{bound!r} is not a [lo, hi] pair"
+        ends = bound
+    elif isinstance(bound, dict):
+        if "base_type" in bound or "set" in bound:
+            from .domain import domain_bound_from_json
+            try:
+                domain_bound_from_json(bound)
+            except (KeyError, TypeError, ValueError) as e:
+                return f"{bound!r} does not read ({e})"
+            return None
+        if "lo" not in bound or "hi" not in bound:
+            return f"{bound!r} needs both lo and hi"
+        ends = [bound["lo"], bound["hi"]]
+    else:
+        return f"{bound!r} is not a bound"
+    try:
+        lo, hi = (complex(e) if isinstance(e, str) and "j" in e.lower()
+                  else float(e) for e in ends)
+    except (TypeError, ValueError):
+        return f"{bound!r} has an endpoint that is not a number"
+    if isinstance(lo, complex) or isinstance(hi, complex):
+        return None
+    if math.isnan(lo) or math.isnan(hi):
+        return f"{bound!r} has a NaN endpoint"
+    if lo > hi:
+        return f"{bound!r} is inverted (lo > hi)"
+    return None
+
+
+def validate_claims_file(data, rel_path: str) -> None:
+    """Intent:
+        Check one parsed claims file's shape, and normalize a tolerance
+        written as numeric text (YAML reads `1e-6` as a string) to its
+        number. The shape: a mapping of function keys (plus an optional
+        file-level `grammar`) to entries; an entry is a mapping whose
+        `claims` is a list of mappings; each claim states its law as
+        text under `statement` (or `law`), names it at most once per
+        key, and gives a readable `domain` and a non-negative
+        `tolerance` when it gives them. A field that is a near miss of
+        a known one is refused, since it would otherwise be ignored.
+
+    Raises:
+        ClaimsFileError: the first shape problem, naming the file, the
+            key and the claim.
+    """
+    import math
+
+    def fail(where: str, problem: str):
+        raise ClaimsFileError(f"{rel_path}: {where}: {problem}")
+
+    if not isinstance(data, dict):
+        raise ClaimsFileError(
+            f"{rel_path}: the top level is a {type(data).__name__}, not a "
+            f"mapping of function keys to entries")
+    for key, entry in data.items():
+        if key == "grammar":
+            continue
+        if entry is None:
+            continue
+        if not isinstance(entry, dict):
+            fail(key, f"the entry is a {type(entry).__name__}, not a "
+                      f"mapping (expected `claims:` and the like under it)")
+        for field_name in entry:
+            near = _misspelling(str(field_name), _ENTRY_FIELDS)
+            if near:
+                fail(key, f"unknown field {field_name!r} (did you mean "
+                          f"{near!r}?)")
+        claims = entry.get("claims")
+        if claims is None:
+            continue
+        if not isinstance(claims, list):
+            fail(key, f"`claims` is a {type(claims).__name__}, not a list")
+        seen: set = set()
+        for i, c in enumerate(claims, 1):
+            if not isinstance(c, dict):
+                fail(key, f"claim {i} is a {type(c).__name__}, not a mapping "
+                          f"(write it as `- statement: ...`)")
+            label = f"claim {c.get('name')!r}" if c.get("name") \
+                else f"claim {i}"
+            for field_name in c:
+                near = _misspelling(str(field_name), _CLAIM_FIELDS)
+                if near:
+                    fail(key, f"{label}: unknown field {field_name!r} (did "
+                              f"you mean {near!r}?)")
+            text = c.get("statement", c.get("law"))
+            if text is None:
+                fail(key, f"{label} has no `statement`")
+            if not isinstance(text, str) or not text.strip():
+                fail(key, f"{label}: `statement` must be the claim's text, "
+                          f"not {text!r}")
+            name = c.get("name")
+            if name is not None:
+                if not isinstance(name, str) or not name.strip():
+                    fail(key, f"claim {i}: `name` must be text, not {name!r}")
+                if name in seen:
+                    fail(key, f"claim name {name!r} is used twice; each "
+                              f"claim under one key needs its own name")
+                seen.add(name)
+            tol = c.get("tolerance")
+            if tol is not None:
+                try:
+                    value = float(tol)
+                except (TypeError, ValueError):
+                    value = float("nan")
+                if isinstance(tol, bool) or math.isnan(value) or value < 0:
+                    fail(key, f"{label}: `tolerance` must be a non-negative "
+                              f"number, not {tol!r}")
+                if isinstance(tol, str):
+                    c["tolerance"] = value
+            domain = c.get("domain")
+            if domain is not None:
+                if not isinstance(domain, dict):
+                    fail(key, f"{label}: `domain` must map each parameter "
+                              f"to its bound, not {domain!r}")
+                for param, bound in domain.items():
+                    problem = _domain_problem(bound)
+                    if problem:
+                        fail(key, f"{label}: `domain` for {param}: {problem}")
 
 
 def load_declared(root: str = ".") -> dict:
@@ -1060,12 +1440,21 @@ def load_declared(root: str = ".") -> dict:
 
     merged: dict = {}
     for _, path in sorted(files):          # shallow first, deep last → deep wins
-        data = yaml.safe_load(open(path)) or {}
-        if not isinstance(data, dict):
+        rel_path = os.path.relpath(path, root)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = yaml.safe_load(fh)
+        except yaml.YAMLError as e:
+            mark = getattr(e, "problem_mark", None)
+            where = f" at line {mark.line + 1}" if mark is not None else ""
+            raise ClaimsFileError(
+                f"{rel_path}: malformed YAML{where}") from None
+        if data is None:
             continue
+        validate_claims_file(data, rel_path)
         file_grammar = data.pop("grammar", None)
         for key, entry in data.items():
-            if not isinstance(entry, dict):
+            if entry is None:
                 continue
             entry.pop("identity", None)    # a declared file never states one
             if file_grammar:

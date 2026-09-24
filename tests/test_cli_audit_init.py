@@ -483,7 +483,7 @@ def test_audit_exclude_skips_column_and_updates_summary(tmp_path):
 def test_audit_exclude_rejects_unknown_analysis_name(tmp_path):
     root = _write_pkg(tmp_path, _BODY)
     r = _run(root, "audit", "trialpkg", "--exclude", "bogus")
-    assert r.returncode != 0
+    assert r.returncode == 2, r.stdout + r.stderr
     assert "unknown --exclude" in r.stdout + r.stderr
 
 

@@ -143,6 +143,7 @@ pricing.discounted:
       authored:
         surface: "docstring"
         ref: "pricing.discounted:docstring:L1"
+        route: "best"
       # ...
 ```
 

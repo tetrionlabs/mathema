@@ -80,12 +80,10 @@ def mismatched_records(root: str = ".") -> list:
     """The verified records whose contents no longer match their stored
     integrity checksum: the ones a reconcile (or a re-verify) addresses
     after a merge, rebase, or a declared-claim edit."""
-    from .spec import integrity_checksum, load_verified
+    from .spec import integrity_matches, load_verified
     out = []
     for key, info in load_verified(root).items():
-        entry = info.get("entry") or {}
-        stored = (entry.get("identity") or {}).get("integrity")
-        if stored and integrity_checksum(entry) != stored:
+        if integrity_matches(info.get("entry") or {}) is False:
             out.append(key)
     return sorted(out)
 
@@ -214,6 +212,37 @@ def _adjudicate_candidate(root: str, key: str, statement: str,
     return probes[0], None
 
 
+RETIREMENT_SECTIONS = ("discoveries", "historical", "superseded")
+
+
+def honoured_retirements(entry: dict, section: str) -> list:
+    """Intent:
+        The rows of one retirement section (`discoveries`, `historical`
+        or `superseded`) that retire a claim: those carrying an
+        `accepted` block, which every acceptance writes as it moves a
+        row there. A row without one did not come through `mathema
+        accept` and retires nothing.
+    """
+    return [r for r in (entry or {}).get(section) or []
+            if isinstance(r, dict) and isinstance(r.get("accepted"), dict)]
+
+
+def unaccepted_retirements(entry: dict) -> list:
+    """Intent:
+        The retirement rows that carry no `accepted` block, as
+        `(section, name)` pairs: rows `honoured_retirements` leaves
+        out, which the sweep reports.
+    """
+    out = []
+    for section in RETIREMENT_SECTIONS:
+        for r in (entry or {}).get(section) or []:
+            if not (isinstance(r, dict)
+                    and isinstance(r.get("accepted"), dict)):
+                name = r.get("name") if isinstance(r, dict) else None
+                out.append((section, name))
+    return out
+
+
 def _same_law_as(statement: str):
     """Intent:
         A canonical-law comparator over claim spellings: two texts
@@ -293,21 +322,23 @@ def _apply_declared_edit(root: str, rel: str, key: str, claim_name: str,
     if corrected:
         kept.append(dict(corrected))
     entry["claims"] = kept
-    with open(path, "w") as fh:
-        yaml.safe_dump(data, fh, sort_keys=False, default_flow_style=False,
-                       allow_unicode=True)
+    from .spec import atomic_write_text
+    atomic_write_text(path, yaml.safe_dump(
+        data, sort_keys=False, default_flow_style=False, allow_unicode=True))
 
 
 def _load_record(root: str, key: str):
-    import yaml
     from .spec import verified_dir
     path = os.path.join(verified_dir(root), f"{key}.yaml")
     if not os.path.exists(path):
         raise UnknownAcceptanceTarget(f"no verified record for {key!r} at {path}, "
                               "run `mathema verify` (or `check`) first; "
                               "acceptance annotates adjudicated evidence")
-    with open(path) as fh:
-        doc = yaml.safe_load(fh) or {}
+    from .spec import read_verified_file
+    doc, reason = read_verified_file(path)
+    if reason is not None or doc is None:
+        raise AcceptanceError(f"{path} {reason}; repair it (or restore it "
+                              f"from git) before accepting anything in it")
     if key not in doc:
         raise AcceptanceError(f"{path} holds no entry for {key!r}")
     return path, doc
@@ -810,10 +841,12 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
         return
     prior_claims = {c.get("name"): c for c in prior_entry.get("claims") or []
                     if c.get("name")}
-    discovery_rows = [d for d in prior_entry.get("discoveries") or []
+    discovery_rows = [d for d in honoured_retirements(prior_entry,
+                                                      "discoveries")
                       if d.get("name")]
     historical_names = {h.get("name")
-                        for h in prior_entry.get("historical") or []
+                        for h in honoured_retirements(prior_entry,
+                                                      "historical")
                         if h.get("name")}
     if discovery_rows or historical_names:
         # a claim accepted as historical is retained under its own
@@ -1065,10 +1098,11 @@ def apply_scope_intent_acceptance(plan: dict) -> str:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     doc = (yaml.safe_load(open(path)) or {}) if os.path.exists(path) else {}
     doc[plan["key"]] = {"text": plan["text"], "accepted": plan["accepted"]}
-    with open(path, "w") as fh:
-        fh.write("# scope-level intent acceptances (module / __project__)"
-                 ", committed with the store\n")
-        yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
+    from .spec import atomic_write_text
+    atomic_write_text(
+        path, "# scope-level intent acceptances (module / __project__)"
+              ", committed with the store\n"
+        + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
     return f"accepted the stated intent of {plan['key']} as documented"
 
 

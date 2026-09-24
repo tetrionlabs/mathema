@@ -6,7 +6,8 @@ MEMBERSHIP; a claim deleted from every authoring surface is
 repopulated from its verified row and keeps being adjudicated; its
 exits are supersession or the human `historical` acceptance, never
 silent removal. Records stamp the git commit and an integrity
-checksum over (claim, verdict) pairs so hand-edits are detectable."""
+checksum over each claim's statement and verdict so hand-edits are
+detectable."""
 import os
 import shutil
 import subprocess
@@ -51,6 +52,12 @@ spkg.mod.double:
 """
 
 
+def _row(rec, key, name):
+    import yaml
+    entry = yaml.safe_load(rec.read_text())[key]
+    return next(c for c in entry["claims"] if c.get("name") == name)
+
+
 def test_membership_survives_declared_deletion(tmp_path):
     env = _project(tmp_path, _DOUBLE, _CLAIMS)
     r = _verify(tmp_path, env)
@@ -65,8 +72,7 @@ def test_membership_survives_declared_deletion(tmp_path):
     r = _verify(tmp_path, env)
     assert r.returncode == 0, r.stdout + r.stderr
     body = rec.read_text()
-    assert "doubles" in body                 # membership survived the deletion
-    assert '"proven"' in body
+    assert _row(rec, key, "doubles")["verdict"] == "proven"   # membership
     # the repopulated claim fingerprints identically to the declared
     # one it replaced, so unchanged code + unchanged effective claim
     # set is genuinely fresh: no busywork re-adjudication
@@ -83,7 +89,8 @@ def double(x: float) -> float:
     assert r.returncode == 0, r.stdout + r.stderr
     body = rec.read_text()
     assert "repopulated-from-verified" in body
-    assert '"proven"' in body                # re-adjudicated, not fossilized
+    # re-adjudicated, not fossilized
+    assert _row(rec, key, "doubles")["verdict"] == "proven"
 
 
 def test_integrity_checksum_detects_hand_edits(tmp_path):

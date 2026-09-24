@@ -135,6 +135,49 @@ def test_hand_deleted_lock_entry_is_detected(project):
     assert any("removed" in p and "unlock" in p for p in out.problems)
 
 
+def test_a_hand_deleted_lock_keeps_failing_until_unlocked(project):
+    # re-adjudication must not rebuild the record without its stamp,
+    # which would leave the removal invisible from the next sweep on
+    from mathema.verify import verify_project
+    lock(str(project), "lockfix.settle", _form(project), by="tester")
+    verify_project(root=str(project))
+    (project / ".mathema" / "meta" / "locks.yaml").unlink()
+    for _ in range(2):
+        out = verify_project(root=str(project), all=True)
+        assert any("removed" in p and "unlock" in p for p in out.problems)
+
+
+def test_a_lock_moved_by_hand_is_detected(project):
+    # pointing the meta entry at the edited body's form, without
+    # unlocking, is a lock moved outside `mathema unlock`
+    from mathema.verify import verify_project
+    lock(str(project), "lockfix.settle", _form(project), by="tester")
+    verify_project(root=str(project))
+    src = project / "lockfix.py"
+    src.write_text(src.read_text().replace("return abs(x)", "return x"))
+    _reload(project)
+    from mathema import analyze
+    import lockfix
+    path = project / ".mathema" / "meta" / "locks.yaml"
+    locks = yaml.safe_load(path.read_text())
+    locks["lockfix.settle"]["form"] = analyze(lockfix.settle).form
+    path.write_text(yaml.safe_dump(locks))
+    before = _record_bytes(project)
+    out = verify_project(root=str(project))
+    assert any("moved" in p and "unlock" in p for p in out.problems), \
+        out.problems
+    assert _record_bytes(project) == before
+
+
+def test_lock_state_names_a_moved_lock():
+    locks = {"k": {"form": "bbb"}}
+    assert lock_state("k", "bbb", locks, {"locked": {"form": "aaa"}}) \
+        == "moved-outside"
+    assert lock_state("k", "bbb", locks, {"locked": {"form": "bbb"}}) \
+        == "held"
+    assert lock_state("k", "bbb", locks, {}) == "held"
+
+
 def test_lock_survives_the_sweep_it_blocks(project):
     from mathema.verify import verify_project
     lock(str(project), "lockfix.settle", _form(project), by="tester")

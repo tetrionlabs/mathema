@@ -58,12 +58,12 @@ def load_locks(root: str = ".") -> dict:
 def _write_locks(root: str, data: dict) -> None:
     import yaml
     path = locks_path(root)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("# locked functions: the form hash each is pinned at.\n"
-                "# `mathema lock KEY` adds one; only `mathema unlock KEY`\n"
-                "# (a human act) removes one.\n")
-        yaml.safe_dump(data, f, sort_keys=True, allow_unicode=True)
+    from .spec import atomic_write_text
+    atomic_write_text(
+        path, "# locked functions: the form hash each is pinned at.\n"
+              "# `mathema lock KEY` adds one; only `mathema unlock KEY`\n"
+              "# (a human act) removes one.\n"
+        + yaml.safe_dump(data, sort_keys=True, allow_unicode=True))
 
 
 def lock(root: str, key: str, form: str, *, by: str | None = None,
@@ -107,14 +107,20 @@ def lock_state(key: str, current_form: str | None, locks: dict,
     """Intent:
         One key's lock condition, for the sweep: `None` (not locked,
         nothing stamped), "held" (locked, form unchanged), "changed"
-        (locked, the body moved), or "removed-outside" (the record
+        (locked, the body moved), "removed-outside" (the record
         still carries a lock stamp but the meta entry is gone, i.e.
-        someone deleted the lock without `mathema unlock`).
+        someone deleted the lock without `mathema unlock`), or
+        "moved-outside" (the meta entry pins a different form from the
+        record's lock stamp, i.e. someone edited the lock file rather
+        than unlocking and re-locking).
     """
     meta_entry = locks.get(key)
     stamped = (verified_entry or {}).get("locked")
     if meta_entry is None:
         return "removed-outside" if isinstance(stamped, dict) else None
+    if isinstance(stamped, dict) and stamped.get("form") \
+            and stamped.get("form") != meta_entry.get("form"):
+        return "moved-outside"
     if current_form is not None and meta_entry.get("form") != current_form:
         return "changed"
     return "held"
