@@ -834,7 +834,10 @@ def _recurrence_domain_gate(lhs_src: str, rhs_src: str, rec,
                        f"this domain, narrow the domain (about "
                        f"{param} <= {safe_hi} is safe here), rewrite the "
                        f"function iteratively, or state the machine limit "
-                       f"as its own raises(...) claim"), False
+                       f"as its own raises(...) claim",
+                meta={"mathema.recursion_depth": {
+                    "param": param, "safe_bound": safe_hi,
+                    "top": None if hi_val is None else int(hi_val)}}), False
     n_sym = rec.params[param]
     valid_from = info.get("valid_from")
     closed_only = valid_from is not None

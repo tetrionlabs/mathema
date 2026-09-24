@@ -3070,10 +3070,30 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         settles it outright. Tried only where the symbolic routes left
         no reliable verdict, so nothing they decided can move."""
         from ._brute_force import brute_force_proof
-        return brute_force_proof(cj, fn, facts, cj_domain, bound_funcs,
-                                 assumption=assumption or [])
+        from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+        try:
+            return _with_timeout(
+                lambda: brute_force_proof(cj, fn, facts, cj_domain,
+                                          bound_funcs,
+                                          assumption=assumption or []),
+                EXTENSIVE_TIMEOUT_SECONDS)
+        except TimeoutError:
+            # an unfinished sweep covers only a prefix of the domain,
+            # which settles nothing
+            return None
 
-    if proof.status in ("undecided", "unliftable"):
+    depth_refusal = (proof.meta or {}).get("mathema.recursion_depth")
+    if depth_refusal is not None:
+        # the implementation cannot recurse deep enough to cover this
+        # domain, so a sweep of it would walk into the same stack limit
+        # (or, for a branching recursion, run exponentially long first).
+        # The refusal stands; an executed witness at the domain's top
+        # turns it into the falsification the raise rule calls for.
+        witnessed = _recursion_depth_witness(ctx, fn, facts, bound_funcs,
+                                             assumption or [], proof, note)
+        if witnessed is not None:
+            return witnessed
+    elif proof.status in ("undecided", "unliftable"):
         swept = _brute_force_fallback()
         if swept is not None:
             proof = swept
@@ -3218,6 +3238,68 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     # (probing.py's own battery), which this fallback path
     # doesn't do.
     return None
+
+
+def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
+                             assumption, proof, note) -> "Probe | None":
+    """Intent:
+        The falsification behind a stack-depth refusal: the claim run at
+        the top of the recursed parameter's domain, where the refusal
+        says the call needs more frames than the interpreter allows. A
+        RecursionError there is a raise inside the domain, so the value
+        claim is falsified with that executed point as its witness, and
+        the refusal's sketch (which names the safe bound) is kept.
+
+        None when there is no finite top, the top is not admitted, the
+        run does not end in a RecursionError, or it outruns the fast
+        wall-clock cap.
+
+    Notes:
+        One point is run, never a sweep: a recursion descends one frame
+        per index step before doing any other work, so a call past the
+        limit raises after about a thousand frames, while the points
+        below the limit can be arbitrarily expensive (a doubly recursive
+        definition is exponential in its argument).
+    """
+    from ._timeout import FAST_TIMEOUT_SECONDS, _WallClockExpired, _with_timeout
+    from .gates import _fmt_point, _point_evaluator
+    info = proof.meta["mathema.recursion_depth"]
+    param, top = info["param"], info["top"]
+    if top is None:
+        return None
+    raised: list = []
+
+    def _recording(*a, **kw):
+        try:
+            return fn(*a, **kw)
+        except Exception as exc:
+            raised.append(exc)
+            raise
+
+    kit = _point_evaluator(ctx.cj, _recording, facts, ctx.cj_domain,
+                           bound_funcs, assumption)
+    if kit is None or list(kit["names"]) != [param]:
+        return None
+    point = {param: top}
+    if not kit["admits"](point):
+        return None
+    try:
+        verdict = _with_timeout(lambda: kit["evaluate"](point),
+                                FAST_TIMEOUT_SECONDS)
+    except (TimeoutError, _WallClockExpired):
+        return None
+    if verdict is not False or not raised \
+            or not isinstance(raised[-1], RecursionError):
+        return None
+    where = _fmt_point(point, [param])
+    cj = ctx.cj
+    return Probe(cj.name, ctx.statement, "falsified", route="derive",
+                 sketch=proof.sketch,
+                 counterexample=f"{where}: raised RecursionError",
+                 note=note,
+                 stratum=_machine_failure_stratum(raised[-1], where),
+                 meta={"mathema.corroboration": "reproduced",
+                       "mathema.recursion_depth": dict(info)})
 
 
 def _adjudicate_equivalence(ctx: "_ClaimContext", fn, facts) -> "Probe":
