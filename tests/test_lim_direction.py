@@ -112,3 +112,49 @@ def test_undirected_finite_limit_resolves_one_sided_when_other_side_leaves_reals
     finally:
         sys.path.remove(str(tmp_path))
         del sys.modules["limmod"]
+
+
+# --- branched functions: the limit of a Piecewise ---------------------------
+
+def step_up(x: float) -> float:
+    if x < 0:
+        return 0.0
+    return 1.0
+
+
+def sign_step(x: float) -> float:
+    return 1.0 if x > 0 else -1.0
+
+
+def relu(x: float) -> float:
+    if x > 0:
+        return x
+    return 0.0
+
+
+def test_a_jump_has_no_two_sided_limit():
+    p = _v(step_up, "lim(f(x), x, 0) == 1")
+    assert p.verdict != "proven", (p.verdict, p.sketch)
+    p = _v(step_up, "lim(f(x), x, 0) == 0")
+    assert p.verdict != "proven", (p.verdict, p.sketch)
+
+
+def test_a_one_sided_limit_of_a_branch_takes_the_branch_on_that_side():
+    """At the jump itself the function takes the else-branch value, but
+    the limit from above is the branch just to the right."""
+    for law, expected in (("lim(f(x), x -> 0+) == 1", "proven"),
+                          ("lim(f(x), x -> 0+) == -1", None),
+                          ("lim(f(x), x -> 0-) == -1", "proven"),
+                          ("lim(f(x), x -> 0-) == 1", None)):
+        p = _v(sign_step, law)
+        if expected:
+            assert p.verdict == expected, (law, p.verdict, p.sketch)
+        else:
+            assert p.verdict != "proven", (law, p.verdict, p.sketch)
+
+
+def test_a_continuous_branch_point_still_has_its_limit():
+    p = _v(relu, "lim(f(x), x, 0) == 0")
+    assert p.verdict == "proven", (p.verdict, p.sketch)
+    p = _v(step_up, "lim(f(x), x, oo) == 1")
+    assert p.verdict == "proven", (p.verdict, p.sketch)

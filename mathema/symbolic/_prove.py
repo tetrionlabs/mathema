@@ -94,6 +94,207 @@ def _one_sided_lim_rescue(inner, var_sym, point, direction, aux, node):
 
 
 
+_KINKS_KEY = "__mathema_kinks__"
+
+
+def _near_sign(g, eps) -> "int | None":
+    """The sign of `g` for every small enough positive `eps`: -1, 0 or
+    1, or None when it cannot be settled."""
+    from .._timeout import _with_timeout, lowering_cap
+    if g.has(sympy.Piecewise):
+        return None
+    try:
+        value = _with_timeout(lambda: sympy.limit(sympy.sign(g), eps, 0,
+                                                  dir="+"),
+                              lowering_cap())
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    if value in (-1, 0, 1):
+        return int(value)
+    return None
+
+
+def _near_truth(cond, eps) -> "bool | None":
+    """Whether a branch condition holds for every small enough
+    positive `eps` (True), for none of them (False), or neither is
+    settled (None)."""
+    if cond is sympy.true or cond is sympy.false:
+        return bool(cond)
+    if isinstance(cond, (sympy.And, sympy.Or)):
+        parts = [_near_truth(a, eps) for a in cond.args]
+        if isinstance(cond, sympy.And):
+            if any(p is False for p in parts):
+                return False
+            return True if all(p is True for p in parts) else None
+        if any(p is True for p in parts):
+            return True
+        return False if all(p is False for p in parts) else None
+    if isinstance(cond, sympy.Not):
+        inner = _near_truth(cond.args[0], eps)
+        return None if inner is None else not inner
+    if not isinstance(cond, sympy.core.relational.Relational):
+        return None
+    sign = _near_sign(cond.lhs - cond.rhs, eps)
+    if sign is None:
+        return None
+    return {sympy.Gt: sign > 0, sympy.Ge: sign >= 0, sympy.Lt: sign < 0,
+            sympy.Le: sign <= 0, sympy.Eq: sign == 0,
+            sympy.Ne: sign != 0}.get(type(cond))
+
+
+def _branch_limit(inner, var_sym, point, direction: str):
+    """Intent:
+        The one-sided limit of an expression holding a `Piecewise` in
+        `var_sym`, with each branch chosen by where the approach
+        actually runs: `var_sym = point + eps` from above, `point -
+        eps` from below, `1/eps` towards `oo`, all with `eps -> 0+`.
+        None when a branch condition cannot be settled near the point.
+
+    Notes:
+        sympy's own `limit` of a Piecewise evaluates the branch that
+        holds AT the point, so a jump there reads as either side's
+        value regardless of the direction asked for.
+    """
+    from .._timeout import _with_timeout, lowering_cap
+    eps = sympy.Dummy("eps", positive=True)
+    if point is sympy.oo:
+        approach = 1 / eps
+    elif point is sympy.S.NegativeInfinity:
+        approach = -1 / eps
+    else:
+        approach = point + eps if direction == "+" else point - eps
+    near = inner.subs(var_sym, approach)
+    undecided = []
+
+    def choose(pw):
+        for value, cond in pw.args:
+            truth = _near_truth(cond, eps)
+            if truth is True:
+                return value
+            if truth is None:
+                undecided.append(cond)
+                return pw
+        undecided.append(pw)
+        return pw
+
+    near = near.replace(lambda e: isinstance(e, sympy.Piecewise), choose)
+    if undecided or near.has(sympy.Piecewise):
+        return None
+    return _with_timeout(lambda: sympy.limit(near, eps, 0, dir="+"),
+                         lowering_cap())
+
+
+def _branch_aware_limit(inner, var_sym, point, direction: str, node):
+    """`sympy.limit`, except that a Piecewise in the limit variable goes
+    through `_branch_limit`, side by side for a two-sided limit (the
+    sides must agree). Raises NotSymbolic when the limit does not
+    exist or cannot be settled."""
+    if point.is_infinite:
+        sides = ["+"]
+    else:
+        sides = ["+", "-"] if direction == "+-" else [direction]
+    values = []
+    for d in sides:
+        try:
+            value = _branch_limit(inner, var_sym, point, d)
+        except TimeoutError as e:
+            raise NotSymbolic(f"the limit computation exceeded the wall "
+                              f"clock: {ast.unparse(node)!r}") from e
+        except Exception:
+            value = None
+        if value is None or value is sympy.zoo or value.has(sympy.nan):
+            raise NotSymbolic(f"could not settle the branch the limit "
+                              f"approaches through: {ast.unparse(node)!r}")
+        values.append(value)
+    if len(values) == 2 and sympy.simplify(values[0] - values[1]) != 0:
+        raise NotSymbolic(
+            f"the two-sided limit does not exist (left and right limits "
+            f"differ, {values[1]} and {values[0]}; state a one-sided "
+            f"point, e.g. 0+ or 0-, to claim one side): "
+            f"{ast.unparse(node)!r}")
+    return values[0]
+
+
+def _kink_loci(expr, var_syms) -> list:
+    """Intent:
+        Where `expr` may fail to be differentiable in `var_syms`: one
+        condition per non-smooth node (the zero of an `Abs`/`sign`/
+        `Heaviside` argument, the tie of a `Max`/`Min`, the boundary of
+        a Piecewise condition, the whole-number points of a floor,
+        ceiling or remainder), each an equality over the parameters.
+    """
+    wanted = set(var_syms)
+    loci: list = []
+
+    def touches(e) -> bool:
+        return bool(getattr(e, "free_symbols", set()) & wanted)
+
+    for node in sympy.preorder_traversal(expr):
+        if isinstance(node, (sympy.Abs, sympy.sign, sympy.Heaviside)):
+            if touches(node.args[0]):
+                loci.append(sympy.Eq(node.args[0], 0))
+        elif isinstance(node, (sympy.Max, sympy.Min)):
+            if touches(node):
+                args = list(node.args)
+                loci.extend(sympy.Eq(a - b, 0) for i, a in enumerate(args)
+                            for b in args[i + 1:])
+        elif isinstance(node, sympy.Piecewise):
+            for _value, cond in node.args:
+                for rel in cond.atoms(sympy.core.relational.Relational):
+                    if touches(rel):
+                        loci.append(sympy.Eq(rel.lhs - rel.rhs, 0))
+        elif isinstance(node, (sympy.floor, sympy.ceiling, sympy.frac)):
+            if touches(node.args[0]):
+                loci.append(sympy.Eq(sympy.frac(node.args[0]), 0))
+        elif isinstance(node, sympy.Mod):
+            if touches(node):
+                loci.append(sympy.Eq(sympy.frac(node.args[0] / node.args[1]), 0))
+    return loci
+
+
+def _derivative_at(inner, var_syms, subs, node):
+    """Intent:
+        `d(inner, var)` at the point `subs`, for an `inner` with
+        non-smooth nodes: the symbolic derivative where the point is
+        clear of every kink, else the one-sided difference quotients,
+        which must agree. Raises NotSymbolic where the derivative does
+        not exist or cannot be settled.
+    """
+    loci = _kink_loci(inner, var_syms)
+    at_loci = [locus.lhs.subs(subs, simultaneous=True) for locus in loci]
+    if all(v.is_number and v != 0 for v in at_loci):
+        return sympy.diff(inner, *var_syms).subs(subs, simultaneous=True)
+    if len(var_syms) != 1 or var_syms[0] not in subs:
+        raise NotSymbolic(f"not differentiable at the evaluation point, or "
+                          f"it cannot be settled there: {ast.unparse(node)!r}")
+    var = var_syms[0]
+    point = subs[var]
+    h = sympy.Dummy("h", real=True)
+    at_point = inner.subs(subs, simultaneous=True)
+    moved = inner.subs({**subs, var: point + h}, simultaneous=True)
+    quotient = (moved - at_point) / h
+    values = []
+    for d in ("+", "-"):
+        try:
+            value = _branch_limit(quotient, h, sympy.Integer(0), d)
+        except TimeoutError:
+            raise
+        except Exception:
+            value = None
+        if value is None or not value.is_finite:
+            raise NotSymbolic(f"not differentiable at the evaluation point "
+                              f"(a one-sided difference quotient has no "
+                              f"finite limit): {ast.unparse(node)!r}")
+        values.append(value)
+    if sympy.simplify(values[0] - values[1]) != 0:
+        raise NotSymbolic(f"not differentiable at the evaluation point (the "
+                          f"one-sided derivatives are {values[1]} and "
+                          f"{values[0]}): {ast.unparse(node)!r}")
+    return values[0]
+
+
 def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
     """Convert one claim-law expression node to sympy. `f(...)` calls
     substitute into the lifted body at the given (positional) arguments;
@@ -260,6 +461,8 @@ def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
                 var_syms.append(lifted.params[a.id])
             derivative = sympy.diff(inner, *var_syms)
             if at_idx is None:
+                aux.setdefault(_KINKS_KEY, []).extend(
+                    _kink_loci(inner, var_syms))
                 return derivative
             sub_args = rest[at_idx + 1:]
             if not sub_args or len(sub_args) % 2 != 0:
@@ -274,6 +477,8 @@ def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
                         f"d(...)'s evaluation point can only substitute a "
                         f"parameter name: {ast.unparse(node)!r}")
                 subs[lifted.params[var_node.id]] = _law_to_sympy(val_node, lifted, param_names, aux)
+            if _kink_loci(inner, var_syms):
+                return _derivative_at(inner, var_syms, subs, node)
             return derivative.subs(subs, simultaneous=True)
         if isinstance(node.func, ast.Name) and node.func.id == "lim":
             if len(node.args) not in (3, 4):
@@ -340,6 +545,10 @@ def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
                     direction = "-"
                 else:
                     direction = "+-"
+            if any(var_sym in pw.free_symbols
+                   for pw in inner.atoms(sympy.Piecewise)):
+                return _branch_aware_limit(inner, var_sym, point, direction,
+                                           node)
             from .._timeout import _with_timeout, lowering_cap
             try:
                 result = _with_timeout(
@@ -1744,6 +1953,17 @@ def _guard_condition_params(facts) -> set:
                 named.add(sub.id)
     return named
 
+def _has_calculus_call(src: str) -> bool:
+    """Whether claim text calls `d`, `lim` or `integrate`."""
+    try:
+        tree = ast.parse(src or "", mode="eval")
+    except SyntaxError:
+        return False
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+               and n.func.id in ("d", "lim", "integrate")
+               for n in ast.walk(tree))
+
+
 def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                       domain: dict, tolerance, max_callee_depth: int,
                       extensive: bool, depth: int) -> ProofResult | None:
@@ -1766,6 +1986,11 @@ def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         back to its ordinary unliftable report.
     """
     if depth >= 2 or not domain:
+        return None
+    if _has_calculus_call(lhs_src) or _has_calculus_call(rhs_src):
+        # a derivative, limit or integral reads the function around a
+        # point or across an interval, which a piece's pruned lift
+        # (one branch, fixed by the piece) no longer describes
         return None
     cuts = _guard_cut_points(facts)
     guard_named = _guard_condition_params(facts)
@@ -1892,6 +2117,51 @@ def _tighten_domain_by_assumption(domain: dict, params: dict, assumption) -> dic
         tightened[name] = Interval(lo, hi, closed_lo, closed_hi)
     return tightened
 
+def _kink_in_domain(loci: list, domain: dict) -> "str | None":
+    """The first non-differentiability condition the declared domain
+    does not provably exclude, as text, or None when every one is
+    excluded."""
+    from ._fold import _cond_truth_over
+    for locus in loci:
+        if locus is sympy.false:
+            continue
+        if _cond_truth_over(locus, domain or {}) is True:
+            continue
+        if _roots_outside_domain(locus, domain or {}):
+            continue
+        return _cond_text(locus)
+    return None
+
+
+def _roots_outside_domain(locus, domain: dict) -> bool:
+    """Whether an equality over a single declared parameter has finitely
+    many real roots, none of them inside that parameter's declared
+    bound."""
+    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from ..domain import domain_contains
+    if not isinstance(locus, sympy.Eq) or len(locus.free_symbols) != 1:
+        return False
+    (sym,) = locus.free_symbols
+    bound = domain.get(str(sym))
+    if bound is None:
+        return False
+    try:
+        roots = _with_timeout(
+            lambda: sympy.solveset(locus.lhs - locus.rhs, sym,
+                                   domain=sympy.S.Reals),
+            FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return False
+    except Exception:
+        return False
+    if not isinstance(roots, sympy.FiniteSet):
+        return False
+    try:
+        return not any(domain_contains(float(r), bound) for r in roots)
+    except Exception:
+        return False
+
+
 def _loop_proof_raise_gate(fn, facts, domain, proof: ProofResult) -> ProofResult:
     """Intent:
         A loop-shape proof, kept only when every implicit raise region
@@ -1943,7 +2213,72 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                     f"pass stops at {notes['unread']}, so a raise inside the "
                     "domain is not ruled out"),
             meta=dict(result.meta))
+    if result.status == "proven":
+        kink = _derivative_kink(fn, facts, lhs_src, rhs_src, domain)
+        if kink is not None:
+            return ProofResult(
+                "undecided",
+                sketch=(f"{result.sketch}; not kept as a proof: f is not "
+                        f"differentiable where {kink}, which the declared "
+                        f"domain does not exclude"),
+                meta=dict(result.meta))
     return result
+
+
+def _derivative_kink(fn, facts, lhs_src: str, rhs_src: str,
+                     domain) -> "str | None":
+    """Intent:
+        For a claim that differentiates f over its domain (a `d(...)`
+        with no evaluation point), the first point where f itself may
+        not be differentiable that the declared domain does not
+        exclude, as text; None when there is none or the claim has no
+        such derivative.
+
+    Notes:
+        Read off f's unpruned lift over plain real symbols: the lift a
+        proof uses can be pruned to one branch by the domain, or have
+        the domain's sign facts baked into its symbols (`Abs(x)` read
+        as `-x` on `[-1, 0]`), and either hides a kink on the domain's
+        boundary. When f is called at anything but its own parameters,
+        a kink anywhere is enough to decline.
+    """
+    free_d, identity_calls = False, True
+    for src in (lhs_src, rhs_src):
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            return None
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)):
+                continue
+            if n.func.id == "d" and not any(
+                    isinstance(a, ast.Name) and a.id == _D_AT_SENTINEL
+                    for a in n.args):
+                free_d = True
+            if n.func.id == "f" and [getattr(a, "id", None)
+                                     for a in n.args] != list(facts.params):
+                identity_calls = False
+    if not free_d:
+        return None
+    try:
+        raw = lift(fn, facts)
+        if raw is None and facts.branch_count:
+            raw = lift_piecewise(fn, facts)
+            if raw is not None and raw.kind != "value":
+                raw = None
+    except TimeoutError:
+        raise
+    except Exception:
+        raw = None
+    if raw is None or isinstance(raw.expr, tuple) \
+            or not hasattr(raw.expr, "free_symbols"):
+        return None
+    loci = _kink_loci(raw.expr, list(raw.params.values()))
+    if not loci:
+        return None
+    if not identity_calls:
+        return _cond_text(loci[0])
+    return _kink_in_domain(loci, domain or {})
 
 
 def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
@@ -2602,6 +2937,14 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         result = _mechanized(result)
         if result.status != "proven":
             return result
+        kink = _kink_in_domain(aux.get(_KINKS_KEY) or [], domain)
+        if kink is not None:
+            return ProofResult(
+                "undecided",
+                sketch=f"{result.sketch}; not kept as a proof: a derivative "
+                       f"in the claim does not exist where {kink}, which the "
+                       f"declared domain does not exclude",
+                meta=dict(result.meta))
         names = (_free_names(lhs) | _free_names(rhs)) if not lhs_tuple else \
             set().union(*(_free_names(lv) | _free_names(rv) for lv, rv in zip(lhs, rhs)))
         return replace(result, quantifier=_quantifier_clause(
