@@ -257,13 +257,92 @@ def _claim_family(cj, fn, facts):
     a renamed predicate claim still reaches its family."""
     base = cj.name.split("[", 1)[0]
     family = families.families().get(base)
-    if family is not None and family.can_handle(fn, facts, cj.name):
+    if family is not None and family.can_handle(fn, facts, cj.name) \
+            and _statement_is_family_claim(cj, base, family, facts):
         return family
     if cj.relation in routes.examine_predicates():
         family = families.families().get(cj.relation)
         if family is not None:
             return family
     return None
+
+
+#: the families whose routes read a claim's name rather than its text,
+#: with the statement each adjudicates: derivative order and relation,
+#: against zero, in the parameter the name brackets
+_DERIVATIVE_FAMILY_FORMS = {
+    "monotonic_increasing": (1, ">="),
+    "monotonic_decreasing": (1, "<="),
+    "affine": (2, "=="),
+    "convex": (2, ">="),
+    "concave": (2, "<="),
+}
+
+_FINITE_NO_ERROR = "mathema.f.finite_no_error"
+
+_COMPARISON_RELATIONS = frozenset({"==", "~=", "!=", "<=", ">=", "<", ">"})
+
+#: the families stated as `f(<params>) == f(<params>)`, the call agreeing
+#: with itself, each examining one way it could fail to
+_SELF_AGREEMENT_FAMILIES = frozenset({"is_deterministic", "is_reproducible",
+                                      "is_state_safe"})
+
+
+def _squash(text) -> str:
+    """Claim text with all whitespace removed, for comparing two
+    spellings of the same expression."""
+    return "".join((text or "").split())
+
+
+def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
+    """Intent:
+        Whether the claim's statement is the one the family registered
+        under its name adjudicates, so a name alone never swaps the
+        question being asked.
+
+    Notes:
+        A predicate statement (`is_pole_safe(x)`, `is_symmetric(f(A))`)
+        matches the family of the same name. The derivative-sign
+        families match `d(f(<params>), p) >= 0` and its siblings, with
+        `p` the bracketed parameter. `is_numerically_stable` matches
+        `g(f, <params>) == 1` with `g` bound to `mathema.f.finite_no_
+        error`. `is_deterministic`, `is_reproducible` and
+        `is_state_safe` match `f(<params>) == f(<params>)`. `is_defined` states a region under its name (the
+        restriction form in docs/conditional-claims.md) and so accepts
+        any comparison. A family that dispatches on the function's
+        shape and reads the claim's own text (the dot-product, sum and
+        fold lifters) accepts any statement.
+    """
+    from .claim_families import (MatrixPropertyFamily, OutputPredicateFamily,
+                                 _NamedClaimFamily)
+    if cj.relation in routes.examine_predicates() \
+            or cj.relation not in _COMPARISON_RELATIONS:
+        return cj.relation == base
+    if base == "is_defined":
+        return True
+    call = f"f({', '.join(facts.params)})"
+    form = _DERIVATIVE_FAMILY_FORMS.get(base)
+    if form is not None:
+        order, relation = form
+        param = cj.name[len(base):]
+        if not (param.startswith("[") and param.endswith("]")):
+            return False
+        param = param[1:-1]
+        expected = f"d({call}, {', '.join([param] * order)})"
+        return (cj.relation == relation and _squash(cj.rhs) == "0"
+                and _squash(cj.lhs) == _squash(expected))
+    if base in _SELF_AGREEMENT_FAMILIES:
+        return (cj.relation == "==" and _squash(cj.lhs) == _squash(call)
+                and _squash(cj.rhs) == _squash(call))
+    if base == "is_numerically_stable":
+        bound = (cj.funcs or {}).get("g")
+        from .f import finite_no_error
+        return (cj.relation == "==" and _squash(cj.rhs) == "1"
+                and _squash(cj.lhs) == _squash(
+                    f"g(f, {', '.join(facts.params)})")
+                and (bound == _FINITE_NO_ERROR or bound is finite_no_error))
+    return not isinstance(family, (_NamedClaimFamily, MatrixPropertyFamily,
+                                   OutputPredicateFamily))
 
 
 def _resolve_func_ref(ref: str, *, root: str = "."):
@@ -375,7 +454,7 @@ _SAFE_FUNCS = {
 }
 _ALLOWED_NODES = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Call, ast.Name,
                   ast.Constant, ast.Load, ast.Add, ast.Sub, ast.Mult, ast.Div,
-                  ast.Pow, ast.Mod, ast.USub, ast.UAdd, ast.List, ast.Tuple,
+                  ast.Pow, ast.Mod, ast.FloorDiv, ast.USub, ast.UAdd, ast.List, ast.Tuple,
                   ast.Subscript, ast.Index, ast.Slice,
                   # truth-valued law expressions (`f(a, b) == (a <= b)`):
                   # comparisons and boolean connectives evaluate to
@@ -1024,12 +1103,21 @@ def _interpret_assumption(cj, conjectures):
     return conjuncts_of(text, text)
 
 
+#: how to write each math constant when a parameter of the same name
+#: takes the bare token
+_CONSTANT_SPELLINGS = {
+    "e": "write exp(1) for Euler's number",
+    "pi": "write acos(-1) for pi",
+}
+
+
 def _shadowed_constants(lhs: str, rhs: str, param_names: set) -> list[str]:
     """Intent:
         Math-constant names (`e`/`pi`) that a real parameter shadows: a
         bare `ast.Name` in the law that is both a `MATH_CONSTANTS` name
         AND a parameter. The parameter wins (unchanged), but the caller
-        warns, pointing at `exp(1)`, so the reading is never silent.
+        warns, naming the spelling that still reaches the constant
+        (`_CONSTANT_SPELLINGS`), so the reading is never silent.
 
     Notes:
         Value position only: a name in a call's function slot (there is
@@ -1909,7 +1997,8 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         if shadowed:
             note += (f"; {', '.join(shadowed)} read as the parameter"
                      f"{'s' if len(shadowed) > 1 else ''}, not the math "
-                     f"constant, write exp(1) for Euler's number")
+                     f"constant, "
+                     + ", ".join(_CONSTANT_SPELLINGS[c] for c in shadowed))
         assumption = _interpret_assumption(cj, conjectures)
         if isinstance(assumption, Probe):
             out.append(_stamped(assumption, cj))
@@ -2043,7 +2132,7 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         elif assumption is not None:
             statement = f"assuming {assumption[1]}, {statement}"
             cj = _dc_replace(cj, assuming=f"assuming {assumption[1]}")
-        validated = _validate_claim(cj, statement, note, facts, domain)
+        validated = _validate_claim(cj, statement, note, facts, domain, fn=fn)
         if isinstance(validated, Probe):
             # a rejected claim has no canonical form (it was never a
             # claim), so its record keeps what was written, verbatim
@@ -2098,6 +2187,17 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         # family-owned name reaches the family's own empirical
         # technique rather than the generic sampling loop
         ctx.family = _claim_family(cj, fn, facts)
+        emptied = _empty_premise_parameter(ctx, facts)
+        if emptied is not None:
+            out.append(stamp(Probe(
+                cj.name, statement, "skipped", route=None,
+                note=f"{ctx.note}; the premise ({ctx.assumption_display}) "
+                     f"admits no value of {emptied} in its declared "
+                     f"domain, so the claim quantifies over nothing and "
+                     f"is vacuous; state a premise the domain can "
+                     f"satisfy",
+                meta={"mathema.empty_premise": emptied})))
+            continue
         if cj.relation == "=:=":
             # function equivalence has its own ladder (form hash ->
             # symbolic difference -> code-vs-code sampling); neither
@@ -2138,6 +2238,28 @@ def _chain_statement(cj) -> str:
     return " ".join(parts)
 
 
+def _conjunction_route(routes: list, default: str) -> str:
+    """Intent:
+        The route a conjunction reports, from the routes of the parts
+        that set its verdict: their shared route when they agree; the
+        one subroute when the rest report its plain root (`derive` and
+        `derive:extensive` give `derive:extensive`, since the wider
+        mechanism was needed to settle the whole); else their shared
+        root; `default` when the parts share nothing or report none.
+    """
+    known = [r for r in routes if r]
+    if not known:
+        return default
+    distinct = set(known)
+    if len(distinct) == 1:
+        return known[0]
+    roots = {r.partition(":")[0] for r in distinct}
+    if len(roots) != 1:
+        return default
+    subroutes = {r for r in distinct if ":" in r}
+    return subroutes.pop() if len(subroutes) == 1 else roots.pop()
+
+
 def _combine_conjunction(probes: list, name: str, statement: str,
                          labels: list, what: str = "chained comparison",
                          unit: str = "link") -> "Probe":
@@ -2153,8 +2275,9 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     Notes:
         `labels` names each part for the counterexample/sketch (e.g.
         "link 1: a <= b"); `what`/`unit` name the conjunction kind in
-        the combined note. The reported route is "derive" only when
-        every part proved, else the deciding part's own route.
+        the combined note. The reported route is the one the deciding
+        parts report (`_conjunction_route`): every part for a proof,
+        the holding parts for a `holds`, the deciding part otherwise.
     """
     def corroboration(probe) -> dict:
         return {k: v for k, v in (probe.meta or {}).items()
@@ -2172,11 +2295,16 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                          meta=corroboration(probe))
     verdicts = [p.verdict for p in probes]
     if all(v == "proven" for v in verdicts):
-        return Probe(name, statement, "proven", route="derive",
+        return Probe(name, statement, "proven",
+                     route=_conjunction_route(
+                         [p.route for p in probes], "derive"),
                      note=f"every {unit} of the {what} proven")
     if all(v in ("proven", "holds") for v in verdicts):
         n = min((p.n for p in probes if p.n), default=0)
-        return Probe(name, statement, "holds", n=n, route="probe",
+        return Probe(name, statement, "holds", n=n,
+                     route=_conjunction_route(
+                         [p.route for p in probes if p.verdict == "holds"],
+                         "probe"),
                      note=f"every {unit} of the {what} holds")
     weakest = next(p for p, v in zip(probes, verdicts)
                    if v not in ("proven", "holds"))
@@ -2243,8 +2371,11 @@ def _stamp_examine_route(probe, cj, fn, facts) -> None:
     is_safety = cj.relation in routes.examine_predicates()
     if not is_safety:
         from .claim_families import SafetyFamily
-        base_family = families.families().get(cj.name.split("[", 1)[0])
-        is_safety = isinstance(base_family, SafetyFamily)
+        base = cj.name.split("[", 1)[0]
+        base_family = families.families().get(base)
+        is_safety = (isinstance(base_family, SafetyFamily)
+                     and _statement_is_family_claim(cj, base, base_family,
+                                                    facts))
     if not is_safety:
         return
     root, _, _sub = probe.route.partition(":")
@@ -2466,11 +2597,11 @@ def _derive_operational_domain(cj, cj_domain: dict, facts) -> dict:
 
 
 def _validate_claim(cj, statement: str, note: str, facts,
-                    domain: dict) -> "Probe | _ClaimContext":
+                    domain: dict, fn=None) -> "Probe | _ClaimContext":
     """Intent:
         Everything checked before either evidence route runs: grammar
-        membership, bare-reserved-name and ambiguous-differential
-        misspecifications, the per-claim domain merge (inline
+        membership, bare-reserved-name, ambiguous-differential and
+        `raises(...)` call-arity misspecifications, the per-claim domain merge (inline
         quantifier wins over the function-level argument, literal-
         argument inference filling gaps), free-variable/parameter
         reconciliation, and unknown domain keys.
@@ -2563,6 +2694,14 @@ def _validate_claim(cj, statement: str, note: str, facts,
             if "disallowed" in str(e):
                 return Probe(cj.name, statement, "skipped", route=None,
                              note=f"{note}; {e}")
+    if cj.relation == "raises" and fn is not None:
+        # the TypeError a call that does not fit the signature raises
+        # comes from the claim's own malformed text, never from the
+        # function, so it can neither satisfy nor refute the claim
+        mismatch = _call_arity_mismatch(cj.lhs, fn, param_set)
+        if mismatch is not None:
+            return Probe(cj.name, statement, "skipped:misspecified",
+                         route=None, note=f"{note}; {mismatch}")
     colliding = sorted(set(cj.ambiguous_diff_vars) & param_set)
     if colliding:
         # d(<expr>/d<var>)'s fraction sugar (grammar.
@@ -2924,6 +3063,22 @@ def _derive_line_coverage(fn, facts, domain):
     return {first_line - 1 + ln for ln in live}
 
 
+def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
+    """Intent:
+        The parameter whose declared range the claim's premises leave
+        with no point at all, or None when the premises (if any) leave
+        every range non-empty or cannot be read as bounds.
+    """
+    if not ctx.assumption:
+        return None
+    from .symbolic._prove import premise_empties_domain
+    try:
+        premises = [(a.lhs, a.relation, a.rhs) for a in ctx.assumption]
+    except AttributeError:
+        return None
+    return premise_empties_domain(ctx.cj_domain, set(facts.params), premises)
+
+
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        extensive: bool) -> "Probe | None":
     """Intent:
@@ -3116,10 +3271,30 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         settles it outright. Tried only where the symbolic routes left
         no reliable verdict, so nothing they decided can move."""
         from ._brute_force import brute_force_proof
-        return brute_force_proof(cj, fn, facts, cj_domain, bound_funcs,
-                                 assumption=assumption or [])
+        from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+        try:
+            return _with_timeout(
+                lambda: brute_force_proof(cj, fn, facts, cj_domain,
+                                          bound_funcs,
+                                          assumption=assumption or []),
+                EXTENSIVE_TIMEOUT_SECONDS)
+        except TimeoutError:
+            # an unfinished sweep covers only a prefix of the domain,
+            # which settles nothing
+            return None
 
-    if proof.status in ("undecided", "unliftable"):
+    depth_refusal = (proof.meta or {}).get("mathema.recursion_depth")
+    if depth_refusal is not None:
+        # the implementation cannot recurse deep enough to cover this
+        # domain, so a sweep of it would walk into the same stack limit
+        # (or, for a branching recursion, run exponentially long first).
+        # The refusal stands; an executed witness at the domain's top
+        # turns it into the falsification the raise rule calls for.
+        witnessed = _recursion_depth_witness(ctx, fn, facts, bound_funcs,
+                                             assumption or [], proof, note)
+        if witnessed is not None:
+            return witnessed
+    elif proof.status in ("undecided", "unliftable"):
         swept = _brute_force_fallback()
         if swept is not None:
             proof = swept
@@ -3266,6 +3441,68 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     return None
 
 
+def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
+                             assumption, proof, note) -> "Probe | None":
+    """Intent:
+        The falsification behind a stack-depth refusal: the claim run at
+        the top of the recursed parameter's domain, where the refusal
+        says the call needs more frames than the interpreter allows. A
+        RecursionError there is a raise inside the domain, so the value
+        claim is falsified with that executed point as its witness, and
+        the refusal's sketch (which names the safe bound) is kept.
+
+        None when there is no finite top, the top is not admitted, the
+        run does not end in a RecursionError, or it outruns the fast
+        wall-clock cap.
+
+    Notes:
+        One point is run, never a sweep: a recursion descends one frame
+        per index step before doing any other work, so a call past the
+        limit raises after about a thousand frames, while the points
+        below the limit can be arbitrarily expensive (a doubly recursive
+        definition is exponential in its argument).
+    """
+    from ._timeout import FAST_TIMEOUT_SECONDS, _WallClockExpired, _with_timeout
+    from .gates import _fmt_point, _point_evaluator
+    info = proof.meta["mathema.recursion_depth"]
+    param, top = info["param"], info["top"]
+    if top is None:
+        return None
+    raised: list = []
+
+    def _recording(*a, **kw):
+        try:
+            return fn(*a, **kw)
+        except Exception as exc:
+            raised.append(exc)
+            raise
+
+    kit = _point_evaluator(ctx.cj, _recording, facts, ctx.cj_domain,
+                           bound_funcs, assumption)
+    if kit is None or list(kit["names"]) != [param]:
+        return None
+    point = {param: top}
+    if not kit["admits"](point):
+        return None
+    try:
+        verdict = _with_timeout(lambda: kit["evaluate"](point),
+                                FAST_TIMEOUT_SECONDS)
+    except (TimeoutError, _WallClockExpired):
+        return None
+    if verdict is not False or not raised \
+            or not isinstance(raised[-1], RecursionError):
+        return None
+    where = _fmt_point(point, [param])
+    cj = ctx.cj
+    return Probe(cj.name, ctx.statement, "falsified", route="derive",
+                 sketch=proof.sketch,
+                 counterexample=f"{where}: raised RecursionError",
+                 note=note,
+                 stratum=_machine_failure_stratum(raised[-1], where),
+                 meta={"mathema.corroboration": "reproduced",
+                       "mathema.recursion_depth": dict(info)})
+
+
 def _adjudicate_equivalence(ctx: "_ClaimContext", fn, facts) -> "Probe":
     """The `f =:= g` ladder, in its own module; see equivalence.py."""
     from .equivalence import adjudicate
@@ -3375,6 +3612,46 @@ def _sympy_zero():
     import sympy
     return sympy.S.Zero
 
+
+
+def _call_arity_mismatch(src: str, fn, param_set: set) -> str | None:
+    """Intent:
+        The reason a call to `f` in the claim text `src` cannot bind to
+        `fn`'s signature (too many or too few arguments, an unknown
+        keyword), or None when every such call fits or the signature
+        cannot be read.
+
+    Notes:
+        A starred argument is not counted and makes the check decline
+        for that call. A parameter literally named `f` makes `f(...)`
+        ambiguous, so the check declines entirely.
+    """
+    import inspect as _inspect
+    if "f" in param_set:
+        return None
+    try:
+        sig = _inspect.signature(fn)
+        tree = ast.parse(src, mode="eval")
+    except (TypeError, ValueError, SyntaxError):
+        return None
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "f"):
+            continue
+        if any(isinstance(a, ast.Starred) for a in node.args) \
+                or any(k.arg is None for k in node.keywords):
+            continue
+        try:
+            sig.bind(*([None] * len(node.args)),
+                     **{k.arg: None for k in node.keywords})
+        except TypeError:
+            params = list(sig.parameters)
+            given = len(node.args) + len(node.keywords)
+            return (f"f is called here with {given} argument(s), but its "
+                    f"signature takes {len(params)} ({', '.join(params)}), "
+                    f"so any TypeError is raised by the malformed call "
+                    f"itself; call f with its own parameters")
+    return None
 
 
 def _int_annotated_params(callee) -> list:

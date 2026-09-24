@@ -1365,6 +1365,29 @@ def _symbology_answers(provider, params, funcs) -> tuple[dict, dict]:
 
 
 
+def _symbology_clash(param_symbols: dict, real_params) -> str | None:
+    """Intent:
+        Why a provider's parameter symbols cannot be used together, or
+        None when they can: a symbol that spells a different real
+        parameter of the claim, or one symbol proposed for two
+        parameters. Either makes two parameters share a spelling in
+        the rendered text.
+    """
+    params = set(real_params)
+    owner: dict = {}
+    for name, symbol in param_symbols.items():
+        if symbol == name:
+            continue
+        if symbol in params:
+            return (f"it renders parameter {name} as {symbol!r}, which is "
+                    f"already the name of parameter {symbol}")
+        if symbol in owner:
+            return (f"it renders both {owner[symbol]} and {name} as "
+                    f"{symbol!r}")
+        owner[symbol] = name
+    return None
+
+
 def _auto_renames(cj, funcs: frozenset, unicode: bool,
                   long_param_threshold: int, long_func_threshold: int,
                   canonical: bool = False):
@@ -1420,7 +1443,8 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     falling back to `_MATH_ATTRS`, so a genuine `pi`-named parameter is
     already proven/disproven correctly regardless of how this renders."""
     from .grammar import auto_short_names, greek_symbol_for_name, reserved_names
-    from ._providers import get_provider, report_provider_failure
+    from ._providers import (get_provider, report_provider_failure,
+                             report_provider_rejection)
 
     # `eps`/`epsilon`/`ε` are the claim's tolerance, not parameters to
     # rename
@@ -1461,6 +1485,13 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
                 provider, real_params, cj.funcs)
         except Exception as exc:
             report_provider_failure("symbology", exc)
+            provider_params, provider_funcs = {}, {}
+        clash = _symbology_clash(provider_params, real_params)
+        if clash is not None:
+            # a parameter shown under another parameter's name reparses
+            # as a different claim, so none of this provider's answers
+            # are used for this render
+            report_provider_rejection("symbology", clash)
             provider_params, provider_funcs = {}, {}
     for name in real_params:
         symbol = provider_params.get(name)

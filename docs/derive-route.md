@@ -813,8 +813,12 @@ Three gates keep the closed form honest about the implementation:
   implementation still recurses about one frame per index step, so a
   domain whose top implies a depth beyond the interpreter's recursion
   limit refuses to prove, `fib(100000)` raises `RecursionError`
-  however true Binet is. The sketch names the safe bound, the
-  iterative rewrite, and the `raises(...)` claim as ways out.
+  however true Binet is. The claim is then run once at the top of
+  the domain, and the RecursionError it raises there is the executed
+  witness of a falsification (a raise inside a value claim's domain).
+  The domain is never swept point by point past the limit. The
+  sketch names the safe bound, the iterative rewrite, and the
+  `raises(...)` claim as ways out.
 - **Non-termination is a raise region.** Isolated base points
   (`if n == 0: ... if n == 1: ...`) leave the recursion descending
   forever below them; that region is treated exactly like an explicit

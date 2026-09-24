@@ -352,3 +352,15 @@ def test_differentiate_wrt_a_param_named_e_does_not_resolve_to_eulers_number():
 
     # the bare token `e` in value position is still Euler's number
     assert canonical_claim_text(claim("for x in [1, 5], f(x) == e")).endswith("= e")
+
+
+def test_a_shadowed_constant_names_its_own_remedy():
+    from mathema.conjecture import claim, check_conjectures
+
+    def turn(pi: float) -> float:
+        return pi + 1.0
+
+    (p,) = check_conjectures(turn, [claim("for pi in [0, 1], f(pi) >= pi")])
+    assert "'pi' read as the parameter" in p.note or "pi read as the parameter" in p.note
+    assert "acos(-1)" in p.note, p.note
+    assert "exp(1)" not in p.note, p.note

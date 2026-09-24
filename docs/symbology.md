@@ -153,9 +153,14 @@ such as `KeyboardInterrupt` still stops the render.
 A returned symbol is accepted only if it is safe, and mathema checks
 this rather than trusting the provider:
 
-- **It cannot collide.** A symbol already in use, by another parameter
-  or by a name already in the claim, is rejected, so a provider can
-  never make two things in one claim share a spelling.
+- **It cannot collide.** A provider that renders a parameter with
+  another parameter's name, or gives two parameters the same symbol, is
+  refused for that render: none of its answers are used, the claim
+  renders with mathema's own names, and a warning naming the provider
+  says which rename collided, as for a provider that raises. A symbol
+  that clashes with any other name already in the claim is declined on
+  its own. Either way a provider can never make two things in one
+  claim share a spelling.
 - **It has to survive a parse.** CPython normalises identifiers under
   NFKC at parse time, so `Mₛ` is a legal identifier that comes back as
   `Ms` once parsed. Written bare, a symbol like that would appear one

@@ -78,3 +78,23 @@ def report_provider_failure(name: str, exc: Exception) -> None:
     warnings.warn(f"mathema: provider {label!r} for capability {name!r} "
                   f"raised ({exc!r}), skipped for this call, falling back "
                   f"to mathema's own rendering", stacklevel=3)
+
+
+def report_provider_rejection(name: str, reason: str) -> None:
+    """Intent:
+        Warn that the provider for capability `name` returned answers
+        mathema refused (`reason` says why), so it was skipped for this
+        call, once per provider per process.
+
+    Notes:
+        Shares the once-per-provider record with
+        `report_provider_failure`: a provider is warned about once,
+        whichever way it first went wrong.
+    """
+    label = provider_label(name)
+    if (name, label) in _warned_failures:
+        return
+    _warned_failures.add((name, label))
+    warnings.warn(f"mathema: provider {label!r} for capability {name!r} "
+                  f"was refused ({reason}), skipped for this call, falling "
+                  f"back to mathema's own rendering", stacklevel=3)
