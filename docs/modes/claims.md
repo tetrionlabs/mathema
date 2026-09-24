@@ -45,8 +45,23 @@ not recorded as fact:
 
 `functions.py` holds the `softmax` from the
 [`check` worked example](check.md#worked-example-softmax-start-to-finish),
-without its `Claims:` block.
+without its `Claims:` block:
 
+<!-- example: adopt file=functions.py -->
+```python
+import math
+from typing import Annotated
+from mathema.types import Shape
+
+def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+    """Turn a vector of real-valued scores into a probability distribution."""
+    m = max(scores)
+    exps = [math.exp(s - m) for s in scores]
+    total = sum(exps)
+    return [e / total for e in exps]
+```
+
+<!-- example: adopt session -->
 ```
 $ mathema claims functions.softmax
 functions.softmax: no declared claims (mathema claims --suggest lists candidates)
@@ -72,6 +87,12 @@ functions.softmax: 1 declared claim(s)
 The adopted stanza is plain declared-claims YAML, so it's yours to
 edit or delete like anything else in the file:
 
+<!-- example: adopt run -->
+```bash
+cat claims/adopted.claims.yaml
+```
+
+<!-- example: adopt output -->
 ```yaml
 functions.softmax:
   claims:

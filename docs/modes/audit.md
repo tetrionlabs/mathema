@@ -114,9 +114,13 @@ function can have one resolvable branch and one structurally blocked
 one, and both get their own line.
 
 Against `strength_to_distance` (a real fixture in
-`tests/test_branch_pruning.py`):
+`tests/test_branch_pruning.py`), here in `mypkg.py`:
 
+<!-- example: branches file=mypkg.py -->
 ```python
+import math
+
+
 def strength_to_distance(r: float, scale: str = "info") -> float:
     if scale == "info":
         return math.sqrt(1.0 - r ** 2)
@@ -125,9 +129,12 @@ def strength_to_distance(r: float, scale: str = "info") -> float:
     raise ValueError(f"unknown scale {scale!r}, use 'info' or 'linear'")
 ```
 
+`--deriv-report` closes the report with this block (the table above it
+trimmed here):
+
+<!-- example: branches session match=subset -->
 ```
 $ mathema audit mypkg --deriv-report
-...
 underivable functions:
   mypkg.strength_to_distance:
     line 2  branch:needs-domain(scale)
@@ -172,6 +179,7 @@ Example: this function only partially satisfies "documents raising";
 `ValueError` is named, `OverflowError` isn't, so `documents_raises` is
 `False` even though a `Raises:` section is present:
 
+<!-- example: half run -->
 ```python
 def half(x: float) -> float:
     """Halves x.
@@ -189,6 +197,7 @@ def half(x: float) -> float:
 Run this checklist against a single function without the `audit` CLI,
 useful in a notebook or a quick interactive check:
 
+<!-- example: half repl -->
 ```python
 >>> import mathema
 >>> mathema.docstring_report(half)
