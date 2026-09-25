@@ -41,7 +41,8 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
                       _missing_guard_params as _missing_guard_params,
                       _pole_bearing_params as _pole_bearing_params,
                       _restricted_domain_targets as _restricted_domain_targets)
-from .probing import _fmt, _points_for_probe, _pole_safety, _poles_by_var, _synth
+from .probing import (_fmt, _pinned_float_env, _points_for_probe, _pole_safety,
+                      _poles_by_var, _synth)
 
 # --- probe:algorithmic families: monotonicity, affine-ness, convexity ------
 #
@@ -661,20 +662,6 @@ def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                       f"DISCOVERED pole of {facts.name} (pole discovery "
                       f"is the fast-path search; the containment itself "
                       f"is exact)")
-
-
-def _pinned_float_env():
-    """The floating-point error regime every hazard trial runs under:
-    numpy's own defaults, pinned explicitly so a verdict never depends
-    on whatever ambient `numpy.seterr` state the calling process
-    happens to carry. A no-op context when numpy isn't importable."""
-    import contextlib
-    try:
-        import numpy
-    except Exception:
-        return contextlib.nullcontext()
-    return numpy.errstate(divide="warn", over="warn", under="ignore",
-                          invalid="warn")
 
 
 def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,

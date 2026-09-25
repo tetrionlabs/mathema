@@ -49,8 +49,9 @@ from ._scan import _split_commas, blank_strings
 from .domain import DuplicateBinding
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
                       _probe_density, _sampling_shorthand, _synth,
-                      _synth_dict, complex_is_a_raise, is_complex_value,
-                      ordering_shortfall, relation_holds_elementwise)
+                      _synth_dict, complex_is_a_raise, holds_nan,
+                      is_complex_value, ordering_shortfall,
+                      relation_holds_elementwise)
 from .records import _EXC_TYPES, Probe, classify_verdict, statement_text
 from .symbolic import (mentions_matrix_ops, try_prove, try_prove_matrix,
                        try_prove_raises)
@@ -4347,6 +4348,19 @@ def _machine_failure_stratum(exc, witness: str) -> dict | None:
 def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                       sampling) -> "Probe":
     """Intent:
+        The probe stage, run under the pinned floating-point regime
+        (`probing._pinned_float_env`), so an invalid operation is a
+        NaN whatever `numpy.seterr` state the caller carries and the
+        verdict and witness are the same in every process.
+    """
+    from .probing import _pinned_float_env
+    with _pinned_float_env():
+        return _probe_stage(ctx, fn, facts, kinds, sampling)
+
+
+def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
+                 sampling) -> "Probe":
+    """Intent:
         The probe stage: relation/exception-type gates, a registered
         family's `probe:algorithmic` technique, then the generic
         seeded sampling loop over compiled lhs/rhs, with the final
@@ -4602,6 +4616,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                         literal_args)
                if c not in pinned]
     call_raised = [None]   # the LABEL of the callee that raised, or None
+    call_nan = [None]      # the LABEL of the first callee to return a NaN
 
     def _tagged(callee, label):
         # a raise from the function under test (or a bound function) is
@@ -4631,13 +4646,15 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if complex_raises and is_complex_value(value):
                 call_raised[0] = label
                 raise ComplexResult(label, value)
+            if call_nan[0] is None and holds_nan(value):
+                call_nan[0] = label
             return value
         return _wrapped
 
     fn_tagged = _tagged(fn, "f")
     bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
     for trial in range(budget + len(pinned)):
-        call_raised[0] = None
+        call_raised[0] = call_nan[0] = None
         trial_sizes: dict = (
             _draw_trial_sizes(resolver, shape_lo, shape_hi, shape_groups, rng)
             if plan_dims and trial >= len(pinned) else {})
@@ -4903,19 +4920,26 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   "the raising region as its own raises(...) claim")
             cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args)))
             break
-        if (is_missing(lv) or is_missing(rv)) and not (
-                not any(is_missing(v) for v in args)
-                and any(isinstance(v, float) and v != v for v in (lv, rv))):
+        if not any(is_missing(v) for v in args) \
+                and (holds_nan(lv) or holds_nan(rv)):
+            # a NaN computed from inputs that are not missing is no
+            # value, like a raise: every value relation fails at this
+            # in-domain point, `!=` included, and the witness names
+            # the callee that returned it
+            checked += 1
+            cx = (f"{_fmt(tuple(args))}: {call_nan[0]} returned nan"
+                  if call_nan[0] is not None else
+                  f"{_fmt(tuple(args))}: {lv!r} vs {rv!r}, and a nan is "
+                  f"no value")
+            break
+        if is_missing(lv) or is_missing(rv):
             # a domain that includes missing by default (see
             # grammar.parse_binding's own policy) can sample the
             # missing sentinel itself as a candidate value; a
             # function that returns it unchanged (identity, say)
             # leaves lv/rv genuinely non-comparable, neither
             # confirming nor denying the claim, so this sample is
-            # inconclusive. A NaN computed from non-missing inputs is
-            # different: it is the function's value at an in-domain
-            # point, and the comparison below reads it as IEEE does
-            # (no ordering holds, and it equals no number).
+            # inconclusive
             continue
         checked += 1
         # a declared tolerance governs the comparison outright; the

@@ -425,6 +425,40 @@ def _is_matrix_value(v) -> bool:
     return hasattr(v, "shape") and hasattr(v, "__array__")
 
 
+def _pinned_float_env():
+    """The floating-point error regime every probe evaluation runs
+    under: numpy's own defaults, pinned explicitly so a verdict never
+    depends on whatever ambient `numpy.seterr` state the calling
+    process happens to carry (an invalid operation is a NaN, never a
+    FloatingPointError). A no-op context when numpy isn't importable."""
+    import contextlib
+    try:
+        import numpy
+    except Exception:
+        return contextlib.nullcontext()
+    return numpy.errstate(divide="warn", over="warn", under="ignore",
+                          invalid="warn")
+
+
+def holds_nan(value) -> bool:
+    """True when a value is a NaN or contains one: a Python or numpy
+    float NaN, or a NaN element of a numpy array or a nested list or
+    tuple. A value that is not numeric at all holds no NaN."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, float):
+        return value != value
+    if isinstance(value, (list, tuple)):
+        return any(holds_nan(v) for v in value)
+    if hasattr(value, "dtype") and hasattr(value, "shape"):
+        try:
+            import numpy
+            return bool(numpy.isnan(numpy.asarray(value, dtype=float)).any())
+        except (TypeError, ValueError, ImportError):
+            return False
+    return False
+
+
 def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                                exact_inequality: bool = False,
                                rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
