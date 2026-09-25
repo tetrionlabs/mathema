@@ -4884,10 +4884,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     key = resolver.key(p, 0)
                     n = trial_sizes.get(key) or rng.randint(2, 5)
                     v = _mtx.synth_for(param_structures[p], n, rng)
-                elif shape is not None and shape.ndim >= 2:
-                    # a matrix-shaped (marker-declared) parameter: the
-                    # resolver nests to the marked axes, each leaf a
-                    # fresh element draw, sizes fixed by the shape plan
+                elif shape is not None and (
+                        shape.ndim >= 2
+                        or (shape.ndim == 1 and k != "sequence")):
+                    # a matrix-shaped (marker-declared) parameter, or a
+                    # space binding (`R^n`, `R^(n,n)`) on a parameter
+                    # whose kind the signature does not state: the
+                    # resolver nests to the axes, each leaf a fresh
+                    # element draw, sizes fixed by the shape plan
                     # (shared marker dims agree by construction)
                     v = resolver.synth(
                         p, trial_sizes,

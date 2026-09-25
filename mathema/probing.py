@@ -1245,18 +1245,34 @@ def probe(fn, facts, domain: dict | None = None,
     except (TypeError, ValueError):
         signature = {}
 
-    def value_for(p, k):
+    from . import dimensions as _dims
+    from .types import shapes_from_signature
+    try:
+        resolver = _dims.resolve(facts, shapes_from_signature(fn),
+                                 claim_domain=domain)
+    except _dims.DimensionConflict:
+        resolver = None
+
+    def value_for(p, k, sizes):
         param = signature.get(p)
         if (param is not None and param.default is not param.empty
                 and p not in domain and _keeps_default(param)):
             return param.default
+        shape = resolver.shapes.get(p) if resolver is not None else None
+        if shape is not None and k != "sequence" and shape.ndim >= 1:
+            # a space binding (`R^n`, `R^(n,n)`) from the claims shapes
+            # a parameter whose kind the signature does not state
+            return resolver.synth(
+                p, sizes, lambda: _synth("float", rng, domain.get(p),
+                                         specials=specials), rng)
         return _synth(k, rng, domain.get(p), specials=specials,
                       extra=critical_hints.get(p),
                       extra_cycle=extra_cycles.get(p))
 
     def args_for() -> "tuple[list, dict]":
+        sizes = resolver.draw_sizes(rng) if resolver is not None else {}
         return call_arguments(fn, facts.params, {
-            p: value_for(p, k) for p, k in zip(facts.params, kinds)})
+            p: value_for(p, k, sizes) for p, k in zip(facts.params, kinds)})
 
     # A parameter's own critical-point hint is drawn deterministically
     # exactly once (extra_cycle's own guaranteed lap), which may be
