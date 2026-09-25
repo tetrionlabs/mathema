@@ -383,6 +383,28 @@ without repeating `let`, so a bare `name = expr` straight after the run
 reads as one more binding; a claim written that way is refused with a
 message saying to write the relation as `==`.
 
+### Pinning a parameter: `let p be v`
+
+`let` followed by a parameter's own name and a literal value (a number,
+`None`, `True` or `False`) pins that parameter: every call the claim
+makes passes it at that value, whether or not the claim's text writes
+it into the call. It is how a claim about a library function states a
+value other than the default, since a library function's other
+parameters are otherwise passed at their defaults (see
+[Claims transfer](claims-transfer.md)):
+
+```yaml
+numpy.mean:
+  claims:
+    - name: one_mean_per_column
+      statement: "let axis be 0, for a in R^(n,n), dim(f(a)) == dim(a)"
+```
+
+The pin is part of the claim's canonical text, so it survives every
+round trip, and the record lists it among the values passed without
+sampling, `axis: 0 (pinned)`. A pin naming something the function
+does not take is a misspecified claim, never a silent free variable.
+
 ### Operational infinity: `let |inf| be ...`
 
 One more binding uses bars around the name. It sets an operational

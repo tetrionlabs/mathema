@@ -51,6 +51,20 @@ mathema knows, the way `math.sqrt` raising below zero is. Your
 project's own compendium files apply wherever mathema reads the
 project (`mathema check`, `mathema verify`, `write_spec`).
 
+A row about a library function passes the parameters it does not
+bind at the library's own defaults, rather than sampling them:
+`for a in R^n, min(a) <= f(a) <= max(a)` on `numpy.mean` samples `a`
+and leaves `axis`, `dtype`, `out`, `keepdims` and `where` as numpy
+defines them. The record says so: each row carries the values it
+passed in `mathema.defaults`, and its note lists them. A different
+value is a pin, `let axis be 0` (see [the grammar](grammar.md)), shown
+as `0 (pinned)`. `mathema verify` compares those values with the
+installed library on every sweep, so a release inside the declared
+`versions` range that changes a default marks the row stale and it is
+adjudicated again, and a pin naming a parameter the library no longer
+has makes the row misspecified. Your own functions are not affected:
+their defaulted parameters are sampled like any other.
+
 An `is_defined` row with a stated region reads as "returns a value on
 exactly this region", so `numpy.sqrt`'s `x >= 0` says that outside it
 the call has no value, whether the library raises there (`math.sqrt`),
