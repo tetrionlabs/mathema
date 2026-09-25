@@ -586,6 +586,28 @@ def verify_project(root: str = ".", *, all: bool = False,
                              trials_scale=trials_scale, only=only)
 
 
+def _unsettled_library_hints(key: str, claims: list) -> list:
+    """Intent:
+        For each library row this sweep left unsettled (declared,
+        unknown or skipped), the line naming both ways to settle it:
+        accept it as trusted, or let verify adjudicate it against the
+        installed library.
+    """
+    from .compendium import _compendium_hint
+    out: list = []
+    for c in claims:
+        name, verdict, meta, _note = _claim_fields(c)
+        if meta.get("mathema.surface") != "compendium":
+            continue
+        if classify_verdict(verdict) not in ("declared", "unknown",
+                                             "skipped"):
+            continue
+        out.append(_compendium_hint(
+            meta.get("mathema.compendium") or "a compendium", name, key,
+            verdict))
+    return out
+
+
 def _library_population(root: str, verified: dict, declared: dict,
                         library_claims: dict) -> dict:
     """Intent:
@@ -1121,15 +1143,16 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # phase 3: gate every key through the one policy and render lines
     for key, why, claims_for_gate, rec, deps, accepted, unres, _vinfo in pending:
         is_library = key in library
-        report = gate(claims_for_gate, strict=strict and not is_library,
+        # a library key gates like the project's own claims: a row
+        # neither verified here nor accepted (`--as trusted`) fails.
+        # The unresolved-global-name check is the one rule it skips:
+        # that check reads the analysed body of the project's own
+        # function, and a library's body is not what its rows are about
+        report = gate(claims_for_gate, strict=strict,
                       accepted_risk=accepted,
                       unresolved=() if is_library else unres)
-        if is_library:
-            # library claims are testimony about code this project does
-            # not own: a row verify cannot settle here is reported,
-            # never a failure; a falsified row still fails
-            report.problems = [p for p in report.problems
-                               if "falsified" in p or "invalidated" in p]
+        hints = (_unsettled_library_hints(key, claims_for_gate)
+                 if is_library and report.problems else [])
         state = "FAIL" if report.problems or key_problems.get(key) else "ok"
         if key in lock_messages:
             # the record is left as it was, so its counts describe code
@@ -1142,7 +1165,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             if is_library:
                 line += f"; library claims from {library[key]}"
             if report.problems:
-                line += "; " + "; ".join(report.problems)
+                line += "; " + "; ".join(report.problems + hints)
         else:
             line = (f"{state:4} {key}: "
                     + (f"library claims from {library[key]}; "
@@ -1155,7 +1178,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 line += (f", {len(report.foreign)} not this grammar "
                          f"({', '.join(grammars)})")
             if report.problems:
-                line += "  <- " + "; ".join(report.problems)
+                line += "  <- " + "; ".join(report.problems + hints)
         out.problems.extend(f"{key}: {p}" for p in report.problems)
         out.lines.append(line)
         out.keys.append({

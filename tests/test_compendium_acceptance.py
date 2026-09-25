@@ -2,8 +2,9 @@
 # Copyright 2026 Tetrion Ltd
 """The compendium-premise loop end to end: a library row a project's
 claim rests on is adjudicated by `mathema verify` against the installed
-library; a row verify cannot settle is recorded as such and satisfies
-nothing (the resting claim's note names both paths), `accept --as
+library; a row verify cannot settle is recorded as such, fails the
+sweep like an unsettled project claim, and satisfies nothing (the
+verify line and the resting claim's note name both paths), `accept --as
 trusted` raises it to its claimed level so the premise resolves with
 the compendium named as provenance, and a dotted reference resolves the
 same row. A project that never touches a library adjudicates none of
@@ -77,8 +78,14 @@ def test_the_loop_end_to_end(project):
     assert row["meta"]["mathema.surface"] == "compendium"
     assert row["meta"]["mathema.compendium_claimed"] == "proven"
     assert row["meta"]["mathema.compendium"] == "compendium:math"
-    assert "ok   math.log: library claims from claims/math.claims.yaml" \
+    # an unsettled library row gates like the project's own claims,
+    # and the line names both ways to settle it
+    assert "FAIL math.log: library claims from claims/math.claims.yaml" \
         in r1.stdout, r1.stdout
+    assert r1.returncode == 1
+    assert ("mathema accept math.log log_increasing --as trusted"
+            in r1.stdout), r1.stdout
+    assert "adjudicate it against the installed library" in r1.stdout
     resting = _rows(project, "spkg.mod.widened")["rests"]
     assert resting["verdict"] == "unknown"
     assert "--as trusted" in (resting["note"] or "")
