@@ -1726,6 +1726,8 @@ def _let_sections(cj) -> list:
         if bound is not None:
             from .domain import render_domain_bound
             sections.append(f"let {name} be {render_domain_bound(bound)}")
+    for name, value in sorted((getattr(cj, "param_pins", None) or {}).items()):
+        sections.append(f"let {name} be {value!r}")
     return sections
 
 def callable_ref(fn) -> "str | None":
@@ -2347,6 +2349,8 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         f"let {name} be "
         f"{render_domain(cj.domain[name], ascii_mode=not unicode, show_missing=domain_show_missing)}"
         for name in sorted(cj.free_vars) if name in cj.domain]
+    let_segments += [f"let {name} be {value!r}" for name, value in
+                     sorted((getattr(cj, "param_pins", None) or {}).items())]
     if getattr(cj, "pseudo_infinity", None) is not None:
         # the operational infinity magnitude, in the one claim-text
         # spelling (the bars mean magnitude, applied symmetrically)

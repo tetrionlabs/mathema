@@ -714,6 +714,12 @@ class Conjecture:
     # than silently guessing wrong. Empty means the claim's `d(...)`
     # calls (if any) never used the fraction spelling at all.
     pins: list = field(default_factory=list)
+    param_pins: dict = field(default_factory=dict)
+    # `let <parameter> be None|True|False` bindings (grammar.
+    # ParameterPin): the value each named parameter is passed at on
+    # every call the claim makes. A number spelled the same way is a
+    # single-point `let` bound in `domain`/`free_vars`, which reads as a
+    # pin too when the name is a real parameter of a library function.
     meta: dict = field(default_factory=dict)   # declared extension data
                                  # (the spec's own meta object, e.g.
                                  # {"concepts": [...]}), carried onto
@@ -958,6 +964,10 @@ def claim(law: str, name: str | None = None, source: str = "user",
             f"{aliases[aliased_domain_keys[0]]}' alias was resolved, "
             f"write the real name ({aliases[aliased_domain_keys[0]]!r}) in "
             f"the 'for' clause instead, or move the 'let' earlier")
+    from .grammar import ParameterPin
+    param_pins = {k: v.value for k, v in let_domain.items()
+                  if isinstance(v, ParameterPin)}
+    let_domain = {k: v for k, v in let_domain.items() if k not in param_pins}
     dom = {**let_domain, **dom}
     prime_problem = unexpanded_prime_message(text)
     if prime_problem is not None:
@@ -1094,6 +1104,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
                       ambiguous_diff_vars=ambiguous_diff_vars, tolerance=tolerance,
                       negated=negated, assuming=assuming, outcome=outcome or "",
                       links=links, pseudo_infinity=pseudo_infinity,
+                      param_pins=param_pins,
                       meta=dict(meta or {}), raw=law)
 
 
@@ -2163,6 +2174,87 @@ def _shape_constraints(assumption, resolver):
     return lo, hi, merged
 
 
+def _single_point(bound) -> "float | None":
+    """The one value a bound admits when it is a single point (`let c
+    be 2.0` reads as the interval [2.0, 2.0]), else None."""
+    pieces = getattr(bound, "pieces", None)
+    if pieces and len(pieces) == 1:
+        lo, hi = pieces[0]
+        if isinstance(lo, (int, float)) and lo == hi:
+            return lo
+    if isinstance(bound, tuple) and len(bound) == 2 and bound[0] == bound[1] \
+            and isinstance(bound[0], (int, float)):
+        return bound[0]
+    return None
+
+
+def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
+    """Intent:
+        How a claim about a library function (a key of a registered
+        `compendium:` file) calls it, beyond the parameters it
+        samples: `(kept, pins, problem)`. `kept` maps each parameter
+        with a default that the claim neither binds, pins nor names to
+        that default; `pins` maps each parameter the claim pins (`let
+        axis be 0`, `let keepdims be True`) to its value; `problem`
+        names a pinned parameter the function does not have. For any
+        other function, `({}, {}, None)`: its defaulted parameters are
+        sampled like the rest.
+
+    Notes:
+        A number spelled `let p be 2` is a single-point bound, so it
+        is a pin when `p` is a parameter, and a pin of a parameter that
+        no longer exists when the claim's text never reads `p`; an
+        integral point is passed as an int.
+    """
+    import inspect
+    import re
+
+    from .compendium import library_key_of
+    key = library_key_of(fn)
+    if key is None:
+        return {}, {}, None
+    try:
+        sig = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return {}, {}, None
+    text = " ".join(str(t) for t in (cj.lhs, cj.rhs, cj.assuming) if t)
+    named = set(re.findall(r"\b[A-Za-z_]\w*\b", text))
+    pins = dict(getattr(cj, "param_pins", None) or {})
+    for name in sorted(cj.free_vars or ()):
+        point = _single_point((cj.domain or {}).get(name))
+        if point is None or (name not in sig and name in named):
+            continue
+        pins[name] = (int(point) if isinstance(point, float)
+                      and point.is_integer() else point)
+    missing = sorted(p for p in pins if p not in sig)
+    problem = (f"{', '.join(missing)} {'is not a parameter' if len(missing) == 1 else 'are not parameters'} "
+               f"of {key}, so the pin names nothing to pass"
+               if missing else None)
+    kept = {p: param.default for p, param in sig.items()
+            if param.default is not param.empty
+            and param.kind not in (param.VAR_POSITIONAL, param.VAR_KEYWORD)
+            and p not in (cj.domain or {}) and p not in pins
+            and p not in named}
+    return kept, {p: v for p, v in pins.items() if p in sig}, problem
+
+
+def defaults_meta(kept: dict, pins: dict) -> dict:
+    """Intent:
+        The `mathema.defaults` record field: each parameter a library
+        call passed at a value the claim did not sample, as the repr of
+        that value (numpy's own no-value sentinel reads `<no value>`),
+        a pinned one with `(pinned)` beside it.
+    """
+    out = {p: _value_text(v) for p, v in kept.items()}
+    out.update({p: f"{_value_text(v)} (pinned)" for p, v in pins.items()})
+    return dict(sorted(out.items()))
+
+
+def _value_text(value) -> str:
+    text = repr(value)
+    return "<no value>" if text in ("<no value>", "<NoValue>") else text
+
+
 def _premise_draws(assumption, kinds: dict) -> dict:
     """Intent:
         Draws that satisfy an equality premise by construction, for the
@@ -2557,6 +2649,16 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             probe.condition = "for " + ", ".join(
                 f"{p2} in {render_domain(b, ascii_mode=True)}"
                 for p2, b in cj.domain.items())
+        kept, pinned, _problem = call_defaults(fn, cj)
+        if kept or pinned:
+            # a library call's values the claim did not sample, stated
+            # in the record and the note
+            resolved = defaults_meta(kept, pinned)
+            probe.meta = {**(probe.meta or {}), "mathema.defaults": resolved}
+            said = ("passed without sampling: "
+                    + ", ".join(f"{p2}={v}" for p2, v in resolved.items()))
+            if said not in (probe.note or ""):
+                probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         inherited = {p2: b for p2, b in domain.items()
                      if p2 not in (cj.domain or {})}
         if inherited:
@@ -2838,6 +2940,12 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                 cj.name, statement, "skipped", route=None,
                 note=f"unknown route {cj.route!r}"), cj))
             continue
+        _kept, call_pins, pin_problem = call_defaults(fn, cj)
+        if pin_problem is not None:
+            out.append(stamp(Probe(
+                cj.name, statement, "skipped:misspecified", route=None,
+                note=f"{ctx.note}; {pin_problem}")))
+            continue
         # the family is resolved for every concrete route: the derive
         # stage reads its derive half, and the probe stage reads its
         # probe:algorithmic half, a plain route="probe" claim on a
@@ -2861,7 +2969,16 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             # generic stage applies
             out.append(stamp(_adjudicate_equivalence(ctx, fn, facts)))
             continue
-        if cj.route in ("derive", "best", "examine"):
+        if call_pins:
+            # the derive route reads the call the claim writes, never a
+            # pinned parameter it does not pass, so a pinned claim is
+            # adjudicated by execution
+            ctx.derive_undecided = Probe(
+                cj.name, statement, "unknown", route="derive",
+                note=f"{ctx.note}; the derive route does not model the "
+                     f"pinned parameter(s) {', '.join(sorted(call_pins))}",
+                meta={"mathema.derive_status": "unsupported"})
+        elif cj.route in ("derive", "best", "examine"):
             # route="best" IS the cascade: its derive attempt engages
             # the extensive ladder inside the same try_prove call (the
             # fast attempt runs once; the ladder only starts where it
@@ -4796,6 +4913,13 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     literal_args = _literal_call_args(cj.lhs, facts.params)
     if cj.rhs:
         literal_args.update(_literal_call_args(cj.rhs, facts.params))
+    # a library call's defaulted parameters the claim leaves alone stay
+    # at their defaults, and a pinned one at its pin: fixed values, not
+    # samples, and a pin is passed on every call of f
+    kept_defaults, call_pins, _problem = call_defaults(fn, cj)
+    literal_args.update({p: v for p, v in {**kept_defaults,
+                                           **call_pins}.items()
+                         if p in kinds and p not in literal_args})
     # the domain box's corners replay with the recorded counterexamples,
     # before any random sampling
     pinned += [c for c in _domain_corners(kinds, cj_domain, literal_args)
@@ -4810,7 +4934,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # finite arguments
     call_inf: list = [None, 0]
 
-    def _tagged(callee, label):
+    def _tagged(callee, label, inject=None):
         # a raise from the function under test (or a bound function) is
         # pedantic evidence; a raise from the law's own plumbing (a
         # malformed sum(...), a bad index, a wrong argument count) is a
@@ -4825,6 +4949,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         complex_raises = complex_is_a_raise(callee, cj_domain)
 
         def _wrapped(*a, **k):
+            if inject and sig is not None:
+                # each pinned parameter the call does not pass itself
+                try:
+                    given = sig.bind_partial(*a, **k).arguments
+                except TypeError:
+                    given = {}
+                k = {**{p: v for p, v in inject.items() if p not in given},
+                     **k}
             if sig is not None:
                 try:
                     sig.bind(*a, **k)
@@ -4849,7 +4981,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             return value
         return _wrapped
 
-    fn_tagged = _tagged(fn, "f")
+    fn_tagged = _tagged(fn, "f", inject=call_pins)
     bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
     for trial in range(budget + len(pinned)):
         call_raised[0] = call_nan[0] = call_inf[0] = None

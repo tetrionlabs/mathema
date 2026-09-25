@@ -783,7 +783,8 @@ def register_library_claims(root: "str | None" = ".") -> list:
             register_raises_when(key, build, label_text)
             rows.append((key, build))
             names.append((key, str(row.get("name"))))
-    _INSTALLED.update(root=marker, rows=rows, names=names)
+    _INSTALLED.update(root=marker, rows=rows, names=names,
+                      keys=frozenset(library_claims), objects=None)
     from ..hazards import register_hazard_generator
     register_hazard_generator("compendium",
                               _boundary_generator(library_claims))
@@ -799,6 +800,32 @@ def install(root: str = ".") -> None:
     reads no project file and applies the bundled layer alone
     (`ensure_bundled`)."""
     register_library_claims(root)
+
+
+def library_key_of(fn) -> "str | None":
+    """Intent:
+        The library claim key `fn` is (`numpy.mean` for `np.mean`),
+        among the keys the registered library claims files state, or
+        None for any other callable (a project's own function
+        included).
+    """
+    keys = _INSTALLED.get("keys") or frozenset()
+    if not keys:
+        return None
+    objects = _INSTALLED.get("objects")
+    if objects is None:
+        from ..conjecture import _resolve_func_ref
+        objects = {}
+        for key in sorted(keys):
+            try:
+                obj = _resolve_func_ref(key)
+            except Exception:
+                obj = None
+            if obj is not None:
+                objects.setdefault(id(obj), (obj, key))
+        _INSTALLED["objects"] = objects
+    found = objects.get(id(fn))
+    return found[1] if found is not None and found[0] is fn else None
 
 
 def ensure_bundled() -> None:
@@ -821,7 +848,8 @@ def uninstall(root: "str | None" = None) -> None:
         return
     for key, build in _INSTALLED["rows"]:
         unregister_lemmas(key, [build])
-    _INSTALLED.update(root=None, rows=[], names=[])
+    _INSTALLED.update(root=None, rows=[], names=[], keys=frozenset(),
+                      objects=None)
     from ..hazards import _GENERATORS
     _GENERATORS.pop("compendium", None)
 

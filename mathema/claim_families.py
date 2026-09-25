@@ -2212,12 +2212,16 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
         with the counts inside and outside the region in `meta`, or
         None when a link is not a comparison.
     """
-    from .conjecture import _SAFE_FUNCS, MATH_CONSTANTS, _validate
+    from .conjecture import _SAFE_FUNCS, MATH_CONSTANTS, _validate, call_defaults
     from .domain import domain_contains, is_missing
     from .gates import _fmt_point
     from .probing import _fmt_value
 
-    params = list(facts.params)
+    # a library function's defaulted parameters the claim leaves alone
+    # are not passed (they take their defaults); a pinned one is
+    # passed at its pin
+    kept, call_pins, _problem = call_defaults(fn, cj)
+    params = [p for p in facts.params if p not in kept]
     if not params:
         return None
     bare = cj.relation == "is_defined"
@@ -2292,6 +2296,8 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     def draw_one(p: str):
         from .matrices import _rand
+        if p in call_pins:
+            return call_pins[p]
         if shapes.get(p) == "matrix":
             return _rand(rng.randint(2, 5), rng)
         if shapes.get(p) == "sequence":
@@ -2314,6 +2320,8 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     def corners():
         for p in params:
+            if p in call_pins:
+                continue
             ends = _interval_ends((domain or {}).get(p))
             if ends is None:
                 continue
@@ -2375,8 +2383,9 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if where is None:
             continue
         try:
+            call_args, call_kwargs = call_arguments(fn, params, point)
             with _pinned_float_env():
-                out = fn(*(point[p] for p in params))
+                out = fn(*call_args, **call_kwargs)
         except Exception as exc:
             has_value, what = False, f"raised {type(exc).__name__}"
         else:

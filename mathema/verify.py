@@ -586,6 +586,33 @@ def verify_project(root: str = ".", *, all: bool = False,
                              trials_scale=trials_scale, only=only)
 
 
+def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
+    """Intent:
+        Whether a library function's calls would now pass a different
+        value than the record states (`mathema.defaults` on each row):
+        a default the installed library changed, a parameter added or
+        removed. Such a record is stale even though the claims and the
+        form are not.
+    """
+    from .conjecture import call_defaults, defaults_meta
+    from .spec import entry_claims
+    try:
+        current = entry_claims(merged_entry or {})
+    except Exception:
+        return False
+    now: dict = {}
+    for cj in current:
+        kept, pins, _problem = call_defaults(fn, cj)
+        if kept or pins:
+            now[cj.name] = defaults_meta(kept, pins)
+    names = {cj.name for cj in current}
+    recorded = {c.get("name"): (c.get("meta") or {}).get("mathema.defaults")
+                for c in (verified_entry or {}).get("claims") or []
+                if c.get("name") in names
+                and (c.get("meta") or {}).get("mathema.defaults")}
+    return now != recorded
+
+
 def _unsettled_library_hints(key: str, claims: list) -> list:
     """Intent:
         For each library row this sweep left unsettled (declared,
@@ -1000,8 +1027,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         premise_now = _premise_state(current_claims, stub_premises)
         recorded_premises = (verified_entry.get("meta") or {}).get(
             "mathema.premise_state")
+        defaults_moved = _defaults_moved(fn, merged_entry, verified_entry)
         is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
-                    and recorded_fp == current_fp
+                    and recorded_fp == current_fp and not defaults_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
         deps_now = function_dependencies(fn, facts_now) if is_fresh else None
@@ -1075,6 +1103,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         rec.probes.append(dependencies_current_probe(rec.dependencies,
                                                      root=root))
         why = ("dependency changed" if dependency_changed
+               else "defaults changed" if defaults_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh
                else "targeted re-verify" if only and is_fresh
                else "no baseline record" if not recorded_form

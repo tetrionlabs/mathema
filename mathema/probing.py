@@ -440,28 +440,35 @@ def _pinned_float_env():
                           invalid="warn")
 
 
-def _keeps_default(parameter) -> bool:
+def _keeps_default(fn, parameter) -> bool:
     """Intent:
         Whether a parameter that has a default, and that no claim
         binds, is passed at its default when the built-in battery
-        builds a call, rather than sampled like any other parameter.
+        builds a call, rather than sampled like any other parameter:
+        True for a library function (a key of a registered
+        `compendium:` file), False for any other function, whose
+        defaulted parameters are sampled.
 
     Notes:
-        The one rule for unbound defaulted parameters, with one call
-        site (`probe()`'s battery call). Today every such parameter is
-        sampled. A record built without Python source lists only the
-        parameters without defaults (`_doc_only_facts`), so its
-        defaulted parameters are never passed at all.
+        A claim's own calls follow the same rule
+        (`conjecture.call_defaults`). A record built without Python
+        source lists only the parameters without defaults
+        (`_doc_only_facts`), so its defaulted parameters are never
+        passed at all.
     """
-    return False
+    from .compendium import library_key_of
+    return (parameter.default is not parameter.empty
+            and library_key_of(fn) is not None)
 
 
 def call_arguments(fn, params, values: dict) -> "tuple[list, dict]":
     """Intent:
         The positional and keyword arguments that call `fn` with
-        `values[p]` for every parameter `p` in `params`: a keyword-only
-        parameter by keyword, every other one positionally, in order.
-        A callable whose signature cannot be read takes every value
+        `values[p]` for every parameter `p` in `params` that `values`
+        holds: a keyword-only parameter by keyword, every other one
+        positionally, in order, until a parameter is left out (it then
+        takes its default), after which each goes by keyword. A
+        callable whose signature cannot be read takes every value
         positionally.
     """
     import inspect
@@ -471,9 +478,22 @@ def call_arguments(fn, params, values: dict) -> "tuple[list, dict]":
         spec = {}
     args: list = []
     kwargs: dict = {}
+    order = [p for p, param in spec.items()
+             if param.kind in (param.POSITIONAL_ONLY,
+                               param.POSITIONAL_OR_KEYWORD)]
+    gap = False
     for p in params:
+        if p not in values:
+            continue
         param = spec.get(p)
-        if param is not None and param.kind is param.KEYWORD_ONLY:
+        if p in order:
+            # a positional parameter before this one that no value
+            # fills leaves a gap only a keyword can step over
+            gap = gap or any(q not in values for q in
+                             order[:order.index(p)])
+        if param is not None and (param.kind is param.KEYWORD_ONLY
+                                  or (gap and param.kind is
+                                      param.POSITIONAL_OR_KEYWORD)):
             kwargs[p] = values[p]
         else:
             args.append(values[p])
@@ -1286,8 +1306,8 @@ def probe(fn, facts, domain: dict | None = None,
 
     def value_for(p, k, sizes):
         param = signature.get(p)
-        if (param is not None and param.default is not param.empty
-                and p not in domain and _keeps_default(param)):
+        if (param is not None and p not in domain
+                and _keeps_default(fn, param)):
             return param.default
         shape = resolver.shapes.get(p) if resolver is not None else None
         if shape is not None and k != "sequence" and shape.ndim >= 1:
