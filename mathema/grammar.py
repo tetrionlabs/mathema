@@ -114,6 +114,7 @@ from ._scan import (_split_commas, mask_strings, outside_strings,
 # working. New code should import from mathema.domain directly.
 from .domain import (MISSING as MISSING, Domain as Domain,
                      Interval as Interval, InvalidDomain as InvalidDomain,
+                     LanguageRef as LanguageRef,
                      _MEMBERSHIP_OPS as _MEMBERSHIP_OPS,
                      desuperscript_spaces as _desuperscript_spaces,
                      _as_domain as _as_domain,
@@ -2335,6 +2336,12 @@ def _verbatim_atom(node: ast.AST):
     return sympy.Symbol(text, real=True)
 
 
+def _string_literals(node: ast.AST) -> list:
+    """Every string literal in a subtree, in source order."""
+    return [n.value for n in ast.walk(node)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+
+
 def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
                    matrix_names: frozenset = frozenset()):
     """Convert a law-expression AST node to sympy with every bound function
@@ -2386,6 +2393,12 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         v = _node_to_sympy(node.operand, funcs, matrix_names)
         return -v if isinstance(node.op, ast.USub) else v
+    if isinstance(node, ast.BinOp) and _string_literals(node):
+        # an operator over a string literal is concatenation or
+        # repetition, which does not commute: sympy's sum would reorder
+        # `s + "0"` into `"0" + s`, a different claim, so the whole
+        # operation is one verbatim atom, rendered as written
+        return _verbatim_atom(node)
     if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
         return _BINOPS[type(node.op)](
             _node_to_sympy(node.left, funcs, matrix_names),

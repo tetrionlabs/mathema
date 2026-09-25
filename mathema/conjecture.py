@@ -311,16 +311,26 @@ def _guard_points(fn, facts, kinds: dict, domain: dict,
 
 def _sample_in_domain(value, bound) -> bool:
     """Intent:
-        Whether one sampled scalar lies inside its parameter's declared
-        bound, for the probe route's per-trial check. Only a real number
-        is judged here: a sequence, mapping, string or complex value
-        has its own sampler, and a missing value is the missing-value
-        policy's to decide. A whole float counts as the integer it
+        Whether one sampled value lies inside its parameter's declared
+        bound, for the probe route's per-trial check. A language domain
+        judges every value; otherwise only a real number is judged
+        here: a sequence, mapping, string or complex value has its own
+        sampler, and a missing value is the missing-value policy's to
+        decide. A whole float counts as the integer it
         equals, and an infinity is inside exactly when the bound is
         unbounded in its direction.
     """
     from .domain import domain_contains
-    if bound is None or isinstance(value, bool) \
+    if bound is None:
+        return True
+    if getattr(bound, "base_type", None) == "L":
+        # a language domain judges its own members, strings and
+        # structured values included
+        try:
+            return bool(domain_contains(value, bound))
+        except Exception:
+            return True
+    if isinstance(value, bool) \
             or not isinstance(value, (int, float)) or value != value:
         return True
     try:
@@ -494,6 +504,56 @@ def _resolve_func_ref(ref: str, *, root: str = "."):
 # domain base type corresponds to, for reconciling a let-declared type
 # against the real parameter's own annotation.
 _BASE_TYPE_KIND = {"Z": "int", "N": "int", "R": "scalar", "C": "complex"}
+
+
+def _stated_kind(bound) -> str:
+    """Intent:
+        The parameter kind a stated domain type corresponds to: the
+        table above for a number set, and for a language domain the
+        kind of the language itself (a string language is `"string"`,
+        a schema language `"mapping"` or `"object"`), read from the
+        resolved language and falling back to `"string"` when it does
+        not resolve (validation reports that separately).
+    """
+    base_type = getattr(bound, "base_type", None)
+    if base_type == "L":
+        from .domain import LanguageRef
+        from .languages import resolve_language
+        for piece in getattr(bound, "pieces", ()):
+            if isinstance(piece, LanguageRef):
+                try:
+                    return resolve_language(piece).kind
+                except Exception:
+                    return "string"
+        return "string"
+    return _BASE_TYPE_KIND.get(base_type, str(base_type).lower())
+
+
+def _language_meta(bounds: dict) -> dict:
+    """Intent:
+        The record's statement of every language a claim was
+        adjudicated over: per parameter, one description per language
+        piece (name, source, level, kind, persisted form), so a reader
+        of the record sees what `L[ascii]` resolved to. A language that
+        does not resolve is left out; validation has already reported
+        it.
+    """
+    from .domain import LanguageRef
+    from .languages import describe_language
+    out: dict = {}
+    for p, b in sorted(bounds.items()):
+        if getattr(b, "base_type", None) != "L":
+            continue
+        described = []
+        for piece in b.pieces:
+            if isinstance(piece, LanguageRef):
+                try:
+                    described.append(describe_language(piece))
+                except Exception:
+                    continue
+        if described:
+            out[p] = described
+    return out
 
 GRAMMAR = "mathema"
 
@@ -2396,6 +2456,10 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                             for p2, b in cj.domain.items()}
         probe.grammar = cj.grammar
         probe.tolerance = cj.tolerance
+        languages = _language_meta({**domain, **(cj.domain or {})})
+        if languages:
+            # what every `L[...]` binding resolved to, on the record
+            probe.meta = {**(probe.meta or {}), "mathema.language": languages}
         if cj.domain and not probe.condition:
             # every quantified row carries its region as the ONE
             # canonical rendered condition, real parameter names,
@@ -3410,8 +3474,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
                 # type outside the table keeps its own name as the
                 # kind, so a future type can disagree with a scalar
                 # annotation instead of silently matching it.
-                stated_kind = _BASE_TYPE_KIND.get(bound.base_type,
-                                                  bound.base_type.lower())
+                stated_kind = _stated_kind(bound)
                 if real_kind not in (None, "unknown", stated_kind):
                     note = (f"{note}; let-declared free variable {p!r} states "
                            f"'{bound.base_type}' but the real parameter {p!r} "
@@ -3434,7 +3497,37 @@ def _validate_claim(cj, statement: str, note: str, facts,
                          note=f"{note}; ordering ({cj.relation}) isn't "
                               f"meaningful over the complex plane "
                               f"({', '.join(complex_typed)} ⊂ ℂ)")
-    from .domain import KNOWN_BASE_TYPES
+    from .domain import KNOWN_BASE_TYPES, LanguageRef
+    language_bound = {p: b for p, b in cj_domain.items()
+                      if getattr(b, "base_type", None) == "L"}
+    if language_bound:
+        # every language a binding names resolves once, up front, so an
+        # unknown name refuses here on both routes with the vocabulary,
+        # and the resolved source is stated beside the claim; a
+        # language whose members are not what the real parameter takes
+        # is flagged, and the stated language is used as written
+        from .languages import UnknownLanguage, resolve
+        resolved_sources = []
+        for p, b in sorted(language_bound.items()):
+            for piece in b.pieces:
+                if not isinstance(piece, LanguageRef):
+                    continue
+                try:
+                    language, source = resolve(piece)
+                except UnknownLanguage as e:
+                    return Probe(cj.name, statement, "skipped", route=None,
+                                 note=f"{note}; {e}",
+                                 meta={"mathema.probe_gap":
+                                       "language-unresolved"})
+                resolved_sources.append(f"{p} in L[{piece.name}] ({source})")
+                real_kind = facts.param_kinds.get(p)
+                if real_kind not in (None, "unknown", language.kind):
+                    note = (f"{note}; {p} is quantified over "
+                            f"L[{piece.name}], whose members are "
+                            f"{language.kind} values, but the real "
+                            f"parameter {p!r} is {real_kind!r}; the stated "
+                            f"language is used as written")
+        note = f"{note}; " + ", ".join(resolved_sources)
     strange_types = sorted(
         f"{p} ({bound.base_type})" for p, bound in cj_domain.items()
         if getattr(bound, "base_type", None) not in (None, *KNOWN_BASE_TYPES))
@@ -3889,16 +3982,33 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                   f"it explicitly with funcs=")
             # route == "best": the probe stage reports its own skip
             return None
-    derive_domain = _derive_operational_domain(cj, cj_domain, facts)
-    if cj.relation == "raises":
+    language_params = sorted(p for p, b in cj_domain.items()
+                             if getattr(b, "base_type", None) == "L")
+    if language_params:
+        # a string or structured value has no symbolic reading, and a
+        # real symbol standing in for one would prove real-only facts
+        # it does not have, so the lift is declined outright; a FINITE
+        # language is still swept point by point by the brute-force
+        # fallback below, which is the one derive mechanism it admits
+        from .symbolic._proof_support import ProofResult
+        proof = ProofResult(
+            "unliftable",
+            sketch=(", ".join(language_params) + " quantified over a "
+                    "language domain: the symbolic lift has no reading "
+                    "of a string or structured value, so only a finite "
+                    "language, swept point by point, is decided on this "
+                    "route"))
+    elif cj.relation == "raises":
         # only ever reachable via domain-conditioned branch
         # pruning, a raises claim with no domain specific
         # enough to settle which branch runs comes back
         # unliftable from try_prove_raises itself, same as any
         # other undecidable derive claim.
+        derive_domain = _derive_operational_domain(cj, cj_domain, facts)
         proof = try_prove_raises(fn, facts, cj.lhs, cj.rhs or None,
                                  domain=derive_domain)
     else:
+        derive_domain = _derive_operational_domain(cj, cj_domain, facts)
         proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
                           domain=derive_domain, tolerance=cj.tolerance,
                           extensive=extensive, funcs=bound_funcs or None,

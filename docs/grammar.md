@@ -267,6 +267,10 @@ stronger than you mean. The `for` clause narrows it:
 | `for scale in {"info", "linear"}, f(r, scale) >= 0` | a finite set of strings |
 | `for v in R^n, f(v) >= 0` | a real vector of length `n`, never empty |
 | `for A in R^(m,n), f(A) == f(A)` | an `m`-by-`n` real matrix, rows then columns |
+| `for text in L[ascii], f(f(text)) == f(text)` | every string over the ascii alphabet, the empty string included |
+| `for s in L[digit] \ {""}, f(s + "0") == 10 * f(s)` | a language with the empty string excluded |
+| <code>for text in L[alnum] &#124; {"n/a"}, len(f(text)) &lt;= len(text)</code> | a language with one more member |
+| `for text in L[latin-1] \ {∅}, len(f(text)) <= len(text)` | a language, missing values excluded |
 
 A matrix space is written `R^(m,n)`, the order of a numpy shape. The
 spellings `R^{m,n}`, `R^(m×n)`, `R^{m×n}`, `R^(m*n)` and the superscript
@@ -280,6 +284,16 @@ The excluded-point form is how you state a claim around a pole. The
 finite-set form is how a string-valued parameter that selects a branch
 becomes something the derive route can reason about, since it can then
 check every case rather than guessing.
+
+`L[<name>]` is a language: the set of strings a named alphabet or
+predicate admits, the way `R` is the set of reals. The built-in names
+are `ascii`, `latin-1`, `unicode` (every `str`), `printable`, `digit`,
+`alpha`, `alnum`, `identifier` and `json`. An alphabet language
+contains the empty string, as a Kleene star does; `\ {""}` removes
+it. A name mathema does not know is refused with the vocabulary, never
+read as a wider set. [Authoring claims](authoring.md#language-domains)
+says what a language samples, what the record states about it, and
+which claims a parser or a renderer earns over one.
 
 ## Calculus
 

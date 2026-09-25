@@ -247,6 +247,12 @@ _PIECE_RANGE = re.compile(r"^([\[\(])\s*([^,]+?)\s*,\s*\.\.\.\s*,\s*(.+?)\s*([\]
 _PIECE_INTERVAL = re.compile(r"^([\[\(])\s*([^,]+?)\s*,\s*(.+?)\s*([\]\)])$")
 _PIECE_SET = re.compile(r"^\{\s*(.*?)\s*\}$")
 _PIECE_NAMED = re.compile(r"^(R|Z|N|C|ℝ|ℤ|ℕ|ℂ)$")
+# a language piece, `L[ascii]`, `L[latin-1]`, `L[myapp.models.Order]`:
+# a name, or a dotted path an adaptor resolves. A bare `L` is not a
+# piece (it is refused, as any unknown bare name is), so `L^2` never
+# reads as a space.
+_PIECE_LANGUAGE = re.compile(
+    r"^L\[\s*(?P<name>[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\s*\]$")
 # Sampling-intensity modifiers, not a parameter binding at all: `n=500`
 # in the same comma-list sets domain["n"] (how many draws/rows, not a
 # bound on any variable); domain means scope *and* intensity of
@@ -432,11 +438,29 @@ _is_missing = is_missing
 
 
 @dataclass(frozen=True)
+class LanguageRef:
+    """One language piece of a domain, `L[ascii]`: the name a language
+    resolves under (`mathema.languages.resolve_language`). It sits in
+    `Domain.pieces` beside an `Interval` or a `frozenset`, under
+    `base_type` `"L"`, so a union with a finite set, an exclusion and
+    the missing-value policy all read as they do for a numeric domain.
+    Membership, sampling and the record's description of the language
+    all go through the resolved `Language`; nothing here interprets
+    the name. A frozen dataclass rather than a tuple, since every
+    interval test in this module reads a tuple piece as `(lo, hi)`."""
+    name: str
+
+    def __repr__(self) -> str:
+        return f"L[{self.name}]"
+
+
+@dataclass(frozen=True)
 class Domain:
     """A domain that's more than one bare `Interval`/`"Z"`/`"N"`/
     `frozenset` (`split_quantifier()`'s original three shapes): a union
-    of one or more `pieces` (each an `Interval` or a discrete-value
-    `frozenset`), restricted to `base_type` (`"R"`/`"Z"`/`"N"`), minus
+    of one or more `pieces` (each an `Interval`, a discrete-value
+    `frozenset`, or under `base_type` `"L"` a `LanguageRef`),
+    restricted to `base_type` (`"R"`/`"Z"`/`"N"`/`"C"`/`"L"`), minus
     whatever concrete values sit in `excluded` (which may include
     `MISSING`). Every domain the rest of the codebase already produces
     is the trivial case of this shape, `split_quantifier()` only
@@ -470,8 +494,10 @@ class Domain:
 # function that projects a domain into sympy or answers membership
 # checks against this set and refuses an unknown name loudly, an
 # unrecognized type silently treated as real is a wrong proof waiting
-# to happen, not a default.
-KNOWN_BASE_TYPES = frozenset({"R", "Z", "N", "C"})
+# to happen, not a default. `"L"` is a language domain (`L[ascii]`):
+# its pieces are `LanguageRef`s and finite sets, it has no real-set
+# reading, and its members are strings or structured values.
+KNOWN_BASE_TYPES = frozenset({"R", "Z", "N", "C", "L"})
 
 
 def _require_known_base_type(base_type: str) -> None:
@@ -525,6 +551,8 @@ def _as_domain(bound) -> Domain:
         return Domain()
     if isinstance(bound, Domain):
         return bound
+    if isinstance(bound, LanguageRef):
+        return Domain(base_type="L", pieces=(bound,), explicit_type=True)
     if isinstance(bound, str):
         return Domain(base_type=bound, explicit_type=True)
     if isinstance(bound, frozenset):
@@ -576,6 +604,55 @@ def _piece_contains_complex(value, piece) -> bool:
     return _piece_contains(value, piece)
 
 
+def _safe_in(value, values) -> bool:
+    """`value in values` for a value that may not be hashable (a
+    mapping member of a schema language), which is then in no set."""
+    try:
+        return value in values
+    except TypeError:
+        return False
+
+
+def _language_piece_contains(value, piece) -> bool:
+    """Membership of `value` in one piece of a language domain: a
+    `LanguageRef` asks the resolved language, a finite set is checked
+    directly, and nothing else is a piece of a language domain."""
+    if isinstance(piece, LanguageRef):
+        from .languages import resolve_language
+        return bool(resolve_language(piece).contains(value))
+    if isinstance(piece, frozenset):
+        return _safe_in(value, piece)
+    return False
+
+
+def _language_members(dom: "Domain", limit: int):
+    """Every member of a language domain when each piece is finite
+    and the union has at most `limit` members, else `None`; a
+    language answering `members(limit)` with more than `limit` values
+    is read as infinite, never as a prefix to sweep."""
+    from .languages import resolve_language
+    out: list = []
+    for piece in dom.pieces:
+        if isinstance(piece, frozenset):
+            values = [v for v in piece if v is not MISSING]
+        elif isinstance(piece, LanguageRef):
+            members = resolve_language(piece).members(limit)
+            if members is None or len(members) > limit:
+                return None
+            values = list(members)
+        else:
+            return None
+        for v in values:
+            if not _safe_in(v, out):
+                out.append(v)
+        if len(out) > limit:
+            return None
+    out = [v for v in out if not _safe_in(v, dom.excluded)]
+    if not out:
+        return None
+    return tuple(sorted(out, key=_member_sort_key))
+
+
 def finite_members(bound, limit: int):
     """Intent:
         Every value the domain `bound` admits, as a sorted tuple, when
@@ -597,13 +674,16 @@ def finite_members(bound, limit: int):
 
         A vector or matrix space (`dims` set) describes a nested value
         whose ELEMENT domain these pieces bound, not a scalar to sweep,
-        so it is declined. `excluded` is honoured, and `MISSING` in it
+        so it is declined. A language domain is enumerable exactly when
+        every language in it answers `members(limit)` with a tuple. `excluded` is honoured, and `MISSING` in it
         is ignored here because it is a policy for absent values rather
         than a member of the value set.
     """
     if isinstance(bound, frozenset):
         members = sorted(bound, key=_member_sort_key)
         return tuple(members) if len(members) <= limit else None
+    if isinstance(bound, Domain) and bound.base_type == "L":
+        return _language_members(bound, limit)
     if not isinstance(bound, Domain) or bound.dims:
         return None
     if not bound.pieces:
@@ -745,8 +825,12 @@ def domain_contains(value, bound) -> bool:
     _require_known_base_type(dom.base_type)
     if is_missing(value):
         return MISSING not in dom.excluded
-    if value in dom.excluded:
+    if _safe_in(value, dom.excluded):
         return False
+    if dom.base_type == "L":
+        # a language domain: the resolved language decides, a finite
+        # piece by membership, and a number is a member of neither
+        return any(_language_piece_contains(value, p) for p in dom.pieces)
     if dom.base_type == "C":
         # the complex plane: any number belongs (the reals embed);
         # discrete pieces and exclusions still apply below.
@@ -795,7 +879,12 @@ def _member_sort_key(v):
         return (2, 0.0, "")
     if isinstance(v, str):
         return (1, 0.0, v)
-    return (0, float(v), "")
+    try:
+        return (0, float(v), "")
+    except (TypeError, ValueError):
+        # a member of a finite language that is neither (an enum
+        # member, say) sorts after every value with an order
+        return (3, 0.0, repr(v))
 
 
 def _render_set_member(v, *, ascii_mode: bool) -> str:
@@ -816,6 +905,8 @@ def _render_set_member(v, *, ascii_mode: bool) -> str:
 
 
 def _render_piece(piece, *, ascii_mode: bool, as_int: bool = False) -> str:
+    if isinstance(piece, LanguageRef):
+        return f"L[{piece.name}]"
     if isinstance(piece, str):
         return piece if ascii_mode else _TYPE_GLYPH.get(piece, piece)
     if isinstance(piece, frozenset):
@@ -924,7 +1015,7 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     numeric_excluded = dom.excluded - {MISSING}
     fully_unbounded = (
         len(real_pieces) == 1 and not numeric_excluded
-        and not isinstance(real_pieces[0], (str, frozenset))
+        and isinstance(real_pieces[0], tuple)
         and real_pieces[0][0] == float("-inf") and real_pieces[0][1] == float("inf"))
     missing_included = show_missing and MISSING not in dom.excluded
     # an excluded missing value joins the one exclusion set whenever
@@ -937,6 +1028,22 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     if missing_merged:
         numeric_excluded = numeric_excluded | {MISSING}
     exp = _render_dims(getattr(dom, "dims", ()), ascii_mode)
+    if dom.base_type == "L":
+        # a language domain: its languages and finite pieces, an
+        # exclusion set, and the resolved missing-value policy in the
+        # same two spellings every other shape uses. No type clause: the
+        # `L[...]` piece is the type.
+        text = " ∪ ".join(_render_piece(p, ascii_mode=ascii_mode)
+                          for p in real_pieces)
+        if numeric_excluded:
+            text += " \\ " + _render_piece(frozenset(numeric_excluded),
+                                           ascii_mode=ascii_mode)
+        if show_missing:
+            if ascii_mode:
+                text += "|missing" if missing_included else ""
+            elif not missing_merged:
+                text += " ∪ {∅}" if missing_included else " \\ {∅}"
+        return text
     if not real_pieces or fully_unbounded:
         text = dom.base_type if ascii_mode else _TYPE_GLYPH.get(dom.base_type, dom.base_type)
         text += exp
@@ -1027,6 +1134,8 @@ def domain_bound_to_json(b) -> str | dict:
         if b.dims:
             out["dims"] = list(b.dims)
         return out
+    if isinstance(b, LanguageRef):
+        return {"language": b.name}
     if isinstance(b, str):
         return b
     if isinstance(b, frozenset):
@@ -1058,6 +1167,8 @@ def domain_bound_from_json(v):
         return v
     if isinstance(v, list):
         return Interval(_endpoint_from_json(v[0]), _endpoint_from_json(v[1]))
+    if "language" in v:
+        return LanguageRef(str(v["language"]))
     if "base_type" in v:
         return Domain(base_type=v["base_type"],
                       pieces=tuple(domain_bound_from_json(p) for p in v["pieces"]),
@@ -1123,6 +1234,9 @@ def _parse_piece(text: str):
             return frozenset(_set_value(v) for v in _split_commas(m.group(1)) if v.strip())
         except ValueError:
             return None
+    m = _PIECE_LANGUAGE.match(text)
+    if m is not None:
+        return LanguageRef(m.group("name"))
     m = _PIECE_NAMED.match(text)
     if m is not None:
         return _SUBSET_ASCII.get(m.group(1), m.group(1))
@@ -1280,6 +1394,25 @@ def _parse_binding(part: str):
                     f"⊂ {type_explicit}) for {name!r}")
         type_explicit = bare_type
         pieces = []
+
+    # a language piece (`L[ascii]`) makes the whole binding a language
+    # domain: no numeric type clause, no dimension power (a length is a
+    # premise, `assuming len(s) <= 80`), and no interval or named set
+    # beside it in the union; a finite set of literal members is fine
+    if any(isinstance(p, LanguageRef) for p in pieces):
+        if type_explicit is not None:
+            return (f"{part!r}: a language domain (L[...]) carries no "
+                    f"numeric type, so the stated type {type_explicit} "
+                    f"contradicts it for {name!r}")
+        if space_dims:
+            return (f"{part!r}: a language domain has no dimension power; "
+                    f"bound a length with a premise, 'assuming "
+                    f"len({name}) <= 80', for {name!r}")
+        if any(not isinstance(p, (LanguageRef, frozenset)) for p in pieces):
+            return (f"{part!r}: a language domain can be unioned with a "
+                    f"finite set of members, not with an interval or a "
+                    f"named number set, for {name!r}")
+        type_explicit = "L"
 
     excluded = set()
     if excluded_text is not None:
@@ -1655,8 +1788,13 @@ def bound_assumptions(bound) -> dict | None:
         # "Z"/"N" matched above; a bare "R" states only the default.
         _require_known_base_type(bound)
         return None
+    if isinstance(bound, LanguageRef):
+        return None
     if isinstance(bound, Domain):
         _require_known_base_type(bound.base_type)
+        if bound.base_type == "L":
+            # a string or structured value has no symbol-level reading
+            return None
         if bound.base_type == "C":
             # a complex symbol, never real; interval sign facts have no
             # complex reading, so the type is the whole statement.
@@ -1731,6 +1869,10 @@ def bound_context(sym, bound):
                   else sympy.Q.le(sym, hi))
         return sympy.And(lo_pred, hi_pred)
 
+    if isinstance(bound, LanguageRef) or (
+            isinstance(bound, Domain) and bound.base_type == "L"):
+        # a language domain states nothing a real symbol can carry
+        return None
     if isinstance(bound, Domain) and bound.base_type == "C":
         # ordering predicates have no complex reading; only exclusions
         # survive as facts.
@@ -1772,8 +1914,16 @@ def bound_to_sympy_set(bound):
     be silently read as real.
 
     Raises:
-        InvalidDomain: for a base type outside `KNOWN_BASE_TYPES`."""
+        InvalidDomain: for a base type outside `KNOWN_BASE_TYPES`, and
+            for a language domain, which has no real-set reading at
+            all (a caller settling a guard against `S.Reals` would be
+            reasoning about strings as numbers)."""
     import sympy
+
+    if bound == "L" or isinstance(bound, LanguageRef) or (
+            isinstance(bound, Domain) and bound.base_type == "L"):
+        raise InvalidDomain("a language domain (L[...]) has no real-set "
+                            "reading")
 
     def piece_set(piece):
         if isinstance(piece, frozenset):

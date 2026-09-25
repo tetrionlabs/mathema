@@ -245,6 +245,66 @@ declared domain, including this missing-value policy, an out-of-bounds
 or unexpectedly-missing element is rejected the same way a scalar
 argument outside its own domain already is.
 
+### Language domains
+
+A function over text has a domain too: not an interval of numbers but
+a language, a set of strings. `L[<name>]` quantifies over one:
+
+```
+for text in L[ascii], f(f(text)) == f(text)
+for text in L[unicode], len(f(text)) <= len(text)
+for s in L[digit] \ {""}, f(s + "0") == 10 * f(s)
+```
+
+The built-in languages follow Python's own reading of the alphabet:
+`ascii` (`str.isascii`), `latin-1` (what the codec encodes), `unicode`
+(every `str`, lone surrogates included), `printable`, `digit` (the ten
+decimal digits), `alpha`, `alnum`, `identifier` (`str.isidentifier`)
+and `json` (what `json.loads` accepts). An alphabet language is a
+Kleene star: it contains the empty string, and `L[ascii] \ {""}` is
+the way to exclude it. Union with a finite set of members and the
+missing-value policy read exactly as they do for a numeric domain:
+`L[alnum] ∪ {"n/a"}`, `L[ascii] \ {∅}`. There is no length syntax; a
+length is a premise, `assuming len(text) <= 80, for text in L[ascii], len(f(text)) <= 80`,
+and a very long input is a hazard the probe visits on its own. A name mathema does not know
+is refused with the vocabulary and the entry-point group a package
+registers a language under; nothing is ever read as a wider language
+than the one written.
+
+Think of the function as a map between languages, and the claims
+write themselves. A normaliser is idempotent (`collapse` above) and a
+contraction (`len(f(text)) <= len(text)`); an escaper never shortens
+(`len(f(text)) >= len(text)`); a parser and its renderer are a section
+and a retraction, stated with a `let`-bound inverse:
+
+```
+let u = html.unescape, for text in L[unicode], u(f(text)) == text
+let dump = json.dumps, for s in L[json], f(dump(f(s))) == f(s)
+```
+
+A parser of decimal digits is a homomorphism from concatenation to
+arithmetic, which is what `f(s + "0") == 10 * f(s)` says. Where a
+function raises inside the language it was declared over, the claim
+is falsified with that member as the witness, the same rule a numeric
+domain follows; a parser that rejects some of the language is declared
+over the language it accepts, or its raising region is stated as its
+own `raises(...)` claim.
+
+The probe samples members: the language's own hazards first (the
+empty string, whitespace, NUL and the other control code points, the
+alphabet's boundary, a long member, and for `unicode` a lone
+surrogate and a byte-order mark), then random members, and it never
+draws a value outside the language. Every record states what a
+language resolved to (`meta["mathema.language"]`: the name, its
+source, its level and kind, and its persisted form), and the
+statement carries the resolved missing-value policy as usual. The
+derive route has no reading of a string, so it declines with the
+reason rather than proving real-only facts about a symbol standing in
+for one; a finite language (an enumeration a package registers) is
+the exception, swept point by point and proven or falsified with the
+member. `is_arbitrary_input_safe(text)` keeps fuzzing a string
+parameter for accidental crashes as before.
+
 ## Calling the derive route directly
 
 A bare string claim leaves the route to the cascade

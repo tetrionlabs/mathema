@@ -365,6 +365,26 @@ LEXICON: dict[str, str] = {
                                   "f(a) == a[2][2]"),
     "dim_premise_rectangular_matrix": ("assuming min(m, n) >= 3, "
                                        "for a in R^(m,n), f(a) == a[2][2]"),
+    # language domains: a string parameter quantified over a named
+    # language. `L[ascii]` is every string over the alphabet, the empty
+    # string included; `\\ {""}` excludes it; a finite set of extra
+    # members unions in; the missing-value policy reads as it does for
+    # a number. The claims are the ones a parser or a normaliser earns:
+    # idempotence, a length bound, a section (an inverse on the image),
+    # a homomorphism over concatenation
+    "language_alphabet": "for text in L[ascii], f(f(text)) == f(text)",
+    "language_contraction": "for text in L[unicode], len(f(text)) <= len(text)",
+    "language_excluding_empty":
+        'for s in L[digit] \\ {""}, f(s + "0") == 10 * f(s)',
+    "language_with_special_member":
+        'for text in L[alnum] | {"n/a"}, len(f(text)) <= len(text)',
+    "language_membership_symbol":
+        "for text ∈ L[unicode], len(f(text)) >= len(text)",
+    "language_section":
+        "let u = mathema.lexicon.unescape_angle, for text in L[unicode], "
+        "u(f(text)) == text",
+    "language_missing_excluded":
+        "for text in L[latin-1] \\ {∅}, len(f(text)) <= len(text)",
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -457,6 +477,11 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "mixed_backslash_greek_and_unicode_relation",
         "stress_gauge_invariance", "stress_mixed_let_and_types",
         "chained_comparison", "euler_via_exp"),
+    "languages": (
+        "language_alphabet", "language_contraction",
+        "language_excluding_empty", "language_with_special_member",
+        "language_membership_symbol", "language_section",
+        "language_missing_excluded"),
 }
 
 
@@ -477,6 +502,16 @@ TAGS: dict[str, tuple[str, ...]] = {
     "domain_open_interval": ("open", "exclusive", "endpoint"),
     "domain_subset_integer": ("integer", "whole numbers", "type refinement"),
     "domain_excluded_point": ("exclusion", "except", "singularity", "hole"),
+    "language_alphabet": ("string", "text", "language", "alphabet", "ascii",
+                          "idempotent", "normaliser"),
+    "language_contraction": ("string", "length", "unicode", "shorter"),
+    "language_excluding_empty": ("string", "digits", "empty string",
+                                 "concatenation", "parser"),
+    "language_with_special_member": ("string", "sentinel", "union"),
+    "language_membership_symbol": ("string", "unicode", "escape", "longer"),
+    "language_section": ("string", "round trip", "inverse", "escape",
+                         "unescape", "parser", "renderer"),
+    "language_missing_excluded": ("string", "latin-1", "missing", "None"),
     "domain_natural_numbers": ("natural", "counting", "nonnegative integer"),
     "domain_complex": ("complex numbers", "imaginary", "plane"),
     "raises_typed": ("exception", "error", "raises", "precondition"),
@@ -953,7 +988,42 @@ def gd_convergence_factor(alpha: float, q: float) -> float:
     return 1.0 - alpha * q
 
 
+def collapse_spaces(text: str) -> str:
+    """Runs of whitespace collapsed to one space, the ends stripped: a
+    normaliser, so applying it twice is applying it once, and the
+    result is never longer than the input."""
+    return " ".join(text.split())
+
+
+def escape_angle(text: str) -> str:
+    """Angle brackets and ampersands written as their entities, so the
+    text is inert markup. Never shorter than its input, and
+    `unescape_angle` undoes it exactly; it is not idempotent, since an
+    ampersand it wrote is escaped again on a second pass."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def unescape_angle(text: str) -> str:
+    """The inverse of `escape_angle` on its image."""
+    return text.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
+
+
+def digits_to_int(s: str) -> int:
+    """The integer a string of decimal digits spells. Appending a digit
+    multiplies the value by ten and adds the digit; a leading zero
+    changes nothing."""
+    return int(s)
+
+
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
+    "collapse_spaces": (collapse_spaces, [
+        "language_alphabet", "language_contraction",
+        "language_with_special_member", "language_missing_excluded",
+    ]),
+    "escape_angle": (escape_angle, [
+        "language_membership_symbol", "language_section",
+    ]),
+    "digits_to_int": (digits_to_int, ["language_excluding_empty"]),
     "add_two": (add_two, ["abs_bars_compound"]),
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
     "nearly_identity": (nearly_identity, [

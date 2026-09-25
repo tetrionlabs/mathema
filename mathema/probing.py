@@ -425,6 +425,22 @@ def _is_matrix_value(v) -> bool:
     return hasattr(v, "shape") and hasattr(v, "__array__")
 
 
+class _NotAnArray(Exception):
+    """A structure numpy cannot read as one array; compared leaf by leaf."""
+
+
+def _numeric_leaves(v) -> bool:
+    """Whether every leaf of a (nested) sequence or array is a number,
+    the precondition of the numpy comparison: a `None` leaf is not a
+    NaN and a string leaf is not a number, so a structure holding one
+    is compared value by value instead."""
+    if isinstance(v, (list, tuple)):
+        return all(_numeric_leaves(e) for e in v)
+    if hasattr(v, "dtype"):
+        return getattr(v.dtype, "kind", "O") in "biufc"
+    return isinstance(v, (int, float, complex))
+
+
 def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                                exact_inequality: bool = False,
                                rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
@@ -437,7 +453,10 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     shapes), which the caller reads as skip, never falsify.
     `exact_inequality` makes `!=` compare exactly (see
     `_scalar_relation`), and `rel_tol` is the relative allowance `==`
-    and a toleranced `!=` get on top of `slack`."""
+    and a toleranced `!=` get on top of `slack`. A structure with a
+    non-numeric leaf (`None`, a string, a tuple of them: a parser's
+    result) is compared leaf by leaf, equality exact, ordering
+    unanswerable."""
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,
@@ -446,15 +465,20 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
             return None
     from .matrices import _numpy
     np = _numpy()
-    if np is not None and (hasattr(lv, "__array__") or hasattr(rv, "__array__")
-                           or isinstance(lv, (list, tuple))
-                           or isinstance(rv, (list, tuple))):
+    if np is not None and _numeric_leaves(lv) and _numeric_leaves(rv) and (
+            hasattr(lv, "__array__") or hasattr(rv, "__array__")
+            or isinstance(lv, (list, tuple))
+            or isinstance(rv, (list, tuple))):
         try:
             a = np.asarray(lv, dtype=float)
             b = np.asarray(rv, dtype=float)
         except Exception:
-            return None
+            # a ragged structure (a scalar beside a list, a parser's
+            # result) is no array; the leaf walk below reads it
+            a = b = None
         try:
+            if a is None:
+                raise _NotAnArray
             if relation in ("==", "~="):
                 return bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
             if relation == "!=":
@@ -468,6 +492,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
             if relation == "<":
                 return bool((a < b).all())
             return bool((a > b).all())
+        except _NotAnArray:
+            pass
         except (ValueError, TypeError):
             return None       # incompatible shapes: unanswerable
 
@@ -689,9 +715,53 @@ def _sample_domain(rng: random.Random, dom: Domain,
     return value
 
 
+def _sample_language(rng: random.Random, dom: Domain):
+    """Intent:
+        One member of a language domain: a piece chosen uniformly (a
+        language or a finite set of members), then a hazard value of
+        that language three draws in ten and a random member
+        otherwise, retried a bounded number of times to avoid an
+        excluded member.
+
+    Notes:
+        The hazard corpus is the language's own (`Language.hazards`,
+        every value of which is a member), so a draw never leaves the
+        declared language; the guaranteed lap over every hazard is the
+        per-parameter cycle the claim loop threads in.
+    """
+    from .domain import LanguageRef, MISSING as _MISSING
+    from .languages import resolve_language
+    pieces = dom.pieces or ()
+    value = None
+    for _ in range(20):
+        piece = rng.choice(pieces)
+        if isinstance(piece, frozenset):
+            members = [v for v in piece if v is not _MISSING]
+            if not members:
+                continue
+            value = rng.choice(members)
+        elif isinstance(piece, LanguageRef):
+            language = resolve_language(piece)
+            hazards = language.hazards()
+            if hazards and rng.random() < 0.3:
+                value = rng.choice(hazards).value
+            else:
+                value = language.sample(rng)
+        else:
+            continue
+        try:
+            excluded = value in dom.excluded
+        except TypeError:
+            excluded = False
+        if not excluded:
+            return value
+    return value
+
+
 def _classify_bound(bounds) -> str:
     """The domain-bound shape, independent of a parameter's own
-    inferred kind, "domain" (a grammar.Domain: union/exclusion/an
+    inferred kind, "language" (a Domain over `L[...]` pieces),
+    "domain" (a grammar.Domain: union/exclusion/an
     explicit type refinement), "frozenset" (a discrete set), "Z"/"N"
     (a named integer set), "interval" (a plain (lo, hi) tuple), or
     "none". Shared by every consumer that needs to dispatch on a
@@ -701,7 +771,7 @@ def _classify_bound(bounds) -> str:
     Domain object _synth already knew how to handle, the first time a
     claim's own richer domain bound reached it."""
     if isinstance(bounds, Domain):
-        return "domain"
+        return "language" if bounds.base_type == "L" else "domain"
     if isinstance(bounds, frozenset):
         return "frozenset"
     if bounds == "Z":
@@ -734,7 +804,11 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         # that only iterates its values. The claim path uses
         # `_synth_dict(keys, ...)` with the body's real keys instead.
         return _synth_dict([], rng, specials=specials)
-    if kind == "sequence":
+    if kind == "sequence" and _classify_bound(bounds) != "language":
+        # a language bound is the parameter's own domain, whatever kind
+        # the body's usage suggested (iterating a string looks like a
+        # sequence): the author said the value IS a member, so it is
+        # sampled as one below
         # `length`, when a dimension premise fixed it for this trial,
         # overrides the free 2..8 draw so the premise holds by
         # construction rather than by rejection
@@ -775,6 +849,8 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     bound_shape = _classify_bound(bounds)
     if bound_shape == "domain":
         return _sample_domain(rng, bounds, specials=specials)
+    if bound_shape == "language":
+        return _sample_language(rng, bounds)
     if bound_shape == "frozenset":
         return rng.choice(list(bounds))
     if bound_shape in ("Z", "N", "C"):
@@ -903,6 +979,10 @@ def _out_of_domain_candidates(bounds) -> list:
         span = (hi - lo) or 1.0
         return [lo - 0.5 * span, hi + 0.5 * span]
     if isinstance(bounds, Domain):
+        if bounds.base_type == "L":
+            # a language's own near non-members are its `outside`
+            # draws, which the safety families read directly
+            return []
         candidates = []
         for piece in bounds.pieces:
             if isinstance(piece, tuple):
@@ -1149,7 +1229,7 @@ def probe(fn, facts, domain: dict | None = None,
     # that fixes it
     for p, k in zip(facts.params, kinds):
         if k == "string" and _classify_bound(domain.get(p)) not in (
-                "frozenset", "domain"):
+                "frozenset", "domain", "language"):
             return [Probe(
                 "callable", callable_statement, "skipped",
                 note=f"parameter {p!r} is a string with no declared "

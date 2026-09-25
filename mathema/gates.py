@@ -187,6 +187,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     int_names = {name for name in names
                  if _integer_bound(cj_domain.get(name))
                  or kinds.get(name) in ("int", "bool")}
+    language_names = {name for name in names
+                      if getattr(cj_domain.get(name), "base_type", None) == "L"}
 
     def _typed(point):
         # a whole-number coordinate of an integer domain is passed as an
@@ -387,6 +389,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             v = point.get(n)
             if bound is None or v is None or n in seq_names:
                 continue
+            if n in language_names:
+                # a language coordinate is judged by its language,
+                # never coerced to a number
+                if not domain_contains(v, bound):
+                    return False
+                continue
             try:
                 fv = float(v)
                 fv = int(fv) if fv.is_integer() else fv
@@ -435,7 +443,29 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # a sequence's corner is a short list at the per-element edge
         return [value] * 3 if name in seq_names else value
 
-    edges = {n: (_endpoint(n, "lo"), _endpoint(n, "hi")) for n in names}
+    def _language_edges(name):
+        # a language coordinate has no numeric ends: its corners are the
+        # language's own hazard values, the empty string and the long
+        # one where the language has them, else two sampled members
+        from .domain import LanguageRef
+        from .languages import resolve_language
+        values: list = []
+        for piece in cj_domain[name].pieces:
+            if isinstance(piece, LanguageRef):
+                values.extend(resolve_language(piece).hazards())
+        by_kind = {h.kind: h.value for h in values}
+        first = by_kind.get("empty", values[0].value if values else None)
+        last = by_kind.get("length", values[-1].value if values else None)
+        if first is None or last is None:
+            import random as _random
+            drawn = sample(name, _random.Random(0))
+            first = drawn if first is None else first
+            last = drawn if last is None else last
+        return first, last
+
+    edges = {n: (_language_edges(n) if n in language_names
+                 else (_endpoint(n, "lo"), _endpoint(n, "hi")))
+             for n in names}
     if len(names) <= 6:
         # every corner of the box: 2^k points for k coordinates
         import itertools

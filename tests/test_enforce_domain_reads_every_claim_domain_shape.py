@@ -64,3 +64,24 @@ def test_the_integer_type_rejects_a_fraction(build):
 def test_the_guard_read_off_the_claim_is_the_claims_own_domain():
     f = _guarded_from_claim(NO_MISSING)
     assert f.__mathema_enforced_domain__ == {"x": claim(NO_MISSING).domain["x"]}
+
+
+LANGUAGE = "for x in L[ascii], f(x) == f(x)"
+LANGUAGE_NO_MISSING = "for x in L[ascii] \\ {∅}, f(x) == f(x)"
+
+
+@pytest.mark.parametrize("build", [_guarded_from_claim, _guarded_explicitly])
+def test_a_language_domain_rejects_a_value_outside_the_language(build):
+    f = build(LANGUAGE)
+    assert f("abc") == "abc"
+    with pytest.raises(ValueError, match=r"outside its declared domain L\[ascii\]"):
+        f("caf\u00e9")
+    with pytest.raises(ValueError, match="outside its declared domain"):
+        f(3)
+
+
+@pytest.mark.parametrize("build", [_guarded_from_claim, _guarded_explicitly])
+def test_a_language_domain_follows_the_missing_policy(build):
+    assert build(LANGUAGE)(None) is None
+    with pytest.raises(ValueError, match="x=None"):
+        build(LANGUAGE_NO_MISSING)(None)
