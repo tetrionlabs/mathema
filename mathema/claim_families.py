@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from .records import Probe
 
 from ._sampling import _finite_bounds as _finite_bounds, _synth_scalar as _synth_scalar
+from .f import _is_nonfinite as _is_nonfinite
 from .grammar import Domain
 # hazard knowledge (which parameters face which hazard kinds, and the
 # restricted builtins' own accepted ranges) lives in mathema.hazards,
@@ -2577,26 +2578,6 @@ class OutputPredicateFamily:
 
     def routes(self) -> dict:
         return {"probe:algorithmic": self._probe}
-
-
-def _is_nonfinite(out) -> bool:
-    """True when a value is a silent non-finite number (nan/inf), scalar
-    or numpy array; False for a genuinely non-numeric value, which is not
-    this predicate's concern."""
-    import math
-    if isinstance(out, bool):
-        return False
-    if isinstance(out, (int, float)):
-        return math.isnan(out) or math.isinf(out)
-    try:
-        import numpy as np
-    except ImportError:
-        return False
-    try:
-        arr = np.asarray(out, dtype=float)
-    except (TypeError, ValueError):
-        return False
-    return not bool(np.isfinite(arr).all())
 
 
 def _is_compendium_safe_derive(fn, facts, lhs_src: str, rhs_src: str,

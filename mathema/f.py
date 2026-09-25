@@ -44,16 +44,38 @@ def sort_seq(xs):
     return sorted(xs)
 
 
+def _is_nonfinite(out) -> bool:
+    """True when a value is a silent non-finite number (nan/inf), a
+    Python or numpy scalar or a numpy array; False for a genuinely
+    non-numeric value, which is not this predicate's concern."""
+    import math
+    if isinstance(out, bool):
+        return False
+    if isinstance(out, (int, float)):
+        return math.isnan(out) or math.isinf(out)
+    try:
+        import numpy as np
+    except ImportError:
+        return False
+    try:
+        arr = np.asarray(out, dtype=float)
+    except (TypeError, ValueError):
+        return False
+    return not bool(np.isfinite(arr).all())
+
+
 def finite_no_error(fn, *args):
-    """1 if calling `fn(*args)` raises neither `ZeroDivisionError` nor
-    `OverflowError` and returns a finite result (no `NaN`/infinite
-    value, checking every element when the result is a list or tuple),
-    0 otherwise."""
+    """1 if calling `fn(*args)` raises none of `ZeroDivisionError`,
+    `OverflowError`, `FloatingPointError` or `ValueError` and returns a
+    finite result (no `NaN`/infinite value, a numpy scalar or array
+    included, checking every element when the result is a list or
+    tuple), 0 otherwise."""
     try:
         r = fn(*args)
-    except (ZeroDivisionError, OverflowError):
+    except (ZeroDivisionError, OverflowError, FloatingPointError,
+            ValueError):
         return 0
     vals = r if isinstance(r, (list, tuple)) else [r]
-    if any(isinstance(v, float) and (v != v or abs(v) == float("inf")) for v in vals):
+    if any(_is_nonfinite(v) for v in vals):
         return 0
     return 1
