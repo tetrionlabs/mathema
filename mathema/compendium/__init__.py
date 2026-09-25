@@ -233,13 +233,20 @@ def _alias_origins(fn, facts) -> dict:
     """Intent:
         Every name `fn` can reach a module or a module's function
         through, mapped to its dotted origin: module-level globals,
-        the function's own local imports, and from-imports (`from
+        names it closes over, the function's own local imports, and
+        from-imports (`from
         numpy import arcsin` maps `arcsin` to `numpy.arcsin`).
     """
     import ast
     import types
+    import inspect
     origin: dict = {}
-    for name, obj in (getattr(fn, "__globals__", {}) or {}).items():
+    scope = dict(getattr(fn, "__globals__", {}) or {})
+    try:
+        scope.update(inspect.getclosurevars(fn).nonlocals)
+    except (TypeError, ValueError):
+        pass
+    for name, obj in scope.items():
         if isinstance(obj, types.ModuleType):
             origin[name] = obj.__name__
         elif callable(obj):
@@ -489,21 +496,239 @@ def _is_defined_region_texts(entry: dict) -> list:
     return out
 
 
-_INSTALLED_FOR: set = set()
+#: what `install` registered: the root it was installed for, and the
+#: `(key, builder)` rows it added to the partiality registry
+_INSTALLED: dict = {"root": None, "rows": []}
+#: the rows already reported as unbuildable, so each is reported once
+_REPORTED: set = set()
+
+#: region functions a row may read that are facts about an array's shape
+#: or a matrix, not a scalar region over the call's arguments
+_SHAPE_FUNCTIONS = ("dim", "det", "rows", "cols", "len")
+
+
+class _Unbuildable(Exception):
+    """A library row whose region cannot be stated over the call's
+    scalar arguments; the message says why."""
+
+
+def _signature_params(key: str, used: list) -> list:
+    """Intent:
+        The positional parameter names of the function `key` names, in
+        call order (`inspect.signature`); when the function has no
+        readable signature, the one name the row itself uses.
+
+    Raises:
+        _Unbuildable: no signature and not exactly one name in use.
+    """
+    import inspect
+
+    from ..conjecture import _resolve_func_ref
+    fn = _resolve_func_ref(key)
+    try:
+        sig = inspect.signature(fn) if fn is not None else None
+    except (TypeError, ValueError):
+        sig = None
+    if sig is not None:
+        return [n for n, p in sig.parameters.items()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    if len(used) == 1:
+        return list(used)
+    raise _Unbuildable("the function has no readable signature to place "
+                       "the row's parameters in call order")
+
+
+def _side_to_sympy(text: str, env: dict):
+    """One relation side as a sympy expression over `env`'s symbols,
+    read the way the claim grammar reads it."""
+    import ast
+    import re
+
+    from ..grammar import normalize
+    from ..symbolic._base import NotSymbolic, _expr_to_sympy
+    src = normalize(str(text))
+    if re.search(rf"\b(?:{'|'.join(_SHAPE_FUNCTIONS)})\s*\(", src):
+        raise _Unbuildable("shape")
+    try:
+        value = _expr_to_sympy(ast.parse(src, mode="eval").body, dict(env))
+    except (NotSymbolic, SyntaxError) as e:
+        raise _Unbuildable(f"{text!r} does not lift ({e})") from None
+    if isinstance(value, tuple):
+        raise _Unbuildable(f"{text!r} is not a single value")
+    return value
+
+
+def _relation(lhs: str, rel: str, rhs: str, env: dict):
+    import sympy
+    ops = {"<": sympy.Lt, "<=": sympy.Le, ">": sympy.Gt, ">=": sympy.Ge,
+           "==": sympy.Eq, "!=": sympy.Ne}
+    if rel not in ops:
+        raise _Unbuildable(f"relation {rel!r} is not a region")
+    return ops[rel](_side_to_sympy(lhs, env), _side_to_sympy(rhs, env))
+
+
+def _row_region(key: str, row: dict) -> "tuple | None":
+    """Intent:
+        One library row as a partiality guard: `(parameter names in call
+        order, region, label)`, where the region is where the call
+        fails and the label is `NO_VALUE` for an `is_defined` row (the
+        complement of its stated region) or the exception name of a
+        `raises(f(...), Exc)` row (its `for` domain and `assuming`
+        premise conjoined). None for a row that states no region.
+        The statement is read by the claim grammar itself.
+
+    Raises:
+        _Unbuildable: the region cannot be stated over the call's
+            scalar arguments (`"shape"` when it reads an array's shape
+            or a matrix, otherwise the reason).
+    """
+    import sympy
+
+    from ..conjecture import _parse_assuming_relation, claim
+    from ..domain import bound_to_sympy_set
+    from ..symbolic._partiality import NO_VALUE
+    name = str(row.get("name") or "")
+    text = str(row.get("statement") or row.get("law") or "")
+    try:
+        cj = claim(text, name=name or None)
+    except Exception as e:
+        raise _Unbuildable(f"the statement does not parse ({e})") from None
+    if name.split("[", 1)[0] == "is_defined" and cj.relation != "raises":
+        links = cj.links or [(cj.lhs, cj.relation, cj.rhs)]
+        used = sorted({n for lhs, _r, rhs in links
+                       for n in _names_in(f"{lhs} {rhs}")})
+        params = _signature_params(key, used)
+        env = {p: sympy.Symbol(p, real=True) for p in params}
+        stray = [n for n in used if n not in env]
+        if stray:
+            raise _Unbuildable(f"{', '.join(stray)} is not a parameter of "
+                               f"{key}")
+        region = sympy.And(*[_relation(lhs, rel, rhs, env)
+                             for lhs, rel, rhs in links])
+        return params, sympy.Not(region).to_nnf(), NO_VALUE
+    if cj.relation != "raises" or not cj.rhs:
+        return None
+    used = sorted(set(cj.domain) | set(_names_in(cj.assuming or ""))
+                  | set(_names_in(cj.lhs)) - {"f"})
+    params = _signature_params(key, used)
+    env = {p: sympy.Symbol(p, real=True) for p in params}
+    parts = []
+    for p, bound in (cj.domain or {}).items():
+        if p not in env:
+            raise _Unbuildable(f"{p} is not a parameter of {key}")
+        if getattr(bound, "dims", None):
+            raise _Unbuildable("shape")
+        parts.append(bound_to_sympy_set(bound).as_relational(env[p]))
+    premise = (cj.assuming or "").strip()
+    if premise.startswith("assuming"):
+        premise = premise[len("assuming"):].strip()
+    for conjunct in filter(None, (c.strip() for c in premise.split(" and "))):
+        rel = _parse_assuming_relation(conjunct)
+        if rel is None:
+            raise _Unbuildable(f"premise {conjunct!r} is not a relation")
+        parts.append(_relation(rel.lhs, rel.relation, rel.rhs, env))
+    return params, sympy.And(*parts), str(cj.rhs).strip()
+
+
+def _names_in(text: str) -> list:
+    """The identifiers a relation text reads that are not calls."""
+    import re
+    return [m.group(1) for m in re.finditer(
+        r"\b([A-Za-z_]\w*)\b(?!\s*\()", str(text))
+        if m.group(1) not in ("and", "or", "not", "in", "for", "assuming",
+                              "inf", "oo", "pi", "e", "E")]
+
+
+def _builder(params: list, region):
+    """The callable the partiality registry takes: the call's
+    positional arguments (sympy expressions) substituted for the row's
+    parameter symbols."""
+    import sympy
+    syms = [sympy.Symbol(p, real=True) for p in params]
+    needed = {i for i, s in enumerate(syms) if s in region.free_symbols}
+
+    def build(*args):
+        if needed and max(needed) >= len(args):
+            return sympy.false
+        return region.subs({syms[i]: args[i] for i in needed},
+                           simultaneous=True)
+    return build
+
+
+def register_library_claims(root: str = ".") -> list:
+    """Intent:
+        Register every applicable library row's region as a partiality
+        guard (`load_library_claims`): an `is_defined` row registers
+        the complement of its region as `NO_VALUE`, a `raises(f(...),
+        Exc)` row its domain and premise as `Exc`. Idempotent per root:
+        the same root again is a no-op, a different root replaces the
+        rows the previous one registered. Returns the `(key, row name)`
+        pairs registered.
+
+    Notes:
+        A row that reads an array's shape or a matrix (`dim(a) >= 1`,
+        `det(a) != 0`) states no scalar region and is left to the
+        hazard generator; any other row whose region cannot be built is
+        reported once with `warnings.warn`, naming the key and the row.
+    """
+    import warnings
+
+    from ..symbolic._partiality import register_raises_when
+    marker = os.path.abspath(root)
+    if _INSTALLED["root"] == marker:
+        return list(_INSTALLED.get("names", []))
+    uninstall()
+    library_claims = load_library_claims(root)
+    rows: list = []
+    names: list = []
+    for key, info in sorted(library_claims.items()):
+        for row in info["entry"].get("claims") or []:
+            try:
+                built = _row_region(key, row)
+            except _Unbuildable as e:
+                reason = str(e)
+                label = (key, str(row.get("name")), reason)
+                if reason != "shape" and label not in _REPORTED:
+                    _REPORTED.add(label)
+                    warnings.warn(
+                        f"mathema: compendium row {row.get('name')!r} of "
+                        f"{key} ({info['source']}) registers no region: "
+                        f"{reason}", stacklevel=2)
+                continue
+            if built is None:
+                continue
+            params, region, label_text = built
+            build = _builder(params, region)
+            register_raises_when(key, build, label_text)
+            rows.append((key, build))
+            names.append((key, str(row.get("name"))))
+    _INSTALLED.update(root=marker, rows=rows, names=names)
+    from ..hazards import register_hazard_generator
+    register_hazard_generator("compendium",
+                              _boundary_generator(library_claims))
+    return names
 
 
 def install(root: str = ".") -> None:
-    """Register every applicable compendium entry's automatic facts, once per
-    root per process: the boundary-hazard generator. Called by the
-    joins (`verify`, `write_spec`, the CLI and MCP surfaces), never by
+    """Register the applicable library claims' automatic facts for
+    `root`: partiality guards (`register_library_claims`) and the
+    boundary-hazard generator. Called by the joins (`verify`,
+    `write_spec`, `mathema check`, the MCP surfaces), never by
     `check()` itself, which stays IO-free."""
-    marker = os.path.abspath(root)
-    if marker in _INSTALLED_FOR:
+    register_library_claims(root)
+
+
+def uninstall(root: "str | None" = None) -> None:
+    """Remove what `install` registered (for `root`, when given and it
+    is the installed one; otherwise whatever is installed)."""
+    from ..symbolic._partiality import unregister_lemmas
+    if root is not None and _INSTALLED["root"] != os.path.abspath(root):
         return
-    _INSTALLED_FOR.add(marker)
-    from ..hazards import register_hazard_generator
-    register_hazard_generator(
-        "compendium", _boundary_generator(load_library_claims(root)))
+    for key, build in _INSTALLED["rows"]:
+        unregister_lemmas(key, [build])
+    _INSTALLED.update(root=None, rows=[], names=[])
+    from ..hazards import _GENERATORS
+    _GENERATORS.pop("compendium", None)
 
 
 def _boundaries(condition) -> list:
@@ -550,6 +775,8 @@ def _boundary_generator(library_claims: dict):
     expression over the caller's parameters, not one of them), and a
     wrong hint costs one sample."""
     def generate(fn, facts, domain):
+        import re
+
         from ..hazards import HazardPoint
         out = []
         for key in sorted(library_keys_called(
@@ -562,6 +789,17 @@ def _boundary_generator(library_claims: dict):
                 f"compendium:{info['compendium']}")
             for region in _is_defined_region_texts(info["entry"]):
                 for condition in region:
+                    if re.search(r"\bdim\s*\(", condition):
+                        # outside `dim(a) >= 1` is the empty sequence
+                        for param in getattr(facts, "params", ()):
+                            if (getattr(facts, "param_kinds", None) or {}
+                                    ).get(param) == "sequence":
+                                out.append(HazardPoint(
+                                    kind="compendium", param=param,
+                                    at=f"{key}: empty sequence, outside "
+                                       f"({condition})",
+                                    value=None, source=source))
+                        continue
                     for value in _boundaries(condition):
                         for param in getattr(facts, "params", ()):
                             out.append(HazardPoint(

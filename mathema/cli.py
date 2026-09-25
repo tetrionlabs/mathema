@@ -138,11 +138,15 @@ def _check_rows(args) -> list[dict]:
                           f"{args.target}")
     verified_store = load_verified(root)
     declared_store = load_declared(root)
+    from .compendium import external_premises, install
+    install(root)
+    premises = external_premises(root, verified=verified_store)
     for name, fn in sorted(target.functions.items()):
         rec = check(fn, claims=list(args.claim) if args.claim else None,
                     domain=domain or None,
                     trials_scale=args.trials_scale,
-                    declared=retrieve(fn, root, store=declared_store))
+                    declared=retrieve(fn, root, store=declared_store),
+                    known_premises=premises)
         # the one gate (verify.gate): provenance population, so a
         # falsified suggestion surfaces in the printed detail (real
         # knowledge, and a reason not to adopt) but never gates;

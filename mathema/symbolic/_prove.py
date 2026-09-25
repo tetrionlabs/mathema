@@ -1519,15 +1519,35 @@ def _defined_assumptions(sub_conds: list) -> "tuple[list, list, list]":
     return gaps, nonzero, preds
 
 
+def _returns_no_value(out) -> bool:
+    """Whether a call's result is a nan or an infinity (a scalar, or an
+    array with any non-finite element)."""
+    import math
+    try:
+        return not math.isfinite(complex(out).real) \
+            or not math.isfinite(complex(out).imag)
+    except (TypeError, ValueError, OverflowError):
+        pass
+    try:
+        import numpy as np
+        arr = np.asarray(out, dtype=float)
+        return bool(arr.size) and not bool(np.isfinite(arr).all())
+    except Exception:
+        return False
+
+
 def _witness_corroborated(callable_target, arg_exprs: list,
-                          witness: dict) -> bool:
+                          witness: dict, exc: "str | None" = None) -> bool:
     """Intent:
         True only when the real call, executed at the candidate
         witness point, actually raises, the executed-witness bar a
-        guard disproof must clear. Evaluates each substituted argument
-        expression at the witness numerically; any evaluation failure,
-        or a call that returns a value, refuses corroboration.
+        guard disproof must clear; for a `NO_VALUE` guard, a call that
+        returns a nan or an infinity corroborates too. Evaluates each
+        substituted argument expression at the witness numerically;
+        any evaluation failure, or a call that returns a (finite)
+        value, refuses corroboration.
     """
+    from ._partiality import NO_VALUE
     import inspect
     try:
         annotations = [prm.annotation for prm in
@@ -1558,13 +1578,16 @@ def _witness_corroborated(callable_target, arg_exprs: list,
             vals.append(float(v.real))
         else:
             vals.append(int(v.real) if float(v.real).is_integer() else v.real)
+    import warnings
     try:
-        callable_target(*vals)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            out = callable_target(*vals)
     except TimeoutError:
         raise
     except Exception:
         return True
-    return False
+    return exc == NO_VALUE and _returns_no_value(out)
 
 
 def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
@@ -1666,7 +1689,7 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             # (the false-falsified family), never a counterexample.
             target = (callables or {}).get(target_name)
             if target is None or not _witness_corroborated(
-                    target, arg_exprs, witness):
+                    target, arg_exprs, witness, exc):
                 uncorroborated = True
                 undecided = True
                 continue
@@ -1676,10 +1699,12 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             where = ", ".join(f"{name} = {_witness_value_text(at_witness[sym])}"
                               for name, sym in ext_params.items()
                               if sym in at_witness)
-            exc_text = exc or "an exception"
+            from ._partiality import NO_VALUE
+            fails = ("has no value" if exc == NO_VALUE
+                     else f"raises {exc or 'an exception'}")
             return ProofResult(
                 "disproven",
-                sketch=f"{call_text} raises {exc_text} inside the declared "
+                sketch=f"{call_text} {fails} inside the declared "
                        f"domain (guard {_cond_text(cond)} holds at {where}), "
                        "so the claim has no value there, narrow the claim's "
                        "domain to where every call returns, or state the "
@@ -2273,13 +2298,15 @@ def _loop_proof_raise_gate(fn, facts, domain, proof: ProofResult) -> ProofResult
         raise
     except Exception:
         return proof
+    from ._partiality import NO_VALUE
     for cond, exc in guards:
         if _cond_truth_over(cond, domain or {}) is True:
             continue
+        fails = ("have no value" if exc == NO_VALUE else f"raise {exc}")
         return ProofResult(
             "undecided",
             sketch=f"{proof.sketch}; not kept as a proof: the code may "
-                   f"raise {exc} inside the declared domain (where "
+                   f"{fails} inside the declared domain (where "
                    f"{_cond_text(cond)}), narrow the domain to where every "
                    f"call returns, or state the raising region as its own "
                    f"raises(...) claim",

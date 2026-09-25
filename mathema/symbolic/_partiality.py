@@ -18,14 +18,18 @@ so claims about its CALLERS adjudicate against its raising region too.
 True division contributes a ZeroDivisionError guard with no registry
 entry at all.
 
-Deliberately absent from the built-in rows: `x ** 0.5` (Python returns
-a complex number, no raise, the ordering machinery already refuses
-complex values) and numpy's vectorized forms (they return nan, which
-is the missing-policy axis, adjudicated by is_missing_safe, never a
-raise). A bare `sqrt` call in a body matches only through the caller's
-own scope resolving it to a registered function, the spelling alone
-never decides, since guessing the origin wrong would falsify with a
-lemma about the wrong function.
+A region where a call returns no value without raising (numpy's
+`sqrt` returns nan for a negative input, `log` an infinity at zero) is
+a guard of the same shape whose exception slot holds `NO_VALUE`: a
+value claim over it is false just the same, and its witness is
+corroborated by a call that raises or returns a non-finite value.
+Those rows come from the compendium's `is_defined` rows
+(`register_no_value_when`), not from a built-in table; `x ** 0.5` is
+absent too (Python returns a complex number there, which the ordering
+machinery already refuses). A bare `sqrt` call in a body matches only
+through the caller's own scope resolving it to a registered function,
+the spelling alone never decides, since guessing the origin wrong would
+falsify with a lemma about the wrong function.
 """
 import ast
 import contextvars
@@ -64,6 +68,11 @@ _PARTIALITY_LEMMAS: dict = {
 }
 
 
+#: the exception-name slot of a guard whose region has no value without
+#: raising: the call returns nan or an infinity there
+NO_VALUE = "no value"
+
+
 def qualified_name(fn) -> "str | None":
     """`module.qualname` for a plain function, `None` for anything
     without an importable identity (a lambda, a nested def's caller may
@@ -92,6 +101,37 @@ def register_raises_when(target, condition, exc_name: str = "ValueError") -> Non
         raise ValueError("target has no importable module.qualname; "
                          "pass the dotted name string instead")
     _PARTIALITY_LEMMAS.setdefault(key, []).append((condition, exc_name))
+
+
+def register_no_value_when(target, region_builder) -> None:
+    """Intent:
+        Register the region where a call to `target` has no value
+        without raising (it returns nan or an infinity): given the
+        call's lifted arguments as sympy expressions, `region_builder`
+        returns that region. Callers' claims then treat it like a
+        raise region whose exception is `NO_VALUE`.
+
+    Notes:
+        `target` is a callable or its dotted "module.qualname" string.
+    """
+    register_raises_when(target, region_builder, NO_VALUE)
+
+
+def unregister_lemmas(target, builders: list) -> None:
+    """Intent:
+        Remove the rows registered for `target` whose builder is one of
+        `builders` (compared by identity), dropping the key when none
+        remain.
+    """
+    key = target if isinstance(target, str) else qualified_name(target)
+    have = _PARTIALITY_LEMMAS.get(key)
+    if not have:
+        return
+    kept = [row for row in have if not any(row[0] is b for b in builders)]
+    if kept:
+        _PARTIALITY_LEMMAS[key] = kept
+    else:
+        del _PARTIALITY_LEMMAS[key]
 
 
 def _lemmas_for_call(node: ast.Call, scope: dict) -> list:

@@ -179,3 +179,106 @@ def test_is_defined_regions_become_hazard_boundaries_for_callers():
     assert any(h.value == 0.0 and "numpy.sqrt" in h.at for h in points)
     assert points and all(h.source.startswith("compendium:numpy")
                           for h in points)
+
+
+def test_region_boundaries_are_solved_over_the_reals():
+    from mathema.compendium import _boundaries
+    assert _boundaries("abs(x) > 1") == [-1.0, 1.0]
+    assert _boundaries("x >= 0") == [0.0]
+    assert _boundaries("-1 < x") == [-1.0]
+    assert _boundaries("x + y > 1") == []
+
+
+@pytest.mark.parametrize("spelling", ["np.arcsin(x)", "numpy.arcsin(x)",
+                                      "arcsin(x)"])
+def test_every_import_spelling_of_a_call_gets_the_hazard(tmp_path, spelling):
+    import importlib.util
+    (tmp_path / "hz.py").write_text(textwrap.dedent(f'''
+        import numpy
+        import numpy as np
+        from numpy import arcsin
+
+        def to_angle(x: float) -> float:
+            """Angle whose sine is x."""
+            return float({spelling})
+    '''))
+    spec = importlib.util.spec_from_file_location("hz", tmp_path / "hz.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    from mathema.analysis import analyze_source
+    from mathema.compendium import install
+    from mathema.hazards import hazard_points
+    install(".")
+    values = sorted(h.value for h in hazard_points(
+        mod.to_angle, analyze_source(mod.to_angle), kinds=["compendium"]))
+    assert values == [-1.0, 1.0]
+
+
+def test_an_empty_reduction_is_a_hazard_on_sequence_parameters():
+    import numpy as np
+
+    def average_of(xs: list) -> float:
+        """Mean of the values."""
+        return float(np.mean(xs))
+
+    from mathema.analysis import analyze_source
+    from mathema.compendium import install
+    from mathema.hazards import hazard_points
+    install(".")
+    (point,) = hazard_points(average_of, analyze_source(average_of),
+                             kinds=["compendium"])
+    assert point.param == "xs" and point.value is None
+    assert point.at == "numpy.mean: empty sequence, outside (dim(a) >= 1)"
+
+
+def test_library_rows_reach_the_partiality_registry_with_their_labels(
+        tmp_path):
+    import sympy
+
+    from mathema.compendium import install, register_library_claims
+    from mathema.partiality import NO_VALUE
+    from mathema.symbolic._partiality import _PARTIALITY_LEMMAS
+    _write(tmp_path / "claims" / "math.claims.yaml", """
+        compendium: math
+        math.acosh:
+          claims:
+            - name: is_defined
+              statement: 'x >= 1'
+            - name: below_one_raises
+              statement: 'for x in [-10, 10], assuming x < 1, raises(f(x), ValueError)'
+    """)
+    names = register_library_claims(str(tmp_path))
+    assert ("math.acosh", "is_defined") in names
+    assert ("math.acosh", "below_one_raises") in names
+    rows = _PARTIALITY_LEMMAS["math.acosh"]
+    assert [label for _b, label in rows] == [NO_VALUE, "ValueError"]
+    u = sympy.Symbol("u", real=True)
+    assert rows[0][0](u) == sympy.Lt(u, 1)
+    raises_region = rows[1][0](u)
+    assert raises_region.subs(u, 0) == sympy.true
+    assert raises_region.subs(u, 2) == sympy.false
+    assert raises_region.subs(u, -11) == sympy.false
+    # the same root again is a no-op; another root replaces these rows
+    install(str(tmp_path))
+    assert len(_PARTIALITY_LEMMAS["math.acosh"]) == 2
+    install(".")
+    assert "math.acosh" not in _PARTIALITY_LEMMAS
+
+
+def test_a_row_whose_region_does_not_build_is_reported_once(tmp_path):
+    from mathema.compendium import register_library_claims, uninstall
+    _write(tmp_path / "claims" / "math.claims.yaml", """
+        compendium: math
+        math.acosh:
+          claims:
+            - name: is_defined
+              statement: 'y >= 1'
+    """)
+    with pytest.warns(UserWarning, match=r"'is_defined' of math\.acosh"):
+        register_library_claims(str(tmp_path))
+    uninstall()
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        register_library_claims(str(tmp_path))
+

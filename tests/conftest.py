@@ -30,6 +30,27 @@ def _no_installed_providers(monkeypatch):
     load.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _library_claims_isolated():
+    """Installing library claims (`compendium.install`, which `verify`,
+    `write_spec` and `mathema check` do) registers process-wide
+    partiality guards and a hazard generator; every test starts and
+    ends with the registries as they were, so no verdict depends on
+    which test ran earlier in the same process."""
+    from mathema import compendium, hazards
+    from mathema.symbolic import _partiality
+    lemmas = {k: list(v) for k, v in _partiality._PARTIALITY_LEMMAS.items()}
+    generators = dict(hazards._GENERATORS)
+    installed = dict(compendium._INSTALLED)
+    yield
+    _partiality._PARTIALITY_LEMMAS.clear()
+    _partiality._PARTIALITY_LEMMAS.update(lemmas)
+    hazards._GENERATORS.clear()
+    hazards._GENERATORS.update(generators)
+    compendium._INSTALLED.clear()
+    compendium._INSTALLED.update(installed)
+
+
 def pytest_addoption(parser):
     parser.addoption("--extensive", action="store_true", default=False,
                      help="run the extensive-ladder proof corpus (slower, opt-in)")
