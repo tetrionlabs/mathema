@@ -517,20 +517,32 @@ def _declared_rel_tol(cj) -> float:
     return 0.0 if cj.tolerance is not None else DEFAULT_RELATIVE_TOLERANCE
 
 
-def _runtime_dim(value, axis):
+def _runtime_dim(value, axis=0):
     """`dim(value, axis)` at evaluation time: the size of the axis-th
-    dimension of a nested-sequence value, descending first elements.
-    Raises IndexError past the value's depth, the same honest failure
-    an over-indexed axis deserves."""
+    dimension of a nested-sequence value, descending first elements;
+    `dim(value)` is the first axis. Raises IndexError past the value's
+    depth, the same honest failure an over-indexed axis deserves."""
     v = value
     for _ in range(int(axis)):
         v = v[0]
     return len(v)
 
 
+def _runtime_det(value) -> float:
+    """`det(value)` at evaluation time: the determinant of a square
+    matrix value (nested lists or an array), through numpy. Raises
+    ValueError when numpy is not importable, and numpy's own error for
+    a value that is not a square matrix."""
+    from .matrices import _numpy
+    np = _numpy()
+    if np is None:
+        raise ValueError("det needs numpy")
+    return float(np.linalg.det(np.asarray(value, dtype=float)))
+
+
 _SAFE_FUNCS = {
     "abs": abs, "min": min, "max": max, "len": len, "sum": sum,
-    "dim": _runtime_dim,
+    "dim": _runtime_dim, "det": _runtime_det,
     # output-shape builtins for the output-contract invariants
     # (preserves_type, is_permutation_of_input): probe-only, harmless,
     # not sympy functions (the derive route reports them unsupported and
@@ -2096,6 +2108,11 @@ def _shape_constraints(assumption, resolver):
                 and isinstance(node.args[0], _ast.Name)
                 and isinstance(node.args[1], _ast.Constant)):
             return resolver.key(node.args[0].id, int(node.args[1].value))
+        if (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name)
+                and node.func.id == "dim" and len(node.args) == 1
+                and isinstance(node.args[0], _ast.Name)):
+            # `dim(a)` is the first axis, `dim(a, 0)`
+            return resolver.key(node.args[0].id, 0)
         if isinstance(node, _ast.Name) and node.id in marker_names:
             return node.id
         return None
@@ -2143,6 +2160,78 @@ def _shape_constraints(assumption, resolver):
             merged.remove(m)
         merged.append(set().union(g, *hit))
     return lo, hi, merged
+
+
+def _premise_draws(assumption, kinds: dict) -> dict:
+    """Intent:
+        Draws that satisfy an equality premise by construction, for the
+        premises random sampling essentially never lands on, keyed by
+        parameter: `dim(a) == 0` (or `dim(a, 0) == 0`) draws the empty
+        sequence, `det(a) == 0` a singular square matrix, and `x == c`
+        the constant itself. Each draw is `draw(rng, size)`, `size` the
+        trial's planned first-axis size for the parameter, or None.
+
+    Notes:
+        A length premise `dim(a) == k` for k > 0 is not here: the
+        shape plan (`_shape_constraints`) already sizes the draw. The
+        rejection filter still checks every conjunct, so a draw that
+        misses another conjunct is a wasted trial, never a wrong
+        verdict.
+    """
+    import ast as _ast
+
+    def constant(node):
+        if isinstance(node, _ast.UnaryOp) and isinstance(node.op, _ast.USub):
+            inner = constant(node.operand)
+            return None if inner is None else -inner
+        if isinstance(node, _ast.Constant) \
+                and isinstance(node.value, (int, float)) \
+                and not isinstance(node.value, bool):
+            return node.value
+        return None
+
+    def param_of(call, name):
+        if (isinstance(call, _ast.Call) and isinstance(call.func, _ast.Name)
+                and call.func.id == name and call.args
+                and isinstance(call.args[0], _ast.Name)
+                and call.args[0].id in kinds):
+            rest = call.args[1:]
+            if name == "dim" and rest and constant(rest[0]) != 0:
+                return None
+            return call.args[0].id if len(rest) <= (name == "dim") else None
+        return None
+
+    def draw_for(node, c):
+        if isinstance(node, _ast.Name) and node.id in kinds:
+            value = int(c) if kinds[node.id] == "int" \
+                and float(c).is_integer() else c
+            return node.id, lambda rng, size, v=value: v
+        seq = param_of(node, "dim")
+        if seq is not None and c == 0:
+            return seq, lambda rng, size: []
+        mat = param_of(node, "det")
+        if mat is not None and c == 0:
+            from .matrices import _synth_singular
+            return mat, (lambda rng, size:
+                         _synth_singular(size or rng.randint(2, 5), rng))
+        return None
+
+    out: dict = {}
+    for acj in assumption or ():
+        if acj.relation != "==" or not acj.rhs:
+            continue
+        try:
+            left = _ast.parse(acj.lhs, mode="eval").body
+            right = _ast.parse(acj.rhs, mode="eval").body
+        except SyntaxError:
+            continue
+        for side, other in ((left, right), (right, left)):
+            c = constant(other)
+            found = draw_for(side, c) if c is not None else None
+            if found is not None:
+                out.setdefault(*found)
+                break
+    return out
 
 
 def _draw_trial_sizes(resolver, lo, hi, groups, rng):
@@ -4643,6 +4732,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     shape_lo, shape_hi, shape_groups = _shape_constraints(
         ctx.assumption, resolver)
     plan_dims = bool(resolver.distinct_keys())
+    premise_draws = _premise_draws(ctx.assumption, kinds)
     from .types import structures_from_signature
     # a parameter's structure comes from its signature marker and from
     # an `assuming A is symmetric` premise; both narrow synthesis the
@@ -4789,6 +4879,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               length=length)
                 env[p] = v
                 args.append(v)
+            for p, draw in premise_draws.items():
+                # an equality premise fixes this parameter's draw, so
+                # the sample lies on the premise by construction
+                if p in literal_args:
+                    continue
+                v = draw(rng, trial_sizes.get(resolver.key(p, 0)))
+                env[p] = v
+                args[list(kinds).index(p)] = v
         for a_name in aux:
             # eps/epsilon/ε resolve to the claim's own declared
             # tolerance, not a random aux value, same convention as

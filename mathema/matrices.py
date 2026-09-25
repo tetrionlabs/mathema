@@ -291,6 +291,21 @@ def _synth_finite(n, rng):
     return _rand(n, rng)
 
 
+def _synth_singular(n, rng):
+    # a random matrix with one row or one column zeroed: the
+    # determinant is exactly zero, and elimination meets an exactly
+    # zero pivot, so a solver reports it singular rather than returning
+    # a huge but finite inverse
+    m = _rand(n, rng)
+    k = rng.randrange(n)
+    if rng.random() < 0.5:
+        m[k] = [0.0] * n
+    else:
+        for row in m:
+            row[k] = 0.0
+    return m
+
+
 # --- the registry ----------------------------------------------------
 
 @dataclass(frozen=True)
