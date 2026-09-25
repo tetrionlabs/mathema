@@ -66,14 +66,14 @@ def _is_nonfinite(out) -> bool:
 
 def finite_no_error(fn, *args):
     """1 if calling `fn(*args)` raises none of `ZeroDivisionError`,
-    `OverflowError`, `FloatingPointError` or `ValueError` and returns a
-    finite result (no `NaN`/infinite value, a numpy scalar or array
-    included, checking every element when the result is a list or
-    tuple), 0 otherwise."""
+    `OverflowError` or `FloatingPointError` and returns a finite result
+    (no `NaN`/infinite value, a numpy scalar or array included,
+    checking every element when the result is a list or tuple), 0
+    otherwise. Any other exception propagates to the caller, where the
+    probe route reads it as a raise at that point."""
     try:
         r = fn(*args)
-    except (ZeroDivisionError, OverflowError, FloatingPointError,
-            ValueError):
+    except (ZeroDivisionError, OverflowError, FloatingPointError):
         return 0
     vals = r if isinstance(r, (list, tuple)) else [r]
     if any(_is_nonfinite(v) for v in vals):
