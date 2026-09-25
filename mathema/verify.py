@@ -682,6 +682,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        write_yaml)
 
     out = VerifyResult()
+    from .compendium import own_package_compendium_files
+    for where, library in own_package_compendium_files(root):
+        out.lines.append(
+            f"note {where}: `compendium: {library}` names this project's "
+            f"own package, so the file is ignored; its claims are the "
+            f"project's own, stated in its ordinary claims files")
     integrity_warned: set = set()
     from .auth import acceptance_policy_problems, load_policy
     from .locks import load_locks, lock_state

@@ -113,6 +113,75 @@ def applicable_tag(library: str, versions: str = "*") -> "str | None":
     return f"compendium:{library}-{'.'.join(installed.split('.')[:2])}"
 
 
+def own_packages(root: str = ".") -> frozenset:
+    """Intent:
+        The top-level packages a project tree is the source of: every
+        directory directly under `root` (or `root/src`) holding an
+        `__init__.py`, and the distribution name its `pyproject.toml`
+        declares, with `-` read as `_`.
+    """
+    import re
+    names: set = set()
+    for base in (root, os.path.join(root, "src")):
+        try:
+            entries = os.listdir(base)
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.isidentifier() and os.path.isfile(
+                    os.path.join(base, entry, "__init__.py")):
+                names.add(entry)
+    try:
+        with open(os.path.join(root, "pyproject.toml"),
+                  encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        text = ""
+    section = re.search(r"^\[project\]\s*$(.*?)(?=^\[|\Z)", text,
+                        re.MULTILINE | re.DOTALL)
+    if section:
+        name = re.search(r"^name\s*=\s*[\"']([^\"']+)[\"']",
+                         section.group(1), re.MULTILINE)
+        if name:
+            names.add(name.group(1).strip().replace("-", "_").lower())
+    return frozenset(names)
+
+
+def names_own_package(library: str, root: str = ".") -> bool:
+    """Intent:
+        Whether a claims file's `compendium: <library>` names the
+        project's own package (`own_packages`): such a file states the
+        project's own claims, not testimony about a library, and
+        contributes nothing as a compendium file.
+    """
+    head = str(library).split(".")[0]
+    return head in own_packages(root) or \
+        head.replace("-", "_").lower() in own_packages(root)
+
+
+def own_package_compendium_files(root: str = ".") -> list:
+    """Intent:
+        The project claims files ignored because their `compendium:`
+        names the project's own package, as `(path relative to root,
+        library)` pairs.
+    """
+    from ..spec import claims_file_paths, read_claims_file
+    own = own_packages(root)
+    if not own:
+        return []
+    out: list = []
+    for path in claims_file_paths(root, exclude=(_bundled_dir(),)):
+        where = os.path.relpath(path, root)
+        try:
+            data = read_claims_file(path, where)
+        except Exception:
+            continue
+        library = (data or {}).get("compendium")
+        if isinstance(library, str) and names_own_package(library, root):
+            out.append((where, library))
+    return out
+
+
 def _bundled_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
@@ -141,8 +210,10 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         The bundled files are read first, then the project tree
         (`root`), with the discovery `spec.load_declared` uses; only
         files declaring `compendium:` count, and only when the library
-        is importable at a version inside the file's range. A later
-        file shadows an earlier one per key, whole entry.
+        is importable at a version inside the file's range. A project
+        file naming the project's own package (`names_own_package`)
+        does not count. A later file shadows an earlier one per key,
+        whole entry.
 
     Raises:
         spec.ClaimsFileError: a claims file that does not read.
@@ -151,6 +222,7 @@ def load_library_claims(root: "str | None" = ".") -> dict:
                         stamp_library_rows)
     bundled = _bundled_dir()
     paths = claims_file_paths(bundled)
+    shipped = set(paths)
     if root is not None:
         paths += claims_file_paths(root, exclude=(bundled,))
     out: dict = {}
@@ -160,6 +232,9 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         if not data or "compendium" not in data:
             continue
         library = data.pop("compendium")
+        if path not in shipped and names_own_package(library, root or "."):
+            # the project's own package: its claims, not a library's
+            continue
         versions = str(data.pop("versions", "*"))
         data.pop("grammar", None)
         tag = applicable_tag(library, versions)

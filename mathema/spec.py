@@ -1578,10 +1578,12 @@ def load_declared(root: str = ".") -> dict:
     library's functions: its rows are stamped as compendium testimony
     (`stamp_library_rows`), and the whole file is left out when the
     library is not importable or its installed version is outside the
-    file's `versions` range. The bundled compendium directory is never
-    read as part of a project tree; `compendium.load_library_claims`
-    reads it."""
-    from .compendium import applicable_tag
+    file's `versions` range, or when the library is the project's own
+    package (`compendium.names_own_package`), whose claims the project
+    states as its own. The bundled compendium directory is never read
+    as part of a project tree; `compendium.load_library_claims` reads
+    it."""
+    from .compendium import applicable_tag, names_own_package
     merged: dict = {}
     # shallow first, deep last, so the deeper file wins
     for path in claims_file_paths(root, exclude=(_bundled_compendium_dir(),)):
@@ -1594,7 +1596,7 @@ def load_declared(root: str = ".") -> dict:
         versions = data.pop("versions", "*")
         if library is not None:
             tag = applicable_tag(library, versions)
-            if tag is None:
+            if tag is None or names_own_package(library, root):
                 continue
             stamp_library_rows(data, tag)
         for key, entry in data.items():

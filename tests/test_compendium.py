@@ -282,3 +282,49 @@ def test_a_row_whose_region_does_not_build_is_reported_once(tmp_path):
         warnings.simplefilter("error")
         register_library_claims(str(tmp_path))
 
+
+
+def test_a_compendium_file_naming_the_projects_own_package_is_ignored(
+        tmp_path, monkeypatch):
+    # the export of a project's own library, inside its own tree: the
+    # package is installed (editable), so the file would apply
+    import mathema.compendium as comp
+    from mathema.verify import verify_project
+    real = comp._installed_version
+    monkeypatch.setattr(comp, "_installed_version",
+                        lambda lib: "1.0" if lib == "mylib" else real(lib))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    _write(tmp_path / "mylib" / "__init__.py", '''
+        def f(x: float) -> float:
+            """One more than x."""
+            return x + 1.0
+    ''')
+    _write(tmp_path / "claims" / "c.claims.yaml", """
+        mylib.f:
+          claims:
+            - name: grows
+              statement: 'for x in [0, 1], f(x) >= x'
+    """)
+    _write(tmp_path / "claims" / "mylib.claims.yaml", """
+        compendium: mylib
+        versions: ">=1.0"
+        mylib.f:
+          claims:
+            - name: grows
+              statement: 'for x in [0, 1], f(x) >= x'
+              meta: {mathema.compendium_claimed: holds}
+            - name: bounded
+              statement: 'for x in [0, 1], f(x) <= 2'
+    """)
+    declared = load_declared(str(tmp_path))
+    assert declared["mylib.f"]["source"] == "claims/c.claims.yaml"
+    rows = declared["mylib.f"]["entry"]["claims"]
+    assert [r["name"] for r in rows] == ["grows"]
+    assert (rows[0].get("meta") or {}).get("mathema.surface") != "compendium"
+    assert "mylib.f" not in load_library_claims(str(tmp_path))
+    result = verify_project(str(tmp_path))
+    notes = [line for line in result.lines if "mylib.claims.yaml" in line]
+    assert len(notes) == 1, result.lines
+    assert notes[0].startswith("note ")
+    assert "own package" in notes[0]
+    assert not any("library claims from" in line for line in result.lines)
