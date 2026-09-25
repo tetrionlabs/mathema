@@ -323,7 +323,11 @@ raises(f(50, 0), ValueError)
 ```
 
 The second form infers the domain from the literal arguments, so you do
-not restate what you already wrote. A function that raises inside a
+not restate what you already wrote. The exception is a built-in name
+(`ValueError`), a dotted path (`numpy.linalg.LinAlgError`), or a bare
+name defined on the function's own module or a parent package
+(`LinAlgError` for `numpy.linalg.inv`); a name none of these resolve
+makes the claim `skipped:misspecified`, and the note names it. A function that raises inside a
 region a claim quantifies over falsifies that claim, on either evidence
 route, because a claim about a value is not satisfied by an exception.
 

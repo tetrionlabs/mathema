@@ -590,6 +590,57 @@ _ALLOWED_NODES = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Call, ast.Name,
 # still can.
 
 
+def _resolve_exception_type(name: str, fn) -> "type | None":
+    """Intent:
+        The exception class a `raises(f(x), <name>)` claim names, or
+        None when nothing resolves it. Tried in order: the fixed
+        `_EXC_TYPES` table, a built-in exception, a dotted path
+        (`numpy.linalg.LinAlgError`: the longest importable module
+        prefix, then attributes), and a bare name on the target's own
+        module or one of its parent packages (`LinAlgError` for a
+        `numpy.linalg` function, `StatisticsError` for
+        `statistics.mean`).
+    """
+    import builtins
+    import importlib
+
+    def _exception_class(obj) -> bool:
+        return isinstance(obj, type) and issubclass(obj, BaseException)
+
+    if name in _EXC_TYPES:
+        return _EXC_TYPES[name]
+    if _exception_class(getattr(builtins, name, None)):
+        return getattr(builtins, name)
+
+    def _walk(module_name: str, attrs: list):
+        try:
+            obj = importlib.import_module(module_name)
+        except Exception:
+            return None
+        for attr in attrs:
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                return None
+        return obj if _exception_class(obj) else None
+
+    parts = name.split(".")
+    if len(parts) > 1:
+        for cut in range(len(parts) - 1, 0, -1):
+            found = _walk(".".join(parts[:cut]), parts[cut:])
+            if found is not None:
+                return found
+        return None
+    module = getattr(fn, "__module__", None) or ""
+    if not module and getattr(fn, "__self__", None) is not None:
+        module = type(fn.__self__).__module__
+    pieces = module.split(".") if module else []
+    for cut in range(len(pieces), 0, -1):
+        found = _walk(".".join(pieces[:cut]), [name])
+        if found is not None:
+            return found
+    return None
+
+
 @dataclass
 class Conjecture:
     """One parsed claim, ready to be adjudicated: a relation between
@@ -3259,6 +3310,13 @@ def _validate_claim(cj, statement: str, note: str, facts,
         if mismatch is not None:
             return Probe(cj.name, statement, "skipped:misspecified",
                          route=None, note=f"{note}; {mismatch}")
+        if cj.rhs and _resolve_exception_type(cj.rhs, fn) is None:
+            return Probe(cj.name, statement, "skipped:misspecified",
+                         route=None,
+                         note=f"{note}; unknown exception type "
+                              f"{cj.rhs!r}: not a built-in exception, a "
+                              f"dotted path to one, or a name on the "
+                              f"module of {getattr(fn, '__name__', 'f')}")
     colliding = sorted(set(cj.ambiguous_diff_vars) & param_set)
     if colliding:
         # d(<expr>/d<var>)'s fraction sugar (grammar.
@@ -4406,8 +4464,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # dispatch catches a decline).
         return Probe(cj.name, statement, "skipped", route=None,
                      note=f"unknown relation {cj.relation!r}")
-    if cj.relation == "raises" and cj.rhs and cj.rhs not in _EXC_TYPES:
-        return Probe(cj.name, statement, "skipped", route=None,
+    raised_type = (_resolve_exception_type(cj.rhs, fn)
+                   if cj.relation == "raises" and cj.rhs else None)
+    if cj.relation == "raises" and cj.rhs and raised_type is None:
+        return Probe(cj.name, statement, "skipped:misspecified", route=None,
                      note=f"unknown exception type {cj.rhs!r}")
     # A registered family's own "probe:algorithmic" route, tried
     # before the generic blind-sampling loop below, reachable for
@@ -4801,7 +4861,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 v = eval(code_l, {"__builtins__": {}}, env)
             except Exception as e:
                 checked += 1
-                if cj.rhs and not isinstance(e, _EXC_TYPES[cj.rhs]):
+                if raised_type is not None and not isinstance(e, raised_type):
                     cx = (f"{_fmt(tuple(args))}: raised "
                           f"{type(e).__name__}, claimed {cj.rhs}")
                     break

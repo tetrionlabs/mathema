@@ -2525,7 +2525,8 @@ _SPECIAL_RENDER_CALLS = {
 def parse_raises(law: str) -> tuple[str, str | None] | None:
     """Recognize the raises(...) predicate form (declared-schema.md,
     "Domain is a claim field"): `raises(f(x))` asserts the call raises,
-    `raises(f(x), ValueError)` asserts it raises specifically that.
+    `raises(f(x), ValueError)` asserts it raises specifically that, the
+    name bare or dotted (`raises(f(a), numpy.linalg.LinAlgError)`).
     Returns (call_source, exception_name | None), or None when the law
     isn't a raises predicate at all."""
     try:
@@ -2541,7 +2542,17 @@ def parse_raises(law: str) -> tuple[str, str | None] | None:
         return ast.unparse(node.args[0]), None
     if len(node.args) == 2 and isinstance(node.args[1], ast.Name):
         return ast.unparse(node.args[0]), node.args[1].id
+    if len(node.args) == 2 and _is_dotted_name(node.args[1]):
+        # a dotted exception path, `numpy.linalg.LinAlgError`
+        return ast.unparse(node.args[0]), ast.unparse(node.args[1])
     return None
+
+
+def _is_dotted_name(node) -> bool:
+    """True for an `a.b.c` attribute chain rooted at a plain name."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return isinstance(node, ast.Name)
 
 
 
