@@ -89,6 +89,8 @@ def test_the_loop_end_to_end(project):
                            "log_increasing", "trusted", by="test")
     assert plan["new_verdict"] == "proven"
     assert plan["accepted"]["source"] == "compendium:math"
+    assert any("on the word of compendium:math" in a
+               for a in plan["actions"]), plan["actions"]
     apply_acceptance(plan)
     row = _rows(project, "math.log")["log_increasing"]
     assert row["verdict"] == "proven"
