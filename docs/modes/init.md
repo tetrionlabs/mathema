@@ -34,7 +34,7 @@ files a tracked store wants:
   expandable when you do want to read it. (`linguist-generated`, not
   `-diff`: the record stays reviewable.)
 - **`.mathema/.gitignore`** tracking the durable evidence and required
-  artifacts (`verified/`, `meta/`, `compendium/`, `badges/`) and ignoring
+  artifacts (`verified/`, `meta/`, `badges/`) and ignoring
   regenerated state (`declared/`, `issues/`).
 
 The evidence is meant to be committed: a verified record is the durable

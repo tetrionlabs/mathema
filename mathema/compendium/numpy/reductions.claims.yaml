@@ -1,0 +1,28 @@
+# Claims about numpy's reductions. Over an empty array each returns nan
+# with a RuntimeWarning, which the `is_defined` rows exclude.
+compendium: numpy
+versions: ">=1.24,<3"
+
+numpy.mean:
+  intent: "Arithmetic mean; the mean of an empty array is nan with a RuntimeWarning, never raises."
+  claims:
+    - name: is_defined
+      statement: "dim(a) >= 1"
+
+numpy.std:
+  intent: "Standard deviation; the standard deviation of an empty array is nan with a RuntimeWarning."
+  claims:
+    - name: is_defined
+      statement: "dim(a) >= 1"
+
+numpy.var:
+  intent: "Variance; the variance of an empty array is nan with a RuntimeWarning."
+  claims:
+    - name: is_defined
+      statement: "dim(a) >= 1"
+
+numpy.average:
+  intent: "Weighted average; without weights an empty array returns nan with a RuntimeWarning, like mean. Weights that sum to zero raise ZeroDivisionError."
+  claims:
+    - name: is_defined
+      statement: "dim(a) >= 1"

@@ -1161,8 +1161,8 @@ _GITATTRIBUTES_BLOCK = (
 )
 _MATHEMA_GITIGNORE = (
     "# Regenerated from the code or local-only, so not committed. The\n"
-    "# verified records, meta (locks/policy), compendium and badges are the\n"
-    "# evidence and config, and ARE committed.\n"
+    "# verified records, meta (locks/policy) and badges are the evidence\n"
+    "# and config, and ARE committed.\n"
     "/declared/\n"
     "/issues/\n"
 )
@@ -2510,13 +2510,13 @@ def cmd_badges(args) -> int:
 
 
 def cmd_compendium(args) -> int:
-    """`mathema compendium export <library>`: write a partial compendium
-    SKELETON for <library> from this project's verified claims, verified
-    bound claims become `claims`, verified `raises(...)` become
-    `raises_when`, and AST-detected nan/inf returns become `nan_when`;
-    `limitations` are stubbed as TODOs. The result is declared until a
-    consumer verifies or trusts it, so review and complete it before
-    shipping (curate limitations, confirm the AST-guessed nan regions)."""
+    """`mathema compendium export <library>`: write the proven and held
+    claims this project's verified store holds about <library>'s
+    functions as a compendium claims file (`compendium: <library>`,
+    `versions: ">=<installed major.minor>"`), by default to
+    `claims/<library>.claims.yaml` under the root. Each row carries the
+    verdict it reached as its claimed level; a consumer verifies or
+    accepts it before resting a claim on it."""
     import os
 
     from .compendium.export import write_compendium
@@ -2528,10 +2528,8 @@ def cmd_compendium(args) -> int:
     if not any(k.split(".")[0] == args.library for k in load_verified(root)):
         raise TargetError(f"no verified records for library "
                           f"{args.library!r} under {root}; nothing to export")
-    path = write_compendium(args.library, root=root, out_dir=args.out)
-    print(f"wrote compendium skeleton for {args.library!r} to {path}")
-    print("(a partial skeleton: complete the TODOs, confirm nan_when, and "
-          "verify or trust it downstream, it is declared until then)")
+    path = write_compendium(args.library, root=root, out=args.out)
+    print(f"wrote the {args.library!r} compendium claims file to {path}")
     return 0
 
 
@@ -2704,17 +2702,20 @@ def main(argv: list[str] | None = None) -> int:
                          "--root, or pass an explicit DIR")
     pb.set_defaults(fn=cmd_badges)
 
-    pcomp = sub.add_parser("compendium", help="export a partial compendium "
-                           "skeleton for a library from this project's "
-                           "verified claims")
+    pcomp = sub.add_parser("compendium", help="export this project's "
+                           "verified claims about a library as a "
+                           "compendium claims file")
     pcomp.add_argument("action", choices=["export"],
-                       help="export: write a compendium skeleton")
+                       help="export: write the library's proven and held "
+                            "claims as a claims file with compendium: and "
+                            "versions:")
     pcomp.add_argument("library", help="the importable package name to export "
                        "verified claims for (e.g. mylib)")
     pcomp.add_argument("--root", default=None,
                        help="project root holding .mathema/verified")
-    pcomp.add_argument("--out", default=None, metavar="DIR",
-                       help="output directory (default compendium/<library>/)")
+    pcomp.add_argument("--out", default=None, metavar="PATH",
+                       help="output file (default "
+                            "claims/<library>.claims.yaml under --root)")
     pcomp.set_defaults(fn=cmd_compendium)
 
     pa = sub.add_parser("audit", help="population report: every function "

@@ -220,24 +220,26 @@ definedness premise excludes it. The `math` module's own partiality
 
 ## The compendium
 
-The registration generalises to curated files: mathema bundles a
-light compendium for `math` and `numpy` (raise and nan regions, known
-limitations, a few bound claims), and a project adds or overrides
-under `.mathema/compendium/*.yaml`. Raise regions register exactly as
-above; nan regions become sampling hazards for callers; and a
-compendium claim may be named as a premise, by bare name or by its
-qualified spelling (`assuming numpy.clip.clip_lower holds`).
+The registration generalises to claims files about libraries: a file
+that declares `compendium: numpy` (and a `versions:` range) holds
+claims whose keys are the library's functions, and mathema bundles such
+files for `math` and `numpy`. A project states its own in any claims
+file (`claims/numpy.claims.yaml`), shadowing the bundled entry per
+function. An `is_defined` row there states the region where the
+function returns a value, so a caller's claim is read against it the
+way it is read against an explicit raise guard, and a compendium claim
+may be named as a premise, by bare name or by its qualified spelling
+(`assuming numpy.clip.clip_lower holds`).
 
-A compendium verdict never enters the evidence chain silently. On
-first reference the row materialises into the verified store at
-`declared` status, the resting claim stays `unknown`, and the note
-names both paths forward: `mathema accept <key> <claim> --as trusted`
-takes the row at the level its curator claims (the conclusion caps
-there, provenance named), while an ordinary `mathema verify`
-re-adjudicates the row against the installed library and the local
-verdict replaces the testimony. An entry whose `versions` range does
-not match the installed package contributes nothing. The wider story,
-including transfer between implementations, is
+A compendium verdict never enters the evidence chain silently: `mathema
+verify` adjudicates the library rows your project calls or rests on
+against the installed library and the premise resolves at the verdict
+recorded there. A row verify cannot settle leaves the resting claim
+`unknown`, with a note naming `mathema accept <key> <claim> --as
+trusted`, which takes the row at the level its curator claims (the
+conclusion caps there, provenance named). A file whose `versions`
+range does not match the installed library contributes nothing. The
+wider story, including transfer between implementations, is
 [Claims transfer](claims-transfer.md).
 
 ## What the record carries

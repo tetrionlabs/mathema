@@ -150,6 +150,18 @@ def _root_name(node: ast.AST) -> str | None:
     return node.id if isinstance(node, ast.Name) else None
 
 
+def _dotted_chain(node: ast.AST) -> str | None:
+    """`a.b.c` for an attribute chain made only of names, else None."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
 class SourceUnavailable(RuntimeError):
     """Raised when `inspect.getsource()` can't retrieve a callable's
     source (builtins, C extensions, functions defined via exec/stdin).
@@ -648,7 +660,10 @@ def _call_groups(fdef: ast.FunctionDef, name: str) -> tuple[dict[str, list[str]]
                     groups["external"].append(f.id)
         elif isinstance(f, ast.Attribute):
             root = _root_name(f.value)
-            label = f"{root}.{f.attr}" if root else f.attr
+            # a plain dotted chain keeps every name (`np.linalg.norm`);
+            # a chain through a call or subscript keeps its root
+            chain = _dotted_chain(f)
+            label = chain or (f"{root}.{f.attr}" if root else f.attr)
             if root in _MATH_MODULES:
                 if label not in groups["math"]:
                     groups["math"].append(label)

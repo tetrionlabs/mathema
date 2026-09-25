@@ -577,14 +577,16 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         # level, provenance meta marks it testimony, and premises
         # resting on it cap at that level, never higher
         meta = target.get("meta") or {}
-        if meta.get("mathema.surface") != "compendium" or verdict != "declared":
+        if meta.get("mathema.surface") != "compendium" \
+                or base not in ("declared", "unknown", "skipped"):
             raise AcceptanceError(
                 f"{claim_name} is {verdict!r}"
                 + ("" if meta.get("mathema.surface") == "compendium"
                    else " and not compendium-sourced")
-                + ": --as trusted applies to an unaccepted compendium "
-                  "row (verdict 'declared'); anything else is either "
-                  "already evidence or needs the ordinary flow")
+                + ": --as trusted applies to a compendium row verify "
+                  "could not settle (verdict declared, unknown or "
+                  "skipped); anything else is either already evidence "
+                  "or needs the ordinary flow")
         claimed = meta.get("mathema.compendium_claimed", "holds")
         plan["accepted"] = {"as": "trusted",
                             "at": datetime.date.today().isoformat(),
@@ -597,7 +599,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         plan["new_verdict"] = claimed
         plan["actions"].append(
             f"trust {claim_name} at its claimed level ({claimed}), on "
-            f"the word of {meta.get('mathema.stub') or 'its compendium entry'}; "
+            f"the word of {meta.get('mathema.compendium') or 'its compendium entry'}; "
             f"`mathema verify` re-adjudicating this key replaces the "
             f"testimony with a local verdict")
         return plan

@@ -8,47 +8,78 @@ claims as a compendium others consume.
 
 ## In: the compendium
 
-The compendium is a curated file of claims ABOUT a library: raise and
-nan regions, known limitations, and bound claims. mathema bundles
-entries for `math` and `numpy` (numpy's ~28 covered functions split by
-hazard category: domain-nan, overflow, division, empty-reductions,
-bounds); a project adds or overrides under `.mathema/compendium/`. Each
-file declares its own `package` and `versions`, and lives either as a
-flat `<package>.yaml` or, for a growing library, in a per-package
-subdirectory `<package>/*.yaml` split by category. An entry applies
-only when the installed package version falls inside its stated range;
-a stale entry contributes nothing, and several version-specific files
-coexist by a `<package>-<version>.yaml` filename suffix.
+A compendium is an ordinary claims file whose keys are a library's
+functions rather than your own, with two file-level fields beside the
+optional `grammar`: `compendium`, naming the library, and `versions`,
+the range of its installed versions the claims apply to (`"*"`,
+`">=X"` or `">=X,<Y"`, and the standard library always counts as
+`"*"`):
+
+```yaml
+compendium: numpy
+versions: ">=1.24,<3"
+
+numpy.sqrt:
+  intent: "Principal square root; a negative input returns nan, never raises."
+  claims:
+    - name: is_defined
+      statement: "x >= 0"
+
+numpy.clip:
+  claims:
+    - name: clip_lower
+      statement: "assuming a_min <= a_max, for a in [-1e6, 1e6], a_min <= f(a, a_min, a_max)"
+```
+
+The parameter names are the library's own (`inspect.signature`, so
+numpy's `clip` takes `a`, `a_min` and `a_max`), and every row is a
+claim like any other, with an `intent:` where the library's behaviour
+needs saying in prose. mathema bundles such files for `math` and
+`numpy` (numpy's 28 covered functions split into scalars, reductions
+and bounds), and a project states its own anywhere its claims files
+already live, `claims/numpy.claims.yaml` for instance, where a key
+shadows the bundled entry for that function. A file applies only when
+the library is importable at a version inside its range; otherwise it
+contributes nothing, which is better than contributing stale facts.
+
+An `is_defined` row with a stated region reads as "returns a value on
+exactly this region", so `numpy.sqrt`'s `x >= 0` says that outside it
+the call has no value, whether the library raises there (`math.sqrt`),
+returns nan (`numpy.sqrt`) or overflows to an infinity. A `raises(f(x),
+Exc)` row is added only where the exception type itself matters.
 
 Consumption paths:
 
-- **Raise regions** register into the partiality machinery, so a
-  claim about a CALLER of a covered function adjudicates against the
-  callee's raising region exactly as it does against `math.sqrt`'s.
-- **nan regions** become sampling hazards: their boundary values join
-  the probe candidates for every caller.
-- **`is_compendium_safe(numpy)`** asserts a function never silently
-  emits a non-finite value (nan/inf) through an unguarded call into a
-  covered library function; the probe samples the hazard boundaries and
-  the empty-sequence case, and falsifies on a nan/inf output.
-- **Claims** may be named as premises: `assuming clip_lower holds`,
-  or qualified, `assuming numpy.clip.clip_lower holds`.
+- Definedness regions become sampling hazards: their boundary values
+  join the probe candidates for every caller, whether it spells the
+  call `numpy.sqrt(x)` or `np.sqrt(x)`.
+- `is_compendium_safe(numpy)` asserts a function never silently emits
+  a non-finite value (nan/inf) through an unguarded call into a covered
+  library function; the probe samples the hazard boundaries and the
+  empty-sequence case, and falsifies on a nan/inf output.
+- Claims may be named as premises: `assuming clip_lower holds`, or
+  qualified, `assuming numpy.clip.clip_lower holds`.
 
-A compendium verdict never enters the evidence chain silently. On
-first reference the row materialises into the verified store at
-`declared` status; the resting claim stays `unknown` and its note
-names both paths forward:
+A compendium row is testimony, and it never enters the evidence chain
+silently. `mathema verify` adjudicates the rows of every library
+function your project calls or rests a premise on against the library
+you have installed, records the local verdict with the row's
+provenance (`compendium:numpy-2.5`), and a premise then resolves at
+that verdict; a project that never calls numpy verifies none of its
+rows, and a row verify cannot settle here is reported rather than
+failing the run. For such a row the resting claim stays `unknown` and
+its note names the other path forward:
 
 ```bash
 mathema accept numpy.clip clip_lower --as trusted
 ```
 
-takes the row at the level its curator claims, and every conclusion
-resting on it caps there, with the provenance
-(`compendium:numpy-2.5/clip_lower`) named in the record. Running
-`mathema verify` instead re-adjudicates the row against the installed
-library, and the local verdict replaces the testimony. Accepting is a
-statement of trust; reverifying removes the need for it.
+takes the row at the level its curator claims (the row's `meta:
+{mathema.compendium_claimed: proven}`, `holds` when it states none),
+and every conclusion resting on it caps there, with the provenance
+(`compendium:numpy-2.5/clip_lower`) named in the record. Accepting is
+a statement of trust, which a later verify that does settle the row
+replaces with the local verdict.
 
 ### Guarding a numpy hazard, and superseding the finding
 
@@ -85,23 +116,24 @@ A library author who has run `mathema verify` on their own package can
 publish that evidence as a compendium others consume:
 
 ```bash
-mathema compendium export mylib --out compendium/mylib/
+mathema compendium export mylib
 ```
 
-reads the verified store, filters to `mylib`'s functions, and writes a
-partial SKELETON: verified bound claims become `claims`, verified
-`raises(...)` contracts become `raises_when`, and any nan/inf a
-function returns through a recognisable guard (`if ...: return
-float('nan')`) becomes `nan_when`. What cannot be read from positive
-claims, the prose limitations and the nan regions no guard spells out,
-is left as an explicit `TODO`, and the header says the file is a
-skeleton to complete. The filename carries the installed version as a
-suffix so several version-specific packs coexist.
+reads the verified store, keeps the proven and held rows of `mylib`'s
+functions (the built-in battery and the other rows mathema generates
+for every function stay behind), and writes them as a claims file in
+the shape above, `compendium: mylib` and `versions: ">=<installed
+major.minor>"`, by default to `claims/mylib.claims.yaml` under the
+project root (`--out PATH` puts it elsewhere). Each row carries the
+verdict it reached as its claimed level, `meta:
+{mathema.compendium_claimed: holds}`, so the file a downstream project
+drops into its own `claims/` directory is read exactly like a bundled
+one.
 
-This is the same rule as the compendium consumption side, run in
-reverse: the export moves rows from one project's VERIFIED layer into
-another's DECLARED layer. The downstream consumer still has to verify
-or trust them; nothing is promoted to proof by being published.
+This is the consumption side run in reverse: the export moves rows from
+one project's verified layer into another's declared layer, and the
+downstream consumer still verifies or trusts them, since nothing is
+promoted to proof by being published.
 
 ## Across: equivalence, and other languages
 

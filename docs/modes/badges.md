@@ -113,13 +113,14 @@ A few consequences worth knowing:
   falsified companion credits nothing: it records one relation the float
   code breaks, not the function's stability.
 - **A black-box dependency lowers clarity, and caps it.** When a function
-  calls a library that has a [compendium](../claims-transfer.md), mathema
-  has a model of where that call can fail, and `is_compendium_safe` can
-  clear it. When it calls a library with NO compendium, there is no model
-  of where it fails, and no claim you can write will settle it. That
-  uncertainty is irreducible, so such a function cannot reach 100 until a
-  compendium covers the library. Writing a compendium stub is the way to
-  lift the ceiling.
+  calls a library a [compendium](../claims-transfer.md) claims file
+  covers, mathema has a model of where that call can fail, and
+  `is_compendium_safe` can clear it. When it calls a library with NO
+  compendium, there is no model of where it fails, and no claim you can
+  write will settle it. That uncertainty is irreducible, so such a
+  function cannot reach 100 until a compendium covers the library.
+  Writing a claims file with `compendium: <library>` is the way to lift
+  the ceiling.
 - **No claims is a low floor, not always zero.** A function nobody has
   verified is scored only on what its code visibly shows: a plainly pure,
   total, hazard-free helper reads low but not zero (it is nearly

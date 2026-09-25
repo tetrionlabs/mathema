@@ -321,7 +321,7 @@ store: a `.gitattributes` marking `.mathema/verified/**/*.yaml`
 drops out of the repository's language stats, while staying expandable
 when you do want to read it), and a `.mathema/.gitignore` that tracks the
 durable evidence and required artifacts (`verified/`, `meta/`,
-`compendium/`, `badges/`) while ignoring regenerated state (`declared/`,
+`badges/`) while ignoring regenerated state (`declared/`,
 `issues/`). It is additive and idempotent, so running it on an existing
 project only fills in what is missing.
 
@@ -352,13 +352,14 @@ acceptance.
 
 ## `--as trusted`
 
-A compendium row (curated knowledge about a library, materialised
-into the store at `declared` status when a premise first references
-it) accepted at the level its curator claims. The row's verdict
-becomes that level, the acceptance records the source
+A compendium row (a claim about a library's function, from a claims
+file that declares `compendium:`) that `mathema verify` could not
+settle against the installed library, recorded `unknown` or `skipped`,
+accepted at the level its curator claims (its `meta:
+{mathema.compendium_claimed: ...}`, `holds` when it states none). The
+row's verdict becomes that level, the acceptance records the source
 (`compendium:numpy-2.5`), and every conclusion resting on the row
-caps there. The alternative needs no verb at all: `mathema verify`
-re-adjudicates the row against the installed library, and the local
-verdict replaces the testimony. See
+caps there. A row verify did settle needs no verb at all, since a
+premise resting on it already resolves at the local verdict. See
 [Claims transfer](../claims-transfer.md).
 

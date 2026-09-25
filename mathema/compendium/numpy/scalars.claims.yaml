@@ -1,0 +1,91 @@
+# Claims about numpy's scalar functions. An `is_defined` row states the
+# region where the function returns a finite value; outside it numpy
+# returns nan or an infinity with a RuntimeWarning rather than raising,
+# which is no value all the same. Functions without a single-relation
+# region carry what is known about them as intent.
+compendium: numpy
+versions: ">=1.24,<3"
+
+numpy.sqrt:
+  intent: "Principal square root; a negative input returns nan with a RuntimeWarning, never raises."
+  claims:
+    - name: is_defined
+      statement: "x >= 0"
+
+numpy.log:
+  intent: "Natural logarithm; x = 0 returns -inf and x < 0 returns nan, never raises."
+  claims:
+    - name: is_defined
+      statement: "x > 0"
+
+numpy.log2:
+  intent: "Base-2 logarithm; x = 0 returns -inf and x < 0 returns nan."
+  claims:
+    - name: is_defined
+      statement: "x > 0"
+
+numpy.log10:
+  intent: "Base-10 logarithm; x = 0 returns -inf and x < 0 returns nan."
+  claims:
+    - name: is_defined
+      statement: "x > 0"
+
+numpy.log1p:
+  intent: "log(1 + x); x = -1 returns -inf and x < -1 returns nan."
+  claims:
+    - name: is_defined
+      statement: "x > -1"
+
+numpy.arcsin:
+  intent: "Inverse sine; input outside [-1, 1] returns nan with a RuntimeWarning."
+  claims:
+    - name: is_defined
+      statement: "-1 <= x <= 1"
+
+numpy.arccos:
+  intent: "Inverse cosine; input outside [-1, 1] returns nan with a RuntimeWarning."
+  claims:
+    - name: is_defined
+      statement: "-1 <= x <= 1"
+
+numpy.arccosh:
+  intent: "Inverse hyperbolic cosine; x < 1 returns nan with a RuntimeWarning."
+  claims:
+    - name: is_defined
+      statement: "x >= 1"
+
+numpy.arctanh:
+  intent: "Inverse hyperbolic tangent; abs(x) = 1 returns an infinity and abs(x) > 1 returns nan."
+  claims:
+    - name: is_defined
+      statement: "-1 < x < 1"
+
+numpy.exp:
+  intent: "Exponential; overflows to inf above roughly x = 709.78, with a RuntimeWarning."
+
+numpy.exp2:
+  intent: "2 to the power x; overflows to inf above roughly x = 1024."
+
+numpy.expm1:
+  intent: "exp(x) - 1; overflows to inf for large x."
+
+numpy.cosh:
+  intent: "Hyperbolic cosine; overflows to inf for abs(x) above roughly 710."
+
+numpy.sinh:
+  intent: "Hyperbolic sine; overflows to an infinity for large abs(x)."
+
+numpy.power:
+  intent: "x1 to the power x2; a negative base with a non-integer exponent returns nan, and large results overflow to an infinity."
+
+numpy.float_power:
+  intent: "power computed in floating point; the same nan and overflow behaviour as power."
+
+numpy.divide:
+  intent: "Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises."
+
+numpy.true_divide:
+  intent: "Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises."
+
+numpy.reciprocal:
+  intent: "1 / x; the reciprocal of 0 returns inf, never raises, and an integer input's reciprocal truncates."

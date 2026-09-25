@@ -169,7 +169,7 @@ _SOURCE_VOCAB = {"mathema": "suggested", "docstring": "docstring",
                  # the Conjecture default: a claim passed at the call
                  # site, mapped deliberately rather than falling through
                  "user": "ad_hoc",
-                 # a compendium row materialised into the store
+                 # a row from a compendium claims file
                  "compendium": "compendium"}
 
 

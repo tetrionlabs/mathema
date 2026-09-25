@@ -30,21 +30,27 @@ def test_the_numpy_compendium_covers_the_expected_surface():
     from mathema.compendium import compendium_functions
     numpy = {k: v for k, v in compendium_functions().items()
              if k.startswith("numpy.")}
+
+    def defined_on(key):
+        return [c["statement"] for c in numpy[key].get("claims") or []
+                if c["name"] == "is_defined"]
+
     # expanded coverage across the hazard categories (domain nan,
     # overflow, division, reductions, bounds)
     assert len(numpy) >= 25
-    # domain-nan functions carry precise single-variable nan_when regions
-    assert numpy["numpy.sqrt"].nan_when == ("x < 0",)
-    assert numpy["numpy.arcsin"].nan_when == ("abs(x) > 1",)
-    assert numpy["numpy.log1p"].nan_when == ("x < -1",)
-    assert numpy["numpy.arccosh"].nan_when == ("x < 1",)
+    # domain-nan functions state the region where they return a value
+    assert defined_on("numpy.sqrt") == ["x >= 0"]
+    assert defined_on("numpy.arcsin") == ["-1 <= x <= 1"]
+    assert defined_on("numpy.log1p") == ["x > -1"]
+    assert defined_on("numpy.arccosh") == ["x >= 1"]
+    assert defined_on("numpy.arctanh") == ["-1 < x < 1"]
     # overflow / division functions are covered (caught empirically)
     assert {"numpy.exp", "numpy.divide", "numpy.reciprocal"} <= set(numpy)
-    # reductions carry the empty-input region
-    assert numpy["numpy.mean"].nan_when == ("len(a) == 0",)
+    # reductions are defined on a non-empty array only
+    assert defined_on("numpy.mean") == ["dim(a) >= 1"]
     # bounds carry claims, not hazards
-    assert len(numpy["numpy.clip"].claims) == 2
-    assert numpy["numpy.tanh"].claims
+    assert len(numpy["numpy.clip"]["claims"]) == 2
+    assert numpy["numpy.tanh"]["claims"]
 
 
 def test_unguarded_numpy_nan_falsifies_with_a_finite_witness(tmp_path):
