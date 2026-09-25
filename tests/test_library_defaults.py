@@ -164,3 +164,18 @@ def test_a_numeric_pin_of_a_parameter_the_function_lacks_is_misspecified():
                   "let axis be 0, for a in [0, 1], f(a, 0, 1) >= 0")
     assert p.verdict == "skipped:misspecified", p.note
     assert "axis is not a parameter of numpy.clip" in p.note
+
+
+def test_a_literal_pin_on_a_project_function_is_passed(tmp_path, monkeypatch):
+    (tmp_path / "pinproj.py").write_text(textwrap.dedent('''
+        def g(x: float, strict: bool = False) -> float:
+            """x, or its magnitude when strict."""
+            return abs(x) if strict else x
+    '''))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    import importlib
+    g = importlib.import_module("pinproj").g
+    pinned = _declared(g, "let strict be True, for x in [-1, 1], f(x) >= 0")
+    assert pinned.verdict == "holds", pinned.note
+    assert pinned.meta["mathema.defaults"] == {"strict": "True (pinned)"}
+    assert _declared(g, "for x in [-1, 1], f(x) >= 0").verdict == "falsified"

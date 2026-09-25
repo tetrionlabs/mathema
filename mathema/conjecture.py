@@ -2197,8 +2197,9 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
         that default; `pins` maps each parameter the claim pins (`let
         axis be 0`, `let keepdims be True`) to its value; `problem`
         names a pinned parameter the function does not have. For any
-        other function, `({}, {}, None)`: its defaulted parameters are
-        sampled like the rest.
+        other function nothing is kept (its defaulted parameters are
+        sampled like the rest) and only a `None`/`True`/`False` pin is
+        passed; a number pin there stays a single-point bound.
 
     Notes:
         A number spelled `let p be 2` is a single-point bound, so it
@@ -2211,15 +2212,24 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
 
     from .compendium import library_key_of
     key = library_key_of(fn)
-    if key is None:
+    pins = dict(getattr(cj, "param_pins", None) or {})
+    if key is None and not pins:
         return {}, {}, None
     try:
         sig = inspect.signature(fn).parameters
     except (TypeError, ValueError):
         return {}, {}, None
+    if key is None:
+        # any other function: a literal pin is passed, and every
+        # defaulted parameter is sampled
+        missing = sorted(p for p in pins if p not in sig)
+        name = getattr(fn, "__qualname__", None) or "the function"
+        return {}, {p: v for p, v in pins.items() if p in sig}, (
+            f"{', '.join(missing)} {'is not a parameter' if len(missing) == 1 else 'are not parameters'} "
+            f"of {name}, so the pin names nothing to pass"
+            if missing else None)
     text = " ".join(str(t) for t in (cj.lhs, cj.rhs, cj.assuming) if t)
     named = set(re.findall(r"\b[A-Za-z_]\w*\b", text))
-    pins = dict(getattr(cj, "param_pins", None) or {})
     for name in sorted(cj.free_vars or ()):
         point = _single_point((cj.domain or {}).get(name))
         if point is None or (name not in sig and name in named):
