@@ -57,7 +57,17 @@ def test_an_installed_library_is_ranged_from_its_installed_version(tmp_path):
     _seed_verified(tmp_path, "numpy.tanh", [
         {"name": "tanh_bounded",
          "statement": "for x in [-1, 1], -1 <= f(x) <= 1",
-         "verdict": "holds"}])
+         "verdict": "holds"}], intent="tanh(x, /, out=None) Hyperbolic "
+                                      "tangent.")
+    from mathema.spec import load_verified, verified_dir, write_yaml
+    entry = load_verified(str(tmp_path))["numpy.tanh"]["entry"]
+    entry["identity"] = {"source_available": False}
+    write_yaml(os.path.join(verified_dir(str(tmp_path)), "numpy.tanh.yaml"),
+               {"numpy.tanh": entry})
+    # a source-less function's recorded intent is its docstring's
+    # first line, which is not a statement about it worth exporting
+    assert "intent" not in export_compendium("numpy", str(tmp_path))[
+        "numpy.tanh"]
     major_minor = ".".join(numpy.__version__.split(".")[:2])
     assert export_compendium("numpy", str(tmp_path))["versions"] == \
         f">={major_minor}"
