@@ -49,7 +49,8 @@ from ._scan import _split_commas, blank_strings
 from .domain import DuplicateBinding
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
                       _probe_density, _sampling_shorthand, _synth,
-                      _synth_dict, complex_is_a_raise, holds_nan,
+                      _synth_dict, complex_is_a_raise, holds_inf,
+                      holds_nan,
                       is_complex_value, ordering_shortfall,
                       relation_holds_elementwise)
 from .records import _EXC_TYPES, Probe, classify_verdict, statement_text
@@ -4798,6 +4799,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                if c not in pinned]
     call_raised = [None]   # the LABEL of the callee that raised, or None
     call_nan = [None]      # the LABEL of the first callee to return a NaN
+    # the LABEL and sign of the first callee to return an infinity for
+    # finite arguments
+    call_inf: list = [None, 0]
 
     def _tagged(callee, label):
         # a raise from the function under test (or a bound function) is
@@ -4829,13 +4833,19 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 raise ComplexResult(label, value)
             if call_nan[0] is None and holds_nan(value):
                 call_nan[0] = label
+            if call_inf[0] is None:
+                sign = holds_inf(value)
+                if sign and not any(
+                        is_missing(v) or holds_nan(v) or holds_inf(v)
+                        for v in (*a, *k.values())):
+                    call_inf[0], call_inf[1] = label, sign
             return value
         return _wrapped
 
     fn_tagged = _tagged(fn, "f")
     bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
     for trial in range(budget + len(pinned)):
-        call_raised[0] = call_nan[0] = None
+        call_raised[0] = call_nan[0] = call_inf[0] = None
         trial_sizes: dict = (
             _draw_trial_sizes(resolver, shape_lo, shape_hi, shape_groups, rng)
             if plan_dims and trial >= len(pinned) else {})
@@ -5124,6 +5134,16 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   if call_nan[0] is not None else
                   f"{_fmt(tuple(args))}: {lv!r} vs {rv!r}, and a nan is "
                   f"no value")
+            break
+        if call_inf[0] is not None:
+            # an infinity a callee returned for finite arguments is an
+            # overflow or a pole, the computation not producing a value
+            # (the case where `math` raises): every value relation fails
+            # at this point, whichever sign it has
+            checked += 1
+            cx = (f"{_fmt(tuple(args))}: {call_inf[0]} returned "
+                  f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "
+                  f"infinity for a finite input is no value")
             break
         if is_missing(lv) or is_missing(rv):
             # a domain that includes missing by default (see

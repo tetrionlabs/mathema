@@ -499,6 +499,37 @@ def holds_nan(value) -> bool:
     return False
 
 
+def holds_inf(value) -> int:
+    """Intent:
+        The sign of an infinity a value is or contains: 1 for `inf`, -1
+        for `-inf` (when both occur, the first found), 0 for none. Reads
+        Python and numpy floats, numpy arrays, and nested lists and
+        tuples; a value that is not numeric holds no infinity.
+    """
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, float):
+        return (1 if value > 0 else -1) if value in (_INF, -_INF) else 0
+    if isinstance(value, (list, tuple)):
+        for v in value:
+            sign = holds_inf(v)
+            if sign:
+                return sign
+        return 0
+    if hasattr(value, "dtype") and hasattr(value, "shape"):
+        try:
+            import numpy
+            arr = numpy.asarray(value, dtype=float)
+            found = arr[numpy.isinf(arr)]
+        except (TypeError, ValueError, ImportError):
+            return 0
+        return (1 if found.flat[0] > 0 else -1) if found.size else 0
+    return 0
+
+
+_INF = float("inf")
+
+
 def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                                exact_inequality: bool = False,
                                rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
