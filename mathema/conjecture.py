@@ -2593,7 +2593,8 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             # the opt-out adjudicates exactly as a derive claim; only the
             # companion it would spawn is withheld
             cj = _dc_replace(cj, route="derive")
-        if cj.links:
+        if cj.links and not (cj.name.split("[", 1)[0] == "is_defined"
+                             and facts.tree is None):
             # a chained comparison is the conjunction of its links: run
             # each link through the full ordinary adjudication (same
             # domain/funcs/assuming/route) and fold, so no proof path is
@@ -2933,7 +2934,8 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     """
     def corroboration(probe) -> dict:
         return {k: v for k, v in (probe.meta or {}).items()
-                if k.startswith("mathema.corroboration")}
+                if k.startswith("mathema.corroboration")
+                or k == "mathema.witness_executed"}
 
     for probe, label in zip(probes, labels):
         if probe.verdict == "falsified":
@@ -3902,6 +3904,16 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                          "the positive claim is falsified, and that "
                                          "evidence proves the negation: "
                                          + (family_proof.counterexample or family_proof.sketch or ""))
+    if (family_proof is None and family_derive is not None
+            and cj.name.split("[", 1)[0] == "is_defined"):
+        # no source to compute a definedness region from: the claim is
+        # adjudicated by execution in the probe stage
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; the target has no Python source, so there is "
+                 f"no definedness region to compare",
+            meta={"mathema.derive_status": "unsupported"})
+        return None
     if family_proof is not None and family_proof.status == "proven":
         return Probe(cj.name, statement, "proven",
                      sketch=family_proof.sketch, note=note,
@@ -4535,13 +4547,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     f"approximate infinity as the pseudo-infinity "
                     f"{pinf[1]:g} ({', '.join(approximated)}); the "
                     f"symbolic proof region keeps the declared oo")
-    if cj.name.split("[", 1)[0] == "is_defined":
+    is_defined_claim = cj.name.split("[", 1)[0] == "is_defined"
+    if is_defined_claim and facts.tree is not None:
         # region equivalence has no empirical reading: sampling the
         # stated relation as a bare fact answers the wrong question
         return Probe(cj.name, statement, "skipped", route=None,
                      note=f"{note}; is_defined adjudicates by region "
                           f"equivalence on the derive route only")
-    if cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
+    if not is_defined_claim and cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
                                       "raises"})
                            | (routes.examine_predicates()
                               & routes.route_capabilities("probe"))):
@@ -4575,18 +4588,22 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         setup = sampling()
         algo_result = algo_route(fn, facts, cj, cj_domain, setup.rng, setup.budget)
         if algo_result is not None:
-            if len(algo_result) == 4:
-                verdict, checked, cx, established = algo_result
-            else:
-                verdict, checked, cx = algo_result
-                established = None
+            # (verdict, checked, cx), optionally with the established
+            # sketch, and then the family's own record meta, whose
+            # `mathema.sampled` text (what was sampled) joins the note
+            verdict, checked, cx = algo_result[:3]
+            established = algo_result[3] if len(algo_result) > 3 else None
+            algo_meta = dict(algo_result[4]) if len(algo_result) > 4 else {}
+            if algo_meta.get("mathema.sampled"):
+                note = f"{note}; {algo_meta['mathema.sampled']}".lstrip("; ")
+            algo_meta = algo_meta or None
             if verdict == "proven":
                 # an ESTABLISHED empirical examination: the guard only
                 # lets this through with the exhaustive-coverage
                 # sketch, so the surety is real however it was reached
                 return Probe(cj.name, statement, "proven", n=checked,
                              route=probe_route, sketch=established,
-                             note=note)
+                             note=note, meta=algo_meta)
             if verdict == "falsified":
                 # two safety families whose falsification is BY
                 # CONSTRUCTION about the implementation stratum:
@@ -4602,12 +4619,20 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                              stratum=({"blame": "implementation",
                                        "cause": family_cause,
                                        "witness": cx}
-                                      if family_cause else None))
+                                      if family_cause else None),
+                             meta=algo_meta)
             if verdict == "holds":
                 return Probe(cj.name, statement, "holds", n=checked,
-                             route=probe_route, note=note)
+                             route=probe_route, note=note, meta=algo_meta)
             return Probe(cj.name, statement, "skipped", route=probe_route,
                          note=note + f"; {cx or 'no evaluable inputs'}")
+    if is_defined_claim:
+        # a target with no source has no region to compare; its only
+        # reading is the executed one above, which could not sample
+        return Probe(cj.name, statement, "unknown", route=None,
+                     note=f"{note}; is_defined on a target with no Python "
+                          f"source adjudicates by execution, and no point "
+                          f"of this claim could be sampled")
     if cj.relation in routes.examine_predicates():
         # only reachable when the registered family declined, the
         # generic sampling loop below has no meaning for a
