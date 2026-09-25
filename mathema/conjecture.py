@@ -2962,11 +2962,22 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                      note=f"every {unit} of the {what} proven")
     if all(v in ("proven", "holds") for v in verdicts):
         n = min((p.n for p in probes if p.n), default=0)
+        # an engine-bug flag on any part (a derive disproof nothing
+        # reproduced) stays on the whole
+        flagged = {k: v for p in probes for k, v in corroboration(p).items()
+                   if k.startswith("mathema.corroboration")}
+        uncorroborated = [lbl for p, lbl in zip(probes, labels)
+                          if "UNCORROBORATED" in (p.note or "")]
+        note = f"every {unit} of the {what} holds"
+        if uncorroborated:
+            note += (f"; derive reported an UNCORROBORATED disproof at "
+                     f"{', '.join(uncorroborated)} (probable engine bug, "
+                     f"worth reporting)")
         return Probe(name, statement, "holds", n=n,
                      route=_conjunction_route(
                          [p.route for p in probes if p.verdict == "holds"],
                          "probe"),
-                     note=f"every {unit} of the {what} holds")
+                     note=note, meta=flagged or None)
     weakest = next(p for p, v in zip(probes, verdicts)
                    if v not in ("proven", "holds"))
     label = labels[probes.index(weakest)]
@@ -3946,15 +3957,17 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                   **_provenance_meta(family_proof)})
         return None
     if family_proof is not None and cj.name.split("[", 1)[0] == "is_defined":
-        # region equivalence is the ONLY reading of an is_defined
-        # claim: an undecided family verdict is final, the ordinary
-        # prover and the probe sampler would answer a different
-        # question (is the stated relation TRUE?), not whether it
-        # names the definedness region
-        return Probe(cj.name, statement, "unknown", route=cj.route,
-                     sketch=family_proof.sketch,
-                     note=f"{note}; region equivalence undecided",
-                     meta=_provenance_meta(family_proof))
+        # region equivalence undecided: the claim is adjudicated by
+        # execution in the probe stage (the family's own probe half,
+        # which reads the region, never the ordinary prover or sampler,
+        # which would ask whether the stated relation is TRUE)
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            sketch=family_proof.sketch,
+            note=f"{note}; region equivalence undecided",
+            meta={"mathema.derive_status": "undecided",
+                  **_provenance_meta(family_proof)})
+        return None
     # a matrix-algebra relation claim (det / transpose / matmul / trace
     # / inverse over declared matrix parameters) is decided by sympy's
     # matrix algebra, not by lifting f's body, so it is attempted before
@@ -4555,12 +4568,6 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     f"{pinf[1]:g} ({', '.join(approximated)}); the "
                     f"symbolic proof region keeps the declared oo")
     is_defined_claim = cj.name.split("[", 1)[0] == "is_defined"
-    if is_defined_claim and facts.tree is not None:
-        # region equivalence has no empirical reading: sampling the
-        # stated relation as a bare fact answers the wrong question
-        return Probe(cj.name, statement, "skipped", route=None,
-                     note=f"{note}; is_defined adjudicates by region "
-                          f"equivalence on the derive route only")
     if not is_defined_claim and cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
                                       "raises"})
                            | (routes.examine_predicates()
@@ -4634,12 +4641,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             return Probe(cj.name, statement, "skipped", route=probe_route,
                          note=note + f"; {cx or 'no evaluable inputs'}")
     if is_defined_claim:
-        # a target with no source has no region to compare; its only
-        # reading is the executed one above, which could not sample
+        # the executed reading above is the last one, and it could
+        # not sample a point of this claim
         return Probe(cj.name, statement, "unknown", route=None,
-                     note=f"{note}; is_defined on a target with no Python "
-                          f"source adjudicates by execution, and no point "
-                          f"of this claim could be sampled")
+                     note=f"{note}; is_defined adjudicates by execution "
+                          f"when region equivalence does not decide, and "
+                          f"no point of this claim could be sampled")
     if cj.relation in routes.examine_predicates():
         # only reachable when the registered family declined, the
         # generic sampling loop below has no meaning for a

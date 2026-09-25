@@ -2190,14 +2190,17 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
                       trials: int):
     """Intent:
-        Empirical half of `is_defined` for a target with no Python
-        source. A call has a value when it returns a finite result; a
-        raise or a non-finite result (nan, inf) is no value. The bare
-        claim (`is_defined(f)`, per parameter) asks for a value at
-        every sampled point of the domain. A stated region asks for a
-        value at every sampled point inside it and no value at every
-        sampled point outside it. The first point that disagrees is
-        the executed witness.
+        Empirical half of `is_defined`, for any target whose region
+        equivalence (the derive half) declines or does not decide. A
+        call has a value when it returns a finite result; a raise or a
+        non-finite result (nan, inf) is no value. The bare claim
+        (`is_defined(f)`, per parameter) asks for a value at every
+        sampled point of the domain. A stated region asks for a value
+        at every sampled point inside it and no value at every sampled
+        point outside it. An indexed row (`is_defined[2]`) states one
+        conjunct of the region, so it asks only for no value outside
+        it: inside, the other conjuncts decide. The first point that
+        disagrees is the executed witness.
 
     Notes:
         Points come from the domain's corners, then points around the
@@ -2207,11 +2210,8 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
         or outside the domain, is not a trial. Returns the
         `(verdict, checked, counterexample, established, meta)` shape,
         with the counts inside and outside the region in `meta`, or
-        None when the target has source (the derive half's region
-        equivalence decides then) or a link is not a comparison.
+        None when a link is not a comparison.
     """
-    if facts.tree is not None:
-        return None
     from .conjecture import _SAFE_FUNCS, MATH_CONSTANTS, _validate
     from .domain import domain_contains, is_missing
     from .gates import _fmt_point
@@ -2221,6 +2221,7 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if not params:
         return None
     bare = cj.relation == "is_defined"
+    conjunct = not bare and "[" in cj.name
     links = [] if bare else (list(cj.links)
                              or [(cj.lhs, cj.relation, cj.rhs)])
     compiled = []
@@ -2233,18 +2234,38 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except Exception:
             return None
         compiled.append((code_l, rel, code_r))
+    # the claim's own premise: a point outside it is not a trial
+    from .conjecture import _parse_assuming_relation
+    premise = (cj.assuming or "").strip()
+    if premise.startswith("assuming"):
+        premise = premise[len("assuming"):].strip()
+    assumed = []
+    for part in filter(None, (c.strip() for c in premise.split(" and "))):
+        rel_parts = _parse_assuming_relation(part)
+        if rel_parts is None or rel_parts.relation not in _COMPARISONS:
+            return None
+        try:
+            assumed.append((
+                _validate(rel_parts.lhs, set(params), frozenset())[0],
+                rel_parts.relation,
+                _validate(rel_parts.rhs, set(params), frozenset())[0]))
+        except Exception:
+            return None
     compare = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
                "<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
                ">": lambda a, b: a > b, ">=": lambda a, b: a >= b}
 
-    def inside(point: dict) -> "bool | None":
+    def satisfies(relations: list, point: dict) -> "bool | None":
         env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **point}
         try:
             return all(bool(compare[rel](eval(cl, {"__builtins__": {}}, env),
                                          eval(cr, {"__builtins__": {}}, env)))
-                       for cl, rel, cr in compiled)
+                       for cl, rel, cr in relations)
         except Exception:
             return None
+
+    def inside(point: dict) -> "bool | None":
+        return satisfies(compiled, point)
 
     def admitted(point: dict) -> bool:
         for p, v in point.items():
@@ -2253,6 +2274,13 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
             bound = (domain or {}).get(p)
             if bound is None:
                 continue
+            dims = getattr(bound, "dims", None)
+            if dims:
+                # a space binding (`R^n`, `R^(n,n)`): a non-empty array
+                # with that many axes
+                if not _has_axes(v, len(dims)):
+                    return False
+                continue
             try:
                 if not domain_contains(v, bound):
                     return False
@@ -2260,9 +2288,29 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 return False
         return True
 
+    shapes = _region_shapes(links, params, domain)
+
+    def draw_one(p: str):
+        from .matrices import _rand
+        if shapes.get(p) == "matrix":
+            return _rand(rng.randint(2, 5), rng)
+        if shapes.get(p) == "sequence":
+            return [rng.uniform(-10.0, 10.0)
+                    for _ in range(rng.randint(1, 6))]
+        return _synth(facts.param_kinds.get(p, "unknown"), rng,
+                      (domain or {}).get(p))
+
     def draw() -> dict:
-        return {p: _synth(facts.param_kinds.get(p, "unknown"), rng,
-                          (domain or {}).get(p)) for p in params}
+        return {p: draw_one(p) for p in params}
+
+    def shape_boundaries():
+        # the edge of a shape region: a singular matrix sits on
+        # `det(a) != 0`'s boundary, the empty sequence below `dim(a) >= 1`
+        from .matrices import _synth_singular
+        for p, shape in sorted(shapes.items()):
+            for _ in range(3):
+                yield {**draw(), p: (_synth_singular(rng.randint(2, 5), rng)
+                                     if shape == "matrix" else [])}
 
     def corners():
         for p in params:
@@ -2310,6 +2358,7 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
     def candidates():
         yield from corners()
         if not bare:
+            yield from shape_boundaries()
             yield from near_boundaries()
         for _ in range(trials):
             yield draw()
@@ -2318,7 +2367,8 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
     seen: set = set()
     for point in candidates():
         key = tuple(repr(point[p]) for p in params)
-        if key in seen or not admitted(point):
+        if key in seen or not admitted(point) \
+                or (assumed and not satisfies(assumed, point)):
             continue
         seen.add(key)
         where = True if bare else inside(point)
@@ -2334,7 +2384,7 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
             what = f"returned {_fmt_value(out)}"
         checked += 1
         n_in, n_out = n_in + bool(where), n_out + (not where)
-        if has_value == where:
+        if has_value == where or (conjunct and where):
             continue
         at = _fmt_point(point, params)
         if bare:
@@ -2349,9 +2399,44 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return "skipped", 0, None
     sampled = (f"{checked} executed points in the domain, each returning "
                f"a finite value" if bare else
+               f"{n_out} executed points outside the stated conjunct "
+               f"returned no value and {n_in} were sampled inside it, "
+               f"where the region's other conjuncts decide" if conjunct else
                f"{n_in} executed points inside the stated region returned "
                f"a finite value and {n_out} outside it returned no value")
     return "holds", checked, None, None, {"mathema.sampled": sampled}
+
+
+def _has_axes(value, axes: int) -> bool:
+    """Whether `value` is a non-empty nested list or tuple (or array)
+    `axes` levels deep, with real numbers at the bottom."""
+    if axes == 0:
+        return (isinstance(value, (int, float))
+                and not isinstance(value, bool)) or (
+            hasattr(value, "dtype") and getattr(value, "shape", None) == ())
+    if hasattr(value, "tolist") and hasattr(value, "shape"):
+        value = value.tolist()
+    return (isinstance(value, (list, tuple)) and len(value) >= 1
+            and all(_has_axes(v, axes - 1) for v in value))
+
+
+def _region_shapes(links: list, params: list, domain: dict) -> dict:
+    """Intent:
+        The parameters an `is_defined` region reads as arrays, mapped to
+        `"matrix"` or `"sequence"`: a parameter bound over `R^(n,n)` or
+        read through `det(...)` is a square matrix, one bound over `R^n`
+        or read through `dim(...)` is a sequence.
+    """
+    import re
+    out: dict = {}
+    text = " ".join(f"{lhs} {rhs}" for lhs, _rel, rhs in links)
+    for p in params:
+        dims = getattr((domain or {}).get(p), "dims", None) or ()
+        if len(dims) == 2 or re.search(rf"\bdet\s*\(\s*{p}\s*\)", text):
+            out[p] = "matrix"
+        elif len(dims) == 1 or re.search(rf"\bdim\s*\(\s*{p}\b", text):
+            out[p] = "sequence"
+    return out
 
 
 def _matrix_property(name: str):

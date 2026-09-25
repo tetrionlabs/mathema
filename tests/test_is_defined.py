@@ -7,6 +7,7 @@ guards, per call) and rendered into the statement, never an opaque
 raise regions by construction and gains their negations as algebraic
 assumptions, probe rejects raising samples as outside the quantifier."""
 import math
+import re
 
 from mathema.conjecture import claim, check_conjectures
 from mathema.spec import render_claim_text
@@ -217,10 +218,19 @@ def test_multi_conjunct_region_suggests_and_adjudicates_per_conjunct():
     assert rs[1].verdict == "falsified"
     assert "fresh region" in rs[1].sketch
 
+    # on the probe route the claim is adjudicated by execution: an
+    # indexed row is one conjunct of the region, so every sampled point
+    # outside it has no value, and inside it the other conjunct decides
     (p,) = check_conjectures(two_guards, [
         claim("y >= 0", name="is_defined[2]", route="probe")])
-    assert p.verdict == "skipped"
-    assert "region equivalence" in p.note
+    assert p.verdict == "holds", p.note
+    assert re.search(r"\d+ executed points outside the stated conjunct "
+                     r"returned no value and \d+ were sampled inside it",
+                     p.note)
+    (p,) = check_conjectures(two_guards, [
+        claim("y >= 1", name="is_defined[2]", route="probe")])
+    assert p.verdict == "falsified", p.note
+    assert "a value outside the stated region" in p.counterexample
 
 
 def _guarded(x):
