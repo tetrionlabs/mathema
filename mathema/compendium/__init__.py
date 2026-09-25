@@ -128,13 +128,14 @@ def _display_path(path: str, root: str) -> str:
     return os.path.relpath(path, root)
 
 
-def load_library_claims(root: str = ".") -> dict:
+def load_library_claims(root: "str | None" = ".") -> dict:
     """Intent:
         Every applicable library claim entry, keyed by dotted function
         (`numpy.sqrt`): `{"entry", "compendium", "versions", "source"}`,
         where `entry` is the claims-file entry with its rows stamped as
         compendium testimony, `compendium` the library, `versions` the
         range the file declares, and `source` the file it came from.
+        `root=None` reads the bundled files only.
 
     Notes:
         The bundled files are read first, then the project tree
@@ -149,11 +150,12 @@ def load_library_claims(root: str = ".") -> dict:
     from ..spec import (claims_file_paths, read_claims_file,
                         stamp_library_rows)
     bundled = _bundled_dir()
-    paths = claims_file_paths(bundled) + claims_file_paths(
-        root, exclude=(bundled,))
+    paths = claims_file_paths(bundled)
+    if root is not None:
+        paths += claims_file_paths(root, exclude=(bundled,))
     out: dict = {}
     for path in paths:
-        where = _display_path(path, root)
+        where = _display_path(path, root or ".")
         data = read_claims_file(path, where)
         if not data or "compendium" not in data:
             continue
@@ -496,9 +498,12 @@ def _is_defined_region_texts(entry: dict) -> list:
     return out
 
 
-#: what `install` registered: the root it was installed for, and the
+#: what is registered: the root the library claims were installed for
+#: (`BUNDLED` for the bundled layer alone, None for nothing), and the
 #: `(key, builder)` rows it added to the partiality registry
 _INSTALLED: dict = {"root": None, "rows": []}
+#: the `_INSTALLED` root of the bundled layer alone
+BUNDLED = "<bundled>"
 #: the rows already reported as unbuildable, so each is reported once
 _REPORTED: set = set()
 
@@ -655,15 +660,16 @@ def _builder(params: list, region):
     return build
 
 
-def register_library_claims(root: str = ".") -> list:
+def register_library_claims(root: "str | None" = ".") -> list:
     """Intent:
         Register every applicable library row's region as a partiality
         guard (`load_library_claims`): an `is_defined` row registers
         the complement of its region as `NO_VALUE`, a `raises(f(...),
-        Exc)` row its domain and premise as `Exc`. Idempotent per root:
-        the same root again is a no-op, a different root replaces the
-        rows the previous one registered. Returns the `(key, row name)`
-        pairs registered.
+        Exc)` row its domain and premise as `Exc`. `root=None` registers
+        the bundled files alone. Idempotent per root: the same root
+        again is a no-op, a different root replaces the rows the
+        previous one registered. Returns the `(key, row name)` pairs
+        registered.
 
     Notes:
         A row that reads an array's shape or a matrix (`dim(a) >= 1`,
@@ -674,7 +680,7 @@ def register_library_claims(root: str = ".") -> list:
     import warnings
 
     from ..symbolic._partiality import register_raises_when
-    marker = os.path.abspath(root)
+    marker = BUNDLED if root is None else os.path.abspath(root)
     if _INSTALLED["root"] == marker:
         return list(_INSTALLED.get("names", []))
     uninstall()
@@ -711,11 +717,25 @@ def register_library_claims(root: str = ".") -> list:
 
 def install(root: str = ".") -> None:
     """Register the applicable library claims' automatic facts for
-    `root`: partiality guards (`register_library_claims`) and the
+    `root`, the bundled files with the project's own on top:
+    partiality guards (`register_library_claims`) and the
     boundary-hazard generator. Called by the joins (`verify`,
-    `write_spec`, `mathema check`, the MCP surfaces), never by
-    `check()` itself, which stays IO-free."""
+    `write_spec`, `mathema check`, the MCP surfaces); `check()` itself
+    reads no project file and applies the bundled layer alone
+    (`ensure_bundled`)."""
     register_library_claims(root)
+
+
+def ensure_bundled() -> None:
+    """Intent:
+        Register the bundled library claims when no library claims are
+        registered, so every adjudication knows what mathema ships about
+        `math` and `numpy`; a project layer installed by `install(root)`
+        already contains them and is left as it is. Reads only files
+        inside the mathema package.
+    """
+    if _INSTALLED["root"] is None:
+        register_library_claims(None)
 
 
 def uninstall(root: "str | None" = None) -> None:

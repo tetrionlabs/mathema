@@ -154,3 +154,29 @@ def test_mathema_check_installs_the_library_claims(tmp_path):
     (claim,) = [c for c in row["claims"] if c["name"] == "f_x_f_x_eq_x"]
     assert claim["verdict"] == "falsified", claim
     assert r.returncode == 1
+
+
+def _named(record, name):
+    (p,) = [p for p in record.probes if p.name == name]
+    return p
+
+
+@pytest.mark.needs_full_proof_budget
+def test_check_applies_the_bundled_library_claims_unasked(g):
+    # no install(): the bundled compendium is the engine's own knowledge
+    from mathema import check
+    from mathema.compendium import uninstall
+    uninstall()
+    rec = check(g, claims=["for x in [-4, 4], f(x)*f(x) == x"])
+    p = _named(rec, "f_x_f_x_eq_x")
+    assert p.verdict == "falsified", p.note
+    assert p.meta.get("mathema.corroboration") == "reproduced"
+
+
+@pytest.mark.needs_full_proof_budget
+def test_check_with_the_bundled_claims_proves_where_sqrt_has_a_value(g):
+    from mathema import check
+    from mathema.compendium import uninstall
+    uninstall()
+    rec = check(g, claims=["for x in [0, 4], f(x)*f(x) == x"])
+    assert _named(rec, "f_x_f_x_eq_x").verdict == "proven"

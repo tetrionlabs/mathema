@@ -36,9 +36,12 @@ def _library_claims_isolated():
     `write_spec` and `mathema check` do) registers process-wide
     partiality guards and a hazard generator; every test starts and
     ends with the registries as they were, so no verdict depends on
-    which test ran earlier in the same process."""
+    which test ran earlier in the same process. The baseline is the
+    bundled library claims alone, the state every `check()` starts
+    from."""
     from mathema import compendium, hazards
     from mathema.symbolic import _partiality
+    compendium.ensure_bundled()
     lemmas = {k: list(v) for k, v in _partiality._PARTIALITY_LEMMAS.items()}
     generators = dict(hazards._GENERATORS)
     installed = dict(compendium._INSTALLED)

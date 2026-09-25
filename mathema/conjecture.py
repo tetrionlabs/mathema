@@ -2496,7 +2496,13 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     `grammar` check below, tagged in `meta["mathema.foreign_grammar"]`
     so a caller can tell the two kinds of skip apart), each noting who
     proposed it.
+
+    The bundled library claims (`compendium.ensure_bundled`) are
+    applied before anything is adjudicated, unless a project layer is
+    already installed.
     """
+    from .compendium import ensure_bundled
+    ensure_bundled()
     facts = _effective_facts(fn, facts)
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     domain = domain or {}

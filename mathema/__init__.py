@@ -446,7 +446,10 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
 
     check is IO-free: it reads only what travels with the function
     object (decorator, docstring, type markers) and never touches the
-    filesystem. The file-declared layer, the highest-precedence
+    project's files. What mathema itself ships about libraries (the
+    bundled compendium: numpy's sqrt has no value below zero, ...)
+    applies to every call, as the engine's own knowledge; a project's
+    own compendium files apply once `compendium.install(root)` ran. The file-declared layer, the highest-precedence
     authoring surface, therefore reaches it only through `declared=`,
     a retrieved entry from `mathema.retrieve(fn, root)`. Call-site
     `claims=` still wins per claim name over everything retrieved.
@@ -511,10 +514,12 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     authoring.declared_from_function's own decorator-over-docstring rule
     for the same reasoning one layer in).
     """
+    from .compendium import ensure_bundled
     from .probing import _RISK, _SPECIALS
     from .spec import declare, entry_claims
     from .types import _TYPE_PROBE_TRIALS, domain_from_signature, type_probes
 
+    ensure_bundled()
     facts = analyze(fn)
     # the function-level parent domain: signature markers, then an
     # explicit domain= winning per parameter. Each claim is adjudicated
