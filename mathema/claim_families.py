@@ -2622,15 +2622,45 @@ def _is_compendium_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     return None
 
 
+def _raised_by_library(exc: BaseException, library: str) -> bool:
+    """Intent:
+        Whether an exception is the library failing rather than the
+        caller refusing an input: a floating-point error, or a raise
+        whose traceback passes through a file of the library's own
+        package.
+    """
+    import importlib
+    import os
+    if isinstance(exc, FloatingPointError):
+        return True
+    try:
+        pkg = os.path.dirname(os.path.realpath(
+            importlib.import_module(library).__file__ or ""))
+    except Exception:
+        return False
+    if not pkg:
+        return False
+    tb = exc.__traceback__
+    while tb is not None:
+        path = os.path.realpath(tb.tb_frame.f_code.co_filename)
+        if path.startswith(pkg + os.sep):
+            return True
+        tb = tb.tb_next
+    return False
+
+
 def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
     """Empirical half of is_compendium_safe(<library>): sample the
     function's inputs (respecting a declared domain, and hitting the
     negative / out-of-unit boundary specials that trigger a covered
     library's nan regions), call f, and check the output is FINITE. A
     silent nan/inf produced through an unguarded call into a covered
-    library function (numpy.sqrt on a negative, numpy.arcsin past 1) is
-    the counterexample; a finite result on every trial holds. Declines
-    when f does not call a covered function of the named library."""
+    library function (numpy.sqrt on a negative, numpy.arcsin past 1),
+    or a raise from inside the library itself (`_raised_by_library`), is
+    the counterexample; a finite result on every trial holds, and a
+    raise of the caller's own (a guard) is not the library failing.
+    Declines when f does not call a covered function of the named
+    library."""
     from .compendium import libraries_called
     library = cj.lhs.strip()
     if library not in libraries_called(fn, facts):
@@ -2654,7 +2684,10 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
         try:
             with _pinned_float_env():
                 out = fn(*filled)
-        except Exception:
+        except Exception as e:
+            if _raised_by_library(e, library):
+                return (f"{_fmt(tuple(filled))}: raised "
+                        f"{type(e).__name__} inside {library}")
             return None
         if _is_nonfinite(out):
             return (f"{_fmt(tuple(filled))}: output {out!r} is a silent "

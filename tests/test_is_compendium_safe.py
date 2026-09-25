@@ -120,3 +120,31 @@ def test_a_bound_supersedes_the_compendium_falsification():
     bounded = _v(unguarded_arcsin,
                  "for x in [-1, 1], is_compendium_safe(numpy)")
     assert bounded.verdict == "holds"
+
+
+def test_a_raise_inside_the_library_falsifies(tmp_path):
+    # numpy.average raises ZeroDivisionError from its own code when the
+    # weights sum to zero: a failure of the covered call, not a guard
+    pytest.importorskip("numpy")
+    mod = _load(tmp_path, '''
+        import numpy as np
+        def weighted(x: float) -> float:
+            """Average of 1 and 2, weighted by x and -x."""
+            return float(np.average([1.0, 2.0], weights=[x, -x]))
+    ''', name="raising_lib")
+    pr = _v(mod.weighted, "for x in [1, 2], is_compendium_safe(numpy)")
+    assert pr.verdict == "falsified"
+    assert "raised ZeroDivisionError inside numpy" in pr.counterexample
+
+
+def test_the_callers_own_guard_is_not_a_library_failure(tmp_path):
+    pytest.importorskip("numpy")
+    mod = _load(tmp_path, '''
+        import numpy as np
+        def to_angle(x: float) -> float:
+            """Angle whose sine is x, refusing out-of-range input."""
+            if abs(x) > 1:
+                raise ValueError("x must lie in [-1, 1]")
+            return float(np.arcsin(x))
+    ''', name="guarded_lib")
+    assert _v(mod.to_angle, "is_compendium_safe(numpy)").verdict == "holds"
