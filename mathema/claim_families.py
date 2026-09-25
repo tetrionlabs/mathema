@@ -581,10 +581,11 @@ def _check_restricted_domain(name: str, dom) -> str:
     Notes:
         factorial gets its own dedicated check (_factorial_verdict);
         it needs an integer *type* guarantee, not just a range, unlike
-        the other five. Every other name here reduces to "is dom a
-        subset of this function's own safe range" via
-        _domain_pieces/_range_piece_verdict/_combine_piece_verdicts,
-        the same three-step shape regardless of which of the five it is.
+        every other name. Every other name here reduces to "is dom a
+        subset of this function's own safe range" (its `_SAFE_RANGE`
+        row) via _domain_pieces/_range_piece_verdict/
+        _combine_piece_verdicts, the same three-step shape whichever
+        name it is.
     """
     if name == "factorial":
         return _factorial_verdict(dom)
