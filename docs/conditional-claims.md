@@ -60,6 +60,19 @@ raise region at all, and falsifies when it has one, naming the region
 `f` actually returns on. mathema suggests the restriction form for a
 partial function and never for a total one.
 
+When there is no body to compute a region from (a builtin, a numpy
+ufunc), or the comparison does not decide (a library function whose
+region reads `det(a)` or `dim(a)`), the claim is adjudicated by
+execution: every sampled point inside the region must return a value
+and every point outside it must not, where a raise, a nan and an
+infinity for a finite input are all no value. A region over `det(a)`
+draws square matrices, singular ones on its boundary; one over
+`dim(a)` draws sequences, the empty one below it. An indexed row
+(`is_defined[2]`, one conjunct of a region with several) only asks
+for no value outside it, since inside it the other conjuncts decide.
+The verdict is `holds` at best, and the note says how many points were
+executed on each side.
+
 ## The definedness premise
 
 ```
@@ -229,14 +242,20 @@ function. An `is_defined` row there states the region where the
 function returns a value, so a caller's claim is read against it the
 way it is read against an explicit raise guard, and a compendium claim
 may be named as a premise, by bare name or by its qualified spelling
-(`assuming numpy.clip.clip_lower holds`).
+(`assuming numpy.clip.clip_lower holds`). The bundled files apply to
+every `check`, the Python API included, with nothing to install; a
+project's own compendium files apply wherever mathema reads the
+project. Outside an `is_defined` region the call has no value: a
+raise, a nan, and an infinity returned for a finite input all count
+the same, and each falsifies a value claim that reaches it.
 
 A compendium verdict never enters the evidence chain silently: `mathema
-verify` adjudicates the library rows your project calls or rests on
-against the installed library and the premise resolves at the verdict
-recorded there. A row verify cannot settle leaves the resting claim
-`unknown`, with a note naming `mathema accept <key> <claim> --as
-trusted`, which takes the row at the level its curator claims (the
+verify` adjudicates the library rows your project calls or rests on by
+executing them against the installed library, and the premise resolves
+at the verdict recorded there. Those rows gate the run like the
+project's own claims. A row verify cannot settle fails it and leaves
+the resting claim `unknown`, both naming `mathema accept <key> <claim>
+--as trusted`, which takes the row at the level its curator claims (the
 conclusion caps there, provenance named). A file whose `versions`
 range does not match the installed library contributes nothing. The
 wider story, including transfer between implementations, is

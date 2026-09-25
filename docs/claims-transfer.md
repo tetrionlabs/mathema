@@ -40,13 +40,25 @@ and bounds), and a project states its own anywhere its claims files
 already live, `claims/numpy.claims.yaml` for instance, where a key
 shadows the bundled entry for that function. A file applies only when
 the library is importable at a version inside its range; otherwise it
-contributes nothing, which is better than contributing stale facts.
+contributes nothing, which is better than contributing stale facts. A
+file whose `compendium:` names your project's own package is ignored:
+those are your own claims, stated in your ordinary claims files, and
+`mathema verify` prints a note naming the file.
+
+The bundled compendium applies to every `check`, from the command line
+or the Python API alike, without being asked: it is part of what
+mathema knows, the way `math.sqrt` raising below zero is. Your
+project's own compendium files apply wherever mathema reads the
+project (`mathema check`, `mathema verify`, `write_spec`).
 
 An `is_defined` row with a stated region reads as "returns a value on
 exactly this region", so `numpy.sqrt`'s `x >= 0` says that outside it
 the call has no value, whether the library raises there (`math.sqrt`),
-returns nan (`numpy.sqrt`) or overflows to an infinity. A `raises(f(x),
-Exc)` row is added only where the exception type itself matters.
+returns nan (`numpy.sqrt`) or overflows to an infinity (`numpy.exp`).
+That is one rule across libraries: a nan, or an infinity returned for
+a finite input, is no value, exactly like a raise, and it falsifies
+every relation a claim states at that point. A `raises(f(x), Exc)` row
+is added only where the exception type itself matters.
 
 Consumption paths:
 
@@ -62,13 +74,14 @@ Consumption paths:
 
 A compendium row is testimony, and it never enters the evidence chain
 silently. `mathema verify` adjudicates the rows of every library
-function your project calls or rests a premise on against the library
-you have installed, records the local verdict with the row's
-provenance (`compendium:numpy-2.5`), and a premise then resolves at
-that verdict; a project that never calls numpy verifies none of its
-rows, and a row verify cannot settle here is reported rather than
-failing the run. For such a row the resting claim stays `unknown` and
-its note names the other path forward:
+function your project calls or rests a premise on by executing them
+against the library you have installed, records the local verdict with
+the row's provenance (`compendium:numpy-2.5`), and a premise then
+resolves at that verdict; a project that never calls numpy verifies
+none of its rows. Library rows gate the run exactly like your own
+claims: a row verify cannot settle here fails it, with a line naming
+both ways to settle it, and the resting claim stays `unknown` with the
+same two paths in its note. One is a fresh local verdict; the other is:
 
 ```bash
 mathema accept numpy.clip clip_lower --as trusted
