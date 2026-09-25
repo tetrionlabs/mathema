@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from .records import Probe
 
 from ._sampling import _finite_bounds as _finite_bounds, _synth_scalar as _synth_scalar
+from .f import _is_nonfinite as _is_nonfinite
 from .grammar import Domain
 # hazard knowledge (which parameters face which hazard kinds, and the
 # restricted builtins' own accepted ranges) lives in mathema.hazards,
@@ -41,7 +42,8 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
                       _missing_guard_params as _missing_guard_params,
                       _pole_bearing_params as _pole_bearing_params,
                       _restricted_domain_targets as _restricted_domain_targets)
-from .probing import _fmt, _points_for_probe, _pole_safety, _poles_by_var, _synth
+from .probing import (_fmt, _pinned_float_env, _points_for_probe, _pole_safety,
+                      _poles_by_var, _synth, call_arguments)
 
 # --- probe:algorithmic families: monotonicity, affine-ness, convexity ------
 #
@@ -80,9 +82,10 @@ def _synth_other_params(fn, facts, target: str, domain: dict, rng: random.Random
 
 
 def _call_with_target(fn, facts, target: str, args: list, value):
-    args = list(args)
-    args[facts.params.index(target)] = value
-    return fn(*args)
+    values = dict(zip(facts.params, args))
+    values[target] = value
+    call_args, call_kwargs = call_arguments(fn, facts.params, values)
+    return fn(*call_args, **call_kwargs)
 
 
 def _probe_trials(fn, facts, target: str, domain: dict, rng: random.Random,
@@ -579,10 +582,11 @@ def _check_restricted_domain(name: str, dom) -> str:
     Notes:
         factorial gets its own dedicated check (_factorial_verdict);
         it needs an integer *type* guarantee, not just a range, unlike
-        the other five. Every other name here reduces to "is dom a
-        subset of this function's own safe range" via
-        _domain_pieces/_range_piece_verdict/_combine_piece_verdicts,
-        the same three-step shape regardless of which of the five it is.
+        every other name. Every other name here reduces to "is dom a
+        subset of this function's own safe range" (its `_SAFE_RANGE`
+        row) via _domain_pieces/_range_piece_verdict/
+        _combine_piece_verdicts, the same three-step shape whichever
+        name it is.
     """
     if name == "factorial":
         return _factorial_verdict(dom)
@@ -661,20 +665,6 @@ def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                       f"DISCOVERED pole of {facts.name} (pole discovery "
                       f"is the fast-path search; the containment itself "
                       f"is exact)")
-
-
-def _pinned_float_env():
-    """The floating-point error regime every hazard trial runs under:
-    numpy's own defaults, pinned explicitly so a verdict never depends
-    on whatever ambient `numpy.seterr` state the calling process
-    happens to carry. A no-op context when numpy isn't importable."""
-    import contextlib
-    try:
-        import numpy
-    except Exception:
-        return contextlib.nullcontext()
-    return numpy.errstate(divide="warn", over="warn", under="ignore",
-                          invalid="warn")
 
 
 def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
@@ -2016,13 +2006,18 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         validates it.
 
     Notes:
-        Always returns a ProofResult, never None: an is_defined claim
-        must not fall through to the ordinary relation prover, whose
-        reading (is the relation TRUE?) is a different question from
-        region equivalence. A structural disproof no executed point
-        reproduces comes back undecided with the corroboration flags
-        (`_witnessed_disproof`).
+        Returns a ProofResult whenever the function has Python source:
+        an is_defined claim must not fall through to the ordinary
+        relation prover, whose reading (is the relation TRUE?) is a
+        different question from region equivalence. A structural
+        disproof no executed point reproduces comes back undecided with
+        the corroboration flags (`_witnessed_disproof`). With no source
+        (`facts.tree is None`) there is no body to compute a region
+        from, and it declines (None); the probe half
+        (`_is_defined_probe`) adjudicates by execution.
     """
+    if facts.tree is None:
+        return None
     import ast as _ast
 
     import sympy as _sympy
@@ -2190,6 +2185,173 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
             meta={"mathema.corroboration": "reproduced",
                   "mathema.witness_executed": True})
     return ProofResult("undecided", sketch=undecided_sketch)
+
+
+def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                      trials: int):
+    """Intent:
+        Empirical half of `is_defined` for a target with no Python
+        source. A call has a value when it returns a finite result; a
+        raise or a non-finite result (nan, inf) is no value. The bare
+        claim (`is_defined(f)`, per parameter) asks for a value at
+        every sampled point of the domain. A stated region asks for a
+        value at every sampled point inside it and no value at every
+        sampled point outside it. The first point that disagrees is
+        the executed witness.
+
+    Notes:
+        Points come from the domain's corners, then points around the
+        region's boundary (each link solved for one parameter under the
+        fast wall-clock cap, the root offset a little each way), then
+        seeded draws from the domain. A point with a missing argument,
+        or outside the domain, is not a trial. Returns the
+        `(verdict, checked, counterexample, established, meta)` shape,
+        with the counts inside and outside the region in `meta`, or
+        None when the target has source (the derive half's region
+        equivalence decides then) or a link is not a comparison.
+    """
+    if facts.tree is not None:
+        return None
+    from .conjecture import _SAFE_FUNCS, MATH_CONSTANTS, _validate
+    from .domain import domain_contains, is_missing
+    from .gates import _fmt_point
+    from .probing import _fmt_value
+
+    params = list(facts.params)
+    if not params:
+        return None
+    bare = cj.relation == "is_defined"
+    links = [] if bare else (list(cj.links)
+                             or [(cj.lhs, cj.relation, cj.rhs)])
+    compiled = []
+    for lhs, rel, rhs in links:
+        if rel not in _COMPARISONS or not rhs:
+            return None
+        try:
+            code_l, _aux = _validate(lhs, set(params), frozenset())
+            code_r, _aux = _validate(rhs, set(params), frozenset())
+        except Exception:
+            return None
+        compiled.append((code_l, rel, code_r))
+    compare = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
+               "<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
+               ">": lambda a, b: a > b, ">=": lambda a, b: a >= b}
+
+    def inside(point: dict) -> "bool | None":
+        env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **point}
+        try:
+            return all(bool(compare[rel](eval(cl, {"__builtins__": {}}, env),
+                                         eval(cr, {"__builtins__": {}}, env)))
+                       for cl, rel, cr in compiled)
+        except Exception:
+            return None
+
+    def admitted(point: dict) -> bool:
+        for p, v in point.items():
+            if is_missing(v):
+                return False
+            bound = (domain or {}).get(p)
+            if bound is None:
+                continue
+            try:
+                if not domain_contains(v, bound):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
+
+    def draw() -> dict:
+        return {p: _synth(facts.param_kinds.get(p, "unknown"), rng,
+                          (domain or {}).get(p)) for p in params}
+
+    def corners():
+        for p in params:
+            ends = _interval_ends((domain or {}).get(p))
+            if ends is None:
+                continue
+            lo, hi = ends
+            for v in (lo, hi, (lo + hi) / 2):
+                yield {**draw(), p: v}
+
+    def near_boundaries():
+        import sympy as _sympy
+
+        from ._timeout import FAST_TIMEOUT_SECONDS as _FAST
+        from ._timeout import _with_timeout as _capped
+        from .grammar import _node_to_sympy
+        import ast as _ast
+        for lhs, _rel, rhs in links:
+            try:
+                gap = (_node_to_sympy(_ast.parse(lhs, mode="eval").body)
+                       - _node_to_sympy(_ast.parse(rhs, mode="eval").body))
+            except Exception:
+                continue
+            by_name = {str(sym): sym for sym in gap.free_symbols}
+            for p in params:
+                if p not in by_name:
+                    continue
+                base = draw()
+                held = gap.subs({by_name[q]: base[q] for q in params
+                                 if q != p and q in by_name
+                                 and isinstance(base[q], (int, float))})
+                try:
+                    roots = _capped(lambda: _sympy.solve(held, by_name[p]),
+                                    _FAST)
+                except TimeoutError:
+                    return
+                except Exception:
+                    continue
+                for root in roots:
+                    if root.free_symbols or not root.is_real:
+                        continue
+                    for off in _WITNESS_OFFSETS + (1e-6, -1e-6, 10.0, -10.0):
+                        yield {**base, p: float(root) + off}
+
+    def candidates():
+        yield from corners()
+        if not bare:
+            yield from near_boundaries()
+        for _ in range(trials):
+            yield draw()
+
+    checked = n_in = n_out = 0
+    seen: set = set()
+    for point in candidates():
+        key = tuple(repr(point[p]) for p in params)
+        if key in seen or not admitted(point):
+            continue
+        seen.add(key)
+        where = True if bare else inside(point)
+        if where is None:
+            continue
+        try:
+            with _pinned_float_env():
+                out = fn(*(point[p] for p in params))
+        except Exception as exc:
+            has_value, what = False, f"raised {type(exc).__name__}"
+        else:
+            has_value = not _is_nonfinite(out)
+            what = f"returned {_fmt_value(out)}"
+        checked += 1
+        n_in, n_out = n_in + bool(where), n_out + (not where)
+        if has_value == where:
+            continue
+        at = _fmt_point(point, params)
+        if bare:
+            cx = f"{at}: f {what}, so it is not defined on the whole domain"
+        elif where:
+            cx = f"{at}: inside the stated region, f {what}"
+        else:
+            cx = f"{at}: f {what}, a value outside the stated region"
+        return ("falsified", checked, cx, None,
+                {"mathema.witness_executed": True})
+    if checked == 0:
+        return "skipped", 0, None
+    sampled = (f"{checked} executed points in the domain, each returning "
+               f"a finite value" if bare else
+               f"{n_in} executed points inside the stated region returned "
+               f"a finite value and {n_out} outside it returned no value")
+    return "holds", checked, None, None, {"mathema.sampled": sampled}
 
 
 def _matrix_property(name: str):
@@ -2592,26 +2754,6 @@ class OutputPredicateFamily:
         return {"probe:algorithmic": self._probe}
 
 
-def _is_nonfinite(out) -> bool:
-    """True when a value is a silent non-finite number (nan/inf), scalar
-    or numpy array; False for a genuinely non-numeric value, which is not
-    this predicate's concern."""
-    import math
-    if isinstance(out, bool):
-        return False
-    if isinstance(out, (int, float)):
-        return math.isnan(out) or math.isinf(out)
-    try:
-        import numpy as np
-    except ImportError:
-        return False
-    try:
-        arr = np.asarray(out, dtype=float)
-    except (TypeError, ValueError):
-        return False
-    return not bool(np.isfinite(arr).all())
-
-
 def _is_compendium_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                                relation: str, domain: dict | None = None,
                                tolerance: float | None = None):
@@ -2719,7 +2861,8 @@ def _register_builtin_claim_families() -> None:
         _families.register(_kind, _NamedClaimFamily(
             _kind, {"probe:algorithmic": _functools.partial(_second_difference_probe, kind=_kind)}))
     _families.register("is_defined", _NamedClaimFamily(
-        "is_defined", {"derive": _is_defined_derive}))
+        "is_defined", {"derive": _is_defined_derive,
+                       "probe:algorithmic": _is_defined_probe}))
     # the implementation-safety members, one SafetyFamily each: the
     # derive/probe halves and the suggestion gate are the member's
     # injected parts, and every half runs inside the family verdict

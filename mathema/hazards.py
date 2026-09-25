@@ -50,11 +50,13 @@ class HazardPoint:
 # --- hazard knowledge: restricted-builtin real domains ---------------
 
 # Real math functions whose own domain is narrower than sympy's
-# symbolic generalization. Membership here is what makes a call a
-# hazard at all; _SAFE_RANGE below carries the accepted ranges for
-# the non-factorial names.
+# symbolic generalization, in math's spellings and numpy's (`arcsin`,
+# `log10`, ...; `_call_name` reduces `np.log10(x)` to `log10`).
+# Membership here is what makes a call a hazard at all; _SAFE_RANGE
+# below carries the accepted ranges for the non-factorial names.
 _RESTRICTED_DOMAIN_NAMES = frozenset(
-    {"factorial", "sqrt", "log", "asin", "acos", "gamma", "lgamma"})
+    {"factorial", "sqrt", "log", "asin", "acos", "gamma", "lgamma",
+     "arcsin", "arccos", "log2", "log10", "log1p", "arccosh", "arctanh"})
 
 # name -> (lo, lo_inclusive, hi, hi_inclusive) real math function's own
 # accepted range. gamma/lgamma are the conservative half of their real
@@ -69,6 +71,13 @@ _SAFE_RANGE = {
     "acos": (-1.0, True, 1.0, True),
     "gamma": (0.0, False, math.inf, True),
     "lgamma": (0.0, False, math.inf, True),
+    "arcsin": (-1.0, True, 1.0, True),
+    "arccos": (-1.0, True, 1.0, True),
+    "log2": (0.0, False, math.inf, True),
+    "log10": (0.0, False, math.inf, True),
+    "log1p": (-1.0, False, math.inf, True),
+    "arccosh": (1.0, True, math.inf, True),
+    "arctanh": (-1.0, False, 1.0, False),
 }
 
 
@@ -244,7 +253,8 @@ def _pole_hazard_points(fn, facts, domain: dict) -> list[HazardPoint]:
 def _builtin_edge_points(fn, facts, domain: dict) -> list[HazardPoint]:
     """The domain edges of every restricted builtin a parameter is
     actually passed to: log's zero, asin/acos's unit endpoints, sqrt's
-    zero, factorial's negative and non-integer neighbours. These are
+    zero, factorial's negative and non-integer neighbours, and the
+    same edges of numpy's spellings (arcsin, log10, log1p's -1, ...). These are
     where the implementation's accepted range ends however fine the
     mathematics is on paper."""
     out: list[HazardPoint] = []

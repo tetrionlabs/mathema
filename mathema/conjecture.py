@@ -49,8 +49,9 @@ from ._scan import _split_commas, blank_strings
 from .domain import DuplicateBinding
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
                       _probe_density, _sampling_shorthand, _synth,
-                      _synth_dict, complex_is_a_raise, is_complex_value,
-                      ordering_shortfall, relation_holds_elementwise)
+                      _synth_dict, complex_is_a_raise, holds_nan,
+                      is_complex_value, ordering_shortfall,
+                      relation_holds_elementwise)
 from .records import _EXC_TYPES, Probe, classify_verdict, statement_text
 from .symbolic import (mentions_matrix_ops, try_prove, try_prove_matrix,
                        try_prove_raises)
@@ -516,20 +517,32 @@ def _declared_rel_tol(cj) -> float:
     return 0.0 if cj.tolerance is not None else DEFAULT_RELATIVE_TOLERANCE
 
 
-def _runtime_dim(value, axis):
+def _runtime_dim(value, axis=0):
     """`dim(value, axis)` at evaluation time: the size of the axis-th
-    dimension of a nested-sequence value, descending first elements.
-    Raises IndexError past the value's depth, the same honest failure
-    an over-indexed axis deserves."""
+    dimension of a nested-sequence value, descending first elements;
+    `dim(value)` is the first axis. Raises IndexError past the value's
+    depth, the same honest failure an over-indexed axis deserves."""
     v = value
     for _ in range(int(axis)):
         v = v[0]
     return len(v)
 
 
+def _runtime_det(value) -> float:
+    """`det(value)` at evaluation time: the determinant of a square
+    matrix value (nested lists or an array), through numpy. Raises
+    ValueError when numpy is not importable, and numpy's own error for
+    a value that is not a square matrix."""
+    from .matrices import _numpy
+    np = _numpy()
+    if np is None:
+        raise ValueError("det needs numpy")
+    return float(np.linalg.det(np.asarray(value, dtype=float)))
+
+
 _SAFE_FUNCS = {
     "abs": abs, "min": min, "max": max, "len": len, "sum": sum,
-    "dim": _runtime_dim,
+    "dim": _runtime_dim, "det": _runtime_det,
     # output-shape builtins for the output-contract invariants
     # (preserves_type, is_permutation_of_input): probe-only, harmless,
     # not sympy functions (the derive route reports them unsupported and
@@ -587,6 +600,57 @@ _ALLOWED_NODES = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Call, ast.Name,
 # _EXC_TYPES (the exception names a raises(...) claim may assert) lives
 # in records.py, imported above; consumers that used to find it here
 # still can.
+
+
+def _resolve_exception_type(name: str, fn) -> "type | None":
+    """Intent:
+        The exception class a `raises(f(x), <name>)` claim names, or
+        None when nothing resolves it. Tried in order: the fixed
+        `_EXC_TYPES` table, a built-in exception, a dotted path
+        (`numpy.linalg.LinAlgError`: the longest importable module
+        prefix, then attributes), and a bare name on the target's own
+        module or one of its parent packages (`LinAlgError` for a
+        `numpy.linalg` function, `StatisticsError` for
+        `statistics.mean`).
+    """
+    import builtins
+    import importlib
+
+    def _exception_class(obj) -> bool:
+        return isinstance(obj, type) and issubclass(obj, BaseException)
+
+    if name in _EXC_TYPES:
+        return _EXC_TYPES[name]
+    if _exception_class(getattr(builtins, name, None)):
+        return getattr(builtins, name)
+
+    def _walk(module_name: str, attrs: list):
+        try:
+            obj = importlib.import_module(module_name)
+        except Exception:
+            return None
+        for attr in attrs:
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                return None
+        return obj if _exception_class(obj) else None
+
+    parts = name.split(".")
+    if len(parts) > 1:
+        for cut in range(len(parts) - 1, 0, -1):
+            found = _walk(".".join(parts[:cut]), parts[cut:])
+            if found is not None:
+                return found
+        return None
+    module = getattr(fn, "__module__", None) or ""
+    if not module and getattr(fn, "__self__", None) is not None:
+        module = type(fn.__self__).__module__
+    pieces = module.split(".") if module else []
+    for cut in range(len(pieces), 0, -1):
+        found = _walk(".".join(pieces[:cut]), [name])
+        if found is not None:
+            return found
+    return None
 
 
 @dataclass
@@ -2044,6 +2108,11 @@ def _shape_constraints(assumption, resolver):
                 and isinstance(node.args[0], _ast.Name)
                 and isinstance(node.args[1], _ast.Constant)):
             return resolver.key(node.args[0].id, int(node.args[1].value))
+        if (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name)
+                and node.func.id == "dim" and len(node.args) == 1
+                and isinstance(node.args[0], _ast.Name)):
+            # `dim(a)` is the first axis, `dim(a, 0)`
+            return resolver.key(node.args[0].id, 0)
         if isinstance(node, _ast.Name) and node.id in marker_names:
             return node.id
         return None
@@ -2091,6 +2160,78 @@ def _shape_constraints(assumption, resolver):
             merged.remove(m)
         merged.append(set().union(g, *hit))
     return lo, hi, merged
+
+
+def _premise_draws(assumption, kinds: dict) -> dict:
+    """Intent:
+        Draws that satisfy an equality premise by construction, for the
+        premises random sampling essentially never lands on, keyed by
+        parameter: `dim(a) == 0` (or `dim(a, 0) == 0`) draws the empty
+        sequence, `det(a) == 0` a singular square matrix, and `x == c`
+        the constant itself. Each draw is `draw(rng, size)`, `size` the
+        trial's planned first-axis size for the parameter, or None.
+
+    Notes:
+        A length premise `dim(a) == k` for k > 0 is not here: the
+        shape plan (`_shape_constraints`) already sizes the draw. The
+        rejection filter still checks every conjunct, so a draw that
+        misses another conjunct is a wasted trial, never a wrong
+        verdict.
+    """
+    import ast as _ast
+
+    def constant(node):
+        if isinstance(node, _ast.UnaryOp) and isinstance(node.op, _ast.USub):
+            inner = constant(node.operand)
+            return None if inner is None else -inner
+        if isinstance(node, _ast.Constant) \
+                and isinstance(node.value, (int, float)) \
+                and not isinstance(node.value, bool):
+            return node.value
+        return None
+
+    def param_of(call, name):
+        if (isinstance(call, _ast.Call) and isinstance(call.func, _ast.Name)
+                and call.func.id == name and call.args
+                and isinstance(call.args[0], _ast.Name)
+                and call.args[0].id in kinds):
+            rest = call.args[1:]
+            if name == "dim" and rest and constant(rest[0]) != 0:
+                return None
+            return call.args[0].id if len(rest) <= (name == "dim") else None
+        return None
+
+    def draw_for(node, c):
+        if isinstance(node, _ast.Name) and node.id in kinds:
+            value = int(c) if kinds[node.id] == "int" \
+                and float(c).is_integer() else c
+            return node.id, lambda rng, size, v=value: v
+        seq = param_of(node, "dim")
+        if seq is not None and c == 0:
+            return seq, lambda rng, size: []
+        mat = param_of(node, "det")
+        if mat is not None and c == 0:
+            from .matrices import _synth_singular
+            return mat, (lambda rng, size:
+                         _synth_singular(size or rng.randint(2, 5), rng))
+        return None
+
+    out: dict = {}
+    for acj in assumption or ():
+        if acj.relation != "==" or not acj.rhs:
+            continue
+        try:
+            left = _ast.parse(acj.lhs, mode="eval").body
+            right = _ast.parse(acj.rhs, mode="eval").body
+        except SyntaxError:
+            continue
+        for side, other in ((left, right), (right, left)):
+            c = constant(other)
+            found = draw_for(side, c) if c is not None else None
+            if found is not None:
+                out.setdefault(*found)
+                break
+    return out
 
 
 def _draw_trial_sizes(resolver, lo, hi, groups, rng):
@@ -2452,7 +2593,8 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             # the opt-out adjudicates exactly as a derive claim; only the
             # companion it would spawn is withheld
             cj = _dc_replace(cj, route="derive")
-        if cj.links:
+        if cj.links and not (cj.name.split("[", 1)[0] == "is_defined"
+                             and facts.tree is None):
             # a chained comparison is the conjunction of its links: run
             # each link through the full ordinary adjudication (same
             # domain/funcs/assuming/route) and fold, so no proof path is
@@ -2792,7 +2934,8 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     """
     def corroboration(probe) -> dict:
         return {k: v for k, v in (probe.meta or {}).items()
-                if k.startswith("mathema.corroboration")}
+                if k.startswith("mathema.corroboration")
+                or k == "mathema.witness_executed"}
 
     for probe, label in zip(probes, labels):
         if probe.verdict == "falsified":
@@ -3258,6 +3401,13 @@ def _validate_claim(cj, statement: str, note: str, facts,
         if mismatch is not None:
             return Probe(cj.name, statement, "skipped:misspecified",
                          route=None, note=f"{note}; {mismatch}")
+        if cj.rhs and _resolve_exception_type(cj.rhs, fn) is None:
+            return Probe(cj.name, statement, "skipped:misspecified",
+                         route=None,
+                         note=f"{note}; unknown exception type "
+                              f"{cj.rhs!r}: not a built-in exception, a "
+                              f"dotted path to one, or a name on the "
+                              f"module of {getattr(fn, '__name__', 'f')}")
     colliding = sorted(set(cj.ambiguous_diff_vars) & param_set)
     if colliding:
         # d(<expr>/d<var>)'s fraction sugar (grammar.
@@ -3754,6 +3904,16 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                          "the positive claim is falsified, and that "
                                          "evidence proves the negation: "
                                          + (family_proof.counterexample or family_proof.sketch or ""))
+    if (family_proof is None and family_derive is not None
+            and cj.name.split("[", 1)[0] == "is_defined"):
+        # no source to compute a definedness region from: the claim is
+        # adjudicated by execution in the probe stage
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; the target has no Python source, so there is "
+                 f"no definedness region to compare",
+            meta={"mathema.derive_status": "unsupported"})
+        return None
     if family_proof is not None and family_proof.status == "proven":
         return Probe(cj.name, statement, "proven",
                      sketch=family_proof.sketch, note=note,
@@ -4347,6 +4507,19 @@ def _machine_failure_stratum(exc, witness: str) -> dict | None:
 def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                       sampling) -> "Probe":
     """Intent:
+        The probe stage, run under the pinned floating-point regime
+        (`probing._pinned_float_env`), so an invalid operation is a
+        NaN whatever `numpy.seterr` state the caller carries and the
+        verdict and witness are the same in every process.
+    """
+    from .probing import _pinned_float_env
+    with _pinned_float_env():
+        return _probe_stage(ctx, fn, facts, kinds, sampling)
+
+
+def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
+                 sampling) -> "Probe":
+    """Intent:
         The probe stage: relation/exception-type gates, a registered
         family's `probe:algorithmic` technique, then the generic
         seeded sampling loop over compiled lhs/rhs, with the final
@@ -4374,13 +4547,14 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     f"approximate infinity as the pseudo-infinity "
                     f"{pinf[1]:g} ({', '.join(approximated)}); the "
                     f"symbolic proof region keeps the declared oo")
-    if cj.name.split("[", 1)[0] == "is_defined":
+    is_defined_claim = cj.name.split("[", 1)[0] == "is_defined"
+    if is_defined_claim and facts.tree is not None:
         # region equivalence has no empirical reading: sampling the
         # stated relation as a bare fact answers the wrong question
         return Probe(cj.name, statement, "skipped", route=None,
                      note=f"{note}; is_defined adjudicates by region "
                           f"equivalence on the derive route only")
-    if cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
+    if not is_defined_claim and cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
                                       "raises"})
                            | (routes.examine_predicates()
                               & routes.route_capabilities("probe"))):
@@ -4392,8 +4566,10 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # dispatch catches a decline).
         return Probe(cj.name, statement, "skipped", route=None,
                      note=f"unknown relation {cj.relation!r}")
-    if cj.relation == "raises" and cj.rhs and cj.rhs not in _EXC_TYPES:
-        return Probe(cj.name, statement, "skipped", route=None,
+    raised_type = (_resolve_exception_type(cj.rhs, fn)
+                   if cj.relation == "raises" and cj.rhs else None)
+    if cj.relation == "raises" and cj.rhs and raised_type is None:
+        return Probe(cj.name, statement, "skipped:misspecified", route=None,
                      note=f"unknown exception type {cj.rhs!r}")
     # A registered family's own "probe:algorithmic" route, tried
     # before the generic blind-sampling loop below, reachable for
@@ -4412,18 +4588,22 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         setup = sampling()
         algo_result = algo_route(fn, facts, cj, cj_domain, setup.rng, setup.budget)
         if algo_result is not None:
-            if len(algo_result) == 4:
-                verdict, checked, cx, established = algo_result
-            else:
-                verdict, checked, cx = algo_result
-                established = None
+            # (verdict, checked, cx), optionally with the established
+            # sketch, and then the family's own record meta, whose
+            # `mathema.sampled` text (what was sampled) joins the note
+            verdict, checked, cx = algo_result[:3]
+            established = algo_result[3] if len(algo_result) > 3 else None
+            algo_meta = dict(algo_result[4]) if len(algo_result) > 4 else {}
+            if algo_meta.get("mathema.sampled"):
+                note = f"{note}; {algo_meta['mathema.sampled']}".lstrip("; ")
+            algo_meta = algo_meta or None
             if verdict == "proven":
                 # an ESTABLISHED empirical examination: the guard only
                 # lets this through with the exhaustive-coverage
                 # sketch, so the surety is real however it was reached
                 return Probe(cj.name, statement, "proven", n=checked,
                              route=probe_route, sketch=established,
-                             note=note)
+                             note=note, meta=algo_meta)
             if verdict == "falsified":
                 # two safety families whose falsification is BY
                 # CONSTRUCTION about the implementation stratum:
@@ -4439,12 +4619,20 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                              stratum=({"blame": "implementation",
                                        "cause": family_cause,
                                        "witness": cx}
-                                      if family_cause else None))
+                                      if family_cause else None),
+                             meta=algo_meta)
             if verdict == "holds":
                 return Probe(cj.name, statement, "holds", n=checked,
-                             route=probe_route, note=note)
+                             route=probe_route, note=note, meta=algo_meta)
             return Probe(cj.name, statement, "skipped", route=probe_route,
                          note=note + f"; {cx or 'no evaluable inputs'}")
+    if is_defined_claim:
+        # a target with no source has no region to compare; its only
+        # reading is the executed one above, which could not sample
+        return Probe(cj.name, statement, "unknown", route=None,
+                     note=f"{note}; is_defined on a target with no Python "
+                          f"source adjudicates by execution, and no point "
+                          f"of this claim could be sampled")
     if cj.relation in routes.examine_predicates():
         # only reachable when the registered family declined, the
         # generic sampling loop below has no meaning for a
@@ -4569,6 +4757,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     shape_lo, shape_hi, shape_groups = _shape_constraints(
         ctx.assumption, resolver)
     plan_dims = bool(resolver.distinct_keys())
+    premise_draws = _premise_draws(ctx.assumption, kinds)
     from .types import structures_from_signature
     # a parameter's structure comes from its signature marker and from
     # an `assuming A is symmetric` premise; both narrow synthesis the
@@ -4602,6 +4791,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                         literal_args)
                if c not in pinned]
     call_raised = [None]   # the LABEL of the callee that raised, or None
+    call_nan = [None]      # the LABEL of the first callee to return a NaN
 
     def _tagged(callee, label):
         # a raise from the function under test (or a bound function) is
@@ -4631,13 +4821,15 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if complex_raises and is_complex_value(value):
                 call_raised[0] = label
                 raise ComplexResult(label, value)
+            if call_nan[0] is None and holds_nan(value):
+                call_nan[0] = label
             return value
         return _wrapped
 
     fn_tagged = _tagged(fn, "f")
     bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
     for trial in range(budget + len(pinned)):
-        call_raised[0] = None
+        call_raised[0] = call_nan[0] = None
         trial_sizes: dict = (
             _draw_trial_sizes(resolver, shape_lo, shape_hi, shape_groups, rng)
             if plan_dims and trial >= len(pinned) else {})
@@ -4692,10 +4884,14 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     key = resolver.key(p, 0)
                     n = trial_sizes.get(key) or rng.randint(2, 5)
                     v = _mtx.synth_for(param_structures[p], n, rng)
-                elif shape is not None and shape.ndim >= 2:
-                    # a matrix-shaped (marker-declared) parameter: the
-                    # resolver nests to the marked axes, each leaf a
-                    # fresh element draw, sizes fixed by the shape plan
+                elif shape is not None and (
+                        shape.ndim >= 2
+                        or (shape.ndim == 1 and k != "sequence")):
+                    # a matrix-shaped (marker-declared) parameter, or a
+                    # space binding (`R^n`, `R^(n,n)`) on a parameter
+                    # whose kind the signature does not state: the
+                    # resolver nests to the axes, each leaf a fresh
+                    # element draw, sizes fixed by the shape plan
                     # (shared marker dims agree by construction)
                     v = resolver.synth(
                         p, trial_sizes,
@@ -4712,6 +4908,14 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               length=length)
                 env[p] = v
                 args.append(v)
+            for p, draw in premise_draws.items():
+                # an equality premise fixes this parameter's draw, so
+                # the sample lies on the premise by construction
+                if p in literal_args:
+                    continue
+                v = draw(rng, trial_sizes.get(resolver.key(p, 0)))
+                env[p] = v
+                args[list(kinds).index(p)] = v
         for a_name in aux:
             # eps/epsilon/ε resolve to the claim's own declared
             # tolerance, not a random aux value, same convention as
@@ -4784,7 +4988,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 v = eval(code_l, {"__builtins__": {}}, env)
             except Exception as e:
                 checked += 1
-                if cj.rhs and not isinstance(e, _EXC_TYPES[cj.rhs]):
+                if raised_type is not None and not isinstance(e, raised_type):
                     cx = (f"{_fmt(tuple(args))}: raised "
                           f"{type(e).__name__}, claimed {cj.rhs}")
                     break
@@ -4903,19 +5107,26 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   "the raising region as its own raises(...) claim")
             cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args)))
             break
-        if (is_missing(lv) or is_missing(rv)) and not (
-                not any(is_missing(v) for v in args)
-                and any(isinstance(v, float) and v != v for v in (lv, rv))):
+        if not any(is_missing(v) for v in args) \
+                and (holds_nan(lv) or holds_nan(rv)):
+            # a NaN computed from inputs that are not missing is no
+            # value, like a raise: every value relation fails at this
+            # in-domain point, `!=` included, and the witness names
+            # the callee that returned it
+            checked += 1
+            cx = (f"{_fmt(tuple(args))}: {call_nan[0]} returned nan"
+                  if call_nan[0] is not None else
+                  f"{_fmt(tuple(args))}: {lv!r} vs {rv!r}, and a nan is "
+                  f"no value")
+            break
+        if is_missing(lv) or is_missing(rv):
             # a domain that includes missing by default (see
             # grammar.parse_binding's own policy) can sample the
             # missing sentinel itself as a candidate value; a
             # function that returns it unchanged (identity, say)
             # leaves lv/rv genuinely non-comparable, neither
             # confirming nor denying the claim, so this sample is
-            # inconclusive. A NaN computed from non-missing inputs is
-            # different: it is the function's value at an in-domain
-            # point, and the comparison below reads it as IEEE does
-            # (no ordering holds, and it equals no number).
+            # inconclusive
             continue
         checked += 1
         # a declared tolerance governs the comparison outright; the

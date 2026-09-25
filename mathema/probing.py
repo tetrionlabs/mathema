@@ -425,6 +425,80 @@ def _is_matrix_value(v) -> bool:
     return hasattr(v, "shape") and hasattr(v, "__array__")
 
 
+def _pinned_float_env():
+    """The floating-point error regime every probe evaluation runs
+    under: numpy's own defaults, pinned explicitly so a verdict never
+    depends on whatever ambient `numpy.seterr` state the calling
+    process happens to carry (an invalid operation is a NaN, never a
+    FloatingPointError). A no-op context when numpy isn't importable."""
+    import contextlib
+    try:
+        import numpy
+    except Exception:
+        return contextlib.nullcontext()
+    return numpy.errstate(divide="warn", over="warn", under="ignore",
+                          invalid="warn")
+
+
+def _keeps_default(parameter) -> bool:
+    """Intent:
+        Whether a parameter that has a default, and that no claim
+        binds, is passed at its default when the built-in battery
+        builds a call, rather than sampled like any other parameter.
+
+    Notes:
+        The one rule for unbound defaulted parameters, with one call
+        site (`probe()`'s battery call). Today every such parameter is
+        sampled. A record built without Python source lists only the
+        parameters without defaults (`_doc_only_facts`), so its
+        defaulted parameters are never passed at all.
+    """
+    return False
+
+
+def call_arguments(fn, params, values: dict) -> "tuple[list, dict]":
+    """Intent:
+        The positional and keyword arguments that call `fn` with
+        `values[p]` for every parameter `p` in `params`: a keyword-only
+        parameter by keyword, every other one positionally, in order.
+        A callable whose signature cannot be read takes every value
+        positionally.
+    """
+    import inspect
+    try:
+        spec = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        spec = {}
+    args: list = []
+    kwargs: dict = {}
+    for p in params:
+        param = spec.get(p)
+        if param is not None and param.kind is param.KEYWORD_ONLY:
+            kwargs[p] = values[p]
+        else:
+            args.append(values[p])
+    return args, kwargs
+
+
+def holds_nan(value) -> bool:
+    """True when a value is a NaN or contains one: a Python or numpy
+    float NaN, or a NaN element of a numpy array or a nested list or
+    tuple. A value that is not numeric at all holds no NaN."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, float):
+        return value != value
+    if isinstance(value, (list, tuple)):
+        return any(holds_nan(v) for v in value)
+    if hasattr(value, "dtype") and hasattr(value, "shape"):
+        try:
+            import numpy
+            return bool(numpy.isnan(numpy.asarray(value, dtype=float)).any())
+        except (TypeError, ValueError, ImportError):
+            return False
+    return False
+
+
 def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                                exact_inequality: bool = False,
                                rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
@@ -1165,12 +1239,40 @@ def probe(fn, facts, domain: dict | None = None,
     rng, specials = setup.rng, setup.specials
     critical_hints, extra_cycles = setup.critical_hints, setup.extra_cycles
 
-    def args_for() -> tuple:
-        out = []
-        for p, k in zip(facts.params, kinds):
-            out.append(_synth(k, rng, domain.get(p), specials=specials,
-                              extra=critical_hints.get(p), extra_cycle=extra_cycles.get(p)))
-        return tuple(out)
+    import inspect
+    try:
+        signature = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        signature = {}
+
+    from . import dimensions as _dims
+    from .types import shapes_from_signature
+    try:
+        resolver = _dims.resolve(facts, shapes_from_signature(fn),
+                                 claim_domain=domain)
+    except _dims.DimensionConflict:
+        resolver = None
+
+    def value_for(p, k, sizes):
+        param = signature.get(p)
+        if (param is not None and param.default is not param.empty
+                and p not in domain and _keeps_default(param)):
+            return param.default
+        shape = resolver.shapes.get(p) if resolver is not None else None
+        if shape is not None and k != "sequence" and shape.ndim >= 1:
+            # a space binding (`R^n`, `R^(n,n)`) from the claims shapes
+            # a parameter whose kind the signature does not state
+            return resolver.synth(
+                p, sizes, lambda: _synth("float", rng, domain.get(p),
+                                         specials=specials), rng)
+        return _synth(k, rng, domain.get(p), specials=specials,
+                      extra=critical_hints.get(p),
+                      extra_cycle=extra_cycles.get(p))
+
+    def args_for() -> "tuple[list, dict]":
+        sizes = resolver.draw_sizes(rng) if resolver is not None else {}
+        return call_arguments(fn, facts.params, {
+            p: value_for(p, k, sizes) for p, k in zip(facts.params, kinds)})
 
     # A parameter's own critical-point hint is drawn deterministically
     # exactly once (extra_cycle's own guaranteed lap), which may be
@@ -1180,7 +1282,8 @@ def probe(fn, facts, domain: dict | None = None,
     last_exc: Exception | None = None
     for _ in range(3):
         try:
-            fn(*args_for())
+            call_args, call_kwargs = args_for()
+            fn(*call_args, **call_kwargs)
             break
         except Exception as e:
             last_exc = e
