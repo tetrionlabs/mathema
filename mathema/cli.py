@@ -2594,6 +2594,10 @@ def main(argv: list[str] | None = None) -> int:
                                  description="Claim-Driven Development: turn "
                                              "software intent into verifiable "
                                              "evidence.")
+    from . import __version__
+    ap.add_argument("--version", action="version",
+                    version=f"mathema {__version__}",
+                    help="print the installed mathema version and exit")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     pc = sub.add_parser("check", help="interactive: adjudicate one file, "
