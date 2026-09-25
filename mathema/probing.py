@@ -440,6 +440,46 @@ def _pinned_float_env():
                           invalid="warn")
 
 
+def _keeps_default(parameter) -> bool:
+    """Intent:
+        Whether a parameter that has a default, and that no claim
+        binds, is passed at its default when the built-in battery
+        builds a call, rather than sampled like any other parameter.
+
+    Notes:
+        The one rule for unbound defaulted parameters, with one call
+        site (`probe()`'s battery call). Today every such parameter is
+        sampled. A record built without Python source lists only the
+        parameters without defaults (`_doc_only_facts`), so its
+        defaulted parameters are never passed at all.
+    """
+    return False
+
+
+def call_arguments(fn, params, values: dict) -> "tuple[list, dict]":
+    """Intent:
+        The positional and keyword arguments that call `fn` with
+        `values[p]` for every parameter `p` in `params`: a keyword-only
+        parameter by keyword, every other one positionally, in order.
+        A callable whose signature cannot be read takes every value
+        positionally.
+    """
+    import inspect
+    try:
+        spec = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        spec = {}
+    args: list = []
+    kwargs: dict = {}
+    for p in params:
+        param = spec.get(p)
+        if param is not None and param.kind is param.KEYWORD_ONLY:
+            kwargs[p] = values[p]
+        else:
+            args.append(values[p])
+    return args, kwargs
+
+
 def holds_nan(value) -> bool:
     """True when a value is a NaN or contains one: a Python or numpy
     float NaN, or a NaN element of a numpy array or a nested list or
@@ -1199,12 +1239,24 @@ def probe(fn, facts, domain: dict | None = None,
     rng, specials = setup.rng, setup.specials
     critical_hints, extra_cycles = setup.critical_hints, setup.extra_cycles
 
-    def args_for() -> tuple:
-        out = []
-        for p, k in zip(facts.params, kinds):
-            out.append(_synth(k, rng, domain.get(p), specials=specials,
-                              extra=critical_hints.get(p), extra_cycle=extra_cycles.get(p)))
-        return tuple(out)
+    import inspect
+    try:
+        signature = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        signature = {}
+
+    def value_for(p, k):
+        param = signature.get(p)
+        if (param is not None and param.default is not param.empty
+                and p not in domain and _keeps_default(param)):
+            return param.default
+        return _synth(k, rng, domain.get(p), specials=specials,
+                      extra=critical_hints.get(p),
+                      extra_cycle=extra_cycles.get(p))
+
+    def args_for() -> "tuple[list, dict]":
+        return call_arguments(fn, facts.params, {
+            p: value_for(p, k) for p, k in zip(facts.params, kinds)})
 
     # A parameter's own critical-point hint is drawn deterministically
     # exactly once (extra_cycle's own guaranteed lap), which may be
@@ -1214,7 +1266,8 @@ def probe(fn, facts, domain: dict | None = None,
     last_exc: Exception | None = None
     for _ in range(3):
         try:
-            fn(*args_for())
+            call_args, call_kwargs = args_for()
+            fn(*call_args, **call_kwargs)
             break
         except Exception as e:
             last_exc = e

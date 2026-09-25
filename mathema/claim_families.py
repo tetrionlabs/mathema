@@ -43,7 +43,7 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
                       _pole_bearing_params as _pole_bearing_params,
                       _restricted_domain_targets as _restricted_domain_targets)
 from .probing import (_fmt, _pinned_float_env, _points_for_probe, _pole_safety,
-                      _poles_by_var, _synth)
+                      _poles_by_var, _synth, call_arguments)
 
 # --- probe:algorithmic families: monotonicity, affine-ness, convexity ------
 #
@@ -82,9 +82,10 @@ def _synth_other_params(fn, facts, target: str, domain: dict, rng: random.Random
 
 
 def _call_with_target(fn, facts, target: str, args: list, value):
-    args = list(args)
-    args[facts.params.index(target)] = value
-    return fn(*args)
+    values = dict(zip(facts.params, args))
+    values[target] = value
+    call_args, call_kwargs = call_arguments(fn, facts.params, values)
+    return fn(*call_args, **call_kwargs)
 
 
 def _probe_trials(fn, facts, target: str, domain: dict, rng: random.Random,
