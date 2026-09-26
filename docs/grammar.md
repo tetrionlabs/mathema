@@ -495,7 +495,74 @@ the `oo` endpoint at `1e12` and the proof keeps `oo`, so the proof's
 own row quantifies over `[0, oo]` and the bound appears only beside the
 executed evidence. Nothing in the claim refers to `|inf|` by name, so it
 is not an ordinary binding, and in Python the same setting is
-`claim(..., pseudo_infinity=1e100)`.
+`claim(..., pseudo_infinity=1e100)`. A binding that can bound nothing,
+because every name the claim reads already has a bounded domain, is
+dropped from the claim's text and so from its identity.
+
+The claim is the first of three levels. A function's entry in a claims
+file can carry a `pseudo_infinity:` field beside `claims:`, which
+`mathema.check(fn, pseudo_infinity=...)` also sets, and a project sets
+one for every function with the `MATHEMA_PSEUDO_INFINITY` environment
+variable. The claim's own binding wins over the function level, the
+function level over the project, and with none of them set the
+computation runs to float64's own maximum. Only the claim's own binding
+is part of the claim: the value that applied is output, rendered with
+its level where it bounds an unbounded direction of the claim's domain,
+and `mathema verify` treats a change in it as a stale record, not a
+different claim. A claim whose every direction is bounded says nothing
+about infinity at any level:
+
+<!-- example: levels file=levels.py -->
+```python
+import math
+import sys
+
+import mathema
+
+
+def gauss(x: float) -> float:
+    """The standard normal density."""
+    return math.exp(-x ** 2 / 2) / math.sqrt(2 * math.pi)
+
+
+level = float(sys.argv[1]) if len(sys.argv) > 1 else None
+for law in ["f(x) >= 0", "for x in [-3, 3], f(x) >= 0"]:
+    rows = mathema.check(gauss, claims=[law], pseudo_infinity=level).probes
+    companion = rows[-1]
+    reach = [part for part in companion.note.split("; ")
+             if part.startswith("unbounded")]
+    print(f"{law:27} [float] {companion.verdict:9} "
+          f"{companion.meta.get('mathema.pseudo_infinity')}")
+    print(f"  {reach[0] if reach else '(every direction bounded)'}")
+```
+
+<!-- example: levels run -->
+```bash
+MATHEMA_PSEUDO_INFINITY=1e100 python levels.py
+MATHEMA_PSEUDO_INFINITY=1e100 python levels.py 1e50
+```
+
+<!-- example: levels output -->
+```text
+f(x) >= 0                   [float] holds     {'value': 1e+100, 'source': 'environment'}
+  unbounded directions (x) run to let |inf| be 1e+100 (MATHEMA_PSEUDO_INFINITY)
+for x in [-3, 3], f(x) >= 0 [float] holds     None
+  (every direction bounded)
+f(x) >= 0                   [float] holds     {'value': 1e+50, 'source': 'function'}
+  unbounded directions (x) run to let |inf| be 1e+50 (function level)
+for x in [-3, 3], f(x) >= 0 [float] holds     None
+  (every direction bounded)
+```
+
+The value a project sets hides every overflow beyond it, so `mathema
+verify` and `mathema check` warn once on stderr when
+`MATHEMA_PSEUDO_INFINITY` is below `1e100`, in case it was left over from
+an experiment. The probe route reads the same value: an unbounded
+direction, declared (`for x in [0, oo)`, `for x in R`) or a parameter
+with no domain at all, is exercised with finite values only, out to the
+value that applied or to `1e308`, spread over the decades so the far end
+is reached; a real domain contains no infinity, so the probe never calls
+the code at `inf` itself.
 
 ## `assuming`: stating a premise
 

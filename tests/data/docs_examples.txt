@@ -44,6 +44,7 @@
 [x] docs/grammar.md:just-below                   run output
 [x] docs/grammar.md:half-power                   run output
 [x] docs/grammar.md:gauss                        run output
+[x] docs/grammar.md:levels                       file run output
 [x] docs/index.md:midpoint                       file file run output run output file run output
 [x] docs/index.md:audit                          run output
 [x] docs/index.md:lock                           file run output file session
@@ -81,4 +82,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 68 examples checked, 4 output fences not yet marked
+# 69 examples checked, 4 output fences not yet marked

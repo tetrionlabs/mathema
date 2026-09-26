@@ -337,6 +337,17 @@ process, the same read-once-at-import pattern as `MATHEMA_UNICODE`:
 `MATHEMA_EXTENSIVE_TIMEOUT` (default 15 seconds), whole seconds;
 the knob for a claim whose computation is long but finite.
 
+`MATHEMA_PSEUDO_INFINITY` is the project level of the operational
+infinity, how far the computation of every claim is exercised along an
+unbounded direction, and it is read on every call rather than once at
+import. A function's claims-file entry can set its own with a
+`pseudo_infinity:` field beside `claims:`, and a claim's `let |inf| be`
+wins over both; with none of the three set, the computation runs to
+float64's maximum, `1e308`. A proof never reads any of them. `mathema
+verify` and `mathema check` warn once on stderr when the project value
+is below `1e100`, since overflow beyond it is then never exercised; see
+[operational infinity](grammar.md#operational-infinity-let-inf-be).
+
 ### `is_pole_safe(param)` / `is_builtin_safe(param)`
 
 Two family-derive-only predicates (`route="derive"` always, neither
