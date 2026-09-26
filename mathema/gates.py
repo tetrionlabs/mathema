@@ -99,7 +99,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     from .domain import (_as_int_if_whole, bound_to_sympy_set,
                          domain_contains, is_missing, operational_domain)
     from .probing import (ComplexResult, _synth, complex_is_a_raise,
-                          is_complex_value)
+                          holds_nan, is_complex_value, same_infinity)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     # the gates verify VALUE claims by calling fn at a point; a
@@ -219,6 +219,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # case.
         rel = cj.relation
         both_finite = all(abs(v) != float("inf") for v in (lv, rv))
+        if same_infinity(lv, rv):
+            # one extended-real point: equal, so no strict order
+            return rel in ("==", "~=", "<=", ">=")
         if rel in ("==", "~="):
             return lv == rv or (both_finite and abs(lv - rv) <= tol)
         if rel == "!=":
@@ -281,17 +284,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # opaque disproof reproduces), and ordering over non-orderable
         # values proves nothing. A NaN that propagates a missing input
         # is the missing-policy axis's business, inconclusive here; a
-        # NaN computed from non-missing inputs is read as IEEE reads
-        # it: no ordering holds, it equals no number, and two NaN
-        # sides agree, as the probe route's comparison has it
-        nan_sides = [isinstance(v, float) and v != v for v in (lv, rv)]
-        if any(nan_sides):
-            if any(is_missing(v) for v in point.values()):
+        # NaN computed from non-missing inputs, a scalar or an element
+        # of an array or list, is no value and fails every relation,
+        # `!=` included: it agrees with nothing, another NaN included
+        # (P4)
+        if holds_nan(lv) or holds_nan(rv):
+            if any(is_missing(v) or holds_nan(v) for v in point.values()):
                 return None
-            if cj.relation in ("==", "~="):
-                return all(nan_sides)
-            if cj.relation == "!=":
-                return not all(nan_sides)
             return False
         if cj.relation in ("==", "~="):
             try:
