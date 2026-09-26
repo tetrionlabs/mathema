@@ -38,3 +38,22 @@ def test_a_ragged_structure_is_compared_leaf_by_leaf():
     assert relation_holds_elementwise(value, value, "==", 1e-9) is True
     assert relation_holds_elementwise([1, [2, 3]], [1, [2, 4]], "==", 1e-9) is False
     assert relation_holds_elementwise([1, [2, 3]], [1, [2, 4]], "<=", 0.0) is True
+
+
+def test_records_compare_by_their_own_equality():
+    from dataclasses import dataclass
+
+    @dataclass
+    class Order:
+        id: int
+        kind: str
+
+    a, b = [Order(1, "web"), Order(2, "shop")], [Order(1, "web"), Order(2, "shop")]
+    assert relation_holds_elementwise(a, b, "==", 1e-9) is True
+    assert relation_holds_elementwise(a, [Order(1, "web"), Order(2, "web")], "==", 1e-9) is False
+    assert relation_holds_elementwise(a, [Order(1, "web"), Order(2, "web")], "!=", 1e-9,
+                                      exact_inequality=True) is True
+    # an ordering over records is unanswerable, and so is a different
+    # length (mismatched shapes are unanswerable, not false)
+    assert relation_holds_elementwise(a, b, "<=", 1e-9) is None
+    assert relation_holds_elementwise(a, [Order(1, "web")], "==", 1e-9) is None

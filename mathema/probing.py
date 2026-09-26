@@ -497,6 +497,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
         except (ValueError, TypeError):
             return None       # incompatible shapes: unanswerable
 
+    equality = relation in ("==", "~=", "!=")
+
     def _walk(x, y):
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
         if xs and ys:
@@ -512,7 +514,18 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                 return bool(_scalar_relation(x, y, relation, slack,
                                              exact_inequality, rel_tol))
             except TypeError:
-                return None
+                if not equality:
+                    return None
+                # leaves that do not subtract (a record, an object)
+                # still answer equality by their own __eq__
+                try:
+                    same = bool(x == y)
+                except Exception:
+                    return None
+                return (not same) if relation == "!=" else same
+        if equality and relation == "!=":
+            # a sequence differs when any leaf does
+            return None if any(pt is None for pt in parts) else any(parts)
         return None if any(pt is None for pt in parts) else all(parts)
 
     return _walk(lv, rv)
