@@ -50,7 +50,7 @@ from .domain import DuplicateBinding
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
-                      holds_nan,
+                      holds_nan, same_infinity,
                       is_complex_value, ordering_shortfall,
                       quiet_while_probing, relation_holds_elementwise)
 from .records import _EXC_TYPES, Probe, classify_verdict, statement_text
@@ -5409,11 +5409,22 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   f"{_fmt(tuple(args))}: {lv!r} vs {rv!r}, and a nan is "
                   f"no value")
             break
+        if call_inf[0] is not None and same_infinity(lv, rv):
+            # both sides overflow toward the same infinity: one
+            # extended-real point, so the point reads as two equal
+            # values (a NaN never gets here, it agrees with nothing)
+            checked += 1
+            if cj.relation in ("==", "~=", "<=", ">="):
+                continue
+            cx = (f"{_fmt(tuple(args))}: both sides are "
+                  f"{'-inf' if call_inf[1] < 0 else 'inf'}, the same point, "
+                  f"which {cj.relation} does not admit")
+            break
         if call_inf[0] is not None:
             # an infinity a callee returned for finite arguments is an
             # overflow or a pole, the computation not producing a value
-            # (the case where `math` raises): every value relation fails
-            # at this point, whichever sign it has
+            # (the case where `math` raises): against a value, or the
+            # opposite infinity, every value relation fails
             checked += 1
             cx = (f"{_fmt(tuple(args))}: {call_inf[0]} returned "
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "

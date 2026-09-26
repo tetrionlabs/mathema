@@ -211,9 +211,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     def _relation_holds(lv, rv, tol):
         # inf-aware: an infinity here is one the law's own arithmetic
         # produced (a callee's own nan or inf is no value, read before
-        # this: two sides with no value in the same way, inf and inf,
-        # -inf and -inf, nan and nan, agree, and no value against a
-        # value fails). Native comparison handles inf/-inf, never
+        # this: two sides at the same infinity, inf and inf or -inf and
+        # -inf, are one extended-real point and agree; a NaN is the
+        # absence of a value and agrees with nothing, another NaN
+        # included; no value against a value fails). Native comparison handles inf/-inf, never
         # abs(inf - inf) = NaN; abs-difference is only for the finite
         # case.
         rel = cj.relation
@@ -257,8 +258,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return False if calls_raised[0] else None
         if calls_nonfinite[0] is not None:
             # a nan or an infinity the code returned for finite inputs
-            # is no value: against a value every relation fails; two
-            # sides with no value in the same way agree, as equal sides
+            # is no value: against a value every relation fails. Two
+            # sides overflowing toward the same infinity are one
+            # extended-real point and agree, as equal sides; a NaN is
+            # the absence of a value and agrees with nothing
             if _same_no_value(lv, rv):
                 return cj.relation in ("==", "~=", "<=", ">=")
             return False
@@ -322,8 +325,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return None
         if calls_nonfinite[0] is not None:
             # no value at a finite input: an overflow, a pole, a nan.
-            # Two sides with no value in the same way agree, as equal
-            # sides; against a value it is a failure
+            # Two sides at the same infinity are one extended-real
+            # point and agree, as equal sides; a NaN, or an infinity
+            # against a value, is a failure
             if _same_no_value(lv, rv) and cj.relation in ("==", "~=",
                                                           "<=", ">="):
                 return None
@@ -763,19 +767,13 @@ def _reach_text(names, cj_domain, cap, reach) -> str:
 
 def _same_no_value(lv, rv) -> bool:
     """Intent:
-        Whether two sides are no value in the same way: both nan, both
-        inf, or both -inf. An inf against a -inf, an infinity against a
-        nan, and anything against a value do not agree.
+        Whether two sides that have no value agree: only when both are
+        the same infinity (`probing.same_infinity`), one extended-real
+        point. A NaN never agrees, not even with another NaN, and an
+        infinity never agrees with a value or the opposite infinity.
     """
-    def kind(v):
-        if not isinstance(v, float) or isinstance(v, bool):
-            return None
-        if v != v:
-            return "nan"
-        if v in (float("inf"), float("-inf")):
-            return "inf" if v > 0 else "-inf"
-        return None
-    return kind(lv) is not None and kind(lv) == kind(rv)
+    from .probing import same_infinity
+    return same_infinity(lv, rv)
 
 
 def _finite_arguments(args, kwargs) -> bool:

@@ -66,16 +66,11 @@ def test_precision_loss_falsifies_the_companion_not_the_proof():
     assert comp.stratum["blame"] == "implementation"
 
 
-def test_nan_on_both_sides_agrees_and_against_a_value_falsifies():
-    # both sides no value in the same way (nan and nan) agree, as equal
-    # sides; the same nan against a number is no value against a value
+def test_nan_everywhere_falsifies_the_companion_over_an_unbounded_domain():
     probes, _ = _check(all_nan, "f(x) == f(x)")
     assert probes["law"].verdict == "proven"
-    assert probes["law[float]"].verdict == "holds"
-    probes, _ = _check(all_nan, "for x in [1, 2], f(x) * 0 == 0")
-    assert probes["law"].verdict == "proven"
     comp = probes["law[float]"]
-    assert comp.verdict == "falsified", comp.note
+    assert comp.verdict == "falsified"
     assert "NaN" in comp.sketch
 
 
@@ -357,7 +352,8 @@ def test_different_no_values_do_not_agree():
     from mathema.gates import _same_no_value
     inf, nan = float("inf"), float("nan")
     assert _same_no_value(inf, inf) and _same_no_value(-inf, -inf)
-    assert _same_no_value(nan, nan)
+    # a NaN is the absence of a value: no two agree
+    assert not _same_no_value(nan, nan)
     assert not _same_no_value(inf, -inf)
     assert not _same_no_value(inf, nan)
     assert not _same_no_value(inf, 1.0)

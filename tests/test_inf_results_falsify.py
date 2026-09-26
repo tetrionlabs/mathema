@@ -68,3 +68,34 @@ def test_inequality_to_a_number_is_falsified_by_an_inf_result():
 def test_an_inf_that_only_passes_an_infinite_input_through_is_a_value():
     p = _probe(passes_inf_through, "for x in R, f(x) == x")
     assert p.verdict == "holds", p.note
+
+
+def add(a: float, b: float) -> float:
+    return a + b
+
+
+def dbl(a: float) -> float:
+    return a + a
+
+
+def always_nan(x: float) -> float:
+    return float("nan")
+
+
+def test_two_sides_overflowing_to_the_same_infinity_agree():
+    # the domain's corners reach -1e308, where both sides are -inf: one
+    # extended real point, so the implementation is consistent there
+    p = _probe(add, "for a in [-1e308, -9e307], b in [-1e308, -9e307], "
+                    "f(a, b) == f(b, a)")
+    assert p.verdict == "holds", p.note
+
+
+def test_an_infinity_against_a_value_falsifies():
+    p = _probe(dbl, "for a in [1e308, 1.7e308], f(a) / 2 == a")
+    assert p.verdict == "falsified", p.note
+    assert "returned inf" in p.counterexample or "returned -inf" in p.counterexample
+
+
+def test_a_nan_never_agrees_even_with_a_nan():
+    p = _probe(always_nan, "for x in [-1, 1], f(x) != f(x)")
+    assert p.verdict == "falsified", p.note
