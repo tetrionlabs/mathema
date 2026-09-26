@@ -15,6 +15,7 @@
 [x] docs/case-studies.md:sigmoid-limit-upper     verdicts
 [x] docs/case-studies.md:sigmoid-limit-lower     verdicts
 [x] docs/case-studies.md:sigmoid-density         verdicts
+[x] docs/case-studies.md:sigmoid-whole-line      run output
 [x] docs/case-studies.md:sigmoid-above-zero      verdicts
 [x] docs/case-studies.md:sigmoid-below-one       verdicts
 [x] docs/case-studies.md:descent                 verdicts
@@ -77,7 +78,7 @@
 [x] README.md:parity                             file run output
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output
-[-] README.md:187
-[-] README.md:285
+[-] README.md:188
+[-] README.md:286
 
-# 67 examples checked, 4 output fences not yet marked
+# 68 examples checked, 4 output fences not yet marked

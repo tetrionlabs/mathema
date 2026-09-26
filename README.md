@@ -108,9 +108,10 @@ The same distinction reaches claims no amount of test-running could establish.
 Four defining properties of the logistic function include a limit at infinity and an
 improper integral over the whole real line, and all four come back proven, with a
 fifth row for the symmetry identity's `[float]` companion (the calculus claims
-spawn none, having no point to execute). The two identities carry a range
-because this code overflows below about `x = -709.78`, and stated over the
-whole line mathema falsifies them there:
+spawn none, having no point to execute). The two identities carry a range for
+the sake of that companion rather than the proof: stated over the whole line
+both are still proven, and the companion is falsified instead where this code
+overflows, below about `x = -709.78`:
 
 <!-- example: sigmoid file=sigmoid.py -->
 ```python
