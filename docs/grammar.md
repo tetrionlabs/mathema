@@ -408,12 +408,16 @@ does not take is a misspecified claim, never a silent free variable.
 ### Operational infinity: `let |inf| be ...`
 
 One more binding uses bars around the name. It sets an operational
-infinity, the finite magnitude that stands in for `oo` wherever a
-claim's domain is unbounded, and it exists because code running on
-doubles does not reach infinity. Past about `1.34e154`, `x ** 2` raises
-`OverflowError`, and a value claim is false wherever the code raises.
-With no operational infinity declared, infinity means infinity, so an
-unbounded pointwise claim meets that overflow.
+infinity, the finite magnitude that stands in for `oo` wherever the
+computation of a claim is exercised along an unbounded direction, and it
+exists because code running on doubles does not reach infinity while the
+mathematics it implements does. A proof is about the mathematics, so it
+is over ℝ whatever the binding says, with infinity as infinity, and the
+binding bounds only the computation, namely what a proof's `[float]`
+companion and the probe route execute. Past about `1.34e154`, `x ** 2`
+raises `OverflowError`, and with no operational infinity declared the
+companion runs an unbounded direction out to `1e308`, where that
+overflow shows.
 
 The standard normal density shows both halves of the rule:
 
@@ -431,35 +435,40 @@ def gauss(x: float) -> float:
 for law in ["∫(f(x), x, -oo, oo) == 1",
             "f(x) >= 0",
             "let |inf| be 1e100, f(x) >= 0"]:
-    (p,) = mathema.claims.check(gauss, [law])
-    print(f"{law:31} {p.verdict:9} {p.counterexample or p.condition or ''}")
+    for p in mathema.check(gauss, claims=[law]).probes:
+        label = "  [float]" if p.name.endswith("[float]") else law
+        print(f"{label:31} {p.verdict:9} {p.counterexample or p.condition or ''}")
 ```
 
 <!-- example: gauss output -->
 ```text
 ∫(f(x), x, -oo, oo) == 1        proven
-f(x) >= 0                       falsified x = 2.6815615859885194e+154
-let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ [-1e+100, 1e+100] ⊂ ℝ ∪ {∅}
+f(x) >= 0                       proven    ∀ x ∈ ℝ
+  [float]                       falsified x=-1e+308
+let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ ℝ
+  [float]                       holds
 ```
 
-The integral over the whole line is proven: an integral, like a limit,
-is a statement about the mathematics, and an overflow in the far tail
-does not change what it equals. The pointwise claim is a statement
-about the code at every `x`, and at `x = 2.68e154` the code raises
-before it returns anything. Declaring `let |inf| be 1e100` says that
-for this claim, "every `x`" means every `x` up to `1e100` in magnitude,
-and the proof then holds, with the region it holds over stated in the
-record rather than implied.
+The integral over the whole line is proven, since an integral, like a
+limit, is a statement about the mathematics, and so is the pointwise
+claim, because the density is positive at every real `x` and the proof
+says so over ℝ. The computation is a separate question, and the `[float]`
+row under each proof answers it: at `x = -1e308` the code squares `x`
+before it returns anything, the square overflows, and the companion is
+falsified with that witness while the proof stands. Declaring `let |inf|
+be 1e100` says that for this claim the computation is exercised out to
+`1e100` in magnitude, where `x ** 2` is still a finite double, so the
+companion holds; the proof is the same proof over ℝ it was without the
+binding, and the binding stays in the claim's statement, so a reader
+sees what bounded the computation (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)).
 
-The bound applies to both routes: the derive route proves over it, and
-the probe route samples out to it, as does a proof's `[float]`
-companion (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)).
-With none declared, the companion runs an unbounded direction out to
-`1e308`. A claim can also state a half-line
-explicitly, `let |inf| be 1e12, for x in [0, oo], f(x) >= 0`, where the
-`oo` endpoint stops at `1e12`. Nothing in the claim refers to `|inf|`
-by name, so it is not an ordinary binding, and in Python the same
-setting is `claim(..., pseudo_infinity=1e100)`.
+A claim can also state a half-line explicitly, `let |inf| be 1e12, for
+x in [0, oo], f(x) >= 0`, where the probe route and the companion stop
+the `oo` endpoint at `1e12` and the proof keeps `oo`, so the proof's
+own row quantifies over `[0, oo]` and the bound appears only beside the
+executed evidence. Nothing in the claim refers to `|inf|` by name, so it
+is not an ordinary binding, and in Python the same setting is
+`claim(..., pseudo_infinity=1e100)`.
 
 ## `assuming`: stating a premise
 
