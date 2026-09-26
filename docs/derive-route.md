@@ -11,7 +11,7 @@ A `proven` is the mathematics, and only the mathematics. Whether the
 float implementation carries it is a second claim, `<name>[float]`,
 which every proof spawns and which runs the real code at the domain's
 corners and at sampled points; `route="derive:math_only"` asks for the
-proof alone. [The evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)
+proof alone. [The evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)
 shows the two side by side.
 
 Lifting is honest, not clever: it never guesses at a closed form.

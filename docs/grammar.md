@@ -460,7 +460,7 @@ be 1e100` says that for this claim the computation is exercised out to
 `1e100` in magnitude, where `x ** 2` is still a finite double, so the
 companion holds; the proof is the same proof over ℝ it was without the
 binding, and the binding stays in the claim's statement, so a reader
-sees what bounded the computation (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)).
+sees what bounded the computation (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)).
 
 A claim can also state a half-line explicitly, `let |inf| be 1e12, for
 x in [0, oo], f(x) >= 0`, where the probe route and the companion stop

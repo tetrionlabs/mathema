@@ -105,7 +105,7 @@ A few consequences worth knowing:
   now know where it fails); correctness is reported separately.
 - **A `[float]` companion that holds counts as numerical stability.** A
   claim the derive route proves spawns a
-  [`<name>[float]` companion](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code),
+  [`<name>[float]` companion](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation),
   the relation executed against the code in float, in the
   `is_numerically_stable` family. A companion that holds or is proven
   credits that family for its function, as a verified

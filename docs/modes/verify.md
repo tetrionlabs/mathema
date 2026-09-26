@@ -216,7 +216,7 @@ the sign of the lifted sum), so the dependent claim is `unknown`.
 `shifts_with_start` proves on the derive route, and every proof spawns
 a `shifts_with_start[float]` companion, the same law checked in
 floating point (see
-[the evidence ladder](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)),
+[the evidence ladder](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)),
 which holds. The second proven claim in the count is
 `dependencies_current`, which `verify` adds to every record:
 

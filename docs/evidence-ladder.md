@@ -37,14 +37,17 @@ ladder is defined in the engine as `mathema.conjecture.EVIDENCE_LADDER`, and
 a route mathema does not recognise, such as one from a verification
 technique you have plugged in yourself, ranks below everything it does.
 
-## A proof is the mathematics; `[float]` is the code
+<a id="a-proof-is-the-mathematics-float-is-the-code"></a>
+
+## A proof is the mathematics; `[float]` is the computation
 
 A `proven` from the derive route means the claim holds in exact real
-arithmetic over the declared domain, and nothing more. It does not say
-the float implementation gets the same answer. That is a separate
-claim, and mathema makes it for you: every claim the derive route
-proves spawns a companion named `<name>[float]`, in the numerical
-stability family, adjudicated on the probe route against the real code.
+arithmetic over the declared domain, with infinity as infinity, and
+nothing more. It does not say the computation in float64 gets the same
+answer. That is a separate claim, and mathema makes it for you: every
+claim the derive route proves spawns a companion named `<name>[float]`,
+in the numerical stability family, adjudicated on the probe route
+against the real code.
 The companion runs the relation at every corner of the declared domain
 and at sampled interior points. A raise, a `NaN`, or an `inf` or a loss
 of precision where the relation fails on the executed values falsifies

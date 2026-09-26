@@ -71,7 +71,7 @@ names.
 
 | Verdict | Route | Means |
 |---|---|---|
-| `proven` | derive | Established by algebra over the whole declared domain, in exact real arithmetic. That is all it says: the float implementation is its own claim, the `<name>[float]` companion every proof spawns (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)). A point inside the domain where the mathematics is undefined, or where the function's own source raises, still falsifies the claim itself; a failure of the computation there, an overflow say, falsifies the `[float]` companion instead; see [the sigmoid case study](case-studies.md#the-sigmoid-calculus-as-a-specification). |
+| `proven` | derive | Established by algebra over the whole declared domain, in exact real arithmetic. That is all it says: the float implementation is its own claim, the `<name>[float]` companion every proof spawns (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)). A point inside the domain where the mathematics is undefined, or where the function's own source raises, still falsifies the claim itself; a failure of the computation there, an overflow say, falsifies the `[float]` companion instead; see [the sigmoid case study](case-studies.md#the-sigmoid-calculus-as-a-specification). |
 | `holds (n=...)` | probe | Held on every one of `n` seeded trials. Evidence, not proof. |
 | `falsified` | either | A counterexample exists and is kept, permanently. |
 | `unknown` | either | Adjudication ran but couldn't decide (an undecided proof, inconclusive sampling). |
