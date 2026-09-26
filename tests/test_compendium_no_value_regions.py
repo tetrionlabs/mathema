@@ -194,11 +194,20 @@ def ex(tmp_path):
 
 
 @pytest.mark.needs_full_proof_budget
-def test_an_overflow_region_falsifies_on_derive_with_a_reproduced_witness(ex):
-    p = _verdict(ex, "for x in [700, 1000], f(x) >= 0")
-    assert p.verdict == "falsified", p.note
-    assert p.route == "derive", p.route
-    assert p.meta.get("mathema.corroboration") == "reproduced"
+def test_an_overflow_region_is_computation_the_proof_stands_and_the_companion_falls(ex):
+    # numpy.exp's overflow is an `is_overflow_safe` row, never a derive
+    # guard: exp(x) >= 0 is proven over the reals, and the float
+    # companion carries the overflow at x = 1000
+    from mathema import check
+    by_name = {p.name: p for p in
+               check(ex, claims=["for x in [700, 1000], f(x) >= 0"]).probes}
+    parent, companion = by_name["f_x_ge_0"], by_name["f_x_ge_0[float]"]
+    assert parent.verdict == "proven", (parent.verdict, parent.note)
+    assert parent.route == "derive", parent.route
+    assert companion.verdict == "falsified", (companion.verdict,
+                                              companion.note)
+    assert "x=1000" in (companion.counterexample or "")
+    assert "returned inf" in (companion.sketch or ""), companion.sketch
 
 
 @pytest.mark.needs_full_proof_budget

@@ -35,6 +35,10 @@ def test_the_numpy_compendium_covers_the_expected_surface():
         return [c["statement"] for c in numpy[key].get("claims") or []
                 if c["name"] == "is_defined"]
 
+    def overflow_safe_on(key):
+        return [c["statement"] for c in numpy[key].get("claims") or []
+                if c["name"] == "is_overflow_safe"]
+
     # expanded coverage across the hazard categories (domain nan,
     # overflow, division, reductions, bounds)
     assert len(numpy) >= 25
@@ -46,13 +50,17 @@ def test_the_numpy_compendium_covers_the_expected_surface():
     assert defined_on("numpy.arctanh") == ["-1 < x < 1"]
     # overflow / division functions are covered (caught empirically)
     assert {"numpy.exp", "numpy.divide", "numpy.reciprocal"} <= set(numpy)
-    # the exponentials return a finite value only below their overflow
-    # threshold, inf past it
-    assert defined_on("numpy.exp") == ["x <= 709.782712893384"]
-    assert defined_on("numpy.expm1") == ["x <= 709.782712893384"]
-    assert defined_on("numpy.exp2") == ["x < 1024"]
-    assert defined_on("numpy.cosh") == ["-710.475860073944 < x < 710.475860073944"]
-    assert defined_on("numpy.sinh") == ["-710.475860073944 < x < 710.475860073944"]
+    # the exponentials are mathematically total (a bare is_defined) and
+    # overflow-safe only below their threshold, an inf past it: the
+    # threshold is a computation fact, stated by an is_overflow_safe row
+    assert overflow_safe_on("numpy.exp") == ["x <= 709.782712893384"]
+    assert overflow_safe_on("numpy.expm1") == ["x <= 709.782712893384"]
+    assert overflow_safe_on("numpy.exp2") == ["x < 1024"]
+    assert overflow_safe_on("numpy.cosh") == ["-710.475860073944 < x < 710.475860073944"]
+    assert overflow_safe_on("numpy.sinh") == ["-710.475860073944 < x < 710.475860073944"]
+    for key in ("numpy.exp", "numpy.expm1", "numpy.exp2", "numpy.cosh",
+                "numpy.sinh"):
+        assert defined_on(key) == ["is_defined(f)"], key
     # reductions are defined on a non-empty array only
     assert defined_on("numpy.mean") == ["dim(a) >= 1"]
     # bounds carry claims, not hazards
