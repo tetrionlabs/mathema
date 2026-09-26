@@ -141,6 +141,58 @@ def _overflow_prone_params(fn, facts) -> set:
     return set(_bare_call_targets(facts, _OVERFLOW_PRONE_NAMES))
 
 
+# the power functions whose result leaves float range at moderate
+# arguments, beside `**` itself
+_POWER_NAMES = frozenset({"power", "float_power", "pow"})
+
+
+def _overflow_targets(fn, facts) -> set:
+    """Intent:
+        The is_overflow_safe suggestion gate: every real parameter the
+        body raises to a power (`**`, `pow`, `power`), passes inside
+        any expression to an overflow-prone function (`exp`, `cosh`,
+        ...), or feeds bare to one (the is_extremity_safe set).
+
+    Notes:
+        A source-level scan over the whole argument expression, unlike
+        `_bare_call_targets`: `exp(2 * x)` overflows in `x` just as
+        `exp(x)` does. Sequence, string and boolean parameters are
+        not overflow targets.
+    """
+    out = set(_overflow_prone_params(fn, facts))
+    tree = facts.tree
+    if tree is None:
+        return out
+    scalars = {p for p in facts.params
+               if facts.param_kinds.get(p) not in ("sequence", "string",
+                                                    "bool")}
+
+    def names_in(node) -> set:
+        return {n.id for n in ast.walk(node)
+                if isinstance(n, ast.Name) and n.id in scalars}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            out |= names_in(node)
+        elif isinstance(node, ast.Call) and _call_name(node) in (
+                _OVERFLOW_PRONE_NAMES | _POWER_NAMES):
+            for arg in node.args:
+                out |= names_in(arg)
+    return out & scalars if scalars else set()
+
+
+def _recursion_targets(fn, facts) -> set:
+    """The is_recursion_safe suggestion gate: every numeric parameter
+    of a body that calls itself (`facts.recursion`), since the depth a
+    recursion reaches is driven by its arguments; nothing for a body
+    that does not recurse."""
+    if not getattr(facts, "recursion", False):
+        return set()
+    return {p for p in facts.params
+            if facts.param_kinds.get(p) not in ("sequence", "string",
+                                                 "bool")}
+
+
 # --- hazard knowledge: missing-value guards --------------------------
 
 

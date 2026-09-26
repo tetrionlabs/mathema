@@ -1724,36 +1724,40 @@ def _guarded_safety_derive(derive):
 
 def _guarded_safety_probe(probe):
     """Wrap a safety member's empirical half in the family verdict
-    contract. Trials may falsify (with a witness), hold, or decline;
-    they may claim "proven" ONLY by returning the 4-tuple form
-    (verdict, checked, cx, established) with a non-empty
-    `established` sketch naming why the coverage was EXHAUSTIVE,
-    the hazard class fully enumerated and every case observed. The
-    verdict carries surety, so an established empirical examination
-    proves; anything short of exhaustive coverage holds at best. A
-    contract violation raises, same as the derive guard."""
+    contract. Trials may falsify (with a witness), hold, decline, or
+    report `unknown` (the member examined the function and could not
+    settle it, a roll-up with an unsettled child); they may claim
+    "proven" ONLY by returning the 4-tuple form (verdict, checked, cx,
+    established) with a non-empty `established` sketch naming why the
+    coverage was EXHAUSTIVE, the hazard class fully enumerated and
+    every case observed. The verdict carries surety, so an established
+    empirical examination proves; anything short of exhaustive
+    coverage holds at best. A fifth element, the member's own record
+    meta, passes through untouched. A contract violation raises, same
+    as the derive guard."""
     def run(fn, facts, cj, domain, rng, trials):
         result = probe(fn, facts, cj, domain, rng, trials)
         if result is None:
             return None
-        if len(result) == 4:
-            verdict, checked, cx, established = result
-        else:
-            verdict, checked, cx = result
-            established = None
+        verdict, checked, cx = result[:3]
+        established = result[3] if len(result) > 3 else None
+        meta = result[4] if len(result) > 4 else None
         if verdict == "proven" and not established:
             raise ValueError("safety trials claimed proven without an "
                              "established-coverage sketch, sampling "
                              "alone never proves; only an exhaustive "
                              "examination (stated as such) does")
-        if verdict not in ("proven", "falsified", "holds", "skipped"):
+        if verdict not in ("proven", "falsified", "holds", "skipped",
+                           "unknown"):
             raise ValueError(f"safety probe returned verdict {verdict!r}, "
                              f"outside the closed vocabulary")
         if verdict == "falsified" and not cx:
             raise ValueError("safety probe falsified without a concrete "
                              "counterexample, a safety falsification "
                              "must carry its witness")
-        return (verdict, checked, cx, established)
+        if meta is None:
+            return (verdict, checked, cx, established)
+        return (verdict, checked, cx, established, meta)
     return run
 
 
@@ -1772,7 +1776,9 @@ class SafetyFamily(_NamedClaimFamily):
 
     def __init__(self, base_name: str, *, derive, probe=None,
                  suggest_targets=None,
-                 probe_route="probe:algorithmic"):
+                 probe_route="probe:algorithmic",
+                 whole_function: bool = False,
+                 reserved: "str | None" = None):
         family_routes = {"derive": _guarded_safety_derive(derive)}
         if probe is not None:
             family_routes["probe:algorithmic"] = _guarded_safety_probe(probe)
@@ -1784,6 +1790,14 @@ class SafetyFamily(_NamedClaimFamily):
         # shrink -> "probe:minimal_example") names it here so the record
         # reflects the real mechanism.
         self.probe_route = probe_route
+        # a member that examines the whole function at once: its `(f)`
+        # spelling is adjudicated as one claim, not expanded into the
+        # conjunction over every numeric parameter
+        self.whole_function = whole_function
+        # a member defined but not adjudicated in this release: both
+        # halves report `skipped` with this reason, so a claim naming it
+        # is a known claim that is not yet decided, never a misspelling
+        self.reserved = reserved
 
     def suggest_targets(self, fn, facts) -> list:
         """The parameters this member is structurally relevant for,
@@ -2193,35 +2207,199 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     return ProofResult("undecided", sketch=undecided_sketch)
 
 
-def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                      trials: int):
+def _has_value(out, exc) -> bool:
+    """Whether an executed call had a value: it returned, and the
+    result is finite. A raise, a nan and an infinity are no value."""
+    return exc is None and not _is_nonfinite(out)
+
+
+def _no_overflow(out, exc) -> bool:
+    """Whether an executed call stayed inside float range: it neither
+    raised an OverflowError (or a FloatingPointError reporting an
+    overflow) nor returned an infinity. A nan, a finite value and any
+    other raise are not an overflow."""
+    from .probing import holds_inf
+    if exc is not None:
+        return not (isinstance(exc, OverflowError)
+                    or (isinstance(exc, FloatingPointError)
+                        and "overflow" in str(exc).lower()))
+    return not holds_inf(out)
+
+
+#: the two region families (`conjecture.REGION_ROW_STRATA`): what an
+#: executed call must do inside the stated region
+_REGION_SAFE = {"is_defined": _has_value, "is_overflow_safe": _no_overflow}
+
+#: the words the record uses for each outcome of a region family
+_REGION_WORDS: dict = {
+    "is_defined": {
+        "bare": "so it is not defined on the whole domain",
+        "outside": "a value outside the stated region",
+        "sampled_bare": "{checked} executed points in the domain, each "
+                        "returning a finite value",
+        "sampled_conjunct": "{n_out} executed points outside the stated "
+                            "conjunct returned no value and {n_in} were "
+                            "sampled inside it, where the region's other "
+                            "conjuncts decide",
+        "sampled": "{n_in} executed points inside the stated region "
+                   "returned a finite value and {n_out} outside it "
+                   "returned no value",
+    },
+    "is_overflow_safe": {
+        "bare": "so it is not overflow-safe on the whole domain",
+        "outside": "no overflow outside the stated region",
+        "sampled_bare": "{checked} executed points in the domain, none "
+                        "overflowing",
+        "sampled_conjunct": "{n_out} executed points outside the stated "
+                            "conjunct overflowed and {n_in} were sampled "
+                            "inside it, where the region's other conjuncts "
+                            "decide",
+        "sampled": "{n_in} executed points inside the stated region "
+                   "returned without overflow and {n_out} outside it "
+                   "overflowed",
+    },
+}
+
+
+def _region_interval(region, symbol):
     """Intent:
-        Empirical half of `is_defined`, for any target whose region
-        equivalence (the derive half) declines or does not decide. A
-        call has a value when it returns a finite result; a raise or a
-        non-finite result (nan, inf) is no value. The bare claim
-        (`is_defined(f)`, per parameter) asks for a value at every
-        sampled point of the domain. A stated region asks for a value
-        at every sampled point inside it and no value at every sampled
-        point outside it. An indexed row (`is_defined[2]`) states one
-        conjunct of the region, so it asks only for no value outside
-        it: inside, the other conjuncts decide. The first point that
-        disagrees is the executed witness.
+        The real interval a one-parameter region describes, as
+        `(lo, hi, closed_lo, closed_hi)` with infinite ends where the
+        region is unbounded, or None when the region is not one
+        interval in that symbol (another variable, a union, an
+        unsolvable relation). Each conjunct is solved on its own under
+        the fast wall-clock cap and the results intersected.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    parts = list(region.args) if isinstance(region, sympy.And) else [region]
+    hull = sympy.S.Reals
+    for part in parts:
+        if not isinstance(part, sympy.core.relational.Relational):
+            return None
+        if part.free_symbols != {symbol}:
+            return None
+        try:
+            solved = _with_timeout(
+                lambda: sympy.solveset(part, symbol, sympy.S.Reals),
+                FAST_TIMEOUT_SECONDS)
+        except Exception:
+            return None
+        hull = hull.intersect(solved)
+    if not isinstance(hull, sympy.Interval):
+        return None
+    try:
+        return (float(hull.inf), float(hull.sup),
+                not hull.left_open, not hull.right_open)
+    except (TypeError, ValueError):
+        return None
+
+
+def _library_reach(fn, cj, params: list, domain: dict, shapes: dict):
+    """Intent:
+        How far an `is_defined` probe on a LIBRARY key (a key of a
+        registered compendium file) runs each scalar parameter: the
+        key's own `is_overflow_safe` region when the compendium states
+        one (the function is mathematically total where it does not
+        overflow, and overflow is the `is_overflow_safe` row's fact,
+        not this claim's), else the claim's pseudo-infinity, else the
+        f64 reach (1e308), each intersected with the parameter's own
+        declared bound. Returns `(reach, note)`: the per-parameter
+        `(lo, hi)` the corners are taken from and outside which a draw
+        is not a trial, and the text the record carries, or `({},
+        None)` for any other function.
+    """
+    import math as _math
+
+    import sympy
+
+    from .compendium import computation_region, library_key_of
+    from .records import pseudo_infinity_range
+    key = library_key_of(fn)
+    if key is None:
+        return {}, None
+    pinf = pseudo_infinity_range(getattr(cj, "pseudo_infinity", None))
+    default_lo, default_hi = pinf if pinf is not None else (-1e308, 1e308)
+    regions = {}
+    texts = []
+    for row in computation_region(key, "is_overflow_safe"):
+        for p in row["params"]:
+            if p not in params:
+                continue
+            found = _region_interval(row["region"],
+                                     sympy.Symbol(p, real=True))
+            if found is not None:
+                regions[p] = found
+                texts.extend(row["texts"])
+    reach: dict = {}
+    for p in params:
+        if shapes.get(p) is not None:
+            continue
+        ends = _interval_ends((domain or {}).get(p))
+        lo, hi = ends if ends is not None else (-_math.inf, _math.inf)
+        r_lo, r_hi, closed_lo, closed_hi = regions.get(
+            p, (-_math.inf, _math.inf, True, True))
+        lo, hi = max(lo, r_lo), min(hi, r_hi)
+        if not closed_lo and lo == r_lo:
+            lo = _math.nextafter(lo, _math.inf)
+        if not closed_hi and hi == r_hi:
+            hi = _math.nextafter(hi, -_math.inf)
+        if _math.isinf(lo):
+            lo = default_lo
+        if _math.isinf(hi):
+            hi = default_hi
+        if lo <= hi:
+            reach[p] = (lo, hi)
+    if not reach:
+        return {}, None
+    if texts:
+        note = (f"sampled inside the overflow-safe region of {key} "
+                f"({' and '.join(texts)})")
+    elif pinf is not None:
+        note = "unbounded directions run to the declared |inf|"
+    else:
+        note = "unbounded directions run to magnitude 1e+308"
+    return reach, note
+
+
+def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                  trials: int, kind: str):
+    """Intent:
+        The empirical half shared by the two region families
+        (`_REGION_SAFE`): `is_defined`, where a call inside the region
+        must have a value (a finite return) and a call outside must
+        not, and `is_overflow_safe`, where a call inside must not
+        overflow and a call outside must. The bare claim (`is_defined(f)`,
+        `is_overflow_safe(x)`) asks the inside condition at every
+        sampled point of the domain. A stated region asks it at every
+        sampled point inside and the outside condition at every
+        sampled point outside. An indexed row (`is_defined[2]`) states
+        one conjunct of the region, so it asks only the outside
+        condition: inside, the other conjuncts decide. The first point
+        that disagrees is the executed witness.
 
     Notes:
         Points come from the domain's corners, then points around the
         region's boundary (each link solved for one parameter under the
         fast wall-clock cap, the root offset a little each way), then
-        seeded draws from the domain. A point with a missing argument,
-        or outside the domain, is not a trial. Returns the
-        `(verdict, checked, counterexample, established, meta)` shape,
-        with the counts inside and outside the region in `meta`, or
-        None when a link is not a comparison.
+        seeded draws from the domain. The bare `is_overflow_safe` also
+        tries the representation extremes the domain admits (the float
+        corner, the exp threshold, the denormal band, or the claim's
+        pseudo-infinity), since overflow lives there. An `is_defined`
+        probe on a library key takes its corners from `_library_reach`
+        and treats a draw outside that reach as no trial. A point with
+        a missing argument, or outside the domain, is not a trial.
+        Returns the `(verdict, checked, counterexample, established,
+        meta)` shape, with the counts inside and outside the region in
+        `meta`, or None when a link is not a comparison.
     """
     from .conjecture import _SAFE_FUNCS, MATH_CONSTANTS, _validate, call_defaults
     from .domain import domain_contains, is_missing
     from .gates import _fmt_point
     from .probing import _fmt_value
+    words = _REGION_WORDS[kind]
+    safe = _REGION_SAFE[kind]
 
     # a library function's defaulted parameters the claim leaves alone
     # are not passed (they take their defaults); a pinned one is
@@ -2230,7 +2408,7 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
     params = [p for p in facts.params if p not in kept]
     if not params:
         return None
-    bare = cj.relation == "is_defined"
+    bare = cj.relation == kind
     conjunct = not bare and "[" in cj.name
     links = [] if bare else (list(cj.links)
                              or [(cj.lhs, cj.relation, cj.rhs)])
@@ -2277,11 +2455,20 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
     def inside(point: dict) -> "bool | None":
         return satisfies(compiled, point)
 
+    shapes = _region_shapes(links, params, domain)
+    reach, reach_note = ({}, None)
+    if kind == "is_defined":
+        reach, reach_note = _library_reach(fn, cj, params, domain, shapes)
+
     def admitted(point: dict) -> bool:
         for p, v in point.items():
             if is_missing(v):
                 return False
             bound = (domain or {}).get(p)
+            span = reach.get(p)
+            if span is not None and isinstance(v, (int, float)) \
+                    and not span[0] <= v <= span[1]:
+                return False
             if bound is None:
                 continue
             dims = getattr(bound, "dims", None)
@@ -2297,8 +2484,6 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
             except (TypeError, ValueError):
                 return False
         return True
-
-    shapes = _region_shapes(links, params, domain)
 
     def draw_one(p: str):
         from .matrices import _rand
@@ -2328,11 +2513,25 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
         for p in params:
             if p in call_pins:
                 continue
-            ends = _interval_ends((domain or {}).get(p))
+            ends = reach.get(p) or _interval_ends((domain or {}).get(p))
             if ends is None:
                 continue
             lo, hi = ends
             for v in (lo, hi, (lo + hi) / 2):
+                yield {**draw(), p: v}
+
+    def extremes():
+        # the bare overflow claim: the representation extremes each
+        # scalar parameter's bound admits, where overflow lives
+        from .hazards import _extreme_candidates
+        from .records import pseudo_infinity_range
+        pinf = pseudo_infinity_range(getattr(cj, "pseudo_infinity", None))
+        for p in params:
+            if p in call_pins or shapes.get(p) is not None \
+                    or facts.param_kinds.get(p) in ("sequence", "string"):
+                continue
+            for v in _extreme_candidates((domain or {}).get(p),
+                                         pseudo_infinity=pinf):
                 yield {**draw(), p: v}
 
     def near_boundaries():
@@ -2371,6 +2570,8 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     def candidates():
         yield from corners()
+        if bare and kind == "is_overflow_safe":
+            yield from extremes()
         if not bare:
             yield from shape_boundaries()
             yield from near_boundaries()
@@ -2393,33 +2594,42 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
             with _pinned_float_env():
                 out = fn(*call_args, **call_kwargs)
         except Exception as exc:
-            has_value, what = False, f"raised {type(exc).__name__}"
+            out, raised = None, exc
+            what = f"raised {type(exc).__name__}"
         else:
-            has_value = not _is_nonfinite(out)
+            raised = None
             what = f"returned {_fmt_value(out)}"
         checked += 1
         n_in, n_out = n_in + bool(where), n_out + (not where)
-        if has_value == where or (conjunct and where):
+        if safe(out, raised) == where or (conjunct and where):
             continue
         at = _fmt_point(point, params)
         if bare:
-            cx = f"{at}: f {what}, so it is not defined on the whole domain"
+            cx = f"{at}: f {what}, {words['bare']}"
         elif where:
             cx = f"{at}: inside the stated region, f {what}"
         else:
-            cx = f"{at}: f {what}, a value outside the stated region"
+            cx = f"{at}: f {what}, {words['outside']}"
         return ("falsified", checked, cx, None,
                 {"mathema.witness_executed": True})
     if checked == 0:
         return "skipped", 0, None
-    sampled = (f"{checked} executed points in the domain, each returning "
-               f"a finite value" if bare else
-               f"{n_out} executed points outside the stated conjunct "
-               f"returned no value and {n_in} were sampled inside it, "
-               f"where the region's other conjuncts decide" if conjunct else
-               f"{n_in} executed points inside the stated region returned "
-               f"a finite value and {n_out} outside it returned no value")
+    sampled = (words["sampled_bare"] if bare else
+               words["sampled_conjunct"] if conjunct else
+               words["sampled"]).format(checked=checked, n_in=n_in,
+                                        n_out=n_out)
+    if reach_note:
+        sampled = f"{sampled}; {reach_note}"
     return "holds", checked, None, None, {"mathema.sampled": sampled}
+
+
+def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                      trials: int):
+    """Empirical half of `is_defined`, for any target whose region
+    equivalence (the derive half) declines or does not decide: the
+    `_region_probe` with "has a value" (a finite return) as the inside
+    condition."""
+    return _region_probe(fn, facts, cj, domain, rng, trials, "is_defined")
 
 
 def _has_axes(value, axes: int) -> bool:
@@ -2921,6 +3131,14 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
                             (domain or {}).get(p))
                 for p in facts.params]
 
+    def diagnosed(cx: str, filled: list) -> str:
+        # the covered call's computation region, when the compendium
+        # states one (numpy.exp is overflow-safe only for x <= 709.78)
+        from .compendium import computation_diagnosis
+        region = computation_diagnosis(fn, facts,
+                                       dict(zip(facts.params, filled)))
+        return f"{cx}; {region}" if region else cx
+
     def trial(_args):
         filled = _sample(empties.pop() if empties else None)
         try:
@@ -2928,17 +3146,218 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
                 out = fn(*filled)
         except Exception as e:
             if _raised_by_library(e, library):
-                return (f"{_fmt(tuple(filled))}: raised "
-                        f"{type(e).__name__} inside {library}")
+                return diagnosed(f"{_fmt(tuple(filled))}: raised "
+                                 f"{type(e).__name__} inside {library}",
+                                 filled)
             return None
         if _is_nonfinite(out):
-            return (f"{_fmt(tuple(filled))}: output {out!r} is a silent "
-                    f"non-finite value from an unguarded {library} call")
+            return diagnosed(f"{_fmt(tuple(filled))}: output {out!r} is a "
+                             f"silent non-finite value from an unguarded "
+                             f"{library} call", filled)
         return True
 
     target = facts.params[0] if facts.params else ""
     return _probe_trials(fn, facts, target, domain, rng,
                          max(trials, len(facts.params) + 4), trial)
+
+
+# --- the computation-safety hierarchy (P13): is_computation_safe(f) rolls
+# up its children for one implementation; each child is adjudicated by
+# execution, and a child's restriction form states the region where the
+# implementation is safe in that respect. -------------------------------
+
+
+def _is_overflow_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+                             relation: str, domain: dict | None = None,
+                             tolerance: float | None = None):
+    """Structural half of is_overflow_safe: decline. Whether an
+    implementation overflows is a fact about one carrier, established
+    by executing it (P3, P13); a derive proof over the reals says
+    nothing about it."""
+    return None
+
+
+def _overflow_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                    trials: int):
+    """Empirical half of is_overflow_safe: the `_region_probe` with
+    "does not overflow" (no infinity returned, no OverflowError) as
+    the inside condition. The bare claim also tries the representation
+    extremes the domain admits, where overflow lives."""
+    return _region_probe(fn, facts, cj, domain, rng, trials,
+                         "is_overflow_safe")
+
+
+def _is_recursion_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+                              relation: str, domain: dict | None = None,
+                              tolerance: float | None = None):
+    """Structural half of is_recursion_safe: decline. The recursion
+    limit is the runtime's, reached or not by executing the call."""
+    return None
+
+
+def _recursion_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                     trials: int):
+    """Empirical half of is_recursion_safe: call fn at the corners of
+    the declared domain (the far end of each numeric parameter first,
+    where a recursion driven by it runs deepest) and at sampled points;
+    a RecursionError at an admitted point is the counterexample. Any
+    other raise is not the recursion limit and passes; so does a
+    normal return. `is_recursion_safe(n)` focuses the corners on `n`,
+    `is_recursion_safe(f)` takes every numeric parameter's."""
+    from .gates import _fmt_point
+    target = cj.lhs
+    numeric = [p for p in facts.params
+               if facts.param_kinds.get(p) not in ("sequence", "string")]
+    if target in facts.params:
+        focus = [target]
+    elif target == "f" and numeric:
+        focus = numeric
+    else:
+        return None
+    anchor = focus[0]
+    corners: list = []
+    for p in focus:
+        ends = _interval_ends((domain or {}).get(p))
+        if ends is not None:
+            lo, hi = ends
+            corners.extend((p, v) for v in (hi, lo, (lo + hi) / 2))
+    state = {"i": 0}
+
+    def trial(args):
+        values = dict(zip(facts.params, args))
+        values[anchor] = _synth(facts.param_kinds.get(anchor, "unknown"),
+                                rng, (domain or {}).get(anchor))
+        if state["i"] < len(corners):
+            p, v = corners[state["i"]]
+            state["i"] += 1
+            values[p] = v
+        try:
+            call_args, call_kwargs = call_arguments(fn, facts.params, values)
+            with _pinned_float_env():
+                fn(*call_args, **call_kwargs)
+        except RecursionError:
+            return (f"{_fmt_point(values, list(facts.params))}: f raised "
+                    f"RecursionError, the recursion limit is reached "
+                    f"inside the declared domain")
+        except Exception:
+            return True
+        return True
+
+    verdict, checked, cx = _probe_trials(fn, facts, anchor, domain, rng,
+                                         max(trials, len(corners)), trial)
+    if verdict != "holds":
+        return verdict, checked, cx
+    return ("holds", checked, None, None,
+            {"mathema.sampled": f"{checked} executed points, none reaching "
+                                f"the recursion limit"})
+
+
+#: why is_memory_safe reports skipped: adjudicating memory use needs a
+#: resource cap around the call, which this release does not provide
+_MEMORY_SAFETY_NOTE = ("memory safety needs a resource cap and is not "
+                       "adjudicated in this release")
+
+
+def _is_memory_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+                           relation: str, domain: dict | None = None,
+                           tolerance: float | None = None):
+    """Structural half of is_memory_safe: decline; the member is
+    defined and reserved, see `_MEMORY_SAFETY_NOTE`."""
+    return None
+
+
+def _memory_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                  trials: int):
+    """Empirical half of is_memory_safe: skipped, with the reason. The
+    name is registered so a claim stating it is a known claim, not a
+    misspelling."""
+    return "skipped", 0, _MEMORY_SAFETY_NOTE
+
+
+#: the children of is_computation_safe, in the order the roll-up runs
+#: and reports them; each is relevant to a function when its own
+#: suggestion gate names a target there, except the three always run
+_COMPUTATION_CHILDREN = (
+    "is_overflow_safe", "is_numerically_stable", "is_representation_safe",
+    "is_extremity_safe", "is_pole_safe", "is_builtin_safe",
+    "is_missing_safe", "is_empty_safe", "is_recursion_safe",
+    "is_deterministic", "is_state_safe", "is_arbitrary_input_safe",
+    "is_compendium_safe")
+_ALWAYS_RELEVANT_CHILDREN = frozenset({"is_numerically_stable",
+                                       "is_deterministic", "is_state_safe"})
+
+
+def _is_computation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+                                relation: str, domain: dict | None = None,
+                                tolerance: float | None = None):
+    """Structural half of is_computation_safe: decline. The roll-up is
+    the conjunction of executed facts and holds at best (P3)."""
+    return None
+
+
+def _computation_children(fn, facts, cj, domain: dict) -> list:
+    """The child claims is_computation_safe runs for this function: the
+    always-relevant three (numerical stability, determinism, state
+    safety) in their own spellings, and every other child at each
+    target its suggestion gate names, all over the roll-up's domain
+    and pseudo-infinity."""
+    from dataclasses import replace as _replace
+
+    from . import families as _families
+    from .conjecture import claim
+    registry = _families.families()
+    call = f"f({', '.join(facts.params)})"
+    out: list = []
+    for name in _COMPUTATION_CHILDREN:
+        family = registry.get(name)
+        if family is None:
+            continue
+        if name == "is_numerically_stable":
+            out.append(claim(f"g(f, {', '.join(facts.params)}) == 1",
+                             name=name, route="best",
+                             funcs={"g": "mathema.f.finite_no_error"}))
+        elif name in _ALWAYS_RELEVANT_CHILDREN:
+            out.append(claim(f"{call} == {call}", name=name, route="best"))
+        else:
+            for target in family.suggest_targets(fn, facts):
+                out.append(claim(f"{name}({target})",
+                                 name=f"{name}[{target}]", route="best"))
+    return [_replace(c, domain=dict(domain or {}),
+                     pseudo_infinity=getattr(cj, "pseudo_infinity", None))
+            for c in out]
+
+
+def _computation_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                       trials: int):
+    """Empirical half of is_computation_safe(f): adjudicate every
+    relevant child (`_computation_children`) in one nested
+    `check_conjectures` call and roll the verdicts up. Any child
+    falsified falsifies the roll-up with that child's name and witness;
+    every child holding or proven makes it hold, never proven (P3, a
+    roll-up of executed facts about one implementation); anything else
+    is unknown. The note lists each child's verdict and
+    `meta["mathema.children"]` carries them as a mapping."""
+    from .conjecture import check_conjectures
+    children = _computation_children(fn, facts, cj, domain)
+    if not children:
+        return None
+    probes = check_conjectures(fn, children, facts=facts, trials=trials)
+    verdicts = {p.name: p.verdict for p in probes}
+    checked = sum(p.n or 0 for p in probes)
+    meta = {"mathema.children": verdicts,
+            "mathema.sampled": ", ".join(f"{n}: {v}"
+                                         for n, v in verdicts.items())}
+    failed = [p for p in probes if p.verdict == "falsified"]
+    if failed:
+        first = failed[0]
+        cause = (first.stratum or {}).get("cause")
+        if cause:
+            meta["mathema.cause"] = cause
+        return ("falsified", checked,
+                f"{first.name}: {first.counterexample}", None, meta)
+    if all(v in ("holds", "proven") for v in verdicts.values()):
+        return "holds", checked, None, None, meta
+    return "unknown", checked, None, None, meta
 
 
 def _register_builtin_claim_families() -> None:
@@ -2960,9 +3379,15 @@ def _register_builtin_claim_families() -> None:
     for _kind in ("affine", "convex", "concave"):
         _families.register(_kind, _NamedClaimFamily(
             _kind, {"probe:algorithmic": _functools.partial(_second_difference_probe, kind=_kind)}))
-    _families.register("is_defined", _NamedClaimFamily(
+    _defined = _NamedClaimFamily(
         "is_defined", {"derive": _is_defined_derive,
-                       "probe:algorithmic": _is_defined_probe}))
+                       "probe:algorithmic": _is_defined_probe})
+    # the bare `is_defined(f)` is one question about the whole function
+    # (the derive half reads the body's raise regions, the probe half
+    # samples every parameter jointly), so it is not expanded into a
+    # conjunction over the parameters
+    _defined.whole_function = True
+    _families.register("is_defined", _defined)
     # the implementation-safety members, one SafetyFamily each: the
     # derive/probe halves and the suggestion gate are the member's
     # injected parts, and every half runs inside the family verdict
@@ -2989,6 +3414,16 @@ def _register_builtin_claim_families() -> None:
         "is_extremity_safe", derive=_is_extremity_safe_derive,
         probe=_extreme_probe,
         suggest_targets=_overflow_prone_params))
+    # is_overflow_safe: no infinity and no OverflowError from finite
+    # inputs (P13); its restriction form states the region where the
+    # implementation stays in float range, the computation row a
+    # compendium carries for numpy.exp. Suggested wherever a parameter
+    # is raised to a power or reaches an overflow-prone function.
+    from .hazards import _overflow_targets
+    _families.register("is_overflow_safe", SafetyFamily(
+        "is_overflow_safe", derive=_is_overflow_safe_derive,
+        probe=_overflow_probe,
+        suggest_targets=_overflow_targets))
     _families.register("is_representation_safe", SafetyFamily(
         "is_representation_safe", derive=_is_representation_safe_derive,
         probe=_representation_probe,
@@ -3007,6 +3442,14 @@ def _register_builtin_claim_families() -> None:
         probe=_arbitrary_input_probe,
         suggest_targets=lambda fn, facts: _string_input_params(facts),
         probe_route="probe:minimal_example"))
+    # is_recursion_safe: no RecursionError over the domain, suggested
+    # when the body calls itself; `(f)` is one claim over the whole
+    # function, not a conjunction over its parameters
+    from .hazards import _recursion_targets
+    _families.register("is_recursion_safe", SafetyFamily(
+        "is_recursion_safe", derive=_is_recursion_safe_derive,
+        probe=_recursion_probe,
+        suggest_targets=_recursion_targets, whole_function=True))
     # is_compendium_safe(<library>): the function never silently produces
     # a non-finite output (nan/inf) through an unguarded call into a
     # compendium-covered library function. Parameterised by library
@@ -3036,3 +3479,14 @@ def _register_builtin_claim_families() -> None:
     _families.register("is_state_safe", SafetyFamily(
         "is_state_safe", derive=_is_state_safe_derive,
         probe=_state_probe))
+    # is_memory_safe is defined and reserved (skipped with the reason,
+    # never suggested); is_computation_safe is the roll-up of the
+    # hierarchy, declared by the author and never battery-suggested,
+    # like excluded_outside_domain
+    _families.register("is_memory_safe", SafetyFamily(
+        "is_memory_safe", derive=_is_memory_safe_derive,
+        probe=_memory_probe, whole_function=True,
+        reserved=_MEMORY_SAFETY_NOTE))
+    _families.register("is_computation_safe", SafetyFamily(
+        "is_computation_safe", derive=_is_computation_safe_derive,
+        probe=_computation_probe, whole_function=True))

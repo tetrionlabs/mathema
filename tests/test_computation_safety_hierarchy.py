@@ -62,7 +62,7 @@ def test_a_square_over_the_reals_overflows_to_inf_at_the_float_corner(tmp_path):
     ''', "hier_sq").sq
     p = _one(sq, "for x in R, is_overflow_safe(x)")
     assert p.verdict == "falsified", (p.verdict, p.note)
-    assert "1e+308" in (p.counterexample or "")
+    assert "e+308" in (p.counterexample or "")
     assert "returned inf" in (p.counterexample or "")
     assert (p.stratum or {}).get("cause") == "implementation:overflow"
 

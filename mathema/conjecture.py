@@ -403,6 +403,25 @@ _COMPARISON_RELATIONS = frozenset({"==", "~=", "!=", "<=", ">=", "<", ">"})
 _SELF_AGREEMENT_FAMILIES = frozenset({"is_deterministic", "is_reproducible",
                                       "is_state_safe"})
 
+#: the families whose claim states a REGION under the family's name (the
+#: restriction form, `{name: is_defined, statement: "x >= 0"}`), each
+#: with the stratum its region belongs to (P9): `is_defined` is
+#: mathematics (the region where the function has a value, a derive
+#: guard and a probe), `is_overflow_safe` is computation (the region
+#: where one implementation does not overflow, adjudicated by execution
+#: only)
+REGION_ROW_STRATA = {"is_defined": "mathematics",
+                     "is_overflow_safe": "computation"}
+
+
+def region_row_kind(name) -> "str | None":
+    """The region family a claim name belongs to (`is_defined` for
+    `is_defined` and `is_defined[2]`, `is_overflow_safe` for
+    `is_overflow_safe` and `is_overflow_safe[x]`), or None for any
+    other name."""
+    base = str(name or "").split("[", 1)[0]
+    return base if base in REGION_ROW_STRATA else None
+
 
 def _squash(text) -> str:
     """Claim text with all whitespace removed, for comparing two
@@ -434,7 +453,7 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
     if cj.relation in routes.examine_predicates() \
             or cj.relation not in _COMPARISON_RELATIONS:
         return cj.relation == base
-    if base == "is_defined":
+    if region_row_kind(base):
         return True
     call = f"f({', '.join(facts.params)})"
     form = _DERIVATIVE_FAMILY_FORMS.get(base)
@@ -2713,7 +2732,7 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             # the opt-out adjudicates exactly as a derive claim; only the
             # companion it would spawn is withheld
             cj = _dc_replace(cj, route="derive")
-        if cj.links and cj.name.split("[", 1)[0] != "is_defined":
+        if cj.links and region_row_kind(cj.name) is None:
             # a chained comparison is the conjunction of its links: run
             # each link through the full ordinary adjudication (same
             # domain/funcs/assuming/route) and fold, so no proof path is
@@ -2731,9 +2750,13 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                 _emit_companion(out, _stamped(companion, cj), cj.name)
             continue
         if (cj.relation in routes.safety_predicates() and cj.lhs == "f"
-                and "f" not in facts.params):
+                and "f" not in facts.params
+                and not getattr(families.families().get(cj.relation),
+                                "whole_function", False)):
             # the function-wide spelling: the predicate over f is the
             # conjunction of the predicate over every numeric parameter
+            # (a family that examines the whole function at once, the
+            # computation roll-up, adjudicates `f` itself below)
             out.append(_stamped(_adjudicate_function_wide_safety(
                 cj, fn, facts, domain, trials, trials_scale, extensive), cj))
             continue
@@ -4100,8 +4123,18 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     assumption = (None if ctx.assumption is None else
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
     family_derive = family.routes().get("derive") if family is not None else None
+    reserved = getattr(family, "reserved", None)
+    if reserved:
+        # a family defined but not adjudicated in this release: the
+        # derive half reports skipped with the reason, and the probe
+        # half says the same
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "skipped", route=None,
+            note=f"{note}; {reserved}",
+            meta={"mathema.derive_status": "unsupported"})
+        return None
     if (family_derive is not None and cj.links
-            and cj.name.split("[", 1)[0] == "is_defined"):
+            and region_row_kind(cj.name) == "is_defined"):
         family_proof = _chained_definedness_proof(
             family_derive, fn, facts, cj, cj_domain, assumption)
     else:
@@ -4125,13 +4158,21 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                          "evidence proves the negation: "
                                          + (family_proof.counterexample or family_proof.sketch or ""))
     if (family_proof is None and family_derive is not None
-            and cj.name.split("[", 1)[0] == "is_defined"):
-        # no source to compute a definedness region from: the claim is
-        # adjudicated by execution in the probe stage
+            and region_row_kind(cj.name)):
+        # a region row the family's derive half declined: is_defined
+        # with no source to compute a definedness region from, or a
+        # computation family whose region is a fact about the
+        # executed implementation (P9); either way the claim is
+        # adjudicated by execution in the probe stage, never read as
+        # an ordinary relation over the parameters
+        why = ("the target has no Python source, so there is no "
+               "definedness region to compare"
+               if region_row_kind(cj.name) == "is_defined" else
+               f"{region_row_kind(cj.name)} is a computation fact, "
+               f"established by execution alone")
         ctx.derive_undecided = Probe(
             cj.name, statement, "unknown", route="derive",
-            note=f"{note}; the target has no Python source, so there is "
-                 f"no definedness region to compare",
+            note=f"{note}; {why}",
             meta={"mathema.derive_status": "unsupported"})
         return None
     if (family_proof is not None and family_proof.status == "proven"
@@ -4161,7 +4202,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                      meta=_provenance_meta(family_proof))
     if (family_proof is not None
             and family_proof.meta.get("mathema.corroboration") == "uncorroborated"
-            and cj.name.split("[", 1)[0] != "is_defined"):
+            and region_row_kind(cj.name) is None):
         # a family disproof the executed code did not reproduce: the
         # claim's own verdict is unknown with the engine-bug flag, and
         # like any unknown it is superseded by real empirical evidence,
@@ -4173,7 +4214,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             meta={"mathema.derive_status": "undecided",
                   **_provenance_meta(family_proof)})
         return None
-    if family_proof is not None and cj.name.split("[", 1)[0] == "is_defined":
+    if family_proof is not None and region_row_kind(cj.name):
         # region equivalence undecided: the claim is adjudicated by
         # execution in the probe stage (the family's own probe half,
         # which reads the region, never the ordinary prover or sampler,
@@ -4783,8 +4824,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     f"approximate infinity as the pseudo-infinity "
                     f"{pinf[1]:g} ({', '.join(approximated)}); the "
                     f"symbolic proof region keeps the declared oo")
-    is_defined_claim = cj.name.split("[", 1)[0] == "is_defined"
-    if not is_defined_claim and cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
+    region_claim = region_row_kind(cj.name) is not None
+    if not region_claim and cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
                                       "raises"})
                            | (routes.examine_predicates()
                               & routes.route_capabilities("probe"))):
@@ -4835,15 +4876,20 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                              route=probe_route, sketch=established,
                              note=note, meta=algo_meta)
             if verdict == "falsified":
-                # two safety families whose falsification is BY
+                # the safety families whose falsification is BY
                 # CONSTRUCTION about the implementation stratum:
-                # spelling divergence and unguarded crashes have no
-                # mathematical reading at all
+                # spelling divergence, unguarded crashes, an overflow
+                # and a recursion limit have no mathematical reading at
+                # all; a roll-up carries the cause its failing child
+                # reports (`mathema.cause`)
                 family_cause = {
                     "is_representation_safe": "implementation:representation",
                     "is_arbitrary_input_safe":
                         "implementation:accidental-crash",
-                }.get(cj.name.split("[", 1)[0])
+                    "is_overflow_safe": "implementation:overflow",
+                    "is_recursion_safe": "implementation:recursion-depth",
+                }.get(cj.name.split("[", 1)[0]) or (
+                    algo_meta or {}).get("mathema.cause")
                 return Probe(cj.name, statement, "falsified", n=checked,
                              route=probe_route, counterexample=cx, note=note,
                              stratum=({"blame": "implementation",
@@ -4854,15 +4900,23 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if verdict == "holds":
                 return Probe(cj.name, statement, "holds", n=checked,
                              route=probe_route, note=note, meta=algo_meta)
+            if verdict == "unknown":
+                # the family examined the function and could not
+                # settle it (a roll-up with an unsettled child): the
+                # honest unknown, with what was examined in the note
+                return Probe(cj.name, statement, "unknown", n=checked,
+                             route=probe_route,
+                             note=note + (f"; {cx}" if cx else ""),
+                             meta=algo_meta)
             return Probe(cj.name, statement, "skipped", route=probe_route,
                          note=note + f"; {cx or 'no evaluable inputs'}")
-    if is_defined_claim:
+    if region_claim:
         # the executed reading above is the last one, and it could
         # not sample a point of this claim
         return Probe(cj.name, statement, "unknown", route=None,
-                     note=f"{note}; is_defined adjudicates by execution "
-                          f"when region equivalence does not decide, and "
-                          f"no point of this claim could be sampled")
+                     note=f"{note}; {region_row_kind(cj.name)} adjudicates "
+                          f"by execution, and no point of this claim could "
+                          f"be sampled")
     if cj.relation in routes.examine_predicates():
         # only reachable when the registered family declined, the
         # generic sampling loop below has no meaning for a

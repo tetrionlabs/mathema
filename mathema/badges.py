@@ -91,6 +91,12 @@ _SAFETY_SOURCE = {
     "is_empty_safe": "is_missing_safe",
     "is_arbitrary_input_safe": "is_arbitrary_input_safe",
     "is_compendium_safe": "is_compendium_safe",
+    # the computation-safety hierarchy's new members credit existing
+    # sources: an overflow is a representation hazard, a recursion limit
+    # an accidental crash. is_computation_safe credits nothing itself
+    # (its children do) and is_memory_safe is not adjudicated.
+    "is_overflow_safe": "is_representation_safe",
+    "is_recursion_safe": "is_arbitrary_input_safe",
 }
 
 

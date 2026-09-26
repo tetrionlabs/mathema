@@ -151,6 +151,17 @@ GROUPS: dict[str, tuple[str, ...]] = {
     # or varied on (is_deterministic is one member inside it)
     "stateless": ("is_state_safe", "is_deterministic",
                   "is_reproducible"),
+    # the children of is_computation_safe, the computation-safety
+    # hierarchy: every fact about one implementation that execution
+    # establishes (is_memory_safe is reserved and not yet adjudicated;
+    # is_computation_safe itself is the roll-up, declared by name)
+    "computation_safe": ("is_overflow_safe", "is_numerically_stable",
+                         "is_representation_safe", "is_extremity_safe",
+                         "is_pole_safe", "is_builtin_safe",
+                         "is_missing_safe", "is_empty_safe",
+                         "is_recursion_safe", "is_deterministic",
+                         "is_state_safe", "is_arbitrary_input_safe",
+                         "is_compendium_safe"),
 }
 
 # terse spellings (and the spaced forms a claim-text reader would
@@ -161,6 +172,7 @@ KEYWORD_ALIASES: dict[str, str] = {
     "excluding": "excluded_outside_domain",
     "excluded outside domain": "excluded_outside_domain",
     "numerically stable": "stable",
+    "computation safe": "computation_safe",
 }
 
 # one-line meanings, rendered whole in the did-you-mean error so a
@@ -174,6 +186,10 @@ KEYWORD_MEANINGS: dict[str, str] = {
     "stable": "numerical stability across the declared domain",
     "stateless": "no external state written, read, or varied on "
                  "(state safety, determinism, seeded reproducibility)",
+    "computation_safe": "every computation-safety check that applies "
+                        "(overflow, stability, representation, missing, "
+                        "recursion, determinism, state, arbitrary input, "
+                        "covered library calls), each gated on relevance",
 }
 
 
