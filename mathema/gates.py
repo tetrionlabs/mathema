@@ -858,12 +858,17 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      "declare an |inf| for the unbounded directions, ")
                   + "fix the implementation, or state the claim with "
                     "route derive:math_only")
+        # a covered call's computation region, when the compendium
+        # states one and the failing point lies outside it
+        from .compendium import computation_diagnosis
+        covered = computation_diagnosis(fn, facts, sweep.fragile_point)
         return Probe(
             name, parent.statement, "falsified", route="probe",
             n=sweep.checked, counterexample=pt, note=what,
             sketch=f"{parent.name} is proven in exact arithmetic, but the "
                    f"implementation fails it at {pt}: {sweep.detail}; "
-                   f"{remedy}",
+                   + (f"{covered}; " if covered else "")
+                   + f"{remedy}",
             # the proof that coexists with the executed break is the
             # evidence that the mathematics is sound and the code is not
             stratum={"mathematics": "sound", "blame": "implementation",

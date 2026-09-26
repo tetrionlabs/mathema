@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import NamedTuple
 
 
 def _version_tuple(text: str) -> tuple:
@@ -551,21 +552,26 @@ def _compendium_hint(tag: str, name: str, key: str,
             f"library")
 
 
-def _is_defined_region_texts(entry: dict) -> list:
+def _region_texts(entry: dict, families) -> list:
     """Intent:
-        Each `is_defined` restriction row's region as the relation
-        texts it conjoins (`-1 <= x <= 1` reads as `["-1 <= x",
-        "x <= 1"]`), parsed by the claim grammar.
+        Each restriction row of one of `families` (`is_defined`,
+        `is_overflow_safe`) in `entry`, as the relation texts its
+        region conjoins (`-1 <= x <= 1` reads as `["-1 <= x", "x <=
+        1"]`), parsed by the claim grammar. A bare row
+        (`is_defined(f)`) states no region and contributes nothing.
     """
-    from ..conjecture import InvalidConjecture, claim
+    from ..conjecture import InvalidConjecture, claim, region_row_kind
     out: list = []
     for row in entry.get("claims") or []:
-        if str(row.get("name", "")).split("[", 1)[0] != "is_defined":
+        kind = region_row_kind(row.get("name", ""))
+        if kind is None or kind not in families:
             continue
         try:
             cj = claim(str(row.get("statement") or row.get("law") or ""),
                        name=row.get("name"))
         except (InvalidConjecture, ValueError):
+            continue
+        if cj.relation == kind:
             continue
         links = cj.links or [(cj.lhs, cj.relation, cj.rhs)]
         out.append([f"{lhs} {rel} {rhs}" for lhs, rel, rhs in links
@@ -573,10 +579,27 @@ def _is_defined_region_texts(entry: dict) -> list:
     return out
 
 
+def _is_defined_region_texts(entry: dict) -> list:
+    """The `is_defined` restriction rows' regions, see `_region_texts`."""
+    return _region_texts(entry, ("is_defined",))
+
+
 #: what is registered: the root the library claims were installed for
 #: (`BUNDLED` for the bundled layer alone, None for nothing), and the
 #: `(key, builder)` rows it added to the partiality registry
 _INSTALLED: dict = {"root": None, "rows": []}
+#: the computation stratum of the registered library claims (P9): per
+#: key, the rows that state a fact about the computation rather than the
+#: mathematics, each `{"family", "name", "params", "region", "texts",
+#: "exception", "source"}`. For a computation-safety family in
+#: restriction form (`is_overflow_safe`) `region` is where the
+#: implementation is safe in that respect and `exception` is None; for a
+#: `raises` row whose type is a machine failure, `family` is "raises",
+#: `region` is where the call raises and `exception` names the type.
+#: Read by the hazard generator, `is_compendium_safe`'s diagnosis, the
+#: `is_defined` probe's reach on a library key and the float companion's
+#: sketch; never by the derive route.
+_COMPUTATION: dict = {}
 #: the `_INSTALLED` root of the bundled layer alone
 BUNDLED = "<bundled>"
 #: the rows already reported as unbuildable, so each is reported once
@@ -647,15 +670,44 @@ def _relation(lhs: str, rel: str, rhs: str, env: dict):
     return ops[rel](_side_to_sympy(lhs, env), _side_to_sympy(rhs, env))
 
 
-def _row_region(key: str, row: dict) -> "tuple | None":
+class _RowRegion(NamedTuple):
+    """One library row's region, typed by stratum (P9). `params` are the
+    call's parameter names in call order and `texts` the relation texts
+    the row conjoins. On the mathematics stratum `region` is where the
+    call FAILS and `label` is `NO_VALUE` (an `is_defined` row, the
+    complement of its stated region) or the exception name of a
+    `raises` row. On the computation stratum `label` is the family name
+    and `region` the stated region where the implementation is safe in
+    that respect (`is_overflow_safe`), or the exception name and the
+    region where the call raises it (a machine-failure `raises` row)."""
+    params: list
+    region: object
+    label: str
+    stratum: str
+    texts: list
+
+
+def _machine_failure_types() -> frozenset:
+    """The exception names whose raise is the machine giving out rather
+    than the mathematics or the author's contract: the types
+    `conjecture._MACHINE_FAILURE_CAUSES` classifies, and numpy's
+    FloatingPointError."""
+    from ..conjecture import _MACHINE_FAILURE_CAUSES
+    return frozenset(t.__name__ for t in _MACHINE_FAILURE_CAUSES) | {
+        "FloatingPointError"}
+
+
+def _row_region(key: str, row: dict) -> "_RowRegion | None":
     """Intent:
-        One library row as a partiality guard: `(parameter names in call
-        order, region, label)`, where the region is where the call
-        fails and the label is `NO_VALUE` for an `is_defined` row (the
-        complement of its stated region) or the exception name of a
-        `raises(f(...), Exc)` row (its `for` domain and `assuming`
-        premise conjoined). None for a row that states no region.
-        The statement is read by the claim grammar itself.
+        One library row's region, typed by stratum: a `_RowRegion` (see
+        there), or None for a row that states no region (a value claim,
+        the bare `is_defined(f)`). An `is_defined` restriction row and a
+        `raises(f(...), Exc)` row with an ordinary type are mathematics
+        (a partiality guard); a computation-safety family in
+        restriction form (`is_overflow_safe`) and a `raises` row whose
+        type is a machine failure (OverflowError, MemoryError,
+        RecursionError, FloatingPointError) are computation. The
+        statement is read by the claim grammar itself.
 
     Raises:
         _Unbuildable: the region cannot be stated over the call's
@@ -664,7 +716,8 @@ def _row_region(key: str, row: dict) -> "tuple | None":
     """
     import sympy
 
-    from ..conjecture import _parse_assuming_relation, claim
+    from ..conjecture import (REGION_ROW_STRATA, _parse_assuming_relation,
+                              claim, region_row_kind)
     from ..domain import bound_to_sympy_set
     from ..symbolic._partiality import NO_VALUE
     name = str(row.get("name") or "")
@@ -673,7 +726,11 @@ def _row_region(key: str, row: dict) -> "tuple | None":
         cj = claim(text, name=name or None)
     except Exception as e:
         raise _Unbuildable(f"the statement does not parse ({e})") from None
-    if name.split("[", 1)[0] == "is_defined" and cj.relation != "raises":
+    kind = region_row_kind(name)
+    if kind is not None and cj.relation == kind:
+        # the bare form (`is_defined(f)`): totality, no region to state
+        return None
+    if kind is not None and cj.relation != "raises":
         links = cj.links or [(cj.lhs, cj.relation, cj.rhs)]
         used = sorted({n for lhs, _r, rhs in links
                        for n in _names_in(f"{lhs} {rhs}")})
@@ -685,7 +742,11 @@ def _row_region(key: str, row: dict) -> "tuple | None":
                                f"{key}")
         region = sympy.And(*[_relation(lhs, rel, rhs, env)
                              for lhs, rel, rhs in links])
-        return params, sympy.Not(region).to_nnf(), NO_VALUE
+        texts = [f"{lhs} {rel} {rhs}" for lhs, rel, rhs in links]
+        if REGION_ROW_STRATA[kind] == "computation":
+            return _RowRegion(params, region, kind, "computation", texts)
+        return _RowRegion(params, sympy.Not(region).to_nnf(), NO_VALUE,
+                          "mathematics", texts)
     if cj.relation != "raises" or not cj.rhs:
         return None
     used = sorted(set(cj.domain) | set(_names_in(cj.assuming or ""))
@@ -707,7 +768,12 @@ def _row_region(key: str, row: dict) -> "tuple | None":
         if rel is None:
             raise _Unbuildable(f"premise {conjunct!r} is not a relation")
         parts.append(_relation(rel.lhs, rel.relation, rel.rhs, env))
-    return params, sympy.And(*parts), str(cj.rhs).strip()
+    exc_name = str(cj.rhs).strip()
+    stratum = ("computation"
+               if exc_name.rsplit(".", 1)[-1] in _machine_failure_types()
+               else "mathematics")
+    texts = [str(rel) for rel in parts]
+    return _RowRegion(params, sympy.And(*parts), exc_name, stratum, texts)
 
 
 def _names_in(text: str) -> list:
@@ -735,16 +801,29 @@ def _builder(params: list, region):
     return build
 
 
+def _row_source(info: dict) -> str:
+    """The provenance a key's rows carry: the `mathema.compendium` tag a
+    row states, else `compendium:<library>` from the file."""
+    return str(next(
+        ((r.get("meta") or {}).get("mathema.compendium")
+         for r in info["entry"].get("claims") or []
+         if (r.get("meta") or {}).get("mathema.compendium")),
+        f"compendium:{info['compendium']}"))
+
+
 def register_library_claims(root: "str | None" = ".") -> list:
     """Intent:
-        Register every applicable library row's region as a partiality
-        guard (`load_library_claims`): an `is_defined` row registers
-        the complement of its region as `NO_VALUE`, a `raises(f(...),
-        Exc)` row its domain and premise as `Exc`. `root=None` registers
-        the bundled files alone. Idempotent per root: the same root
-        again is a no-op, a different root replaces the rows the
-        previous one registered. Returns the `(key, row name)` pairs
-        registered.
+        Register every applicable library row's region by stratum
+        (`load_library_claims`, `_row_region`). Mathematics rows become
+        partiality guards: an `is_defined` row registers the complement
+        of its region as `NO_VALUE`, a `raises(f(...), Exc)` row with an
+        ordinary type its domain and premise as `Exc`. Computation rows
+        (a computation-safety family in restriction form, a `raises`
+        row with a machine-failure type) go to `_COMPUTATION`, read by
+        `computation_region`. `root=None` registers the bundled files
+        alone. Idempotent per root: the same root again is a no-op, a
+        different root replaces the rows the previous one registered.
+        Returns the `(key, row name)` pairs registered.
 
     Notes:
         A row that reads an array's shape or a matrix (`dim(a) >= 1`,
@@ -754,6 +833,7 @@ def register_library_claims(root: "str | None" = ".") -> list:
     """
     import warnings
 
+    from ..conjecture import REGION_ROW_STRATA
     from ..symbolic._partiality import register_raises_when
     marker = BUNDLED if root is None else os.path.abspath(root)
     if _INSTALLED["root"] == marker:
@@ -778,9 +858,21 @@ def register_library_claims(root: "str | None" = ".") -> list:
                 continue
             if built is None:
                 continue
-            params, region, label_text = built
-            build = _builder(params, region)
-            register_raises_when(key, build, label_text)
+            if built.stratum == "computation":
+                is_family = built.label in REGION_ROW_STRATA
+                free = {str(s) for s in built.region.free_symbols}
+                _COMPUTATION.setdefault(key, []).append({
+                    "family": built.label if is_family else "raises",
+                    "name": str(row.get("name")),
+                    "params": [p for p in built.params if p in free],
+                    "region": built.region,
+                    "texts": list(built.texts),
+                    "exception": None if is_family else built.label,
+                    "source": _row_source(info)})
+                names.append((key, str(row.get("name"))))
+                continue
+            build = _builder(built.params, built.region)
+            register_raises_when(key, build, built.label)
             rows.append((key, build))
             names.append((key, str(row.get("name"))))
     _INSTALLED.update(root=marker, rows=rows, names=names,
@@ -859,7 +951,8 @@ def ensure_bundled() -> None:
 
 def uninstall(root: "str | None" = None) -> None:
     """Remove what `install` registered (for `root`, when given and it
-    is the installed one; otherwise whatever is installed)."""
+    is the installed one; otherwise whatever is installed): the
+    partiality guards, the computation rows and the hazard generator."""
     from ..symbolic._partiality import unregister_lemmas
     if root is not None and _INSTALLED["root"] != os.path.abspath(root):
         return
@@ -867,8 +960,59 @@ def uninstall(root: "str | None" = None) -> None:
         unregister_lemmas(key, [build])
     _INSTALLED.update(root=None, rows=[], names=[], keys=frozenset(),
                       objects=None)
+    _COMPUTATION.clear()
     from ..hazards import _GENERATORS
     _GENERATORS.pop("compendium", None)
+
+
+def computation_region(key: str, family: "str | None" = None) -> list:
+    """Intent:
+        The registered computation rows of a library key (see
+        `_COMPUTATION`), every one or those of one `family`
+        (`"is_overflow_safe"`, `"raises"`); [] when the key states
+        none.
+    """
+    rows = _COMPUTATION.get(key) or []
+    return [dict(r) for r in rows if family is None or r["family"] == family]
+
+
+def computation_diagnosis(fn, facts, point: "dict | None" = None) -> "str | None":
+    """Intent:
+        One sentence naming the computation region of a covered call
+        `fn` makes, for a failure at `point` (the caller's parameter
+        values): "the covered call numpy.exp is overflow-safe only for
+        x <= 709.78, and x = 1000 lies outside it" when the region
+        reads over the caller's own parameters and the point is
+        outside it; the same sentence without the point when the
+        region cannot be evaluated at it (the call's argument is an
+        expression over the caller's parameters); None when no covered
+        call states a computation region, or the point is inside every
+        region that can be evaluated (the failure is not this call's).
+    """
+    import sympy
+    keys = sorted(k for k in _resolve_called_keys(fn, facts)
+                  if k in _COMPUTATION)
+    for key in keys:
+        for row in computation_region(key, "is_overflow_safe"):
+            texts = " and ".join(row["texts"])
+            sentence = (f"the covered call {key} is overflow-safe only for "
+                        f"{texts}")
+            values = {p: (point or {}).get(p) for p in row["params"]}
+            if any(not isinstance(v, (int, float)) or isinstance(v, bool)
+                   for v in values.values()):
+                return sentence
+            try:
+                inside = row["region"].subs(
+                    {sympy.Symbol(p, real=True): v for p, v in values.items()})
+            except Exception:
+                return sentence
+            if inside == sympy.true:
+                continue
+            if inside == sympy.false:
+                at = ", ".join(f"{p} = {v:g}" for p, v in values.items())
+                return f"{sentence}, and {at} lies outside it"
+            return sentence
+    return None
 
 
 def _boundaries(condition) -> list:
@@ -910,24 +1054,23 @@ def _boundaries(condition) -> list:
 
 def _boundary_generator(library_claims: dict):
     """Hazard points for callers of covered functions: each covered
-    region's boundary value, offered on every numeric parameter of
-    the caller. Coarse on purpose (the covered call's argument is often an
-    expression over the caller's parameters, not one of them), and a
-    wrong hint costs one sample."""
+    region's boundary value (an `is_defined` region and an
+    `is_overflow_safe` region alike), offered on every numeric
+    parameter of the caller. Coarse on purpose (the covered call's
+    argument is often an expression over the caller's parameters, not
+    one of them), and a wrong hint costs one sample."""
     def generate(fn, facts, domain):
         import re
 
+        from ..conjecture import REGION_ROW_STRATA
         from ..hazards import HazardPoint
         out = []
         for key in sorted(library_keys_called(
                 fn, facts, library_claims=library_claims)):
             info = library_claims[key]
-            source = next(
-                ((r.get("meta") or {}).get("mathema.compendium")
-                 for r in info["entry"].get("claims") or []
-                 if (r.get("meta") or {}).get("mathema.compendium")),
-                f"compendium:{info['compendium']}")
-            for region in _is_defined_region_texts(info["entry"]):
+            source = _row_source(info)
+            for region in _region_texts(info["entry"],
+                                        tuple(REGION_ROW_STRATA)):
                 for condition in region:
                     if re.search(r"\bdim\s*\(", condition):
                         # outside `dim(a) >= 1` is the empty sequence

@@ -43,11 +43,14 @@ def _library_claims_isolated():
     from mathema.symbolic import _partiality
     compendium.ensure_bundled()
     lemmas = {k: list(v) for k, v in _partiality._PARTIALITY_LEMMAS.items()}
+    computation = {k: list(v) for k, v in compendium._COMPUTATION.items()}
     generators = dict(hazards._GENERATORS)
     installed = dict(compendium._INSTALLED)
     yield
     _partiality._PARTIALITY_LEMMAS.clear()
     _partiality._PARTIALITY_LEMMAS.update(lemmas)
+    compendium._COMPUTATION.clear()
+    compendium._COMPUTATION.update(computation)
     hazards._GENERATORS.clear()
     hazards._GENERATORS.update(generators)
     compendium._INSTALLED.clear()
