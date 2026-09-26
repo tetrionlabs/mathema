@@ -52,7 +52,7 @@ from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
                       _synth_dict, complex_is_a_raise, holds_inf,
                       holds_nan,
                       is_complex_value, ordering_shortfall,
-                      relation_holds_elementwise)
+                      quiet_while_probing, relation_holds_elementwise)
 from .records import _EXC_TYPES, Probe, classify_verdict, statement_text
 from .symbolic import (mentions_matrix_ops, try_prove, try_prove_matrix,
                        try_prove_raises)
@@ -2545,6 +2545,7 @@ def _effective_facts(fn, facts=None):
     return analyze_source(fn)
 
 
+@quiet_while_probing
 def check_conjectures(fn, conjectures: list[Conjecture],
                       domain: dict | None = None, trials: int | None = None,
                       trials_scale: float = 1.0, facts=None,

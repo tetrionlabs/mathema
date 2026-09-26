@@ -430,14 +430,53 @@ def _pinned_float_env():
     under: numpy's own defaults, pinned explicitly so a verdict never
     depends on whatever ambient `numpy.seterr` state the calling
     process happens to carry (an invalid operation is a NaN, never a
-    FloatingPointError). A no-op context when numpy isn't importable."""
+    FloatingPointError), with the RuntimeWarning numpy emits for it
+    silenced (`quiet_callee_warnings`). Without numpy, only the
+    silencing."""
     import contextlib
+    stack = contextlib.ExitStack()
+    stack.enter_context(quiet_callee_warnings())
     try:
         import numpy
     except Exception:
-        return contextlib.nullcontext()
-    return numpy.errstate(divide="warn", over="warn", under="ignore",
-                          invalid="warn")
+        return stack
+    stack.enter_context(numpy.errstate(divide="warn", over="warn",
+                                       under="ignore", invalid="warn"))
+    return stack
+
+
+def quiet_callee_warnings():
+    """Intent:
+        A context in which a RuntimeWarning is not shown: what the code
+        under test emits while it is probed (numpy's "invalid value
+        encountered", "overflow", "Mean of empty slice") is the value
+        being measured, a nan or an inf, and never a message for the
+        person running mathema. mathema's own warnings are other
+        categories and still show.
+    """
+    import warnings
+    ctx = warnings.catch_warnings()
+
+    class _Quiet:
+        def __enter__(self):
+            ctx.__enter__()
+            warnings.simplefilter("ignore", RuntimeWarning)
+            return self
+
+        def __exit__(self, *exc):
+            return ctx.__exit__(*exc)
+    return _Quiet()
+
+
+def quiet_while_probing(func):
+    """Run `func` inside `quiet_callee_warnings`."""
+    import functools
+
+    @functools.wraps(func)
+    def run(*args, **kwargs):
+        with quiet_callee_warnings():
+            return func(*args, **kwargs)
+    return run
 
 
 def _keeps_default(fn, parameter) -> bool:

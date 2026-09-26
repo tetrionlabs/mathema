@@ -64,6 +64,7 @@ from .authoring import (DomainError, claims as claims_decorator,
                         reject_missing, resolve_declared, retrieve)
 from .claim_families import _register_builtin_claim_families
 from .conjecture import Conjecture, check_conjectures, claim
+from .probing import quiet_while_probing as _quiet_while_probing
 from .diagnostics import critical_points
 from .compiled import CompiledForm, compile_form, numeric_check
 from .forms import (Form, SubstitutedForm, Substitution, closed_forms,
@@ -430,6 +431,7 @@ def _domains_from_claims(claims) -> dict:
     return out
 
 
+@_quiet_while_probing
 def check(fn, claims: list | None = None, domain: dict | None = None,
          trials: int | None = None,
          trials_scale: float = 1.0, extensive: bool = False,
