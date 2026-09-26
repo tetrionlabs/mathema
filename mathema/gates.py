@@ -146,7 +146,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # tagged the same way, since an inf or NaN the law's own arithmetic
     # produced says nothing about the code either
     calls_raised = [None]
-    calls_nonfinite = [False]
+    # the first callee that returned a nan or an infinity for finite,
+    # non-missing arguments, as the witness text ("f returned inf")
+    calls_nonfinite: list = [None]
 
     def _tag(callee, label):
         # a complex result under a real claim counts as a raise too
@@ -161,15 +163,18 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if complex_raises and is_complex_value(out):
                 calls_raised[0] = "a complex result"
                 raise ComplexResult(label, out)
-            if isinstance(out, float) and (out != out
-                                           or abs(out) == float("inf")):
-                calls_nonfinite[0] = True
+            if calls_nonfinite[0] is None and isinstance(out, float) \
+                    and (out != out or abs(out) == float("inf")) \
+                    and _finite_arguments(a, kw):
+                calls_nonfinite[0] = (
+                    f"{label} returned "
+                    f"{'nan' if out != out else '-inf' if out < 0 else 'inf'}")
             return out
         return _wrapped
 
     def _reset():
         calls_raised[0] = None
-        calls_nonfinite[0] = False
+        calls_nonfinite[0] = None
 
     base_env = {"f": _tag(fn, "f"), **_SAFE_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
@@ -204,11 +209,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return lv, rv
 
     def _relation_holds(lv, rv, tol):
-        # inf-aware: two sides that overflow to the SAME infinity are
-        # equal (an identity like sinh(-x) == -sinh(x) still holds at
-        # overflow, both -inf), not a spurious inequality from
-        # abs(inf - inf) = NaN. Native comparison handles inf/-inf;
-        # abs-difference is only for the finite case.
+        # inf-aware: an infinity here is one the law's own arithmetic
+        # produced (a callee's own nan or inf is no value, read before
+        # this: two sides with no value in the same way, inf and inf,
+        # -inf and -inf, nan and nan, agree, and no value against a
+        # value fails). Native comparison handles inf/-inf, never
+        # abs(inf - inf) = NaN; abs-difference is only for the finite
+        # case.
         rel = cj.relation
         both_finite = all(abs(v) != float("inf") for v in (lv, rv))
         if rel in ("==", "~="):
@@ -248,6 +255,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # rule), so it reproduces a disproof; a plumbing raise
             # stays inconclusive
             return False if calls_raised[0] else None
+        if calls_nonfinite[0] is not None:
+            # a nan or an infinity the code returned for finite inputs
+            # is no value: against a value every relation fails; two
+            # sides with no value in the same way agree, as equal sides
+            if _same_no_value(lv, rv):
+                return cj.relation in ("==", "~=", "<=", ">=")
+            return False
         if _real(lv) and _real(rv):
             if (abs(lv) == float("inf") or abs(rv) == float("inf")) \
                     and not calls_nonfinite[0]:
@@ -306,6 +320,18 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if calls_raised[0]:
                 return f"the implementation raises {calls_raised[0]} here"
             return None
+        if calls_nonfinite[0] is not None:
+            # no value at a finite input: an overflow, a pole, a nan.
+            # Two sides with no value in the same way agree, as equal
+            # sides; against a value it is a failure
+            if _same_no_value(lv, rv) and cj.relation in ("==", "~=",
+                                                          "<=", ">="):
+                return None
+            if calls_nonfinite[0].endswith("nan"):
+                return (f"the implementation returns NaN here "
+                        f"({calls_nonfinite[0]})")
+            return (f"{calls_nonfinite[0]}, and an infinity for a finite "
+                    f"input is no value")
         for v in (lv, rv):
             if isinstance(v, complex):
                 return None
@@ -733,6 +759,33 @@ def _reach_text(names, cj_domain, cap, reach) -> str:
         return f"unbounded directions ({who}) run to the declared |inf|"
     return (f"unbounded directions ({who}) run to magnitude "
             f"{reach[1]:.0e}, sampled log-uniformly (no |inf| declared)")
+
+
+def _same_no_value(lv, rv) -> bool:
+    """Intent:
+        Whether two sides are no value in the same way: both nan, both
+        inf, or both -inf. An inf against a -inf, an infinity against a
+        nan, and anything against a value do not agree.
+    """
+    def kind(v):
+        if not isinstance(v, float) or isinstance(v, bool):
+            return None
+        if v != v:
+            return "nan"
+        if v in (float("inf"), float("-inf")):
+            return "inf" if v > 0 else "-inf"
+        return None
+    return kind(lv) is not None and kind(lv) == kind(rv)
+
+
+def _finite_arguments(args, kwargs) -> bool:
+    """Whether every argument of a call is a finite, non-missing value
+    (a number, or a list or tuple of them); a non-numeric argument
+    counts as finite."""
+    from .domain import is_missing
+    from .probing import holds_inf, holds_nan
+    return not any(is_missing(v) or holds_nan(v) or holds_inf(v)
+                   for v in (*args, *kwargs.values()))
 
 
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,

@@ -184,7 +184,7 @@ Among the results, all found with no claims written:
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
   FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308, c=-5
+           counterexample x=[0.0, 0.2080627056919493, 0.7687687009617719, 5.937457024362789, -0.5946675312286729, -6.821260279908996, 9.340028108689182], alpha=-1.63348e+145, c=0
            [mathematics sound, implementation:numerical-instability]
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
@@ -199,9 +199,12 @@ weights recent values more heavily: mathema does not know that is intended, so
 it reports the counterexample and leaves the judgement to a person.
 
 `scale_equivariant[float]` is the proof's float companion: the same law run
-through the real code in floating point, where nothing bounds the inputs, so
-it reaches elements near `1e+308` and the arithmetic overflows. The
-mathematics is sound and the float code does not follow it out there.
+through the real code in floating point, where nothing bounds the inputs. At
+an `alpha` near `-1.6e145` the loop overflows to `-inf`, which is no value,
+while the scaled input (every element times `c = 0`) still averages to `0`:
+one side of the law has a value and the other does not. The mathematics is
+sound and the float code does not follow it out there; a domain for `alpha`,
+or a `let |inf| be ...` binding, is the fix.
 
 [A first look](first-look.md) takes `ema` through domains, both evidence
 routes and the stored record.
