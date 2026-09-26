@@ -2141,18 +2141,18 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
             if matches(comp_rel, comp_gap):
                 part = ("" if len(computed_rels) == 1
                         else f" (conjunct {k + 1} of {len(computed_rels)})")
-                # a match of one conjunct of several is marked, so an
-                # unindexed row (which names the whole region) is not
-                # proven by it
+                # which conjunct of how many matched: an unindexed row
+                # (which names the whole region) is proven by it only
+                # when there is one, and a chained row's links must
+                # cover them all
                 return ProofResult(
                     "proven",
                     sketch=f"is_defined: the stated region matches the "
                            f"computed definedness region of the current "
                            f"body{part}, full region: {region_text}",
                     meta={"mathema.derive_route": "definedness_equivalence",
-                          **({"mathema.definedness_conjunct":
-                              [k + 1, len(computed_rels)]}
-                             if len(computed_rels) > 1 else {})})
+                          "mathema.definedness_conjunct":
+                              [k + 1, len(computed_rels)]})
         except TimeoutError:
             raise
     # provable drift: same relation as some conjunct, constant offset

@@ -295,3 +295,47 @@ def test_an_unindexed_restriction_must_name_the_whole_region():
     (p,) = check_conjectures(two_guards, [
         claim("y >= 0", name="is_defined[2]", route="derive")])
     assert p.verdict == "proven", p.note
+
+
+def _two_sided(x):
+    if x < -1 or x > 1:
+        raise ValueError("outside [-1, 1]")
+    return math.asin(x)
+
+
+def _lower_only(x):
+    if x < -1:
+        raise ValueError("below -1")
+    return x + 1.0
+
+
+def test_a_chained_region_is_one_region_on_derive():
+    (p,) = check_conjectures(_two_sided, [
+        claim("-1 <= x <= 1", name="is_defined", route="derive")])
+    assert p.verdict == "proven", (p.verdict, p.note)
+
+
+def test_a_chained_region_is_one_region_on_the_probe_route():
+    (p,) = check_conjectures(_two_sided, [
+        claim("-1 <= x <= 1", name="is_defined", route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.note)
+    assert "inside the stated region returned a finite value" in p.note
+
+
+def test_a_chained_region_wider_than_the_body_is_falsified_by_execution():
+    # the body returns for every x >= -1, so x = 2 has a value outside
+    # the stated region
+    for route in ("derive", "best", "probe"):
+        (p,) = check_conjectures(_lower_only, [
+            claim("-1 <= x <= 1", name="is_defined", route=route)])
+        assert p.verdict == "falsified", (route, p.verdict, p.note)
+        assert "a value outside the stated region" in p.counterexample
+        m = re.search(r"\bx=([-+0-9.e]+)", p.counterexample)
+        assert m and float(m.group(1)) > 1
+        assert _lower_only(float(m.group(1))) is not None
+
+
+def test_a_chained_row_still_gives_both_hazard_boundaries():
+    from mathema.compendium import _is_defined_region_texts
+    entry = {"claims": [{"name": "is_defined", "statement": "-1 <= x <= 1"}]}
+    assert _is_defined_region_texts(entry) == [["-1 <= x", "x <= 1"]]

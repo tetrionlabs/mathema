@@ -2713,8 +2713,7 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             # the opt-out adjudicates exactly as a derive claim; only the
             # companion it would spawn is withheld
             cj = _dc_replace(cj, route="derive")
-        if cj.links and not (cj.name.split("[", 1)[0] == "is_defined"
-                             and facts.tree is None):
+        if cj.links and cj.name.split("[", 1)[0] != "is_defined":
             # a chained comparison is the conjunction of its links: run
             # each link through the full ordinary adjudication (same
             # domain/funcs/assuming/route) and fold, so no proof path is
@@ -4000,6 +3999,111 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     ctx.companion = companion
 
 
+def _same_univariate_region(fn, facts, links) -> "bool | None":
+    """Intent:
+        Whether the conjunction of `links` and the computed definedness
+        region of fn's body are the same set of reals, when both read
+        over one and the same parameter; None when that is not the case
+        or the comparison does not finish under the fast wall-clock cap.
+    """
+    import ast as _ast
+
+    import sympy as _sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _WallClockExpired, _with_timeout
+    from .grammar import normalize as _normalize
+    from .symbolic._base import REL_TEXT, NotSymbolic, _expr_to_sympy
+
+    env = {p: _sympy.Symbol(p, real=True) for p in facts.params}
+    ops = {v: k for k, v in REL_TEXT.items()}
+    stated = []
+    for lhs, rel, rhs in links:
+        try:
+            left = _expr_to_sympy(_ast.parse(_normalize(lhs), mode="eval").body,
+                                  dict(env))
+            right = _expr_to_sympy(_ast.parse(_normalize(rhs), mode="eval").body,
+                                   dict(env))
+        except (NotSymbolic, SyntaxError):
+            return None
+        if rel not in ops or isinstance(left, tuple) or isinstance(right, tuple):
+            return None
+        stated.append(ops[rel](left, right))
+    computed = list(_definedness_region_structured(fn, facts))
+    if not computed:
+        return None
+    region_s, region_c = _sympy.And(*stated), _sympy.And(*computed)
+    free = region_s.free_symbols | region_c.free_symbols
+    if len(free) != 1:
+        return None
+    try:
+        return bool(_with_timeout(
+            lambda: region_s.as_set() == region_c.as_set(),
+            FAST_TIMEOUT_SECONDS))
+    except (TimeoutError, _WallClockExpired):
+        return None
+    except Exception:
+        return None
+
+
+def _chained_definedness_proof(family_derive, fn, facts, cj, cj_domain,
+                               assumption):
+    """Intent:
+        Region equivalence for a chained `is_defined` region (`-1 <= x
+        <= 1`), which is ONE region, the conjunction of its links:
+        proven when the links together match every conjunct of the
+        computed definedness region, one link each; undecided
+        otherwise, so the probe half decides by execution. None when
+        the derive half declines (no source).
+    """
+    from .symbolic import ProofResult
+    if facts.tree is None:
+        return None
+    same = _same_univariate_region(fn, facts, cj.links)
+    if same is True:
+        return ProofResult(
+            "proven",
+            sketch="is_defined: the stated region, the conjunction of its "
+                   "links, equals the computed definedness region of the "
+                   "current body",
+            meta={"mathema.derive_route": "definedness_equivalence"})
+    if same is False:
+        return ProofResult(
+            "undecided",
+            sketch="is_defined: the stated region (the conjunction of its "
+                   "links) differs from the computed definedness region")
+    matched: list = []
+    total = None
+    for lhs, rel, rhs in cj.links:
+        proof = families.call_route(family_derive, fn, facts, lhs, rhs, rel,
+                                    domain=cj_domain,
+                                    tolerance=cj.tolerance,
+                                    assumption=assumption)
+        if proof is None:
+            return None
+        where = (proof.meta or {}).get("mathema.definedness_conjunct")
+        if proof.status != "proven" or not where:
+            return ProofResult(
+                "undecided",
+                sketch=f"is_defined: the stated region (the conjunction "
+                       f"of its links) is not shown equal to the computed "
+                       f"definedness region: link {lhs} {rel} {rhs} does "
+                       f"not match one of its conjuncts")
+        matched.append(where[0])
+        total = where[1]
+    if total is not None and sorted(matched) == list(range(1, total + 1)):
+        return ProofResult(
+            "proven",
+            sketch=f"is_defined: the stated region, the conjunction of its "
+                   f"{len(matched)} links, equals the computed definedness "
+                   f"region of the current body",
+            meta={"mathema.derive_route": "definedness_equivalence"})
+    return ProofResult(
+        "undecided",
+        sketch="is_defined: the stated region (the conjunction of its "
+               "links) does not cover the computed definedness region "
+               "conjunct for conjunct")
+
+
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        extensive: bool) -> "Probe | None":
     """Intent:
@@ -4031,12 +4135,17 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     assumption = (None if ctx.assumption is None else
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
     family_derive = family.routes().get("derive") if family is not None else None
-    family_proof = (families.call_route(family_derive, fn, facts, cj.lhs,
-                                        cj.rhs, cj.relation,
-                                        domain=cj_domain,
-                                        tolerance=cj.tolerance,
-                                        assumption=assumption)
-                    if family_derive is not None else None)
+    if (family_derive is not None and cj.links
+            and cj.name.split("[", 1)[0] == "is_defined"):
+        family_proof = _chained_definedness_proof(
+            family_derive, fn, facts, cj, cj_domain, assumption)
+    else:
+        family_proof = (families.call_route(family_derive, fn, facts,
+                                            cj.lhs, cj.rhs, cj.relation,
+                                            domain=cj_domain,
+                                            tolerance=cj.tolerance,
+                                            assumption=assumption)
+                        if family_derive is not None else None)
     if family_proof is not None and cj.negated:
         # the not-form: a decided positive claim decides its negation
         # the other way (the falsifying witness IS the proof); an
@@ -4062,7 +4171,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         return None
     if (family_proof is not None and family_proof.status == "proven"
             and cj.name == "is_defined"
-            and family_proof.meta.get("mathema.definedness_conjunct")):
+            and (family_proof.meta.get("mathema.definedness_conjunct")
+                 or [0, 1])[1] > 1):
         # an unindexed restriction names the WHOLE region; matching one
         # conjunct of several decides nothing, and execution does
         k, n = family_proof.meta["mathema.definedness_conjunct"]
