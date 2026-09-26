@@ -4060,6 +4060,20 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                  f"no definedness region to compare",
             meta={"mathema.derive_status": "unsupported"})
         return None
+    if (family_proof is not None and family_proof.status == "proven"
+            and cj.name == "is_defined"
+            and family_proof.meta.get("mathema.definedness_conjunct")):
+        # an unindexed restriction names the WHOLE region; matching one
+        # conjunct of several decides nothing, and execution does
+        k, n = family_proof.meta["mathema.definedness_conjunct"]
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            sketch=family_proof.sketch,
+            note=f"{note}; the stated region is conjunct {k} of the "
+                 f"{n} in the computed region, not all of it (index "
+                 f"the row, is_defined[{k}], to state one conjunct)",
+            meta={"mathema.derive_status": "undecided"})
+        return None
     if family_proof is not None and family_proof.status == "proven":
         return Probe(cj.name, statement, "proven",
                      sketch=family_proof.sketch, note=note,

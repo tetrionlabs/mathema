@@ -277,3 +277,21 @@ def test_stated_region_still_reads_as_a_restriction():
     assert "no raise regions" in p.sketch
     # and the message says WHY the claim does not apply to a total function
     assert "restriction" in p.sketch
+
+
+def test_an_unindexed_restriction_must_name_the_whole_region():
+    # two_guards returns only on x > 0 and y >= 0: `y >= 0` alone,
+    # stated as THE region (no index), is not it, on either route
+    def two_guards(x, y):
+        if x <= 0:
+            raise ValueError("x must be positive")
+        return math.sqrt(y) / x
+
+    for route in ("derive", "best", "probe"):
+        (p,) = check_conjectures(two_guards, [
+            claim("y >= 0", name="is_defined", route=route)])
+        assert p.verdict == "falsified", (route, p.verdict, p.note)
+    # the same conjunct, indexed, is one conjunct of the region
+    (p,) = check_conjectures(two_guards, [
+        claim("y >= 0", name="is_defined[2]", route="derive")])
+    assert p.verdict == "proven", p.note
