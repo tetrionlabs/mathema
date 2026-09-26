@@ -91,6 +91,12 @@ bounded says nothing about infinity at all. See [operational
 infinity](grammar.md#operational-infinity-let-inf-be) for the grammar
 and a worked example.
 
+The computation-safety families each answer one of three questions
+about a function: does it run on my domain, is the answer right in
+float64, and is it repeatable. [The claim
+grammar](grammar.md#which-question-each-one-answers) lists every family
+under its question, with what it tells you and the usual fix.
+
 ## Corroboration: why every falsification has a witness
 
 The derive route can report that a claim is false by algebra alone. Such

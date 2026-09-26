@@ -302,42 +302,64 @@ check every case rather than guessing.
 
 ## Safety predicates
 
-Some questions come up so often that they have names. These adjudicate
-by examining the function rather than by algebra:
+Some questions come up so often that they have names. These are facts
+about the computation, one implementation executed in float64,
+established by running the code rather than by algebra, and each
+answers one of three questions you have about a function.
 
-| Spelling | Asks |
-|---|---|
-| `is_pole_safe(x)` | does the code guard the points where the maths blows up |
-| `is_extremity_safe(x)` | does it survive the far ends of its domain |
-| `is_representation_safe(x)` | does floating point represent these values faithfully |
-| `is_empty_safe(xs)` | does it handle an empty sequence |
-| `is_missing_safe(f)` | the whole function's policy on a missing value |
+### Which question each one answers
 
-These are facts about one implementation, established by executing
-it, and they form a hierarchy under one roll-up:
+**Does it run on my domain?** Every input the claim admits gets a
+value: no raise, no NaN, and no infinity from a finite input. When one
+of these fails, the witness names the input, the note names the call
+that failed, and the fix is usually one of the ones below.
 
-| Spelling | Asks |
-|---|---|
-| `is_computation_safe(f)` | every child below that applies to this function holds; `holds` at best, never `proven`, and its note names each child's verdict |
-| `is_overflow_safe(x)` | no infinity and no `OverflowError` from finite inputs; the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range |
-| `is_numerically_stable` | the value is finite and the call raises no floating-point error across the domain (the `[float]` companion's family) |
-| `is_representation_safe(x)`, `is_extremity_safe(x)`, `is_pole_safe(x)`, `is_builtin_safe(x)` | representation, the far ends, the poles, the restricted builtins |
-| `is_missing_safe(f)`, `is_empty_safe(xs)` | a missing value, an empty sequence |
-| `is_recursion_safe(f)` | no `RecursionError` over the domain; suggested when the body calls itself |
-| `is_memory_safe(f)` | reserved: `skipped` in this release, since memory safety needs a resource cap |
-| `is_deterministic`, `is_reproducible`, `is_state_safe` | the stateless cluster |
-| `is_arbitrary_input_safe(s)` | no accidental crash on any string |
-| `is_compendium_safe(numpy)` | covered library calls compute |
+| Spelling | What you learn | Usual fix |
+|---|---|---|
+| `is_builtin_safe(x)` | every restricted builtin the code calls (`sqrt`, `log`, `asin`, `factorial`, ...) gets an argument it accepts: no `math.sqrt` of a negative, no `math.log` of zero | narrow the domain to the builtin's range, or guard the call |
+| `is_pole_safe(x)` | the code never meets a pole, a point where the formula divides by zero or otherwise blows up (`1 / (x - 1)` at `x = 1`), anywhere in the domain | exclude the point from the domain, or guard it with an explicit raise |
+| `is_compendium_safe(numpy)` | every library call a [compendium](claims-transfer.md#in-the-compendium) covers returns a value on the domain | keep the call's argument inside the region the compendium states |
+| `is_overflow_safe(x)` | no result overflows to infinity and nothing raises `OverflowError` from a finite input; the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range | narrow the domain below the overflow point, or rescale (work in logarithms) |
+| `is_extremity_safe(x)` | the function still returns at the extremes of its domain, the largest and smallest magnitudes it admits, out to `1e308` along an unbounded direction | bound the domain, or declare how far the code has to reach with <code>let &#124;inf&#124; be ...</code> |
+| `is_missing_safe(f)` | a missing value (`None`, `NaN`) meets a deliberate policy, raised or passed through, rather than an accidental crash or a wrong number | check for a missing value at entry and handle it on purpose |
+| `is_empty_safe(xs)` | an empty sequence gets an answer or a deliberate error, not an `IndexError` or a division by a zero length | handle the empty case first |
+| `is_representation_safe(x)` | one number written differently (`1`, `1.0`, `True`) gets one answer | normalize the input type at entry |
+| `is_arbitrary_input_safe(s)` | no string input makes the function crash by accident | validate the input and raise the exception you mean |
+| `is_recursion_safe(f)` | the recursion never runs out of stack (`RecursionError`) over the domain; suggested when the body calls itself | rewrite the recursion as a loop, or narrow the domain |
+| `is_memory_safe(f)` | reserved: `skipped` in this release, since memory safety needs a resource cap | |
 
-`is_computation_safe(f)` is declared by the author, never suggested;
-its relevant children are the ones the battery would suggest for the
-function, plus `is_numerically_stable`, `is_deterministic` and
-`is_state_safe` always. A child falsified falsifies the roll-up with
-that child's name and witness. `is_finite_valued` is a documented
-roll-up, not a registered family: `is_defined` and `is_overflow_safe`
-over the domain together say the function returns a finite value
-everywhere on it. `is_defined` itself stays outside the hierarchy: it
-is about the mathematics, see
+**Is the answer right in float64?** The function returns, and the
+number it returns is the one the mathematics says.
+
+| Spelling | What you learn | Usual fix |
+|---|---|---|
+| `is_numerically_stable` | the value is finite and the call raises no floating-point error across the domain | narrow the domain, or reorder the arithmetic that loses the value |
+| `<name>[float]` | the companion every proof spawns: the proven relation run in float64 at the domain's corners and inside it, falsified with a witness where the computation loses what the mathematics proves (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)) | narrow the domain, fix the code, or state the claim with `route="derive:math_only"` |
+
+**Is it repeatable?** The same call gives the same answer and leaves
+nothing behind.
+
+| Spelling | What you learn | Usual fix |
+|---|---|---|
+| `is_deterministic` | the same inputs give the same output on every call | remove the hidden input (a clock, a global counter, an unseeded random draw) |
+| `is_reproducible` | the same inputs give the same output once the random seed is fixed | draw from a generator the caller can seed |
+| `is_state_safe` | the call changes nothing outside itself: no argument mutated, no global written | copy before modifying, and return the result instead of storing it |
+
+`is_computation_safe(f)` is the roll-up: every child that applies to
+the function, drawn from the first two questions (a child applies when
+the battery would suggest it for the function) together with
+`is_numerically_stable`, `is_deterministic` and `is_state_safe`, which
+always apply. It is declared by the author, never suggested; it is
+`holds` at best, never `proven`, its note names each child's verdict,
+and a falsified child falsifies it with that child's name and witness.
+`is_finite_valued` is a documented roll-up, not a registered family:
+`is_defined` and `is_overflow_safe` over the domain together say the
+function returns a finite value everywhere on it.
+
+`is_defined` is not in these tables. Whether a function is defined at a
+point (a square root of a negative, a logarithm of zero) is a question
+about the mathematics, the same in every language, and the derive
+route reasons about it directly; see
 [conditional claims](conditional-claims.md).
 
 ## Partiality: claims about raising

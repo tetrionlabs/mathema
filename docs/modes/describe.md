@@ -110,6 +110,21 @@ that came from a claim is distinguishable from one read off a guard in
 the code. Claims come from the declared and verified layers together,
 each showing its verified verdict when a record exists for it.
 
+Below the claims, the detail view may print `careful:` lines: edges
+mathema knows about that lie just outside a domain the function
+declares, where a claim over that domain passes but a slightly wider
+one would not. A function calling `np.exp(x)` with a claim over
+`[0, 700]` gets `careful: numpy.exp overflows past x = 709.78 (the
+domain stops at 700)`. The edges are a covered library call's
+overflow-safe region (from its compendium), a restricted builtin's
+range (`sqrt needs x >= 0`), and a pole of the lifted body, and an edge
+is shown only when it lies within a factor of 10 of the nearest bound,
+or within 1 of a bound near zero. A claim whose recorded verdict is
+`falsified` contributes no line, since its domain does not pass. The
+lines are information only: they are never a verdict, never gate
+anything, and appear nowhere but `describe`, not in `check`, `verify`
+or the record.
+
 ## The tier ladder
 
 The detail view then prints the same function at each of five tiers,
