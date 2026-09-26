@@ -91,7 +91,7 @@ git commit -qm "softmax, verified"
 
 <!-- example: delta output -->
 ```text
-ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 1 holds, 0 falsified
+ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
 ok   functions.softmax: no baseline record; 1 proven, 2 holds, 0 falsified
 0 fresh (form unchanged, skipped), 2 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema

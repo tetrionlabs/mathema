@@ -104,7 +104,7 @@ mathema.write_spec(softmax)
 <!-- example: sweep session -->
 ```
 $ mathema verify --root .
-ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 1 holds, 0 falsified
+ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
 ok   functions.softmax: fresh
 1 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
