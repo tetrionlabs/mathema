@@ -7,6 +7,8 @@ numerically unstable stays proven; its `[float]` companion is what the
 instability falsifies."""
 import math
 
+import pytest
+
 from mathema.conjecture import claim, check_conjectures
 
 
@@ -68,17 +70,21 @@ def test_uncorroborated_disproof_downgrades_and_probe_supersedes(monkeypatch):
     assert "UNCORROBORATED" in p.note and "engine bug" in p.note
 
 
-def test_an_unbounded_exp_claim_is_falsified_by_its_overflow():
-    # exact in real arithmetic, but math.exp raises OverflowError past
-    # x = 709.78, which lies inside the unbounded domain, so the claim
-    # is false there; on a range inside the representable region it
-    # is proven
+@pytest.mark.needs_full_proof_budget
+def test_an_unbounded_exp_claim_is_proven_and_its_computation_overflows():
+    # exact in real arithmetic over the whole line, so proven; math.exp
+    # raises OverflowError past x = 709.78, which the companion reaches
+    # at its 1e308 corner, so the computation is what is falsified; on a
+    # range inside the representable region the companion holds too
     def grow(x):
         return math.exp(x)
-    p = _v(grow, "f(x) == exp(x)")
-    assert p.verdict == "falsified"
-    assert p.counterexample
-    assert _v(grow, "for x in [-700, 700], f(x) == exp(x)").verdict == "proven"
+    proof, companion = _pair(grow, "f(x) == exp(x)")
+    assert proof.verdict == "proven"
+    assert companion.verdict == "falsified"
+    assert companion.counterexample == "x=1e+308"
+    assert "raises OverflowError" in companion.sketch
+    proof, companion = _pair(grow, "for x in [-700, 700], f(x) == exp(x)")
+    assert (proof.verdict, companion.verdict) == ("proven", "holds")
 
 
 def test_an_unbounded_uncapped_proof_stands_and_its_companion_reaches_far():
