@@ -179,3 +179,20 @@ def test_a_literal_pin_on_a_project_function_is_passed(tmp_path, monkeypatch):
     assert pinned.verdict == "holds", pinned.note
     assert pinned.meta["mathema.defaults"] == {"strict": "True (pinned)"}
     assert _declared(g, "for x in [-1, 1], f(x) >= 0").verdict == "falsified"
+
+
+def test_a_library_function_is_known_after_its_module_is_imported_again():
+    # the identity cache was built for an earlier import of the library;
+    # the function object reached now is a fresh one with the same name
+    from mathema import compendium
+    compendium.ensure_bundled()
+
+    def stale():
+        pass
+
+    compendium._INSTALLED["objects"] = {id(stale): (stale, "numpy.mean")}
+    assert compendium.library_key_of(np.mean) == "numpy.mean"
+    import inspect
+    axis = inspect.signature(np.mean).parameters["axis"]
+    from mathema.probing import _keeps_default
+    assert _keeps_default(np.mean, axis)

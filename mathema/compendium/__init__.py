@@ -812,20 +812,37 @@ def library_key_of(fn) -> "str | None":
     keys = _INSTALLED.get("keys") or frozenset()
     if not keys:
         return None
-    objects = _INSTALLED.get("objects")
-    if objects is None:
-        from ..conjecture import _resolve_func_ref
-        objects = {}
+    from ..conjecture import _resolve_func_ref
+
+    def resolved() -> dict:
+        out: dict = {}
         for key in sorted(keys):
             try:
                 obj = _resolve_func_ref(key)
             except Exception:
                 obj = None
             if obj is not None:
-                objects.setdefault(id(obj), (obj, key))
-        _INSTALLED["objects"] = objects
+                out.setdefault(id(obj), (obj, key))
+        return out
+
+    objects = _INSTALLED.get("objects")
+    if objects is None:
+        objects = _INSTALLED["objects"] = resolved()
     found = objects.get(id(fn))
-    return found[1] if found is not None and found[0] is fn else None
+    if found is not None and found[0] is fn:
+        return found[1]
+    # a module imported again since the map was built holds new
+    # function objects: the function's own dotted name, when it is a
+    # key that resolves to this very object, still identifies it
+    name = f"{getattr(fn, '__module__', '')}.{getattr(fn, '__qualname__', '')}"
+    if name in keys:
+        try:
+            if _resolve_func_ref(name) is fn:
+                _INSTALLED["objects"] = resolved()
+                return name
+        except Exception:
+            return None
+    return None
 
 
 def ensure_bundled() -> None:
