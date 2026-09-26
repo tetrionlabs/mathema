@@ -249,6 +249,8 @@ def test_the_companion_round_trips_through_the_store_and_retires(
     plan = plan_acceptance(str(tmp_path), "floatfix.plus_one_minus",
                            "one[float]", "discovery", by="turing")
     assert any("float companion of 'one'" in a for a in plan["actions"])
+    assert any("records where the computation fails the proven law" in a
+               for a in plan["actions"])
     apply_acceptance(plan)
     after = verify_project(root=str(tmp_path), all=True)
     assert after.problems == []

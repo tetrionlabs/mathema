@@ -112,7 +112,7 @@ def test_operational_infinity_bounds_the_companion():
     proof, companion = _pair(plus_one_minus, "f(x) == 1", pseudo_infinity=1e17)
     assert proof.verdict == "proven"
     assert companion.verdict == "falsified"
-    assert "fails it at" in companion.sketch
+    assert "its computation fails at" in companion.sketch
 
 
 def test_the_companion_catches_in_domain_fragility():
