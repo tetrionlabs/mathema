@@ -1566,7 +1566,9 @@ def _print_describe_detail(key: str, fn, args) -> int:
     """`describe_detail()`'s result, printed as `mathema describe`'s
     single-function view: signature + identity hashes, inferred
     domains (each tagged with its source), claims (statement + LaTeX +
-    verified verdict when one exists), then the tier ladder; one
+    verified verdict when one exists), the careful lines (known edges
+    just outside a declared domain, information only), then the tier
+    ladder; one
     section per tier, in ladder order, `--tier` narrowing to just one
     (accepted either by name or by its 1-5 ladder position, translated
     to the real tier name here so `describe_detail()` itself only ever
@@ -1597,6 +1599,10 @@ def _print_describe_detail(key: str, fn, args) -> int:
     else:
         print("  (none declared)")
     print()
+    if detail.get("careful"):
+        for line in detail["careful"]:
+            print(line)
+        print()
     if detail.get("concepts"):
         print("Concepts: " + ", ".join(detail["concepts"]))
     if detail.get("references"):

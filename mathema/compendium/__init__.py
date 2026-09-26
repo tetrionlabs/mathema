@@ -1015,6 +1015,78 @@ def computation_diagnosis(fn, facts, point: "dict | None" = None) -> "str | None
     return None
 
 
+def _dotted_call_name(node) -> "str | None":
+    """The dotted name a call is written with (`np.exp`, `exp`), or
+    None for a call through anything but names and attributes."""
+    import ast
+    parts: list = []
+    f = node.func
+    while isinstance(f, ast.Attribute):
+        parts.append(f.attr)
+        f = f.value
+    if not isinstance(f, ast.Name):
+        return None
+    parts.append(f.id)
+    return ".".join(reversed(parts))
+
+
+def _call_argument(node, position: int, name: str):
+    """The argument expression a call passes for the parameter at
+    `position` named `name`, or None when the call passes none."""
+    if position < len(node.args):
+        return node.args[position]
+    return next((k.value for k in node.keywords if k.arg == name), None)
+
+
+def computation_edges(fn, facts) -> list:
+    """Intent:
+        The edges of every covered call's overflow-safe region that `fn`
+        passes one of its own parameters to directly, in the caller's
+        terms: `(param, value, key, above)`; for `np.exp(x)` it is
+        `("x", 709.78..., "numpy.exp", True)`, `above` saying the call
+        stops being overflow-safe past the value rather than below it.
+        A call whose argument is an expression is left out, since the
+        row's edge is then not an edge in the caller's parameter.
+    """
+    import ast
+
+    import sympy
+    tree = getattr(facts, "tree", None)
+    if tree is None:
+        return []
+    params = set(getattr(facts, "params", ()) or ())
+    origin = _alias_origins(fn, facts)
+    out: list = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _dotted_call_name(node)
+        if name is None:
+            continue
+        head, dot, rest = name.partition(".")
+        base = origin.get(head)
+        key = name if base is None else (f"{base}.{rest}" if dot else base)
+        for row in computation_region(key, "is_overflow_safe"):
+            positions = {p: i for i, p in enumerate(row["params"])}
+            for condition in row["texts"]:
+                try:
+                    rel = sympy.sympify(condition)
+                    (sym,) = rel.free_symbols
+                except Exception:
+                    continue
+                if sym.name not in positions:
+                    continue
+                arg = _call_argument(node, positions[sym.name], sym.name)
+                if not (isinstance(arg, ast.Name) and arg.id in params):
+                    continue
+                for value in _boundaries(rel):
+                    above = rel.subs(sym, value + 1) == sympy.false
+                    edge = (arg.id, value, key, bool(above))
+                    if edge not in out:
+                        out.append(edge)
+    return out
+
+
 def _boundaries(condition) -> list:
     """Intent:
         The numeric boundary values of a single-variable relation (a

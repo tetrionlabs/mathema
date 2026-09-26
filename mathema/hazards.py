@@ -805,3 +805,102 @@ def hazard_points(fn, facts, domain: dict | None = None,
         except Exception:
             continue
     return out
+
+
+# --- careful: known edges just outside a declared domain --------------
+
+#: an edge counts as close to a bound within this factor of it, or
+#: within `_CAREFUL_ABSOLUTE` of it for a bound near zero
+_CAREFUL_FACTOR = 10.0
+_CAREFUL_ABSOLUTE = 1.0
+
+
+def _careful_number(value: float) -> str:
+    """A number as a careful line prints it: an integer bare, a
+    magnitude of at least 1 to two decimals, anything smaller in
+    general format (`709.78`, `700`, `0.5`)."""
+    if float(value).is_integer():
+        return str(int(value))
+    if abs(value) >= 1:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+    return f"{value:g}"
+
+
+def _near_bound(edge: float, bound: float) -> bool:
+    """Whether an edge outside a domain is close to the bound it lies
+    beyond: within 1 of it, or on the same side of zero and within a
+    factor of 10 of it."""
+    if abs(edge - bound) <= _CAREFUL_ABSOLUTE:
+        return True
+    if edge == 0 or bound == 0 or (edge > 0) != (bound > 0):
+        return False
+    big, small = max(abs(edge), abs(bound)), min(abs(edge), abs(bound))
+    return big <= _CAREFUL_FACTOR * small
+
+
+def _known_edges(fn, facts) -> list:
+    """Intent:
+        Every edge mathema knows about in `fn`'s own parameters, as
+        `(param, value, what)` with `what` the plain reading of the
+        edge: a covered call's overflow-safe region
+        (`compendium.computation_edges`), a restricted builtin's real
+        domain edge (`_SAFE_RANGE`), and a pole the fast critical-point
+        search finds.
+    """
+    from .compendium import computation_edges
+    out: list = []
+    for param, value, key, above in computation_edges(fn, facts):
+        side = "past" if above else "below"
+        out.append((param, value,
+                    f"{key} overflows {side} {param} = "
+                    f"{_careful_number(value)}"))
+    for param, names in _restricted_domain_targets(fn, facts).items():
+        for name in sorted(names - {"factorial"}):
+            lo, lo_incl, hi, hi_incl = _SAFE_RANGE[name]
+            if not math.isinf(lo):
+                out.append((param, lo, f"{name} needs {param} "
+                            f"{'>=' if lo_incl else '>'} "
+                            f"{_careful_number(lo)}"))
+            if not math.isinf(hi):
+                out.append((param, hi, f"{name} needs {param} "
+                            f"{'<=' if hi_incl else '<'} "
+                            f"{_careful_number(hi)}"))
+    for point in _pole_hazard_points(fn, facts, {}):
+        if point.value is not None:
+            out.append((point.param, point.value,
+                        f"a pole at {point.param} = "
+                        f"{_careful_number(point.value)}"))
+    return out
+
+
+def careful_edges(fn, facts, domains: list) -> list[str]:
+    """Intent:
+        The careful lines for `fn`: each known edge (`_known_edges`)
+        that lies outside one of `domains` but close to the bound it
+        lies beyond (`_near_bound`), read as "numpy.exp overflows past
+        x = 709.78 (the domain stops at 700)". `domains` are the
+        declared domains to read against, each a dict of parameter to
+        `(lo, hi)` floats. Information about where a passing domain
+        ends, never a verdict.
+    """
+    lines: list[str] = []
+    try:
+        edges = _known_edges(fn, facts)
+    except Exception:
+        return lines
+    for domain in domains:
+        for param, value, what in edges:
+            ends = domain.get(param)
+            if ends is None:
+                continue
+            lo, hi = ends
+            if value > hi and not math.isinf(hi) and _near_bound(value, hi):
+                where = f"the domain stops at {_careful_number(hi)}"
+            elif value < lo and not math.isinf(lo) and _near_bound(value, lo):
+                where = f"the domain starts at {_careful_number(lo)}"
+            else:
+                continue
+            line = f"careful: {what} ({where})"
+            if line not in lines:
+                lines.append(line)
+    return lines
