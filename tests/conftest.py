@@ -31,6 +31,15 @@ def _no_installed_providers(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_project_pseudo_infinity(monkeypatch):
+    """A project-level `MATHEMA_PSEUDO_INFINITY` set on this machine
+    moves how far every unbounded direction is exercised, so every
+    test starts without one; a test about the project level sets its
+    own."""
+    monkeypatch.delenv("MATHEMA_PSEUDO_INFINITY", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _library_claims_isolated():
     """Installing library claims (`compendium.install`, which `verify`,
     `write_spec` and `mathema check` do) registers process-wide
