@@ -176,3 +176,64 @@ def test_a_project_that_calls_no_library_adjudicates_none(tmp_path):
     store = tmp_path / ".mathema" / "verified"
     assert sorted(p.name for p in store.glob("*.yaml")) == \
         ["ppkg.mod.plain.yaml"]
+
+
+def test_a_trusted_row_stands_until_a_verdict_contradicts_it(
+        tmp_path, monkeypatch):
+    # a library outside the project; its first release defines the
+    # function with no Python source, so a derivative row cannot be
+    # settled here, and its next release has source, so it can
+    import sys
+
+    import mathema.compendium as comp
+    from mathema.acceptance import apply_acceptance, plan_acceptance
+    from mathema.verify import verify_project
+    real = comp._installed_version
+    monkeypatch.setattr(comp, "_installed_version",
+                        lambda lib: "1.0" if lib == "extlib" else real(lib))
+    site = tmp_path / "site"
+    source = site / "extlib" / "__init__.py"
+    _write(source, '''
+        exec("def scaled(x):\\n    return 2.0 * x\\n")
+    ''')
+    monkeypatch.syspath_prepend(str(site))
+    proj = tmp_path / "proj"
+    _write(proj / "claims" / "extlib.claims.yaml", """
+        compendium: extlib
+        versions: ">=1.0"
+        extlib.scaled:
+          claims:
+            - name: rising
+              statement: 'for x in (0, 100], d(f(x), x) > 0'
+              meta: {mathema.compendium_claimed: proven}
+    """)
+
+    def sweep(**kw):
+        sys.modules.pop("extlib", None)
+        comp.uninstall()
+        return verify_project(str(proj), **kw)
+
+    sweep()
+    assert _rows(proj, "extlib.scaled")["rising"]["verdict"] == "unknown"
+    apply_acceptance(plan_acceptance(str(proj), "extlib.scaled", "rising",
+                                     "trusted", by="test"))
+    # the forced sweep still cannot settle it: the acceptance stands
+    forced = sweep(all=True)
+    row = _rows(proj, "extlib.scaled")["rising"]
+    assert row["verdict"] == "proven", row
+    assert row["accepted"]["as"] == "trusted"
+    assert not row["accepted"].get("stale")
+    assert not forced.problems, forced.lines
+    line = next(x for x in forced.lines if "extlib.scaled" in x)
+    assert "stays trusted at its accepted level" in line, line
+    # the next release has source: the local verdict replaces the trust
+    _write(source, '''
+        def scaled(x: float) -> float:
+            """Twice x."""
+            return 2.0 * x
+    ''')
+    sweep(all=True)
+    row = _rows(proj, "extlib.scaled")["rising"]
+    assert row["verdict"] == "proven"
+    assert row["accepted"].get("stale") is True
+    assert "mathema.trusted_unsettled" not in (row.get("meta") or {})

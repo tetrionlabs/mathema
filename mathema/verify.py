@@ -117,7 +117,9 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
         under that name rather than as the fresh `falsified`.
 
     Notes:
-        Only a stored `invalidated` is carried over; every other
+        A stored `invalidated` is carried over, and so is the accepted
+        level of a trusted row the sweep could not settle
+        (`mathema.trusted_unsettled`), with that marker; every other
         verdict is already the probe's own.
     """
     import yaml
@@ -129,9 +131,16 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
         return
     stored = {c.get("name"): c.get("verdict")
               for c in entry.get("claims") or []}
+    trusted = {c.get("name"): (c.get("meta") or {})["mathema.trusted_unsettled"]
+               for c in entry.get("claims") or []
+               if "mathema.trusted_unsettled" in (c.get("meta") or {})}
     for p in probes:
         if classify_verdict(stored.get(p.name) or "") == "invalidated":
             p.verdict = stored[p.name]
+        elif p.name in trusted:
+            p.verdict = stored[p.name]
+            p.meta = {**(p.meta or {}),
+                      "mathema.trusted_unsettled": trusted[p.name]}
 
 
 def gate(claims, *, strict: bool,
@@ -1193,6 +1202,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                       unresolved=() if is_library else unres)
         hints = (_unsettled_library_hints(key, claims_for_gate)
                  if is_library and report.problems else [])
+        standing = [
+            f"{name} stays trusted at its accepted level ({verdict}): the "
+            f"sweep could not settle it ({meta['mathema.trusted_unsettled']})"
+            for name, verdict, meta, _n in map(_claim_fields, claims_for_gate)
+            if meta.get("mathema.trusted_unsettled")]
         state = "FAIL" if report.problems or key_problems.get(key) else "ok"
         if key in lock_messages:
             # the record is left as it was, so its counts describe code
@@ -1217,6 +1231,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                    for p in report.foreign})
                 line += (f", {len(report.foreign)} not this grammar "
                          f"({', '.join(grammars)})")
+            if standing:
+                line += "; " + "; ".join(standing)
             if report.problems:
                 line += "  <- " + "; ".join(report.problems + hints)
         out.problems.extend(f"{key}: {p}" for p in report.problems)

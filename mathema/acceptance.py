@@ -951,6 +951,39 @@ def corrected_stub(plan: dict) -> dict | None:
             "route": route if route in ("probe", "derive") else "best"}
 
 
+def _carry_trust(c: dict, accepted: dict, history: list) -> None:
+    """Intent:
+        Carry a trusted acceptance onto a freshly adjudicated row. A
+        re-adjudication that settles the row (a proof, a holds, a
+        falsification) is evidence, and it replaces the trusted level:
+        the acceptance is marked stale. One that cannot settle it
+        (unknown, skipped) leaves the acceptance standing: the row keeps
+        its accepted level, never `invalidated`, and
+        `meta["mathema.trusted_unsettled"]` records what the sweep got.
+    """
+    meta = dict(c.get("meta") or {})
+    fresh = c.get("verdict") or ""
+    if classify_verdict(fresh) == "invalidated":
+        fresh = meta.get("mathema.regressed_to") or fresh
+    if classify_verdict(fresh) in ("unknown", "skipped", "declared"):
+        level = accepted.get("level") or "holds"
+        c["verdict"] = level
+        meta.pop("mathema.regressed_to", None)
+        if meta.get("mathema.previous_verdict") == level:
+            meta.pop("mathema.previous_verdict")
+        meta["mathema.trusted_unsettled"] = fresh
+    else:
+        meta.pop("mathema.trusted_unsettled", None)
+        accepted["stale"] = True
+        history.append({"at": datetime.date.today().isoformat(),
+                        "event": "stale",
+                        "reason": f"a local verdict ({fresh}) replaces the "
+                                  f"trusted level"})
+    c["meta"] = meta
+    c["accepted"] = accepted
+    c["acceptance_history"] = history
+
+
 def carry_acceptance(spec: dict, key: str, path: str) -> None:
     """Intent:
         At record-write time, carry each claim's acceptance state
@@ -959,7 +992,9 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
         decision must never be silently dropped by a re-run.
 
     Notes:
-        Three rules ride along. A changed form marks the acceptance
+        A trusted acceptance (testimony at a curator's level) stands
+        until a verdict contradicts it (`_carry_trust`). Three rules
+        ride along for the others. A changed form marks the acceptance
         stale (it was a decision about a different function; a new
         sign-off is required) and the stale marker is itself a history
         event. A still-valid risk acceptance re-applies the
@@ -1021,6 +1056,9 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
             continue
         accepted = dict(prior["accepted"])
         history = list(prior.get("acceptance_history") or [])
+        if accepted.get("as") == "trusted" and not accepted.get("stale"):
+            _carry_trust(c, accepted, history)
+            continue
         if accepted.get("form") != fresh_form and not accepted.get("stale"):
             accepted["stale"] = True
             history.append({"at": datetime.date.today().isoformat(),
