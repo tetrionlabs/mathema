@@ -83,7 +83,9 @@ def test_the_square_companion_reports_the_overflow_at_the_float_corner():
 
 @pytest.mark.needs_full_proof_budget
 def test_the_exponential_companion_reports_the_overflow_at_a_corner():
-    proof, companion = _rows(ex, "for x in R, f(x) > 0")
+    # `>= 0` so the underflow corner (exp(-1e308) is exactly 0.0) passes
+    # and the witness is the overflow one
+    proof, companion = _rows(ex, "for x in R, f(x) >= 0")
     assert proof.verdict == "proven", (proof.verdict, proof.note)
     assert companion is not None
     assert companion.verdict == "falsified", (companion.verdict,
@@ -107,8 +109,7 @@ def test_the_symbolic_package_reads_no_carrier_constant():
 def test_an_explicit_raise_in_the_source_still_falsifies_on_derive():
     p = _derive(g, "for x in [0, 10], f(x) >= 0")
     assert p.verdict == "falsified", (p.verdict, p.note)
-    assert p.route.startswith("derive") or p.route.startswith("probe"), \
-        p.route
+    assert p.route == "derive", p.route
     assert p.meta.get("mathema.corroboration") == "reproduced", p.meta
     assert p.counterexample
 

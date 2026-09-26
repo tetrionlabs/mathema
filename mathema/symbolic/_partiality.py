@@ -30,6 +30,16 @@ machinery already refuses). A bare `sqrt` call in a body matches only
 through the caller's own scope resolving it to a registered function,
 the spelling alone never decides, since guessing the origin wrong would
 falsify with a lemma about the wrong function.
+
+Every region here is mathematics: the real domain of a primitive
+(`sqrt` below zero, `log` at or below zero, `asin` outside [-1, 1],
+division by zero, a fractional power of a negative base), a region a
+library's `is_defined` row states, or a raise the function's own source
+states. Nothing here depends on the float carrier's range or precision,
+so `math.exp` has no row and `x ** 3` has no overflow region: a proof
+over the reals is a proof over the reals, and where the computation
+leaves the doubles is found by executing it (the `[float]` companion,
+the probe route), never by this walk.
 """
 import ast
 import contextvars
@@ -54,10 +64,6 @@ _PARTIALITY_LEMMAS: dict = {
     "math.log10": [(lambda u: sympy.Le(u, 0), "ValueError")],
     "math.asin": [(lambda u: sympy.Gt(sympy.Abs(u), 1), "ValueError")],
     "math.acos": [(lambda u: sympy.Gt(sympy.Abs(u), 1), "ValueError")],
-    # exp overflows past log of the largest double, 709.782712893384
-    # (the exact binary value, so the region boundary is the real one)
-    "math.exp": [(lambda u: sympy.Gt(u, sympy.Rational(709.782712893384)),
-                  "OverflowError")],
     # numpy.linspace(start, stop, num): num must be a nonnegative integer
     "numpy.linspace": [
         (lambda *a: sympy.Ne(a[2], sympy.floor(a[2])) if len(a) > 2
@@ -192,24 +198,10 @@ def _inline_lambdas(stmt: ast.stmt, lambdas: dict) -> ast.stmt:
     return _LambdaInliner(lambdas).visit(copy.deepcopy(stmt))
 
 
-_DBL_MAX = 1.7976931348623157e308
-
 # where the walk records the regions a fractional power of a negative
 # base returns a complex number, when a caller asked for them
 _COMPLEX_OUT: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_complex_regions", default=None)
-
-
-def _float_pow_region(base, exponent: float, int_syms: frozenset):
-    """The regions where `base ** exponent` raises OverflowError, a float
-    power whose result would exceed the largest double: the base above
-    the limit, and below its negation. An integer base (every symbol
-    integer-typed, no float constant) never overflows, so it has none."""
-    if base.free_symbols and base.free_symbols <= int_syms \
-            and not base.atoms(sympy.Float):
-        return []
-    limit = sympy.Float(_DBL_MAX ** (1.0 / exponent), 17)
-    return [sympy.Gt(base, limit), sympy.Lt(base, -limit)]
 
 
 def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
@@ -299,21 +291,6 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
                 complex_out.append(path_cond)
             elif base.free_symbols:
                 complex_out.append(sympy.And(path_cond, base < 0))
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow) \
-            and isinstance(node.right, ast.Constant) \
-            and isinstance(node.right.value, (int, float)) \
-            and not isinstance(node.right.value, bool) \
-            and node.right.value > 1:
-        try:
-            base = _expr_to_sympy(node.left, dict(env))
-        except NotSymbolic:
-            base = None
-        if base is None or isinstance(base, tuple):
-            miss("power base")
-        elif base.free_symbols:
-            for region in _float_pow_region(base, float(node.right.value),
-                                            int_syms):
-                out.append((sympy.And(path_cond, region), "OverflowError"))
     if isinstance(node, ast.BinOp) \
             and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
         try:
