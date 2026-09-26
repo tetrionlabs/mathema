@@ -29,9 +29,11 @@ Notable changes to mathema are recorded here from its first public release onwar
   binding deeper than one level is refused by name.
 - Two results compare by their values whatever their leaves are: a
   parser's nested result holding `None` or strings is equal to itself,
-  a ragged value is compared leaf by leaf, and records that do not
-  subtract compare by their own equality; an ordering over such values
-  is unanswerable.
+  a ragged value is compared leaf by leaf, records that do not subtract
+  compare by their own equality, and two sequences of different length
+  (or arrays of shapes that do not broadcast) are unequal outright, so
+  a filter that drops a row falsifies `f(xs) == xs` with a witness. An
+  ordering over such values is unanswerable, as before.
 - A string concatenation in a claim keeps its order when rendered
   (`s + "0"` never becomes `"0" + s`).
 

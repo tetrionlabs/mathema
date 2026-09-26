@@ -479,6 +479,12 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
         try:
             if a is None:
                 raise _NotAnArray
+            try:
+                np.broadcast_shapes(a.shape, b.shape)
+            except ValueError:
+                # shapes that do not broadcast are unequal outright
+                # under equality, and unanswerable under an ordering
+                return (relation == "!=") if relation in ("==", "~=", "!=") else None
             if relation in ("==", "~="):
                 return bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
             if relation == "!=":
@@ -503,7 +509,9 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
         if xs and ys:
             if len(x) != len(y):
-                return None
+                # two sequences of different length are unequal
+                # outright; only an ordering over them is unanswerable
+                return (relation == "!=") if equality else None
             parts = [_walk(u, v) for u, v in zip(x, y)]
         elif xs:
             parts = [_walk(u, y) for u in x]   # broadcast scalar y

@@ -53,7 +53,8 @@ def test_records_compare_by_their_own_equality():
     assert relation_holds_elementwise(a, [Order(1, "web"), Order(2, "web")], "==", 1e-9) is False
     assert relation_holds_elementwise(a, [Order(1, "web"), Order(2, "web")], "!=", 1e-9,
                                       exact_inequality=True) is True
-    # an ordering over records is unanswerable, and so is a different
-    # length (mismatched shapes are unanswerable, not false)
+    # an ordering over records is unanswerable; a different length is
+    # a definite inequality
     assert relation_holds_elementwise(a, b, "<=", 1e-9) is None
-    assert relation_holds_elementwise(a, [Order(1, "web")], "==", 1e-9) is None
+    assert relation_holds_elementwise(a, [Order(1, "web")], "==", 1e-9) is False
+    assert relation_holds_elementwise(a, [Order(1, "web")], "!=", 1e-9, exact_inequality=True) is True

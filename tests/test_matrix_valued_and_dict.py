@@ -40,8 +40,12 @@ def test_relation_holds_elementwise_broadcasts_and_reduces():
     assert relation_holds_elementwise([[1.0, 2.0]], [[1.0, 2.0]], "==", 1e-9)
     # a value that does not order is unanswerable, not false
     assert relation_holds_elementwise(1j, 2, "<", 1e-9) is None
-    # mismatched shapes are unanswerable, not false
-    assert relation_holds_elementwise([1, 2, 3], [1, 2], "==", 1e-9) is None
+    # mismatched shapes are unequal outright under equality (a dropped
+    # element is a definite difference), and unanswerable under an
+    # ordering
+    assert relation_holds_elementwise([1, 2, 3], [1, 2], "==", 1e-9) is False
+    assert relation_holds_elementwise([1, 2, 3], [1, 2], "!=", 1e-9, exact_inequality=True) is True
+    assert relation_holds_elementwise([1, 2, 3], [1, 2], "<=", 1e-9) is None
 
 
 # --- matrix-valued / elementwise laws -------------------------------------
