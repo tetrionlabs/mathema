@@ -47,13 +47,15 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
 from . import linalg
 from ._scan import _split_commas, blank_strings
 from .domain import DuplicateBinding
+from .domain import operational_domain as _operational_domain
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
                       holds_nan, same_infinity,
                       is_complex_value, ordering_shortfall,
                       quiet_while_probing, relation_holds_elementwise)
-from .records import _EXC_TYPES, Probe, classify_verdict, statement_text
+from .records import (_EXC_TYPES, Probe, PseudoInfinity, classify_verdict,
+                      statement_text)
 from .symbolic import (mentions_matrix_ops, try_prove, try_prove_matrix,
                        try_prove_raises)
 
@@ -181,6 +183,10 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
                 if not (math.isfinite(lo) and math.isfinite(hi)):
                     return []
             except TypeError:
+                return []
+            if getattr(piece, "bare", False):
+                # an undeclared direction has no corner: its reach is
+                # visited by the sampler's far draws
                 return []
             if getattr(piece, "closed_lo", True):
                 ends.append(lo)
@@ -778,14 +784,19 @@ class Conjecture:
     # nothing reads this yet, the parser round-trips it and no
     # adjudication consults it. Empty string means no such section.
     pseudo_infinity: float | None = None
-    # the domain approximation for infinity, parallel to tolerance: an
-    # unbounded (+-inf) direction stops at this magnitude on both
-    # routes, and the float companion runs to it, applied symmetrically
-    # (records.pseudo_infinity_range resolves it to the (-v, v) range
-    # consumers read). None means real infinity: no default, and the
-    # float companion then runs to a large sampled magnitude. Rendered
-    # in the claim text only when set (an ordinary bounded-domain claim
-    # never states it).
+    # the authored `let |inf| be v`, the claim level of the operational
+    # infinity (P6): how far the computation (the probe route and the
+    # float companion) runs along an unbounded direction, applied
+    # symmetrically (records.pseudo_infinity_range). The derive route
+    # never reads it (P1). Part of the claim's text, and so of its
+    # identity, only where it bounds an unbounded direction (P8).
+    resolved_pseudo_infinity: "PseudoInfinity | None" = field(
+        default=None, compare=False)
+    # the operational infinity that applies after resolution, claim >
+    # function > MATHEMA_PSEUDO_INFINITY (records.resolve_pseudo_infinity),
+    # with its source; set only on check_conjectures' working copy and
+    # read through records.operational_range. Output, never identity
+    # (P7): no renderer or fingerprint reads it.
     links: list = field(default_factory=list)
     # a chained comparison's pairwise links, each an (lhs, rel, rhs)
     # triple (grammar.split_relation_chain); empty for an ordinary
@@ -2570,7 +2581,8 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                       trials_scale: float = 1.0, facts=None,
                       extensive: bool = False,
                       known_premises: dict | None = None,
-                      float_companions: bool = False) -> list[Probe]:
+                      float_companions: bool = False,
+                      pseudo_infinity=None) -> list[Probe]:
     """Adjudicate proposed claims against the live function.
 
     `trials` omitted (`None`) uses the same structural-risk-based
@@ -2620,12 +2632,30 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     so a caller can tell the two kinds of skip apart), each noting who
     proposed it.
 
+    `pseudo_infinity` is the function level of the operational
+    infinity (a claims-file entry's `pseudo_infinity:`, or
+    `check(fn, pseudo_infinity=)`). Each claim's computation runs to
+    the value resolved claim > function > `MATHEMA_PSEUDO_INFINITY`
+    (`records.resolve_pseudo_infinity`, read once per call), else to
+    the carrier's maximum; the derive route never reads it. Where the
+    resolved value bounds an unbounded direction of a claim's
+    effective domain, the claim's rows carry it with its source in
+    `meta["mathema.pseudo_infinity"]` (P8).
+
     The bundled library claims (`compendium.ensure_bundled`) are
     applied before anything is adjudicated, unless a project layer is
     already installed.
+
+    Raises:
+        InvalidDomain: a function-level or `MATHEMA_PSEUDO_INFINITY`
+            value that `let |inf| be` would refuse.
     """
     from .compendium import ensure_bundled
+    from .records import resolve_pseudo_infinity
     ensure_bundled()
+    # the function and project levels, validated before any claim runs
+    # so a bad value refuses the whole call
+    resolve_pseudo_infinity(None, pseudo_infinity)
     facts = _effective_facts(fn, facts)
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     domain = domain or {}
@@ -2700,6 +2730,12 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                 f"{p2} in {render_domain(b, ascii_mode=True)}"
                 for p2, b in sorted(inherited.items()))
             probe.meta = meta
+        stamp_pinf = pseudo_infinity_stamp(cj, facts, domain)
+        if stamp_pinf is not None:
+            # the operational infinity bounds a direction of this
+            # claim's domain: the value and its level are output (P7, P8)
+            probe.meta = {**(probe.meta or {}),
+                          "mathema.pseudo_infinity": stamp_pinf}
         if cj.meta:
             # declared meta (the spec's own extension object, e.g.
             # concepts) passes through under the probe's meta, the
@@ -2727,6 +2763,14 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                        (cj.name for cj in conjectures)
                        if [c.name for c in conjectures].count(name) > 1}
     for cj in ordered:
+        if cj.resolved_pseudo_infinity is None:
+            # the working copy carries the operational infinity that
+            # applies to this claim's computation; a claim synthesized
+            # from an outer one (a chain link, a roll-up child) arrives
+            # already resolved
+            cj = _dc_replace(cj, resolved_pseudo_infinity=
+                             resolve_pseudo_infinity(cj.pseudo_infinity,
+                                                     pseudo_infinity))
         math_only = cj.route == MATH_ONLY_ROUTE
         if math_only:
             # the opt-out adjudicates exactly as a derive claim; only the
@@ -3035,6 +3079,34 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         out.append(stamp(probed, _cap=verdict_cap))
     out.sort(key=lambda p: _emit_position(p, conjectures, declared_order))
     return out
+
+
+# parameter kinds whose values run along a real direction
+_DIRECTION_KINDS = frozenset({"scalar", "unknown", "int", "sequence"})
+
+
+def pseudo_infinity_stamp(cj, facts, parent_domain: "dict | None") -> "dict | None":
+    """Intent:
+        The `mathema.pseudo_infinity` meta a claim's rows carry: the
+        resolved operational infinity (`records.operational_infinity`)
+        as `{"value", "source"}`, when it bounds an unbounded direction
+        of the claim's effective domain (the parent domain overlaid by
+        the claim's own bindings, over the function's numeric
+        parameters and the claim's free variables); None otherwise
+        (P8).
+    """
+    from .domain import unbounded_directions
+    from .records import operational_infinity
+    found = operational_infinity(cj)
+    if found is None:
+        return None
+    names = [p for p in facts.params
+             if facts.param_kinds.get(p, "unknown") in _DIRECTION_KINDS]
+    names += sorted(set(cj.free_vars or ()) - set(names))
+    effective = {**(parent_domain or {}), **(cj.domain or {})}
+    if not unbounded_directions(names, effective):
+        return None
+    return found.meta()
 
 
 def _chain_statement(cj) -> str:
@@ -3796,54 +3868,6 @@ def _provenance_meta(proof) -> dict:
         if key in proof.meta:
             meta[key] = proof.meta[key]
     return meta
-
-
-def _operational_domain(cj_domain: dict, magnitude: float):
-    """Intent:
-        The empirical-check reading of a `let |inf| be v` claim: every
-        infinite interval endpoint rewritten to the operational
-        magnitude (closed there; the operational extreme is an
-        attainable trial point), leaving every finite endpoint and
-        every non-interval bound exactly as declared. Returns the
-        rewritten copy plus a rendering of each change, so the record
-        can state the operational region next to the true proof
-        region.
-
-    Notes:
-        The probe stage's reading, and only the probe stage's: the
-        operational infinity bounds the computation, never the
-        mathematics (P1, P6). The derive route proves over the declared
-        domain with infinity as infinity, so a proof under `let |inf|
-        be v` is a proof over the reals, and the record states the
-        operational bound only beside the executed evidence.
-        Bare type bounds ("N", "Z", a Domain object) are not rewritten,
-        the shorthand replaces the oo SYMBOL the author wrote,
-        nothing else.
-    """
-    from .grammar import Interval
-    rewritten: dict = {}
-    changes: list = []
-    for p, bound in cj_domain.items():
-        if not (isinstance(bound, tuple) and not isinstance(bound, frozenset)
-                and len(bound) == 2):
-            rewritten[p] = bound
-            continue
-        try:
-            lo, hi = float(bound[0]), float(bound[1])
-        except (TypeError, ValueError):
-            rewritten[p] = bound
-            continue
-        lo_inf, hi_inf = lo == -float("inf"), hi == float("inf")
-        if not (lo_inf or hi_inf):
-            rewritten[p] = bound
-            continue
-        new_lo = -magnitude if lo_inf else bound[0]
-        new_hi = magnitude if hi_inf else bound[1]
-        closed_lo = True if lo_inf else getattr(bound, "closed_lo", True)
-        closed_hi = True if hi_inf else getattr(bound, "closed_hi", True)
-        rewritten[p] = Interval(new_lo, new_hi, closed_lo, closed_hi)
-        changes.append(f"{p} in {rewritten[p]!r}")
-    return rewritten, changes
 
 
 # the soundness gates live in mathema/gates.py, beside the
@@ -4623,8 +4647,8 @@ def _lifted_numeric_fallback(ctx, cj, statement, note, cj_domain):
             # no numeric sampling story; the fallback must decline,
             # not adjudicate nonsense
             return None
-    from .records import pseudo_infinity_range
-    pinf = pseudo_infinity_range(getattr(cj, "pseudo_infinity", None))
+    from .records import operational_range
+    pinf = operational_range(cj)
     lhs_cf = CF.compile_form(lhs_expr, pseudo_infinity=pinf)
     rhs_cf = CF.compile_form(rhs_expr if rhs_expr is not None else _sympy_zero(),
                              pseudo_infinity=pinf)
@@ -4810,20 +4834,30 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     cj_domain, extra, family = ctx.cj_domain, ctx.extra, ctx.family
     bundles = _instance_bundles(fn, facts)
-    from .records import pseudo_infinity_range
-    pinf = pseudo_infinity_range(getattr(cj, "pseudo_infinity", None))
+    from .domain import unbounded_directions
+    from .records import operational_infinity, operational_range
+    from .types import shapes_from_signature
+    pinf = operational_range(cj)
+    # the real parameters no domain was declared for: the generic
+    # sampling loop runs them along the whole reach
+    shaped = set(shapes_from_signature(fn) or {})
+    bare = [p for p, k in kinds.items()
+            if k in ("scalar", "unknown") and cj_domain.get(p) is None
+            and p not in shaped and p not in bundles]
     if pinf is not None:
-        # the |inf| binding is the empirical reading of the declared
-        # oo: this stage (and only this stage) rewrites infinite
-        # endpoints to the operational magnitude, and the record says
-        # so next to the true region; the derive stage never sees
-        # this, so a symbolic proof still covers actual infinity
-        cj_domain, approximated = _operational_domain(cj_domain, pinf[1])
-        if approximated:
-            note = (f"{note}; the implementation and empirical analysis "
-                    f"approximate infinity as the pseudo-infinity "
-                    f"{pinf[1]:g} ({', '.join(approximated)}); the "
-                    f"symbolic proof region keeps the declared oo")
+        # the resolved pseudo-infinity is the computation's reading of
+        # the declared oo: this stage (and only this stage) runs
+        # infinite endpoints to it, and the record says so with its
+        # source; the derive stage never sees this, so a proof still
+        # covers actual infinity (P1, P6)
+        cj_domain, _approximated = _operational_domain(cj_domain, pinf)
+        directions = [p for p, k in kinds.items() if k in _DIRECTION_KINDS]
+        directions += sorted(set(cj.free_vars or ()) - set(directions))
+        if unbounded_directions(directions, ctx.cj_domain):
+            resolved = operational_infinity(cj)
+            note = (f"{note}; the computation approximates infinity as "
+                    f"{resolved.magnitude():g} ({resolved.label()}); the "
+                    f"mathematics keeps the declared oo").lstrip("; ")
     region_claim = region_row_kind(cj.name) is not None
     if not region_claim and cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
                                       "raises"})
@@ -4927,6 +4961,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      note=f"{note}; the registered family for this claim's "
                           "own name couldn't decide it, and the generic "
                           "sampling loop has no meaning for this predicate")
+    # the generic loop's reading of the domain: every unbounded
+    # direction, declared or bare, runs with finite values out to the
+    # resolved pseudo-infinity, else the carrier's maximum (P1: a real
+    # domain contains no infinity)
+    from ._sampling import CARRIER_REACH
+    cj_domain, _approximated = _operational_domain(
+        cj_domain, pinf if pinf is not None
+        else (-CARRIER_REACH, CARRIER_REACH), bare=bare)
     try:
         if cj.relation == "raises":
             code_l, aux_names = _validate(cj.lhs, set(kinds), extra)

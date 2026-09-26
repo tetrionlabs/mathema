@@ -178,9 +178,9 @@ Among the results, all found with no claims written:
 <!-- example: finds output match=subset -->
 ```text
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([2.01488, 3.30692, -6.39418, 3.78355, 6.96564, 7.97935], -9.1034): -6.39418363288563 vs -45761.14174665739
+           counterexample ([-8.45341, 4.50714, -6.81355, 9.56619, 9.82492, -3.48464], -3.87612): -8.453411994413011 vs -31170.68185339262
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([6.22429, 5.95714, 3.98826, -6.56235, 7.20359, 1.66103, -8.45295], -5.87836): 78066.38231536481 vs -1129152.7241483687
+           counterexample ([0, 4.3345], -8.15071): -35.32926960780323 vs 39.66377358173939
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
   FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)

@@ -21,13 +21,25 @@ def flat(x: float) -> float:
 
 
 def test_a_tiny_nonzero_value_is_not_a_counterexample_on_the_probe_route():
-    (p,) = check_conjectures(bump, [claim("f(x) != 0", route="probe")])
+    (p,) = check_conjectures(bump, [claim("for x in [-1e6, 1e6], f(x) != 0",
+                                          route="probe")])
     assert p.verdict == "holds", (p.verdict, p.counterexample)
 
 
 def test_a_small_gap_at_large_magnitude_is_not_a_counterexample():
-    (p,) = check_conjectures(nudged, [claim("f(x) != x", route="probe")])
+    (p,) = check_conjectures(nudged, [claim("for x in [-1e6, 1e6], f(x) != x",
+                                            route="probe")])
     assert p.verdict == "holds", (p.verdict, p.counterexample)
+
+
+def test_over_the_whole_line_the_computation_reaches_an_actual_equality():
+    # the probe runs an undeclared direction out to 1e308: there
+    # 1 / (1 + x*x) underflows to exactly 0.0, and x + 0.001 rounds
+    # back to x, genuine equalities of the float computation
+    (p,) = check_conjectures(bump, [claim("f(x) != 0", route="probe")])
+    assert p.verdict == "falsified", p.note
+    (p,) = check_conjectures(nudged, [claim("f(x) != x", route="probe")])
+    assert p.verdict == "falsified", p.note
 
 
 def test_a_genuine_equality_still_falsifies():

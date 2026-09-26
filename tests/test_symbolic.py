@@ -96,9 +96,13 @@ def test_lowercase_sum_on_derive_route_hints_at_capitalized_form():
 
 def test_not_equal_and_approx_equal_relations_on_probe_route():
     # sq(t, x, sigma) = x**2, always >= 0, so it's genuinely never -1,
-    # unlike cube(x) = x**3, which *does* equal -1 at x = -1.
-    assert check_conjectures(sq, [claim("f(t, x, sigma) != -1", route="probe")])[0].verdict == "holds"
-    assert check_conjectures(cube, [claim("f(x) ~= x^3", route="probe")])[0].verdict == "holds"
+    # unlike cube(x) = x**3, which *does* equal -1 at x = -1. Both are
+    # bounded: over the whole line the probe reaches x = 1e308, where
+    # x ** 2 and x ** 3 raise OverflowError.
+    assert check_conjectures(sq, [claim("for x in [-1e6, 1e6], f(t, x, sigma) != -1",
+                                        route="probe")])[0].verdict == "holds"
+    assert check_conjectures(cube, [claim("for x in [-1e6, 1e6], f(x) ~= x^3",
+                                          route="probe")])[0].verdict == "holds"
 
 
 def test_approx_equal_provable_on_derive_route_like_equality():

@@ -257,6 +257,31 @@ def _format_check(rows: list[dict], fmt: str) -> str:
     return "\n".join(lines)
 
 
+def _warn_small_pseudo_infinity() -> None:
+    """Intent:
+        One loud stderr line when the project-level pseudo-infinity
+        (`MATHEMA_PSEUDO_INFINITY`) is below 1e100: a value that small
+        is usually left over from an experiment, and overflow of a
+        float64 computation beyond it is never exercised. A value `let
+        |inf| be` would refuse is left to the adjudication's own
+        refusal.
+    """
+    import os
+
+    from .domain import InvalidDomain
+    from .records import (PSEUDO_INFINITY_ENV, PSEUDO_INFINITY_WARN_BELOW,
+                          environment_pseudo_infinity)
+    try:
+        value = environment_pseudo_infinity()
+    except InvalidDomain:
+        return
+    if value is not None and value < PSEUDO_INFINITY_WARN_BELOW:
+        raw = os.environ.get(PSEUDO_INFINITY_ENV, "").strip()
+        print(f"warning: {PSEUDO_INFINITY_ENV}={raw} is below 1e100: a "
+              f"leftover? overflow beyond it is not exercised",
+              file=sys.stderr)
+
+
 def cmd_check(args) -> int:
     """`mathema check`: one-off interactive verification of a single
     function (or file) against its built-in laws and any inline
@@ -265,6 +290,7 @@ def cmd_check(args) -> int:
     claim in any mode; skipped claims and unenforced domains under
     `--strict`), 0 otherwise, suitable for a pre-commit check on a
     single target."""
+    _warn_small_pseudo_infinity()
     rows = _check_rows(args)
     out = _format_check(rows, args.format)
     if args.output:
@@ -309,6 +335,7 @@ def cmd_verify(args) -> int:
     from .verify import verify_project
 
     _validate_trials_scale(args.trials_scale)
+    _warn_small_pseudo_infinity()
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)

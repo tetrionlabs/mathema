@@ -140,7 +140,8 @@ def test_an_operational_infinity_bounds_only_the_computation():
     assert proof.condition == "∀ x ∈ ℝ", proof.condition
     assert "let |inf| be 1e+100" in proof.statement, proof.statement
     assert companion.verdict == "holds", companion.note
-    assert "run to the declared |inf|" in companion.note, companion.note
+    assert "run to let |inf| be 1e+100 (claim)" in companion.note, \
+        companion.note
     # exp overflows at 709.78, well inside 1e100: the proof stands and
     # the companion is falsified at the declared bound
     proof, companion = _pair(grow, "f(x) >= 0", pseudo_infinity=1e100)

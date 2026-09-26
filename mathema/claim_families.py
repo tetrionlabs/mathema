@@ -838,11 +838,11 @@ def _extreme_probe(fn, facts, cj, domain: dict, rng: random.Random,
     explicit job; every trial point is still admitted by the domain.
     A raise or non-finite return falsifies with that witness."""
     from .hazards import _extreme_candidates
-    from .records import pseudo_infinity_range
+    from .records import operational_range
     target = cj.lhs
     if target not in facts.params:
         return None
-    pinf = pseudo_infinity_range(getattr(cj, "pseudo_infinity", None))
+    pinf = operational_range(cj)
     candidates = _extreme_candidates(domain.get(target),
                                      pseudo_infinity=pinf)
     return _hazard_value_probe(
@@ -2315,11 +2315,11 @@ def _library_reach(fn, cj, params: list, domain: dict, shapes: dict):
     import sympy
 
     from .compendium import computation_region, library_key_of
-    from .records import pseudo_infinity_range
+    from .records import operational_range
     key = library_key_of(fn)
     if key is None:
         return {}, None
-    pinf = pseudo_infinity_range(getattr(cj, "pseudo_infinity", None))
+    pinf = operational_range(cj)
     default_lo, default_hi = pinf if pinf is not None else (-1e308, 1e308)
     regions = {}
     texts = []
@@ -2357,7 +2357,8 @@ def _library_reach(fn, cj, params: list, domain: dict, shapes: dict):
         note = (f"sampled inside the overflow-safe region of {key} "
                 f"({' and '.join(texts)})")
     elif pinf is not None:
-        note = "unbounded directions run to the declared |inf|"
+        from .records import operational_infinity
+        note = f"unbounded directions run to {operational_infinity(cj).render()}"
     else:
         note = "unbounded directions run to magnitude 1e+308"
     return reach, note
@@ -2524,8 +2525,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         # the bare overflow claim: the representation extremes each
         # scalar parameter's bound admits, where overflow lives
         from .hazards import _extreme_candidates
-        from .records import pseudo_infinity_range
-        pinf = pseudo_infinity_range(getattr(cj, "pseudo_infinity", None))
+        from .records import operational_range
+        pinf = operational_range(cj)
         for p in params:
             if p in call_pins or shapes.get(p) is not None \
                     or facts.param_kinds.get(p) in ("sequence", "string"):
@@ -3323,7 +3324,9 @@ def _computation_children(fn, facts, cj, domain: dict) -> list:
                 out.append(claim(f"{name}({target})",
                                  name=f"{name}[{target}]", route="best"))
     return [_replace(c, domain=dict(domain or {}),
-                     pseudo_infinity=getattr(cj, "pseudo_infinity", None))
+                     pseudo_infinity=getattr(cj, "pseudo_infinity", None),
+                     resolved_pseudo_infinity=getattr(
+                         cj, "resolved_pseudo_infinity", None))
             for c in out]
 
 

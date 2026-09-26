@@ -18,7 +18,7 @@ mathema.registry.load_specs(root)             # read the whole spec store
 mathema.registry.load_claims(path)            # parse an authoring-shape claims file
 ```
 
-## `check(fn, claims=None, domain=None, trials=None, trials_scale=1.0, extensive=False, declared=None, known_premises=None)`
+## `check(fn, claims=None, domain=None, trials=None, trials_scale=1.0, extensive=False, declared=None, known_premises=None, pseudo_infinity=None)`
 
 Verify a function's claims, each adjudicated against the real
 function: mathema's suggested standard claims when `claims` is
@@ -47,6 +47,15 @@ own bindings in its `domain` and `condition`, the parent's share in
 `meta["mathema.parent_domain"]`. The `excluding` keyword reads the
 parent domain only: a parameter bounded only inside one claim has no
 function-level outside to exclude.
+
+`pseudo_infinity` is the function level of the operational infinity:
+how far the computation of each claim (the probe route and the `[float]`
+companion) is exercised along an unbounded direction, unless the claim
+binds its own `let |inf| be`. Left out, a `declared=` entry's
+`pseudo_infinity:` field applies, then the project's
+`MATHEMA_PSEUDO_INFINITY`, then float64's own maximum. A proof never
+reads it; see [operational
+infinity](../grammar.md#operational-infinity-let-inf-be).
 
 A parameter or return type hinted with a mathema type marker
 (`Annotated[float, Probability]`, `Annotated[list, Shape("m", "n")]`)

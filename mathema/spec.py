@@ -1277,7 +1277,8 @@ class ClaimsFileError(ValueError):
 _CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
                  "grammar", "funcs", "pseudo_infinity", "meta", "authored",
                  "source", "family", "note")
-_ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references")
+_ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references",
+                 "pseudo_infinity")
 
 
 _ENTRY_ANNOTATIONS = ("an entry's annotations go in `meta:` (structured "
@@ -1436,6 +1437,9 @@ def validate_claims_file(data, rel_path: str) -> None:
                           f"{near!r}?)")
             fail(key, f"unknown field {field_name!r}; "
                       f"{_ENTRY_ANNOTATIONS}")
+        problem = _pseudo_infinity_problem(entry.get("pseudo_infinity"))
+        if problem:
+            fail(key, f"`pseudo_infinity`: {problem}")
         claims = entry.get("claims")
         if claims is None:
             continue
@@ -1490,6 +1494,9 @@ def validate_claims_file(data, rel_path: str) -> None:
                               f"number, not {tol!r}")
                 if isinstance(tol, str):
                     c["tolerance"] = value
+            problem = _pseudo_infinity_problem(c.get("pseudo_infinity"))
+            if problem:
+                fail(key, f"{label}: `pseudo_infinity`: {problem}")
             domain = c.get("domain")
             if domain is not None:
                 if not isinstance(domain, dict):
@@ -1499,6 +1506,23 @@ def validate_claims_file(data, rel_path: str) -> None:
                     problem = _domain_problem(bound)
                     if problem:
                         fail(key, f"{label}: `domain` for {param}: {problem}")
+
+
+def _pseudo_infinity_problem(value) -> "str | None":
+    """Intent:
+        Why a claims-file `pseudo_infinity` value is refused, in the
+        words a bad `let |inf| be` gets, or None when it is absent or
+        a finite positive magnitude.
+    """
+    if value is None:
+        return None
+    from .domain import InvalidDomain
+    from .records import _checked_magnitude
+    try:
+        _checked_magnitude(value)
+    except InvalidDomain as e:
+        return str(e)
+    return None
 
 
 def _bundled_compendium_dir() -> str:
@@ -1767,6 +1791,54 @@ def callable_ref(fn) -> "str | None":
     return f"{mod}.{qual}" if obj is fn else None
 
 
+def _claim_variable_names(cj) -> "set | None":
+    """Intent:
+        The variable names a claim's relation reads (every name outside
+        a call's function position, the math constants aside), or None
+        when some part of it does not read as an expression.
+    """
+    import ast as _ast
+
+    from ._math_vocab import MATH_CONSTANTS
+    from .grammar import normalize
+    # a raises claim's right side names an exception type
+    texts = [cj.lhs] if cj.relation == "raises" else [cj.lhs, cj.rhs]
+    for lhs, _rel, rhs in cj.links or ():
+        texts += [lhs, rhs]
+    names: set = set()
+    for text in texts:
+        if not text or not str(text).strip():
+            continue
+        try:
+            tree = _ast.parse(normalize(str(text)), mode="eval")
+        except (SyntaxError, ValueError):
+            return None
+        called = {id(node.func) for node in _ast.walk(tree)
+                  if isinstance(node, _ast.Call)}
+        names |= {node.id for node in _ast.walk(tree)
+                  if isinstance(node, _ast.Name) and id(node) not in called}
+    return names - set(MATH_CONSTANTS) - {"eps", "epsilon", "ε"}
+
+
+def pseudo_infinity_bounds_something(cj) -> bool:
+    """Intent:
+        Whether a claim's authored `let |inf| be` can bound anything: some
+        name the relation reads is unbounded in its declared domain,
+        or has no declared domain at all. False only when the claim
+        has no binding, or every name it reads is provably bounded, so
+        an inert binding leaves the claim's text and identity (P8);
+        anything unreadable keeps the binding.
+    """
+    if getattr(cj, "pseudo_infinity", None) is None:
+        return False
+    names = _claim_variable_names(cj)
+    if names is None:
+        return True
+    from .domain import unbounded_directions
+    return bool(unbounded_directions(sorted(names), cj.domain or {},
+                                     unsure_unbounded=True))
+
+
 def declare(cj) -> dict:
     """The inverse of entry_claims()'s per-claim parsing: one Conjecture
     back to declared-schema.md's claim-dict shape. This is the seam every
@@ -1817,10 +1889,10 @@ def declare(cj) -> dict:
         out["tolerance"] = cj.tolerance
     if getattr(cj, "meta", None):
         out["meta"] = dict(cj.meta)
-    if getattr(cj, "pseudo_infinity", None) is not None:
-        # the operational infinity magnitude for the extreme-value
-        # checks, emitted only when the author set it (an ordinary
-        # bounded-domain claim never states it); applied symmetrically
+    if pseudo_infinity_bounds_something(cj):
+        # the operational infinity magnitude, emitted only when the
+        # author set it and it can bound an unbounded direction (P8);
+        # applied symmetrically
         _, hi = pseudo_infinity_range(cj.pseudo_infinity)
         out["pseudo_infinity"] = hi
     if cj.funcs:
@@ -2362,9 +2434,10 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         for name in sorted(cj.free_vars) if name in cj.domain]
     let_segments += [f"let {name} be {value!r}" for name, value in
                      sorted((getattr(cj, "param_pins", None) or {}).items())]
-    if getattr(cj, "pseudo_infinity", None) is not None:
+    if pseudo_infinity_bounds_something(cj):
         # the operational infinity magnitude, in the one claim-text
-        # spelling (the bars mean magnitude, applied symmetrically)
+        # spelling (the bars mean magnitude, applied symmetrically),
+        # stated only where it can bound an unbounded direction (P8)
         _, pinf_hi = pseudo_infinity_range(cj.pseudo_infinity)
         let_segments.append(
             f"let |{'∞' if unicode else 'inf'}| be {pinf_hi:g}")

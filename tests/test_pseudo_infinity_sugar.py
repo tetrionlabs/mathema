@@ -91,9 +91,9 @@ def test_empirical_record_calls_out_the_approximation_derive_does_not():
     (probed,) = check_conjectures(doubled, [claim(law, route="probe")],
                                   facts=facts)
     assert probed.verdict == "holds"
-    assert ("approximate infinity as the pseudo-infinity 1e+06"
+    assert ("the computation approximates infinity as 1e+06 (claim)"
             in probed.note)
-    assert "symbolic proof region keeps the declared oo" in probed.note
+    assert "the mathematics keeps the declared oo" in probed.note
     # the derive route never sees the rewrite: its proof covers the
     # actual infinity and its record carries no approximation note
     (derived,) = check_conjectures(doubled, [claim(law, route="derive")],

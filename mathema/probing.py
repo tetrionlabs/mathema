@@ -28,6 +28,7 @@ from ._sampling import (
     _SpecialCycle as _SpecialCycle, _finite_bounds as _finite_bounds,
     _synth_scalar as _synth_scalar,
 )
+from ._sampling import _moderate_bounds, _reach_ends
 from .grammar import MISSING, Domain, domain_contains
 # Probe's real home is records.py (the stdlib-only leaf every layer can
 # import); re-exported here because probing is where consumers
@@ -792,12 +793,17 @@ def _integer_range(piece, base_type: str) -> "tuple[int, int]":
         The first and last integers an interval piece admits, an open
         end excluding its endpoint and a fractional end rounding inward
         (`(0, 5]` gives 1..5, `[0.5, 5]` gives 1..5), with an unbounded
-        side capped the way `_finite_bounds` caps a real one. `first >
-        last` when no integer lies inside.
+        side (an infinite end, or the reach a `ReachInterval` marks)
+        capped the way `_finite_bounds` caps a real one. `first > last`
+        when no integer lies inside.
     """
     from .domain import _integer_span
     first, last = _integer_span(piece, base_type)
-    flo, fhi = _finite_bounds(float(piece[0]), float(piece[1]))
+    if getattr(piece, "reach_lo", False):
+        first = -math.inf
+    if getattr(piece, "reach_hi", False):
+        last = math.inf
+    flo, fhi = _moderate_bounds(*_reach_ends(piece))
     if math.isinf(first):
         first = math.ceil(flo)
     if math.isinf(last):
@@ -837,7 +843,7 @@ def _sample_domain(rng: random.Random, dom: Domain,
         if _rectangle(p):
             weights.append(1.0)
         elif isinstance(p, tuple):
-            lo, hi = _finite_bounds(*p)
+            lo, hi = _moderate_bounds(*_reach_ends(p))
             weights.append(max(hi - lo, 1e-9))
         else:
             weights.append(1.0)
@@ -1023,9 +1029,31 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         trunc = f"[truncated@{len(hints)}]" if p in truncated_hints else ""
         return "⊕crit{" + ", ".join(f"{v:g}" for v in hints) + "}" + trunc
 
+    def far_suffix(bounds) -> str:
+        # an unbounded direction's far draws, out to its reach
+        lo, hi, un_lo, un_hi = _reach_ends(bounds)
+        reach = max(abs(lo) if un_lo else 0.0, abs(hi) if un_hi else 0.0)
+        return f"⊔far(≤{reach:g})"
+
     parts = []
     for p, k in kinds.items():
         bounds = domain.get(p) if k != "sequence" else None
+        if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
+                and getattr(bounds.pieces[0], "bare", False)
+                and not bounds.excluded):
+            # a bare real line given the reach samples as a bare parameter
+            bounds = bounds.pieces[0]
+        if getattr(bounds, "bare", False):
+            parts.append(f"{p}~U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]"
+                         f"{far_suffix(bounds)}[p=.1]{crit_suffix(p)}")
+            continue
+        if isinstance(bounds, tuple) and k != "int" and (
+                getattr(bounds, "reach_lo", False)
+                or getattr(bounds, "reach_hi", False)):
+            mlo, mhi = _moderate_bounds(*_reach_ends(bounds))
+            parts.append(f"{p}~U({mlo:g},{mhi:g})⊔{{lo,hi,mid,±ε}}[p=.3]"
+                         f"{far_suffix(bounds)}{crit_suffix(p)}")
+            continue
         bound_shape = _classify_bound(bounds)
         if bound_shape == "frozenset":
             parts.append(f"{p}~U{{{', '.join(str(v) for v in sorted(bounds))}}}")

@@ -94,8 +94,8 @@ def test_conjunction_assumptions_thread_through_both_routes():
     def scaled(x, k, j):
         return x / (k * j)
 
-    law = ("assuming k != 0 and j > 0, for x in [1, 5], "
-           "f(x, k, j) * k * j == x")
+    law = ("assuming k != 0 and j > 0, for x in [1, 5], k in [-10, 10], "
+           "j in [-10, 10], f(x, k, j) * k * j == x")
     (p,) = check_conjectures(scaled, [claim(law, route="derive")])
     assert p.verdict == "proven"
     (p,) = check_conjectures(scaled, [claim(law, route="probe")])

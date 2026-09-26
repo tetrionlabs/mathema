@@ -155,7 +155,10 @@ def test_explicit_trials_disables_adaptivity_entirely():
     # every probe that ran to completion must carry exactly n=50 (a
     # falsified probe legitimately stops early at its counterexample)
     import mathema as _m
-    rec = _m.check(ema, trials=50)
+    # alpha in its weighting range: unbounded, the probe reaches
+    # alpha = 1e308, where the loop overflows and every sampled row
+    # stops early at that counterexample
+    rec = _m.check(ema, trials=50, domain={"alpha": (0, 1)})
     # only the generic sampling loop (route "probe") honors the trial
     # count verbatim; a hazard-targeted family battery
     # (probe:algorithmic) deliberately runs its own structured round
@@ -194,12 +197,15 @@ def test_budget_stays_the_same_regardless_of_earlier_falsifications():
     # falsification exits at its counterexample and never shrinks the
     # full budget a later holding claim runs, and that full budget is
     # identical across calls (no reactive state anywhere)
-    r = mathema.check(ema)
+    # alpha in its weighting range, where the loop does not overflow
+    r = mathema.check(ema, domain={"alpha": (0, 1)})
     probes = {p.name: p for p in r.probes}
-    assert probes["bounded_lower"].verdict == "falsified"
+    assert probes["permutation_invariant"].verdict == "falsified"
     assert probes["is_numerically_stable"].verdict == "holds"
-    assert probes["bounded_lower"].n < probes["is_numerically_stable"].n
-    again = {p.name: p for p in mathema.check(ema).probes}
+    assert (probes["permutation_invariant"].n
+            < probes["is_numerically_stable"].n)
+    again = {p.name: p for p in mathema.check(
+        ema, domain={"alpha": (0, 1)}).probes}
     assert again["is_numerically_stable"].n == probes[
         "is_numerically_stable"].n
 

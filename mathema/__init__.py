@@ -436,7 +436,8 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
          trials: int | None = None,
          trials_scale: float = 1.0, extensive: bool = False,
          declared: dict | None = None,
-         known_premises: dict | None = None) -> Record:
+         known_premises: dict | None = None,
+         pseudo_infinity=None) -> Record:
     """Verify a function's claims, each adjudicated against the real
     function.
 
@@ -488,6 +489,17 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     `compendium.external_premises`) that the missing-prerequisite note
     then includes. Data only; it never satisfies a premise, and
     check() itself stays IO-free.
+
+    `pseudo_infinity` is the function level of the operational
+    infinity: how far each claim's computation (the probe route and
+    the `[float]` companion) runs along an unbounded direction, unless
+    the claim states its own `let |inf| be`. Omitted, a `declared=`
+    entry's `pseudo_infinity:` field applies, else the project's
+    `MATHEMA_PSEUDO_INFINITY`, else the carrier's maximum (1e308). A
+    proof never reads it. Where the value that applied bounds a
+    direction of a claim's domain, the claim's rows state it with its
+    source (`meta["mathema.pseudo_infinity"]` and the notes); a value
+    `let |inf| be` would refuse raises `InvalidDomain`.
 
     `extensive` reaches every route this call touches: `probe()`'s own
     critical-point sampling hints and `domain_safe[...]` probe, and a
@@ -604,12 +616,20 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         merged_entry = merge_entries(authored, {"claims": explicit},
                                      on_conflict="silent")
     all_claims = entry_claims(merged_entry)
+    if pseudo_infinity is None and declared is not None:
+        pseudo_infinity = declared.get("pseudo_infinity")
     if all_claims:
         probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
                                             trials=trials, trials_scale=trials_scale,
                                             facts=facts, extensive=extensive,
                                             known_premises=known_premises,
-                                            float_companions=True)
+                                            float_companions=True,
+                                            pseudo_infinity=pseudo_infinity)
+    else:
+        # a bad function-level or project value refuses even with
+        # nothing to adjudicate
+        from .records import resolve_pseudo_infinity
+        resolve_pseudo_infinity(None, pseudo_infinity)
     from .concepts import Concept, concepts_for, flat_union
     sources = concepts_for(facts, probes)
     dismissed = set(((declared or {}).get("meta") or {}).get(

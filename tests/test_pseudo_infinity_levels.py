@@ -261,7 +261,9 @@ def test_without_a_reach_the_bare_domain_falls_at_a_far_corner():
     (probed,) = check_conjectures(
         logistic, [claim("for x in R, f(x) > 0", route="probe")])
     assert probed.verdict == "falsified"
-    x = float(probed.counterexample.split("=", 1)[1])
+    import re
+    x = float(re.search(r"-?[\d.]+e[+-]\d+|-?[\d.]+",
+                        probed.counterexample).group())
     assert abs(x) > 700, probed.counterexample
 
 
@@ -305,7 +307,7 @@ def test_verify_honours_the_entry_field(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(tmp_path))
     _project(tmp_path, "pseudo_infinity: 1e100")
     verify_project(str(tmp_path))
-    entry = load_verified(str(tmp_path))["pimod.sq"]
+    entry = load_verified(str(tmp_path))["pimod.sq"]["entry"]
     rows = {c["name"]: c for c in entry["claims"]}
     assert rows["nonneg[float]"]["verdict"] == "holds", rows["nonneg[float]"]
     assert rows["nonneg[float]"]["meta"]["mathema.pseudo_infinity"] == {

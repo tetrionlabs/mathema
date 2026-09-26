@@ -85,8 +85,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         `None` when the claim can't be numerically evaluated at all (a
         calculus form d/lim/integrate, or an uncompilable law): the
         caller then marks a disproof uncorroborated and spawns no float
-        companion. An unbounded direction runs to `cap`'s resolved
-        pseudo-infinity range when one is declared, else to `reach`
+        companion. An unbounded direction runs to `cap`, the claim's
+        resolved pseudo-infinity range, when one applies, else to `reach`
         when given (the float companion's large magnitude, sampled
         log-uniformly so moderate magnitudes are visited too), else to
         +-`_EXTREME`. A sequence parameter is evaluable only with
@@ -97,7 +97,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     """
     import math
     from .domain import (_as_int_if_whole, bound_to_sympy_set,
-                         domain_contains, is_missing)
+                         domain_contains, is_missing, operational_domain)
     from .probing import (ComplexResult, _synth, complex_is_a_raise,
                           is_complex_value)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
@@ -384,11 +384,16 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                     cap_hi if math.isinf(hi) else hi)
         return int(round(value)) if name in int_names else value
 
+    # under a pseudo-infinity, a declared unbounded direction samples
+    # out to it and no further
+    sample_domain = (operational_domain(cj_domain, (cap_lo, cap_hi))[0]
+                     if cap is not None else cj_domain)
+
     def sample(name, rng):
         # an unbounded parameter samples within the pseudo-infinity
         # range (or the reach), so a declared range bounds the draws
         # too, not only the corners
-        b = cj_domain.get(name)
+        b = sample_domain.get(name)
         if name in seq_names:
             # a sequence's declared bound is per element
             return _synth("sequence", rng, b)
@@ -734,33 +739,21 @@ def companion_name(parent_name: str) -> str:
     return f"{parent_name}{FLOAT_SUFFIX}"
 
 
-def _reach_text(names, cj_domain, cap, reach) -> str:
+def _reach_text(names, cj_domain, resolved, reach) -> str:
     """Intent:
         How far the float companion ran along the claim's unbounded
         directions, in words, or an empty string when every coordinate
-        is bounded.
+        is bounded (P8). `resolved` is the claim's resolved
+        pseudo-infinity, stated with its source; without one the
+        directions ran to the carrier's reach.
     """
-    import math
-    from .domain import bound_to_sympy_set
-    unbounded = []
-    for n in names:
-        b = cj_domain.get(n)
-        if b is None:
-            unbounded.append(n)
-            continue
-        try:
-            lo, hi = ((float(b[0]), float(b[1])) if isinstance(b, tuple) else
-                      (float(bound_to_sympy_set(b).inf),
-                       float(bound_to_sympy_set(b).sup)))
-        except Exception:
-            continue
-        if math.isinf(lo) or math.isinf(hi):
-            unbounded.append(n)
+    from .domain import unbounded_directions
+    unbounded = unbounded_directions(names, cj_domain)
     if not unbounded:
         return ""
     who = ", ".join(unbounded)
-    if cap is not None:
-        return f"unbounded directions ({who}) run to the declared |inf|"
+    if resolved is not None:
+        return f"unbounded directions ({who}) run to {resolved.render()}"
     return (f"unbounded directions ({who}) run to magnitude "
             f"{reach[1]:.0e}, sampled log-uniformly (no |inf| declared)")
 
@@ -794,9 +787,10 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         says; the companion `<name>[float]` is the same relation
         executed against the REAL code in float: at every corner of
         the declared domain and at sampled interior points, unbounded
-        directions running to the claim's `pseudo_infinity` when one is
-        declared and to a large magnitude (1e308, sampled log-uniformly)
-        otherwise. A raise, a NaN, or an inf or a precision loss where
+        directions running to the claim's resolved pseudo-infinity
+        (`records.operational_range`: claim, function level or
+        `MATHEMA_PSEUDO_INFINITY`) when one applies and to the carrier's
+        reach (1e308, sampled log-uniformly) otherwise. A raise, a NaN, or an inf or a precision loss where
         the relation fails on the executed values falsifies it with
         that point as the witness; otherwise it holds, over the points
         it executed.
@@ -814,16 +808,16 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     """
     from . import corroboration as C
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    cap = getattr(cj, "pseudo_infinity", None)
+    from .records import operational_infinity, operational_range
+    resolved = operational_infinity(cj)
+    cap = operational_range(cj)
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
                             cap=cap, reach=_FLOAT_REACH, sequences=True)
     if deps is None:
         return None
-    from .records import pseudo_infinity_range
     name = companion_name(parent.name)
-    reach = (pseudo_infinity_range(cap) if cap is not None
-             else (-_FLOAT_REACH, _FLOAT_REACH))
-    reach_text = _reach_text(deps["names"], cj_domain, cap, reach)
+    reach = cap if cap is not None else (-_FLOAT_REACH, _FLOAT_REACH)
+    reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
     interior = (C._CORROBORATION_BUDGET if budget is None
                 else max(0, int(budget) - len(deps["corners"])))
     progress = C.StabilitySweep()

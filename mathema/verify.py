@@ -622,6 +622,48 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
     return now != recorded
 
 
+def _pseudo_infinity_moved(fn, facts, merged_entry: dict,
+                           verified_entry: dict) -> bool:
+    """Intent:
+        Whether the operational infinity a claim's computation runs to
+        would now differ from what the record states
+        (`mathema.pseudo_infinity` on the claim's rows): a changed or
+        removed `MATHEMA_PSEUDO_INFINITY`, entry field or `let |inf|
+        be`, compared only where it bounds an unbounded direction (P8).
+        Such a record is stale, its claims unchanged (P7).
+    """
+    from dataclasses import replace
+
+    from .conjecture import pseudo_infinity_stamp
+    from .gates import FLOAT_SUFFIX
+    from .records import resolve_pseudo_infinity
+    from .spec import entry_claims
+    from .types import domain_from_signature
+    try:
+        current = entry_claims(merged_entry or {})
+        parent = domain_from_signature(fn)
+    except Exception:
+        return False
+    function_level = (merged_entry or {}).get("pseudo_infinity")
+    now: dict = {}
+    for cj in current:
+        resolved = replace(cj, resolved_pseudo_infinity=resolve_pseudo_infinity(
+            cj.pseudo_infinity, function_level))
+        stamp = pseudo_infinity_stamp(resolved, facts, parent)
+        if stamp is not None:
+            now[cj.name] = stamp
+    names = {cj.name for cj in current}
+    recorded: dict = {}
+    for c in (verified_entry or {}).get("claims") or []:
+        name = c.get("name") or ""
+        base = (name[:-len(FLOAT_SUFFIX)] if name.endswith(FLOAT_SUFFIX)
+                else name)
+        stamp = (c.get("meta") or {}).get("mathema.pseudo_infinity")
+        if base in names and stamp:
+            recorded[base] = stamp
+    return now != recorded
+
+
 def _unsettled_library_hints(key: str, claims: list) -> list:
     """Intent:
         For each library row this sweep left unsettled (declared,
@@ -1037,8 +1079,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         recorded_premises = (verified_entry.get("meta") or {}).get(
             "mathema.premise_state")
         defaults_moved = _defaults_moved(fn, merged_entry, verified_entry)
+        pinf_moved = _pseudo_infinity_moved(fn, facts_now, merged_entry,
+                                            verified_entry)
         is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
                     and recorded_fp == current_fp and not defaults_moved
+                    and not pinf_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
         deps_now = function_dependencies(fn, facts_now) if is_fresh else None
@@ -1100,7 +1145,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         attach_recorded_pins(claims, verified_entry or None)
         rec = check(fn, claims=claims if claims else [],
                     trials_scale=trials_scale,
-                    known_premises=stub_premises)
+                    known_premises=stub_premises,
+                    pseudo_infinity=merged_entry.get("pseudo_infinity"))
         rec.probes = [p for p in rec.probes
                       if getattr(p, "name", None) not in withheld]
         rec.probes, late_notes = _strip_retired_probes(
@@ -1113,6 +1159,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                                      root=root))
         why = ("dependency changed" if dependency_changed
                else "defaults changed" if defaults_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
+               else "pseudo-infinity changed" if pinf_moved
                and facts_now.form == recorded_form
                and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh

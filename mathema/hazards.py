@@ -347,9 +347,13 @@ def _extreme_candidates(bounds, pseudo_infinity=None) -> list[float]:
 
     Notes:
         `pseudo_infinity` is the resolved (lo, hi) operational range
-        or None. Candidates are filtered by domain membership, so an
-        excluded endpoint or a bound shape domain_contains rejects
-        contributes nothing.
+        or None. Under a range, an unbounded side keeps the ladder's
+        rungs at or inside it and adds the range's own end, so the
+        overflow scales below the reach are still visited. An end a
+        `domain.ReachInterval` marks is unbounded, its value the reach.
+        Candidates are filtered by domain membership, so an excluded
+        endpoint or a bound shape domain_contains rejects contributes
+        nothing.
     """
     from .grammar import domain_contains
 
@@ -367,18 +371,29 @@ def _extreme_candidates(bounds, pseudo_infinity=None) -> list[float]:
             lo, hi = float(bounds[0]), float(bounds[1])
         except (TypeError, ValueError):
             lo = hi = None
-    if lo is not None and abs(lo) != float("inf"):
+    reach_lo = bool(getattr(bounds, "reach_lo", False))
+    reach_hi = bool(getattr(bounds, "reach_hi", False))
+    if reach_lo and pseudo_infinity is None and lo is not None:
+        pseudo_infinity = (lo, abs(lo))
+    if reach_hi and pseudo_infinity is None and hi is not None:
+        pseudo_infinity = (-abs(hi), hi)
+    if lo is not None and abs(lo) != float("inf") and not reach_lo:
         raw.append(lo)
-    if hi is not None and abs(hi) != float("inf"):
+    if hi is not None and abs(hi) != float("inf") and not reach_hi:
         raw.append(hi)
-    unbounded_hi = hi is None or hi == float("inf")
-    unbounded_lo = lo is None or lo == -float("inf")
+    unbounded_hi = hi is None or hi == float("inf") or reach_hi
+    unbounded_lo = lo is None or lo == -float("inf") or reach_lo
     if unbounded_hi:
-        raw.extend([pseudo_infinity[1]] if pseudo_infinity is not None
-                   else list(_REPRESENTATION_LADDER))
+        raw.extend(list(_REPRESENTATION_LADDER) if pseudo_infinity is None
+                   else [v for v in _REPRESENTATION_LADDER
+                         if v <= pseudo_infinity[1]]
+                   + [pseudo_infinity[1]])
     if unbounded_lo:
-        raw.extend([pseudo_infinity[0]] if pseudo_infinity is not None
-                   else [-v for v in _REPRESENTATION_LADDER])
+        raw.extend([-v for v in _REPRESENTATION_LADDER]
+                   if pseudo_infinity is None
+                   else [-v for v in _REPRESENTATION_LADDER
+                         if -v >= pseudo_infinity[0]]
+                   + [pseudo_infinity[0]])
     out: list[float] = []
     for cand in raw:
         if admitted(cand) and cand not in out:

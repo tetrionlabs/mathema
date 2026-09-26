@@ -22,7 +22,7 @@ math.exp:
     - name: is_overflow_safe
       statement: "x <= 709.782712893384"
     - name: exp_overflow_raises
-      statement: "let |inf| be 1e308, for x in (709.782712893384, oo), raises(f(x), OverflowError)"
+      statement: "for x in (709.782712893384, oo), raises(f(x), OverflowError)"
 
 math.log:
   intent: "Natural logarithm; raises ValueError at x <= 0 (math.log(0) does not return -inf)."
