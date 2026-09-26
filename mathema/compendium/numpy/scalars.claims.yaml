@@ -62,18 +62,33 @@ numpy.arctanh:
 
 numpy.exp:
   intent: "Exponential; overflows to inf above roughly x = 709.78, with a RuntimeWarning."
+  claims:
+    - name: is_defined
+      statement: "x <= 709.782712893384"
 
 numpy.exp2:
   intent: "2 to the power x; overflows to inf above roughly x = 1024."
+  claims:
+    - name: is_defined
+      statement: "x < 1024"
 
 numpy.expm1:
   intent: "exp(x) - 1; overflows to inf for large x."
+  claims:
+    - name: is_defined
+      statement: "x <= 709.782712893384"
 
 numpy.cosh:
   intent: "Hyperbolic cosine; overflows to inf for abs(x) above roughly 710."
+  claims:
+    - name: is_defined
+      statement: "-710.475860073944 < x < 710.475860073944"
 
 numpy.sinh:
   intent: "Hyperbolic sine; overflows to an infinity for large abs(x)."
+  claims:
+    - name: is_defined
+      statement: "-710.475860073944 < x < 710.475860073944"
 
 numpy.power:
   intent: "x1 to the power x2; a negative base with a non-integer exponent returns nan, and large results overflow to an infinity."

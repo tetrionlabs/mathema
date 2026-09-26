@@ -180,3 +180,27 @@ def test_check_with_the_bundled_claims_proves_where_sqrt_has_a_value(g):
     uninstall()
     rec = check(g, claims=["for x in [0, 4], f(x)*f(x) == x"])
     assert _named(rec, "f_x_f_x_eq_x").verdict == "proven"
+
+
+@pytest.fixture()
+def ex(tmp_path):
+    return _load(tmp_path, '''
+        import numpy as np
+
+        def ex(x: float) -> float:
+            """Exponential through numpy."""
+            return float(np.exp(x))
+    ''', "nv_exp").ex
+
+
+@pytest.mark.needs_full_proof_budget
+def test_an_overflow_region_falsifies_on_derive_with_a_reproduced_witness(ex):
+    p = _verdict(ex, "for x in [700, 1000], f(x) >= 0")
+    assert p.verdict == "falsified", p.note
+    assert p.route == "derive", p.route
+    assert p.meta.get("mathema.corroboration") == "reproduced"
+
+
+@pytest.mark.needs_full_proof_budget
+def test_below_the_overflow_threshold_exp_stays_proven(ex):
+    assert _verdict(ex, "for x in [-700, 700], f(x) > 0").verdict == "proven"

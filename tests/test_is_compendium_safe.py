@@ -46,6 +46,13 @@ def test_the_numpy_compendium_covers_the_expected_surface():
     assert defined_on("numpy.arctanh") == ["-1 < x < 1"]
     # overflow / division functions are covered (caught empirically)
     assert {"numpy.exp", "numpy.divide", "numpy.reciprocal"} <= set(numpy)
+    # the exponentials return a finite value only below their overflow
+    # threshold, inf past it
+    assert defined_on("numpy.exp") == ["x <= 709.782712893384"]
+    assert defined_on("numpy.expm1") == ["x <= 709.782712893384"]
+    assert defined_on("numpy.exp2") == ["x < 1024"]
+    assert defined_on("numpy.cosh") == ["-710.475860073944 < x < 710.475860073944"]
+    assert defined_on("numpy.sinh") == ["-710.475860073944 < x < 710.475860073944"]
     # reductions are defined on a non-empty array only
     assert defined_on("numpy.mean") == ["dim(a) >= 1"]
     # bounds carry claims, not hazards
