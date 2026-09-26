@@ -21,6 +21,12 @@ Notable changes to mathema are recorded here from its first public release onwar
   API version is unchanged.
 - A claim over a language domain is stamped `grammar: mathema/language`;
   `𝕃[...]` is accepted on input.
+- `excluded_outside_domain(s)` and `is_arbitrary_input_safe(s)` read a
+  declared language: the near non-members come from the language, a
+  witness says whether it lies inside or outside it, and shrinking never
+  crosses the boundary. The derive route lifts a schema language's
+  numeric fields, so a claim over rows can reach `proven`. A field
+  binding deeper than one level is refused by name.
 - Two results compare by their values whatever their leaves are: a
   parser's nested result holding `None` or strings is equal to itself,
   and a ragged value is compared leaf by leaf.

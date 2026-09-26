@@ -259,6 +259,10 @@ _PIECE_LANGUAGE = re.compile(
 # bound on any variable); domain means scope *and* intensity of
 # verification, not just numeric range.
 _BINDING_INTENSITY = re.compile(r"^\s*n\s*=\s*(\d+)\s*$")
+# a field binding reaches one level deep (`o.qty in [...]`); a deeper
+# path is refused by name rather than left to read as a second relation
+_DEEP_FIELD_BINDING = re.compile(
+    rf"^\s*(?P<path>\w+(?:\.\w+){{2,}})\s+{_MEMBERSHIP_OPS}\s+")
 _BOUND_CONSTS = {"pi": math.pi, "-pi": -math.pi, "e": math.e,
                  "oo": math.inf, "-oo": -math.inf,
                  "infinity": math.inf, "-infinity": -math.inf}
@@ -1568,6 +1572,13 @@ def split_quantifier(text: str) -> tuple[dict, str]:
     n_bindings = 0
     for seg in segments:
         if not is_binding(seg):
+            deep = _DEEP_FIELD_BINDING.match(seg)
+            if deep is not None:
+                path = deep.group("path")
+                raise InvalidDomain(
+                    f"{seg.strip()!r}: a field binding reaches one level "
+                    f"deep ({path.split('.')[0]}.{path.split('.')[1]}), not "
+                    f"{path}; a deeper field has no domain of its own here")
             break
         n_bindings += 1
     if n_bindings == 0:

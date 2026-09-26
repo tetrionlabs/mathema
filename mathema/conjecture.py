@@ -555,6 +555,45 @@ def _stated_kind(bound) -> str:
     return _BASE_TYPE_KIND.get(base_type, str(base_type).lower())
 
 
+def _language_field_bounds(cj_domain: dict) -> dict:
+    """Intent:
+        `{param: {field: bound}}` for every parameter bound to a
+        single schema language, the one-deep numeric field domains its
+        `fields()` states (an `Interval`, a named number set, a numeric
+        `Domain`); a union of languages, a language without fields, or
+        a field whose bound is not numeric leaves the parameter out,
+        and the lift then declines it as any language.
+    """
+    from .domain import Domain, LanguageRef
+    from .languages import resolve_language
+    out: dict = {}
+    for p, b in cj_domain.items():
+        if getattr(b, "base_type", None) != "L":
+            continue
+        refs = [piece for piece in b.pieces if isinstance(piece, LanguageRef)]
+        if len(refs) != 1 or len(b.pieces) != 1:
+            continue
+        try:
+            fields = resolve_language(refs[0]).fields()
+        except Exception:
+            continue
+        if not fields:
+            continue
+        numeric: dict = {}
+        for name, bound in fields.items():
+            if isinstance(bound, Domain):
+                if bound.base_type == "L":
+                    numeric = {}
+                    break
+            elif not (bound in ("Z", "N", "R") or isinstance(bound, tuple)):
+                numeric = {}
+                break
+            numeric[name] = bound
+        if numeric:
+            out[p] = numeric
+    return out
+
+
 def _adaptor_inferred_domains(fn, facts, cj_domain: dict) -> dict:
     """Intent:
         `{param: (language domain, adaptor name, annotation text)}` for
@@ -4087,7 +4126,22 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             return None
     language_params = sorted(p for p, b in cj_domain.items()
                              if getattr(b, "base_type", None) == "L")
-    if language_params:
+    schema_fields = _language_field_bounds(cj_domain)
+    if language_params and all(p in schema_fields for p in language_params):
+        # every language-bound parameter is a SCHEMA language whose
+        # fields the lift reads one symbol at a time: the field bounds
+        # become that symbol's domain, a claim-level `o.field` binding
+        # overriding, and the ordinary prover runs
+        field_domain = {f"{p}.{k}": b for p, bounds in schema_fields.items()
+                        for k, b in bounds.items()}
+        derive_domain = _derive_operational_domain(
+            cj, {**field_domain, **cj_domain}, facts)
+        proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
+                          domain=derive_domain, tolerance=cj.tolerance,
+                          extensive=extensive, funcs=bound_funcs or None,
+                          assumption=assumption,
+                          assume_defined=ctx.assume_defined)
+    elif language_params:
         # a string or structured value has no symbolic reading, and a
         # real symbol standing in for one would prove real-only facts
         # it does not have, so the lift is declined outright; a FINITE

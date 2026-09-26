@@ -37,6 +37,63 @@ def test_an_unguarded_crash_falsifies_with_a_minimal_witness(tmp_path):
     assert "''" in pr.counterexample and "IndexError" in pr.counterexample
 
 
+def _letters():
+    from mathema.languages import StringLanguage
+    return StringLanguage("letters", char_ok=str.isalpha, pool="abcXYZ\u00e9",
+                          outside_pool="1 -.")
+
+
+def test_the_shrunk_witness_states_whether_it_is_inside_the_declared_language(tmp_path):
+    from mathema.languages import register_language, unregister_language
+    register_language("letters", _letters())
+    try:
+        mod = _load(tmp_path, '''
+            def first_char(s: str) -> str:
+                """First character."""
+                return s[0]
+        ''')
+        pr = _one(mod.first_char, "for s in L[letters], is_arbitrary_input_safe(s)")
+        assert pr.verdict == "falsified"
+        assert "(inside L[letters])" in pr.counterexample
+        assert "''" in pr.counterexample and "IndexError" in pr.counterexample
+    finally:
+        unregister_language("letters")
+
+
+def test_shrinking_never_crosses_the_language_boundary(tmp_path):
+    from mathema.languages import register_language, unregister_language
+    register_language("letters", _letters())
+    try:
+        mod = _load(tmp_path, '''
+            def digit_value(s: str) -> int:
+                """The value of a leading digit; letters count as zero."""
+                if s.isalpha() or s == "":
+                    return 0
+                return {"0": 0, "1": 1, "2": 2}[s[0]]
+        ''')
+        # inside the language the function is fine; outside it, a
+        # non-digit crashes with an unguarded KeyError, and the shrunk
+        # witness stays outside the language
+        pr = _one(mod.digit_value, "for s in L[letters], is_arbitrary_input_safe(s)")
+        assert pr.verdict == "falsified", (pr.verdict, pr.note)
+        assert "(outside L[letters])" in pr.counterexample
+        witness = pr.counterexample.split(" = ", 1)[1].split(" (", 1)[0]
+        assert not eval(witness).isalpha()
+    finally:
+        unregister_language("letters")
+
+
+def test_without_a_language_bound_nothing_changes(tmp_path):
+    mod = _load(tmp_path, '''
+        def first_char(s: str) -> str:
+            """First character."""
+            return s[0]
+    ''')
+    pr = _one(mod.first_char)
+    assert pr.counterexample == ("s = '' raised IndexError on arbitrary input, "
+                                 "an unguarded crash, not a declared rejection")
+
+
 def test_a_guarded_rejection_holds(tmp_path):
     mod = _load(tmp_path, '''
         def guarded(s: str) -> str:
