@@ -760,9 +760,9 @@
   "ascii": "assuming min(m, n) >= 3, for a in R^(m,n)|missing, f(a) = a[2][2]"
  },
  "language_alphabet": {
-  "input": "for text in L[ascii], f(f(text)) == f(text)",
-  "unicode": "∀ text ∈ L[ascii] ∪ {∅}, f(f(text)) = f(text)",
-  "ascii": "for text in L[ascii]|missing, f(f(text)) = f(text)"
+  "input": "for text in L[unicode], f(f(text)) == f(text)",
+  "unicode": "∀ text ∈ L[unicode] ∪ {∅}, f(f(text)) = f(text)",
+  "ascii": "for text in L[unicode]|missing, f(f(text)) = f(text)"
  },
  "language_contraction": {
   "input": "for text in L[unicode], len(f(text)) <= len(text)",
@@ -770,14 +770,9 @@
   "ascii": "for text in L[unicode]|missing, dim(f(text), 0) <= dim(text, 0)"
  },
  "language_excluding_empty": {
-  "input": "for s in L[digit] \\ {\"\"}, f(s + \"0\") == 10 * f(s)",
-  "unicode": "∀ s ∈ L[digit] \\ {\"\"} ∪ {∅}, f(s + '0') = 10*f(s)",
-  "ascii": "for s in L[digit] \\ {\"\"}|missing, f(s + '0') = 10*f(s)"
- },
- "language_with_special_member": {
-  "input": "for text in L[alnum] | {\"n/a\"}, len(f(text)) <= len(text)",
-  "unicode": "∀ text ∈ L[alnum] ∪ {\"n/a\"} ∪ {∅}, dim(f(text), 0) ≤ dim(text, 0)",
-  "ascii": "for text in L[alnum] ∪ {\"n/a\"}|missing, dim(f(text), 0) <= dim(text, 0)"
+  "input": "for text in L[unicode] \\ {\"\"}, len(f(text)) >= 1",
+  "unicode": "∀ text ∈ L[unicode] \\ {\"\"} ∪ {∅}, dim(f(text), 0) ≥ 1",
+  "ascii": "for text in L[unicode] \\ {\"\"}|missing, dim(f(text), 0) >= 1"
  },
  "language_membership_symbol": {
   "input": "for text ∈ L[unicode], len(f(text)) >= len(text)",
@@ -790,8 +785,8 @@
   "ascii": "let u = mathema.lexicon.unescape_angle, for text in L[unicode]|missing, u(f(text)) = text"
  },
  "language_missing_excluded": {
-  "input": "for text in L[latin-1] \\ {∅}, len(f(text)) <= len(text)",
-  "unicode": "∀ text ∈ L[latin-1] \\ {∅}, dim(f(text), 0) ≤ dim(text, 0)",
-  "ascii": "for text in L[latin-1] \\ {missing}, dim(f(text), 0) <= dim(text, 0)"
+  "input": "for text in L[unicode] \\ {∅}, len(f(text)) <= len(text)",
+  "unicode": "∀ text ∈ L[unicode] \\ {∅}, dim(f(text), 0) ≤ dim(text, 0)",
+  "ascii": "for text in L[unicode] \\ {missing}, dim(f(text), 0) <= dim(text, 0)"
  }
 }

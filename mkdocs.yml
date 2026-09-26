@@ -131,6 +131,7 @@ nav:
       - Conditional claims: conditional-claims.md
       - Lemmas: lemmas.md
       - Matrix structure and linear algebra: matrix-structure.md
+      - Language domains: language.md
       - Multi-function claims: multi-function-claims.md
   - Command reference:
       - mathema check: modes/check.md

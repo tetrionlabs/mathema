@@ -506,6 +506,32 @@ def _resolve_func_ref(ref: str, *, root: str = "."):
 _BASE_TYPE_KIND = {"Z": "int", "N": "int", "R": "scalar", "C": "complex"}
 
 
+# which real parameter kinds (analysis.param_kinds' vocabulary) a
+# language's member kind is compatible with: a row is a mapping the body
+# reads as a dict, a frame is iterated or subscripted, an object is
+# anything the body does not pin down
+_KIND_COMPATIBLE = {
+    "string": {"string"},
+    "mapping": {"dict"},
+    "sequence": {"sequence"},
+    "object": {"dict", "sequence", "unknown"},
+    "row": {"dict"},
+    "frame": {"sequence", "dict"},
+}
+
+
+def _kind_compatible(stated: str, real: "str | None") -> bool:
+    """Intent:
+        Whether a real parameter of kind `real` can take members of
+        a domain whose stated kind is `stated`. An unknown real kind
+        is compatible with anything; otherwise the table above, and
+        equality for a kind outside it.
+    """
+    if real in (None, "unknown"):
+        return True
+    return real in _KIND_COMPATIBLE.get(stated, {stated})
+
+
 def _stated_kind(bound) -> str:
     """Intent:
         The parameter kind a stated domain type corresponds to: the
@@ -527,6 +553,45 @@ def _stated_kind(bound) -> str:
                     return "string"
         return "string"
     return _BASE_TYPE_KIND.get(base_type, str(base_type).lower())
+
+
+def _adaptor_inferred_domains(fn, facts, cj_domain: dict) -> dict:
+    """Intent:
+        `{param: (language domain, adaptor name, annotation text)}` for
+        every parameter no binding names whose annotation a registered
+        language adaptor turns into a language. The domain names the
+        language by its own name when that resolves, else by the
+        annotation's dotted path when the annotation is a class the
+        adaptors accept again; an annotation whose language can be
+        named neither way infers nothing, since a record must be able
+        to resolve what it states.
+    """
+    if fn is None:
+        return {}
+    from .domain import Domain, LanguageRef
+    from .languages import adapt_annotation, resolves
+    from .types import _hints
+    hints = _hints(fn)
+    out: dict = {}
+    for p in facts.params:
+        hint = hints.get(p)
+        if p in cj_domain or hint is None:
+            continue
+        found = adapt_annotation(hint)
+        if found is None:
+            continue
+        language, adaptor = found
+        if resolves(language.name):
+            ref = LanguageRef(language.name)
+        elif isinstance(hint, type) and resolves(
+                f"{hint.__module__}.{hint.__qualname__}"):
+            ref = LanguageRef(f"{hint.__module__}.{hint.__qualname__}")
+        else:
+            continue
+        hint_text = getattr(hint, "__name__", None) or str(hint)
+        out[p] = (Domain(base_type="L", pieces=(ref,), explicit_type=True),
+                  adaptor, hint_text)
+    return out
 
 
 def _language_meta(bounds: dict) -> dict:
@@ -1051,6 +1116,12 @@ def claim(law: str, name: str | None = None, source: str = "user",
     # canonical statement re-parses under base `mathema` on its own.
     if grammar == GRAMMAR and linalg.mentions_matrix_ops(lhs, rhs):
         grammar = f"{GRAMMAR}/linalg"
+    elif grammar == GRAMMAR and any(getattr(b, "base_type", None) == "L"
+                                    for b in dom.values()):
+        # the language dialect: a claim quantified over a language is
+        # read with the language vocabulary; a finite-set domain stays
+        # the base grammar, and the matrix dialect wins when both apply
+        grammar = f"{GRAMMAR}/language"
     if let_pseudo_inf is not None:
         from .records import pseudo_infinity_range
         if (pseudo_infinity is not None
@@ -2180,6 +2251,21 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
 
     from .probing import _synth
     cls, fields = bundle
+    bound = cj_domain.get(p)
+    if getattr(bound, "base_type", None) == "L":
+        # the parameter is quantified over a language: its members are
+        # the instances, and a claim-level field bound narrows them by
+        # a bounded rejection
+        from .domain import domain_contains
+        field_bounds = {f: cj_domain[f"{p}.{f}"] for f in fields
+                        if cj_domain.get(f"{p}.{f}") is not None}
+        inst = None
+        for _ in range(20):
+            inst = _synth("object", rng, bound)
+            if all(domain_contains(getattr(inst, f, None), b)
+                   for f, b in field_bounds.items()):
+                break
+        return inst
     values = {f: _synth("float", rng, cj_domain.get(f"{p}.{f}"),
                         specials=specials) for f in fields}
     if isinstance(cls, type) and _dc.is_dataclass(cls):
@@ -3392,6 +3478,23 @@ def _validate_claim(cj, statement: str, note: str, facts,
                    + ", ".join(repr(v) for v in sorted(vals, key=repr)) + "}"
                    for p, vals in sorted(literal_inferred.items()))
                + " from its own annotation's stated values")
+    # a language inferred from the annotation by a registered adaptor
+    # (`str` to the package's unicode language, a schema class to the
+    # language of its rows), the same gap-filling rule as the int
+    # inference above: only a parameter no binding names, rendered
+    # explicitly with the adaptor that answered; with no adaptor
+    # installed nothing is inferred
+    adaptor_inferred = _adaptor_inferred_domains(fn, facts, cj_domain)
+    if adaptor_inferred:
+        from .domain import render_domain
+        cj_domain = {**{p: b for p, (b, _, _) in adaptor_inferred.items()},
+                     **cj_domain}
+        note = (f"{note}; inferred "
+               + ", ".join(
+                   f"{p} in {render_domain(b, ascii_mode=True)} from its own "
+                   f"{hint_text} annotation (adaptor {adaptor})"
+                   for p, (b, adaptor, hint_text)
+                   in sorted(adaptor_inferred.items())))
     # canonical narrowing, at resolve time: the resolved domain IS the
     # canonical set (prover, records, and comparisons all use it); the
     # declared text stays the author's, and the collapse is rendered
@@ -3475,7 +3578,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
                 # kind, so a future type can disagree with a scalar
                 # annotation instead of silently matching it.
                 stated_kind = _stated_kind(bound)
-                if real_kind not in (None, "unknown", stated_kind):
+                if not _kind_compatible(stated_kind, real_kind):
                     note = (f"{note}; let-declared free variable {p!r} states "
                            f"'{bound.base_type}' but the real parameter {p!r} "
                            f"is {real_kind!r}; the stated type is used as "
@@ -3521,7 +3624,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
                                        "language-unresolved"})
                 resolved_sources.append(f"{p} in L[{piece.name}] ({source})")
                 real_kind = facts.param_kinds.get(p)
-                if real_kind not in (None, "unknown", language.kind):
+                if not _kind_compatible(language.kind, real_kind):
                     note = (f"{note}; {p} is quantified over "
                             f"L[{piece.name}], whose members are "
                             f"{language.kind} values, but the real "
@@ -4770,6 +4873,14 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # the call fixes this parameter to a literal: use it
                     # verbatim for both the sample and the witness.
                     v = literal_args[p]
+                    env[p] = v
+                    args.append(v)
+                    continue
+                if k == "dict" and getattr(cj_domain.get(p), "base_type",
+                                           None) == "L":
+                    # a mapping parameter quantified over a language: the
+                    # members ARE the mappings, drawn from the language
+                    v = _synth(k, rng, cj_domain.get(p))
                     env[p] = v
                     args.append(v)
                     continue

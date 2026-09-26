@@ -798,13 +798,18 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     # than it does for a scalar (the parameter's own domain), so a
     # sequence-typed parameter must never fall into the scalar
     # dispatch below and come back a bare number instead of a list.
+    if _classify_bound(bounds) == "language":
+        # a language bound is the parameter's own domain whatever kind
+        # the body suggested (a mapping read, an iteration): the author
+        # said the value IS a member, so it is drawn as one
+        return _sample_language(rng, bounds)
     if kind == "dict":
         # a mapping parameter with no key list to hand (the automatic
         # type-probes): a generic dict, enough not to crash a function
         # that only iterates its values. The claim path uses
         # `_synth_dict(keys, ...)` with the body's real keys instead.
         return _synth_dict([], rng, specials=specials)
-    if kind == "sequence" and _classify_bound(bounds) != "language":
+    if kind == "sequence":
         # a language bound is the parameter's own domain, whatever kind
         # the body's usage suggested (iterating a string looks like a
         # sequence): the author said the value IS a member, so it is
@@ -849,8 +854,6 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     bound_shape = _classify_bound(bounds)
     if bound_shape == "domain":
         return _sample_domain(rng, bounds, specials=specials)
-    if bound_shape == "language":
-        return _sample_language(rng, bounds)
     if bound_shape == "frozenset":
         return rng.choice(list(bounds))
     if bound_shape in ("Z", "N", "C"):
@@ -862,6 +865,18 @@ def _synth(kind: str, rng: random.Random, bounds=None,
             return _synth_int_in(rng, bounds, "Z")
         return rng.choice([0, 1, 2]) if rng.random() < 0.3 else rng.randint(0, 10)
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
+
+
+def sample_bound(bound, rng: random.Random, kind: str = "scalar"):
+    """Intent:
+        One value drawn from a declared bound, the draw the probe route
+        makes for a parameter of `kind` with that bound: a language
+        member for a language bound, an element of a finite set, an
+        integer or a real inside an interval, a list for `"sequence"`.
+        The extension surface's sampling seam, so a registered family
+        or a language package draws members the way the probe does.
+    """
+    return _synth(kind, rng, bound)
 
 
 def _fmt_value(v) -> str:

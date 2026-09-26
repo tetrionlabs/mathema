@@ -18,6 +18,8 @@ exposes.
 | `mathema.capabilities` | a presentation hook: how should something already computed be shown | `mathema._providers` |
 | `mathema.mcp_tools` | extra tools for the MCP server | `mathema.interfaces.mcp.server` |
 | `mathema.target_resolvers` | a resolver for language-tagged target keys (`ts:...`) | `mathema._target_resolvers` |
+| `mathema.languages` | a named language a claim quantifies over with `L[<name>]` | `mathema.languages` |
+| `mathema.language_adaptors` | an adaptor turning an imported object (a schema class, a type) into a language, or `None` for "not mine" | `mathema.languages` |
 
 A claim family answers "can this be proven." A capability answers "how
 should this be shown." They are separate mechanisms with separate
@@ -64,6 +66,23 @@ enforced for you. The static tables (`routes.SAFETY_PREDICATES` and
 kin) keep meaning core's own vocabulary; live membership is read
 through `routes.safety_predicates()` / `routes.examine_predicates()`.
 
+## Registered languages and adaptors
+
+`L[<name>]` in a claim resolves through the registry in
+`mathema.languages`: an in-process `register_language(name, obj)`
+first, then the `mathema.languages` entry point of that name, then a
+dotted path to a `Language` object, and last the `mathema.language_adaptors`
+adaptors, each called as `adapt(obj)` on the imported object and
+answering a `Language` or `None`. A language is any object satisfying
+the `Language` protocol; `language_problems(obj)` lists what one is
+missing, and a registered or loaded object that fails it is skipped
+with a warning, never served. Core ships no language: the alphabets,
+predicate languages, hazard families and schema adaptors are the
+`mathema-language` package's, and an unknown name is refused with the
+vocabulary and the group to register under. An output-contract
+predicate registered under a name shaped `output_<slug>` or
+`is_<slug>_output` joins the grammar the way `is_<slug>_safe` does.
+
 ## Injected facts
 
 A resolver-built proxy may carry a `__mathema_facts__` attribute
@@ -94,6 +113,9 @@ Everything a provider may import lives in
 | `store` | `load_declared`, `load_verified`, `save_verified_entry` |
 | `index` | `build_index` |
 | `evidence` | `evidence_rank`, `SUPPORTED_VERDICTS` |
+| `languages` | `Language`, `LanguageRef`, `StringLanguage`, `Problem`, `HazardValue`, `KINDS`, `LEVELS`, `HAZARD_KINDS`, `STRING_HAZARDS`, `language_problems`, `register_language`, `unregister_language`, `resolve_language`, `describe_language`, `language_vocabulary`, `UnknownLanguage` |
+| `families` | `SafetyFamily`, `OutputPredicateFamily`, `ProofResult`, `probe_trials`, `call_with_target`, `synth_other_params`, `format_point`, `pinned_float_env` |
+| `sampling` | `sample_bound`, `shrink` |
 
 Import from `mathema.interfaces.extension`, not from the module a name
 happens to live in today. The module is free to move; the name on this

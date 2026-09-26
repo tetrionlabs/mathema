@@ -248,11 +248,12 @@ _PIECE_INTERVAL = re.compile(r"^([\[\(])\s*([^,]+?)\s*,\s*(.+?)\s*([\]\)])$")
 _PIECE_SET = re.compile(r"^\{\s*(.*?)\s*\}$")
 _PIECE_NAMED = re.compile(r"^(R|Z|N|C|ℝ|ℤ|ℕ|ℂ)$")
 # a language piece, `L[ascii]`, `L[latin-1]`, `L[myapp.models.Order]`:
-# a name, or a dotted path an adaptor resolves. A bare `L` is not a
-# piece (it is refused, as any unknown bare name is), so `L^2` never
-# reads as a space.
+# a name, or a dotted path an adaptor resolves; the double-struck `𝕃`
+# (U+1D543) is the same piece on input. A bare `L` is not a piece (it
+# is refused, as any unknown bare name is), so `L^2` never reads as a
+# space.
 _PIECE_LANGUAGE = re.compile(
-    r"^L\[\s*(?P<name>[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\s*\]$")
+    r"^(?:L|\U0001d543)\[\s*(?P<name>[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\s*\]$")
 # Sampling-intensity modifiers, not a parameter binding at all: `n=500`
 # in the same comma-list sets domain["n"] (how many draws/rows, not a
 # bound on any variable); domain means scope *and* intensity of

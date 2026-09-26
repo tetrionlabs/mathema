@@ -30,6 +30,7 @@ Each extra adds one capability without making it everyone's dependency.
 | `mcp` | `mathema mcp serve`, which exposes mathema's checking tools to a coding agent |
 | `coverage` | reading a native `.coverage` report, so the tests you already run count toward the implementation score (a `coverage.json` export works without it) |
 | `symbology` | conventional notation for parameter and function names when claims are rendered |
+| `language` | the named languages behind `L[...]` (alphabets, `json`, a schema of your own), the hazard families over text and the row schema adaptors, from the `mathema-language` package |
 | `all` | `numpy`, `smt`, `mcp` and `coverage` together |
 
 ```bash

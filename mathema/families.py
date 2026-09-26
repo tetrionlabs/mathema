@@ -182,6 +182,20 @@ KEYWORD_MEANINGS: dict[str, str] = {
 _PREDICATE_SHAPE = re.compile(r"is_[a-z0-9][a-z0-9_]*_safe")
 
 
+# the shape a family name must have to contribute an output-contract
+# predicate (`is_sorted_output`, `output_never_none`, `output_in_language`)
+_OUTPUT_SHAPE = re.compile(r"output_[a-z0-9][a-z0-9_]*|is_[a-z0-9][a-z0-9_]*_output")
+
+
+def registered_output_predicates() -> frozenset:
+    """Output-contract predicate names contributed by registered claim
+    families: every family name shaped like `output_<slug>` or
+    `is_<slug>_output`. The registered NAME is the predicate, as for
+    the safety predicates; `routes` unions this with its static table."""
+    return frozenset(name for name in families()
+                     if _OUTPUT_SHAPE.fullmatch(name))
+
+
 def registered_predicates() -> frozenset:
     """Safety-predicate names contributed by registered claim families:
     every family name shaped like `is_<slug>_safe`. The registered NAME

@@ -35,10 +35,6 @@ def doubled(x: float) -> float:
 
 def summed(x: float) -> float:
     return x + x
-
-
-def shouted(s: str) -> str:
-    return s.upper()
 '''
 
 # (function, claim text, name or None)
@@ -54,8 +50,6 @@ _SHAPES = [
     ("running_total", "f(xs, y0) - y0 + 0 >= 0", None),
     ("doubled", "f(x) == summed(x)", "matches_sibling"),
     ("doubled", "let g = roundtrip_fns.summed, f(x) == g(x)", "matches_let"),
-    ("shouted", "for s in L[ascii], len(f(s)) == len(s)", "keeps_length"),
-    ("shouted", 'for s in L[ascii] \\ {""}, len(f(s)) >= 1', None),
 ]
 
 

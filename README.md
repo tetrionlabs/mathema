@@ -373,8 +373,9 @@ pip install "mathema[all]"    # numpy, z3, MCP server, coverage
 
 The extras can also be taken one at a time: `mcp` exposes mathema's tools to
 an agent, `smt` adds z3 as a fallback decision procedure, `numpy` enables
-array-shaped claims, `coverage` reads a native `.coverage` report and
-`symbology` adds conventional notation.
+array-shaped claims, `coverage` reads a native `.coverage` report,
+`symbology` adds conventional notation and `language` brings the named
+languages a claim quantifies text and structured values over.
 
 ## Documentation
 
@@ -407,7 +408,9 @@ families and the YAML record schema), maintained independently under
 that reads or writes that shape interoperates with mathema's records without
 importing it. `mathema.SPEC_VERSION` states the targeted version and every
 record stamps it. [mathema-symbology](https://github.com/aaronbyrnephd/mathema-symbology)
-renders claims in a field's conventional notation, and
+renders claims in a field's conventional notation,
+[mathema-language](https://github.com/tetrionlabs/mathema-language) provides
+the languages behind `L[...]` (alphabets, predicate languages, schemas), and
 [mathema-agents](https://github.com/tetrionlabs/mathema-agents) teaches coding
 agents to drive the claim loop properly, vendored by an explicit, opt-in
 `mathema init --agents`.

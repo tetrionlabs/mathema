@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The language registry behind `L[<name>]`: a built-in resolves first
-and is never overridden, an in-process registration next, then a
-`mathema.languages` entry point, then a dotted reference imported and
-offered to the `mathema.language_adaptors` adaptors. An unknown name
-refuses with the vocabulary and the group to register under, a broken
-entry point warns and is skipped, and a registered language must
-satisfy the protocol."""
+"""The language registry behind `L[<name>]`: an in-process registration
+resolves first, then a `mathema.languages` entry point, then a dotted
+reference imported and offered to the `mathema.language_adaptors`
+adaptors. Core ships no language of its own. An unknown name refuses
+with the vocabulary, the group to register under and the package that
+provides the common languages; a broken entry point warns and is
+skipped; a registered language must satisfy the protocol."""
 import fractions
 import random
 
@@ -14,7 +14,7 @@ import pytest
 
 import mathema.languages as languages
 from mathema.domain import LanguageRef
-from mathema.languages import (BUILTIN_LANGUAGES, Problem, UnknownLanguage,
+from mathema.languages import (Problem, StringLanguage, UnknownLanguage,
                                describe_language, language_problems,
                                language_vocabulary, register_language,
                                resolve, resolve_language, unregister_language)
@@ -96,15 +96,11 @@ def entry_points(monkeypatch):
     languages._loaded_adaptors.cache_clear()
 
 
-def test_a_builtin_resolves_first():
-    language, source = resolve(LanguageRef("ascii"))
-    assert language is BUILTIN_LANGUAGES["ascii"]
-    assert source == "built-in"
-
-
-def test_a_builtin_name_cannot_be_registered_over():
-    with pytest.raises(ValueError, match="built-in"):
-        register_language("ascii", _Words("a"))
+def test_core_ships_no_language(entry_points):
+    entry_points()
+    assert language_vocabulary() == ()
+    with pytest.raises(UnknownLanguage, match="none in this process"):
+        resolve_language(LanguageRef("unicode"))
 
 
 def test_a_registered_language_resolves_by_name(registered):
@@ -113,6 +109,13 @@ def test_a_registered_language_resolves_by_name(registered):
     assert "answers" in language_vocabulary()
     unregister_language("answers")
     assert "answers" not in language_vocabulary()
+
+
+def test_a_registered_language_wins_over_an_entry_point_of_the_same_name(
+        registered, entry_points):
+    entry_points(named=[_Entry("answers", "pkg.mod:words", obj=_Words("a"))])
+    language, source = resolve("answers")
+    assert language is registered and source == "registered"
 
 
 def test_a_registered_language_must_satisfy_the_protocol():
@@ -127,12 +130,13 @@ def test_a_registered_language_must_satisfy_the_protocol():
         register_language("broken", Broken())
 
 
-def test_an_unknown_name_refuses_with_the_vocabulary():
+def test_an_unknown_name_refuses_with_the_vocabulary_and_the_remedy(registered):
     with pytest.raises(UnknownLanguage) as err:
         resolve_language(LanguageRef("nope"))
     message = str(err.value)
-    assert "L[nope]" in message and "ascii" in message
+    assert "L[nope]" in message and "answers" in message
     assert "mathema.languages" in message
+    assert 'mathema[language]' in message
     assert err.value.vocabulary == language_vocabulary()
 
 
@@ -143,12 +147,6 @@ def test_an_entry_point_language_resolves_by_name(entry_points):
     assert language is words
     assert source == "entry point pkg.mod:words"
     assert "directions" in language_vocabulary()
-
-
-def test_a_builtin_wins_over_an_entry_point_of_the_same_name(entry_points):
-    entry_points(named=[_Entry("ascii", "pkg.mod:words", obj=_Words("a"))])
-    language, source = resolve("ascii")
-    assert language is BUILTIN_LANGUAGES["ascii"] and source == "built-in"
 
 
 def test_a_broken_entry_point_warns_and_is_skipped(entry_points):
@@ -209,7 +207,7 @@ def test_describe_states_name_source_level_kind_and_schema(registered):
                          "schema": {"type": "string", "enum": ["yes", "no"]}}
 
 
-def test_builtin_languages_all_satisfy_the_protocol():
-    for language in BUILTIN_LANGUAGES.values():
-        assert language_problems(language) == []
-        assert isinstance(language.sample(random.Random(0)), str)
+def test_the_kit_builds_a_language_that_satisfies_the_protocol():
+    letters = StringLanguage("letters", char_ok=str.isalpha, pool="abc")
+    assert language_problems(letters) == []
+    assert isinstance(letters.sample(random.Random(0)), str)

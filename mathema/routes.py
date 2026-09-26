@@ -92,10 +92,17 @@ def safety_predicates() -> frozenset:
     return SAFETY_PREDICATES | registered_predicates()
 
 
+def output_predicates() -> frozenset:
+    """The live output-contract vocabulary: `OUTPUT_PREDICATES` plus
+    the output predicates registered claim families own."""
+    from . import families
+    return OUTPUT_PREDICATES | families.registered_output_predicates()
+
+
 def examine_predicates() -> frozenset:
     """The live examine vocabulary: `EXAMINE_PREDICATES` plus
-    registered ones."""
-    return EXAMINE_PREDICATES | registered_predicates()
+    registered safety and output predicates."""
+    return EXAMINE_PREDICATES | registered_predicates() | output_predicates()
 
 
 ROUTE_CAPABILITIES: dict[str, frozenset] = {
@@ -117,7 +124,7 @@ def route_capabilities(route: str) -> frozenset:
     """The live form vocabulary for `route`: the static table plus
     registered predicates (a family may offer any route for a
     predicate it owns)."""
-    return ROUTE_CAPABILITIES[route] | registered_predicates()
+    return ROUTE_CAPABILITIES[route] | registered_predicates() | output_predicates()
 
 
 # What a runtime provider can contribute; the vocabulary is defined

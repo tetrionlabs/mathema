@@ -38,6 +38,16 @@ EXPECTED_SURFACE = {
     "store": ("load_declared", "load_verified", "save_verified_entry"),
     "index": ("build_index",),
     "evidence": ("evidence_rank", "SUPPORTED_VERDICTS"),
+    "languages": ("Language", "LanguageRef", "StringLanguage", "Problem",
+                  "HazardValue", "KINDS", "LEVELS", "HAZARD_KINDS",
+                  "STRING_HAZARDS", "language_problems",
+                  "register_language", "unregister_language",
+                  "resolve_language", "describe_language",
+                  "language_vocabulary", "UnknownLanguage"),
+    "families": ("SafetyFamily", "OutputPredicateFamily", "ProofResult",
+                 "probe_trials", "call_with_target", "synth_other_params",
+                 "format_point", "pinned_float_env"),
+    "sampling": ("sample_bound", "shrink"),
 }
 
 MODULE_LEVEL = {"EXTENSION_API_VERSION", "SURFACE", "CAPABILITY_PROTOCOLS",

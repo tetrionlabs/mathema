@@ -4,14 +4,23 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## Unreleased
 
-- Language domains: `for text in L[ascii], ...` quantifies a string
-  parameter over a named language. Built in: `ascii`, `latin-1`,
-  `unicode`, `printable`, `digit`, `alpha`, `alnum`, `identifier`,
-  `json`; a package registers more under the `mathema.languages` and
-  `mathema.language_adaptors` entry-point groups. The probe samples the
-  language's own hazards and members, the record states what a
-  language resolved to, and the derive route declines a string with
-  the reason, except over a finite language, which it sweeps.
+- Language domains: `for text in L[unicode], ...` quantifies a string
+  parameter over a named language. mathema parses, renders and records
+  `L[...]`; the names come from the `mathema-language` package
+  (`pip install "mathema[language]"`), or from a language registered in
+  the process, a `mathema.languages` entry point, or a
+  `mathema.language_adaptors` adaptor. The probe samples the language's
+  own hazards and members, the record states what a language resolved
+  to, and the derive route declines a string with the reason, except
+  over a finite language, which it sweeps.
+- The extension surface gains three seams, `languages`, `families` and
+  `sampling`, and two entry-point groups, `mathema.languages` and
+  `mathema.language_adaptors`; a claim family registered under a name
+  shaped `output_<slug>` contributes an output-contract predicate the
+  way `is_<slug>_safe` contributes a safety predicate. The extension
+  API version is unchanged.
+- A claim over a language domain is stamped `grammar: mathema/language`;
+  `𝕃[...]` is accepted on input.
 - Two results compare by their values whatever their leaves are: a
   parser's nested result holding `None` or strings is equal to itself,
   and a ragged value is compared leaf by leaf.

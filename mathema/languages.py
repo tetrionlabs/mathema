@@ -9,21 +9,23 @@ probe must visit, and an explanation of why a value is not a member.
 The name is what a claim writes (`L[ascii]`, `L[latin-1]`), and the
 `Language` protocol below is what stands behind it.
 
-Three sources supply a name. The built-in alphabets in
-`BUILTIN_LANGUAGES` resolve first and are never overridden. A package
-registers a named language under the `mathema.languages` entry-point
-group (the name is the language name), or an adaptor under
-`mathema.language_adaptors` (a callable turning an imported object, a
-schema class say, into a `Language`, or `None` for "not mine"), which
-is how a dotted reference such as `L[myapp.models.Order]` resolves.
-An unknown name refuses loudly with the vocabulary, never a silently
+Core ships no language of its own. A name resolves through, in
+order, an in-process registration (`register_language`), a package's
+`mathema.languages` entry point (the name is the language name), a
+dotted path to a `Language` object, and the `mathema.language_adaptors`
+adaptors (a callable turning an imported object, a schema class say,
+into a `Language`, or `None` for "not mine"), which is how a dotted
+reference such as `L[myapp.models.Order]` resolves. The alphabets and
+predicate languages (`ascii`, `latin-1`, `unicode`, `json`, ...) are
+the `mathema-language` package's, installed as `mathema[language]`. An
+unknown name refuses loudly with the vocabulary, never a silently
 wider domain.
 
-Every language here is a set of `str`. Membership follows Python's
-own reading of the alphabet (`str.isascii`, the `latin-1` codec,
-`str.isprintable`), and an alphabet language contains the empty
-string, the way a Kleene star does; a predicate language (`json`,
-`identifier`) contains exactly what its predicate accepts.
+`StringLanguage` is the assembly kit for a language of `str` values:
+a per-character test (an alphabet, every string over it a member, the
+empty string included, the way a Kleene star reads) or a whole-string
+test (a predicate, exactly what it accepts). `STRING_HAZARDS` is the
+corpus every string language draws its hazards from.
 
 Stdlib only, so the domain model, the sampler and the spec store can
 all read a language without importing the symbolic engine.
@@ -32,7 +34,6 @@ from __future__ import annotations
 
 import functools
 import importlib
-import json
 import random
 import string
 import unicodedata
@@ -49,8 +50,9 @@ ADAPTOR_GROUP = "mathema.language_adaptors"
 
 #: what a member of a language IS, in the parameter-kind vocabulary
 #: `analysis.param_kinds` uses, so a claim quantifying an `int`
-#: parameter over a string language can be flagged.
-KINDS = ("string", "mapping", "sequence", "object")
+#: parameter over a string language can be flagged. A `row` is one
+#: record of a schema, a `frame` a table of them.
+KINDS = ("string", "mapping", "sequence", "object", "row", "frame")
 
 #: how much a language can be decided: a `finite` language is swept
 #: point by point and can be proven; an `alphabet`, `regular` or
@@ -63,8 +65,14 @@ LEVELS = ("finite", "alphabet", "regular", "predicate", "schema")
 #: format, combining and surrogate code points), `length` (a long
 #: string), `encoding` (code points past an alphabet boundary) and
 #: `text` (ordinary-looking text a parser tends to mishandle: a
-#: number, a format string, a path, an injection).
-HAZARD_KINDS = ("empty", "whitespace", "control", "length", "encoding", "text")
+#: number, a format string, a path, an injection). A structured
+#: language adds `null` (a missing value where one is allowed),
+#: `extremity` (a numeric field at its bounds), `duplicate` (repeated
+#: keys or rows), `layout` (a physical layout, chunked or sliced),
+#: `time` (a timestamp at a boundary) and `shape` (an empty, single-row
+#: or wide table).
+HAZARD_KINDS = ("empty", "whitespace", "control", "length", "encoding", "text",
+                "null", "extremity", "duplicate", "layout", "time", "shape")
 
 
 @dataclass(frozen=True)
@@ -183,9 +191,9 @@ _HAZARD_NOTES = {
     "﻿": "a byte-order mark",
     "‮": "a right-to-left override",
     "\ud800": "a lone surrogate, which no codec can encode",
-    "\x80": "the first code point past ascii",
-    "\xff": "the last latin-1 code point",
-    "Ā": "the first code point past latin-1",
+    "\x80": "the first code point past 0x7f",
+    "\xff": "code point 0xff",
+    "Ā": "the first code point past 0xff",
 }
 
 #: the shared corpus (`_sampling._STRING_SPECIALS`, the fuzz family's
@@ -199,12 +207,9 @@ STRING_HAZARDS: tuple = tuple(
 
 # --- string languages -------------------------------------------------
 
+#: the default character pool a `StringLanguage` draws random members
+#: from: printable ascii plus the two control code points at its ends
 _ASCII_POOL = string.printable + "\x00\x7f"
-_LATIN1_POOL = _ASCII_POOL + "".join(chr(c) for c in range(0x80, 0x100, 5))
-_UNICODE_POOL = (_LATIN1_POOL
-                 + "日本語\U0001f642é́​﻿"
-                 + "‮ĀΩж")
-_LETTERS = string.ascii_letters + "éΩж日"
 
 
 def _draw_length(rng: random.Random) -> int:
@@ -329,132 +334,45 @@ class StringLanguage:
                 **self.schema}
 
 
-def _generate_identifier(rng: random.Random) -> str:
-    first = rng.choice(string.ascii_letters + "_")
-    rest = "".join(rng.choice(string.ascii_letters + string.digits + "_")
-                   for _ in range(rng.randint(0, 11)))
-    return first + rest
-
-
-def _generate_json(rng: random.Random) -> str:
-    def value(depth: int):
-        choice = rng.random()
-        if depth > 1 or choice < 0.4:
-            return rng.choice([0, 1, -1, 1.5, 1e300, True, False, None,
-                               "", "a", "café", "日本語"])
-        if choice < 0.7:
-            return [value(depth + 1) for _ in range(rng.randint(0, 3))]
-        return {rng.choice(["a", "b", "key", ""]): value(depth + 1)
-                for _ in range(rng.randint(0, 3))}
-    return json.dumps(value(0), ensure_ascii=False)
-
-
-def _is_json(s: str) -> bool:
-    try:
-        json.loads(s)
-    except ValueError:
-        return False
-    return True
-
-
-def _printable(c: str) -> bool:
-    return c.isprintable()
-
-
-def _is_ascii(c: str) -> bool:
-    return ord(c) < 0x80
-
-
-def _is_latin1(c: str) -> bool:
-    return ord(c) < 0x100
-
-
-def _is_digit(c: str) -> bool:
-    return c in string.digits
-
-
-def _is_alpha(c: str) -> bool:
-    return c.isalpha()
-
-
-def _is_alnum(c: str) -> bool:
-    return c.isalnum()
-
-
-def _every_str(s: str) -> bool:
-    return True
-
-
-BUILTIN_LANGUAGES: dict = {
-    lang.name: lang for lang in (
-        StringLanguage("ascii", char_ok=_is_ascii, pool=_ASCII_POOL,
-                       outside_pool="\x80é日\U0001f642",
-                       schema={"pattern": "^[\\x00-\\x7f]*$"}),
-        StringLanguage("latin-1", char_ok=_is_latin1, pool=_LATIN1_POOL,
-                       outside_pool="Ā日\U0001f642",
-                       schema={"pattern": "^[\\x00-\\xff]*$"}),
-        StringLanguage("unicode", accepts=_every_str, pool=_UNICODE_POOL),
-        StringLanguage("printable", char_ok=_printable,
-                       pool="".join(c for c in _UNICODE_POOL if c.isprintable()),
-                       outside_pool="\x00\n\x7f​"),
-        StringLanguage("digit", char_ok=_is_digit, pool=string.digits,
-                       outside_pool="a -.٣",
-                       schema={"pattern": "^[0-9]*$"}),
-        StringLanguage("alpha", char_ok=_is_alpha, pool=_LETTERS,
-                       outside_pool="1 -_"),
-        StringLanguage("alnum", char_ok=_is_alnum,
-                       pool=_LETTERS + string.digits, outside_pool=" -_."),
-        StringLanguage("identifier", level="predicate",
-                       accepts=str.isidentifier, generate=_generate_identifier,
-                       pool=string.ascii_letters + string.digits + "_",
-                       outside_pool=" -.1"),
-        StringLanguage("json", level="predicate", accepts=_is_json,
-                       generate=_generate_json, pool=_ASCII_POOL,
-                       outside_pool="{'"),
-    )
-}
-
-
 # --- the registry -----------------------------------------------------
 
 _REGISTRY: dict = {}
 
 
 class UnknownLanguage(InvalidDomain):
-    """Raised when `L[<name>]` names no language: not a built-in, not
-    registered in this process, not served by a `mathema.languages`
-    entry point, and (for a dotted name) not importable or not
-    accepted by any `mathema.language_adaptors` adaptor. The message
-    lists the vocabulary and the groups, so the remedy is in the
-    error."""
+    """Raised when `L[<name>]` names no language: not registered in
+    this process, not served by a `mathema.languages` entry point, and
+    (for a dotted name) not importable or not accepted by any
+    `mathema.language_adaptors` adaptor. The message lists the
+    vocabulary, the groups and the package that ships the common
+    languages, so the remedy is in the error."""
 
     def __init__(self, name: str, vocabulary: tuple, detail: str = ""):
         self.name = name
         self.vocabulary = vocabulary
+        known = (", ".join(vocabulary) if vocabulary
+                 else "none in this process")
         hint = (f"; a dotted name is imported and offered to the "
                 f"{ADAPTOR_GROUP!r} adaptors" if "." in name else
                 f"; a package adds one under the {LANGUAGE_GROUP!r} "
-                f"entry-point group")
+                f"entry-point group, and 'pip install \"mathema[language]\"' "
+                f"brings the built-in alphabets and languages")
         super().__init__(
-            f"unknown language L[{name}]: known languages are "
-            + ", ".join(vocabulary) + hint
-            + (f" ({detail})" if detail else ""))
+            f"unknown language L[{name}]: known languages are {known}"
+            + hint + (f" ({detail})" if detail else ""))
 
 
 def register_language(name: str, language) -> None:
     """Intent:
         Make `language` resolvable as `L[<name>]` in this process,
         the in-process half of the seam (the entry-point groups are
-        the packaged half). A built-in name is never replaced, and a
-        language failing the protocol is refused with the reasons.
+        the packaged half). A registration takes precedence over an
+        entry point of the same name, and a language failing the
+        protocol is refused with the reasons.
 
     Raises:
-        ValueError: `name` is a built-in, or `language` does not
-            satisfy `language_problems`.
+        ValueError: `language` does not satisfy `language_problems`.
     """
-    if name in BUILTIN_LANGUAGES:
-        raise ValueError(f"L[{name}] is a built-in language and cannot be "
-                         f"replaced")
     problems = language_problems(language)
     if problems:
         raise ValueError(f"L[{name}] cannot be registered: "
@@ -531,24 +449,21 @@ def _import_dotted(name: str):
 
 
 def language_vocabulary() -> tuple:
-    """Every name `L[...]` resolves by name alone: the built-ins, the
-    in-process registrations and the entry-point languages, sorted."""
-    return tuple(sorted(set(BUILTIN_LANGUAGES) | set(_REGISTRY)
-                        | set(_discovered_languages())))
+    """Every name `L[...]` resolves by name alone: the in-process
+    registrations and the entry-point languages, sorted."""
+    return tuple(sorted(set(_REGISTRY) | set(_discovered_languages())))
 
 
 def resolve(ref) -> tuple:
     """Intent:
         `(language, source)` for a `LanguageRef` or a bare name, the
-        source being `"built-in"`, `"registered"`, `"entry point
-        <value>"` or `"adaptor <name>"`, in that precedence.
+        source being `"registered"`, `"entry point <value>"`,
+        `"object"` or `"adaptor <name>"`, in that precedence.
 
     Raises:
         UnknownLanguage: nothing serves the name.
     """
     name = ref.name if isinstance(ref, LanguageRef) else str(ref)
-    if name in BUILTIN_LANGUAGES:
-        return BUILTIN_LANGUAGES[name], "built-in"
     if name in _REGISTRY:
         return _REGISTRY[name], "registered"
     loaded = _load_language(name)
@@ -578,6 +493,37 @@ def resolve(ref) -> tuple:
     raise UnknownLanguage(name, language_vocabulary(), detail)
 
 
+def adapt_annotation(hint) -> "tuple | None":
+    """Intent:
+        `(language, adaptor_name)` for the first `mathema.language_adaptors`
+        adaptor that turns an annotation object (`str`, a schema class,
+        an `Annotated[...]`) into a language, or `None` when none does.
+        This is how a parameter's own annotation infers a language
+        domain: with no adaptor installed, nothing is inferred.
+    """
+    for adaptor_name, adapt in _loaded_adaptors():
+        try:
+            adapted = adapt(hint)
+        except Exception as e:
+            warnings.warn(f"mathema: language adaptor {adaptor_name!r} failed "
+                          f"on annotation {hint!r} ({e!r}), skipping it",
+                          stacklevel=2)
+            continue
+        if adapted is not None and not language_problems(adapted):
+            return adapted, adaptor_name
+    return None
+
+
+def resolves(name: str) -> bool:
+    """Whether `L[<name>]` resolves in this process, by name or by
+    dotted path, without raising."""
+    try:
+        resolve(name)
+    except InvalidDomain:
+        return False
+    return True
+
+
 def resolve_language(ref):
     """The `Language` behind a `LanguageRef` or a bare name; see
     `resolve` for the precedence and the refusal."""
@@ -594,10 +540,10 @@ def describe_language(ref) -> dict:
 
 
 __all__ = [
-    "ADAPTOR_GROUP", "BUILTIN_LANGUAGES", "HAZARD_KINDS", "HazardValue",
+    "ADAPTOR_GROUP", "HAZARD_KINDS", "HazardValue",
     "KINDS", "LANGUAGE_GROUP", "LEVELS", "Language", "Problem",
     "STRING_HAZARDS", "StringLanguage", "UnknownLanguage",
-    "describe_language", "language_problems", "language_vocabulary",
-    "register_language", "resolve", "resolve_language",
-    "unregister_language",
+    "adapt_annotation", "describe_language", "language_problems",
+    "language_vocabulary", "register_language", "resolve",
+    "resolve_language", "resolves", "unregister_language",
 ]

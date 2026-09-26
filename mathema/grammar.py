@@ -129,10 +129,16 @@ from .domain import (MISSING as MISSING, Domain as Domain,
                      split_quantifier as split_quantifier)
 from .domain import bound_to_sympy_set
 from .routes import MATRIX_PREDICATES as _MATRIX_PREDICATES
-from .routes import OUTPUT_PREDICATES as _OUTPUT_PREDICATES
 from .linalg import (RENDER_CALLS as _MATRIX_RENDER_CALLS,
                      RENDER_DIM as _MATRIX_RENDER_DIM,
                      operand_matrix_names as _matrix_names)
+
+
+def _output_predicates() -> frozenset:
+    # the LIVE output-contract vocabulary (the static table plus the
+    # predicates registered claim families own), read per parse
+    from .routes import output_predicates
+    return output_predicates()
 
 
 def _domain_safety_predicates() -> frozenset:
@@ -353,6 +359,10 @@ _SUPERSCRIPT_RUN = re.compile(f"⁻?[{_SUPERSCRIPT_DIGITS}]+")
 _UNICODE = {
     "≤": "<=", "≥": ">=", "≠": "!=", "−": "-", "·": "*", "×": "*",
     "π": "pi", "√": "sqrt", "∀": "for ", "∈": " in ", "∞": "oo",
+    # the double-struck L (U+1D543) spells a language domain on input,
+    # `𝕃[ascii]`; the rendered form is always the plain `L[...]`, so a
+    # record displays the same everywhere
+    "\U0001d543": "L",
     **_GREEK_LETTERS,
     **_PSEUDO_GREEK_LETTERS,
     # ⩽/⩾ ("less/greater-than-or-slanted-equal", U+2A7D/2A7E): an
@@ -2587,7 +2597,7 @@ def parse_domain_safety(law: str) -> tuple[str, str] | None:
         # is a matrix predicate examining a VALUE; a safety predicate is
         # a fact about the code for one bare argument, never an
         # expression.
-        if predicate in _MATRIX_PREDICATES | _OUTPUT_PREDICATES:
+        if predicate in _MATRIX_PREDICATES | _output_predicates():
             try:
                 ast.parse(subject, mode="eval")
             except SyntaxError:
@@ -2617,7 +2627,7 @@ def parse_domain_safety(law: str) -> tuple[str, str] | None:
     # symmetric, `is_symmetric(A @ B)` the product is. A safety
     # predicate stays bare-parameter-only (it is a fact about the code
     # for one argument, with nothing to compute).
-    if node.func.id in _MATRIX_PREDICATES | _OUTPUT_PREDICATES:
+    if node.func.id in _MATRIX_PREDICATES | _output_predicates():
         return negated + node.func.id, ast.unparse(arg)
     return None
 
