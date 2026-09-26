@@ -331,10 +331,10 @@ def _reductions(verified_claims, pure: bool) -> dict:
         meta = claim.get("meta") or {}
         if meta.get("mathema.companion_of"):
             # a float companion executes its parent's relation against the
-            # implementation in float across the domain. Holding, it
+            # code in float64 across the domain. Holding, it
             # establishes its family (is_numerically_stable) for the
             # function; falsified, it is a defect in the parent's
-            # implementation and says nothing about the family as a whole
+            # computation and says nothing about the family as a whole
             from .records import classify_verdict
             family = _SAFETY_SOURCE.get(meta.get("mathema.family") or "")
             if family and classify_verdict(claim.get("verdict") or "") in (

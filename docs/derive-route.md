@@ -8,7 +8,7 @@ can actually lift, which is a real subset. This page is the complete,
 current reference for what that subset is.
 
 A `proven` is the mathematics, and only the mathematics. Whether the
-float implementation carries it is a second claim, `<name>[float]`,
+computation in float64 carries it is a second claim, `<name>[float]`,
 which every proof spawns and which runs the real code at the domain's
 corners and at sampled points; `route="derive:math_only"` asks for the
 proof alone. [The evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)
@@ -868,7 +868,7 @@ candidate, never an authority: it's verified against the recurrence
 itself and every base value before anything adjudicates with it, and a
 nonlinear recurrence declines cleanly.
 
-Three gates keep the closed form honest about the implementation:
+Three gates keep the closed form honest about the computation:
 
 - **Integers only.** The closed form describes the integer lattice;
   the runtime recursion on a non-integer argument walks a different
@@ -877,7 +877,7 @@ Three gates keep the closed form honest about the implementation:
   integer-valued; anything else is undecided, with the `subset Z`
   remedy named.
 - **Stack depth.** The closed form settles the mathematics, but the
-  implementation still recurses about one frame per index step, so a
+  computation still recurses about one frame per index step, so a
   domain whose top implies a depth beyond the interpreter's recursion
   limit refuses to prove, `fib(100000)` raises `RecursionError`
   however true Binet is. The claim is then run once at the top of

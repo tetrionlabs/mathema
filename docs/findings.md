@@ -114,7 +114,7 @@ function. The derive rows are witnessed by the call at the pole itself (`even`
 fails at `x = -1` because `f(1)` raises), which says the claim has no value
 there, not whether its mathematics holds, so they carry no tag.
 `[implementation:representation]` means the mathematics was fine and the
-implementation fell over, here because the integer `1` is admitted by the
+computation fell over, here because the integer `1` is admitted by the
 domain and raises. `is_defined` is the same pole seen from the other side: a
 claim named `is_defined` states the region on which `f` returns, and it is
 proven because `f` returns on exactly `1 - x != 0` and raises everywhere else.

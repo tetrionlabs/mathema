@@ -278,8 +278,9 @@ def test_a_family_claim_spawns_no_float_companion():
     rec = mathema.check(ema)
     probes = {p.name: p for p in rec.probes}
     registered = set(families.families())
-    spawned = [n for n in probes if n.endswith("[float]")
-               and n[:-len("[float]")].split("[", 1)[0] in registered]
+    spawned = [n for n, p in probes.items()
+               if (p.meta or {}).get("mathema.companion_of", "")
+               .split("[", 1)[0] in registered]
     assert not spawned, spawned
     assert probes["is_deterministic"].meta["mathema.float_companion"] == \
         "none (a claim family adjudicates this claim)"

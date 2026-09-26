@@ -41,7 +41,7 @@ SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_builtin_safe",
                                "is_arbitrary_input_safe",
                                "is_compendium_safe",
                                "excluded_outside_domain",
-                               # function-wide implementation checks.
+                               # function-wide computation checks.
                                # They were registered claim families and
                                # adjudicated through the `stateless`
                                # keyword, but could not be WRITTEN as a
@@ -104,7 +104,7 @@ ROUTE_CAPABILITIES: dict[str, frozenset] = {
     # probe cannot evaluate the symbolic-calculus forms; every safety
     # predicate and raises has a real sampling half
     "probe": _ALL_FORMS - DERIVE_ONLY_FORMS,
-    # examine is the implementation-check route: safety predicates
+    # examine is the computation-check route: safety predicates
     # are facts about the code itself, examined through whichever
     # mechanism (structural or trial) can establish them, akin to
     # tests in traditional testing. It owns exactly the safety
@@ -124,7 +124,7 @@ def route_capabilities(route: str) -> frozenset:
 # beside the adaptor contract in `interfaces.runtime`. `runtime` is
 # calling the function at concrete points, `frontend` is source-level
 # analysis (a Facts with body structure), `globals` is visibility of
-# ambient implementation state (module globals, argument mutation).
+# the code's ambient state (module globals, argument mutation).
 CAPABILITIES = frozenset({"runtime", "frontend", "globals"})
 
 # the strongest verdict each route can reach per outcome direction,

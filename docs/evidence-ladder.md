@@ -87,7 +87,8 @@ derive:math_only one        proven
 `(x + 1) - x` is `1` for every real `x`, so all three proofs stand. In
 float64 the `+ 1` is lost once `|x|` passes `2^53`, so the companion of
 the unbounded claim is falsified, and its row names the stratum:
-mathematics sound, implementation numerically unstable. Two claims, two
+mathematics sound, its computation numerically unstable
+(`implementation:numerical-instability`). Two claims, two
 verdicts, and the companion gates `mathema verify` like any other claim.
 The remedies are the ordinary ones: narrow the domain, declare the
 `|inf|` the code has to reach, fix the code, accept the companion as a

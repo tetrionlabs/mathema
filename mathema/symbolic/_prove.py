@@ -984,7 +984,7 @@ def _recurrence_domain_gate(lhs_src: str, rhs_src: str, rec,
         passes to `f` must be provably integer-valued under it, and the
         runtime recursion depth the domain's top demands must fit the
         interpreter's stack: the closed form settles the mathematics,
-        but the implementation still recurses one frame per step, and a
+        but the computation still recurses one frame per step, and a
         call whose depth exceeds `sys.getrecursionlimit()` raises
         RecursionError however true the formula is.
 
@@ -1034,7 +1034,7 @@ def _recurrence_domain_gate(lhs_src: str, rhs_src: str, rec,
             return ProofResult(
                 "undecided",
                 sketch=f"the recurrence closed form settles the mathematics, "
-                       f"but the implementation recurses about one stack "
+                       f"but the computation recurses about one stack "
                        f"frame per index step: at {at} it needs "
                        f"~{'unbounded' if depth is None else int(depth)} "
                        f"frames against an interpreter recursion limit of "

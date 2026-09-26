@@ -222,7 +222,7 @@ Read such a result honestly:
   `for x in [0,1], f(x) <= 1` is about the function's behaviour, and
   equivalence at evidence level E lets it stand for the other
   implementation at level E, never higher.
-- **What never transfers is the implementation.** The safety families
+- **What never transfers is the computation.** The safety families
   (`is_state_safe`, representation, extremity, determinism) are facts
   about one implementation in one language. C++ has hazards Python
   cannot exhibit: signed-integer overflow is undefined behaviour, not

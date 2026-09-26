@@ -28,8 +28,8 @@ print(mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (-10, 10)}))
 
 The `domain=` states a plausible range for the data and the smoothing
 factor. Without one, every claim ranges over all of the reals, out to the
-largest double, and a float implementation overflows long before it gets
-there (see [operational infinity](grammar.md#operational-infinity-let-inf-be)).
+largest double, and the computation in float64 overflows long before it
+gets there (see [operational infinity](grammar.md#operational-infinity-let-inf-be)).
 With no `claims=` argument, mathema still runs the probes every
 function gets (`is_deterministic`, `is_state_safe`,
 `is_numerically_stable`, `is_representation_safe`), plus whichever
@@ -217,7 +217,7 @@ print(open(".mathema/verified/ema.yaml").read())
 
 runs step 3's check again and writes the results to
 `.mathema/verified/ema.yaml`, the durable record a **provable codebase**
-keeps instead of trusting the implementation alone (trimmed):
+keeps instead of trusting the code alone (trimmed):
 
 <!-- example: ema output match=subset -->
 ```yaml
@@ -251,7 +251,7 @@ ema:
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
       n: 44
-      note: "the implementation of collapses_derived, executed in float at 44 points (every domain corner, then sampled interior points); unbounded directions (x) run to magnitude 1e+308, sampled log-uniformly (no |inf| declared)"
+      note: "the computation of collapses_derived in float64, executed at 44 points (every domain corner, then sampled interior points); unbounded directions (x) run to magnitude 1e+308, sampled log-uniformly (no |inf| declared)"
       route: "probe"
     - name: "collapses_probed"
       statement: "f(x, 1.0) = x[-1]"

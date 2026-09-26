@@ -866,7 +866,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
     "probe" samples only (seeded, verdict `holds`/`falsified`) ("auto" is retired, not a
     legacy spelling of "best"). A derive proof is the mathematics in
     exact arithmetic; `mathema.check` pairs it with a `<name>[float]`
-    companion claim about the implementation, and "derive:math_only"
+    companion claim about the computation, and "derive:math_only"
     asks for the proof alone, with no companion. the safety predicates always adjudicate on the examine route
     regardless of the route passed in. A
     leading `let name = expr, ...` (see grammar.extract_let_bindings)
@@ -890,7 +890,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
     # "auto" is fully retired (the word stays free for automatic
     # differentiation): it is NOT a legacy alias, an "auto" route
     # reaches adjudication as an unknown route and skips loudly.
-    # A safety predicate is an implementation fact: whatever route the
+    # A safety predicate is a computation fact: whatever route the
     # author passed, it is examined through the full structural +
     # empirical cascade, and the record reports which mechanism
     # decided (the examine route). That normalization happens after
@@ -1106,7 +1106,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
                 "keyword argument disagree")
         pseudo_infinity = let_pseudo_inf
     if rel in routes.examine_predicates():
-        # the examine normalization promised above: implementation
+        # the examine normalization promised above: computation
         # facts always run the full cascade; a declared derive/probe/
         # best on a safety predicate is advisory and folds here
         route = "examine"
@@ -2615,7 +2615,7 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     own `extensive`.
 
     `float_companions=True` makes every claim the derive route proves
-    (route "derive" or "best") spawn its implementation claim,
+    (route "derive" or "best") spawn its computation claim,
     `<name>[float]`, emitted directly after it: a derive `proven` is
     the mathematics in exact arithmetic, and the companion is the same
     relation executed against the real code in float (see
@@ -3262,8 +3262,8 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     companion = _combine_conjunction(
         companions, companion_name(cj.name), _chain_statement(cj), labels,
         what="float companion")
-    companion.note = (f"the implementation of {cj.name}, executed in "
-                      f"float link by link; {companion.note}")
+    companion.note = (f"the computation of {cj.name} in float64, executed "
+                      f"link by link; {companion.note}")
     broken = next((p for p in companions if p.verdict == "falsified"), None)
     if broken is not None:
         companion.stratum = broken.stratum
@@ -3274,7 +3274,7 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
 
 def _stamp_examine_route(probe, cj, fn, facts) -> None:
     """Intent:
-        Restate a safety examination's route: an implementation fact
+        Restate a safety examination's route: a computation fact
         ESTABLISHED structurally is examined, not derived, so a safety
         predicate or a registered SafetyFamily name whose structural
         (derive) mechanism decided reports `examine`. The empirical half
@@ -4186,7 +4186,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # a region row the family's derive half declined: is_defined
         # with no source to compute a definedness region from, or a
         # computation family whose region is a fact about the
-        # executed implementation (P9); either way the claim is
+        # executed computation (P9); either way the claim is
         # adjudicated by execution in the probe stage, never read as
         # an ordinary relation over the parameters
         why = ("the target has no Python source, so there is no "
@@ -4385,7 +4385,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
 
     depth_refusal = (proof.meta or {}).get("mathema.recursion_depth")
     if depth_refusal is not None:
-        # the implementation cannot recurse deep enough to cover this
+        # the computation cannot recurse deep enough to cover this
         # domain, so a sweep of it would walk into the same stack limit
         # (or, for a branching recursion, run exponentially long first).
         # The refusal stands; an executed witness at the domain's top
@@ -4437,7 +4437,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        sketch=proof.sketch, note=note,
                        condition=proof.quantifier, route=route,
                        meta=meta)
-        # a derive proof is exact arithmetic; the implementation is the
+        # a derive proof is exact arithmetic; the computation is the
         # float companion's claim
         _spawn_float_companion(ctx, proven, fn, facts, bound_funcs,
                                assumption or [])

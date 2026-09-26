@@ -594,7 +594,7 @@ def same_infinity(lv, rv) -> bool:
     """Intent:
         Whether two values are the same infinity, inf and inf or -inf
         and -inf: two overflows toward one infinity are the same
-        extended-real point, so an implementation is consistent there.
+        extended-real point, so the computation is consistent there.
         A NaN is the absence of a value and never the same as anything,
         another NaN included; a finite value is not an infinity.
     """

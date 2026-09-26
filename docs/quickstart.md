@@ -129,8 +129,8 @@ ok   pricing.discounted: source, no side effects; claims 2/2 adjudicated (1 prov
 
 The second claim is the proof's `[float]` companion: every claim the derive
 route proves also runs through the real code in floating point, since a
-proof is about the mathematics and whether the implementation keeps up in
-f64 is a separate question. See [the evidence ladder](evidence-ladder.md).
+proof is about the mathematics and whether the computation keeps up in
+float64 is a separate question. See [the evidence ladder](evidence-ladder.md).
 
 The docstring is one of four places a claim can live, alongside a
 decorator, a claims file, and an annotation. See [authoring
@@ -173,7 +173,7 @@ pricing.discounted:
       statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
       verdict: "holds"
       n: 44
-      note: "the implementation of never_raises_price, executed in float at 44 points (every domain corner, then sampled interior points)"
+      note: "the computation of never_raises_price in float64, executed at 44 points (every domain corner, then sampled interior points)"
       route: "probe"
 ```
 

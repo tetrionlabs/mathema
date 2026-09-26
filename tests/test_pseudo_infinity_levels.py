@@ -35,8 +35,9 @@ def _rows(fn, law, **kw):
 
 def _proof_and_companion(fn, law, **kw):
     rows = _rows(fn, law, **kw)
-    (name,) = [n for n in rows if n.endswith("[float]")]
-    return rows[name.split("[", 1)[0]], rows[name]
+    (comp,) = [p for p in rows.values()
+               if (p.meta or {}).get("mathema.companion_of")]
+    return rows[comp.meta["mathema.companion_of"]], comp
 
 
 # --- the resolver ----------------------------------------------------------

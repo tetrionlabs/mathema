@@ -73,8 +73,8 @@ expression in which both Gaussian terms cancel and `sigma` disappears,
 establishing the identity for the whole region at once. The second row is
 that proof's `[float]` companion, a separate claim that runs the same identity
 through the real code in floating point at the region's corners and across its
-interior, because a proof is about the mathematics and whether the
-implementation keeps up with it in f64 is a different question, answered here
+interior, because a proof is about the mathematics and whether its
+computation keeps up with it in float64 is a different question, answered here
 by `holds`. The [claim grammar](https://mathema.tetrionlabs.com/grammar/) has
 the full notation.
 
@@ -173,7 +173,7 @@ sampling lands exactly on `x == 1` with probability zero, so a property-based
 run can pass a thousand trials here and report nothing, whereas mathema solves
 the lifted expression for where the denominator vanishes and makes sure that
 point is tried. Every falsification rests on an executed witness, never on a
-symbolic argument alone, and the bracketed tag marks an implementation that
+symbolic argument alone, and the bracketed tag marks a computation that
 fell over (the integer `1` raising where the domain admits it). `is_defined`
 reads the other way round: it states the region on which `f` returns, and
 `1 - x != 0` is exactly that region.

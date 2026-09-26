@@ -17,6 +17,7 @@ import pytest
 
 import mathema
 from mathema.conjecture import check_conjectures, claim
+from mathema.gates import companion_name
 
 
 def sq(x):
@@ -40,9 +41,10 @@ def _derive(fn, law, **kw):
 
 def _rows(fn, law):
     rows = {p.name: p for p in mathema.check(fn, claims=[law]).probes}
-    (name,) = [n for n in rows if not n.endswith("[float]")
+    (name,) = [n for n in rows
+               if not (rows[n].meta or {}).get("mathema.companion_of")
                and rows[n].statement.endswith(law.split(", ", 1)[-1])]
-    return rows[name], rows.get(f"{name}[float]")
+    return rows[name], rows.get(companion_name(name))
 
 
 @pytest.mark.needs_full_proof_budget

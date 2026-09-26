@@ -635,7 +635,6 @@ def _pseudo_infinity_moved(fn, facts, merged_entry: dict,
     from dataclasses import replace
 
     from .conjecture import pseudo_infinity_stamp
-    from .gates import FLOAT_SUFFIX
     from .records import resolve_pseudo_infinity
     from .spec import entry_claims
     from .types import domain_from_signature
@@ -655,10 +654,10 @@ def _pseudo_infinity_moved(fn, facts, merged_entry: dict,
     names = {cj.name for cj in current}
     recorded: dict = {}
     for c in (verified_entry or {}).get("claims") or []:
-        name = c.get("name") or ""
-        base = (name[:-len(FLOAT_SUFFIX)] if name.endswith(FLOAT_SUFFIX)
-                else name)
-        stamp = (c.get("meta") or {}).get("mathema.pseudo_infinity")
+        meta = c.get("meta") or {}
+        # a companion row belongs to the claim it was spawned from
+        base = meta.get("mathema.companion_of") or c.get("name") or ""
+        stamp = meta.get("mathema.pseudo_infinity")
         if base in names and stamp:
             recorded[base] = stamp
     return now != recorded

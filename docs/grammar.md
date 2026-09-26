@@ -319,7 +319,7 @@ it, and they form a hierarchy under one roll-up:
 | Spelling | Asks |
 |---|---|
 | `is_computation_safe(f)` | every child below that applies to this function holds; `holds` at best, never `proven`, and its note names each child's verdict |
-| `is_overflow_safe(x)` | no infinity and no `OverflowError` from finite inputs; the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the implementation stays in float range |
+| `is_overflow_safe(x)` | no infinity and no `OverflowError` from finite inputs; the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range |
 | `is_numerically_stable` | the value is finite and the call raises no floating-point error across the domain (the `[float]` companion's family) |
 | `is_representation_safe(x)`, `is_extremity_safe(x)`, `is_pole_safe(x)`, `is_builtin_safe(x)` | representation, the far ends, the poles, the restricted builtins |
 | `is_missing_safe(f)`, `is_empty_safe(xs)` | a missing value, an empty sequence |

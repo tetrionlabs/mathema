@@ -51,7 +51,7 @@ from typing import Any, Callable, Protocol, runtime_checkable
 #: `runtime` is the ability to call the function at concrete points
 #: (the adaptor contract above); `frontend` is source-level analysis
 #: (a Facts with body structure, enabling the lifting derive routes);
-#: `globals` is visibility of the implementation's ambient state
+#: `globals` is visibility of the function's ambient state
 #: (module globals, argument mutation), which the examine route's
 #: empirical half reads and which never crosses a process boundary.
 RUNTIME_CAPABILITIES = frozenset({"runtime", "frontend", "globals"})
@@ -74,7 +74,7 @@ class PointRuntime(Protocol):
     same infinity are one extended-real point and agree (`==`, `<=`,
     `>=` hold there, no strict order does); a NaN agrees with nothing,
     another NaN included. `probe_finite(point)` reports an
-    implementation-failure detail string (a raise, a NaN, an inf or a
+    computation-failure detail string (a raise, a NaN, an inf or a
     deviation past a magnitude-scaled tolerance where the relation
     fails) or `None`.
     `admits(point)` is domain-and-assumption membership.

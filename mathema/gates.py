@@ -34,7 +34,7 @@ _EXTREME = 1e10
 # claim declares no `|inf|`: the largest power of ten a float64 holds
 _FLOAT_REACH = 1e308
 
-# the name suffix, and the family, of a derive claim's implementation
+# the name suffix, and the family, of a derive claim's computation
 # companion
 FLOAT_SUFFIX = "[float]"
 FLOAT_FAMILY = "is_numerically_stable"
@@ -71,7 +71,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         for THIS claim: `evaluate(point)` decides the original claim's
         relation at a concrete point by calling the real `fn` (True =
         holds, False = a genuine counterexample, None = can't tell);
-        `probe_finite(point)` returns an implementation-failure detail
+        `probe_finite(point)` returns a computation-failure detail
         (a raise, a NaN, an inf or a deviation past a magnitude-scaled
         tolerance where the relation fails) or None; `admits(point)` is
         in-domain-and-assumption membership; `sample(name, rng)` draws
@@ -305,7 +305,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return None
 
     def probe_finite(point):
-        # an implementation failure only: a raise from the code, a NaN
+        # a computation failure only: a raise from the code, a NaN
         # or an inf the code returned where the relation then fails, or
         # a deviation past a MAGNITUDE-SCALED tolerance (so a correct
         # large-magnitude identity is not flagged, only catastrophic
@@ -316,11 +316,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         try:
             lv, rv = _values(point)
         except Exception:
-            # only a raise from the function under test is an
-            # implementation failure; the law's own plumbing failing
+            # only a raise from the function under test is a
+            # computation failure; the law's own plumbing failing
             # says nothing about the code
             if calls_raised[0]:
-                return f"the implementation raises {calls_raised[0]} here"
+                return f"the computation raises {calls_raised[0]} here"
             return None
         if calls_nonfinite[0] is not None:
             # no value at a finite input: an overflow, a pole, a nan.
@@ -331,7 +331,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                                                           "<=", ">="):
                 return None
             if calls_nonfinite[0].endswith("nan"):
-                return (f"the implementation returns NaN here "
+                return (f"the computation returns NaN here "
                         f"({calls_nonfinite[0]})")
             return (f"{calls_nonfinite[0]}, and an infinity for a finite "
                     f"input is no value")
@@ -339,7 +339,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if isinstance(v, complex):
                 return None
         if any(isinstance(v, float) and v != v for v in (lv, rv)):
-            return ("the implementation returns NaN here"
+            return ("the computation returns NaN here"
                     if calls_nonfinite[0] else None)
         if not (_real(lv) and _real(rv)):
             return None
@@ -351,7 +351,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         if _relation_holds(lv, rv, scaled):
             return None
         if overflowed:
-            return (f"the implementation overflows to inf here, and the "
+            return (f"the computation overflows to inf here, and the "
                     f"relation fails on the executed values ({lv!r} "
                     f"{cj.relation} {rv!r})")
         return (f"the relation fails on the executed values ({lv!r} "
@@ -738,6 +738,24 @@ def companion_name(parent_name: str) -> str:
     return f"{parent_name}{FLOAT_SUFFIX}"
 
 
+def companion_descriptor(name: str) -> tuple[str, ...]:
+    """The computation descriptor a companion's name carries in its
+    last bracket, one entry per comma-separated item: `law[float]`
+    gives `("float",)`, and a descriptor naming more of the computation
+    (`law[float, cpython3.12]`) gives each part. A name with no
+    trailing bracket gives `()`.
+
+    Only a companion row's name holds a descriptor; whether a row is a
+    companion is read from its meta (`mathema.companion_of`), since a
+    parameter target (`is_overflow_safe[x]`) or a conjunct index has
+    the same shape.
+    """
+    if not name.endswith("]") or "[" not in name:
+        return ()
+    inside = name[name.rindex("[") + 1:-1]
+    return tuple(part.strip() for part in inside.split(",") if part.strip())
+
+
 def _reach_text(names, cj_domain, resolved, reach) -> str:
     """Intent:
         How far the float companion ran along the claim's unbounded
@@ -781,7 +799,7 @@ def _finite_arguments(args, kwargs) -> bool:
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      assum=(), budget=None) -> "Probe | None":
     """Intent:
-        The implementation claim a derive proof spawns. `parent` is
+        The computation claim a derive proof spawns. `parent` is
         proven in exact arithmetic, which is all a derive `proven`
         says; the companion `<name>[float]` is the same relation
         executed against the REAL code in float: at every corner of
@@ -834,12 +852,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         return Probe(
             name, parent.statement, "unknown", route="probe",
             n=progress.checked,
-            note=f"the implementation of {parent.name}, executed in float; "
+            note=f"the computation of {parent.name} in float64; "
                  f"the sweep hit the {FAST_TIMEOUT_SECONDS}s wall-clock cap"
                  + (f" executing {at}" if at else "")
                  + (f"; {reach_text}" if reach_text else ""),
             meta={"mathema.timeout": "fast"})
-    what = (f"the implementation of {parent.name}, executed in float at "
+    what = (f"the computation of {parent.name} in float64, executed at "
             f"{sweep.checked} points (every domain corner, then sampled "
             f"interior points)"
             + (f"; {reach_text}" if reach_text else ""))
@@ -849,7 +867,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                   + ("" if not reach_text else
                      "lower the |inf| binding, " if cap is not None else
                      "declare an |inf| for the unbounded directions, ")
-                  + "fix the implementation, or state the claim with "
+                  + "fix the code, or state the claim with "
                     "route derive:math_only")
         # a covered call's computation region, when the compendium
         # states one and the failing point lies outside it
@@ -858,8 +876,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         return Probe(
             name, parent.statement, "falsified", route="probe",
             n=sweep.checked, counterexample=pt, note=what,
-            sketch=f"{parent.name} is proven in exact arithmetic, but the "
-                   f"implementation fails it at {pt}: {sweep.detail}; "
+            sketch=f"{parent.name} is mathematically proven, but its "
+                   f"computation fails at {pt}: {sweep.detail}; "
                    + (f"{covered}; " if covered else "")
                    + f"{remedy}",
             # the proof that coexists with the executed break is the

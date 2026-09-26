@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Hazard knowledge: where an implementation can diverge from the
+"""Hazard knowledge: where the computation can diverge from the
 mathematics it encodes.
 
 A hazard is a concrete input location (or class of locations) where
@@ -128,7 +128,7 @@ def _restricted_domain_targets(fn, facts) -> dict:
 # (exp overflows near 710, cosh/sinh near 711, gamma near 171.6,
 # factorial for any large integer), the is_extremity_safe relevance
 # set: a parameter fed bare into one of these is where the
-# implementation's representable range ends well before the
+# computation's representable range ends well before the
 # mathematics does.
 _OVERFLOW_PRONE_NAMES = frozenset(
     {"exp", "expm1", "cosh", "sinh", "gamma", "factorial"})
@@ -307,7 +307,7 @@ def _builtin_edge_points(fn, facts, domain: dict) -> list[HazardPoint]:
     actually passed to: log's zero, asin/acos's unit endpoints, sqrt's
     zero, factorial's negative and non-integer neighbours, and the
     same edges of numpy's spellings (arcsin, log10, log1p's -1, ...). These are
-    where the implementation's accepted range ends however fine the
+    where the computation's accepted range ends however fine the
     mathematics is on paper."""
     out: list[HazardPoint] = []
     for param, names in _restricted_domain_targets(fn, facts).items():

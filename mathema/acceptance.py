@@ -719,11 +719,11 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         if parent:
             # a float companion is no authored law: nothing declares it
             # and no corrected statement replaces it; retiring it records
-            # that the implementation does not carry the proven law there
+            # that the computation does not carry the proven law there
             plan["actions"].append(
                 f"{claim_name!r} is the float companion of {parent!r}, "
                 f"spawned by its proof; the discovery records where the "
-                f"implementation fails the proven law, and verify leaves "
+                f"computation fails the proven law, and verify leaves "
                 f"it retired while the law stands")
             return plan
         # the discovery itself is always recordable, whatever the

@@ -593,7 +593,7 @@ _INSTALLED: dict = {"root": None, "rows": []}
 #: mathematics, each `{"family", "name", "params", "region", "texts",
 #: "exception", "source"}`. For a computation-safety family in
 #: restriction form (`is_overflow_safe`) `region` is where the
-#: implementation is safe in that respect and `exception` is None; for a
+#: computation is safe in that respect and `exception` is None; for a
 #: `raises` row whose type is a machine failure, `family` is "raises",
 #: `region` is where the call raises and `exception` names the type.
 #: Read by the hazard generator, `is_compendium_safe`'s diagnosis, the
@@ -677,7 +677,7 @@ class _RowRegion(NamedTuple):
     call FAILS and `label` is `NO_VALUE` (an `is_defined` row, the
     complement of its stated region) or the exception name of a
     `raises` row. On the computation stratum `label` is the family name
-    and `region` the stated region where the implementation is safe in
+    and `region` the stated region where the computation is safe in
     that respect (`is_overflow_safe`), or the exception name and the
     region where the call raises it (a machine-failure `raises` row)."""
     params: list

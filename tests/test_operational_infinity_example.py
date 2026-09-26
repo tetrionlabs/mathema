@@ -33,7 +33,8 @@ def test_the_page_shows_exactly_what_the_example_prints():
                 "f(x) >= 0",
                 "let |inf| be 1e100, f(x) >= 0"]:
         for p in mathema.check(gauss, claims=[law]).probes:
-            label = "  [float]" if p.name.endswith("[float]") else law
+            label = ("  [float]" if (p.meta or {}).get("mathema.companion_of")
+                     else law)
             rows.append(f"{label:31} {p.verdict:9} "
                         f"{p.counterexample or p.condition or ''}".rstrip())
     assert rows == _shown_rows()
@@ -41,8 +42,9 @@ def test_the_page_shows_exactly_what_the_example_prints():
 
 def _companion(law):
     rows = {p.name: p for p in mathema.check(gauss, claims=[law]).probes}
-    (name,) = [n for n in rows if n.endswith("[float]")]
-    return rows[name.split("[", 1)[0]], rows[name]
+    (comp,) = [p for p in rows.values()
+               if (p.meta or {}).get("mathema.companion_of")]
+    return rows[comp.meta["mathema.companion_of"]], comp
 
 
 @pytest.mark.needs_full_proof_budget

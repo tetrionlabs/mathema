@@ -1346,7 +1346,7 @@ def _sound_interval_result(result) -> bool:
         Belt and braces beside `_interval_bounds`'s own decline,
         because nothing backstops a wrong PROOF in this class: the
         corroboration gate only re-checks disproofs, and a proof's
-        `[float]` companion tests the implementation rather than the
+        `[float]` companion tests the computation rather than the
         proof, so a wrong proof here reaches the record with nothing to
         catch it.
     """

@@ -848,7 +848,7 @@ def _extreme_probe(fn, facts, cj, domain: dict, rng: random.Random,
     return _hazard_value_probe(
         fn, facts, cj, domain, rng, trials, candidates,
         lambda value, what: (f"{target} = {value:.6g} is admitted by the "
-                             f"declared domain but the implementation "
+                             f"declared domain but the computation "
                              f"leaves float range there: the call {what}"))
 
 
@@ -1083,7 +1083,7 @@ def _is_deterministic_derive(fn, facts, lhs_src: str, rhs_src: str,
 
     Notes:
         The maths is deterministic by definition; determinism is the
-        IMPLEMENTATION's claim. Deterministic implies reproducible
+        COMPUTATION's claim. Deterministic implies reproducible
         (the weaker, up-to-a-seed member below). rhs_src/relation/
         tolerance kept for protocol uniformity.
     """
@@ -1173,7 +1173,7 @@ def _reproducible_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if not agree:
             return (f"same inputs, same restored RNG state, different "
                     f"results: {first!r} then {second!r}, the "
-                    f"implementation is not reproducible up to its seed")
+                    f"computation is not reproducible up to its seed")
         return True
 
     return _probe_trials(fn, facts, target, domain, rng,
@@ -1762,7 +1762,7 @@ def _guarded_safety_probe(probe):
 
 
 class SafetyFamily(_NamedClaimFamily):
-    """One implementation-safety member: a claim family whose evidence
+    """One computation-safety member: a claim family whose evidence
     concerns a hazard class (where the CODE's runtime behaviour can
     diverge from the mathematics) rather than the claim's own
     algebraic text.
@@ -3165,14 +3165,14 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
 # --- the computation-safety hierarchy (P13): is_computation_safe(f) rolls
 # up its children for one implementation; each child is adjudicated by
 # execution, and a child's restriction form states the region where the
-# implementation is safe in that respect. -------------------------------
+# computation is safe in that respect. -------------------------------
 
 
 def _is_overflow_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                              relation: str, domain: dict | None = None,
                              tolerance: float | None = None):
-    """Structural half of is_overflow_safe: decline. Whether an
-    implementation overflows is a fact about one carrier, established
+    """Structural half of is_overflow_safe: decline. Whether a
+    computation overflows is a fact about one carrier, established
     by executing it (P3, P13); a derive proof over the reals says
     nothing about it."""
     return None
@@ -3391,7 +3391,7 @@ def _register_builtin_claim_families() -> None:
     # conjunction over the parameters
     _defined.whole_function = True
     _families.register("is_defined", _defined)
-    # the implementation-safety members, one SafetyFamily each: the
+    # the computation-safety members, one SafetyFamily each: the
     # derive/probe halves and the suggestion gate are the member's
     # injected parts, and every half runs inside the family verdict
     # contract. is_missing_safe carries a real probe fallback, unlike
@@ -3419,7 +3419,7 @@ def _register_builtin_claim_families() -> None:
         suggest_targets=_overflow_prone_params))
     # is_overflow_safe: no infinity and no OverflowError from finite
     # inputs (P13); its restriction form states the region where the
-    # implementation stays in float range, the computation row a
+    # computation stays in float range, the row a
     # compendium carries for numpy.exp. Suggested wherever a parameter
     # is raised to a power or reaches an overflow-prone function.
     from .hazards import _overflow_targets
