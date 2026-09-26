@@ -825,7 +825,8 @@ def authored_route(row: dict) -> str:
 
 
 def record(ex, key: str | None = None, root: str = ".",
-          claims: list | None = None, declared_intent: str | None = None) -> str:
+          claims: list | None = None, declared_intent: str | None = None,
+          curated_intent: str | None = None) -> str:
     """Write this explanation into the machine layer of the project store:
     one file per function under .mathema/verified/. `claims` (the declared
     entry's raw claim dicts this record was checked against, if any) gets
@@ -841,7 +842,11 @@ def record(ex, key: str | None = None, root: str = ".",
     own `intent` when the docstring provided none, and stamps
     `meta["mathema.intent_provenance"]: declared`. Every stated intent
     starts on the `declared` rung; `documented` is the human act of
-    accepting it (`mathema accept --intent`)."""
+    accepting it (`mathema accept --intent`).
+
+    `curated_intent` (the `intent:` a `compendium:` file states for a
+    library function) is the record's intent whatever the docstring
+    says, stamped `meta["mathema.intent_provenance"]: compendium`."""
     key = key or getattr(ex.facts, "name", "unknown")
     path = os.path.join(verified_dir(root), f"{key}.yaml")
     if os.path.exists(path):
@@ -856,7 +861,13 @@ def record(ex, key: str | None = None, root: str = ".",
     spec = to_spec(ex)
     spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [])
     _stamp_authored_routes(spec, claims or [])
-    if declared_intent and not spec.get("intent"):
+    if curated_intent:
+        # a library function's statement of intent is its curator's,
+        # never the library docstring's first line
+        spec["intent"] = curated_intent
+        spec.setdefault("meta", {})["mathema.intent_provenance"] = \
+            "compendium"
+    elif declared_intent and not spec.get("intent"):
         # the declared layer's intent is the skeleton when the
         # docstring provides none, still the declared rung
         spec["intent"] = declared_intent

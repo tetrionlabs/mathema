@@ -41,9 +41,10 @@ def export_compendium(library: str, root: str = ".") -> dict:
         whose statement is its own name, `dependencies_current`) are
         left out: they are regenerated for every function, never
         claimed about it. A key with no row to transfer is left out.
-        The record's intent travels with the rows, except for a function
-        with no Python source, whose recorded intent is only its
-        docstring's first line.
+        The record's intent travels with the rows when a compendium
+        file's curator stated it, or when the function has Python
+        source; a source-less function's other recorded intent is only
+        its docstring's first line.
     """
     from ..spec import load_verified
 
@@ -76,7 +77,9 @@ def export_compendium(library: str, root: str = ".") -> dict:
             body: dict = {}
             source_less = (entry.get("identity") or {}).get(
                 "source_available") is False
-            if entry.get("intent") and not source_less:
+            curated = (entry.get("meta") or {}).get(
+                "mathema.intent_provenance") == "compendium"
+            if entry.get("intent") and (curated or not source_less):
                 body["intent"] = entry["intent"]
             body["claims"] = rows
             out[key] = body

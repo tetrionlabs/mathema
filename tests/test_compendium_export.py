@@ -103,3 +103,56 @@ def test_export_writes_where_it_is_told(tmp_path):
     assert write_compendium("lib", root=str(tmp_path), out=str(out)) == \
         str(out)
     assert out.exists()
+
+
+def test_a_library_key_records_and_exports_the_curated_intent(tmp_path):
+    # a key from a compendium file carries its curator's `intent:`, not
+    # the library docstring's first line (a signature for a ufunc, a
+    # paragraph for numpy.mean)
+    import subprocess
+    import sys
+    import textwrap
+
+    import pytest
+    import yaml
+    pytest.importorskip("numpy")
+    (tmp_path / "qpkg").mkdir()
+    (tmp_path / "qpkg" / "__init__.py").write_text("")
+    (tmp_path / "qpkg" / "mod.py").write_text(textwrap.dedent('''
+        import numpy as np
+
+        def angle(x: float) -> float:
+            """Arcsine through numpy."""
+            return float(np.arcsin(x))
+
+        def avg(xs: list) -> float:
+            """Mean through numpy."""
+            return float(np.mean(xs))
+    '''))
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "c.claims.yaml").write_text(textwrap.dedent("""
+        qpkg.mod.angle:
+          claims:
+            - name: bounded
+              statement: 'for x in [-1, 1], -2 <= f(x) <= 2'
+        qpkg.mod.avg:
+          claims:
+            - name: finite
+              statement: 'for xs in R^n, min(xs) <= f(xs) <= max(xs)'
+    """))
+    env = dict(__import__("os").environ, PYTHONPATH=str(tmp_path))
+    subprocess.run([sys.executable, "-c",
+                    "import sys; from mathema.cli import main; "
+                    f"sys.exit(main(['verify', '--root', {str(tmp_path)!r}]))"],
+                   capture_output=True, text=True, env=env)
+    from mathema.compendium import load_library_claims
+    curated = {k: load_library_claims(".")[k]["entry"]["intent"]
+               for k in ("numpy.arcsin", "numpy.mean")}
+    store = tmp_path / ".mathema" / "verified"
+    for key, intent in curated.items():
+        entry = yaml.safe_load((store / f"{key}.yaml").read_text())[key]
+        assert entry["intent"] == intent
+        assert entry["meta"]["mathema.intent_provenance"] == "compendium"
+    data = export_compendium("numpy", root=str(tmp_path))
+    for key, intent in curated.items():
+        assert data[key]["intent"] == intent
