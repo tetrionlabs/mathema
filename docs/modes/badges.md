@@ -112,6 +112,14 @@ A few consequences worth knowing:
   `is_numerically_stable` claim with the same verdict and route would. A
   falsified companion credits nothing: it records one relation the float
   code breaks, not the function's stability.
+- **The computation-safety hierarchy credits existing sources.** Every
+  safety family maps to one source of uncertainty in the *how safely it
+  runs* dimension: `is_overflow_safe` credits the representation source
+  beside `is_extremity_safe` and `is_pole_safe`, `is_recursion_safe`
+  credits the accidental-crash source beside `is_arbitrary_input_safe`,
+  and `is_empty_safe` the missing-value source beside `is_missing_safe`.
+  `is_computation_safe` credits nothing itself, since its children do,
+  and `is_memory_safe` is not adjudicated. No weight moves.
 - **A black-box dependency lowers clarity, and caps it.** When a function
   calls a library a [compendium](../claims-transfer.md) claims file
   covers, mathema has a model of where that call can fail, and

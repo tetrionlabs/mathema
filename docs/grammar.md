@@ -313,6 +313,33 @@ by examining the function rather than by algebra:
 | `is_empty_safe(xs)` | does it handle an empty sequence |
 | `is_missing_safe(f)` | the whole function's policy on a missing value |
 
+These are facts about one implementation, established by executing
+it, and they form a hierarchy under one roll-up:
+
+| Spelling | Asks |
+|---|---|
+| `is_computation_safe(f)` | every child below that applies to this function holds; `holds` at best, never `proven`, and its note names each child's verdict |
+| `is_overflow_safe(x)` | no infinity and no `OverflowError` from finite inputs; the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the implementation stays in float range |
+| `is_numerically_stable` | the value is finite and the call raises no floating-point error across the domain (the `[float]` companion's family) |
+| `is_representation_safe(x)`, `is_extremity_safe(x)`, `is_pole_safe(x)`, `is_builtin_safe(x)` | representation, the far ends, the poles, the restricted builtins |
+| `is_missing_safe(f)`, `is_empty_safe(xs)` | a missing value, an empty sequence |
+| `is_recursion_safe(f)` | no `RecursionError` over the domain; suggested when the body calls itself |
+| `is_memory_safe(f)` | reserved: `skipped` in this release, since memory safety needs a resource cap |
+| `is_deterministic`, `is_reproducible`, `is_state_safe` | the stateless cluster |
+| `is_arbitrary_input_safe(s)` | no accidental crash on any string |
+| `is_compendium_safe(numpy)` | covered library calls compute |
+
+`is_computation_safe(f)` is declared by the author, never suggested;
+its relevant children are the ones the battery would suggest for the
+function, plus `is_numerically_stable`, `is_deterministic` and
+`is_state_safe` always. A child falsified falsifies the roll-up with
+that child's name and witness. `is_finite_valued` is a documented
+roll-up, not a registered family: `is_defined` and `is_overflow_safe`
+over the domain together say the function returns a finite value
+everywhere on it. `is_defined` itself stays outside the hierarchy: it
+is about the mathematics, see
+[conditional claims](conditional-claims.md).
+
 ## Partiality: claims about raising
 
 Raising is behaviour, so it is claimable:

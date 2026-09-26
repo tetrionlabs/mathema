@@ -65,24 +65,66 @@ adjudicated again, and a pin naming a parameter the library no longer
 has makes the row misspecified. Your own functions are not affected:
 their defaulted parameters are sampled like any other.
 
-An `is_defined` row with a stated region reads as "returns a value on
-exactly this region", so `numpy.sqrt`'s `x >= 0` says that outside it
-the call has no value, whether the library raises there (`math.sqrt`),
-returns nan (`numpy.sqrt`) or overflows to an infinity (`numpy.exp`).
-That is one rule across libraries: a nan, or an infinity returned for
-a finite input, is no value, exactly like a raise, and it falsifies
-every relation a claim states at that point. A `raises(f(x), Exc)` row
-is added only where the exception type itself matters.
+### Row kinds, by stratum
+
+A compendium row belongs to one of the two strata
+[the guarantees](guarantees.md#mathematics-and-computation) separate,
+and the stratum decides what mathema does with it.
+
+**Mathematics.** An `is_defined` row with a stated region reads as
+"has a value on exactly this region", so `numpy.sqrt`'s `x >= 0` says
+that outside it the call has no value, whether the library raises there
+(`math.sqrt`) or returns nan (`numpy.sqrt`); the bare `is_defined(f)`
+says the function is total. Such a row is a fact about the function
+as a mathematical object: it enters the derive route as a guard, so a
+caller's claim over a region that reaches the no-value region is
+falsified with an executed witness, exactly as it would be over an
+explicit raise. A `raises(f(x), Exc)` row with an ordinary type
+(`ValueError`) is mathematics too, added only where the exception type
+itself matters.
+
+**Computation.** A computation-safety family in restriction form
+states the region where one implementation is safe in that respect:
+`is_overflow_safe: x <= 709.782712893384` on `numpy.exp` says numpy's
+exponential on float64 stays inside float range exactly there (an
+infinity past it). A `raises` row whose type is a machine failure
+(`OverflowError`, `MemoryError`, `RecursionError`,
+`FloatingPointError`) is computation as well. These rows never enter a
+proof: `exp(x) >= 0` on a numpy caller is proven over the reals
+whatever the threshold, and the overflow shows on the computation side
+(the `[float]` companion, the probe route). They feed the hazard
+points, `is_compendium_safe`'s diagnosis, the reach of the key's own
+`is_defined` row and the companion's sketch.
+
+`numpy.exp` carries one row of each kind:
+
+```yaml
+numpy.exp:
+  intent: "Exponential; overflows to inf above roughly x = 709.78, with a RuntimeWarning."
+  claims:
+    - name: is_defined
+      statement: "is_defined(f)"
+    - name: is_overflow_safe
+      statement: "x <= 709.782712893384"
+```
 
 Consumption paths:
 
-- Definedness regions become sampling hazards: their boundary values
-  join the probe candidates for every caller, whether it spells the
-  call `numpy.sqrt(x)` or `np.sqrt(x)`.
+- Definedness and overflow-safe regions become sampling hazards: their
+  boundary values join the probe candidates for every caller, whether
+  it spells the call `numpy.sqrt(x)` or `np.sqrt(x)`.
 - `is_compendium_safe(numpy)` asserts a function never silently emits
   a non-finite value (nan/inf) through an unguarded call into a covered
   library function; the probe samples the hazard boundaries and the
-  empty-sequence case, and falsifies on a nan/inf output.
+  empty-sequence case, and falsifies on a nan/inf output. When the
+  covered call states a computation region, the counterexample names
+  it: `the covered call numpy.exp is overflow-safe only for x <=
+  709.782712893384, and x = 1000 lies outside it`.
+- A `[float]` companion falsified by a call into a covered function
+  names the same region in its sketch.
+- A library key's own bare `is_defined` row is adjudicated inside its
+  `is_overflow_safe` region (the function is total; where it overflows
+  is the other row's fact), and inside the carrier's range otherwise.
 - Claims may be named as premises: `assuming clip_lower holds`, or
   qualified, `assuming numpy.clip.clip_lower holds`.
 

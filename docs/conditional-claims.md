@@ -65,7 +65,12 @@ ufunc), or the comparison does not decide (a library function whose
 region reads `det(a)` or `dim(a)`), the claim is adjudicated by
 execution: every sampled point inside the region must return a value
 and every point outside it must not, where a raise, a nan and an
-infinity for a finite input are all no value. A region over `det(a)`
+infinity for a finite input are all no value. Where an implementation
+leaves float range is not a definedness fact but a computation one,
+stated by an `is_overflow_safe` row (see
+[claims transfer](claims-transfer.md#row-kinds-by-stratum)), and a
+library function's bare `is_defined` is adjudicated inside that
+region. A region over `det(a)`
 draws square matrices, singular ones on its boundary; one over
 `dim(a)` draws sequences, the empty one below it. An indexed row
 (`is_defined[2]`, one conjunct of a region with several) only asks
