@@ -395,7 +395,7 @@ array-shaped claims, `coverage` reads a native `.coverage` report and
 The full documentation, including the command reference, is at
 **[mathema.tetrionlabs.com](https://mathema.tetrionlabs.com)**.
 
-mathema is at 0.6.0 and pre-1.0, feature-complete for its current scope and
+mathema is at 0.6.1 and pre-1.0, feature-complete for its current scope and
 covered by over 3,500 tests; the claim grammar and record format are settled by
 the spec, but the Python API is likely to change before 1.0.
 

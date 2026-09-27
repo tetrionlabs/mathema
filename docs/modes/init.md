@@ -124,7 +124,7 @@ mathema init: vendored mathema-agents skills for claude:
   .claude/skills/design-claims/SKILL.md
   .claude/skills/start-from-claims/SKILL.md
   .claude/skills/use-mathema-mcp/SKILL.md
-  from v0.6, matching mathema 0.6.0
+  from v0.6, matching mathema 0.6.1
 ```
 
 The last line names the skills branch fetched: the one matching your
