@@ -180,7 +180,10 @@ _FOR_PREFIX = re.compile(r"^\s*for\s+", re.DOTALL)
 _MEMBERSHIP_OPS = r"(?:in|\\elem|\\in|∈)"
 # the name may be dotted (`self.rate`, `cfg.a`): a bundled parameter's
 # field is quantified exactly like a scalar parameter
-_MEMBERSHIP_PREFIX = re.compile(rf"^\s*(?P<name>\w+(?:\.\w+)?)\s+{_MEMBERSHIP_OPS}\s+")
+# a binding's name: a parameter, or a path into one through fields and
+# indices, `o.qty`, `o.address.zip`, `o.lines[0].sku`, `o.lines[*].qty`
+_PATH = r"\w+(?:\.\w+|\[(?:\d+|\*)\])*"
+_MEMBERSHIP_PREFIX = re.compile(rf"^\s*(?P<name>{_PATH})\s+{_MEMBERSHIP_OPS}\s+")
 # "D ⊂ R/Z/N" / "D \sub R/Z/N" / "D \subset R/Z/N", a type refinement,
 # found anywhere in the binding text rather than anchored to the end, so
 # a missing-value override (∪ {∅} / \ {∅}, below) reads naturally on
@@ -268,10 +271,10 @@ _REFINE_INTERVAL = re.compile(
 # bound on any variable); domain means scope *and* intensity of
 # verification, not just numeric range.
 _BINDING_INTENSITY = re.compile(r"^\s*n\s*=\s*(\d+)\s*$")
-# a field binding reaches one level deep (`o.qty in [...]`); a deeper
-# path is refused by name rather than left to read as a second relation
-_DEEP_FIELD_BINDING = re.compile(
-    rf"^\s*(?P<path>\w+(?:\.\w+){{2,}})\s+{_MEMBERSHIP_OPS}\s+")
+# something that reads as a path binding but is not a path, refused by
+# name rather than left to read as a second relation
+_PATH_LIKE_BINDING = re.compile(
+    rf"^\s*(?P<path>\w+[.\[][^\s]*)\s+{_MEMBERSHIP_OPS}\s+")
 _BOUND_CONSTS = {"pi": math.pi, "-pi": -math.pi, "e": math.e,
                  "oo": math.inf, "-oo": -math.inf,
                  "infinity": math.inf, "-infinity": -math.inf}
@@ -549,6 +552,78 @@ def _parse_refinements(text: str, whole: str) -> tuple:
             raise InvalidDomain(f"{whole!r}: the refinement {key!r} is stated twice")
         found[key] = interval
     return tuple(sorted(found.items()))
+
+
+_PATH_STEP = re.compile(r"\.(\w+)|\[(\d+|\*)\]")
+
+
+def path_steps(path: str) -> "list[str | int]":
+    """The steps of a path after its root: a field name, an index, or
+    `"*"` for every element (`.lines[*].qty` is `["lines", "*",
+    "qty"]`)."""
+    steps: list = []
+    for field_name, index in _PATH_STEP.findall(path):
+        steps.append(field_name if field_name else ("*" if index == "*" else int(index)))
+    return steps
+
+
+def path_values(value, steps) -> list:
+    """Intent:
+        Every value a path reaches from `value`: one, or one per element
+        where a step is `"*"`. A step through a missing field, a `None`,
+        or an index past the end reaches the missing value. Walked with
+        an explicit stack, never by recursion.
+    """
+    out: list = []
+    stack = [(value, 0)]
+    while stack:
+        current, i = stack.pop()
+        if i == len(steps):
+            out.append(current)
+            continue
+        step = steps[i]
+        if current is None or is_missing(current):
+            out.append(MISSING)
+            continue
+        if step == "*":
+            try:
+                items = list(current)
+            except TypeError:
+                out.append(MISSING)
+                continue
+            stack.extend((item, i + 1) for item in reversed(items))
+            continue
+        if isinstance(step, int):
+            try:
+                stack.append((current[step], i + 1))
+            except (IndexError, KeyError, TypeError):
+                out.append(MISSING)
+            continue
+        if isinstance(current, dict):
+            stack.append((current[step], i + 1) if step in current else (MISSING, len(steps)))
+        elif hasattr(current, step):
+            stack.append((getattr(current, step), i + 1))
+        else:
+            out.append(MISSING)
+    return out
+
+
+def path_bindings_hold(value, root: str, bindings: dict) -> bool:
+    """Intent:
+        Whether every path binding rooted at `root` (`{"o.lines[*].qty":
+        bound}`) holds of `value`: every value the path reaches is in
+        its bound.
+    """
+    for key, bound in bindings.items():
+        if not (key.startswith(root + ".") or key.startswith(root + "[")):
+            continue
+        for leaf in path_values(value, path_steps(key[len(root):])):
+            try:
+                if not domain_contains(leaf, bound):
+                    return False
+            except Exception:
+                return False
+    return True
 
 
 def language_ref(text: str) -> "LanguageRef | None":
@@ -1681,13 +1756,12 @@ def split_quantifier(text: str) -> tuple[dict, str]:
     n_bindings = 0
     for seg in segments:
         if not is_binding(seg):
-            deep = _DEEP_FIELD_BINDING.match(seg)
-            if deep is not None:
-                path = deep.group("path")
+            bad = _PATH_LIKE_BINDING.match(seg)
+            if bad is not None and not re.fullmatch(_PATH, bad.group("path")):
                 raise InvalidDomain(
-                    f"{seg.strip()!r}: a field binding reaches one level "
-                    f"deep ({path.split('.')[0]}.{path.split('.')[1]}), not "
-                    f"{path}; a deeper field has no domain of its own here")
+                    f"{seg.strip()!r}: {bad.group('path')!r} is not a path; a "
+                    f"path is fields and indices, `o.address.zip`, "
+                    f"`o.lines[0].sku`, `o.lines[*].qty`")
             break
         n_bindings += 1
     if n_bindings == 0:

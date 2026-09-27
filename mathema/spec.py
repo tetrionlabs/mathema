@@ -1749,7 +1749,10 @@ def _ordered_real_param_names(cj, excluded: set) -> list:
                 if name not in excluded and name not in seen:
                     seen.append(name)
     for name in cj.domain:
-        if name not in cj.free_vars and name not in excluded and name not in seen:
+        # a path binding (`o.lines[*].qty`) names a parameter's field,
+        # not a parameter, and keeps its own spelling
+        if name.isidentifier() and name not in cj.free_vars and name not in excluded \
+                and name not in seen:
             seen.append(name)
     return seen
 

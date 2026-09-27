@@ -176,13 +176,11 @@ def test_a_claim_level_field_binding_narrows_the_language(tmp_path, dataclass_ad
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note, p.counterexample)
 
 
-def test_a_deeper_path_is_refused_by_name():
-    from mathema.conjecture import InvalidConjecture
-    with pytest.raises(InvalidConjecture, match="one level deep"):
-        claim("for o in L[orders], o.qty.n in [0, 1], f(o) >= 0")
-    with pytest.raises(InvalidDomain, match="o.qty.n"):
-        from mathema.domain import split_quantifier
-        split_quantifier("for o in L[orders], o.qty.n in [0, 1], f(o) >= 0")
+def test_a_deeper_path_binds_and_a_malformed_one_is_refused_by_name():
+    from mathema.domain import split_quantifier
+    assert "o.qty.n" in claim("for o in L[orders], o.qty.n in [0, 1], f(o) >= 0").domain
+    with pytest.raises(InvalidDomain, match="o.qty..n"):
+        split_quantifier("for o in L[orders], o.qty..n in [0, 1], f(o) >= 0")
 
 
 def test_a_mapping_parameter_bound_to_a_language_is_sampled_from_the_language(tmp_path):

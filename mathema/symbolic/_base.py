@@ -459,17 +459,37 @@ def _dict_key_tree(tree: ast.FunctionDef, param: str) -> dict:
     return root
 
 
+def _chain(node: ast.AST) -> "tuple[str, str] | None":
+    """`(root, path)` for a read through fields and literal indices off
+    a name, `o.address.zip` -> `("o", "address.zip")`,
+    `o["lines"][0].qty` -> `("o", "lines[0].qty")`, else None."""
+    steps: list = []
+    cur = node
+    while isinstance(cur, (ast.Attribute, ast.Subscript)):
+        if isinstance(cur, ast.Attribute):
+            steps.append(f".{cur.attr}")
+        elif isinstance(cur.slice, ast.Constant) and isinstance(cur.slice.value, str):
+            steps.append(f".{cur.slice.value}")
+        elif isinstance(cur.slice, ast.Constant) and isinstance(cur.slice.value, int) \
+                and not isinstance(cur.slice.value, bool) and cur.slice.value >= 0:
+            steps.append(f"[{cur.slice.value}]")
+        else:
+            return None
+        cur = cur.value
+    if not steps or not isinstance(cur, ast.Name):
+        return None
+    path = "".join(reversed(steps))
+    if not path.startswith("."):
+        return None
+    return cur.id, path[1:]
+
+
 def _field_of(node: ast.AST, param: str) -> "str | None":
-    """The field a node reads straight off `param`: `param.qty` or
-    `param["qty"]`, else None."""
-    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
-            and node.value.id == param:
-        return node.attr
-    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) \
-            and node.value.id == param and isinstance(node.slice, ast.Constant) \
-            and isinstance(node.slice.value, str):
-        return node.slice.value
-    return None
+    """The field path a node reads off `param`: `param.qty`,
+    `param["qty"]`, `param.address.zip`, `param.lines[0].qty`, else
+    None."""
+    found = _chain(node)
+    return found[1] if found is not None and found[0] == param else None
 
 
 def field_reads(tree: ast.FunctionDef, param: str) -> "tuple[list[str], list[str]]":
@@ -494,10 +514,13 @@ def field_reads(tree: ast.FunctionDef, param: str) -> "tuple[list[str], list[str
                 in_len.add(id(node.args[0]))
                 if name not in length_fields:
                     length_fields.append(name)
+    inner = {id(node.value) for node in ast.walk(tree)
+             if isinstance(node, (ast.Attribute, ast.Subscript))
+             and id(node) not in call_funcs and _field_of(node, param) is not None}
     plain: list[str] = []
     for node in ast.walk(tree):
         name = _field_of(node, param)
-        if (name is not None and id(node) not in in_len
+        if (name is not None and id(node) not in in_len and id(node) not in inner
                 and id(node) not in call_funcs and name not in plain):
             plain.append(name)
     return plain, [f for f in length_fields if f not in plain]
@@ -937,6 +960,12 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
         if node.id in env:
             return env[node.id]
         raise NotSymbolic(f"unbound name {node.id!r}", category="unbound-name")
+    if isinstance(node, (ast.Attribute, ast.Subscript)):
+        # a read through fields and literal indices bound as one
+        # composite key (`o.address.zip`, `o.lines[0].qty`)
+        chained = _chain(node)
+        if chained is not None and f"{chained[0]}.{chained[1]}" in env:
+            return env[f"{chained[0]}.{chained[1]}"]
     if isinstance(node, ast.Attribute):
         if isinstance(node.value, ast.Name):
             composite = f"{node.value.id}.{node.attr}"
@@ -1052,11 +1081,10 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
     if isinstance(node, ast.Call):
         if (isinstance(node.func, ast.Name) and node.func.id == "len"
                 and len(node.args) == 1 and not node.keywords
-                and isinstance(node.args[0], (ast.Attribute, ast.Subscript))
-                and isinstance(node.args[0].value, ast.Name)):
-            name = _field_of(node.args[0], node.args[0].value.id)
-            composite = f"{node.args[0].value.id}.{name}.len"
-            if name is not None and composite in env:
+                and isinstance(node.args[0], (ast.Attribute, ast.Subscript))):
+            chained = _chain(node.args[0])
+            composite = f"{chained[0]}.{chained[1]}.len" if chained is not None else None
+            if composite is not None and composite in env:
                 return env[composite]
         if (isinstance(node.func, ast.Name)
                 and isinstance(env.get(node.func.id), _LocalLambda)

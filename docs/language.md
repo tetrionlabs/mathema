@@ -94,6 +94,25 @@ A language domain spells the missing value as a word in both modes,
 `L[unicode]|missing` and `L[unicode] \ {missing}`: to a reader of formal
 languages `∅` is the empty language, a different set.
 
+## Paths into a member
+
+A binding can name a path into a member of a language, through fields
+and indices, at any depth:
+
+```
+for o in L[myapp.Order], o.address.zip in L[digit, len <= 5], ...
+for o in L[myapp.Order], o.lines[0].sku in L[slug], ...
+for o in L[myapp.Order], o.lines[*].qty in [1, 10], total(o) >= 0
+```
+
+`[*]` means every element. A path binding narrows the members the probe
+draws: every value the path reaches is in the bound, and a path through a
+missing field or past the end of a list reaches the missing value, so
+`\ {missing}` on the bound says the path must be there. The derive route
+reads a numeric leaf at any depth the body reads (`o.lines[0].qty`,
+`o["address"]["zip"]`) with the bound the language states for it, and a
+claim's own path binding, the `[*]` form included, overrides that bound.
+
 ## Membership and containment
 
 The output side has two spellings of its own. `f(s) in L[slug]` says

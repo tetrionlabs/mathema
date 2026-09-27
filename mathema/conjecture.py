@@ -608,6 +608,27 @@ def _length_domain(bound):
                   explicit_type=True)
 
 
+def _path_bound(p: str, path: str, fields: dict, cj_domain: dict):
+    """Intent:
+        The bound of the field `path` reads off parameter `p`: the
+        claim's own binding of that path, or of the same path with every
+        index read as `[*]`, else the language's, found by walking its
+        `fields()` (a nested mapping for a record, `"[*]"` for the
+        elements of a list). None when neither states one.
+    """
+    import re as _re
+    from .domain import path_steps
+    for key in (f"{p}.{path}", _re.sub(r"\[\d+\]", "[*]", f"{p}.{path}")):
+        if key in cj_domain:
+            return cj_domain[key]
+    node = fields
+    for step in path_steps(f".{path}"):
+        if not isinstance(node, dict):
+            return None
+        node = node.get("[*]") if isinstance(step, int) or step == "*" else node.get(step)
+    return None if isinstance(node, dict) else node
+
+
 def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
     """Intent:
         `(field_domain, reason)`: the `p.field` and `p.field.len`
@@ -632,14 +653,14 @@ def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
             return None, (f"the body reads no field of {p}, so the lift "
                           "declines and the probe adjudicates")
         for f in plain:
-            bound = schema[p].get(f)
+            bound = _path_bound(p, f, schema[p], cj_domain)
             if not _is_numeric_bound(bound):
                 return None, (f"the body reads {p}.{f}, a field with no "
                               "numeric reading, so the lift declines and "
                               "the probe adjudicates")
             out[f"{p}.{f}"] = bound
         for f in length_only:
-            bound = schema[p].get(f)
+            bound = _path_bound(p, f, schema[p], cj_domain)
             if not isinstance(bound, LanguageRef):
                 return None, (f"the body reads len({p}.{f}), and {p}.{f} "
                               "is not a text field")
@@ -2411,14 +2432,11 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
         # the parameter is quantified over a language: its members are
         # the instances, and a claim-level field bound narrows them by
         # a bounded rejection
-        from .domain import domain_contains
-        field_bounds = {f: cj_domain[f"{p}.{f}"] for f in fields
-                        if cj_domain.get(f"{p}.{f}") is not None}
+        from .domain import path_bindings_hold
         inst = None
         for _ in range(20):
             inst = _synth("object", rng, bound)
-            if all(domain_contains(getattr(inst, f, None), b)
-                   for f, b in field_bounds.items()):
+            if path_bindings_hold(inst, p, cj_domain):
                 break
         return inst
     values = {f: _synth("float", rng, cj_domain.get(f"{p}.{f}"),
@@ -3377,7 +3395,7 @@ def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
         fails there, within `_WITNESS_SHRINK_EVALUATIONS` evaluations;
         None when the failure does not reproduce.
     """
-    from .domain import LanguageRef, domain_contains
+    from .domain import LanguageRef, domain_contains, path_bindings_hold
     from .languages import resolve_language
     args = list(args)
     current = _failure_at(cj, kinds, env, args, code_l, code_r)
@@ -3410,7 +3428,8 @@ def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
                     if budget <= 0:
                         break
                     try:
-                        inside = domain_contains(candidate, bound)
+                        inside = (domain_contains(candidate, bound)
+                                  and path_bindings_hold(candidate, p, cj_domain))
                     except Exception:
                         inside = False
                     if not inside:
@@ -5191,10 +5210,32 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
             return value
         return _wrapped
 
+    from .domain import path_bindings_hold
+    path_bound = {p for p in kinds
+                  if any(key.startswith(p + ".") or key.startswith(p + "[")
+                         for key in cj_domain)}
+    outside_draw = [False]
+
+    def narrowed(p, draw):
+        # a parameter with path bindings is drawn until every binding
+        # holds, a bounded rejection; a point none satisfies is outside
+        # the claim's domain
+        v = draw()
+        if p not in path_bound:
+            return v
+        for _ in range(20):
+            if path_bindings_hold(v, p, cj_domain):
+                return v
+            v = draw()
+        if not path_bindings_hold(v, p, cj_domain):
+            outside_draw[0] = True
+        return v
+
     fn_tagged = _tagged(fn, "f")
     bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
     for trial in range(budget + len(pinned)):
         call_raised[0] = None
+        outside_draw[0] = False
         trial_sizes: dict = (
             _draw_trial_sizes(resolver, shape_lo, shape_hi, shape_groups, rng)
             if plan_dims and trial >= len(pinned) else {})
@@ -5224,7 +5265,8 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                            None) == "L":
                     # a mapping parameter quantified over a language: the
                     # members ARE the mappings, drawn from the language
-                    v = _synth(k, rng, cj_domain.get(p), lap=language_laps.get(p))
+                    v = narrowed(p, lambda p=p, k=k: _synth(
+                        k, rng, cj_domain.get(p), lap=language_laps.get(p)))
                     env[p] = v
                     args.append(v)
                     continue
@@ -5271,12 +5313,17 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # domain and the special-value shapes; the plan
                     # only fixes a 1-D length when a premise did
                     length = trial_sizes.get(resolver.key(p, 0))
-                    v = _synth(k, rng, cj_domain.get(p),
-                              specials=specials, extra=critical_hints.get(p),
-                              extra_cycle=extra_cycles.get(p),
-                              length=length, lap=language_laps.get(p))
+                    v = narrowed(p, lambda p=p, k=k, length=length: _synth(
+                        k, rng, cj_domain.get(p),
+                        specials=specials, extra=critical_hints.get(p),
+                        extra_cycle=extra_cycles.get(p),
+                        length=length, lap=language_laps.get(p)))
                 env[p] = v
                 args.append(v)
+        if outside_draw[0]:
+            # a path binding no draw satisfied: the point is outside the
+            # claim's domain, so it neither confirms nor denies anything
+            continue
         for a_name in aux:
             # eps/epsilon/ε resolve to the claim's own declared
             # tolerance, not a random aux value, same convention as

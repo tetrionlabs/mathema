@@ -38,6 +38,17 @@ Notable changes to mathema are recorded here from its first public release onwar
   `len(o.sku)` is a whole number bounded by its length, and a field read
   any other way, or a row the body reads no field of, declines the lift
   with the reason, leaving the claim to the probe.
+- A binding names a path into a member at any depth, `o.address.zip`,
+  `o.lines[0].sku`, `o.lines[*].qty`, narrowing the probe's draws and
+  bounding the leaf in the lift; the one-level limit is gone.
+- Refinements inside `L[...]` are a seam: any `key op n` parses, a
+  refinement registered under the key (in the process, or under the
+  `mathema.language_refinements` entry-point group) serves it, and a key
+  nothing serves is refused when the claim is checked. mathema owns no
+  key; `len` comes from the `mathema-language` package.
+- A value claim's witness over a language is shrunk inside the language,
+  and a language's hazard lap visits the members at a refinement's
+  bounds first.
 - Over a language, a value's length renders as `len(s)`; the canonical
   form keeps `dim(s, 0)`.
 - A claim over a language visits every hazard of the language once
