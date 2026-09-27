@@ -58,11 +58,16 @@ bind at the library's own defaults, rather than sampling them:
 `for a in R^n, min(a) <= f(a) <= max(a)` on `numpy.mean` samples `a`
 and leaves `axis`, `dtype`, `out`, `keepdims` and `where` as numpy
 defines them. The record says so: each row carries the values it
-passed in `mathema.defaults`, and its note lists them. A different
-value is a pin, `let axis be 0` (see [the grammar](grammar.md)), shown
-as `0 (pinned)`. `mathema verify` compares those values with the
+passed in `mathema.defaults`, keyed by the function they were passed
+to, since one claim can call several library functions (`{numpy.mean:
+{axis: None, keepdims: <no value>, ...}}`, and a `let g = numpy.sqrt`
+binding the claim calls adds `numpy.sqrt`'s own), and its note lists
+them as `held at their defaults: axis=None, ...`. A different value is
+a pin, `let axis be 0` (see [the grammar](grammar.md)), shown as `0
+(pinned)`. `mathema verify` compares those values with the
 installed library on every sweep, so a release inside the declared
-`versions` range that changes a default marks the row stale and it is
+`versions` range that changes a default of any function the row
+calls marks the row stale and it is
 adjudicated again, and a pin naming a parameter the library no longer
 has makes the row misspecified. Your own functions are not affected:
 their defaulted parameters are sampled like any other.

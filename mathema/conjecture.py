@@ -2290,6 +2290,90 @@ def defaults_meta(kept: dict, pins: dict) -> dict:
     return dict(sorted(out.items()))
 
 
+def _function_name(fn) -> str:
+    """The dotted name a function is stated under: its library claim key
+    (`numpy.mean`), else its module and qualified name."""
+    from .compendium import library_key_of
+    return library_key_of(fn) or (
+        f"{getattr(fn, '__module__', '')}."
+        f"{getattr(fn, '__qualname__', getattr(fn, '__name__', ''))}")
+
+
+def _kept_in_calls(target, name: str, texts) -> dict:
+    """Intent:
+        Each parameter of `target` with a default that some call
+        `name(...)` in `texts` leaves unpassed, mapped to that default.
+    """
+    import ast as _ast
+    import inspect
+    try:
+        sig = inspect.signature(target).parameters
+    except (TypeError, ValueError):
+        return {}
+    kept: dict = {}
+    for text in texts:
+        try:
+            tree = _ast.parse(str(text), mode="eval")
+        except SyntaxError:
+            continue
+        for node in _ast.walk(tree):
+            if not (isinstance(node, _ast.Call)
+                    and isinstance(node.func, _ast.Name)
+                    and node.func.id == name):
+                continue
+            given = {k.arg for k in node.keywords if k.arg}
+            for i, (p, param) in enumerate(sig.items()):
+                if param.default is param.empty or param.kind in (
+                        param.VAR_POSITIONAL, param.VAR_KEYWORD):
+                    continue
+                positional = param.kind in (param.POSITIONAL_ONLY,
+                                            param.POSITIONAL_OR_KEYWORD)
+                if (positional and i < len(node.args)) or p in given:
+                    continue
+                kept[p] = param.default
+    return kept
+
+
+def claim_defaults(fn, cj) -> dict:
+    """Intent:
+        The `mathema.defaults` record field: for each function the claim
+        calls at values it does not sample, keyed by the function's
+        dotted name, the values passed (`defaults_meta`). The target
+        contributes what `call_defaults` keeps and pins; a `let`-bound
+        library function (`let g = numpy.sqrt`) contributes each
+        defaulted parameter a call to it in the claim leaves unpassed.
+    """
+    from .compendium import library_key_of
+    out: dict = {}
+    kept, pinned, _problem = call_defaults(fn, cj)
+    if kept or pinned:
+        out[_function_name(fn)] = defaults_meta(kept, pinned)
+    texts = [t for t in (cj.lhs, cj.rhs, cj.assuming) if t]
+    for name, ref in sorted((cj.funcs or {}).items()):
+        if ref == name:
+            continue
+        target = ref if callable(ref) else _resolve_func_ref(str(ref))
+        key = library_key_of(target) if target is not None else None
+        if key is None or key in out:
+            continue
+        bound_kept = _kept_in_calls(target, name, texts)
+        if bound_kept:
+            out[key] = defaults_meta(bound_kept, {})
+    return dict(sorted(out.items()))
+
+
+def defaults_note(resolved: dict) -> str:
+    """The note line for a `claim_defaults` result: the values each
+    function was held at, the function named when there are several."""
+    def values(held: dict) -> str:
+        return ", ".join(f"{p}={v}" for p, v in held.items())
+    if len(resolved) == 1:
+        (held,) = resolved.values()
+        return "held at their defaults: " + values(held)
+    return "held at their defaults: " + "; ".join(
+        f"{name} {values(held)}" for name, held in resolved.items())
+
+
 def _value_text(value) -> str:
     text = repr(value)
     return "<no value>" if text in ("<no value>", "<NoValue>") else text
@@ -2709,14 +2793,12 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             probe.condition = "for " + ", ".join(
                 f"{p2} in {render_domain(b, ascii_mode=True)}"
                 for p2, b in cj.domain.items())
-        kept, pinned, _problem = call_defaults(fn, cj)
-        if kept or pinned:
-            # a library call's values the claim did not sample, stated
-            # in the record and the note
-            resolved = defaults_meta(kept, pinned)
+        resolved = claim_defaults(fn, cj)
+        if resolved:
+            # the values each library call passed that the claim did not
+            # sample, stated in the record and the note
             probe.meta = {**(probe.meta or {}), "mathema.defaults": resolved}
-            said = ("passed without sampling: "
-                    + ", ".join(f"{p2}={v}" for p2, v in resolved.items()))
+            said = defaults_note(resolved)
             if said not in (probe.note or ""):
                 probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         inherited = {p2: b for p2, b in domain.items()

@@ -598,12 +598,12 @@ def verify_project(root: str = ".", *, all: bool = False,
 def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
     """Intent:
         Whether a library function's calls would now pass a different
-        value than the record states (`mathema.defaults` on each row):
-        a default the installed library changed, a parameter added or
-        removed. Such a record is stale even though the claims and the
+        value than the record states (`mathema.defaults` on each row,
+        per function the claim calls): a default the installed library
+        changed, a parameter added or removed. Such a record is stale even though the claims and the
         form are not.
     """
-    from .conjecture import call_defaults, defaults_meta
+    from .conjecture import claim_defaults
     from .spec import entry_claims
     try:
         current = entry_claims(merged_entry or {})
@@ -611,9 +611,9 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
         return False
     now: dict = {}
     for cj in current:
-        kept, pins, _problem = call_defaults(fn, cj)
-        if kept or pins:
-            now[cj.name] = defaults_meta(kept, pins)
+        resolved = claim_defaults(fn, cj)
+        if resolved:
+            now[cj.name] = resolved
     names = {cj.name for cj in current}
     recorded = {c.get("name"): (c.get("meta") or {}).get("mathema.defaults")
                 for c in (verified_entry or {}).get("claims") or []

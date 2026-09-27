@@ -227,7 +227,7 @@ def test_a_project_function_calling_a_let_bound_library_function(
     monkeypatch.syspath_prepend(str(tmp_path))
     import importlib
     sq = importlib.import_module("letproj").sq
-    p = _declared(sq, "let g = np.sqrt, for x in [0, 4], g(f(x)) >= 0")
+    p = _declared(sq, "let g = numpy.sqrt, for x in [0, 4], g(f(x)) >= 0")
     assert p.verdict in ("holds", "proven"), p.note
     stated = p.meta["mathema.defaults"]
     assert set(stated) == {"numpy.sqrt"}

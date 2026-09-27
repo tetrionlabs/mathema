@@ -450,8 +450,8 @@ numpy.mean:
 ```
 
 The pin is part of the claim's canonical text, so it survives every
-round trip, and the record lists it among the values passed without
-sampling, `axis: 0 (pinned)`. A pin naming something the function
+round trip, and the record lists it among the values held at their
+defaults, `axis: 0 (pinned)` under `numpy.mean`. A pin naming something the function
 does not take is a misspecified claim, never a silent free variable.
 
 ### Operational infinity: `let |inf| be ...`
