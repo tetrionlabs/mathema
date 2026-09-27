@@ -36,8 +36,10 @@ The probe draws members of the language and never a value outside it:
 the language's own hazards first (the empty string, whitespace, NUL and
 the other control code points, an alphabet's boundary, a long member, a
 lone surrogate, a byte-order mark), every one of them once before any
-random member is drawn, however small a trial budget the function would
-otherwise get, then random members. A function that
+random member is drawn, then random members. The hazards count toward
+the trial budget the way a wide interval does (see
+[the trial budget](modes/check.md#the-trial-budget)), and the
+confidence score is marked down for them the same way. A function that
 raises on a member falsifies the claim with that member as the witness,
 the rule a numeric domain follows. The derive route has no reading of a
 string, so it declines with the reason rather than proving real-only

@@ -5024,7 +5024,9 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         param_structures[_pp] = tuple(sorted(
             set(param_structures.get(_pp, ())) | set(_props)))
     setup = sampling()
-    rng, specials, risk, budget = setup.rng, setup.specials, setup.risk, setup.budget
+    rng, specials = setup.rng, setup.specials
+    from .probing import claim_sampling_budget
+    risk, budget = claim_sampling_budget(setup, facts, cj_domain)
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
     from .probing import _language_lap
@@ -5032,10 +5034,14 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # language's hazards
     language_laps = {p: lap for p in kinds
                      if (lap := _language_lap(rng, cj_domain.get(p))) is not None}
-    if language_laps:
-        # the trial budget covers the longest lap, so every hazard is
-        # visited however small the budget the risk policy chose
-        budget = max(budget, max(lap.lap_size() for lap in language_laps.values()))
+    lap_floor = None
+    longest_lap = max((lap.lap_size() for lap in language_laps.values()), default=0)
+    if longest_lap > budget:
+        # a lap longer than the complexity budget raises the trial
+        # count to the lap, so every hazard is visited, and the
+        # sampling line says so
+        lap_floor = (longest_lap, budget)
+        budget = longest_lap
     checked, cx, cx_stratum = 0, None, None
     # the largest exact ordering violation the default allowance
     # absorbed, and the arguments it happened at
@@ -5447,7 +5453,8 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,
                      counterexample=cx, note=note, stratum=cx_stratum,
                      meta={"mathema.sampling": _sampling_shorthand(
-                               kinds, cj_domain, checked, critical_hints, truncated_hints),
+                               kinds, cj_domain, checked, critical_hints, truncated_hints,
+                               lap_floor),
                           "mathema.confidence": _probe_density(risk, checked),
                           "mathema.counterexample_args": _yaml_safe_args(args)})
     if checked == 0:
@@ -5460,7 +5467,8 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 f"the default tolerance ({DEFAULT_TOLERANCE:g})").lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
-                           kinds, cj_domain, checked, critical_hints, truncated_hints),
+                           kinds, cj_domain, checked, critical_hints, truncated_hints,
+                               lap_floor),
                       "mathema.confidence": _probe_density(risk, checked)})
 
 

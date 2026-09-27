@@ -83,6 +83,8 @@ class _RiskPolicy:
     free_params: int = 2             # first two params add no combinatorial risk
     max_wide_domain_risk: int = 2
     max_float_extreme_risk: int = 2
+    max_language_risk: int = 3
+    language_hazards_per_unit: int = 32   # hazards one unit of language risk stands for
     wide_span: float = 1e4
     tiny_magnitude: float = 1e-6
     huge_magnitude: float = 1e9
@@ -91,6 +93,7 @@ class _RiskPolicy:
     param_penalty: float = 0.5
     wide_domain_penalty: float = 1.0
     float_extreme_penalty: float = 1.0
+    language_penalty: float = 1.0
     score_min: float = 1.0
     score_max: float = 10.0
     budget_step_per_unit: int = 32    # extra trials per unit of starting complexity
@@ -275,7 +278,10 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
     the space of *combinations*; `wide_domain`/`float_extremes` flag a
     declared domain a fixed sample density thins out fast (unbounded or
     very wide) or where float precision itself becomes a risk (very
-    large or very near-zero magnitudes)."""
+    large or very near-zero magnitudes). `language` counts the hazards
+    a language-bound parameter's language brings, one unit per
+    `language_hazards_per_unit`, and is present only when some
+    parameter is bound to a language."""
     wide_domain, float_extremes = 0, 0
     for p in facts.params:
         bounds = domain.get(p)
@@ -287,13 +293,34 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
         if (0 < abs(lo) < policy.tiny_magnitude) or (0 < abs(hi) < policy.tiny_magnitude) \
                 or abs(lo) > policy.huge_magnitude or abs(hi) > policy.huge_magnitude:
             float_extremes += 1
-    return {
+    risk = {
         "branches": min(facts.branch_count, policy.max_branch_risk),
         "loops": min(len(facts.loops), policy.max_loop_risk),
         "params": max(0, len(facts.params) - policy.free_params),
         "wide_domain": min(wide_domain, policy.max_wide_domain_risk),
         "float_extremes": min(float_extremes, policy.max_float_extreme_risk),
     }
+    language = _language_risk(facts.params, domain, policy)
+    if language is not None:
+        risk["language"] = language
+    return risk
+
+
+def _language_risk(params, domain: dict, policy: _RiskPolicy = _RISK) -> "int | None":
+    """Intent:
+        The `language` risk factor: for each parameter bound to a
+        language, one unit per `language_hazards_per_unit` hazards its
+        lap visits, summed and capped at `max_language_risk`. `None`
+        when no parameter is bound to a language.
+    """
+    units, bound = 0, False
+    for p in params:
+        dom = domain.get(p)
+        if _classify_bound(dom) != "language":
+            continue
+        bound = True
+        units += math.ceil(len(_language_hazards(dom)) / policy.language_hazards_per_unit)
+    return min(units, policy.max_language_risk) if bound else None
 
 
 def _starting_budget(risk: dict, affine: bool, policy: _RiskPolicy = _RISK) -> int:
@@ -306,10 +333,13 @@ def _starting_budget(risk: dict, affine: bool, policy: _RiskPolicy = _RISK) -> i
     well-behaved in *shape*, but a wide or float-precision-risky domain
     (`risk["wide_domain"]`/`risk["float_extremes"]`) still needs real
     coverage regardless of shape, so affine-ness is ignored rather than
-    overriding that."""
-    if affine and risk["wide_domain"] == 0 and risk["float_extremes"] == 0:
+    overriding that, and the same holds for a language domain's hazards
+    (`risk["language"]`)."""
+    if affine and risk["wide_domain"] == 0 and risk["float_extremes"] == 0 \
+            and not risk.get("language"):
         return policy.affine_budget
-    complexity = risk["branches"] + risk["loops"] + risk["wide_domain"]
+    complexity = (risk["branches"] + risk["loops"] + risk["wide_domain"]
+                  + risk.get("language", 0))
     return min(_N_MAX, _N_BASE + complexity * policy.budget_step_per_unit)
 
 
@@ -335,6 +365,7 @@ def _probe_density(risk: dict, n_trials: int, policy: _RiskPolicy = _RISK) -> di
     score -= risk["params"] * policy.param_penalty
     score -= risk["wide_domain"] * policy.wide_domain_penalty
     score -= risk["float_extremes"] * policy.float_extreme_penalty
+    score -= risk.get("language", 0) * policy.language_penalty
     # centered on _N_BASE, not linear: doubling n from there is worth a
     # flat +1, same as halving it costs a flat -1, extra trials past a
     # point buy steadily less legibility, not steadily less risk.
@@ -739,16 +770,24 @@ def _sample_domain(rng: random.Random, dom: Domain,
 def _language_lap(rng: random.Random, dom) -> "_SpecialCycle | None":
     """Intent:
         One lap over every hazard of a language domain, for the first
-        draws of a parameter bound to it: each piece's hazards, the
-        members of the domain's excluded set left out, dispensed once
-        each in a seeded order. `None` when the bound is not a language
-        domain or has no hazard to visit.
+        draws of a parameter bound to it, dispensed once each in a
+        seeded order. `None` when the bound is not a language domain or
+        has no hazard to visit.
+    """
+    if _classify_bound(dom) != "language":
+        return None
+    values = _language_hazards(dom)
+    return _SpecialCycle(rng, values=values) if values else None
+
+
+def _language_hazards(dom) -> list:
+    """Intent:
+        Every hazard of a language domain's pieces, the members of the
+        domain's excluded set left out, in the languages' own order.
     """
     from .domain import LanguageRef
     from .languages import resolve_language
-    if _classify_bound(dom) != "language":
-        return None
-    values = []
+    values: list = []
     for piece in dom.pieces or ():
         if not isinstance(piece, LanguageRef):
             continue
@@ -763,7 +802,7 @@ def _language_lap(rng: random.Random, dom) -> "_SpecialCycle | None":
                 excluded = False
             if not excluded:
                 values.append(h.value)
-    return _SpecialCycle(rng, values=values) if values else None
+    return values
 
 
 def _sample_language(rng: random.Random, dom: Domain):
@@ -966,7 +1005,8 @@ def _fmt(args: tuple, names: tuple[str, ...] | None = None) -> str:
 
 def _sampling_shorthand(kinds: dict, domain: dict, n: int,
                         critical_hints: dict[str, list[float]] | None = None,
-                        truncated_hints: "set[str] | None" = None) -> str:
+                        truncated_hints: "set[str] | None" = None,
+                        lap_floor: "tuple[int, int] | None" = None) -> str:
     """How a probe actually sampled, in compact mathematical notation: the
     distribution per parameter, the seed, the trial count. Meant to make a
     `holds (n=...)` verdict legible and reproducible from the record alone,
@@ -980,7 +1020,9 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
     parameter whose own discovered-point count was capped (see
     `_hints_from_points`'s own `max_critical_hints_per_param`), appending
     `[truncated@N]` so a reader knows `n` covers a capped hint pool plus
-    ordinary sampling, not every point that was actually found."""
+    ordinary sampling, not every point that was actually found.
+    `lap_floor`, `(lap, budget)`, says the trial count was raised from
+    the budget to a language's lap so every hazard is visited."""
     critical_hints = critical_hints or {}
     truncated_hints = truncated_hints or set()
 
@@ -1032,7 +1074,9 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             parts.append(f"{p}~{render_domain_bound(bounds)}{crit_suffix(p)}")
         else:
             parts.append(f"{p}~U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]{crit_suffix(p)}")
-    return ", ".join(parts) + f", seed={_RNG_SEED}, n={n}"
+    floor = (f", n raised to {lap_floor[0]} to visit every hazard (budget {lap_floor[1]})"
+             if lap_floor else "")
+    return ", ".join(parts) + f", seed={_RNG_SEED}, n={n}" + floor
 
 
 def _out_of_domain_candidates(bounds) -> list:
@@ -1171,6 +1215,9 @@ class SamplingSetup:
     truncated_hints: set
     extra_cycles: dict
     route: str
+    affine: bool = False
+    explicit_trials: bool = False
+    scale: float = 1.0
     # "probe" or "probe:semi_analytical", the route value the evidence
     # honestly earns, per record-schema.md's open route field.
 
@@ -1207,7 +1254,8 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     rng = random.Random(_RNG_SEED)
     specials = _SpecialCycle(rng)
     risk = _structural_risk(facts, domain)
-    budget = trials if trials is not None else _starting_budget(risk, _affine_hint(fn, facts))
+    affine = trials is None and _affine_hint(fn, facts)
+    budget = trials if trials is not None else _starting_budget(risk, affine)
     points = _points_for_probe(fn, facts, domain, extensive)
     critical_hints, truncated_hints = _hints_from_points(points)
     # the route subroute below keys on ANALYTICAL discoveries about
@@ -1224,9 +1272,7 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     extra_cycles = {p: _SpecialCycle(rng, values=critical_hints[p])
                     for p in facts.params if p in critical_hints}
     scale = min(1.0, trials_scale)
-    if scale < 1.0:
-        budget = max(_RISK.min_trials_floor_when_scaled, len(_SPECIALS),
-                     round(budget * scale))
+    budget = _scaled_budget(budget, scale)
     # record-schema.md's own `route` field: "probe:semi_analytical"
     # states plainly that at least one parameter's own sampling was
     # informed by an analytically discovered critical point this run,
@@ -1235,7 +1281,37 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     return SamplingSetup(rng=rng, specials=specials, risk=risk, budget=budget,
                          points=points, critical_hints=critical_hints,
                          truncated_hints=truncated_hints,
-                         extra_cycles=extra_cycles, route=route_value)
+                         extra_cycles=extra_cycles, route=route_value,
+                         affine=affine, explicit_trials=trials is not None,
+                         scale=scale)
+
+
+def _scaled_budget(budget: int, scale: float) -> int:
+    """Intent:
+        `budget` shrunk by `trials_scale` when it is below one, never
+        under `min_trials_floor_when_scaled` or one lap of the specials.
+    """
+    if scale < 1.0:
+        return max(_RISK.min_trials_floor_when_scaled, len(_SPECIALS),
+                   round(budget * scale))
+    return budget
+
+
+def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict) -> "tuple[dict, int]":
+    """Intent:
+        The risk and trial budget for one claim: the function's own
+        setup, with the `language` factor read off the claim's domain
+        (a written binding or an inferred one), and the budget set from
+        the complexity that factor adds. An explicit trial count is kept
+        as given.
+    """
+    language = _language_risk(facts.params, cj_domain)
+    if language is None or language == setup.risk.get("language"):
+        return setup.risk, setup.budget
+    risk = {**setup.risk, "language": language}
+    if setup.explicit_trials:
+        return risk, setup.budget
+    return risk, _scaled_budget(_starting_budget(risk, setup.affine), setup.scale)
 
 
 def probe(fn, facts, domain: dict | None = None,
