@@ -194,3 +194,60 @@ def test_a_pinned_row_leaves_the_smoke_call_at_the_defaults():
     assert "callable" not in rows, rows["callable"].note
     assert rows["is_defined[axis=0]"].verdict == "holds", \
         rows["is_defined[axis=0]"].note
+
+
+_COMMENTED = """\
+    # numpy rows for this project
+    compendium: numpy
+    versions: ">=1.24"
+    # the mean of an empty array is nan
+    numpy.mean:
+      claims:
+        - name: is_defined
+          statement: "dim(a) >= 1"  # needs one axis
+"""
+
+
+def test_rewriting_a_file_with_comments_warns_and_points_at_note(tmp_path):
+    _project(tmp_path, _AXIS_ONE)
+    _write(tmp_path / "claims" / "numpy.claims.yaml", _COMMENTED)
+    r = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    (warning,) = [ln for ln in r.stdout.splitlines() if "WARN" in ln]
+    assert os.path.join("claims", "numpy.claims.yaml") in warning, warning
+    assert "comments" in warning and "note:" in warning, warning
+    assert "would" not in warning, warning
+    text = (tmp_path / "claims" / "numpy.claims.yaml").read_text()
+    assert text.startswith("# numpy rows for this project"), text
+    assert "the mean of an empty array" not in text, text
+
+
+def test_dry_run_says_the_comments_would_be_lost(tmp_path):
+    _project(tmp_path, _AXIS_ONE)
+    path = tmp_path / "claims" / "numpy.claims.yaml"
+    _write(path, _COMMENTED)
+    before = path.read_text()
+    r = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path),
+             "--dry-run")
+    assert r.returncode == 0, r.stderr
+    (warning,) = [ln for ln in r.stdout.splitlines() if "WARN" in ln]
+    assert os.path.join("claims", "numpy.claims.yaml") in warning, warning
+    assert "would" in warning and "note:" in warning, warning
+    assert path.read_text() == before
+
+
+def test_a_header_comment_alone_raises_no_warning(tmp_path):
+    _project(tmp_path, _AXIS_ONE)
+    _write(tmp_path / "claims" / "numpy.claims.yaml", """\
+        # numpy rows for this project
+        compendium: numpy
+        versions: ">=1.24"
+        numpy.mean:
+          claims:
+            - name: is_defined
+              statement: "dim(a) >= 1"
+    """)
+    r = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    assert "wrote" in r.stdout, r.stdout
+    assert "WARN" not in r.stdout, r.stdout

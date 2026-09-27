@@ -240,6 +240,21 @@ def _leading_comment(path: str) -> "str | None":
     return "\n".join(lines) or None
 
 
+def _comments_beyond_header(path: str) -> bool:
+    """Whether a file carries a YAML comment below its leading comment
+    block (the block a rewrite keeps as its header)."""
+    from ..sync import yaml_has_comments
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return False
+    body = lines
+    while body and body[0].startswith("#"):
+        body = body[1:]
+    return yaml_has_comments("\n".join(body))
+
+
 def plan_update(root: str = ".") -> dict:
     """Intent:
         What `mathema compendium update` would change, as data:
@@ -355,13 +370,21 @@ def run_update(root: str = ".", dry_run: bool = False) -> list:
     """Intent:
         Apply `plan_update` (unless `dry_run`) and return the lines to
         print: each change, each argument left unpinned, each file
-        written, or `nothing to change`.
+        written, or `nothing to change`, and a warning for each file
+        rewritten that carries YAML comments below its header, since
+        only the header survives the rewrite.
     """
     from ..spec import write_yaml
     plan = plan_update(root)
     lines = list(plan["lines"])
     for path, data in sorted(plan["files"].items()):
         rel = os.path.relpath(path, os.path.abspath(root))
+        if _comments_beyond_header(path):
+            lines.append(
+                f"WARN {rel} has YAML comments below its header, which "
+                f"{'would not survive' if dry_run else 'do not survive'} "
+                f"this rewrite; keep a row's annotation in its `note:` "
+                f"field, which persists through every rewrite")
         if dry_run:
             lines.append(f"would write {rel} (dry run: nothing written)")
             continue
