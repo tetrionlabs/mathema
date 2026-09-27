@@ -255,11 +255,14 @@ _PIECE_NAMED = re.compile(r"^(R|Z|N|C|ℝ|ℤ|ℕ|ℂ)$")
 _PIECE_LANGUAGE = re.compile(
     r"^(?:L|\U0001d543)\[\s*(?P<name>[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\s*"
     r"(?:,\s*(?P<refine>.+?))?\s*\]$")
-# a length refinement inside a language piece, `L[ascii, len <= 80]`:
-# one bound, or an interval of lengths; a length counts code points
-_LEN_BOUND = re.compile(r"^len\s*(?P<op><=|<|>=|>)\s*(?P<n>\d+)$")
-_LEN_INTERVAL = re.compile(
-    r"^len\s+in\s+(?P<lb>[\[(])\s*(?P<lo>\d+)\s*,\s*(?P<hi>\d+)\s*(?P<rb>[\])])$")
+# a refinement inside a language piece, `L[ascii, len <= 80]`,
+# `L[json, depth <= 6]`: a key and one bound, or a key and an interval
+# of whole numbers; the key means whatever the language that serves it
+# says, and core reads none of them
+_REFINE_BOUND = re.compile(r"^(?P<key>[A-Za-z_]\w*)\s*(?P<op><=|<|>=|>)\s*(?P<n>\d+)$")
+_REFINE_INTERVAL = re.compile(
+    r"^(?P<key>[A-Za-z_]\w*)\s+in\s+(?P<lb>[\[(])\s*(?P<lo>\d+)\s*,\s*(?P<hi>\d+)\s*"
+    r"(?P<rb>[\])])$")
 # Sampling-intensity modifiers, not a parameter binding at all: `n=500`
 # in the same comma-list sets domain["n"] (how many draws/rows, not a
 # bound on any variable); domain means scope *and* intensity of
@@ -460,17 +463,21 @@ class LanguageRef:
     the name. A frozen dataclass rather than a tuple, since every
     interval test in this module reads a tuple piece as `(lo, hi)`."""
     name: str
-    #: the lengths the piece keeps, an `Interval` of code-point counts
-    #: (`L[ascii, len <= 80]`), or None for every member
-    length: object = None
+    #: the refinements the piece carries, `(key, Interval)` pairs in key
+    #: order (`L[json, depth <= 6, nodes <= 200]`); a key is served by
+    #: whatever refinement is registered under it
+    refinements: tuple = ()
+
+    def refinement(self, key: str):
+        """The interval refinement `key` states, or None."""
+        return dict(self.refinements).get(key)
 
     @property
     def text(self) -> str:
-        """What sits inside the brackets: the name, then any length
-        refinement, `ascii, len <= 80`."""
-        if self.length is None:
-            return self.name
-        return f"{self.name}, {render_length(self.length)}"
+        """What sits inside the brackets: the name, then each
+        refinement, `json, depth <= 6, nodes <= 200`."""
+        return ", ".join([self.name, *(render_refinement(key, interval)
+                                       for key, interval in self.refinements)])
 
     def __repr__(self) -> str:
         return f"L[{self.text}]"
@@ -480,55 +487,78 @@ def _whole(v) -> str:
     return str(int(v)) if float(v).is_integer() else str(v)
 
 
-def render_length(length) -> str:
-    """A length refinement as text: `len <= 80` or `len < 80` for an
-    upper bound from zero, `len >= 1` or `len > 20` for a lower bound
-    alone, and `len in [1, 80]` for both."""
-    lo, hi = length[0], length[1]
-    closed_lo = getattr(length, "closed_lo", True)
-    closed_hi = getattr(length, "closed_hi", True)
+def render_refinement(key: str, interval) -> str:
+    """A refinement as text: `key <= 80` or `key < 80` for an upper
+    bound from zero, `key >= 1` or `key > 20` for a lower bound alone,
+    and `key in [1, 80]` for both."""
+    lo, hi = interval[0], interval[1]
+    closed_lo = getattr(interval, "closed_lo", True)
+    closed_hi = getattr(interval, "closed_hi", True)
     if hi == float("inf"):
-        return f"len {'>=' if closed_lo else '>'} {_whole(lo)}"
+        return f"{key} {'>=' if closed_lo else '>'} {_whole(lo)}"
     if lo == 0 and closed_lo:
-        return f"len {'<=' if closed_hi else '<'} {_whole(hi)}"
-    return (f"len in {'[' if closed_lo else '('}{_whole(lo)}, "
+        return f"{key} {'<=' if closed_hi else '<'} {_whole(hi)}"
+    return (f"{key} in {'[' if closed_lo else '('}{_whole(lo)}, "
             f"{_whole(hi)}{']' if closed_hi else ')'}")
 
 
-def length_range(length) -> "tuple[int, int | None]":
-    """The closed integer range of lengths a refinement keeps, the
-    upper end None when unbounded."""
-    lo, hi = length[0], length[1]
-    first = int(lo) if getattr(length, "closed_lo", True) else int(lo) + 1
+def refinement_range(interval) -> "tuple[int, int | None]":
+    """The closed range of whole numbers a refinement keeps, the upper
+    end None when unbounded."""
+    lo, hi = interval[0], interval[1]
+    first = int(lo) if getattr(interval, "closed_lo", True) else int(lo) + 1
     if hi == float("inf"):
         return first, None
-    last = int(hi) if getattr(length, "closed_hi", True) else int(hi) - 1
+    last = int(hi) if getattr(interval, "closed_hi", True) else int(hi) - 1
     return first, last
 
 
-def _parse_length(text: str, whole: str):
-    """The `Interval` a refinement spells, or InvalidDomain naming the
+def _parse_refinement(text: str, whole: str) -> tuple:
+    """`(key, Interval)` for one refinement, or InvalidDomain naming the
     spellings that are read."""
     t = text.strip()
-    m = _LEN_BOUND.match(t)
+    m = _REFINE_BOUND.match(t)
     if m is not None:
-        n, op = float(m.group("n")), m.group("op")
-        length = {"<=": Interval(0.0, n), "<": Interval(0.0, n, True, False),
-                  ">=": Interval(n, float("inf")),
-                  ">": Interval(n, float("inf"), False, True)}[op]
+        key, n, op = m.group("key"), float(m.group("n")), m.group("op")
+        interval = {"<=": Interval(0.0, n), "<": Interval(0.0, n, True, False),
+                    ">=": Interval(n, float("inf")),
+                    ">": Interval(n, float("inf"), False, True)}[op]
     else:
-        m = _LEN_INTERVAL.match(t)
+        m = _REFINE_INTERVAL.match(t)
         if m is None:
             raise InvalidDomain(
-                f"{whole!r}: a language refinement is a length bound, "
-                f"`len <= 80`, `len > 20` or `len in [1, 80]`, lengths "
-                f"counted in code points; {t!r} is not one")
-        length = Interval(float(m.group("lo")), float(m.group("hi")),
-                          m.group("lb") == "[", m.group("rb") == "]")
-    first, last = length_range(length)
+                f"{whole!r}: a language refinement is `key <= n`, `key < n`, "
+                f"`key >= n`, `key > n` or `key in [lo, hi]` with whole "
+                f"numbers, `len <= 80` or `depth in [1, 6]`; {t!r} is not one")
+        key = m.group("key")
+        interval = Interval(float(m.group("lo")), float(m.group("hi")),
+                            m.group("lb") == "[", m.group("rb") == "]")
+    first, last = refinement_range(interval)
     if last is not None and last < max(first, 0):
-        raise InvalidDomain(f"{whole!r}: no length satisfies {t!r}")
-    return length
+        raise InvalidDomain(f"{whole!r}: no {key} satisfies {t!r}")
+    return key, interval
+
+
+def _parse_refinements(text: str, whole: str) -> tuple:
+    """Every refinement a piece states, in key order; a key stated twice
+    is refused."""
+    found: dict = {}
+    for part in _split_commas(text):
+        key, interval = _parse_refinement(part, whole)
+        if key in found:
+            raise InvalidDomain(f"{whole!r}: the refinement {key!r} is stated twice")
+        found[key] = interval
+    return tuple(sorted(found.items()))
+
+
+def language_ref(text: str) -> "LanguageRef | None":
+    """The `LanguageRef` the inside of `L[...]` spells (`unicode`,
+    `unicode, len <= 80`), or None when it spells none."""
+    m = _PIECE_LANGUAGE.match(f"L[{text}]")
+    if m is None:
+        return None
+    refine = m.group("refine")
+    return LanguageRef(m.group("name"), _parse_refinements(refine, text) if refine else ())
 
 
 @dataclass(frozen=True)
@@ -1214,9 +1244,8 @@ def domain_bound_to_json(b) -> str | dict:
             out["dims"] = list(b.dims)
         return out
     if isinstance(b, LanguageRef):
-        if b.length is None:
-            return {"language": b.name}
-        return {"language": b.name, "len": domain_bound_to_json(b.length)}
+        return {"language": b.name,
+                **{key: domain_bound_to_json(interval) for key, interval in b.refinements}}
     if isinstance(b, str):
         return b
     if isinstance(b, frozenset):
@@ -1249,8 +1278,9 @@ def domain_bound_from_json(v):
     if isinstance(v, list):
         return Interval(_endpoint_from_json(v[0]), _endpoint_from_json(v[1]))
     if "language" in v:
-        return LanguageRef(str(v["language"]),
-                           domain_bound_from_json(v["len"]) if "len" in v else None)
+        return LanguageRef(str(v["language"]), tuple(sorted(
+            (key, domain_bound_from_json(interval))
+            for key, interval in v.items() if key != "language")))
     if "base_type" in v:
         return Domain(base_type=v["base_type"],
                       pieces=tuple(domain_bound_from_json(p) for p in v["pieces"]),
@@ -1320,7 +1350,7 @@ def _parse_piece(text: str):
     if m is not None:
         refine = m.group("refine")
         return LanguageRef(m.group("name"),
-                           _parse_length(refine, text) if refine else None)
+                           _parse_refinements(refine, text) if refine else ())
     m = _PIECE_NAMED.match(text)
     if m is not None:
         return _SUBSET_ASCII.get(m.group(1), m.group(1))

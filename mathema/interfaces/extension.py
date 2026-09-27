@@ -68,7 +68,13 @@ from ..languages import HazardValue as HazardValue
 from ..languages import Language as Language
 from ..languages import Problem as Problem
 from ..languages import StringLanguage as StringLanguage
+from ..languages import REFINEMENT_GROUP as REFINEMENT_GROUP
+from ..languages import RefinedLanguage as RefinedLanguage
 from ..languages import UnknownLanguage as UnknownLanguage
+from ..languages import UnknownRefinement as UnknownRefinement
+from ..languages import refinement_keys as refinement_keys
+from ..languages import register_refinement as register_refinement
+from ..languages import unregister_refinement as unregister_refinement
 from ..lexicon import LEXICON_GROUP as LEXICON_GROUP
 from ..lexicon import LexiconSource as LexiconSource
 from ..lexicon import lexicon_source as lexicon_source
@@ -154,7 +160,9 @@ SURFACE: dict[str, tuple[str, ...]] = {
                   "STRING_HAZARDS", "language_problems",
                   "register_language", "unregister_language",
                   "resolve_language", "describe_language",
-                  "language_vocabulary", "UnknownLanguage", "language_adaptors"),
+                  "language_vocabulary", "UnknownLanguage", "language_adaptors",
+                  "RefinedLanguage", "register_refinement", "unregister_refinement",
+                  "refinement_keys", "UnknownRefinement", "REFINEMENT_GROUP"),
     # assembling a claim family: the two kits, the proof result a derive
     # half returns, and the trial loop a probe half reports through
     "families": ("SafetyFamily", "OutputPredicateFamily", "ProofResult",

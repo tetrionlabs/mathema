@@ -82,7 +82,7 @@ ROWS = '''
         return o.x * o.x
 '''
 
-_FIELDS = {"sku": LanguageRef("unicode", Interval(0.0, 8.0)),
+_FIELDS = {"sku": LanguageRef("unicode", (("len", Interval(0.0, 8.0)),)),
            "qty": Domain(base_type="Z", pieces=(Interval(1.0, 10.0),), explicit_type=True),
            "price": Interval(0.0, float("inf"))}
 

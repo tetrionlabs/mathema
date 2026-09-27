@@ -107,7 +107,7 @@ class _Orders:
         return {"qty": Domain(base_type="Z", pieces=(Interval(1.0, 10.0),), explicit_type=True),
                 "price": Interval(0.0, float("inf")),
                 "kind": None,
-                "sku": LanguageRef("unicode", Interval(0.0, 8.0))}
+                "sku": LanguageRef("unicode", (("len", Interval(0.0, 8.0)),))}
 
     def render(self, ascii_mode=True):
         return f"L[{self.name}]"

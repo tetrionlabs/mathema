@@ -362,6 +362,207 @@ class UnknownLanguage(InvalidDomain):
             + hint + (f" ({detail})" if detail else ""))
 
 
+REFINEMENT_GROUP = "mathema.language_refinements"
+
+#: refinements registered in this process, by key
+_REFINEMENTS: dict = {}
+
+
+@functools.lru_cache(maxsize=1)
+def _discovered_refinements() -> dict:
+    return {ep.name: ep for ep in entry_points(group=REFINEMENT_GROUP)}
+
+
+def register_refinement(key: str, refine) -> None:
+    """Intent:
+        Serve the refinement `key` inside `L[...]` in this process:
+        `refine(language, interval)` returns the language refined to
+        the members whose measure lies in the interval. An in-process
+        registration wins over an entry point of the same key.
+    """
+    _REFINEMENTS[key] = refine
+
+
+def unregister_refinement(key: str) -> None:
+    """Remove an in-process refinement registration."""
+    _REFINEMENTS.pop(key, None)
+
+
+def _refinement(key: str):
+    if key in _REFINEMENTS:
+        return _REFINEMENTS[key]
+    ep = _discovered_refinements().get(key)
+    if ep is None:
+        return None
+    try:
+        return ep.load()
+    except Exception as e:
+        warnings.warn(f"mathema: language refinement {ep.value!r} registered "
+                      f"under {key!r} failed to load ({e!r}), skipping it",
+                      stacklevel=2)
+        return None
+
+
+def refinement_keys() -> tuple:
+    """Every refinement key `L[...]` accepts in this process: the
+    in-process registrations and the entry points, sorted. mathema
+    itself registers none."""
+    return tuple(sorted(set(_REFINEMENTS) | set(_discovered_refinements())))
+
+
+class UnknownRefinement(UnknownLanguage):
+    """Raised when a piece states a refinement no registered language
+    refinement serves (`L[json, depth <= 6]` with nothing registered
+    under `depth`); the message names the keys that are known and the
+    group a package registers one under."""
+
+    def __init__(self, ref, key: str):
+        self.key = key
+        known = ", ".join(refinement_keys()) or "none in this process"
+        InvalidDomain.__init__(
+            self,
+            f"L[{ref.text}]: no language refinement is registered under "
+            f"{key!r}; known keys are {known}; a package adds one under the "
+            f"{REFINEMENT_GROUP!r} entry-point group, and "
+            f"'pip install \"mathema[language]\"' brings len, depth, nodes "
+            f"and children")
+        self.name = ref.text
+        self.vocabulary = refinement_keys()
+
+
+class RefinedLanguage:
+    """The members of `base` whose `measure` lies in `interval`, the
+    kit a refinement key is built from (`L[ascii, len <= 80]` is
+    `RefinedLanguage(ascii, "len", [0, 80], measure=len)`). Random
+    members come from the base by rejection, then from `build(rng, n)`,
+    a base member of measure exactly `n`, when given. The members at
+    each bound are hazards, from `plain(n)` (a simplest member of
+    measure `n`, which may or may not be a base member) where given, else
+    built, each of kind `hazard_kind`, and a base member one past a
+    bound is the outside draw. `schema` is merged into the persisted
+    form (`{"maxLength": 80}`). A value the measure cannot be taken of
+    is not a member."""
+
+    def __init__(self, base, key: str, interval, *, measure, plain=None, build=None,
+                 schema: "dict | None" = None, hazard_kind: str = "shape") -> None:
+        from .domain import refinement_range, render_refinement
+        self.base = base
+        self.key = key
+        self.interval = interval
+        self.measure = measure
+        self._plain_of = plain
+        self._build_of = build
+        self._schema = dict(schema or {})
+        self.hazard_kind = hazard_kind
+        self.lo, self.hi = refinement_range(interval)
+        self.bound_text = render_refinement(key, interval)
+        self.name = f"{base.name}, {self.bound_text}"
+        self.kind = base.kind
+        self.level = base.level
+
+    def _measured(self, value):
+        try:
+            return self.measure(value)
+        except Exception:
+            return None
+
+    def _fits(self, value) -> bool:
+        n = self._measured(value)
+        return n is not None and n >= self.lo and (self.hi is None or n <= self.hi)
+
+    def contains(self, value) -> bool:
+        return self._fits(value) and bool(self.base.contains(value))
+
+    def explain(self, value):
+        if self.base.contains(value) and not self._fits(value):
+            return [Problem("", self.bound_text, value)]
+        return self.base.explain(value)
+
+    def _member_of(self, rng: random.Random, n: int):
+        """A base member of measure exactly `n`, or None."""
+        if n < 0:
+            return None
+        if self._plain_of is not None:
+            try:
+                candidate = self._plain_of(n)
+            except Exception:
+                candidate = None
+            if candidate is not None and self.base.contains(candidate) \
+                    and self._measured(candidate) == n:
+                return candidate
+        if self._build_of is not None:
+            try:
+                candidate = self._build_of(rng, n)
+            except Exception:
+                candidate = None
+            if candidate is not None and self.base.contains(candidate) \
+                    and self._measured(candidate) == n:
+                return candidate
+        return None
+
+    def sample(self, rng: random.Random):
+        for _ in range(50):
+            value = self.base.sample(rng)
+            if self._fits(value):
+                return value
+        top = self.hi if self.hi is not None else self.lo + 40
+        for _ in range(20):
+            value = self._member_of(rng, rng.randint(self.lo, max(self.lo, min(top, self.lo + 300))))
+            if value is not None and self.contains(value):
+                return value
+        raise ValueError(f"L[{self.name}]: no member of this {self.key} was found")
+
+    def members(self, limit: int):
+        members = self.base.members(limit)
+        if members is None:
+            return None
+        return tuple(m for m in members if self._fits(m))
+
+    def hazards(self) -> tuple:
+        """The members at each bound first, then the base's hazards
+        that fit."""
+        rng = random.Random(0)
+        out: list = []
+        seen: list = []
+        edges = [self.lo] + ([self.hi] if self.hi is not None else [self.lo + 256])
+        for n in edges:
+            value = self._member_of(rng, n)
+            if value is not None and value not in seen and self.contains(value):
+                seen.append(value)
+                out.append(HazardValue(self.hazard_kind, value,
+                                       f"a member of {self.key} {n}, at the bound"))
+        for h in self.base.hazards():
+            try:
+                repeated = h.value in seen
+            except Exception:
+                repeated = False
+            if self.contains(h.value) and not repeated:
+                out.append(h)
+        return tuple(out)
+
+    def outside(self, rng: random.Random):
+        for n in ([self.hi + 1] if self.hi is not None else []) + ([self.lo - 1] if self.lo > 0 else []):
+            value = self._member_of(rng, n)
+            if value is not None and not self.contains(value):
+                return value
+        value = self.base.outside(rng)
+        return None if value is None or self.contains(value) else value
+
+    def shrink(self, value) -> Iterable:
+        return [s for s in self.base.shrink(value) if self.contains(s)]
+
+    def fields(self):
+        return self.base.fields()
+
+    def render(self, ascii_mode: bool = True) -> str:
+        return f"L[{self.name}]"
+
+    def to_json(self) -> dict:
+        out = dict(self.base.to_json())
+        out.update(self._schema)
+        return out
+
+
 def register_language(name: str, language) -> None:
     """Intent:
         Make `language` resolvable as `L[<name>]` in this process,
@@ -484,9 +685,14 @@ def resolve(ref) -> tuple:
     Raises:
         UnknownLanguage: nothing serves the name.
     """
-    if isinstance(ref, LanguageRef) and ref.length is not None:
-        base, source = resolve(LanguageRef(ref.name))
-        return _LengthRefined(base, ref), source
+    if isinstance(ref, LanguageRef) and ref.refinements:
+        language, source = resolve(LanguageRef(ref.name))
+        for key, interval in ref.refinements:
+            refine = _refinement(key)
+            if refine is None:
+                raise UnknownRefinement(ref, key)
+            language = refine(language, interval)
+        return language, source
     name = ref.name if isinstance(ref, LanguageRef) else str(ref)
     if name in _REGISTRY:
         return _REGISTRY[name], "registered"
@@ -548,129 +754,6 @@ def resolves(name: str) -> bool:
     return True
 
 
-class _LengthRefined:
-    """The members of `base` whose length lies in a refinement,
-    `L[ascii, len <= 80]`; a length counts code points. Random members
-    come from the base by rejection, then by cutting a run of base
-    members to a chosen length; the members at both bounds are hazards,
-    and a base member one past a bound is the outside draw."""
-
-    def __init__(self, base, ref) -> None:
-        from .domain import length_range, render_length
-        self.base = base
-        self.name = ref.text
-        self.kind = base.kind
-        self.level = base.level
-        self.lo, self.hi = length_range(ref.length)
-        self.bound_text = render_length(ref.length)
-
-    def _fits(self, value) -> bool:
-        try:
-            n = len(value)
-        except TypeError:
-            return False
-        return n >= self.lo and (self.hi is None or n <= self.hi)
-
-    def contains(self, value) -> bool:
-        return self._fits(value) and bool(self.base.contains(value))
-
-    def explain(self, value):
-        if self.base.contains(value) and not self._fits(value):
-            return [Problem("", self.bound_text, value)]
-        return self.base.explain(value)
-
-    def _build(self, rng: random.Random, target: int):
-        """A base member of exactly `target` code points, or None."""
-        if target < 0:
-            return None
-        for _ in range(100):
-            s = self.base.sample(rng)
-            if isinstance(s, str) and len(s) == target:
-                return s
-        for _ in range(100):
-            run = ""
-            for _ in range(target + 8):
-                if len(run) >= target:
-                    break
-                piece = self.base.sample(rng)
-                if not isinstance(piece, str):
-                    return None
-                run += piece
-            candidate = run[:target]
-            if len(candidate) == target and self.base.contains(candidate):
-                return candidate
-        return None
-
-    def sample(self, rng: random.Random):
-        for _ in range(50):
-            s = self.base.sample(rng)
-            if self._fits(s):
-                return s
-        top = self.hi if self.hi is not None else self.lo + 40
-        for _ in range(20):
-            s = self._build(rng, rng.randint(self.lo, max(self.lo, min(top, self.lo + 300))))
-            if s is not None and self.contains(s):
-                return s
-        raise ValueError(f"L[{self.name}]: no member of this length was found")
-
-    def members(self, limit: int):
-        members = self.base.members(limit)
-        if members is None:
-            return None
-        return tuple(m for m in members if self._fits(m))
-
-    def _plain(self, rng: random.Random, n: int):
-        """A base member of exactly `n` code points, one repeated simple
-        character where the base admits one (`"a" * n`), else built."""
-        if n < 0:
-            return None
-        for ch in ("a", "0", "x", "A", " "):
-            if self.base.contains(ch * n):
-                return ch * n
-        return self._build(rng, n)
-
-    def hazards(self) -> tuple:
-        """The members at each bound first, each a plain repetition
-        where the base admits one, then the base's hazards that fit."""
-        rng = random.Random(0)
-        out: list = []
-        seen: set = set()
-        edges = [self.lo] + ([self.hi] if self.hi is not None else [self.lo + 256])
-        for n in edges:
-            s = self._plain(rng, n)
-            if s is not None and s not in seen and self.contains(s):
-                seen.add(s)
-                out.append(HazardValue("length", s, f"a member of length {n}, at the bound"))
-        for h in self.base.hazards():
-            if self.contains(h.value) and not (isinstance(h.value, str) and h.value in seen):
-                out.append(h)
-        return tuple(out)
-
-    def outside(self, rng: random.Random):
-        for n in ([self.hi + 1] if self.hi is not None else []) + ([self.lo - 1] if self.lo > 0 else []):
-            s = self._plain(rng, n)
-            if s is not None and not self.contains(s):
-                return s
-        s = self.base.outside(rng)
-        return None if s is None or self.contains(s) else s
-
-    def shrink(self, value) -> Iterable:
-        return [s for s in self.base.shrink(value) if self.contains(s)]
-
-    def fields(self):
-        return self.base.fields()
-
-    def render(self, ascii_mode: bool = True) -> str:
-        return f"L[{self.name}]"
-
-    def to_json(self) -> dict:
-        out = dict(self.base.to_json())
-        out["minLength"] = self.lo
-        if self.hi is not None:
-            out["maxLength"] = self.hi
-        return out
-
-
 def resolve_language(ref):
     """The `Language` behind a `LanguageRef` or a bare name; see
     `resolve` for the precedence and the refusal."""
@@ -690,7 +773,9 @@ __all__ = [
     "ADAPTOR_GROUP", "HAZARD_KINDS", "HazardValue",
     "KINDS", "LANGUAGE_GROUP", "LEVELS", "Language", "Problem",
     "STRING_HAZARDS", "StringLanguage", "UnknownLanguage",
+    "REFINEMENT_GROUP", "RefinedLanguage", "UnknownRefinement",
     "adapt_annotation", "describe_language", "language_adaptors", "language_problems",
+    "refinement_keys", "register_refinement", "unregister_refinement",
     "language_vocabulary", "register_language", "resolve",
     "resolve_language", "resolves", "unregister_language",
 ]

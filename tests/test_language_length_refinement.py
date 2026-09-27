@@ -6,7 +6,7 @@ the members of the language whose length (in code points, Python's
 `>`, `in [lo, hi]`), renders back to itself, persists, and is a
 language of its own: membership checks the length, samples and hazards
 stay inside it, the member one past the bound is its outside draw, and
-an annotation's `MaxLen(80)` infers it."""
+an adaptor that reads an annotation's `MaxLen(80)` infers it."""
 import random
 import textwrap
 from typing import Annotated
@@ -56,11 +56,11 @@ def test_every_spelling_parses_and_renders_back_to_itself(letters, text):
 def test_the_refinement_is_carried_on_the_piece_and_persisted(letters):
     ref = _ref("L[letters, len <= 80]")
     assert isinstance(ref, LanguageRef) and ref.name == "letters"
-    assert ref.length is not None
+    assert ref.refinement("len") is not None
     assert repr(ref) == "L[letters, len <= 80]"
     assert domain_bound_from_json(domain_bound_to_json(_bound("L[letters, len <= 80]"))) \
         == _bound("L[letters, len <= 80]")
-    assert _ref("L[letters]").length is None
+    assert _ref("L[letters]").refinement("len") is None
 
 
 def test_membership_counts_code_points(letters):
@@ -87,15 +87,16 @@ def test_the_refined_language_is_a_language(letters):
 
 
 def test_a_bound_nothing_satisfies_is_refused_at_parse(letters):
-    with pytest.raises(InvalidDomain, match="no length"):
+    with pytest.raises(InvalidDomain, match="no len satisfies"):
         parse_binding("s in L[letters, len in [5, 2]]")
     with pytest.raises(InvalidDomain):
         parse_binding("s in L[letters, len < 0]")
 
 
-def test_len_is_the_only_refinement_key(letters):
-    with pytest.raises(InvalidDomain):
-        parse_binding("s in L[letters, n <= 80]")
+def test_a_key_nothing_serves_is_refused_at_resolution(letters):
+    from mathema.languages import UnknownRefinement
+    with pytest.raises(UnknownRefinement, match=r"'n'.*known keys are len"):
+        resolve_language(_ref("L[letters, n <= 80]"))
 
 
 def _load(tmp_path, body, name="refine_fns"):
@@ -157,10 +158,16 @@ class _Entry:
 def text_adaptor(monkeypatch):
     import typing
 
+    from mathema.domain import Interval
+    from tests._length_refinement import length
+
     def adapt(hint):
-        if hint is str or (typing.get_origin(hint) is typing.Annotated
-                           and typing.get_args(hint)[0] is str):
+        if hint is str:
             return LETTERS
+        if typing.get_origin(hint) is typing.Annotated and typing.get_args(hint)[0] is str:
+            limits = [getattr(m, "max_length", None) for m in typing.get_args(hint)[1:]]
+            limits = [n for n in limits if isinstance(n, int)]
+            return length(LETTERS, Interval(0.0, float(min(limits)))) if limits else LETTERS
         return None
 
     monkeypatch.setattr(languages, "_discovered_adaptors",

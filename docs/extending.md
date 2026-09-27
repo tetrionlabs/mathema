@@ -20,6 +20,7 @@ exposes.
 | `mathema.target_resolvers` | a resolver for language-tagged target keys (`ts:...`) | `mathema._target_resolvers` |
 | `mathema.languages` | a named language a claim quantifies over with `L[<name>]` | `mathema.languages` |
 | `mathema.language_adaptors` | an adaptor turning an imported object (a schema class, a type) into a language, or `None` for "not mine" | `mathema.languages` |
+| `mathema.language_refinements` | a refinement key inside `L[...]` (`len`, `depth`), the entry point's name being the key | `mathema.languages` |
 | `mathema.lexicon` | worked claims (rows, sections, tags, example functions) that join mathema's lexicon | `mathema.lexicon` |
 
 A claim family answers "can this be proven." A capability answers "how
@@ -120,6 +121,21 @@ The mapping is an addition to the return shape, so a probe written
 against the three- or four-element forms keeps working unchanged and
 the extension API version stays where it is.
 
+## Registered refinements
+
+`L[json, depth <= 6]` hands the refinement `depth <= 6` to whatever is
+registered under the key `depth`: `register_refinement(key, refine)` in
+the process, or a `mathema.language_refinements` entry point named by
+the key. `refine(language, interval)` returns the refined language, and
+`RefinedLanguage(language, key, interval, measure=..., plain=...,
+build=..., schema=..., hazard_kind=...)` builds one from a measure: it
+keeps the members whose measure lies in the interval, samples by
+rejection and then from `build`, visits the members at each bound first
+(`plain`, else `build`), draws one past a bound as the outside member,
+and merges `schema` into the persisted form. mathema registers no key;
+`refinement_keys()` lists what is served, and a key nothing serves
+raises `UnknownRefinement` naming them.
+
 ## Registered lexicons
 
 A package's worked claims join mathema's lexicon through the
@@ -176,7 +192,7 @@ Everything a provider may import lives in
 | `store` | `load_declared`, `load_verified`, `save_verified_entry` |
 | `index` | `build_index` |
 | `evidence` | `evidence_rank`, `SUPPORTED_VERDICTS` |
-| `languages` | `Language`, `LanguageRef`, `StringLanguage`, `Problem`, `HazardValue`, `KINDS`, `LEVELS`, `HAZARD_KINDS`, `STRING_HAZARDS`, `language_problems`, `register_language`, `unregister_language`, `resolve_language`, `describe_language`, `language_vocabulary`, `UnknownLanguage`, `language_adaptors` |
+| `languages` | `Language`, `LanguageRef`, `StringLanguage`, `Problem`, `HazardValue`, `KINDS`, `LEVELS`, `HAZARD_KINDS`, `STRING_HAZARDS`, `language_problems`, `register_language`, `unregister_language`, `resolve_language`, `describe_language`, `language_vocabulary`, `UnknownLanguage`, `language_adaptors`, `RefinedLanguage`, `register_refinement`, `unregister_refinement`, `refinement_keys`, `UnknownRefinement`, `REFINEMENT_GROUP` |
 | `lexicon` | `LEXICON_GROUP`, `LexiconSource`, `lexicon_source`, `lexicon_problems`, `write_lexicon_golden` |
 | `families` | `SafetyFamily`, `OutputPredicateFamily`, `ProofResult`, `probe_trials`, `call_with_target`, `synth_other_params`, `format_point`, `pinned_float_env` |
 | `sampling` | `sample_bound`, `shrink` |

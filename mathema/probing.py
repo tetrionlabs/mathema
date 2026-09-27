@@ -767,12 +767,17 @@ def _sample_domain(rng: random.Random, dom: Domain,
     return value
 
 
+#: the hazard kinds the lap visits first: a length and a shape, which
+#: is where a refinement's members at its bounds sit
+_BOUND_KINDS = ("length", "shape")
+
+
 def _language_lap(rng: random.Random, dom) -> "_SpecialCycle | None":
     """Intent:
         One lap over every hazard of a language domain, for the first
-        draws of a parameter bound to it: the length hazards (the
-        members at a length bound among them) first, in the language's
-        order, then the rest once each in a seeded order. `None` when
+        draws of a parameter bound to it: the length and shape hazards
+        (a refinement's members at its bounds among them) first, in the
+        language's order, then the rest once each in a seeded order. `None` when
         the bound is not a language domain or has no hazard to visit.
     """
     if _classify_bound(dom) != "language":
@@ -780,8 +785,9 @@ def _language_lap(rng: random.Random, dom) -> "_SpecialCycle | None":
     values = _language_hazards(dom)
     if not values:
         return None
-    lengths = [v for v, kind in _language_hazards(dom, kinds=True) if kind == "length"]
-    rest = [v for v, kind in _language_hazards(dom, kinds=True) if kind != "length"]
+    pairs = _language_hazards(dom, kinds=True)
+    lengths = [v for v, kind in pairs if kind in _BOUND_KINDS]
+    rest = [v for v, kind in pairs if kind not in _BOUND_KINDS]
     return _SpecialCycle(rng, values=rest, first=lengths)
 
 

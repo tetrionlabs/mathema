@@ -61,9 +61,10 @@ plain `mathema`. In that dialect a length renders as `len(s)`, while the
 canonical form underneath keeps `dim(s, 0)`, mathema's one spelling of a
 dimension, so the rendered text parses back to the same claim.
 
-## Length bounds
+## Refinements
 
-A length bound refines a language inside its brackets:
+A refinement narrows a language inside its brackets, a key and a bound
+on the whole number it measures:
 
 ```
 for s in L[ascii, len <= 80], len(f(s)) <= 80
@@ -71,16 +72,23 @@ for s in L[unicode, len > 20], len(f(s)) <= len(s)
 for s in L[unicode, len in [1, 80]], f(s) in L[unicode, len in [1, 80]]
 ```
 
-A length is Python's `len`: a count of code points, not of bytes and
-not of the characters a reader sees (`"é"` can be one code point or
-two). The refined language is a language of its own: every member the
-probe draws fits the bound, the members at both bounds are hazards it
-always visits, and a member one past the bound is its outside draw, so
-`excluded_outside_domain(s)` checks that the function refuses the 81st
-character. `L[unicode, len >= 1]` is the same set as `L[unicode] \ {""}`.
-A parameter annotated `Annotated[str, MaxLen(80)]` (annotated_types,
-pydantic) infers `L[unicode, len <= 80]` when the text adaptor is
-installed, and the record's note says so.
+mathema reads the shape, `key <= n`, `key < n`, `key >= n`, `key > n` or
+`key in [lo, hi]`, renders the keys in one order and records each under
+its own name, and owns no key itself: what a key measures is the
+refinement registered under it, in the process or under the
+`mathema.language_refinements` entry-point group, and a key nothing
+serves is refused when the claim is checked, with the keys that are
+known. The `mathema-language` package serves `len`, a count of code
+points (Python's `len`, not bytes, and not the characters a reader sees,
+since `"é"` can be one code point or two). A refined language is a
+language of its own: every member the probe draws fits the bound, the
+members at each bound are the first hazards it visits, as plain as the
+language allows (`"a" * 80`), and a member one past the bound is its
+outside draw, so `excluded_outside_domain(s)` checks that the function
+refuses the 81st character. `L[unicode, len >= 1]` is the same set as
+`L[unicode] \ {""}`. A parameter annotated `Annotated[str, MaxLen(80)]`
+(annotated_types, pydantic) infers `L[unicode, len <= 80]` through the
+package's text adaptor, and the record's note says so.
 
 A language domain spells the missing value as a word in both modes,
 `L[unicode]|missing` and `L[unicode] \ {missing}`: to a reader of formal

@@ -598,11 +598,11 @@ def _length_domain(bound):
         length bound as a whole-number interval, or N.
     """
     from .domain import Domain, Interval, LanguageRef
-    length = getattr(bound, "length", None) if isinstance(bound, LanguageRef) else None
+    length = bound.refinement("len") if isinstance(bound, LanguageRef) else None
     if length is None:
         return "N"
-    from .domain import length_range
-    lo, hi = length_range(length)
+    from .domain import refinement_range
+    lo, hi = refinement_range(length)
     return Domain(base_type="N" if hi is None else "Z",
                   pieces=() if hi is None else (Interval(float(lo), float(hi)),),
                   explicit_type=True)
@@ -647,28 +647,12 @@ def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
     return out, ""
 
 
-def _annotated_length(hint):
-    """Intent:
-        The length refinement an `Annotated[str, ...]` hint's markers
-        state, read by attribute (`max_length`, `min_length`, as
-        annotated_types and pydantic spell them), as an `Interval` of
-        code-point counts, or None when no marker states one.
-    """
-    import typing
-    from .domain import Interval
-    if typing.get_origin(hint) is not typing.Annotated:
-        return None
-    lo, hi = 0, None
-    for marker in typing.get_args(hint)[1:]:
-        found = getattr(marker, "max_length", None)
-        if isinstance(found, int):
-            hi = found if hi is None else min(hi, found)
-        found = getattr(marker, "min_length", None)
-        if isinstance(found, int):
-            lo = max(lo, found)
-    if hi is None and lo == 0:
-        return None
-    return Interval(float(lo), float("inf") if hi is None else float(hi))
+def _ref_resolves(ref, resolve) -> bool:
+    try:
+        resolve(ref)
+    except Exception:
+        return False
+    return True
 
 
 def _adaptor_inferred_domains(fn, facts, cj_domain: dict) -> dict:
@@ -684,8 +668,8 @@ def _adaptor_inferred_domains(fn, facts, cj_domain: dict) -> dict:
     """
     if fn is None:
         return {}
-    from .domain import Domain, LanguageRef
-    from .languages import adapt_annotation, resolves
+    from .domain import Domain, LanguageRef, language_ref
+    from .languages import adapt_annotation, resolve, resolves
     from .types import _hints
     hints = _hints(fn)
     out: dict = {}
@@ -697,9 +681,9 @@ def _adaptor_inferred_domains(fn, facts, cj_domain: dict) -> dict:
         if found is None:
             continue
         language, adaptor = found
-        length = _annotated_length(hint)
-        if resolves(language.name):
-            ref = LanguageRef(language.name, length)
+        named = language_ref(language.name)
+        if named is not None and _ref_resolves(named, resolve):
+            ref = named
         elif isinstance(hint, type) and resolves(
                 f"{hint.__module__}.{hint.__qualname__}"):
             ref = LanguageRef(f"{hint.__module__}.{hint.__qualname__}")
