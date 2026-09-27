@@ -71,12 +71,13 @@ class _Trees:
 
 
 def test_a_value_too_deep_for_repr_is_summarised():
-    text = _fmt_value(_spine(sys.getrecursionlimit() + 50))
-    assert text.startswith("<Node nested") and "levels deep" in text, text
+    n = sys.getrecursionlimit() + 50
+    text = _fmt_value(_spine(n))
+    assert text == f"<Node nested {2 * n} levels deep ({n} Node records)>", text
     deep_list: list = []
     for _ in range(sys.getrecursionlimit() + 50):
         deep_list = [deep_list]
-    assert "levels deep" in _fmt_value(deep_list)
+    assert _fmt_value(deep_list) == f"<list nested {sys.getrecursionlimit() + 51} levels deep>"
     assert _fmt_value([1, 2]) == "[1, 2]"
 
 

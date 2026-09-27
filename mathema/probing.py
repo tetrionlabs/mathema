@@ -17,6 +17,7 @@ in `claim_families.py`.
 from __future__ import annotations
 
 import cmath
+import collections
 import math
 import random
 from dataclasses import dataclass
@@ -791,6 +792,51 @@ def _language_lap(rng: random.Random, dom) -> "_SpecialCycle | None":
     return _SpecialCycle(rng, values=rest, first=lengths)
 
 
+class _Resolved:
+    """One language piece of a domain, resolved once, its hazards built
+    on first use and kept."""
+
+    def __init__(self, piece) -> None:
+        from .languages import resolve_language
+        self.language = resolve_language(piece)
+        self._hazards: "tuple | None" = None
+
+    def hazards(self) -> tuple:
+        if self._hazards is None:
+            self._hazards = tuple(self.language.hazards())
+        return self._hazards
+
+
+#: recently sampled domains, each with its resolved pieces and the
+#: registry generation they were resolved under
+_RESOLVED: "collections.OrderedDict[int, tuple]" = collections.OrderedDict()
+_RESOLVED_KEEP = 32
+
+
+def _resolved(dom, piece) -> _Resolved:
+    """Intent:
+        `piece` of `dom` resolved, reused across a claim's draws until a
+        language or refinement is registered or removed.
+
+    Raises:
+        UnknownLanguage, UnknownRefinement: as resolution does.
+    """
+    from .languages import generation
+    now = generation()
+    entry = _RESOLVED.get(id(dom))
+    if entry is None or entry[0] is not dom or entry[1] != now:
+        entry = (dom, now, {})
+        _RESOLVED[id(dom)] = entry
+        while len(_RESOLVED) > _RESOLVED_KEEP:
+            _RESOLVED.popitem(last=False)
+    else:
+        _RESOLVED.move_to_end(id(dom))
+    pieces = entry[2]
+    if piece not in pieces:
+        pieces[piece] = _Resolved(piece)
+    return pieces[piece]
+
+
 def _language_hazards(dom, kinds: bool = False) -> list:
     """Intent:
         Every hazard of a language domain's pieces, the members of the
@@ -798,13 +844,12 @@ def _language_hazards(dom, kinds: bool = False) -> list:
         with `kinds`, `(value, kind)` pairs.
     """
     from .domain import LanguageRef
-    from .languages import resolve_language
     values: list = []
     for piece in dom.pieces or ():
         if not isinstance(piece, LanguageRef):
             continue
         try:
-            hazards = resolve_language(piece).hazards()
+            hazards = _resolved(dom, piece).hazards()
         except Exception:
             continue
         for h in hazards:
@@ -833,7 +878,6 @@ def _sample_language(rng: random.Random, dom: Domain):
         in through `_synth`'s `lap`.
     """
     from .domain import LanguageRef, MISSING as _MISSING
-    from .languages import resolve_language
     pieces = dom.pieces or ()
     value = None
     for _ in range(20):
@@ -844,12 +888,12 @@ def _sample_language(rng: random.Random, dom: Domain):
                 continue
             value = rng.choice(members)
         elif isinstance(piece, LanguageRef):
-            language = resolve_language(piece)
-            hazards = language.hazards()
+            resolved = _resolved(dom, piece)
+            hazards = resolved.hazards()
             if hazards and rng.random() < 0.3:
                 value = rng.choice(hazards).value
             else:
-                value = language.sample(rng)
+                value = resolved.language.sample(rng)
         else:
             continue
         try:
@@ -986,21 +1030,27 @@ def sample_bound(bound, rng: random.Random, kind: str = "scalar"):
     return _synth(kind, rng, bound)
 
 
-def _nesting_depth(v) -> int:
-    """How many container levels a value nests, counted with an
-    explicit stack: lists, tuples, sets, dicts and the fields of
-    objects with a `__dict__`."""
-    deepest = 0
-    stack = [(v, 0)]
+def _nesting(v) -> tuple:
+    """`(levels, records)`: how many container levels a value nests,
+    counted with an explicit stack over lists, tuples, sets, dicts and
+    the fields of objects with a `__dict__`, and the most values of the
+    value's own type along any one path (0 unless it is such an
+    object)."""
+    root_type = type(v) if hasattr(v, "__dict__") and not isinstance(v, type) else None
+    deepest = most = 0
+    stack = [(v, 0, 0)]
     seen: set = set()
     while stack:
-        node, level = stack.pop()
+        node, level, records = stack.pop()
         if isinstance(node, (str, bytes, int, float, complex, bool)) or node is None:
             deepest = max(deepest, level)
             continue
         if id(node) in seen:
             continue
         seen.add(id(node))
+        if root_type is not None and type(node) is root_type:
+            records += 1
+            most = max(most, records)
         if isinstance(node, dict):
             kids = list(node.values())
         elif isinstance(node, (list, tuple, set, frozenset)):
@@ -1011,8 +1061,16 @@ def _nesting_depth(v) -> int:
             deepest = max(deepest, level)
             continue
         deepest = max(deepest, level + 1)
-        stack.extend((k, level + 1) for k in kids)
-    return deepest
+        stack.extend((k, level + 1, records) for k in kids)
+    return deepest, most
+
+
+def _deep_summary(v) -> str:
+    """A value too deep to print, by its type and how deep it nests."""
+    levels, records = _nesting(v)
+    name = type(v).__name__
+    tail = f" ({records} {name} records)" if records else ""
+    return f"<{name} nested {levels} levels deep{tail}>"
 
 
 def _fmt_value(v) -> str:
@@ -1024,7 +1082,7 @@ def _fmt_value(v) -> str:
     try:
         return _fmt_value_of(v)
     except RecursionError:
-        return f"<{type(v).__name__} nested {_nesting_depth(v)} levels deep>"
+        return _deep_summary(v)
 
 
 def _fmt_value_of(v) -> str:

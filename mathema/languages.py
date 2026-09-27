@@ -373,6 +373,21 @@ def _discovered_refinements() -> dict:
     return {ep.name: ep for ep in entry_points(group=REFINEMENT_GROUP)}
 
 
+_GENERATION = [0]
+
+
+def _changed() -> None:
+    """Note that a registration changed, so anything resolved before
+    it is resolved again."""
+    _GENERATION[0] += 1
+
+
+def generation() -> int:
+    """A number that changes whenever a language or a refinement is
+    registered or removed in this process."""
+    return _GENERATION[0]
+
+
 def register_refinement(key: str, refine) -> None:
     """Intent:
         Serve the refinement `key` inside `L[...]` in this process:
@@ -381,11 +396,13 @@ def register_refinement(key: str, refine) -> None:
         registration wins over an entry point of the same key.
     """
     _REFINEMENTS[key] = refine
+    _changed()
 
 
 def unregister_refinement(key: str) -> None:
     """Remove an in-process refinement registration."""
     _REFINEMENTS.pop(key, None)
+    _changed()
 
 
 def _refinement(key: str):
@@ -593,12 +610,14 @@ def register_language(name: str, language) -> None:
         raise ValueError(f"L[{name}] cannot be registered: "
                          + "; ".join(problems))
     _REGISTRY[name] = language
+    _changed()
 
 
 def unregister_language(name: str) -> None:
     """Remove an in-process registration; a name never registered is
     left alone."""
     _REGISTRY.pop(name, None)
+    _changed()
 
 
 @functools.lru_cache(maxsize=1)
