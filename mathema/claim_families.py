@@ -3449,6 +3449,40 @@ _MEMORY_SAFETY_NOTE = ("memory safety needs a resource cap and is not "
                        "adjudicated in this release")
 
 
+#: computation-safety families named now and adjudicated in a later
+#: release, with the question each answers
+RESERVED_FAMILIES = {
+    "is_precision_safe": "right in a narrower carrier",
+    "is_order_invariant": "the same answer whatever the reduction order",
+    "is_concurrency_safe": "runs correctly under concurrent calls",
+    "is_carrier_consistent": "the same answer across the computations "
+                             "the descriptor names",
+}
+
+
+def _reserved_note(name: str) -> str:
+    """Why a reserved family reports skipped."""
+    return (f"{name} ({RESERVED_FAMILIES[name]}) is reserved for a later "
+            f"release and not adjudicated in this one")
+
+
+def _reserved_derive(fn, facts, lhs_src: str, rhs_src: str,
+                     relation: str, domain: dict | None = None,
+                     tolerance: float | None = None):
+    """Structural half of a reserved family: decline."""
+    return None
+
+
+def _reserved_probe(name: str):
+    """The empirical half of a reserved family: skipped, with the
+    reason, so a claim naming it is a known claim, not a
+    misspelling."""
+    def probe(fn, facts, cj, domain: dict, rng: random.Random,
+              trials: int):
+        return "skipped", 0, _reserved_note(name)
+    return probe
+
+
 def _is_memory_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                            relation: str, domain: dict | None = None,
                            tolerance: float | None = None):
@@ -3721,6 +3755,14 @@ def _register_builtin_claim_families() -> None:
         "is_memory_safe", derive=_is_memory_safe_derive,
         probe=_memory_probe, whole_function=True,
         reserved=_MEMORY_SAFETY_NOTE))
+    # reserved: named now, adjudicated later, never suggested; a
+    # platform (GPU, JIT, distributed) is named in the bracketed
+    # computation descriptor, never in a family name
+    for _rname in RESERVED_FAMILIES:
+        _families.register(_rname, SafetyFamily(
+            _rname, derive=_reserved_derive,
+            probe=_reserved_probe(_rname), whole_function=True,
+            reserved=_reserved_note(_rname)))
     _families.register("is_computation_safe", SafetyFamily(
         "is_computation_safe", derive=_is_computation_safe_derive,
         probe=_computation_probe, whole_function=True))

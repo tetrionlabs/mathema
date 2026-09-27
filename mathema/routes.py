@@ -52,7 +52,10 @@ SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_builtin_safe",
                                "is_state_safe", "is_deterministic",
                                "is_reproducible", "is_defined",
                                # the repeatability roll-up
-                               "is_repeatable"})
+                               "is_repeatable",
+                               # reserved for a later release
+                               "is_order_invariant",
+                               "is_carrier_consistent"})
 
 # Matrix STRUCTURE predicates: facts about a matrix VALUE (a parameter
 # or an f(...) output), examined the same way safety predicates are but

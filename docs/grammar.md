@@ -327,6 +327,7 @@ that failed, and the fix is usually one of the ones below.
 | `is_arbitrary_input_safe(s)` | no string input makes the function crash by accident | validate the input and raise the exception you mean |
 | `is_recursion_safe(f)` | the recursion never runs out of stack (`RecursionError`) over the domain; suggested when the body calls itself | rewrite the recursion as a loop, or narrow the domain |
 | `is_memory_safe(f)` | reserved: `skipped` in this release, since memory safety needs a resource cap | |
+| `is_concurrency_safe(f)` | reserved for a later release: the function runs correctly under concurrent calls | |
 
 **Is the answer right in float64?** The function returns, and the
 number it returns is the one the mathematics says.
@@ -335,6 +336,8 @@ number it returns is the one the mathematics says.
 |---|---|---|
 | `is_numerically_stable` | the value is finite and the call raises no floating-point error across the domain | narrow the domain, or reorder the arithmetic that loses the value |
 | `<name>[float]` | the companion every proof spawns: the proven relation run in float64 at the domain's corners and inside it, falsified with a witness where the computation loses what the mathematics proves (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)) | narrow the domain, fix the code, or state the claim with `route="derive:math_only"` |
+| `is_precision_safe(f)` | reserved for a later release: the answer stays right in a narrower carrier (float32, say) | |
+| `is_carrier_consistent(f)` | reserved for a later release: the same answer across the computations the bracketed descriptor names | |
 
 **Is it repeatable?** The same call gives the same answer and leaves
 nothing behind.
@@ -344,6 +347,13 @@ nothing behind.
 | `is_deterministic` | the same inputs give the same output on every call | remove the hidden input (a clock, a global counter, an unseeded random draw) |
 | `is_reproducible` | the same inputs give the same output once the random seed is fixed; a parameter named `seed`, `rng`, `random_state` or `key`, or one annotated as a numpy `Generator` or `RandomState` or a `random.Random`, is the seed, held fixed while nothing else varies | draw from a generator the caller can seed |
 | `is_state_safe` | the call changes nothing outside itself: no argument mutated, no global written | copy before modifying, and return the result instead of storing it |
+| `is_order_invariant(f)` | reserved for a later release: the same answer whatever order a reduction runs in | |
+
+A reserved family is a known claim that is `skipped` in this release,
+with a note saying so, and it is never suggested. A platform (a GPU, a
+JIT compiler, a distributed runtime) is never part of a family name: it
+is named in the bracketed computation descriptor after a claim name
+(`[float]` today), which says which computation was attempted.
 
 Two roll-ups summarise the questions; the children stay individual
 claims. `is_computation_safe(f)` answers the first two: every child
