@@ -222,3 +222,47 @@ def test_an_entry_point_adapter_joins_and_a_built_in_wins_a_name_clash(
         assert not isinstance(rt.adapter("numpy.ndarray"), Clash)
     finally:
         rt._discovered.cache_clear()
+
+
+# --- missing is one concept, whatever a library spells it --------------
+
+@pytest.mark.parametrize("name, spelling, native", [
+    ("list", "none", lambda v: v is None),
+    ("list", "nan", lambda v: isinstance(v, float) and math.isnan(v)),
+    ("numpy.ndarray", "nan", lambda v: math.isnan(v)),
+    ("pandas.Series", "nan",
+     lambda v: isinstance(v, float) and math.isnan(v)),
+    ("pandas.Series", "none", lambda v: v is None),
+    ("pandas.Series", "na", lambda v: v is pd.NA),
+    ("polars.Series", "null", lambda v: v is None),
+    ("polars.Series", "nan",
+     lambda v: isinstance(v, float) and math.isnan(v)),
+])
+def test_every_spelling_of_missing_round_trips(name, spelling, native):
+    found = rt.adapter(name)
+    obj = found.realise(_VEC, {"missing": spelling})
+    as_list = (obj.to_list() if name == "polars.Series"
+               else obj.tolist() if name == "numpy.ndarray"
+               else list(obj))
+    assert native(as_list[1]), as_list
+    _same_vec(found.observe(obj), _VEC)
+
+
+@pytest.mark.parametrize("name, spelling", [
+    ("pandas.DataFrame", "na"), ("pandas.DataFrame", "none"),
+    ("polars.DataFrame", "nan"), ("polars.DataFrame", "null"),
+])
+def test_every_spelling_of_missing_round_trips_in_a_table(name, spelling):
+    found = rt.adapter(name)
+    back = found.observe(found.realise(_TABLE, {"missing": spelling}))
+    _same_vec(back.columns["r"], _TABLE.columns["r"])
+
+
+def test_a_polars_nan_is_observed_as_missing():
+    seen = rt.observe(pl.Series("x", [1.0, float("nan"), None]))
+    assert seen.missing == frozenset({1, 2}), seen
+
+
+def test_a_pandas_na_is_observed_as_missing():
+    seen = rt.observe(pd.Series([1.0, pd.NA, None], dtype="Float64"))
+    assert seen.missing == frozenset({1, 2}), seen

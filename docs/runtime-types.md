@@ -118,12 +118,18 @@ declared, a raise falsifies as always.
 
 | runtime type | carries | a missing position | notes |
 |---|---|---|---|
-| `list` (and `tuple`) | vector, matrix (nested lists), table (dict of lists) | `None` | a matrix is drawn as nested lists up to 64 per axis |
+| `list` (and `tuple`) | vector, matrix (nested lists), table (dict of lists) | `None`, NaN | a matrix is drawn as nested lists up to 64 per axis |
 | `numpy.ndarray` | vector (1-D), matrix (2-D) | NaN | |
-| `pandas.Series` | vector | NaN | a business-day index from 2020-01-01 |
-| `pandas.DataFrame` | table | NaN | the Series index |
-| `polars.Series` | vector | null | |
-| `polars.DataFrame` | table | null | |
+| `pandas.Series` | vector | NaN, `None`, `pd.NA` | a business-day index from 2020-01-01 |
+| `pandas.DataFrame` | table | NaN, `None`, `pd.NA` | the Series index |
+| `polars.Series` | vector | null, NaN | |
+| `polars.DataFrame` | table | null, NaN | |
+
+Missing is one concept in mathema, whatever a library calls it: every
+spelling in the table reads back as missing when a function returns
+it, a polars NaN included (polars itself treats NaN as an ordinary
+float), and an adapter can realise a missing position in each of its
+spellings (the first one listed is the one it uses by default).
 
 numpy, pandas and polars stay optional: an adapter whose library is not
 installed is absent, and a parameter it would have claimed is sampled

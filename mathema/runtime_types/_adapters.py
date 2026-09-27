@@ -70,6 +70,18 @@ def _missing_to(values, missing, fill) -> list:
     return [fill if k in missing else v for k, v in enumerate(values)]
 
 
+def _spelling(options: dict, spellings: dict, default: str):
+    """The value a missing position is realised as: the spelling
+    `options["missing"]` names among the runtime type's own
+    `spellings`, else its default one. Missing is one concept; each
+    spelling is a way a library can hold it."""
+    choice = str((options or {}).get("missing", default)).lower()
+    if choice not in spellings:
+        raise ValueError(f"missing spelled {choice!r} is not one of "
+                         f"{sorted(spellings)}")
+    return spellings[choice]()
+
+
 class ListAdapter:
     """`list` and `tuple`: the runtime type every sequence was sampled
     as before runtime types existed. A matrix is a list of row lists,
@@ -95,13 +107,17 @@ class ListAdapter:
                              f"annotation: {_type_name(annotation)}")
         return None
 
+    #: how a list can hold a missing position
+    MISSING = {"none": lambda: None, "nan": lambda: math.nan}
+
     def realise(self, abstract, options):
         if isinstance(abstract, AbstractMat):
             return [list(r) for r in abstract.rows]
         if isinstance(abstract, AbstractTable):
             return {name: self.realise(col, options)
                     for name, col in abstract.columns.items()}
-        return _missing_to(abstract.values, abstract.missing, None)
+        return _missing_to(abstract.values, abstract.missing,
+                           _spelling(options, self.MISSING, "none"))
 
     def observe(self, obj):
         from ._abstract import abstract_of
@@ -171,7 +187,8 @@ class NumpyAdapter:
         if isinstance(abstract, AbstractTable):
             raise TypeError("numpy.ndarray does not carry a table")
         return np.array(_missing_to(abstract.values, abstract.missing,
-                                    math.nan))
+                                    _spelling(options, {"nan": lambda:
+                                                        math.nan}, "nan")))
 
     def observe(self, obj):
         import numpy as np
@@ -212,12 +229,10 @@ class PandasSeriesAdapter:
         return _pandas_detect(self, annotation, "Series", "vec")
 
     def realise(self, abstract, options):
-        import pandas as pd
         if not isinstance(abstract, AbstractVec):
             raise TypeError("pandas.Series carries a vector")
-        return pd.Series(_missing_to(abstract.values, abstract.missing,
-                                     math.nan),
-                         index=_default_index(len(abstract), options))
+        return _pandas_column(abstract, options,
+                              _default_index(len(abstract), options))
 
     def observe(self, obj):
         import pandas as pd
@@ -244,10 +259,11 @@ class PandasDataFrameAdapter:
             raise TypeError("pandas.DataFrame carries a table")
         n = len(next(iter(abstract.columns.values()))) \
             if abstract.columns else 0
+        index = _default_index(n, options)
         return pd.DataFrame(
-            {name: _missing_to(col.values, col.missing, math.nan)
+            {name: _pandas_column(col, options, index)
              for name, col in abstract.columns.items()},
-            index=_default_index(n, options))
+            index=index)
 
     def observe(self, obj):
         import pandas as pd
@@ -255,6 +271,22 @@ class PandasDataFrameAdapter:
             return AbstractTable({str(c): _vec_from_pandas(obj[c])
                                   for c in obj.columns})
         return NotMine
+
+
+def _pandas_column(abstract: AbstractVec, options: dict, index):
+    """A vector as a pandas Series on `index`, a missing position held
+    as `nan` (a float Series, the default), `None` (an object Series)
+    or `pd.NA` (a nullable `Float64` Series)."""
+    import pandas as pd
+    spellings = {"nan": lambda: math.nan, "none": lambda: None,
+                 "na": lambda: pd.NA}
+    fill = _spelling(options, spellings, "nan")
+    values = _missing_to(abstract.values, abstract.missing, fill)
+    if fill is None:
+        return pd.Series(values, index=index, dtype=object)
+    if fill is pd.NA:
+        return pd.Series(values, index=index, dtype="Float64")
+    return pd.Series(values, index=index)
 
 
 def _vec_from_pandas(series) -> AbstractVec:
@@ -297,7 +329,7 @@ class PolarsSeriesAdapter:
         if not isinstance(abstract, AbstractVec):
             raise TypeError("polars.Series carries a vector")
         return pl.Series(options.get("name", ""),
-                         _polars_values(abstract), strict=False)
+                         _polars_values(abstract, options), strict=False)
 
     def observe(self, obj):
         import polars as pl
@@ -320,7 +352,8 @@ class PolarsDataFrameAdapter:
         import polars as pl
         if not isinstance(abstract, AbstractTable):
             raise TypeError("polars.DataFrame carries a table")
-        return pl.DataFrame({name: pl.Series(name, _polars_values(col),
+        return pl.DataFrame({name: pl.Series(name,
+                                             _polars_values(col, options),
                                              strict=False)
                              for name, col in abstract.columns.items()})
 
@@ -332,8 +365,14 @@ class PolarsDataFrameAdapter:
         return NotMine
 
 
-def _polars_values(abstract: AbstractVec) -> list:
-    values = _missing_to(abstract.values, abstract.missing, None)
+def _polars_values(abstract: AbstractVec, options: "dict | None" = None
+                   ) -> list:
+    """A vector's values for a polars Series, a missing position held
+    as `null` (the default) or `NaN`, which polars treats as an
+    ordinary float and mathema reads as missing all the same."""
+    fill = _spelling(options or {}, {"null": lambda: None,
+                                     "nan": lambda: math.nan}, "null")
+    values = _missing_to(abstract.values, abstract.missing, fill)
     if any(isinstance(v, float) for v in values):
         # one dtype for the column: an int among floats is a float
         values = [float(v) if isinstance(v, int) else v for v in values]
@@ -342,7 +381,8 @@ def _polars_values(abstract: AbstractVec) -> list:
 
 def _vec_from_polars(series) -> AbstractVec:
     raw = series.to_list()
-    missing = frozenset(k for k, v in enumerate(raw) if v is None)
+    missing = frozenset(k for k, v in enumerate(raw)
+                        if v is None or (isinstance(v, float) and v != v))
     values = tuple(math.nan if v is None else v for v in raw)
     return AbstractVec(values, missing)
 
