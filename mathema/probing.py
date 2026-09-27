@@ -353,26 +353,114 @@ def _probe_density(risk: dict, n_trials: int, policy: _RiskPolicy = _RISK) -> di
 DEFAULT_RELATIVE_TOLERANCE = 1e-6
 
 
+def plain_value(v):
+    """Intent:
+        An executed value in the plain Python form the comparisons
+        read: a numpy scalar or a 0-d array becomes its Python number,
+        an array becomes nested lists, anything else is returned as it
+        is.
+    """
+    if type(v) in (bool, int, float, complex, str, type(None)):
+        return v
+    if hasattr(v, "shape") and hasattr(v, "tolist"):
+        try:
+            return v.tolist()
+        except Exception:
+            return v
+    if hasattr(v, "dtype") and hasattr(v, "item"):
+        try:
+            return v.item()
+        except Exception:
+            return v
+    return v
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float, complex)) and not isinstance(v, bool)
+
+
+def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
+    # a NaN agrees with nothing; the same infinity is one point; a
+    # finite value is close within the tolerances, complex values by
+    # abs(u - v)
+    if holds_nan(u) or holds_nan(v):
+        return False
+    if holds_inf(u) or holds_inf(v):
+        return u == v
+    if isinstance(u, complex) or isinstance(v, complex):
+        return cmath.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
+    return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
+
+
+def values_agree(u, v, tolerance: float | None = None,
+                 rel_tol: float = DEFAULT_RELATIVE_TOLERANCE,
+                 broadcast: bool = False) -> "bool | None":
+    """Intent:
+        Whether two executed values are equal, the one reading every
+        comparison shares: Python numbers, numpy scalars, 0-d arrays,
+        arrays and nested lists alike, arrays and lists compared
+        element by element. A NaN agrees with nothing, another NaN
+        included; two sides at the same infinity agree; complex values
+        compare by `abs(u - v)`; finite values agree within `tolerance`
+        (absolute, 1e-9 when None) or `rel_tol` (relative), whichever
+        is larger.
+
+    Notes:
+        `None` when the two sides have different shapes. With
+        `broadcast`, a number against an array or list is compared
+        with every element. A bool, and a value that is not a number,
+        agrees only by exact equality.
+    """
+    abs_tol = tolerance if tolerance is not None else 1e-9
+    u, v = plain_value(u), plain_value(v)
+
+    def walk(x, y):
+        xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
+        if xs and ys:
+            if len(x) != len(y):
+                return None
+            parts = [walk(a, b) for a, b in zip(x, y)]
+        elif xs or ys:
+            if not broadcast:
+                return None
+            parts = ([walk(a, y) for a in x] if xs
+                     else [walk(x, b) for b in y])
+        elif _is_number(x) and _is_number(y):
+            return _numbers_agree(x, y, abs_tol, rel_tol)
+        else:
+            try:
+                return bool(x == y)
+            except Exception:
+                return False
+        if any(pt is None for pt in parts):
+            return None
+        return all(parts)
+
+    return walk(u, v)
+
+
 def _close(u, v, tolerance: float | None = None,
            rel_tol: float = DEFAULT_RELATIVE_TOLERANCE) -> bool:
     """`tolerance` overrides the default abs_tol, a claim's own declared
     tolerance (declared-schema.md) governs its own comparison outright;
     the 1e-9 default is only a floating-point-representation fudge factor
     for claims that never declared one. `rel_tol` is the relative
-    allowance on top of it, 0 for a claim that declared its tolerance."""
-    if isinstance(u, bool) or isinstance(v, bool):
-        return u == v
-    abs_tol = tolerance if tolerance is not None else 1e-9
-    if isinstance(u, (int, float)) and isinstance(v, (int, float)):
-        if math.isnan(u) and math.isnan(v):
-            return True
-        return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
-    if isinstance(u, (int, float, complex)) and isinstance(v, (int, float, complex)):
-        return cmath.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
-    if isinstance(u, (list, tuple)) and isinstance(v, (list, tuple)):
-        return len(u) == len(v) and all(_close(a, b, tolerance, rel_tol)
-                                        for a, b in zip(u, v))
-    return u == v
+    allowance on top of it, 0 for a claim that declared its tolerance.
+    The reading is `values_agree`'s: a NaN is close to nothing, and two
+    values of different shapes are not close."""
+    return bool(values_agree(u, v, tolerance, rel_tol))
+
+
+def values_differ(u, v, tolerance: float | None = None,
+                  rel_tol: float = DEFAULT_RELATIVE_TOLERANCE) -> bool:
+    """Intent:
+        Whether `u != v` holds between two executed values: they do not
+        agree (`values_agree`), and neither holds a NaN, since a NaN is
+        no value and fails every relation, `!=` included.
+    """
+    if holds_nan(plain_value(u)) or holds_nan(plain_value(v)):
+        return False
+    return not values_agree(u, v, tolerance, rel_tol)
 
 
 def _synth_dict(key_tree, rng: random.Random, specials=None) -> dict:
@@ -404,11 +492,13 @@ def _scalar_relation(a, b, relation: str, slack: float,
     do not order (a complex vs a real), which the caller reads as
     'unanswerable', not 'false'. `rel_tol` is `_close`'s relative
     allowance."""
+    if holds_nan(a) or holds_nan(b):
+        return False
     if relation in ("==", "~="):
         return _close(a, b, tolerance=slack, rel_tol=rel_tol)
     if relation == "!=":
         if exact_inequality:
-            return not (a == b or (a != a and b != b))
+            return not (a == b)
         return not _close(a, b, tolerance=slack, rel_tol=rel_tol)
     if relation == "<=":
         return a <= b + slack
@@ -636,8 +726,11 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                                rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """Whether `lv <relation> rv` holds: a scalar comparison, or, when a
     side is matrix/array-valued, the relation at EVERY element (a scalar
-    broadcasts against a matrix). numpy fast path when either side is an
-    array, a recursive walk over nested lists otherwise. Returns
+    broadcasts against a matrix), numpy values read as the plain values
+    they hold (`plain_value`). `==`, `~=` and `!=` over arrays are one
+    fact about the whole value (`values_agree`), so `!=` holds when some
+    element differs; an ordering holds when it holds at every element. A
+    NaN anywhere fails every relation. Returns
     `True`/`False`, or `None` when the comparison is structurally
     meaningless (an ordering over non-orderable values, or mismatched
     shapes), which the caller reads as skip, never falsify.
@@ -647,44 +740,24 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     numpy scalar) is a scalar. Over complex values `==`, `~=` and `!=`
     compare by `abs(a - b)`, with the tolerance rules of reals; an
     ordering over a complex value is unanswerable."""
-    lv, rv = (v.item() if getattr(v, "shape", None) == ()
-              and hasattr(v, "item") else v for v in (lv, rv))
+    lv, rv = plain_value(lv), plain_value(rv)
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,
                                          exact_inequality, rel_tol))
         except TypeError:
             return None
-    from .matrices import _numpy
-    np = _numpy()
-    if np is not None and (hasattr(lv, "__array__") or hasattr(rv, "__array__")
-                           or isinstance(lv, (list, tuple))
-                           or isinstance(rv, (list, tuple))):
-        try:
-            kind = complex if (np.iscomplexobj(lv) or np.iscomplexobj(rv)) \
-                else float
-            a = np.asarray(lv, dtype=kind)
-            b = np.asarray(rv, dtype=kind)
-        except Exception:
-            return None
-        if kind is complex and relation not in ("==", "~=", "!="):
-            return None     # an ordering over complex values
-        try:
-            if relation in ("==", "~="):
-                return bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
-            if relation == "!=":
-                if exact_inequality:
-                    return not bool(np.array_equal(a, b, equal_nan=True))
-                return not bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
-            if relation == "<=":
-                return bool((a <= b + slack).all())
-            if relation == ">=":
-                return bool((a >= b - slack).all())
-            if relation == "<":
-                return bool((a < b).all())
-            return bool((a > b).all())
-        except (ValueError, TypeError):
+    if relation in ("==", "~=", "!="):
+        # equality of two arrays is one fact about every element; a
+        # NaN anywhere is no value and fails the relation, `!=` too
+        if holds_nan(lv) or holds_nan(rv):
+            return False
+        exact = relation == "!=" and exact_inequality
+        agree = values_agree(lv, rv, 0.0 if exact else slack,
+                             0.0 if exact else rel_tol, broadcast=True)
+        if agree is None:
             return None       # incompatible shapes: unanswerable
+        return agree if relation != "!=" else not agree
 
     def _walk(x, y):
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))

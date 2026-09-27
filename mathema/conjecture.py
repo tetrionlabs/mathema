@@ -53,7 +53,8 @@ from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
                       _synth_dict, complex_is_a_raise, holds_inf,
                       holds_nan, same_infinity,
                       is_complex_value, ordering_shortfall,
-                      quiet_while_probing, relation_holds_elementwise)
+                      quiet_while_probing, relation_holds_elementwise,
+                      values_differ)
 from .records import (_EXC_TYPES, Probe, PseudoInfinity, classify_verdict,
                       statement_text)
 from .symbolic import (mentions_matrix_ops, try_prove, try_prove_matrix,
@@ -5234,7 +5235,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         "==": lambda a, b, t=a_tol, r=a_rel:
                             _close(a, b, tolerance=t, rel_tol=r),
                         "!=": lambda a, b, t=a_tol, r=a_rel:
-                            not _close(a, b, tolerance=t, rel_tol=r)
+                            values_differ(a, b, tolerance=t, rel_tol=r)
                         }[acj.relation]
                 compiled.append((a_code_l, a_code_r, a_op))
                 aux_all |= a_aux_l | a_aux_r
@@ -5613,8 +5614,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     jok = (_close(jl, jr, tolerance=slack,
                                   rel_tol=_declared_rel_tol(cj))
                            if cj.relation in ("==", "~=") else
-                           not _close(jl, jr, tolerance=slack,
-                                      rel_tol=_declared_rel_tol(cj))
+                           values_differ(jl, jr, tolerance=slack,
+                                         rel_tol=_declared_rel_tol(cj))
                            if cj.relation == "!=" else
                            jl <= jr + slack if cj.relation == "<=" else
                            jl >= jr - slack)

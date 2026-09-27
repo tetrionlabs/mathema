@@ -17,7 +17,6 @@ runs, so the import graph stays acyclic."""
 from __future__ import annotations
 
 from ._math_vocab import MATH_CONSTANTS
-from .probing import _close
 from .records import Probe
 
 
@@ -94,9 +93,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     import math
     from .domain import (_as_int_if_whole, bound_to_sympy_set,
                          domain_contains, is_missing, operational_domain)
-    from .probing import (ComplexResult, _bound_is_complex, _fmt_value, _synth,
-                          complex_is_a_raise, holds_inf, holds_nan,
-                          is_complex_value, same_infinity)
+    from .probing import (ComplexResult, _bound_is_complex, _fmt_value,
+                          _is_matrix_value, _synth, complex_is_a_raise,
+                          holds_inf, holds_nan, is_complex_value,
+                          plain_value, relation_holds_elementwise,
+                          same_infinity, values_agree, values_differ)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     # the gates verify VALUE claims by calling fn at a point; a
@@ -173,6 +174,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 calls_nonfinite[0] = (
                     f"{label} returned nan" if holds_nan(out) else
                     f"{label} returned {_fmt_value(complex(out))}")
+            elif calls_nonfinite[0] is None and _is_matrix_value(out) \
+                    and (holds_nan(out) or holds_inf(out)) \
+                    and _finite_arguments(a, kw):
+                # an array holding a NaN or an infinity, element by
+                # element the same as a scalar result
+                calls_nonfinite[0] = (
+                    f"{label} returned an array holding "
+                    + ("nan" if holds_nan(out) else "an infinity"))
             return out
         return _wrapped
 
@@ -214,7 +223,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         env = {"__builtins__": {}, **base_env, **_typed(point)}
         lv = eval(code_l, env)
         rv = eval(code_r, env) if code_r is not None else 0
-        return lv, rv
+        return plain_value(lv), plain_value(rv)
 
     def _relation_holds(lv, rv, tol):
         # inf-aware: an infinity here is one the law's own arithmetic
@@ -273,6 +282,19 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 and all(isinstance(v, (int, float, complex))
                         and not isinstance(v, bool) for v in (lv, rv)))
 
+    def _array_relation(lv, rv, tol, point):
+        # an array result compared element by element: a NaN the code
+        # computed from non-missing inputs is no value and fails; one
+        # that propagates a missing input is the missing-value axis's
+        # business
+        if holds_nan(lv) or holds_nan(rv):
+            if any(is_missing(v) or holds_nan(v) for v in point.values()):
+                return None
+            return False
+        return relation_holds_elementwise(
+            lv, rv, cj.relation, tol,
+            exact_inequality=cj.tolerance is None, rel_tol=0.0)
+
     def evaluate(point):
         _reset()
         try:
@@ -297,6 +319,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 # an infinity only the law's own arithmetic produced
                 return None
             return _relation_holds(lv, rv, slack)
+        if _is_matrix_value(lv) or _is_matrix_value(rv):
+            return _array_relation(lv, rv, slack, point)
         if _real(lv) and _real(rv):
             if (abs(lv) == float("inf") or abs(rv) == float("inf")) \
                     and not calls_nonfinite[0]:
@@ -377,6 +401,25 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return (f"the relation fails on the executed values "
                     f"({_fmt_value(complex(lv))} {cj.relation} "
                     f"{_fmt_value(complex(rv))}), past the magnitude-scaled "
+                    f"tolerance: precision loss")
+        if _is_matrix_value(lv) or _is_matrix_value(rv):
+            if holds_nan(lv) or holds_nan(rv) or holds_inf(lv) \
+                    or holds_inf(rv):
+                # only the law's own arithmetic: the code's own no-value
+                # results were read above
+                return None
+            try:
+                import numpy
+                size = float(numpy.max(numpy.abs(numpy.asarray(
+                    [lv, rv], dtype=complex))))
+            except Exception:
+                return None
+            scaled = slack + 1e-7 * max(size, 1.0)
+            held = _array_relation(lv, rv, scaled, point)
+            if held is None or held:
+                return None
+            return (f"the relation fails on the executed values ({lv!r} "
+                    f"{cj.relation} {rv!r}), past the magnitude-scaled "
                     f"tolerance: precision loss")
         if any(isinstance(v, float) and v != v for v in (lv, rv)):
             return ("the computation returns NaN here"
@@ -497,8 +540,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return False
             ops = {"<=": lambda x, y: x <= y, ">=": lambda x, y: x >= y,
                    "<": lambda x, y: x < y, ">": lambda x, y: x > y,
-                   "==": lambda x, y: _close(x, y),
-                   "!=": lambda x, y: not _close(x, y)}
+                   "==": lambda x, y: values_agree(x, y) is True,
+                   "!=": lambda x, y: values_differ(x, y)}
             if not ops.get(a_rel, lambda x, y: True)(al, ar):
                 return False
         return True

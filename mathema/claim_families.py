@@ -3088,20 +3088,11 @@ def _as_list(value):
 
 def _matrix_close(a, b, tol: float) -> bool:
     """Whether two evaluated results (each a scalar or a matrix) agree to
-    `tol`. numpy when present, an elementwise walk otherwise."""
-    from .matrices import _numpy
-    np = _numpy()
-    if np is not None:
-        aa, bb = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
-        return aa.shape == bb.shape and bool(
-            np.allclose(aa, bb, rtol=0, atol=tol))
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        return abs(a - b) <= tol
-    try:
-        return (len(a) == len(b)
-                and all(_matrix_close(x, y, tol) for x, y in zip(a, b)))
-    except TypeError:
-        return False
+    `tol`, element by element with `probing.values_agree`'s reading: a
+    NaN agrees with nothing, the same infinity agrees, and two results
+    of different shapes do not agree."""
+    from .probing import values_agree
+    return values_agree(a, b, tolerance=tol, rel_tol=0.0) is True
 
 
 def _relation_holds(lv, rv, relation: str, tol: float) -> bool:
@@ -3115,7 +3106,8 @@ def _relation_holds(lv, rv, relation: str, tol: float) -> bool:
     if relation in ("==", "~="):
         return _matrix_close(lv, rv, tol)
     if relation == "!=":
-        return not _matrix_close(lv, rv, tol)
+        from .probing import values_differ
+        return values_differ(lv, rv, tolerance=tol, rel_tol=0.0)
     a, b = float(lv), float(rv)
     if relation == "<=":
         return a <= b + tol
