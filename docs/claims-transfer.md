@@ -245,6 +245,15 @@ one project's verified layer into another's declared layer, and the
 downstream consumer still verifies or trusts them, since nothing is
 promoted to proof by being published.
 
+An export is how claims travel with a package: to the projects
+downstream that install and call it. In the package's own repository
+the file has no effect. A compendium file whose `compendium:` names the
+project's own package is ignored there, since during that package's
+own development its claims live in its ordinary claims files and its
+verified store, and a second, exported copy of them would state the
+same claims twice. `mathema verify` prints a note naming the ignored
+file.
+
 ## Across: equivalence, and other languages
 
 The equivalence relation (`f =:= g`, and the call-form law

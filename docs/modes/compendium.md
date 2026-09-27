@@ -105,6 +105,14 @@ them against the version installed there, or someone accepts them as
 trusted. The details are in
 [Claims transfer](../claims-transfer.md#out-exporting-your-own-verified-claims).
 
+An export transfers claims with a package to the projects downstream
+that consume it. It changes nothing for the package itself: in the
+package's own repository, a compendium file naming the package
+(`compendium: mylib` inside `mylib`'s project) is ignored, because
+there the claims are first-party, stated in the ordinary claims files
+and recorded in the verified store. `mathema verify` prints a note
+naming the ignored file.
+
 ## Installing third-party claims files
 
 mathema bundles claims files for the most used libraries (`math` and
