@@ -279,6 +279,25 @@ def test_the_undeclared_operand_reason_reaches_the_verdict():
     survive to the record rather than being discarded with a bare
     None."""
     import mathema
+    from mathema.types import Mat
+
+    def quad_form(A: Mat("n", "n"), x) -> float:
+        """Quadratic form, x with no shape."""
+        return float(x.T @ A @ x)
+
+    (p,) = mathema.claims.check_conjectures(
+        quad_form, [mathema.claim("x.T @ A @ x >= 0", route="derive")])
+    assert p.verdict == "unknown", p.verdict
+    assert "declared neither a vector nor a matrix" in (p.sketch or ""), \
+        p.sketch
+    assert 'Vec("n")' in (p.sketch or "") \
+        and 'Mat("n", 1)' in (p.sketch or ""), p.sketch
+
+
+def test_a_vector_quadratic_form_is_not_proven_for_any_matrix():
+    """A `Vec("n")` lifts as a vector, so `x.T @ A @ x` is a number;
+    it is not nonnegative for every A, so no proof."""
+    import mathema
     from mathema.types import Mat, Vec
 
     def quad_form(A: Mat("n", "n"), x: Vec("n")) -> float:
@@ -287,9 +306,7 @@ def test_the_undeclared_operand_reason_reaches_the_verdict():
 
     (p,) = mathema.claims.check_conjectures(
         quad_form, [mathema.claim("x.T @ A @ x >= 0", route="derive")])
-    assert p.verdict == "unknown", p.verdict
-    assert "not declared two-dimensional" in (p.sketch or ""), p.sketch
-    assert 'Mat("n", 1)' in (p.sketch or ""), p.sketch
+    assert p.verdict == "unknown", (p.verdict, p.sketch)
 
 
 def test_the_remedy_the_decline_suggests_actually_works():

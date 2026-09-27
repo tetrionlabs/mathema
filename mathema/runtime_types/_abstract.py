@@ -81,7 +81,8 @@ def _is_missing_element(v) -> bool:
 
 def _is_number(v) -> bool:
     return (isinstance(v, (int, float, complex)) and not isinstance(v, bool)
-            or type(v).__module__ == "numpy" and hasattr(v, "item"))
+            or type(v).__module__ == "numpy" and hasattr(v, "item")
+            and getattr(v, "ndim", 0) == 0)
 
 
 def _number(v):

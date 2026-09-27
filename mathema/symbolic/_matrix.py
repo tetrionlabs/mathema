@@ -13,10 +13,14 @@ sympy matrix assumptions (`Q.symmetric`, `Q.positive_definite`,
 under those assumptions and simplifying their difference.
 
 The lift is deliberately narrow: the matrix vocabulary (`@`/`.T`/
-`det`/`inv`/`trace`/`I(n)`) plus scalar arithmetic joining scalar
-results (a determinant or trace is a scalar). A construct outside it
-returns `None`, and the caller falls back exactly as any other
-undecided derive claim does.
+`det`/`inv`/`trace`/`I(n)`/`matrix_power`/`dot`/`outer`/`kron`/
+`solve`), elementwise `+`, `-`, `*` (the Hadamard product of two
+matrices) and `**` (the elementwise power), scaling by a number, and
+scalar arithmetic joining scalar results (a determinant or trace is a
+scalar). A vector is a column, read by `@` the way numpy reads a 1-D
+array, and a 1-by-1 result (`x.T @ A @ x`) is the number it holds. A
+construct outside it returns `None`, and the caller falls back exactly
+as any other undecided derive claim does.
 """
 from __future__ import annotations
 
@@ -29,7 +33,7 @@ from ..linalg import MATRIX_TOKENS, mentions_matrix_ops
 from ._proof_support import ProofResult
 
 __all__ = ["MATRIX_TOKENS", "matrix_param_dims", "mentions_matrix_ops",
-           "try_prove_matrix"]
+           "try_prove_matrix", "vector_param_dims"]
 
 # registry property -> the sympy assumption predicate it maps to, for a
 # structure premise or marker fed into refine(). A property with no
@@ -73,20 +77,41 @@ def matrix_param_dims(domain: dict, shapes: dict) -> dict:
     return dims_by_param
 
 
+def vector_param_dims(domain: dict, shapes: dict) -> dict:
+    """`{param: (n,)}` for every parameter that is a vector: one sized
+    from a 1-D `Shape` marker (`Vec("n")`) or an `R^n` domain."""
+    dims_by_param: dict = {}
+    for p, shape in (shapes or {}).items():
+        if p != "return" and len(getattr(shape, "dims", ())) == 1:
+            dims_by_param[p] = tuple(shape.dims)
+    for p, bound in (domain or {}).items():
+        d = getattr(bound, "dims", ())
+        if len(d) == 1:
+            dims_by_param[p] = tuple(d)
+        elif d:
+            dims_by_param.pop(p, None)
+    return dims_by_param
+
+
 def _matrix_params(facts, domain: dict, shapes: dict) -> tuple[dict, dict]:
     """`({param: (rows, cols)}, {dim_name: sympy.Symbol})` for every
-    matrix parameter, the dimensions turned into shared sympy symbols so
-    a name appearing on two parameters ties them together and `I(n)` in
-    the claim reuses the same `n`."""
+    matrix and vector parameter, the dimensions turned into shared
+    sympy symbols so a name appearing on two parameters ties them
+    together and `I(n)` in the claim reuses the same `n`. A vector is
+    a column, `(n, 1)`."""
     symbols: dict = {}
 
     def dim_symbol(d):
         if isinstance(d, int):
             return d
+        if isinstance(d, str) and d.isdigit():
+            return int(d)
         return symbols.setdefault(d, sympy.Symbol(d, positive=True,
                                                   integer=True))
     params = {p: tuple(dim_symbol(d) for d in dims)
               for p, dims in matrix_param_dims(domain, shapes).items()}
+    for p, (n,) in vector_param_dims(domain, shapes).items():
+        params.setdefault(p, (dim_symbol(n), 1))
     return params, symbols
 
 
@@ -102,56 +127,142 @@ def _shaped(term, node):
     return term
 
 
-def _lift(node, env: dict):
+def _scalar(term):
+    """A 1-by-1 matrix expression as the number it holds (a quadratic
+    form `x.T @ A @ x`), anything else unchanged."""
+    if isinstance(term, sympy.MatrixExpr) and term.shape == (1, 1):
+        from sympy.matrices.expressions.matexpr import MatrixElement
+        return MatrixElement(term, 0, 0)
+    return term
+
+
+def _is_matrix(term) -> bool:
+    return isinstance(term, sympy.MatrixExpr) and term.shape != (1, 1)
+
+
+def _vector_like(term, vectors: frozenset) -> bool:
+    """Whether a column expression stands for a 1-D vector (it is built
+    from a vector parameter), so `@` reads it the way numpy reads a
+    1-D array."""
+    return (isinstance(term, sympy.MatrixExpr) and term.shape[1] == 1
+            and bool(term.atoms(sympy.MatrixSymbol) & vectors))
+
+
+def _matmul(left, right, vectors: frozenset):
+    """`left @ right` with numpy's reading of a 1-D vector: two
+    vectors give their dot product, a vector on the left of a matrix
+    is a row."""
+    if left.shape[1] != right.shape[0] and _vector_like(left, vectors):
+        left = sympy.Transpose(left)
+    if left.shape[1] != right.shape[0] and right.shape[0] == 1 \
+            and right.atoms(sympy.MatrixSymbol) & vectors:
+        right = sympy.Transpose(right)
+    return left * right
+
+
+def _elementwise(op, left, right):
+    """`+`, `-`, `*` and `**` between lifted terms, elementwise on
+    matrices: `*` of two matrices is the Hadamard product and a
+    matrix power `A ** k` is the elementwise power. A number and a
+    matrix combine only by scaling (`c * A`, `A / c`); adding a number
+    to a matrix, or a matrix exponent, is outside the lift."""
+    from sympy.matrices.expressions.hadamard import (HadamardPower,
+                                                     HadamardProduct)
+    lm, rm = _is_matrix(left), _is_matrix(right)
+    if not (lm or rm):
+        left, right = _scalar(left), _scalar(right)
+        return {ast.Add: lambda: left + right, ast.Sub: lambda: left - right,
+                ast.Mult: lambda: left * right,
+                ast.Div: lambda: left / right,
+                ast.Pow: lambda: left ** right}[type(op)]()
+    if isinstance(op, (ast.Add, ast.Sub)):
+        if not (lm and rm):
+            raise ValueError("a number added to a matrix is outside the "
+                             "lift")
+        return left + right if isinstance(op, ast.Add) else left - right
+    if isinstance(op, ast.Mult):
+        if lm and rm:
+            return HadamardProduct(left, right)
+        return _scalar(left) * right if rm else left * _scalar(right)
+    if isinstance(op, ast.Div):
+        if rm:
+            raise ValueError("division by a matrix is outside the lift")
+        return left / _scalar(right)
+    if isinstance(op, ast.Pow):
+        if rm:
+            raise ValueError("a matrix exponent is outside the lift")
+        return HadamardPower(left, _scalar(right))
+    raise ValueError(f"unsupported matrix operator {ast.dump(op)}")
+
+
+def _lift(node, env: dict, vectors: frozenset = frozenset()):
     """One claim-expression node to a sympy (matrix or scalar) term, or
     raise ValueError for a construct outside the matrix vocabulary. A
     name the claim uses as a matrix but that was never declared
     two-dimensional reaches here as a bare `Symbol` and is refused by
-    `_shaped` at the operator that needs it."""
+    `_shaped` at the operator that needs it. `vectors` are the matrix
+    symbols that stand for 1-D vectors."""
+    def lift(n):
+        return _lift(n, env, vectors)
     if isinstance(node, ast.Expression):
-        return _lift(node.body, env)
+        return lift(node.body)
     if isinstance(node, ast.Name):
         return env[node.id] if node.id in env else sympy.Symbol(node.id)
-    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
+            and not isinstance(node.value, bool):
         return sympy.sympify(node.value)
     if isinstance(node, ast.Attribute) and node.attr == "T":
-        return sympy.Transpose(_shaped(_lift(node.value, env), node.value))
+        return sympy.Transpose(_shaped(lift(node.value), node.value))
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-        return -_lift(node.operand, env)
+        return -lift(node.operand)
     if isinstance(node, ast.BinOp):
-        left = _lift(node.left, env)
-        right = _lift(node.right, env)
+        left = lift(node.left)
+        right = lift(node.right)
         if isinstance(node.op, ast.MatMult):
-            return (_shaped(left, node.left) * _shaped(right, node.right))
-        if isinstance(node.op, ast.Mult):
-            return left * right
-        if isinstance(node.op, ast.Add):
-            return left + right
-        if isinstance(node.op, ast.Sub):
-            return left - right
-        if isinstance(node.op, ast.Pow):
-            return left ** right
-        if isinstance(node.op, ast.Div):
-            # a scalar reciprocal in a matrix claim (`det(inv(A)) ==
-            # 1/det(A)`): sympy reads the division on Determinant/Trace
-            # scalars directly. Without this the whole claim declined
-            # as an unsupported operator, which read as a proof gap
-            # rather than a missing case.
-            return left / right
+            return _matmul(_shaped(left, node.left),
+                           _shaped(right, node.right), vectors)
+        if isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div,
+                                ast.Pow)):
+            try:
+                return _elementwise(node.op, left, right)
+            except (TypeError, sympy.ShapeError) as e:
+                raise ValueError(str(e)) from e
         raise ValueError(f"unsupported matrix operator {ast.dump(node.op)}")
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and not node.keywords:
         name = node.func.id
-        args = [_lift(a, env) for a in node.args]
-        if name == "det":
+        args = [lift(a) for a in node.args]
+        one = len(args) == 1
+        if name == "det" and one:
             return sympy.Determinant(args[0])
-        if name == "trace":
+        if name == "trace" and one:
             return sympy.Trace(args[0])
-        if name == "inv":
+        if name == "inv" and one:
             return sympy.Inverse(args[0])
-        if name == "transpose":
+        if name == "transpose" and one:
             return sympy.Transpose(args[0])
-        if name == "I" and len(args) == 1:
+        if name == "I" and one:
             return sympy.Identity(args[0])
+        if name == "matrix_power" and len(args) == 2 \
+                and _is_matrix(args[0]) and args[1].is_integer:
+            return sympy.MatPow(args[0], args[1])
+        if name == "dot" and len(args) == 2:
+            left = _shaped(args[0], node.args[0])
+            right = _shaped(args[1], node.args[1])
+            if _vector_like(left, vectors) and _vector_like(right, vectors):
+                return _scalar(sympy.Transpose(left) * right)
+            return _matmul(left, right, vectors)
+        if name == "outer" and len(args) == 2:
+            return (_shaped(args[0], node.args[0])
+                    * sympy.Transpose(_shaped(args[1], node.args[1])))
+        if name == "kron" and len(args) == 2:
+            return sympy.KroneckerProduct(_shaped(args[0], node.args[0]),
+                                          _shaped(args[1], node.args[1]))
+        if name == "solve" and len(args) == 2:
+            return sympy.Inverse(_shaped(args[0], node.args[0])) \
+                * _shaped(args[1], node.args[1])
+        if name in ("abs", "Abs") and one and not _is_matrix(args[0]):
+            return sympy.Abs(_scalar(args[0]))
     raise ValueError(f"unsupported matrix expression {ast.unparse(node)!r}")
 
 
@@ -196,22 +307,24 @@ def _nonsingular_premises(premises) -> set:
 
 def _inverted_symbols(tree, env: dict) -> set:
     """Every matrix symbol the claim text inverts (inside an `inv(...)`
-    call, or a power with a negative exponent), read off the source:
+    call, the matrix of a `solve(A, b)`, or a matrix power with a
+    negative exponent), read off the source:
     sympy cancels `Inverse(A) * A` to the identity as the product is
     built, so the lifted expression no longer shows the inverse."""
     out: set = set()
     for node in ast.walk(tree):
         inverted = None
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-                and node.func.id == "inv" and node.args:
+                and node.func.id in ("inv", "solve") and node.args:
             inverted = node.args[0]
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "matrix_power" and len(node.args) == 2:
             try:
-                exponent = ast.literal_eval(node.right)
+                exponent = ast.literal_eval(node.args[1])
             except (ValueError, SyntaxError):
                 exponent = None
             if not isinstance(exponent, (int, float)) or exponent < 0:
-                inverted = node.left
+                inverted = node.args[0]
         if inverted is None:
             continue
         try:
@@ -247,6 +360,24 @@ def _expand_determinants(expr):
     return expr
 
 
+def _opaque_scalars(expr, names: dict):
+    """`expr` with every 1-by-1 matrix product (a quadratic form or an
+    inner product) replaced by one scalar symbol per quantity. A
+    number equals its own transpose, so `x.T*y` and `y.T*x` are the
+    same quantity and share a symbol; `names` maps each quantity's
+    chosen spelling to its symbol, shared across both sides."""
+    from sympy.matrices.expressions.matexpr import MatrixElement
+
+    def pick(e):
+        one = e.parent.doit()
+        other = sympy.Transpose(one).doit()
+        key = min(one, other, key=sympy.default_sort_key)
+        return names.setdefault(key, sympy.Symbol(f"<{key}>", real=True))
+    return expr.replace(
+        lambda e: isinstance(e, MatrixElement) and e.parent.shape == (1, 1),
+        pick)
+
+
 def _is_zero(expr) -> bool:
     """Whether a refined difference is the zero of its kind: a
     ZeroMatrix, or a scalar/collapsed 0 (the matrix difference of two
@@ -266,14 +397,43 @@ def _is_zero(expr) -> bool:
         return False
 
 
+def _structure_substitutions(mat_syms: dict, structures: dict) -> dict:
+    """Exact rewrites a structure implies that sympy has no predicate
+    for: an identity matrix is `I(n)` itself, and the transpose of a
+    skew-symmetric matrix is its negation (so its trace is 0)."""
+    subs: dict = {}
+    for param, props in (structures or {}).items():
+        A = mat_syms.get(param)
+        if A is None or A.shape[0] != A.shape[1]:
+            continue
+        if "is_identity" in props:
+            subs[A] = sympy.Identity(A.shape[0])
+        elif "is_skew_symmetric" in props:
+            # A.T = -A, so the trace, equal to its own negation, is 0
+            subs[sympy.Transpose(A)] = -A
+            subs[sympy.Trace(A)] = sympy.Integer(0)
+    return subs
+
+
+def _substituted(expr, subs: dict):
+    if not subs:
+        return expr
+    for _ in range(4):
+        new = expr.xreplace(subs)
+        if new == expr:
+            break
+        expr = new
+    return expr
+
+
 def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
                      domain: dict, shapes: dict,
                      structures: dict,
                      premises=None) -> "ProofResult | None":
-    """Prove `lhs <relation> rhs` over matrix parameters, or return None
-    when it is not a matrix claim or the lift cannot model it (the
-    caller then falls back). An equality (`==`/`~=`) is decided by
-    zeroing the refined difference; a scalar comparison of
+    """Prove `lhs <relation> rhs` over matrix and vector parameters, or
+    return None when it is not a matrix claim or the lift cannot model
+    it (the caller then falls back). An equality (`==`/`~=`) is decided
+    by zeroing the refined difference; a scalar comparison of
     determinants/traces (`det(A) > 0`) is decided by sympy's assumption
     engine under the structure premises. A matrix ordering is not
     defined and is declined.
@@ -290,6 +450,8 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
     mat_syms = {p: sympy.MatrixSymbol(p, r, c) for p, (r, c) in params.items()}
     if not mat_syms:
         return None
+    vectors = frozenset(mat_syms[p] for p in
+                        vector_param_dims(domain, shapes) if p in mat_syms)
     # a bare dimension name in the claim (the `n` of `I(n)`) resolves to
     # the same symbol the matrix dimensions were built from, so an
     # identity's size matches its operands' and their difference closes.
@@ -305,10 +467,13 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
     try:
         lhs_tree = ast.parse(lhs_src, mode="eval")
         rhs_tree = ast.parse(rhs_src, mode="eval")
-        lhs = _lift(lhs_tree, env)
-        rhs = _lift(rhs_tree, env)
-    except (ValueError, SyntaxError):
+        lhs = _lift(lhs_tree, env, vectors)
+        rhs = _lift(rhs_tree, env, vectors)
+    except (ValueError, SyntaxError, TypeError, sympy.ShapeError):
         return None
+    if _is_matrix(lhs) != _is_matrix(rhs):
+        return None
+    lhs, rhs = (lhs, rhs) if _is_matrix(lhs) else (_scalar(lhs), _scalar(rhs))
     nonsingular = _nonsingular_premises(premises)
     invertible = {mat_syms[p] for p in mat_syms
                   if p in nonsingular
@@ -324,6 +489,7 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
             sketch=f"the claim inverts {names}, which may be singular (inv "
                    f"raises there); state it: assuming det({singular[0]}) "
                    f"!= 0")
+    subs = _structure_substitutions(mat_syms, structures)
     context = _assumptions(mat_syms, structures)
     extra = [sympy.Q.invertible(mat_syms[p]) for p in sorted(nonsingular)
              if p in mat_syms]
@@ -345,8 +511,11 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
             return None
         return sympy.ask(_ASK_FOR_RELATION[relation](diff), context)
 
+    scalar_names: dict = {}
+
     def _decide():
-        lhs_d, rhs_d = lhs.doit(), rhs.doit()
+        lhs_d = _opaque_scalars(_substituted(lhs, subs), scalar_names).doit()
+        rhs_d = _opaque_scalars(_substituted(rhs, subs), scalar_names).doit()
         if not orthogonal:
             return _decide_one(lhs_d, rhs_d)
         import itertools
@@ -383,18 +552,13 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
     prem = (f" under {', '.join(sorted(p for ps in structures.values() for p in ps))}"
             if structures else "")
     if decided:
-        rel_text = "=" if is_equality else relation
         return ProofResult(
             "proven",
-            sketch=f"matrix relation: {_humanize(lhs)} {rel_text} "
-                   f"{_humanize(rhs)} holds in sympy's matrix algebra{prem}")
+            sketch=f"matrix relation: {lhs_src.strip()} {relation} "
+                   f"{rhs_src.strip()} holds in sympy's matrix algebra{prem}")
     # a definite non-relation (a false identity or inequality): a matrix
     # disproof needs a witness (a concrete counterexample matrix), which
     # the empirical route supplies; stay undecided here
     return ProofResult("undecided",
                        sketch="matrix relation did not hold symbolically; "
                               "left to empirical checking")
-
-
-def _humanize(expr) -> str:
-    return str(expr).replace("**", "^")

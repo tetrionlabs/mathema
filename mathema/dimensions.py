@@ -89,9 +89,11 @@ class DimResolver:
 
     def marker_names(self) -> set:
         """Every dimension name usable as a symbol in a premise or law:
-        the signature's own names and every claim alias of them."""
+        the signature's own names and every claim alias of them. A
+        fixed size is not a name."""
         names = {a for shape in self.shapes.values()
-                 for a in shape.axes if isinstance(a, str)}
+                 for a in shape.axes if isinstance(a, str)
+                 and not a.isdigit()}
         return names | set(self.aliases)
 
     def anchor(self, name: str):
@@ -210,6 +212,17 @@ def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> dict:
     return aliases
 
 
+def _axis(dim):
+    """One axis of a declared shape: a dimension name as itself, a
+    fixed size (`Mat(2, 2)`, `R^3`) as its digits, which `draw_sizes`
+    holds at exactly that size."""
+    if isinstance(dim, bool):
+        return None
+    if isinstance(dim, int):
+        return str(dim)
+    return dim if isinstance(dim, str) else None
+
+
 def resolve(facts, shapes: "dict | None" = None,
             claim_domain: "dict | None" = None) -> DimResolver:
     """Build the resolver for a function from its `Facts` and its
@@ -229,13 +242,11 @@ def resolve(facts, shapes: "dict | None" = None,
         if marker_dims and declared:
             aliases.update(_reconcile_dims(p, marker_dims, declared))
         if marker_dims:
-            out[p] = ParamShape(axes=tuple(
-                d if isinstance(d, str) else None for d in marker_dims))
+            out[p] = ParamShape(axes=tuple(_axis(d) for d in marker_dims))
         elif declared:
             # a claim-declared space (`for xs in R^n`): its dims name
             # the axes even with no type marker on the parameter
-            out[p] = ParamShape(axes=tuple(
-                d if isinstance(d, str) else None for d in declared))
+            out[p] = ParamShape(axes=tuple(_axis(d) for d in declared))
         elif facts.param_kinds.get(p) in SEQUENCE_KINDS:
             out[p] = ParamShape(axes=(None,))
         else:

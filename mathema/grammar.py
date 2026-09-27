@@ -99,6 +99,8 @@ sugar for the same 4-argument call.
 from __future__ import annotations
 
 import ast
+import contextlib
+import contextvars
 import re
 from dataclasses import dataclass
 
@@ -2030,13 +2032,41 @@ def _bar_pairs(text: str) -> "list[tuple[int, int]] | None":
     return None if stack else pairs
 
 
+#: the names bars read as matrices while a claim is parsed: bars
+#: around one of them (or an expression over them that is a matrix)
+#: are its determinant
+_BAR_MATRICES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "bar_matrices", default=frozenset())
+
+
+@contextlib.contextmanager
+def bars_over_matrices(names):
+    """Within the block, bars around a matrix expression over `names`
+    fold to `det(...)` rather than `abs(...)`."""
+    token = _BAR_MATRICES.set(frozenset(names))
+    try:
+        yield
+    finally:
+        _BAR_MATRICES.reset(token)
+
+
+def _bars_hold_matrix(content: str, names: frozenset) -> bool:
+    from .linalg import is_matrix_expr
+    try:
+        node = ast.parse(_caret_to_power(content.strip()), mode="eval").body
+    except SyntaxError:
+        return False
+    return is_matrix_expr(node, names)
+
+
 def _fold_bars(text: str) -> str:
     """`|expr|` -> `abs(expr)` for any expression between the bars, and
     `||expr||` -> `norm(expr)`: a pair whose content is exactly one
     further pair reads as a norm, so `||a| - |b||` (content not a
     single pair) stays an absolute value of a difference. Text whose
     bars do not pair up is returned unchanged for the claim parser to
-    refuse. A matrix operand turns `abs` into `det` later, by type."""
+    refuse. Within `bars_over_matrices`, bars around a matrix
+    expression are its determinant, `det(expr)`."""
     if "|" not in text:
         return text
     pairs = _bar_pairs(text)
@@ -2052,7 +2082,11 @@ def _fold_bars(text: str) -> str:
             replace[o], replace[c] = "norm(", ")"
             replace[o + 1] = replace[c - 1] = ""
         else:
-            replace[o], replace[c] = "abs(", ")"
+            mats = _BAR_MATRICES.get()
+            opening = ("det(" if mats and "|" not in text[o + 1:c]
+                       and _bars_hold_matrix(text[o + 1:c], mats)
+                       else "abs(")
+            replace[o], replace[c] = opening, ")"
     return "".join(replace.get(i, ch) for i, ch in enumerate(text))
 
 
@@ -2379,8 +2413,18 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
             return sympy.Transpose(
                 _node_to_sympy(node.value, funcs, matrix_names))
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.MatMult):
-            return (_node_to_sympy(node.left, funcs, matrix_names)
-                    * _node_to_sympy(node.right, funcs, matrix_names))
+            left = _node_to_sympy(node.left, funcs, matrix_names)
+            right = _node_to_sympy(node.right, funcs, matrix_names)
+            if isinstance(left, sympy.MatrixExpr) \
+                    and isinstance(right, sympy.MatrixExpr):
+                # unevaluated, so `inv(A) @ A` renders as written rather
+                # than as the identity it equals
+                factors = [*(left.args if isinstance(left, sympy.MatMul)
+                             else (left,)),
+                           *(right.args if isinstance(right, sympy.MatMul)
+                             else (right,))]
+                return sympy.MatMul(*factors, evaluate=False)
+            return left * right
     if isinstance(node, ast.Constant):
         if isinstance(node.value, complex) and not isinstance(node.value, (int, float)):
             v = node.value
@@ -2425,6 +2469,10 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
             # straight off the node
             arg_nodes = arg_nodes[:3]
         args = [_node_to_sympy(a, funcs, matrix_names) for a in arg_nodes]
+        if matrix_names and len(args) == 1 and fname == "I":
+            # the identity renders without its size, so one square
+            # placeholder dimension serves every `I(n)`
+            return sympy.Identity(_MATRIX_RENDER_DIM)
         if matrix_names and len(args) == 1 and fname in _MATRIX_RENDER_CALLS:
             return _MATRIX_RENDER_CALLS[fname](args[0])
         special = _SPECIAL_RENDER_CALLS.get(fname)

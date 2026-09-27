@@ -26,8 +26,19 @@ def test_apply_matrix_sugar_on_matrix_operands():
     m = frozenset({"A", "B"})
     assert apply_matrix_sugar("A ** T", m) == "A.T"
     assert apply_matrix_sugar("A ** -1", m) == "inv(A)"
-    assert apply_matrix_sugar("abs(A)", m) == "det(A)"
-    assert apply_matrix_sugar("abs(A @ B)", m) == "det(A @ B)"
+    # an explicit abs is elementwise; only the bars read as det
+    assert apply_matrix_sugar("abs(A)", m) == "abs(A)"
+    assert apply_matrix_sugar("abs(A @ B)", m) == "abs(A @ B)"
+
+
+def test_bars_fold_to_the_determinant_of_a_matrix():
+    from mathema.grammar import bars_over_matrices, normalize
+    m = frozenset({"A", "B"})
+    with bars_over_matrices(m):
+        assert normalize("|A|") == "det(A)"
+        assert normalize("|A @ B|") == "det(A @ B)"
+        assert normalize("|c|") == "abs(c)"
+    assert normalize("|A|") == "abs(A)"
 
 
 def test_apply_matrix_sugar_leaves_scalars_alone():
