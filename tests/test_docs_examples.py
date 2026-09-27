@@ -35,7 +35,8 @@ _CLAIM_SHAPED = re.compile(
 # requirement. Vocabulary words, grammar fragments shown to explain one
 # form, and quoted Python all fail this and are not claims a reader
 # would paste.
-_HAS_RELATION = re.compile(r"==|!=|<=|>=|≤|≥|≠|~=|=:=|\bequiv\b|=>|[^<>=]<[^=]|[^<>=]>[^=]")
+_HAS_RELATION = re.compile(r"==|!=|<=|>=|≤|≥|≠|~=|=:=|\bequiv\b|=>|[^<>=]<[^=]|[^<>=]>[^=]"
+                           r"|∈|∉|\bnot in\b|\)\s+in\s+")
 _PYTHON_LINE = re.compile(r":\s*$|^\s*(def|class|import|from|return|@)\b")
 
 

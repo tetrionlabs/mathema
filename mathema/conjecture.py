@@ -42,7 +42,8 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       extract_outcome_clause, _split_top_level,
                       is_reserved, normalize,
                       parse_domain_safety, parse_raises, split_quantifier,
-                      split_relation_chain, unexpanded_prime_message,
+                      split_membership, split_relation_chain,
+                      unexpanded_prime_message,
                       UnreadableSpelling)
 from . import linalg
 from ._scan import _split_commas, blank_strings
@@ -320,16 +321,26 @@ def _guard_points(fn, facts, kinds: dict, domain: dict,
 
 def _sample_in_domain(value, bound) -> bool:
     """Intent:
-        Whether one sampled scalar lies inside its parameter's declared
-        bound, for the probe route's per-trial check. Only a real number
-        is judged here: a sequence, mapping, string or complex value
-        has its own sampler, and a missing value is the missing-value
-        policy's to decide. A whole float counts as the integer it
+        Whether one sampled value lies inside its parameter's declared
+        bound, for the probe route's per-trial check. A language domain
+        judges every value; otherwise only a real number is judged
+        here: a sequence, mapping, string or complex value has its own
+        sampler, and a missing value is the missing-value policy's to
+        decide. A whole float counts as the integer it
         equals, and an infinity is inside exactly when the bound is
         unbounded in its direction.
     """
     from .domain import domain_contains
-    if bound is None or isinstance(value, bool) \
+    if bound is None:
+        return True
+    if getattr(bound, "base_type", None) == "L":
+        # a language domain judges its own members, strings and
+        # structured values included
+        try:
+            return bool(domain_contains(value, bound))
+        except Exception:
+            return True
+    if isinstance(value, bool) \
             or not isinstance(value, (int, float)) or value != value:
         return True
     try:
@@ -523,6 +534,242 @@ def _resolve_func_ref(ref: str, *, root: str = "."):
 # against the real parameter's own annotation.
 _BASE_TYPE_KIND = {"Z": "int", "N": "int", "R": "scalar", "C": "complex"}
 
+
+# which real parameter kinds (analysis.param_kinds' vocabulary) a
+# language's member kind is compatible with: a row is a mapping the body
+# reads as a dict, a frame is iterated or subscripted, an object is
+# anything the body does not pin down
+_KIND_COMPATIBLE = {
+    "string": {"string"},
+    "mapping": {"dict"},
+    "sequence": {"sequence"},
+    "object": {"dict", "sequence", "unknown"},
+    "row": {"dict"},
+    "frame": {"sequence", "dict"},
+}
+
+
+def _kind_compatible(stated: str, real: "str | None") -> bool:
+    """Intent:
+        Whether a real parameter of kind `real` can take members of
+        a domain whose stated kind is `stated`. An unknown real kind
+        is compatible with anything; otherwise the table above, and
+        equality for a kind outside it.
+    """
+    if real in (None, "unknown"):
+        return True
+    return real in _KIND_COMPATIBLE.get(stated, {stated})
+
+
+def _stated_kind(bound) -> str:
+    """Intent:
+        The parameter kind a stated domain type corresponds to: the
+        table above for a number set, and for a language domain the
+        kind of the language itself (a string language is `"string"`,
+        a schema language `"mapping"` or `"object"`), read from the
+        resolved language and falling back to `"string"` when it does
+        not resolve (validation reports that separately).
+    """
+    base_type = getattr(bound, "base_type", None)
+    if base_type == "L":
+        from .domain import LanguageRef
+        from .languages import resolve_language
+        for piece in getattr(bound, "pieces", ()):
+            if isinstance(piece, LanguageRef):
+                try:
+                    return resolve_language(piece).kind
+                except Exception:
+                    return "string"
+        return "string"
+    return _BASE_TYPE_KIND.get(base_type, str(base_type).lower())
+
+
+def _language_field_bounds(cj_domain: dict) -> dict:
+    """Intent:
+        `{param: {field: bound}}` for every parameter bound to a
+        single schema language, from the one-deep field domains its
+        `fields()` states: a numeric field keeps its bound (an
+        `Interval`, one side open or both, a named number set, a
+        numeric `Domain`), a text field stated as a language keeps that
+        `LanguageRef`, and a field with no reading (a categorical,
+        None) is present with the bound None. A union of languages or
+        a language without fields leaves the parameter out.
+    """
+    from .domain import LanguageRef
+    from .languages import resolve_language
+    out: dict = {}
+    for p, b in cj_domain.items():
+        if getattr(b, "base_type", None) != "L":
+            continue
+        refs = [piece for piece in b.pieces if isinstance(piece, LanguageRef)]
+        if len(refs) != 1 or len(b.pieces) != 1:
+            continue
+        try:
+            fields = resolve_language(refs[0]).fields()
+        except Exception:
+            continue
+        if fields:
+            out[p] = dict(fields)
+    return out
+
+
+def _is_numeric_bound(bound) -> bool:
+    from .domain import Domain
+    if isinstance(bound, Domain):
+        return bound.base_type in ("R", "Z", "N")
+    return bound in ("Z", "N", "R") or isinstance(bound, tuple)
+
+
+def _length_domain(bound):
+    """Intent:
+        The domain of `len(p.field)` for a text field: its language's
+        length bound as a whole-number interval, or N.
+    """
+    from .domain import Domain, Interval, LanguageRef
+    length = bound.refinement("len") if isinstance(bound, LanguageRef) else None
+    if length is None:
+        return "N"
+    from .domain import refinement_range
+    lo, hi = refinement_range(length)
+    return Domain(base_type="N" if hi is None else "Z",
+                  pieces=() if hi is None else (Interval(float(lo), float(hi)),),
+                  explicit_type=True)
+
+
+def _path_bound(p: str, path: str, fields: dict, cj_domain: dict):
+    """Intent:
+        The bound of the field `path` reads off parameter `p`: the
+        claim's own binding of that path, or of the same path with every
+        index read as `[*]`, else the language's, found by walking its
+        `fields()` (a nested mapping for a record, `"[*]"` for the
+        elements of a list). None when neither states one.
+    """
+    import re as _re
+    from .domain import path_steps
+    for key in (f"{p}.{path}", _re.sub(r"\[\d+\]", "[*]", f"{p}.{path}")):
+        if key in cj_domain:
+            return cj_domain[key]
+    node = fields
+    for step in path_steps(f".{path}"):
+        if not isinstance(node, dict):
+            return None
+        node = node.get("[*]") if isinstance(step, int) or step == "*" else node.get(step)
+    return None if isinstance(node, dict) else node
+
+
+def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
+    """Intent:
+        `(field_domain, reason)`: the `p.field` and `p.field.len`
+        bounds the lift binds for every language-bound parameter, from
+        the fields the body reads, or `(None, reason)` naming the first
+        parameter or field with no symbolic reading: a parameter whose
+        language states no fields, or a field read as a value that is
+        not a number (a categorical, text read as text).
+    """
+    from .domain import LanguageRef
+    from .symbolic._base import field_reads
+    schema = _language_field_bounds(cj_domain)
+    out: dict = {}
+    for p, b in cj_domain.items():
+        if getattr(b, "base_type", None) != "L":
+            continue
+        if p not in schema or facts.tree is None:
+            return None, (f"{p} is quantified over a language with no "
+                          "field reading")
+        plain, length_only = field_reads(facts.tree, p)
+        if not (plain or length_only):
+            return None, (f"the body reads no field of {p}, so the lift "
+                          "declines and the probe adjudicates")
+        for f in plain:
+            bound = _path_bound(p, f, schema[p], cj_domain)
+            if not _is_numeric_bound(bound):
+                return None, (f"the body reads {p}.{f}, a field with no "
+                              "numeric reading, so the lift declines and "
+                              "the probe adjudicates")
+            out[f"{p}.{f}"] = bound
+        for f in length_only:
+            bound = _path_bound(p, f, schema[p], cj_domain)
+            if not isinstance(bound, LanguageRef):
+                return None, (f"the body reads len({p}.{f}), and {p}.{f} "
+                              "is not a text field")
+            out[f"{p}.{f}.len"] = _length_domain(bound)
+    return out, ""
+
+
+def _ref_resolves(ref, resolve) -> bool:
+    try:
+        resolve(ref)
+    except Exception:
+        return False
+    return True
+
+
+def _adaptor_inferred_domains(fn, facts, cj_domain: dict) -> dict:
+    """Intent:
+        `{param: (language domain, adaptor name, annotation text)}` for
+        every parameter no binding names whose annotation a registered
+        language adaptor turns into a language. The domain names the
+        language by its own name when that resolves, else by the
+        annotation's dotted path when the annotation is a class the
+        adaptors accept again; an annotation whose language can be
+        named neither way infers nothing, since a record must be able
+        to resolve what it states.
+    """
+    if fn is None:
+        return {}
+    from .domain import Domain, LanguageRef, language_ref
+    from .languages import adapt_annotation, resolve, resolves
+    from .types import _hints
+    hints = _hints(fn)
+    out: dict = {}
+    for p in facts.params:
+        hint = hints.get(p)
+        if p in cj_domain or hint is None:
+            continue
+        found = adapt_annotation(hint)
+        if found is None:
+            continue
+        language, adaptor = found
+        named = language_ref(language.name)
+        if named is not None and _ref_resolves(named, resolve):
+            ref = named
+        elif isinstance(hint, type) and resolves(
+                f"{hint.__module__}.{hint.__qualname__}"):
+            ref = LanguageRef(f"{hint.__module__}.{hint.__qualname__}")
+        else:
+            continue
+        hint_text = getattr(hint, "__name__", None) or str(hint)
+        out[p] = (Domain(base_type="L", pieces=(ref,), explicit_type=True),
+                  adaptor, hint_text)
+    return out
+
+
+def _language_meta(bounds: dict) -> dict:
+    """Intent:
+        The record's statement of every language a claim was
+        adjudicated over: per parameter, one description per language
+        piece (name, source, level, kind, persisted form), so a reader
+        of the record sees what `L[ascii]` resolved to. A language that
+        does not resolve is left out; validation has already reported
+        it.
+    """
+    from .domain import LanguageRef
+    from .languages import describe_language
+    out: dict = {}
+    for p, b in sorted(bounds.items()):
+        if getattr(b, "base_type", None) != "L":
+            continue
+        described = []
+        for piece in b.pieces:
+            if isinstance(piece, LanguageRef):
+                try:
+                    described.append(describe_language(piece))
+                except Exception:
+                    continue
+        if described:
+            out[p] = described
+    return out
+
 GRAMMAR = "mathema"
 
 # the closeness default: what an equality (or slack on an inequality)
@@ -714,7 +961,8 @@ class Conjecture:
     name: str
     lhs: str
     rhs: str
-    relation: str = "=="        # "==" | "<=" | ">="
+    relation: str = "=="        # "==" | "<=" | ">=" | ... | "in" | "not in"
+    rhs_bound: object = None    # the domain a membership relation's rhs names, else None
     source: str = "user"
     route: str = "best"         # "best" (default cascade) | "probe" | "derive" | "examine" (see claim-driven-
                                  # development/0.1.0/claim-anatomy.md). "best" is
@@ -1035,6 +1283,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
     ds = None if r is not None else parse_domain_safety(text)
     negated = False
     links: list = []
+    rhs_bound = None
     if r is not None:
         lhs, exc = r
         rel, rhs = "raises", (exc or "")
@@ -1069,16 +1318,27 @@ def claim(law: str, name: str | None = None, source: str = "user",
                 "reference (`=> self.<claim_name>`); to make one "
                 "relation conditional on another, state the premise "
                 "as `assuming <relation>, <statement>`")
-        try:
-            links = split_relation_chain(text)
-        except NoRelation as e:
-            raise InvalidConjecture(str(e)) from e
-        lhs, rel, rhs = links[0]
-        if len(links) == 1:
-            links = []
+        membership = split_membership(text)
+        if membership is not None:
+            lhs, rel, rhs = membership
+            rhs_bound = _membership_bound(rhs)
+            chain = _membership_as_chain(lhs, rel, rhs_bound)
+            if chain is not None:
+                # `f(x) in [0, 1]` is the chain `0 <= f(x) <= 1`, which
+                # every route already reads; the membership spelling
+                # is sugar for it, and the chain is the canonical text
+                text, membership, rhs_bound = chain, None, None
+        if membership is None:
+            try:
+                links = split_relation_chain(text)
+            except NoRelation as e:
+                raise InvalidConjecture(str(e)) from e
+            lhs, rel, rhs = links[0]
+            if len(links) == 1:
+                links = []
     # a residual `|` is a bar the grammar could not pair with another,
     # and left in place it reaches rendering as unparseable text
-    for _side in (lhs, rhs):
+    for _side in ((lhs,) if rhs_bound is not None else (lhs, rhs)):
         if _side and "|" in blank_strings(_side):
             raise InvalidConjecture(
                 f"the bars in {_side!r} do not pair up. Each opening bar "
@@ -1100,7 +1360,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
     # SyntaxError wherever the side is next parsed
     if r is None and ds is None:
         for _lhs, _rel, _rhs in (links or [(lhs, rel, rhs)]):
-            for _side in (_lhs, _rhs):
+            for _side in ((_lhs,) if rhs_bound is not None else (_lhs, _rhs)):
                 try:
                     ast.parse(_side, mode="eval")
                 except SyntaxError:
@@ -1125,6 +1385,13 @@ def claim(law: str, name: str | None = None, source: str = "user",
     # canonical statement re-parses under base `mathema` on its own.
     if grammar == GRAMMAR and linalg.mentions_matrix_ops(lhs, rhs):
         grammar = f"{GRAMMAR}/linalg"
+    elif grammar == GRAMMAR and any(getattr(b, "base_type", None) == "L"
+                                    for b in (*dom.values(), rhs_bound)):
+        # the language dialect: a claim that writes a language, as a
+        # domain or on the right of `in`, is read with the language
+        # vocabulary; a finite-set domain stays
+        # the base grammar, and the matrix dialect wins when both apply
+        grammar = f"{GRAMMAR}/language"
     if let_pseudo_inf is not None:
         from .records import pseudo_infinity_range
         if (pseudo_infinity is not None
@@ -1157,6 +1424,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
         # treat it as the function it is rather than refusing
         bound_funcs[unbound] = unbound
     return Conjecture(name=name, lhs=lhs, rhs=rhs, relation=rel,
+                      rhs_bound=rhs_bound,
                       source=source, route=route, grammar=grammar,
                       funcs=bound_funcs, domain=dom,
                       free_vars=frozenset(let_domain),
@@ -1165,6 +1433,43 @@ def claim(law: str, name: str | None = None, source: str = "user",
                       links=links, pseudo_infinity=pseudo_infinity,
                       param_pins=param_pins,
                       meta=dict(meta or {}), raw=law)
+
+
+def _membership_bound(rhs: str):
+    """Intent:
+        The domain a membership relation's right-hand side names
+        (`L[slug]`, `[0, 1]`, `{"a", "b"}`, `Z`), read by the domain
+        grammar, or None when the text is not a domain and the
+        relation is value containment (`"<" not in f(s)`).
+    """
+    from .domain import InvalidDomain, parse_binding
+    try:
+        parsed = parse_binding(f"_ in {rhs}")
+    except InvalidDomain:
+        return None
+    return None if parsed is None else parsed[1]
+
+
+def _membership_as_chain(lhs: str, rel: str, bound) -> "str | None":
+    """Intent:
+        The chained comparison a membership in a plain numeric
+        interval reduces to (`f(x) in [0, 1]` -> `0 <= f(x) <= 1`,
+        open endpoints strict), or None for any other right-hand
+        side, including `not in`, which has no chain form.
+    """
+    from .domain import Interval
+    if rel != "in" or not isinstance(bound, Interval):
+        return None
+    lo, hi = bound
+    if not all(isinstance(v, (int, float)) for v in (lo, hi)):
+        return None
+    left = "<=" if getattr(bound, "closed_lo", True) else "<"
+    right = "<=" if getattr(bound, "closed_hi", True) else "<"
+    return f"{_num(lo)} {left} {lhs} {right} {_num(hi)}"
+
+
+def _num(v) -> str:
+    return str(int(v)) if float(v).is_integer() else repr(float(v))
 
 
 _NOT_CLAIM_SYNTAX = {
@@ -1695,9 +2000,11 @@ def _undeclared_names(cj, declared: set) -> list[str]:
         relation (a safety predicate, `f =:= g`), whose operands are
         read differently.
     """
-    if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">", "raises"):
+    if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">", "raises",
+                           "in", "not in"):
         return []
-    sides = [cj.lhs] if cj.relation == "raises" else [cj.lhs, cj.rhs]
+    sides = [cj.lhs] if cj.relation == "raises" or cj.rhs_bound is not None \
+        else [cj.lhs, cj.rhs]
     for link in cj.links or ():
         sides += [link[0], link[2]]
     premise = re.sub(r"^assuming\s+", "", (cj.assuming or "").strip())
@@ -2504,6 +2811,18 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
 
     from .probing import _synth
     cls, fields = bundle
+    bound = cj_domain.get(p)
+    if getattr(bound, "base_type", None) == "L":
+        # the parameter is quantified over a language: its members are
+        # the instances, and a claim-level field bound narrows them by
+        # a bounded rejection
+        from .domain import path_bindings_hold
+        inst = None
+        for _ in range(20):
+            inst = _synth("object", rng, bound)
+            if path_bindings_hold(inst, p, cj_domain):
+                break
+        return inst
     values = {f: _synth("float", rng, cj_domain.get(f"{p}.{f}"),
                         specials=specials) for f in fields}
     if isinstance(cls, type) and _dc.is_dataclass(cls):
@@ -2807,6 +3126,14 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                             for p2, b in cj.domain.items()}
         probe.grammar = cj.grammar
         probe.tolerance = cj.tolerance
+        languages = _language_meta({**domain, **(cj.domain or {})})
+        if languages:
+            # what every `L[...]` binding resolved to, on the record,
+            # beside any entry a family wrote under the same key (its
+            # `return`, say)
+            earlier = (probe.meta or {}).get("mathema.language")
+            merged = {**earlier, **languages} if isinstance(earlier, dict) else languages
+            probe.meta = {**(probe.meta or {}), "mathema.language": merged}
         if cj.domain and not probe.condition:
             # every quantified row carries its region as the ONE
             # canonical rendered condition, real parameter names,
@@ -3544,6 +3871,127 @@ def _probe_attempt_label(probed: "Probe") -> str:
     return f"probe: {probed.verdict}" + (f" ({reason})" if reason else "")
 
 
+def _merge_under(meta: dict, extra: dict) -> dict:
+    """Intent:
+        `meta` with `extra`'s keys added beneath it: a key already in
+        `meta` keeps its value, except `mathema.language`, whose
+        entries merge per key (an entry already present wins).
+    """
+    import copy
+    out = dict(meta)
+    for key, value in extra.items():
+        if key == "mathema.language" and isinstance(value, dict) \
+                and isinstance(out.get(key), dict):
+            out[key] = {**copy.deepcopy(value), **out[key]}
+        elif key not in out:
+            out[key] = copy.deepcopy(value)
+    return out
+
+
+_WITNESS_SHRINK_EVALUATIONS = 400
+
+
+def _failure_at(cj, kinds, env, args, code_l, code_r) -> "str | None":
+    """Intent:
+        The counterexample text the claim fails with at `args` (a raise,
+        a membership, or a comparison, in the claim loop's own words),
+        or None when it holds there or cannot be evaluated.
+    """
+    from .domain import domain_contains
+    trial_env = dict(env)
+    for p, v in zip(kinds, args):
+        trial_env[p] = v
+    try:
+        lv = eval(code_l, {"__builtins__": {}}, trial_env)
+        rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
+    except Exception as e:
+        return (f"{_fmt(tuple(args))}: raised {type(e).__name__}, narrow "
+                "the claim's domain to where every call returns, or state "
+                "the raising region as its own raises(...) claim")
+    if cj.relation in ("in", "not in"):
+        if cj.rhs_bound is not None:
+            member = (not is_missing(lv)) and domain_contains(lv, cj.rhs_bound)
+        else:
+            try:
+                member = lv in rv  # type: ignore[operator]
+            except TypeError:
+                return None
+        if member != (cj.relation == "in"):
+            return (f"{_fmt(tuple(args))}: {lv!r} is "
+                    f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
+        return None
+    if is_missing(lv) or is_missing(rv):
+        return None
+    slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
+    ok = relation_holds_elementwise(lv, rv, cj.relation, slack,
+                                    exact_inequality=cj.tolerance is None,
+                                    rel_tol=_declared_rel_tol(cj))
+    if ok is False:
+        return f"{_fmt(tuple(args))}: {lv!r} vs {rv!r}"
+    return None
+
+
+def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
+    """Intent:
+        `(args, counterexample, steps)`: the witness shrunk inside each
+        language-bound parameter's language, one of the language's own
+        `shrink` candidates at a time, keeping a candidate only when it
+        is in the claim's domain for that parameter and the claim still
+        fails there, within `_WITNESS_SHRINK_EVALUATIONS` evaluations;
+        None when the failure does not reproduce.
+    """
+    from .domain import LanguageRef, domain_contains, path_bindings_hold
+    from .languages import resolve_language
+    args = list(args)
+    current = _failure_at(cj, kinds, env, args, code_l, code_r)
+    if current is None:
+        return None
+    budget, steps = _WITNESS_SHRINK_EVALUATIONS, 0
+    names = list(kinds)
+    improved = True
+    while improved and budget > 0:
+        improved = False
+        for i, p in enumerate(names):
+            bound = cj_domain.get(p)
+            if getattr(bound, "base_type", None) != "L":
+                continue
+            languages = []
+            for piece in bound.pieces:
+                if isinstance(piece, LanguageRef):
+                    try:
+                        languages.append(resolve_language(piece))
+                    except Exception:
+                        continue
+            for language in languages:
+                try:
+                    if not language.contains(args[i]):
+                        continue
+                    candidates = list(language.shrink(args[i]))
+                except Exception:
+                    continue
+                for candidate in candidates:
+                    if budget <= 0:
+                        break
+                    try:
+                        inside = (domain_contains(candidate, bound)
+                                  and path_bindings_hold(candidate, p, cj_domain))
+                    except Exception:
+                        inside = False
+                    if not inside:
+                        continue
+                    budget -= 1
+                    trial = [*args[:i], candidate, *args[i + 1:]]
+                    failure = _failure_at(cj, kinds, env, trial, code_l, code_r)
+                    if failure is not None:
+                        args, current, steps, improved = trial, failure, steps + 1, True
+                        break
+                if improved:
+                    break
+            if improved:
+                break
+    return args, current, steps
+
+
 def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Probe":
     """Intent:
         Decide which report stands when a route="best"/"derive" claim
@@ -3558,7 +4006,9 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
     Notes:
         The structured mathema.derive_status / mathema.timeout meta is
         carried onto the winning Probe regardless of who adjudicated,
-        so a coverage measurement keeps the derive-route signal.
+        so a coverage measurement keeps the derive-route signal. When
+        derive's report stands, the probe's own meta (a family's
+        resolved target, a probe gap) is merged beneath derive's.
     """
     fallback = ctx.derive_undecided
     if fallback is None:
@@ -3585,6 +4035,8 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
                or k.startswith("mathema.corroboration")}
     if carried:
         winner.meta = {**(winner.meta or {}), **carried}
+    if winner is fallback and probed.meta:
+        winner.meta = _merge_under(winner.meta or {}, probed.meta)
     if (fallback.meta or {}).get("mathema.corroboration") == "uncorroborated":
         # the engine-bug signal must survive whichever route wins: a
         # symbolic disproof nothing reproduced was claimed here, and a
@@ -3677,7 +4129,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
         with any validation-stage inferences appended.
     """
     _KNOWN_RELATIONS = frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
-                                  "=:=",
+                                  "=:=", "in", "not in",
                                   "raises"}) | routes.examine_predicates()
     if cj.relation not in _KNOWN_RELATIONS:
         # a malformed/unrecognized relation is a validation skip, caught
@@ -3705,7 +4157,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
     bare_reserved = (_find_bare_reserved_name(cj.lhs, param_set)
                     if cj.relation != "raises" else None) \
         or (_find_bare_reserved_name(cj.rhs, param_set)
-            if cj.rhs and cj.relation != "raises"
+            if cj.rhs and cj.relation != "raises" and cj.rhs_bound is None
             and cj.relation not in routes.examine_predicates() else None)
     if bare_reserved is not None:
         # a purely syntactic mistake (a recognized function's name
@@ -3843,6 +4295,23 @@ def _validate_claim(cj, statement: str, note: str, facts,
                    + ", ".join(repr(v) for v in sorted(vals, key=repr)) + "}"
                    for p, vals in sorted(literal_inferred.items()))
                + " from its own annotation's stated values")
+    # a language inferred from the annotation by a registered adaptor
+    # (`str` to the package's unicode language, a schema class to the
+    # language of its rows), the same gap-filling rule as the int
+    # inference above: only a parameter no binding names, rendered
+    # explicitly with the adaptor that answered; with no adaptor
+    # installed nothing is inferred
+    adaptor_inferred = _adaptor_inferred_domains(fn, facts, cj_domain)
+    if adaptor_inferred:
+        from .domain import render_domain
+        cj_domain = {**{p: b for p, (b, _, _) in adaptor_inferred.items()},
+                     **cj_domain}
+        note = (f"{note}; inferred "
+               + ", ".join(
+                   f"{p} in {render_domain(b, ascii_mode=True)} from its own "
+                   f"{hint_text} annotation (adaptor {adaptor})"
+                   for p, (b, adaptor, hint_text)
+                   in sorted(adaptor_inferred.items())))
     # canonical narrowing, at resolve time: the resolved domain IS the
     # canonical set (prover, records, and comparisons all use it); the
     # declared text stays the author's, and the collapse is rendered
@@ -3925,9 +4394,8 @@ def _validate_claim(cj, statement: str, note: str, facts,
                 # type outside the table keeps its own name as the
                 # kind, so a future type can disagree with a scalar
                 # annotation instead of silently matching it.
-                stated_kind = _BASE_TYPE_KIND.get(bound.base_type,
-                                                  bound.base_type.lower())
-                if real_kind not in (None, "unknown", stated_kind):
+                stated_kind = _stated_kind(bound)
+                if not _kind_compatible(stated_kind, real_kind):
                     note = (f"{note}; let-declared free variable {p!r} states "
                            f"'{bound.base_type}' but the real parameter {p!r} "
                            f"is {real_kind!r}; the stated type is used as "
@@ -3949,7 +4417,49 @@ def _validate_claim(cj, statement: str, note: str, facts,
                          note=f"{note}; ordering ({cj.relation}) isn't "
                               f"meaningful over the complex plane "
                               f"({', '.join(complex_typed)} ⊂ ℂ)")
-    from .domain import KNOWN_BASE_TYPES
+    from .domain import KNOWN_BASE_TYPES, LanguageRef
+    language_bound = {p: b for p, b in cj_domain.items()
+                      if getattr(b, "base_type", None) == "L"}
+    if language_bound:
+        # every language a binding names resolves once, up front, so an
+        # unknown name refuses here on both routes with the vocabulary,
+        # and the resolved source is stated beside the claim; a
+        # language whose members are not what the real parameter takes
+        # is flagged, and the stated language is used as written
+        from .languages import UnknownLanguage, resolve
+        resolved_sources = []
+        for p, b in sorted(language_bound.items()):
+            for piece in b.pieces:
+                if not isinstance(piece, LanguageRef):
+                    continue
+                try:
+                    language, source = resolve(piece)
+                except UnknownLanguage as e:
+                    return Probe(cj.name, statement, "skipped", route=None,
+                                 note=f"{note}; {e}",
+                                 meta={"mathema.probe_gap":
+                                       "language-unresolved"})
+                resolved_sources.append(f"{p} in L[{piece.text}] ({source})")
+                real_kind = facts.param_kinds.get(p)
+                if not _kind_compatible(language.kind, real_kind):
+                    note = (f"{note}; {p} is quantified over "
+                            f"L[{piece.text}], whose members are "
+                            f"{language.kind} values, but the real "
+                            f"parameter {p!r} is {real_kind!r}; the stated "
+                            f"language is used as written")
+        note = f"{note}; " + ", ".join(resolved_sources)
+    if getattr(cj.rhs_bound, "base_type", None) == "L":
+        # a membership's right-hand language resolves up front too
+        from .languages import UnknownLanguage, resolve
+        for piece in cj.rhs_bound.pieces:
+            if isinstance(piece, LanguageRef):
+                try:
+                    resolve(piece)
+                except UnknownLanguage as e:
+                    return Probe(cj.name, statement, "skipped", route=None,
+                                 note=f"{note}; {e}",
+                                 meta={"mathema.probe_gap":
+                                       "language-unresolved"})
     strange_types = sorted(
         f"{p} ({bound.base_type})" for p, bound in cj_domain.items()
         if getattr(bound, "base_type", None) not in (None, *KNOWN_BASE_TYPES))
@@ -4127,6 +4637,66 @@ def _family_owns_claim(family) -> bool:
                                  _NamedClaimFamily)
     return isinstance(family, (_NamedClaimFamily, MatrixPropertyFamily,
                                OutputPredicateFamily))
+
+
+def _language_strategy_proof(cj, fn, bound_funcs, cj_domain, extensive):
+    """Intent:
+        The derive verdict a language's own strategy gives a claim whose
+        one quantified parameter ranges over that language, or None when
+        there is no strategy, the claim quantifies more than that
+        parameter, or the strategy answers with nothing usable. A proof
+        carries `mathema.derive_strategy` (the language's name) in its
+        meta; an undecided or unliftable answer keeps its sketch; a
+        disproof becomes undecided, since only an executed witness
+        falsifies.
+
+    Notes:
+        The strategy runs under the wall-clock cap, and one that raises
+        is treated as having no answer.
+    """
+    from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, FAST_TIMEOUT_SECONDS, _with_timeout
+    from .domain import LanguageRef
+    from .languages import derive_strategy, resolve_language
+    from .symbolic._proof_support import ProofResult
+    if len(cj_domain) != 1:
+        return None
+    ((param, bound),) = cj_domain.items()
+    pieces = getattr(bound, "pieces", ())
+    if len(pieces) != 1 or not isinstance(pieces[0], LanguageRef):
+        return None
+    try:
+        language = resolve_language(pieces[0])
+    except Exception:
+        return None
+    found = derive_strategy(language)
+    if found is None:
+        return None
+    hook, refinements = found
+    functions = {**{name: v for name, v in bound_funcs.items() if callable(v)},
+                 getattr(fn, "__name__", "f"): fn, "f": fn}
+    cap = EXTENSIVE_TIMEOUT_SECONDS if extensive else FAST_TIMEOUT_SECONDS
+    try:
+        result = _with_timeout(
+            lambda: hook(param=param, lhs=cj.lhs, relation=cj.relation, rhs=cj.rhs,
+                         functions=functions, refinements=refinements),
+            cap)
+    except TimeoutError:
+        return None
+    except Exception:
+        return None
+    if not isinstance(result, ProofResult):
+        return None
+    meta = {**(result.meta or {}), "mathema.derive_strategy": language.name}
+    if result.status == "proven":
+        return ProofResult("proven", sketch=result.sketch, quantifier=result.quantifier,
+                           meta=meta)
+    if result.status == "disproven":
+        return ProofResult("undecided",
+                           sketch=f"the language's strategy claimed a disproof it did not "
+                                  f"execute ({result.sketch}), so the probe decides")
+    if result.status in ("undecided", "unliftable"):
+        return ProofResult(result.status, sketch=result.sketch)
+    return None
 
 
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
@@ -4513,7 +5083,54 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                   f"it explicitly with funcs=")
             # route == "best": the probe stage reports its own skip
             return None
-    if cj.relation == "raises":
+    language_params = sorted(p for p, b in cj_domain.items()
+                             if getattr(b, "base_type", None) == "L")
+    row_domain, row_reason = (_row_lift_domain(fn, facts, cj_domain)
+                              if language_params else (None, ""))
+    if cj.relation in ("in", "not in"):
+        # membership is decided by execution: the lift has no reading
+        # of a value's membership in a language or a set
+        from .symbolic._proof_support import ProofResult
+        proof = ProofResult(
+            "unliftable",
+            sketch=f"`{cj.relation}` is decided by execution: the symbolic "
+                   "lift has no reading of membership in a language or a "
+                   "set, so the probe route adjudicates it")
+    elif language_params and row_domain is not None:
+        # every language-bound parameter is a SCHEMA language and the
+        # body reads only numeric fields of it (or a text field through
+        # len()): each field read is one symbol bounded by its field
+        # domain, a claim-level `o.field` binding overriding, and the
+        # ordinary prover runs
+        from .symbolic._base import row_fields
+        # each row-bound parameter expands into exactly the field keys
+        # bounded above, whatever class its rows are
+        with row_fields({p: [k for k in row_domain if k.startswith(f"{p}.")]
+                         for p in language_params}):
+            proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
+                              domain={**row_domain, **cj_domain},
+                              tolerance=cj.tolerance,
+                              extensive=extensive, funcs=bound_funcs or None,
+                              assumption=assumption,
+                              assume_defined=ctx.assume_defined)
+    elif language_params:
+        # a string or structured value has no symbolic reading, and a
+        # real symbol standing in for one would prove real-only facts
+        # it does not have, so the lift is declined outright unless the
+        # language supplies its own derive strategy; a FINITE language
+        # is still swept point by point by the brute-force fallback
+        # below, which is the one derive mechanism it admits
+        from .symbolic._proof_support import ProofResult
+        proof = _language_strategy_proof(cj, fn, bound_funcs, cj_domain,
+                                         extensive) or ProofResult(
+            "unliftable",
+            sketch=(row_reason if row_reason.startswith("the body reads") else
+                    ", ".join(language_params) + " quantified over a "
+                    "language domain: the symbolic lift has no reading "
+                    "of a string or structured value, so only a finite "
+                    "language, swept point by point, is decided on this "
+                    "route"))
+    elif cj.relation == "raises":
         # only ever reachable via domain-conditioned branch
         # pruning, a raises claim with no domain specific
         # enough to settle which branch runs comes back
@@ -4579,7 +5196,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # it. The one wider mechanism that stays plain "derive" is the
         # guard-boundary domain split, which is default-path and cheap.
         mechanism = proof.meta.get("mathema.derive_route")
-        if mechanism == "brute_force":
+        if proof.meta.get("mathema.derive_strategy") is not None:
+            # a language's own strategy decided it, named by the
+            # mechanism it states
+            route = f"derive:{mechanism or 'language'}"
+        elif mechanism == "brute_force":
             # a different kind of evidence from the wider symbolic
             # mechanisms, not a wider version of them: every point of a
             # finite region was visited. It gets its own subroute so a
@@ -5020,7 +5641,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     f"mathematics keeps the declared oo").lstrip("; ")
     region_claim = region_row_kind(cj.name) is not None
     if not region_claim and cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
-                                      "raises"})
+                                      "in", "not in", "raises"})
                            | (routes.examine_predicates()
                               & routes.route_capabilities("probe"))):
         # a safety predicate passes only when the capability table says
@@ -5054,11 +5675,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         algo_result = algo_route(fn, facts, cj, cj_domain, setup.rng, setup.budget)
         if algo_result is not None:
             # (verdict, checked, cx), optionally with the established
-            # sketch, and then the family's own record meta, whose
-            # `mathema.sampled` text (what was sampled) joins the note
-            verdict, checked, cx = algo_result[:3]
-            established = algo_result[3] if len(algo_result) > 3 else None
-            algo_meta = dict(algo_result[4]) if len(algo_result) > 4 else {}
+            # sketch, and then the family's own record meta, copied onto
+            # the record, whose `mathema.sampled` text (what was sampled)
+            # joins the note
+            import copy
+
+            from .claim_families import split_probe_result
+            verdict, checked, cx, established, algo_meta = \
+                split_probe_result(algo_result)
+            algo_meta = copy.deepcopy(algo_meta) if algo_meta else {}
             if algo_meta.get("mathema.sampled"):
                 note = f"{note}; {algo_meta['mathema.sampled']}".lstrip("; ")
             algo_meta = algo_meta or None
@@ -5103,7 +5728,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                              note=note + (f"; {cx}" if cx else ""),
                              meta=algo_meta)
             return Probe(cj.name, statement, "skipped", route=probe_route,
-                         note=note + f"; {cx or 'no evaluable inputs'}")
+                         note=note + f"; {cx or 'no evaluable inputs'}",
+                         meta=algo_meta)
     if region_claim:
         # the executed reading above is the last one, and it could
         # not sample a point of this claim
@@ -5130,7 +5756,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         cj_domain, pinf if pinf is not None
         else (-carrier_reach(), carrier_reach()), bare=bare)
     try:
-        if cj.relation == "raises":
+        if cj.relation == "raises" or cj.rhs_bound is not None:
             code_l, aux_names = _validate(cj.lhs, set(kinds), extra)
             code_r = None
         else:
@@ -5253,9 +5879,24 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         param_structures[_pp] = tuple(sorted(
             set(param_structures.get(_pp, ())) | set(_props)))
     setup = sampling()
-    rng, specials, risk, budget = setup.rng, setup.specials, setup.risk, setup.budget
+    rng, specials = setup.rng, setup.specials
+    from .probing import claim_sampling_budget
+    risk, budget = claim_sampling_budget(setup, facts, cj_domain)
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
+    from .probing import _language_lap
+    # a language-bound parameter's first draws are one lap over its
+    # language's hazards
+    language_laps = {p: lap for p in kinds
+                     if (lap := _language_lap(rng, cj_domain.get(p))) is not None}
+    lap_floor = None
+    longest_lap = max((lap.lap_size() for lap in language_laps.values()), default=0)
+    if longest_lap > budget:
+        # a lap longer than the complexity budget raises the trial
+        # count to the lap, so every hazard is visited, and the
+        # sampling line says so
+        lap_floor = (longest_lap, budget)
+        budget = longest_lap
     checked, cx, cx_stratum = 0, None, None
     # the largest exact ordering violation the default allowance
     # absorbed, and the arguments it happened at
@@ -5336,10 +5977,32 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             return value
         return _wrapped
 
+    from .domain import path_bindings_hold
+    path_bound = {p for p in kinds
+                  if any(key.startswith(p + ".") or key.startswith(p + "[")
+                         for key in cj_domain)}
+    outside_draw = [False]
+
+    def narrowed(p, draw):
+        # a parameter with path bindings is drawn until every binding
+        # holds, a bounded rejection; a point none satisfies is outside
+        # the claim's domain
+        v = draw()
+        if p not in path_bound:
+            return v
+        for _ in range(20):
+            if path_bindings_hold(v, p, cj_domain):
+                return v
+            v = draw()
+        if not path_bindings_hold(v, p, cj_domain):
+            outside_draw[0] = True
+        return v
+
     fn_tagged = _tagged(fn, "f", inject=call_pins)
     bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
     for trial in range(budget + len(pinned)):
         call_raised[0] = call_nan[0] = call_inf[0] = None
+        outside_draw[0] = False
         trial_sizes: dict = (
             _draw_trial_sizes(resolver, shape_lo, shape_hi, shape_groups, rng)
             if plan_dims and trial >= len(pinned) else {})
@@ -5362,6 +6025,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # the call fixes this parameter to a literal: use it
                     # verbatim for both the sample and the witness.
                     v = literal_args[p]
+                    env[p] = v
+                    args.append(v)
+                    continue
+                if k == "dict" and getattr(cj_domain.get(p), "base_type",
+                                           None) == "L":
+                    # a mapping parameter quantified over a language: the
+                    # members ARE the mappings, drawn from the language
+                    v = narrowed(p, lambda p=p, k=k: _synth(
+                        k, rng, cj_domain.get(p), lap=language_laps.get(p)))
                     env[p] = v
                     args.append(v)
                     continue
@@ -5412,10 +6084,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # domain and the special-value shapes; the plan
                     # only fixes a 1-D length when a premise did
                     length = trial_sizes.get(resolver.key(p, 0))
-                    v = _synth(k, rng, cj_domain.get(p),
-                              specials=specials, extra=critical_hints.get(p),
-                              extra_cycle=extra_cycles.get(p),
-                              length=length)
+                    v = narrowed(p, lambda p=p, k=k, length=length: _synth(
+                        k, rng, cj_domain.get(p),
+                        specials=specials, extra=critical_hints.get(p),
+                        extra_cycle=extra_cycles.get(p),
+                        length=length, lap=language_laps.get(p)))
                 env[p] = v
                 args.append(v)
             for p, draw in premise_draws.items():
@@ -5426,6 +6099,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 v = draw(rng, trial_sizes.get(resolver.key(p, 0)))
                 env[p] = v
                 args[list(kinds).index(p)] = v
+        if outside_draw[0]:
+            # a path binding no draw satisfied: the point is outside the
+            # claim's domain, so it neither confirms nor denies anything
+            continue
         for a_name in aux:
             # eps/epsilon/ε resolve to the claim's own declared
             # tolerance, not a random aux value, same convention as
@@ -5508,7 +6185,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             break
         try:
             lv = eval(code_l, {"__builtins__": {}}, env)
-            rv = eval(code_r, {"__builtins__": {}}, env)
+            rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
         except Exception as e:
             if any(is_missing(v) for v in args):
                 # missing-value behavior is its own axis
@@ -5617,6 +6294,26 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   "the raising region as its own raises(...) claim")
             cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args)))
             break
+        if cj.relation in ("in", "not in"):
+            # membership is exact: a value is in the language or the
+            # set, or it is not, and a missing value is in neither
+            # unless the right-hand side admits it in so many words
+            if cj.rhs_bound is not None:
+                from .domain import domain_contains
+                member = (not is_missing(lv)) and domain_contains(lv, cj.rhs_bound)
+            else:
+                try:
+                    member = lv in rv  # type: ignore[operator]
+                except TypeError:
+                    # a value that cannot be looked up in this rhs:
+                    # unanswerable at this point, not a counterexample
+                    continue
+            checked += 1
+            if member != (cj.relation == "in"):
+                cx = (f"{_fmt(tuple(args))}: {lv!r} is "
+                      f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
+                break
+            continue
         if not any(is_missing(v) for v in args) \
                 and (holds_nan(lv) or holds_nan(rv)):
             # a NaN computed from inputs that are not missing is no
@@ -5710,13 +6407,28 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 else f"{a}={env[a]!r}" for a in aux) if aux else "")
             cx = f"{_fmt(tuple(args))}{aux_part}: {lv!r} vs {rv!r}"
             break
+    shrunk_meta: dict = {}
+    if cx is not None and cx_stratum is None and assum_eval is None and not aux \
+            and any(getattr(cj_domain.get(p), "base_type", None) == "L" for p in kinds):
+        # a witness over a language is shrunk inside the language, as
+        # the hazard families' witnesses are
+        found = _shrink_language_witness(
+            cj, kinds, cj_domain, env, args, code_l, code_r)
+        if found is not None:
+            args, cx, steps = found
+            shrunk_meta = {"mathema.witness_shrunk": {"steps": steps}}
+            if steps:
+                note = (f"{note}; the witness was shrunk inside the language "
+                        f"in {steps} step{'s' if steps != 1 else ''}").lstrip("; ")
     if cx is not None:
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,
                      counterexample=cx, note=note, stratum=cx_stratum,
                      meta={"mathema.sampling": _sampling_shorthand(
-                               kinds, cj_domain, checked, critical_hints, truncated_hints),
+                               kinds, cj_domain, checked, critical_hints, truncated_hints,
+                               lap_floor),
                           "mathema.confidence": _probe_density(risk, checked),
-                          "mathema.counterexample_args": _yaml_safe_args(args)})
+                          "mathema.counterexample_args": _yaml_safe_args(args),
+                          **shrunk_meta})
     if checked == 0:
         why = ("; no sampled point satisfied the assuming clause"
                if assum_eval is not None else "; no evaluable inputs")
@@ -5727,7 +6439,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 f"the default tolerance ({DEFAULT_TOLERANCE:g})").lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
-                           kinds, cj_domain, checked, critical_hints, truncated_hints),
+                           kinds, cj_domain, checked, critical_hints, truncated_hints,
+                               lap_floor),
                       "mathema.confidence": _probe_density(risk, checked)})
 
 

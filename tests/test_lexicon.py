@@ -10,9 +10,13 @@ review; a deliberate rendering change regenerates it (see
 as part of that change."""
 import pytest
 
+from mathema import lexicon_checks
 from mathema.conjecture import claim
-from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON, get, render_both, show
+from mathema.lexicon import LEXICON, get, render_both, show, sources
 from mathema.spec import render_claim_text
+
+#: mathema's own lexicon, never a registered package's
+CORE = sources(extensions=False)[0]
 
 
 @pytest.mark.parametrize("key", list(LEXICON))
@@ -77,12 +81,7 @@ def test_rendered_output_matches_golden_snapshot(key):
 
 
 def test_example_functions_are_checkable_against_their_own_lexicon_keys():
-    from mathema.conjecture import check_conjectures
-
-    for fn, keys in EXAMPLE_FUNCTIONS.values():
-        for key in keys:
-            cj = claim(get(key), route="probe")
-            check_conjectures(fn, [cj], extensive=False)
+    assert lexicon_checks.check_examples(CORE, every_row=False) == []
 
 
 def test_every_spelling_is_a_render_parse_render_fixed_point():
@@ -102,29 +101,7 @@ def test_every_spelling_is_a_render_parse_render_fixed_point():
     display must also have the original's canonical text, the claim's
     identity.
     """
-    from mathema.conjecture import InvalidConjecture, claim
-    from mathema.lexicon import LEXICON
-    from mathema.spec import canonical_claim_text, render_claim_text
-
-    drifted = []
-    for name, law in LEXICON.items():
-        conjecture = claim(law)
-        canonical = canonical_claim_text(conjecture)
-        for unicode_mode in (True, False):
-            once = render_claim_text(conjecture, unicode=unicode_mode)
-            try:
-                reparsed = claim(once)
-            except InvalidConjecture as exc:
-                drifted.append(f"{name}: rendered text will not reparse "
-                               f"({exc}): {once}")
-                continue
-            twice = render_claim_text(reparsed, unicode=unicode_mode)
-            if once != twice:
-                drifted.append(f"{name}:\n    {once}\n    {twice}")
-            if canonical_claim_text(reparsed) != canonical:
-                drifted.append(f"{name}: display reparses to another claim"
-                               f"\n    {canonical}"
-                               f"\n    {canonical_claim_text(reparsed)}")
+    drifted = lexicon_checks.check_fixed_point(CORE)
     assert not drifted, "rendered claims drift on reparse:\n" + "\n".join(drifted)
 
 
@@ -149,6 +126,7 @@ def test_a_rendered_domain_always_states_its_missing_policy():
             shown = render_claim_text(conjecture, unicode=unicode_mode)
             assert canonical_claim_text(claim(shown)) == \
                 canonical_claim_text(conjecture)
+    assert lexicon_checks.check_missing_policy(CORE) == []
 
 
 def test_every_spelling_survives_the_declared_store():
@@ -163,31 +141,7 @@ def test_every_spelling_survives_the_declared_store():
 
     Every spelling the lexicon documents is checked here, so a section
     added to the grammar later cannot quietly skip the store."""
-    from mathema.conjecture import claim
-    from mathema.lexicon import LEXICON
-    from mathema.spec import canonical_claim_text, declare, entry_claims
-
-    lost = []
-    for name, law in LEXICON.items():
-        original = claim(law)
-        try:
-            restored = entry_claims({"claims": [declare(original)]})[0]
-        except Exception as exc:
-            lost.append(f"{name}: will not reparse ({type(exc).__name__}: {exc})")
-            continue
-        for what, before, after in (
-            ("statement", (original.lhs, original.relation, original.rhs),
-                          (restored.lhs, restored.relation, restored.rhs)),
-            ("links", original.links, restored.links),
-            ("free_vars", set(original.free_vars), set(restored.free_vars)),
-            ("funcs", set(original.funcs), set(restored.funcs)),
-            ("assuming", original.assuming, restored.assuming),
-            ("tolerance", original.tolerance, restored.tolerance),
-            ("canonical text", canonical_claim_text(original),
-                               canonical_claim_text(restored)),
-        ):
-            if before != after:
-                lost.append(f"{name}: {what} {before!r} -> {after!r}")
+    lost = lexicon_checks.check_declared_store(CORE)
     assert not lost, "the declared store loses part of the claim:\n" + "\n".join(lost)
 
 
@@ -233,14 +187,10 @@ def test_sections_partition_the_lexicon():
     """`SECTIONS` is the lexicon's exact table of contents: every key
     in exactly one section, no key invented, so `entries("domains")`
     can never silently under-cover the grammar it names."""
-    from mathema.lexicon import LEXICON, SECTIONS, entries
+    from mathema.lexicon import LEXICON, entries
 
-    seen: list[str] = []
-    for keys in SECTIONS.values():
-        seen.extend(keys)
-    assert sorted(seen) == sorted(set(seen)), "a key appears twice"
-    assert set(seen) == set(LEXICON)
-    assert entries() == dict(LEXICON)
+    assert lexicon_checks.check_sections(CORE) == []
+    assert entries(extensions=False) == dict(LEXICON)
     import pytest as _pytest
     with _pytest.raises(KeyError, match="unknown lexicon section"):
         entries("no-such-section")
@@ -256,52 +206,27 @@ def test_every_paired_spelling_survives_the_verified_record():
     store could contradict itself on the second run: the record held a
     weaker claim than the one adjudicated, and nothing noticed until a
     field run did."""
-    from mathema.conjecture import check_conjectures, claim
-    from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON
-    from mathema.spec import entry_claims
-
     _ROW_STILL_DRIFTS = {"bound_function_nested_in_f"}
-    drift = []
-    for fname, (fn, keys) in EXAMPLE_FUNCTIONS.items():
-        laws = [claim(LEXICON[k], name=k) for k in keys]
-        probes = check_conjectures(fn, laws)
-        for p in probes:
-            row = {"name": p.name, "statement": p.statement,
-                   "route": (p.route or "best").split(":", 1)[0]}
-            if row["route"] not in ("derive", "probe"):
-                row["route"] = "best"
-            for field_name in ("domain", "grammar", "tolerance"):
-                if getattr(p, field_name, None) is not None:
-                    row[field_name] = getattr(p, field_name)
-            try:
-                (rebuilt,) = entry_claims({"claims": [row]})
-            except Exception as exc:
-                drift.append(f"{fname}/{p.name}: row will not reconstruct "
-                             f"({type(exc).__name__}: {exc})")
-                continue
-            (p2,) = check_conjectures(fn, [rebuilt])
-            if p.name in _ROW_STILL_DRIFTS:
-                # the one known, tracked drift. Its BINDING half is
-                # now closed: canonical text keeps real function names,
-                # so a scope-bound second function rebinds from f's
-                # module on reconstruction rather than arriving as an
-                # orphan short name that resolves to nothing. What is
-                # left is narrower and is not a lost reference: the
-                # reconstructed expression is a harder one for the
-                # derive route, which returns `undecided` where the
-                # original proved. Pinned exactly, not tolerated.
-                assert p2.verdict == "unknown", (
-                    f"{p.name} now reaches {p2.verdict!r}; the tracked "
-                    f"drift changed, re-examine it rather than editing "
-                    f"this pin")
-                assert p2.meta.get("mathema.derive_status") == "undecided", (
-                    f"{p.name} is unknown for a NEW reason ({p2.meta}); "
-                    f"an uncorroborated disproof here would be a "
-                    f"different and more serious problem")
-                continue
-            if p2.verdict != p.verdict:
-                drift.append(f"{fname}/{p.name}: {p.verdict} -> {p2.verdict}"
-                             f" (statement {p.statement!r})")
+    drift = lexicon_checks.check_verified_record(CORE, skip=_ROW_STILL_DRIFTS)
+    for key, (_before, after, p2, _statement) in \
+            lexicon_checks.verified_record_verdicts(CORE).items():
+        if key not in _ROW_STILL_DRIFTS:
+            continue
+        # the one known, tracked drift. Its BINDING half is now closed:
+        # canonical text keeps real function names, so a scope-bound
+        # second function rebinds from f's module on reconstruction
+        # rather than arriving as an orphan short name that resolves to
+        # nothing. What is left is narrower and is not a lost reference:
+        # the reconstructed expression is a harder one for the derive
+        # route, which returns `undecided` where the original proved.
+        # Pinned exactly, not tolerated.
+        assert after == "unknown", (
+            f"{key} now reaches {after!r}; the tracked drift changed, "
+            f"re-examine it rather than editing this pin")
+        assert p2.meta.get("mathema.derive_status") == "undecided", (
+            f"{key} is unknown for a NEW reason ({p2.meta}); an "
+            f"uncorroborated disproof here would be a different and more "
+            f"serious problem")
     assert not drift, ("a record row adjudicates differently than the "
                        "claim it recorded:\n" + "\n".join(drift))
 
@@ -311,8 +236,7 @@ def test_every_paired_spelling_survives_the_verified_record():
 def test_tags_only_name_real_entries():
     """A tag on a key that no longer exists is a silent dead end in the
     search index, so the table is pinned as a subset of the lexicon."""
-    from mathema.lexicon import LEXICON, TAGS
-    unknown = sorted(set(TAGS) - set(LEXICON))
+    unknown = lexicon_checks.check_tags(CORE)
     assert not unknown, f"TAGS names entries that do not exist: {unknown}"
 
 
@@ -380,21 +304,7 @@ def test_every_spelling_has_a_stable_canonical_form():
     collapsing to `x` (a strictly different, usually false assertion)
     and `∂σ` degrading into an ordinary quotient (a proven claim coming
     back unknown)."""
-    from mathema.conjecture import InvalidConjecture, claim
-    from mathema.lexicon import LEXICON
-    from mathema.spec import canonical_claim_text
-
-    drifted = []
-    for name, law in LEXICON.items():
-        once = canonical_claim_text(claim(law))
-        try:
-            twice = canonical_claim_text(claim(once))
-        except InvalidConjecture as exc:
-            drifted.append(f"{name}: canonical text will not reparse "
-                           f"({type(exc).__name__}): {once}")
-            continue
-        if once != twice:
-            drifted.append(f"{name}:\n    {once}\n    {twice}")
+    drifted = lexicon_checks.check_stable_canonical(CORE)
     assert not drifted, ("canonical claim text drifts on reparse:\n"
                          + "\n".join(drifted))
 
@@ -409,26 +319,6 @@ def test_the_canonical_form_reaches_the_same_verdict_everywhere():
     adjudicate the original and its canonical form and require the same
     verdict. This is the guard that catches a meaning-changing
     canonicalisation, which the fixed-point tests cannot see."""
-    from mathema.conjecture import check_conjectures, claim
-    from mathema.lexicon import EXAMPLE_FUNCTIONS, get
-    from mathema.spec import canonical_claim_text
-
-    diverged = []
-    for fn, keys in EXAMPLE_FUNCTIONS.values():
-        for key in keys:
-            law = get(key)
-            try:
-                original = claim(law, route="probe")
-                restored = claim(canonical_claim_text(original), route="probe")
-            except Exception as exc:
-                diverged.append(f"{key}: canonical form will not reparse "
-                                f"({type(exc).__name__})")
-                continue
-            (before,) = check_conjectures(fn, [original], extensive=False)
-            (after,) = check_conjectures(fn, [restored], extensive=False)
-            if before.verdict != after.verdict:
-                diverged.append(f"{key}: {before.verdict} -> {after.verdict}"
-                                f"\n    {law}"
-                                f"\n    {canonical_claim_text(original)}")
+    diverged = lexicon_checks.check_same_verdict(CORE)
     assert not diverged, ("a canonical form changed the verdict:\n"
                           + "\n".join(diverged))

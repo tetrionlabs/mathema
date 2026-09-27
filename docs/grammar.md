@@ -138,6 +138,9 @@ claims in them.
 | `f =:= g` | function equivalence: two implementations of the same mathematics |
 | `f equiv g` | the word alias for the same relation |
 | `for a in [0.1,10], b in [0.1,10], 2/(1/a+1/b) <= f(a,b) <= (a+b)/2` | a chained comparison, both bounds in one claim |
+| `for s in L[unicode], f(s) in L[unicode]` | membership: every output is a member of a language or a set, `∈` in Unicode |
+| `for x in [0, 1], f(x) in [0, 1]` | membership in a numeric interval, read as the chain it means |
+| `for s in L[unicode], "<" not in f(s)` | containment: the value on the left is never found in the value on the right, `∉` in Unicode |
 
 ### How close counts as equal
 
@@ -267,6 +270,8 @@ stronger than you mean. The `for` clause narrows it:
 | `for scale in {"info", "linear"}, f(r, scale) >= 0` | a finite set of strings |
 | `for v in R^n, f(v) >= 0` | a real vector of length `n`, never empty |
 | `for A in R^(m,n), f(A) == f(A)` | an `m`-by-`n` real matrix, rows then columns |
+| `for s in L[unicode], f(f(s)) == f(s)` | every string, the empty string included: a language |
+| `for s in L[unicode] \ {""}, len(f(s)) >= 1` | a language with the empty string excluded |
 
 A matrix space is written `R^(m,n)`, the order of a numpy shape. The
 spellings `R^{m,n}`, `R^(m×n)`, `R^{m×n}`, `R^(m*n)` and the superscript
@@ -288,6 +293,17 @@ The excluded-point form is how you state a claim around a pole. The
 finite-set form is how a string-valued parameter that selects a branch
 becomes something the derive route can reason about, since it can then
 check every case rather than guessing.
+
+`L[<name>]` is a language: the set of strings, or of structured
+values, a name stands for, the way `R` is the set of reals. An
+alphabet language contains the empty string, as a Kleene star does;
+`\ {""}` removes it. The names themselves (`unicode`, `ascii`,
+`latin-1`, `json`, a schema of your own) come from the
+`mathema-language` package, installed as `mathema[language]`; a name
+mathema cannot resolve is refused with the vocabulary, never read as a
+wider set. [Language domains](language.md) says what a language
+samples, what the record states about it, and which claims a parser
+or a renderer earns over one.
 
 ## Calculus
 

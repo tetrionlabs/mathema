@@ -196,6 +196,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     int_names = {name for name in names
                  if _integer_bound(cj_domain.get(name))
                  or kinds.get(name) in ("int", "bool")}
+    language_names = {name for name in names
+                      if getattr(cj_domain.get(name), "base_type", None) == "L"}
     # coordinates the claim quantifies over the complex plane: drawn,
     # cornered and compared as complex values
     complex_names = {name for name in names
@@ -477,7 +479,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             v = point.get(n)
             if bound is None or v is None or n in seq_names:
                 continue
-            if isinstance(v, complex):
+            if n in language_names or isinstance(v, complex):
+                # a language coordinate is judged by its language and a
+                # complex one as a complex value, never coerced to a real
                 if not domain_contains(v, bound):
                     return False
                 continue
@@ -529,6 +533,26 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # a sequence's corner is a short list at the per-element edge
         return [value] * 3 if name in seq_names else value
 
+    def _language_edges(name):
+        # a language coordinate has no numeric ends: its corners are the
+        # language's own hazard values, the empty string and the long
+        # one where the language has them, else two sampled members
+        from .domain import LanguageRef
+        from .languages import resolve_language
+        values: list = []
+        for piece in cj_domain[name].pieces:
+            if isinstance(piece, LanguageRef):
+                values.extend(resolve_language(piece).hazards())
+        by_kind = {h.kind: h.value for h in values}
+        first = by_kind.get("empty", values[0].value if values else None)
+        last = by_kind.get("length", values[-1].value if values else None)
+        if first is None or last is None:
+            import random as _random
+            drawn = sample(name, _random.Random(0))
+            first = drawn if first is None else first
+            last = drawn if last is None else last
+        return first, last
+
     def _complex_corners(name):
         # a rectangle's four corners, else the plane's far points on
         # both axes (+-R, +-R*1j at the cap or reach), an excluded
@@ -550,7 +574,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 if bound is None or domain_contains(z, bound)]
         return kept or points[:1]
 
-    edges = {n: (_complex_corners(n) if n in complex_names else
+    edges = {n: (list(_language_edges(n)) if n in language_names else
+                 _complex_corners(n) if n in complex_names else
                  [_endpoint(n, "lo"), _endpoint(n, "hi")]) for n in names}
     if len(names) <= 6:
         # every corner of the box: 2^k points for k real coordinates

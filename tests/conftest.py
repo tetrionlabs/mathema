@@ -31,6 +31,18 @@ def _no_installed_providers(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _len_refinement():
+    """mathema registers no refinement key; the suite registers `len`
+    (see `tests/_length_refinement.py`) so its length-bounded claims
+    resolve, as they do with the mathema-language package installed."""
+    from mathema.languages import register_refinement, unregister_refinement
+    from tests._length_refinement import length
+    register_refinement("len", length)
+    yield
+    unregister_refinement("len")
+
+
+@pytest.fixture(autouse=True)
 def _no_project_pseudo_infinity(monkeypatch):
     """A project-level `MATHEMA_PSEUDO_INFINITY` set on this machine
     moves how far every unbounded direction is exercised, so every

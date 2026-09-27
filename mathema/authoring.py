@@ -432,6 +432,10 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             excludes it."""
             if is_missing(value):
                 return domain_contains(value, bounds)
+            if getattr(bounds, "base_type", None) == "L":
+                # a language domain judges every value, a string first
+                # of all; nothing is exempt from it
+                return domain_contains(value, bounds)
             numeric_only = (isinstance(bounds, (str, tuple))
                             or (hasattr(bounds, "pieces")
                                 and not any(isinstance(p, frozenset) for p in bounds.pieces)))

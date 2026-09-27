@@ -143,22 +143,35 @@ class _SpecialCycle:
 
     `values` defaults to the module-level `_SPECIALS`. A caller with
     its own pool (a per-parameter critical-point hint, see
-    `probing._critical_hint()`) passes `values=` directly."""
-    def __init__(self, rng: random.Random, values: list[float] | None = None):
+    `probing._critical_hint()`) passes `values=` directly. `first` are
+    dispensed before the shuffled lap, in their own order, and count
+    toward the first lap."""
+    def __init__(self, rng: random.Random, values: list[float] | None = None,
+                 first: list | None = None):
         self._rng = rng
-        self._values = values if values is not None else _SPECIALS
+        self._first = list(first or [])
+        self._values = [*self._first, *(values if values is not None else _SPECIALS)]
         self._pool: list[float] = []
         self._dispensed = 0
 
     def next(self) -> float:
+        if self._dispensed < len(self._first):
+            value = self._first[self._dispensed]
+            self._dispensed += 1
+            return value
         if not self._pool:
-            self._pool = list(self._values)
+            self._pool = list(self._values[len(self._first):] if self._dispensed < len(self._values)
+                              else self._values)
             self._rng.shuffle(self._pool)
         self._dispensed += 1
         return self._pool.pop()
 
     def guaranteed_remaining(self) -> bool:
         return self._dispensed < len(self._values)
+
+    def lap_size(self) -> int:
+        """How many values one full lap dispenses."""
+        return len(self._values)
 
 
 def _synth_scalar(rng: random.Random, bounds=None,

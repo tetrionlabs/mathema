@@ -17,6 +17,7 @@ in `claim_families.py`.
 from __future__ import annotations
 
 import cmath
+import collections
 import math
 import random
 from dataclasses import dataclass
@@ -85,6 +86,8 @@ class _RiskPolicy:
     free_params: int = 2             # first two params add no combinatorial risk
     max_wide_domain_risk: int = 2
     max_float_extreme_risk: int = 2
+    max_language_risk: int = 3
+    language_hazards_per_unit: int = 32   # hazards one unit of language risk stands for
     wide_span: float = 1e4
     tiny_magnitude: float = 1e-6
     huge_magnitude: float = 1e9
@@ -93,6 +96,7 @@ class _RiskPolicy:
     param_penalty: float = 0.5
     wide_domain_penalty: float = 1.0
     float_extreme_penalty: float = 1.0
+    language_penalty: float = 1.0
     score_min: float = 1.0
     score_max: float = 10.0
     budget_step_per_unit: int = 32    # extra trials per unit of starting complexity
@@ -277,7 +281,10 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
     the space of *combinations*; `wide_domain`/`float_extremes` flag a
     declared domain a fixed sample density thins out fast (unbounded or
     very wide) or where float precision itself becomes a risk (very
-    large or very near-zero magnitudes)."""
+    large or very near-zero magnitudes). `language` counts the hazards
+    a language-bound parameter's language brings, one unit per
+    `language_hazards_per_unit`, and is present only when some
+    parameter is bound to a language."""
     wide_domain, float_extremes = 0, 0
     for p in facts.params:
         bounds = domain.get(p)
@@ -289,13 +296,34 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
         if (0 < abs(lo) < policy.tiny_magnitude) or (0 < abs(hi) < policy.tiny_magnitude) \
                 or abs(lo) > policy.huge_magnitude or abs(hi) > policy.huge_magnitude:
             float_extremes += 1
-    return {
+    risk = {
         "branches": min(facts.branch_count, policy.max_branch_risk),
         "loops": min(len(facts.loops), policy.max_loop_risk),
         "params": max(0, len(facts.params) - policy.free_params),
         "wide_domain": min(wide_domain, policy.max_wide_domain_risk),
         "float_extremes": min(float_extremes, policy.max_float_extreme_risk),
     }
+    language = _language_risk(facts.params, domain, policy)
+    if language is not None:
+        risk["language"] = language
+    return risk
+
+
+def _language_risk(params, domain: dict, policy: _RiskPolicy = _RISK) -> "int | None":
+    """Intent:
+        The `language` risk factor: for each parameter bound to a
+        language, one unit per `language_hazards_per_unit` hazards its
+        lap visits, summed and capped at `max_language_risk`. `None`
+        when no parameter is bound to a language.
+    """
+    units, bound = 0, False
+    for p in params:
+        dom = domain.get(p)
+        if _classify_bound(dom) != "language":
+            continue
+        bound = True
+        units += math.ceil(len(_language_hazards(dom)) / policy.language_hazards_per_unit)
+    return min(units, policy.max_language_risk) if bound else None
 
 
 def _starting_budget(risk: dict, affine: bool, policy: _RiskPolicy = _RISK) -> int:
@@ -308,10 +336,13 @@ def _starting_budget(risk: dict, affine: bool, policy: _RiskPolicy = _RISK) -> i
     well-behaved in *shape*, but a wide or float-precision-risky domain
     (`risk["wide_domain"]`/`risk["float_extremes"]`) still needs real
     coverage regardless of shape, so affine-ness is ignored rather than
-    overriding that."""
-    if affine and risk["wide_domain"] == 0 and risk["float_extremes"] == 0:
+    overriding that, and the same holds for a language domain's hazards
+    (`risk["language"]`)."""
+    if affine and risk["wide_domain"] == 0 and risk["float_extremes"] == 0 \
+            and not risk.get("language"):
         return policy.affine_budget
-    complexity = risk["branches"] + risk["loops"] + risk["wide_domain"]
+    complexity = (risk["branches"] + risk["loops"] + risk["wide_domain"]
+                  + risk.get("language", 0))
     return min(_N_MAX, _N_BASE + complexity * policy.budget_step_per_unit)
 
 
@@ -337,6 +368,7 @@ def _probe_density(risk: dict, n_trials: int, policy: _RiskPolicy = _RISK) -> di
     score -= risk["params"] * policy.param_penalty
     score -= risk["wide_domain"] * policy.wide_domain_penalty
     score -= risk["float_extremes"] * policy.float_extreme_penalty
+    score -= risk.get("language", 0) * policy.language_penalty
     # centered on _N_BASE, not linear: doubling n from there is worth a
     # flat +1, same as halving it costs a flat -1, extra trials past a
     # point buy steadily less legibility, not steadily less risk.
@@ -425,6 +457,22 @@ def _is_matrix_value(v) -> bool:
     if isinstance(v, (list, tuple)):
         return True
     return hasattr(v, "shape") and hasattr(v, "__array__")
+
+
+class _NotAnArray(Exception):
+    """A structure numpy cannot read as one array; compared leaf by leaf."""
+
+
+def _numeric_leaves(v) -> bool:
+    """Whether every leaf of a (nested) sequence or array is a number,
+    the precondition of the numpy comparison: a `None` leaf is not a
+    NaN and a string leaf is not a number, so a structure holding one
+    is compared value by value instead."""
+    if isinstance(v, (list, tuple)):
+        return all(_numeric_leaves(e) for e in v)
+    if hasattr(v, "dtype"):
+        return getattr(v.dtype, "kind", "O") in "biufc"
+    return isinstance(v, (int, float, complex))
 
 
 def _pinned_float_env():
@@ -645,7 +693,10 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     and a toleranced `!=` get on top of `slack`. A 0-d numpy value (a
     numpy scalar) is a scalar. Over complex values `==`, `~=` and `!=`
     compare by `abs(a - b)`, with the tolerance rules of reals; an
-    ordering over a complex value is unanswerable."""
+    ordering over a complex value is unanswerable. A structure with a
+    non-numeric leaf (`None`, a string, a tuple of them: a parser's
+    result) is compared leaf by leaf, equality exact, ordering
+    unanswerable."""
     lv, rv = (v.item() if getattr(v, "shape", None) == ()
               and hasattr(v, "item") else v for v in (lv, rv))
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
@@ -656,19 +707,30 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
             return None
     from .matrices import _numpy
     np = _numpy()
-    if np is not None and (hasattr(lv, "__array__") or hasattr(rv, "__array__")
-                           or isinstance(lv, (list, tuple))
-                           or isinstance(rv, (list, tuple))):
+    if np is not None and _numeric_leaves(lv) and _numeric_leaves(rv) and (
+            hasattr(lv, "__array__") or hasattr(rv, "__array__")
+            or isinstance(lv, (list, tuple))
+            or isinstance(rv, (list, tuple))):
         try:
             kind = complex if (np.iscomplexobj(lv) or np.iscomplexobj(rv)) \
                 else float
             a = np.asarray(lv, dtype=kind)
             b = np.asarray(rv, dtype=kind)
         except Exception:
-            return None
-        if kind is complex and relation not in ("==", "~=", "!="):
+            # a ragged structure (a scalar beside a list, a parser's
+            # result) is no array; the leaf walk below reads it
+            a = b = None
+        if a is not None and kind is complex and relation not in ("==", "~=", "!="):
             return None     # an ordering over complex values
         try:
+            if a is None:
+                raise _NotAnArray
+            try:
+                np.broadcast_shapes(a.shape, b.shape)
+            except ValueError:
+                # shapes that do not broadcast are unequal outright
+                # under equality, and unanswerable under an ordering
+                return (relation == "!=") if relation in ("==", "~=", "!=") else None
             if relation in ("==", "~="):
                 return bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
             if relation == "!=":
@@ -682,14 +744,20 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
             if relation == "<":
                 return bool((a < b).all())
             return bool((a > b).all())
+        except _NotAnArray:
+            pass
         except (ValueError, TypeError):
             return None       # incompatible shapes: unanswerable
+
+    equality = relation in ("==", "~=", "!=")
 
     def _walk(x, y):
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
         if xs and ys:
             if len(x) != len(y):
-                return None
+                # two sequences of different length are unequal
+                # outright; only an ordering over them is unanswerable
+                return (relation == "!=") if equality else None
             parts = [_walk(u, v) for u, v in zip(x, y)]
         elif xs:
             parts = [_walk(u, y) for u in x]   # broadcast scalar y
@@ -700,7 +768,18 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                 return bool(_scalar_relation(x, y, relation, slack,
                                              exact_inequality, rel_tol))
             except TypeError:
-                return None
+                if not equality:
+                    return None
+                # leaves that do not subtract (a record, an object)
+                # still answer equality by their own __eq__
+                try:
+                    same = bool(x == y)
+                except Exception:
+                    return None
+                return (not same) if relation == "!=" else same
+        if equality and relation == "!=":
+            # a sequence differs when any leaf does
+            return None if any(pt is None for pt in parts) else any(parts)
         return None if any(pt is None for pt in parts) else all(parts)
 
     return _walk(lv, rv)
@@ -924,9 +1003,147 @@ def _sample_domain(rng: random.Random, dom: Domain,
     return value
 
 
+#: the hazard kinds the lap visits first: a length and a shape, which
+#: is where a refinement's members at its bounds sit
+_BOUND_KINDS = ("length", "shape")
+
+
+def _language_lap(rng: random.Random, dom) -> "_SpecialCycle | None":
+    """Intent:
+        One lap over every hazard of a language domain, for the first
+        draws of a parameter bound to it: the length and shape hazards
+        (a refinement's members at its bounds among them) first, in the
+        language's order, then the rest once each in a seeded order. `None` when
+        the bound is not a language domain or has no hazard to visit.
+    """
+    if _classify_bound(dom) != "language":
+        return None
+    values = _language_hazards(dom)
+    if not values:
+        return None
+    pairs = _language_hazards(dom, kinds=True)
+    lengths = [v for v, kind in pairs if kind in _BOUND_KINDS]
+    rest = [v for v, kind in pairs if kind not in _BOUND_KINDS]
+    return _SpecialCycle(rng, values=rest, first=lengths)
+
+
+class _Resolved:
+    """One language piece of a domain, resolved once, its hazards built
+    on first use and kept."""
+
+    def __init__(self, piece) -> None:
+        from .languages import resolve_language
+        self.language = resolve_language(piece)
+        self._hazards: "tuple | None" = None
+
+    def hazards(self) -> tuple:
+        if self._hazards is None:
+            self._hazards = tuple(self.language.hazards())
+        return self._hazards
+
+
+#: recently sampled domains, each with its resolved pieces and the
+#: registry generation they were resolved under
+_RESOLVED: "collections.OrderedDict[int, tuple]" = collections.OrderedDict()
+_RESOLVED_KEEP = 32
+
+
+def _resolved(dom, piece) -> _Resolved:
+    """Intent:
+        `piece` of `dom` resolved, reused across a claim's draws until a
+        language or refinement is registered or removed.
+
+    Raises:
+        UnknownLanguage, UnknownRefinement: as resolution does.
+    """
+    from .languages import generation
+    now = generation()
+    entry = _RESOLVED.get(id(dom))
+    if entry is None or entry[0] is not dom or entry[1] != now:
+        entry = (dom, now, {})
+        _RESOLVED[id(dom)] = entry
+        while len(_RESOLVED) > _RESOLVED_KEEP:
+            _RESOLVED.popitem(last=False)
+    else:
+        _RESOLVED.move_to_end(id(dom))
+    pieces = entry[2]
+    if piece not in pieces:
+        pieces[piece] = _Resolved(piece)
+    return pieces[piece]
+
+
+def _language_hazards(dom, kinds: bool = False) -> list:
+    """Intent:
+        Every hazard of a language domain's pieces, the members of the
+        domain's excluded set left out, in the languages' own order;
+        with `kinds`, `(value, kind)` pairs.
+    """
+    from .domain import LanguageRef
+    values: list = []
+    for piece in dom.pieces or ():
+        if not isinstance(piece, LanguageRef):
+            continue
+        try:
+            hazards = _resolved(dom, piece).hazards()
+        except Exception:
+            continue
+        for h in hazards:
+            try:
+                excluded = h.value in dom.excluded
+            except TypeError:
+                excluded = False
+            if not excluded:
+                values.append((h.value, h.kind) if kinds else h.value)
+    return values
+
+
+def _sample_language(rng: random.Random, dom: Domain):
+    """Intent:
+        One member of a language domain: a piece chosen uniformly (a
+        language or a finite set of members), then a hazard value of
+        that language three draws in ten and a random member
+        otherwise, retried a bounded number of times to avoid an
+        excluded member.
+
+    Notes:
+        The hazard corpus is the language's own (`Language.hazards`,
+        every value of which is a member), so a draw never leaves the
+        declared language; the guaranteed lap over every hazard is
+        `_language_lap`, the per-parameter cycle the claim loop threads
+        in through `_synth`'s `lap`.
+    """
+    from .domain import LanguageRef, MISSING as _MISSING
+    pieces = dom.pieces or ()
+    value = None
+    for _ in range(20):
+        piece = rng.choice(pieces)
+        if isinstance(piece, frozenset):
+            members = [v for v in piece if v is not _MISSING]
+            if not members:
+                continue
+            value = rng.choice(members)
+        elif isinstance(piece, LanguageRef):
+            resolved = _resolved(dom, piece)
+            hazards = resolved.hazards()
+            if hazards and rng.random() < 0.3:
+                value = rng.choice(hazards).value
+            else:
+                value = resolved.language.sample(rng)
+        else:
+            continue
+        try:
+            excluded = value in dom.excluded
+        except TypeError:
+            excluded = False
+        if not excluded:
+            return value
+    return value
+
+
 def _classify_bound(bounds) -> str:
     """The domain-bound shape, independent of a parameter's own
-    inferred kind, "domain" (a grammar.Domain: union/exclusion/an
+    inferred kind, "language" (a Domain over `L[...]` pieces),
+    "domain" (a grammar.Domain: union/exclusion/an
     explicit type refinement), "frozenset" (a discrete set), "Z"/"N"
     (a named integer set), "interval" (a plain (lo, hi) tuple), or
     "none". Shared by every consumer that needs to dispatch on a
@@ -936,7 +1153,7 @@ def _classify_bound(bounds) -> str:
     Domain object _synth already knew how to handle, the first time a
     claim's own richer domain bound reached it."""
     if isinstance(bounds, Domain):
-        return "domain"
+        return "language" if bounds.base_type == "L" else "domain"
     if isinstance(bounds, frozenset):
         return "frozenset"
     if bounds == "Z":
@@ -956,13 +1173,22 @@ def _synth(kind: str, rng: random.Random, bounds=None,
           specials: "_SpecialCycle | None" = None,
           extra: list[float] | None = None,
           extra_cycle: "_SpecialCycle | None" = None,
-          length: "int | None" = None):
+          length: "int | None" = None,
+          lap: "_SpecialCycle | None" = None):
     # `kind == "sequence"` is checked first, unconditionally, before any
     # bounds-shape dispatch below, a Domain/frozenset/"Z"/"N" bound
     # means something different for a sequence (a per-element domain)
     # than it does for a scalar (the parameter's own domain), so a
     # sequence-typed parameter must never fall into the scalar
     # dispatch below and come back a bare number instead of a list.
+    if _classify_bound(bounds) == "language":
+        # a language bound is the parameter's own domain whatever kind
+        # the body suggested (a mapping read, an iteration): the author
+        # said the value IS a member, so it is drawn as one, the
+        # language's hazards first when a lap is threaded in
+        if lap is not None and lap.guaranteed_remaining():
+            return lap.next()
+        return _sample_language(rng, bounds)
     if kind == "dict":
         # a mapping parameter with no key list to hand (the automatic
         # type-probes): a generic dict, enough not to crash a function
@@ -970,6 +1196,10 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         # `_synth_dict(keys, ...)` with the body's real keys instead.
         return _synth_dict([], rng, specials=specials)
     if kind == "sequence":
+        # a language bound is the parameter's own domain, whatever kind
+        # the body's usage suggested (iterating a string looks like a
+        # sequence): the author said the value IS a member, so it is
+        # sampled as one below
         # `length`, when a dimension premise fixed it for this trial,
         # overrides the free 2..8 draw so the premise holds by
         # construction rather than by rejection
@@ -1023,11 +1253,74 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
 
 
+def sample_bound(bound, rng: random.Random, kind: str = "scalar"):
+    """Intent:
+        One value drawn from a declared bound, the draw the probe route
+        makes for a parameter of `kind` with that bound: a language
+        member for a language bound, an element of a finite set, an
+        integer or a real inside an interval, a list for `"sequence"`.
+        The extension surface's sampling seam, so a registered family
+        or a language package draws members the way the probe does.
+    """
+    return _synth(kind, rng, bound)
+
+
+def _nesting(v) -> tuple:
+    """`(levels, records)`: how many container levels a value nests,
+    counted with an explicit stack over lists, tuples, sets, dicts and
+    the fields of objects with a `__dict__`, and the most values of the
+    value's own type along any one path (0 unless it is such an
+    object)."""
+    root_type = type(v) if hasattr(v, "__dict__") and not isinstance(v, type) else None
+    deepest = most = 0
+    stack = [(v, 0, 0)]
+    seen: set = set()
+    while stack:
+        node, level, records = stack.pop()
+        if isinstance(node, (str, bytes, int, float, complex, bool)) or node is None:
+            deepest = max(deepest, level)
+            continue
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        if root_type is not None and type(node) is root_type:
+            records += 1
+            most = max(most, records)
+        if isinstance(node, dict):
+            kids = list(node.values())
+        elif isinstance(node, (list, tuple, set, frozenset)):
+            kids = list(node)
+        elif hasattr(node, "__dict__"):
+            kids = list(vars(node).values())
+        else:
+            deepest = max(deepest, level)
+            continue
+        deepest = max(deepest, level + 1)
+        stack.extend((k, level + 1, records) for k in kids)
+    return deepest, most
+
+
+def _deep_summary(v) -> str:
+    """A value too deep to print, by its type and how deep it nests."""
+    levels, records = _nesting(v)
+    name = type(v).__name__
+    tail = f" ({records} {name} records)" if records else ""
+    return f"<{name} nested {levels} levels deep{tail}>"
+
+
 def _fmt_value(v) -> str:
     """One computed or sampled value, legibly, shared by _fmt() (an
     argument tuple) and every check closure's own failure `detail`
     string (the actual result(s) being compared, not just the inputs
-    that produced them)."""
+    that produced them). A value nested too deep for Python to print
+    is named by its type and its depth instead."""
+    try:
+        return _fmt_value_of(v)
+    except RecursionError:
+        return _deep_summary(v)
+
+
+def _fmt_value_of(v) -> str:
     if isinstance(v, float):
         return f"{v:.6g}"
     if isinstance(v, complex):
@@ -1035,9 +1328,9 @@ def _fmt_value(v) -> str:
         # Python's parenthesized repr
         return f"{v.real:.6g}{v.imag:+.6g}j"
     if isinstance(v, list):
-        return "[" + ", ".join(_fmt_value(x) for x in v) + "]"
+        return "[" + ", ".join(_fmt_value_of(x) for x in v) + "]"
     if isinstance(v, tuple):
-        return "(" + ", ".join(_fmt_value(x) for x in v) + ")"
+        return "(" + ", ".join(_fmt_value_of(x) for x in v) + ")"
     return repr(v)
 
 
@@ -1054,7 +1347,8 @@ def _fmt(args: tuple, names: tuple[str, ...] | None = None) -> str:
 
 def _sampling_shorthand(kinds: dict, domain: dict, n: int,
                         critical_hints: dict[str, list[float]] | None = None,
-                        truncated_hints: "set[str] | None" = None) -> str:
+                        truncated_hints: "set[str] | None" = None,
+                        lap_floor: "tuple[int, int] | None" = None) -> str:
     """How a probe actually sampled, in compact mathematical notation: the
     distribution per parameter, the seed, the trial count. Meant to make a
     `holds (n=...)` verdict legible and reproducible from the record alone,
@@ -1068,7 +1362,9 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
     parameter whose own discovered-point count was capped (see
     `_hints_from_points`'s own `max_critical_hints_per_param`), appending
     `[truncated@N]` so a reader knows `n` covers a capped hint pool plus
-    ordinary sampling, not every point that was actually found."""
+    ordinary sampling, not every point that was actually found.
+    `lap_floor`, `(lap, budget)`, says the trial count was raised from
+    the budget to a language's lap so every hazard is visited."""
     critical_hints = critical_hints or {}
     truncated_hints = truncated_hints or set()
 
@@ -1142,7 +1438,9 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             parts.append(f"{p}~{render_domain_bound(bounds)}{crit_suffix(p)}")
         else:
             parts.append(f"{p}~U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]{crit_suffix(p)}")
-    return ", ".join(parts) + f", seed={_RNG_SEED}, n={n}"
+    floor = (f", n raised to {lap_floor[0]} to visit every hazard (budget {lap_floor[1]})"
+             if lap_floor else "")
+    return ", ".join(parts) + f", seed={_RNG_SEED}, n={n}" + floor
 
 
 def _out_of_domain_candidates(bounds) -> list:
@@ -1160,6 +1458,10 @@ def _out_of_domain_candidates(bounds) -> list:
         span = (hi - lo) or 1.0
         return [lo - 0.5 * span, hi + 0.5 * span]
     if isinstance(bounds, Domain):
+        if bounds.base_type == "L":
+            # a language's own near non-members are its `outside`
+            # draws, which the safety families read directly
+            return []
         candidates = []
         for piece in bounds.pieces:
             if isinstance(piece, tuple):
@@ -1277,6 +1579,9 @@ class SamplingSetup:
     truncated_hints: set
     extra_cycles: dict
     route: str
+    affine: bool = False
+    explicit_trials: bool = False
+    scale: float = 1.0
     # "probe" or "probe:semi_analytical", the route value the evidence
     # honestly earns, per record-schema.md's open route field.
 
@@ -1313,7 +1618,8 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     rng = random.Random(_RNG_SEED)
     specials = _SpecialCycle(rng)
     risk = _structural_risk(facts, domain)
-    budget = trials if trials is not None else _starting_budget(risk, _affine_hint(fn, facts))
+    affine = trials is None and _affine_hint(fn, facts)
+    budget = trials if trials is not None else _starting_budget(risk, affine)
     points = _points_for_probe(fn, facts, domain, extensive)
     critical_hints, truncated_hints = _hints_from_points(points)
     # the route subroute below keys on ANALYTICAL discoveries about
@@ -1330,9 +1636,7 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     extra_cycles = {p: _SpecialCycle(rng, values=critical_hints[p])
                     for p in facts.params if p in critical_hints}
     scale = min(1.0, trials_scale)
-    if scale < 1.0:
-        budget = max(_RISK.min_trials_floor_when_scaled, len(_SPECIALS),
-                     round(budget * scale))
+    budget = _scaled_budget(budget, scale)
     # record-schema.md's own `route` field: "probe:semi_analytical"
     # states plainly that at least one parameter's own sampling was
     # informed by an analytically discovered critical point this run,
@@ -1341,7 +1645,37 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     return SamplingSetup(rng=rng, specials=specials, risk=risk, budget=budget,
                          points=points, critical_hints=critical_hints,
                          truncated_hints=truncated_hints,
-                         extra_cycles=extra_cycles, route=route_value)
+                         extra_cycles=extra_cycles, route=route_value,
+                         affine=affine, explicit_trials=trials is not None,
+                         scale=scale)
+
+
+def _scaled_budget(budget: int, scale: float) -> int:
+    """Intent:
+        `budget` shrunk by `trials_scale` when it is below one, never
+        under `min_trials_floor_when_scaled` or one lap of the specials.
+    """
+    if scale < 1.0:
+        return max(_RISK.min_trials_floor_when_scaled, len(_SPECIALS),
+                   round(budget * scale))
+    return budget
+
+
+def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict) -> "tuple[dict, int]":
+    """Intent:
+        The risk and trial budget for one claim: the function's own
+        setup, with the `language` factor read off the claim's domain
+        (a written binding or an inferred one), and the budget set from
+        the complexity that factor adds. An explicit trial count is kept
+        as given.
+    """
+    language = _language_risk(facts.params, cj_domain)
+    if language is None or language == setup.risk.get("language"):
+        return setup.risk, setup.budget
+    risk = {**setup.risk, "language": language}
+    if setup.explicit_trials:
+        return risk, setup.budget
+    return risk, _scaled_budget(_starting_budget(risk, setup.affine), setup.scale)
 
 
 def probe(fn, facts, domain: dict | None = None,
@@ -1406,7 +1740,7 @@ def probe(fn, facts, domain: dict | None = None,
     # that fixes it
     for p, k in zip(facts.params, kinds):
         if k == "string" and _classify_bound(domain.get(p)) not in (
-                "frozenset", "domain"):
+                "frozenset", "domain", "language"):
             return [Probe(
                 "callable", callable_statement, "skipped",
                 note=f"parameter {p!r} is a string with no declared "

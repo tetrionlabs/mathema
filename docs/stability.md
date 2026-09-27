@@ -118,6 +118,11 @@ mathema is the engine. These sit alongside it:
   domain-conventional symbols for parameter and function names when
   rendering claims. Install with `pip install "mathema[symbology]"`.
   See [Symbology and rendering](symbology.md).
+- **[mathema-language](https://github.com/tetrionlabs/mathema-language)**:
+  the languages a claim quantifies over with `L[...]`: the alphabets
+  and predicate languages, the hazard families over text, and the
+  schema adaptors for rows. Core parses and records `L[...]` and
+  resolves no name itself; the extra `language` installs it.
 - **[mathema-agents](https://github.com/tetrionlabs/mathema-agents)**:
   agent-facing setup. Skills and per-tool adapters that teach a coding
   agent how to drive the CDD loop properly. `mathema init --agents`

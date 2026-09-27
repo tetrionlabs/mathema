@@ -64,6 +64,10 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e '.[test]'
+      # the main suite runs with no language package: core must parse,
+      # render and record L[...] and resolve no name on its own
+      - name: no language package is installed
+        run: python -c "import importlib.util, sys; sys.exit(importlib.util.find_spec('mathema_language') is not None)"
       - run: python -m pytest -q
 
   # `requires-python` is deliberately unbounded above (capping it

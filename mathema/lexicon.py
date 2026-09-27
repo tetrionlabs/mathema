@@ -25,11 +25,24 @@ enough that "modulo", "round down" or a typo still land. And
 `EXAMPLE_FUNCTIONS` goes the other way, from a function to the keys it
 demonstrates.
 
+A package extends the lexicon through the `mathema.lexicon`
+entry-point group: the object registered under a name provides
+`LEXICON`, and optionally `SECTIONS`, `TAGS` and `EXAMPLE_FUNCTIONS`,
+in the shapes this module uses. When it is installed, `entries()`,
+`search()`, `find()`, `get()` and `show()` include its rows, its
+sections read `<name>/<section>`, and `origin(key)` says where a row
+came from. `LEXICON`, `SECTIONS`, `TAGS` and `EXAMPLE_FUNCTIONS` here
+stay mathema's own. `mathema.lexicon_checks` holds every check this
+lexicon is held to, callable over a package's rows.
+
 This is a first, deliberately small slice (`render_claim_text()`'s own
 preferred spellings are expected to change once real rendered output
 has been reviewed), see `spec.render_claim_text()` for the renderer
 this module exercises."""
 from __future__ import annotations
+
+import functools
+from dataclasses import dataclass
 
 LEXICON: dict[str, str] = {
     # one construct at a time -----------------------------------
@@ -365,6 +378,28 @@ LEXICON: dict[str, str] = {
                                   "f(a) == a[2][2]"),
     "dim_premise_rectangular_matrix": ("assuming min(m, n) >= 3, "
                                        "for a in R^(m,n), f(a) == a[2][2]"),
+    # language domains: a string parameter quantified over a named
+    # language. `L[unicode]` is every string, the empty string
+    # included; `\\ {""}` excludes it; the missing-value policy reads
+    # as it does for a number. The names resolve through the
+    # mathema-language package. The claims are the ones a parser or a
+    # normaliser earns: idempotence, a length bound, a section (an
+    # inverse on the image)
+    "language_alphabet": "for s in L[unicode], f(f(s)) == f(s)",
+    "language_contraction": "for s in L[unicode], len(f(s)) <= len(s)",
+    "language_excluding_empty":
+        'for s in L[unicode] \\ {""}, len(f(s)) >= 1',
+    "language_membership_symbol":
+        "for s ∈ L[unicode], len(f(s)) >= len(s)",
+    "language_section":
+        "let u = mathema.lexicon.unescape_angle, for s in L[unicode], "
+        "u(f(s)) == s",
+    "language_missing_excluded":
+        "for s in L[unicode] \\ {∅}, len(f(s)) <= len(s)",
+    "language_closure": "for s in L[unicode], f(s) in L[unicode]",
+    "language_length_bound": "for s in L[unicode, len <= 80], len(f(s)) <= 80",
+    "containment_absent": 'for s in L[unicode], "<" not in f(s)',
+    "membership_interval_reduces_to_chain": "for x in [0, 1], f(x) in [0, 1]",
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -457,6 +492,12 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "mixed_backslash_greek_and_unicode_relation",
         "stress_gauge_invariance", "stress_mixed_let_and_types",
         "chained_comparison", "euler_via_exp"),
+    "languages": (
+        "language_alphabet", "language_contraction",
+        "language_excluding_empty", "language_membership_symbol",
+        "language_section", "language_missing_excluded",
+        "language_closure", "language_length_bound", "containment_absent",
+        "membership_interval_reduces_to_chain"),
 }
 
 
@@ -477,6 +518,22 @@ TAGS: dict[str, tuple[str, ...]] = {
     "domain_open_interval": ("open", "exclusive", "endpoint"),
     "domain_subset_integer": ("integer", "whole numbers", "type refinement"),
     "domain_excluded_point": ("exclusion", "except", "singularity", "hole"),
+    "language_alphabet": ("string", "text", "language", "unicode",
+                          "idempotent", "normaliser"),
+    "language_contraction": ("string", "length", "shorter"),
+    "language_excluding_empty": ("string", "empty string", "non-empty"),
+    "language_membership_symbol": ("string", "escape", "longer"),
+    "language_section": ("string", "round trip", "inverse", "escape",
+                         "unescape", "parser", "renderer"),
+    "language_missing_excluded": ("string", "missing", "None"),
+    "language_length_bound": ("string", "length", "max length", "maxlength",
+                              "at most", "len", "characters"),
+    "language_closure": ("string", "in", "member", "closure", "output language",
+                         "element of"),
+    "containment_absent": ("string", "not in", "contains", "substring", "token",
+                           "never contains", "escape"),
+    "membership_interval_reduces_to_chain": ("in", "interval", "range", "between",
+                                             "chain", "bounded output"),
     "domain_natural_numbers": ("natural", "counting", "nonnegative integer"),
     "domain_complex": ("complex numbers", "imaginary", "plane"),
     "raises_typed": ("exception", "error", "raises", "precondition"),
@@ -543,13 +600,134 @@ TAGS: dict[str, tuple[str, ...]] = {
 }
 
 
+LEXICON_GROUP = "mathema.lexicon"
+
+
+@dataclass(frozen=True)
+class LexiconSource:
+    """One lexicon: mathema's own, or a package's registered under
+    `mathema.lexicon`. `name` is `"mathema"` or the entry-point name;
+    `rows`, `sections`, `tags` and `example_functions` have the shapes
+    of this module's `LEXICON`, `SECTIONS`, `TAGS` and
+    `EXAMPLE_FUNCTIONS`."""
+    name: str
+    rows: dict
+    sections: dict
+    tags: dict
+    example_functions: dict
+
+
+def source_of(name: str, obj) -> LexiconSource:
+    """Intent:
+        The `LexiconSource` an object (a module, a class, an instance)
+        provides: its `LEXICON`, and its `SECTIONS`, `TAGS` and
+        `EXAMPLE_FUNCTIONS` where it has them. With no `SECTIONS`,
+        every row is in one section named after the source.
+    Raises:
+        TypeError: the object has no `LEXICON` mapping.
+    """
+    rows = getattr(obj, "LEXICON", None)
+    if not isinstance(rows, dict):
+        raise TypeError(f"lexicon {name!r} has no LEXICON mapping")
+    return LexiconSource(
+        name, dict(rows),
+        dict(getattr(obj, "SECTIONS", None) or {name: tuple(rows)}),
+        dict(getattr(obj, "TAGS", None) or {}),
+        dict(getattr(obj, "EXAMPLE_FUNCTIONS", None) or {}))
+
+
+#: `source_of` under the name the extension surface carries
+lexicon_source = source_of
+
+
+def _core() -> LexiconSource:
+    return LexiconSource("mathema", LEXICON, SECTIONS, TAGS, EXAMPLE_FUNCTIONS)
+
+
+def _entry_points() -> tuple:
+    from importlib.metadata import entry_points
+    return tuple(sorted(entry_points(group=LEXICON_GROUP), key=lambda ep: ep.name))
+
+
+@functools.lru_cache(maxsize=1)
+def _extensions() -> tuple:
+    """Intent:
+        Every registered package lexicon, loaded, in entry-point name
+        order. One that fails to load or has no `LEXICON` is skipped
+        with a warning, and so is a row whose key another lexicon
+        already uses: mathema's own rows always win.
+    """
+    import warnings
+    taken = set(LEXICON)
+    out = []
+    for ep in _entry_points():
+        try:
+            found = source_of(ep.name, ep.load())
+        except Exception as e:
+            warnings.warn(f"mathema: lexicon {ep.value!r} registered under "
+                          f"{ep.name!r} failed to load ({e!r}), skipping it",
+                          stacklevel=2)
+            continue
+        clash = sorted(set(found.rows) & taken)
+        if clash:
+            warnings.warn(f"mathema: lexicon {ep.name!r} reuses the keys "
+                          f"{', '.join(clash)}, skipping those rows",
+                          stacklevel=2)
+        rows = {k: v for k, v in found.rows.items() if k not in taken}
+        taken |= set(rows)
+        out.append(LexiconSource(
+            found.name, rows,
+            {s: tuple(k for k in keys if k in rows) for s, keys in found.sections.items()},
+            {k: v for k, v in found.tags.items() if k in rows},
+            found.example_functions))
+    return tuple(out)
+
+
+def sources(*, extensions: bool = True) -> tuple:
+    """Every lexicon, mathema's own first, then each registered
+    package's, as `LexiconSource`s."""
+    return (_core(), *(_extensions() if extensions else ()))
+
+
+def _rows(extensions: bool = True) -> dict:
+    out: dict = {}
+    for src in sources(extensions=extensions):
+        out.update(src.rows)
+    return out
+
+
+def _sections(extensions: bool = True) -> dict:
+    out = dict(SECTIONS)
+    for src in sources(extensions=extensions)[1:]:
+        for name, keys in src.sections.items():
+            out[f"{src.name}/{name}"] = tuple(keys)
+    return out
+
+
+def _tags(extensions: bool = True) -> dict:
+    out: dict = {}
+    for src in sources(extensions=extensions):
+        out.update(src.tags)
+    return out
+
+
+def origin(key: str) -> str:
+    """Where a lexicon row came from: `"mathema"` for this module's own,
+    else the name its package registered under `mathema.lexicon`.
+    `KeyError` when no lexicon has the key."""
+    for src in sources():
+        if key in src.rows:
+            return src.name
+    raise KeyError(key)
+
+
 def _searchable(key: str) -> str:
     """Everything one entry can be found by, as one lowercased blob:
     its key, its law text, the section it belongs to, and any `TAGS`
     synonyms. Underscores become spaces so a key reads as words."""
-    section = next((name for name, keys in SECTIONS.items() if key in keys), "")
-    parts = [key.replace("_", " "), LEXICON.get(key, ""), section,
-             " ".join(TAGS.get(key, ()))]
+    section = next((name for name, keys in _sections().items() if key in keys), "")
+    parts = [key.replace("_", " "), _rows().get(key, ""), section,
+             " ".join(_tags().get(key, ()))]
     return " ".join(parts).lower()
 
 
@@ -585,8 +763,9 @@ def search(query: str, *, limit: int = 8) -> list[tuple[str, str]]:
     words = [w for w in query.lower().replace("_", " ").split() if w]
     if not words:
         return []
+    rows = _rows()
     scored: list[tuple[float, str]] = []
-    for key in LEXICON:
+    for key in rows:
         blob = _searchable(key)
         haystack = blob.split()
         key_text = key.replace("_", " ").lower()
@@ -608,7 +787,7 @@ def search(query: str, *, limit: int = 8) -> list[tuple[str, str]]:
         if score >= 0.6:
             scored.append((score, key))
     scored.sort(key=lambda pair: (-pair[0], pair[1]))
-    return [(key, LEXICON[key]) for _score, key in scored[:limit]]
+    return [(key, rows[key]) for _score, key in scored[:limit]]
 
 
 def find(query: str, *, limit: int = 8) -> None:
@@ -622,23 +801,27 @@ def find(query: str, *, limit: int = 8) -> None:
         return
     width = max(len(key) for key, _law in hits)
     for key, law in hits:
-        print(f"  {key:<{width}}  {law}")
+        where = origin(key)
+        print(f"  {key:<{width}}  {law}" + ("" if where == "mathema" else f"  [{where}]"))
 
 
-def entries(*sections: str) -> dict[str, str]:
-    """The lexicon, or just the named `SECTIONS` of it, as key -> law.
+def entries(*sections: str, extensions: bool = True) -> dict[str, str]:
+    """The lexicon, or just the named sections of it, as key -> law.
     No argument means everything: a full-sweep test iterates
-    `entries()`, a targeted one `entries("domains", "assuming")`.
-    An unknown section name raises with the roster."""
+    `entries()`, a targeted one `entries("domains", "assuming")`. A
+    registered package's rows are included, its sections named
+    `<name>/<section>`; `extensions=False` is mathema's own alone. An
+    unknown section name raises with the roster."""
+    rows, table = _rows(extensions), _sections(extensions)
     if not sections:
-        return dict(LEXICON)
+        return dict(rows)
     out: dict[str, str] = {}
     for name in sections:
-        if name not in SECTIONS:
+        if name not in table:
             raise KeyError(f"unknown lexicon section {name!r}; "
-                           f"sections: {', '.join(SECTIONS)}")
-        for key in SECTIONS[name]:
-            out[key] = LEXICON[key]
+                           f"sections: {', '.join(table)}")
+        for key in table[name]:
+            out[key] = rows[key]
     return out
 
 
@@ -953,7 +1136,35 @@ def gd_convergence_factor(alpha: float, q: float) -> float:
     return 1.0 - alpha * q
 
 
+def collapse_spaces(s: str) -> str:
+    """Runs of whitespace collapsed to one space, the ends stripped: a
+    normaliser, so applying it twice is applying it once, and the
+    result is never longer than the input."""
+    return " ".join(s.split())
+
+
+def escape_angle(s: str) -> str:
+    """Angle brackets and ampersands written as their entities, so the
+    s is inert markup. Never shorter than its input, and
+    `unescape_angle` undoes it exactly; it is not idempotent, since an
+    ampersand it wrote is escaped again on a second pass."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def unescape_angle(s: str) -> str:
+    """The inverse of `escape_angle` on its image."""
+    return s.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
+
+
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
+    "collapse_spaces": (collapse_spaces, [
+        "language_alphabet", "language_contraction",
+        "language_missing_excluded", "language_closure", "language_length_bound",
+    ]),
+    "escape_angle": (escape_angle, [
+        "language_membership_symbol", "language_section",
+        "language_excluding_empty", "containment_absent",
+    ]),
     "add_two": (add_two, ["abs_bars_compound"]),
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
     "nearly_identity": (nearly_identity, [
@@ -1007,7 +1218,7 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "discounted_price": (discounted_price, [
         "named_under_test", "let_alias_for_under_test",
     ]),
-    "cubed": (cubed, ["odd_function"]),
+    "cubed": (cubed, ["odd_function", "membership_interval_reduces_to_chain"]),
     "unit_sqrt": (unit_sqrt, ["is_compendium_safe_scoped"]),
     "clipped_ratio": (clipped_ratio, ["is_compendium_safe"]),
     "unguarded_arcsin": (unguarded_arcsin, ["is_compendium_safe"]),
@@ -1031,9 +1242,10 @@ def get(key: str | int) -> str:
     or an int index into insertion order. `KeyError`/`IndexError` if it
     doesn't exist, same as indexing the underlying dict/list directly
     would."""
+    rows = _rows()
     if isinstance(key, int):
-        return LEXICON[list(LEXICON)[key]]
-    return LEXICON[key]
+        return rows[list(rows)[key]]
+    return rows[key]
 
 
 def render_both(key: str | int, *, include_internal: bool = False):
@@ -1071,7 +1283,7 @@ def show(key: str | int, *, include_internal: bool = False) -> None:
     already answers "what keys exist" without a separate function.
     `include_internal=True` also prints the parsed `Conjecture`'s own
     fields, see `render_both`."""
-    name = key if isinstance(key, str) else list(LEXICON)[key]
+    name = key if isinstance(key, str) else list(_rows())[key]
     result = render_both(key, include_internal=include_internal)
     text, unicode_form, ascii_form = result[:3]
     print(f"{name}")
