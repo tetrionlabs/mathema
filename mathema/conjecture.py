@@ -5395,6 +5395,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
 
     fn_tagged = _tagged(fn, "f", inject=call_pins)
     bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
+    # the lengths the samples inside the premise region actually had,
+    # per sequence parameter, for the sampling note
+    sequence_params = [p for p, k in kinds.items() if k == "sequence"]
+    observed_lengths: dict = {}
     for trial in range(budget + len(pinned)):
         call_raised[0] = call_nan[0] = call_inf[0] = None
         trial_sizes: dict = (
@@ -5547,6 +5551,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     continue
             except Exception:
                 continue
+        for p in sequence_params:
+            if isinstance(env.get(p), (list, tuple)):
+                observed_lengths.setdefault(p, set()).add(len(env[p]))
         if cj.relation == "raises":
             # the claim is that the call raises: returning any value is
             # the counterexample, raising the wrong type falsifies a
@@ -5771,7 +5778,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,
                      counterexample=cx, note=note, stratum=cx_stratum,
                      meta={"mathema.sampling": _sampling_shorthand(
-                               kinds, cj_domain, checked, critical_hints, truncated_hints),
+                               kinds, cj_domain, checked, critical_hints,
+                               truncated_hints, observed_lengths,
+                               set(premise_draws)),
                           "mathema.confidence": _probe_density(risk, checked),
                           "mathema.counterexample_args": _yaml_safe_args(args)})
     if checked == 0:
@@ -5784,7 +5793,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 f"the default tolerance ({DEFAULT_TOLERANCE:g})").lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
-                           kinds, cj_domain, checked, critical_hints, truncated_hints),
+                           kinds, cj_domain, checked, critical_hints,
+                           truncated_hints, observed_lengths,
+                           set(premise_draws)),
                       "mathema.confidence": _probe_density(risk, checked)})
 
 

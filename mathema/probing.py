@@ -17,6 +17,7 @@ in `claim_families.py`.
 from __future__ import annotations
 
 import cmath
+import dataclasses
 import math
 import random
 from dataclasses import dataclass
@@ -1054,7 +1055,9 @@ def _fmt(args: tuple, names: tuple[str, ...] | None = None) -> str:
 
 def _sampling_shorthand(kinds: dict, domain: dict, n: int,
                         critical_hints: dict[str, list[float]] | None = None,
-                        truncated_hints: "set[str] | None" = None) -> str:
+                        truncated_hints: "set[str] | None" = None,
+                        observed_lengths: "dict[str, set] | None" = None,
+                        premise_drawn: "set[str] | None" = None) -> str:
     """How a probe actually sampled, in compact mathematical notation: the
     distribution per parameter, the seed, the trial count. Meant to make a
     `holds (n=...)` verdict legible and reproducible from the record alone,
@@ -1068,7 +1071,15 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
     parameter whose own discovered-point count was capped (see
     `_hints_from_points`'s own `max_critical_hints_per_param`), appending
     `[truncated@N]` so a reader knows `n` covers a capped hint pool plus
-    ordinary sampling, not every point that was actually found."""
+    ordinary sampling, not every point that was actually found.
+
+    A sequence parameter states the lengths its checked samples had
+    (`observed_lengths`: one length as `len=20`, several as their
+    range, none recorded as the free draw's `len∈[2,8]`) and how its
+    elements were drawn: the declared element domain (`elem~...`, the
+    special shapes are not used under one), the free draw with its
+    shapes, or `drawn on the premise` for a parameter in
+    `premise_drawn`, which an equality premise draws directly."""
     critical_hints = critical_hints or {}
     truncated_hints = truncated_hints or set()
 
@@ -1085,63 +1096,88 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         reach = max(abs(lo) if un_lo else 0.0, abs(hi) if un_hi else 0.0)
         return f"⊔far(≤{reach:g})"
 
-    parts = []
-    for p, k in kinds.items():
-        bounds = domain.get(p) if k != "sequence" else None
+    lengths_seen = observed_lengths or {}
+    premise_drawn = premise_drawn or set()
+
+    def sequence_text(p: str) -> str:
+        lengths = sorted(lengths_seen.get(p) or ())
+        if not lengths:
+            size = "len∈[2,8]"
+        elif len(lengths) == 1:
+            size = f"len={lengths[0]}"
+        else:
+            size = f"len∈[{lengths[0]},{lengths[-1]}]"
+        element_bound = domain.get(p)
+        if p in premise_drawn:
+            draw = "drawn on the premise"
+        elif element_bound is not None:
+            draw = "elem~" + element_text(p, element_bound)
+        else:
+            draw = "shape∈{U,const,sorted,rev,+0,extreme}[p=.3]"
+        return f"Seq({size}; {draw})"
+
+    def element_text(p: str, bound) -> str:
+        # a space binding (`[0, 1]^n`, `R^n`) is a Domain with `dims`,
+        # each element drawn from the Domain without them
+        if isinstance(bound, Domain) and bound.dims:
+            element = dataclasses.replace(bound, dims=())
+            if not element.excluded and element.base_type == "R":
+                if not element.pieces:
+                    return "U(-10,10)"
+                if len(element.pieces) == 1 and isinstance(
+                        element.pieces[0], (tuple, list)):
+                    lo, hi = element.pieces[0]
+                    return f"U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]"
+            return one(p, "float", element)
+        return one(p, "float", bound)
+
+    def one(p: str, k: str, bounds) -> str:
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
                 and not bounds.excluded):
             # a bare real line given the reach samples as a bare parameter
             bounds = bounds.pieces[0]
         if getattr(bounds, "bare", False):
-            parts.append(f"{p}~U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]"
-                         f"{far_suffix(bounds)}[p=.1]{crit_suffix(p)}")
-            continue
+            return (f"U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]"
+                    f"{far_suffix(bounds)}[p=.1]{crit_suffix(p)}")
         if isinstance(bounds, tuple) and k != "int" and (
                 getattr(bounds, "reach_lo", False)
                 or getattr(bounds, "reach_hi", False)):
             mlo, mhi = _moderate_bounds(*_reach_ends(bounds))
-            parts.append(f"{p}~U({mlo:g},{mhi:g})⊔{{lo,hi,mid,±ε}}[p=.3]"
-                         f"{far_suffix(bounds)}{crit_suffix(p)}")
-            continue
+            return (f"U({mlo:g},{mhi:g})⊔{{lo,hi,mid,±ε}}[p=.3]"
+                    f"{far_suffix(bounds)}{crit_suffix(p)}")
         bound_shape = _classify_bound(bounds)
         if bound_shape == "frozenset":
-            parts.append(f"{p}~U{{{', '.join(str(v) for v in sorted(bounds))}}}")
-        elif bound_shape == "Z":
-            parts.append(f"{p}~{{0,±1,±2}}[p=.3]⊔U{{-1000..1000}}")
-        elif bound_shape == "N":
-            parts.append(f"{p}~{{0,1,2}}[p=.3]⊔U{{0..1000}}")
-        elif k == "sequence":
-            parts.append(f"{p}~Seq(len∈[2,8]; shape∈{{U,const,sorted,rev,+0,extreme}}[p=.3])")
-        elif k == "int" and (bounds is None or isinstance(bounds, tuple)):
+            return f"U{{{', '.join(str(v) for v in sorted(bounds))}}}"
+        if bound_shape == "Z":
+            return "{0,±1,±2}[p=.3]⊔U{-1000..1000}"
+        if bound_shape == "N":
+            return "{0,1,2}[p=.3]⊔U{0..1000}"
+        if k == "sequence":
+            return sequence_text(p)
+        if k == "int" and (bounds is None or isinstance(bounds, tuple)):
             # only a plain (lo, hi) tuple/Interval is subscriptable; a
             # Domain-typed bound (a `⊂ Z` refinement) falls through to
-            # the set-notation rendering below, subscripting it blind
-            # was a real crash on the empirical-fallback path
-            # the integers actually drawn: an open or fractional end
-            # rounds inward and an unbounded end is capped, as
-            # `_synth_int_in` samples them
+            # the set-notation rendering below. The integers actually
+            # drawn: an open or fractional end rounds inward and an
+            # unbounded end is capped, as `_synth_int_in` samples them
             if bounds:
                 first, last = _integer_range(bounds, "Z")
-                parts.append(f"{p}~U{{{first}..{last}}}")
-            else:
-                parts.append(f"{p}~{{0,1,2}}[p=.3]⊔U{{0..10}}")
-        elif bound_shape == "interval":
+                return f"U{{{first}..{last}}}"
+            return "{0,1,2}[p=.3]⊔U{0..10}"
+        if bound_shape == "interval":
             lo, hi = bounds
-            parts.append(f"{p}~U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]{crit_suffix(p)}")
-        elif bound_shape != "none":
+            return f"U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]{crit_suffix(p)}"
+        if bound_shape != "none":
             # "domain" (grammar.Domain: union/exclusion/an explicit
-            # type refinement) or "other", a richer shape this
-            # function's own compact notation has no bespoke rendering
-            # for. Fall back to the same canonical set-notation text a
-            # person would type for it, rather than assuming every
-            # non-plain-tuple bound is a (lo, hi) pair, the real gap
-            # that used to crash here on a Domain object _synth already
-            # knew how to handle.
+            # type refinement) or "other": the canonical set-notation
+            # text a person would type for it
             from .grammar import render_domain_bound
-            parts.append(f"{p}~{render_domain_bound(bounds)}{crit_suffix(p)}")
-        else:
-            parts.append(f"{p}~U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]{crit_suffix(p)}")
+            return f"{render_domain_bound(bounds)}{crit_suffix(p)}"
+        return f"U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]{crit_suffix(p)}"
+
+    parts = [f"{p}~{one(p, k, domain.get(p) if k != 'sequence' else None)}"
+             for p, k in kinds.items()]
     return ", ".join(parts) + f", seed={_RNG_SEED}, n={n}"
 
 
