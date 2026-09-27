@@ -1371,6 +1371,51 @@ def _parse_assuming_relation(part: str):
     return None
 
 
+def _parse_assuming_links(part: str):
+    """Intent:
+        One assuming conjunct as its list of plain relations: a single
+        relation gives one link, a chained comparison one link per
+        adjacent pair, conjoined (`a < 0 < b` is `a < 0` and `0 < b`,
+        through `grammar.split_relation_chain`, as a chained statement
+        is read).
+
+    Notes:
+        `None` when the conjunct does not read as plain relations: no
+        top-level relation, a chain `split_relation_chain` refuses (an
+        equality inside a chain), or a side that is itself a
+        comparison (`a < (0 < b)`).
+    """
+    from types import SimpleNamespace
+
+    from .grammar import normalize as _normalize
+    text = _normalize(part.strip())
+    try:
+        node = ast.parse(text, mode="eval").body
+    except SyntaxError:
+        node = None
+    if isinstance(node, ast.Compare) and len(node.ops) > 1:
+        try:
+            chain = split_relation_chain(text)
+        except NoRelation:
+            return None
+        links = [SimpleNamespace(lhs=lhs, relation=rel, rhs=rhs)
+                 for lhs, rel, rhs in chain]
+    else:
+        single = _parse_assuming_relation(part)
+        if single is None:
+            return None
+        links = [single]
+    for link in links:
+        for side in (link.lhs, link.rhs):
+            try:
+                side_node = ast.parse(side, mode="eval").body
+            except SyntaxError:
+                continue
+            if isinstance(side_node, ast.Compare):
+                return None
+    return links
+
+
 #: the word an auto-generated claim name spells each relation with
 _RELATION_WORDS = {"=:=": "equiv", "==": "eq", "~=": "approx", "!=": "ne",
                    "<=": "le", ">=": "ge", "<": "lt", ">": "gt", "=": "eq"}
@@ -1408,7 +1453,7 @@ def _conjoin_assuming(first: str, second: str, law: str) -> str:
     """
     bodies = [re.sub(r"^assuming\s+", "", c.strip()) for c in (first, second)]
     for body in bodies:
-        if "-->" in body or any(_parse_assuming_relation(part) is None
+        if "-->" in body or any(_parse_assuming_links(part) is None
                                 for part in _split_top_and(body)):
             raise InvalidConjecture(
                 f"two `assuming` clauses are joined only when both are "
@@ -1507,7 +1552,7 @@ def _interpret_assumption(cj, conjectures):
     def conjuncts_of(region_text: str, display: str):
         parsed_list = []
         for part in _split_top_and(region_text):
-            parsed = _parse_assuming_relation(part)
+            parsed = _parse_assuming_links(part)
             inner = part.strip()[1:-1].strip()
             if (parsed is None and part.strip().startswith("(")
                     and part.strip().endswith(")")
@@ -1517,8 +1562,9 @@ def _interpret_assumption(cj, conjectures):
                             f"the parentheses, `assuming {inner}`")
             if parsed is None:
                 return skip(f"assuming clause must be a plain relation "
-                            f"(==, !=, >=, <=, >, <): {part!r}")
-            parsed_list.append(parsed)
+                            f"(==, !=, >=, <=, >, <), or a chain of "
+                            f"ordering relations (a < 0 < b): {part!r}")
+            parsed_list.extend(parsed)
         if not parsed_list:
             return skip(f"empty assuming region in {text!r}")
         return ("relation", display, parsed_list)
@@ -1701,9 +1747,10 @@ def _undeclared_names(cj, declared: set) -> list[str]:
         sides += [link[0], link[2]]
     premise = re.sub(r"^assuming\s+", "", (cj.assuming or "").strip())
     if premise and "-->" not in premise:
-        parts = [_parse_assuming_relation(p) for p in _split_top_and(premise)]
+        parts = [_parse_assuming_links(p) for p in _split_top_and(premise)]
         if all(p is not None for p in parts):
-            sides += [s for p in parts for s in (p.lhs, p.rhs)]
+            sides += [s for links in parts for p in links
+                      for s in (p.lhs, p.rhs)]
     trees = []
     for src in sides:
         if not src:
@@ -2564,10 +2611,12 @@ def _lemma_conjuncts(lemmas: list, cj, cj_domain: dict) -> list:
         if any(cj_domain.get(name) != bound
                for name, bound in (lemma.domain or {}).items()):
             continue
-        parsed = _parse_assuming_relation(
-            f"{lemma.lhs} {lemma.relation} {lemma.rhs}")
-        if parsed is not None:
-            contributed.append(parsed)
+        for lhs, relation, rhs in (list(lemma.links or ())
+                                   or [(lemma.lhs, lemma.relation,
+                                        lemma.rhs)]):
+            parsed = _parse_assuming_relation(f"{lhs} {relation} {rhs}")
+            if parsed is not None:
+                contributed.append(parsed)
     return contributed
 
 

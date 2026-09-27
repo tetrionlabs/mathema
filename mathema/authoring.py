@@ -534,6 +534,7 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     import functools
     import inspect
 
+    from .conjecture import _parse_assuming_links, _split_top_and
     from .grammar import extract_assuming_clause, normalize
 
     def _premises(fn) -> list:
@@ -551,13 +552,9 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
                 continue
             body = clause[len("assuming "):] if clause.startswith(
                 "assuming ") else clause
-            for part in body.split(" and "):
-                rel = next((r for r in ("==", "!=", ">=", "<=", ">", "<")
-                            if r in part), None)
-                if rel is None:
-                    continue
-                lhs, rhs = part.split(rel, 1)
-                out.append((lhs.strip(), rel, rhs.strip()))
+            for part in _split_top_and(body):
+                for link in _parse_assuming_links(part) or ():
+                    out.append((link.lhs, link.relation, link.rhs))
         return out
 
     def _dim_ref(text):

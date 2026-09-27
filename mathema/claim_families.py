@@ -2611,22 +2611,25 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return None
         compiled.append((code_l, rel, code_r))
     # the claim's own premise: a point outside it is not a trial
-    from .conjecture import _parse_assuming_relation
+    from .conjecture import _parse_assuming_links, _split_top_and
     premise = (cj.assuming or "").strip()
     if premise.startswith("assuming"):
         premise = premise[len("assuming"):].strip()
     assumed = []
-    for part in filter(None, (c.strip() for c in premise.split(" and "))):
-        rel_parts = _parse_assuming_relation(part)
-        if rel_parts is None or rel_parts.relation not in _COMPARISONS:
+    for part in _split_top_and(premise):
+        links = _parse_assuming_links(part)
+        if links is None:
             return None
-        try:
-            assumed.append((
-                _validate(rel_parts.lhs, set(params), frozenset())[0],
-                rel_parts.relation,
-                _validate(rel_parts.rhs, set(params), frozenset())[0]))
-        except Exception:
-            return None
+        for rel_parts in links:
+            if rel_parts.relation not in _COMPARISONS:
+                return None
+            try:
+                assumed.append((
+                    _validate(rel_parts.lhs, set(params), frozenset())[0],
+                    rel_parts.relation,
+                    _validate(rel_parts.rhs, set(params), frozenset())[0]))
+            except Exception:
+                return None
     compare = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
                "<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
                ">": lambda a, b: a > b, ">=": lambda a, b: a >= b}
