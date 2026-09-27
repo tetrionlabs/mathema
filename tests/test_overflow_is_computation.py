@@ -105,7 +105,7 @@ def test_a_float_power_overflow_is_a_computation_failure():
         assert proof.verdict == "proven", (law, proof.verdict, proof.note)
         assert proof.condition == "∀ x ∈ ℝ", proof.condition
         assert companion.verdict == "falsified", (law, companion.note)
-        assert companion.counterexample in ("x=-1e+308", "x=1e+308"), \
+        assert companion.counterexample in ("x=-1.79769e+308", "x=1.79769e+308"), \
             companion.counterexample
         assert "raises OverflowError" in companion.sketch, companion.sketch
     proof, companion = _pair(cubed, "for x in [-1e100, 1e100], f(-x) == -f(x)",
@@ -126,7 +126,7 @@ def squared(x: float) -> float:
 @pytest.mark.needs_full_proof_budget
 def test_an_operational_infinity_bounds_only_the_computation():
     # no operational infinity: the proof is over R and the companion
-    # runs the unbounded direction to 1e308, where x**2 raises
+    # runs the unbounded direction to the float64 maximum, where x**2 raises
     proof, companion = _pair(squared, "f(x) >= 0", route="derive")
     assert proof.verdict == "proven", (proof.verdict, proof.note)
     assert proof.condition == "∀ x ∈ ℝ", proof.condition

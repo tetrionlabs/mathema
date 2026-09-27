@@ -83,8 +83,8 @@ which is over ℝ whatever the binding says. It is declared on the claim,
 `let |inf| be 1e100` in the grammar or `pseudo_infinity=` in Python,
 and a claim's own declaration takes precedence over the levels beneath
 it. Those resolve in the order claim, function, project
-(`MATHEMA_PSEUDO_INFINITY`) and then the carrier's own maximum, `1e308`
-for float64, and the value that applied, with its source, is rendered
+(`MATHEMA_PSEUDO_INFINITY`) and then the carrier's own maximum,
+`sys.float_info.max` (about `1.8e308`) for float64, and the value that applied, with its source, is rendered
 in a claim's output only where it bounds an unbounded direction of the
 claim's effective domain, so a claim whose every direction is already
 bounded says nothing about infinity at all. See [operational

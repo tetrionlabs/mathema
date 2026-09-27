@@ -320,7 +320,7 @@ that failed, and the fix is usually one of the ones below.
 | `is_pole_safe(x)` | the code never meets a pole, a point where the formula divides by zero or otherwise blows up (`1 / (x - 1)` at `x = 1`), anywhere in the domain | exclude the point from the domain, or guard it with an explicit raise |
 | `is_compendium_safe(numpy)` | every library call a [compendium](claims-transfer.md#in-the-compendium) covers returns a value on the domain | keep the call's argument inside the region the compendium states |
 | `is_overflow_safe(x)` | no result overflows to infinity and nothing raises `OverflowError` from a finite input; the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range | narrow the domain below the overflow point, or rescale (work in logarithms) |
-| `is_extremity_safe(x)` | the function still returns at the extremes of its domain, the largest and smallest magnitudes it admits, out to `1e308` along an unbounded direction | bound the domain, or declare how far the code has to reach with <code>let &#124;inf&#124; be ...</code> |
+| `is_extremity_safe(x)` | the function still returns at the extremes of its domain, the largest and smallest magnitudes it admits, out to float64's maximum along an unbounded direction | bound the domain, or declare how far the code has to reach with <code>let &#124;inf&#124; be ...</code> |
 | `is_missing_safe(f)` | a missing value (`None`, `NaN`) meets a deliberate policy, raised or passed through, rather than an accidental crash or a wrong number | check for a missing value at entry and handle it on purpose |
 | `is_empty_safe(xs)` | an empty sequence gets an answer or a deliberate error, not an `IndexError` or a division by a zero length | handle the empty case first |
 | `is_representation_safe(x)` | one number written differently (`1`, `1.0`, `True`) gets one answer | normalize the input type at entry |
@@ -465,7 +465,8 @@ is over ℝ whatever the binding says, with infinity as infinity, and the
 binding bounds only the computation, namely what a proof's `[float]`
 companion and the probe route execute. Past about `1.34e154`, `x ** 2`
 raises `OverflowError`, and with no operational infinity declared the
-companion runs an unbounded direction out to `1e308`, where that
+companion runs an unbounded direction out to float64's maximum
+(about `1.8e308`), where that
 overflow shows.
 
 The standard normal density shows both halves of the rule:
@@ -493,7 +494,7 @@ for law in ["∫(f(x), x, -oo, oo) == 1",
 ```text
 ∫(f(x), x, -oo, oo) == 1        proven
 f(x) >= 0                       proven    ∀ x ∈ ℝ
-  [float]                       falsified x=-1e+308
+  [float]                       falsified x=-1.79769e+308
 let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ ℝ
   [float]                       holds
 ```
@@ -502,7 +503,7 @@ The integral over the whole line is proven, since an integral, like a
 limit, is a statement about the mathematics, and so is the pointwise
 claim, because the density is positive at every real `x` and the proof
 says so over ℝ. The computation is a separate question, and the `[float]`
-row under each proof answers it: at `x = -1e308` the code squares `x`
+row under each proof answers it: at `x = -1.79769e308` the code squares `x`
 before it returns anything, the square overflows, and the companion is
 falsified with that witness while the proof stands. Declaring `let |inf|
 be 1e100` says that for this claim the computation is exercised out to
@@ -583,10 +584,12 @@ checked for computation, and an explicit domain for the variables
 (`for x in [lo, hi], ...`) is usually the better way to say the same
 thing, since it is part of the claim a reader sees. The probe route reads the same value: an unbounded
 direction, declared (`for x in [0, oo)`, `for x in R`) or a parameter
-with no domain at all, is exercised with finite values only, out to the
-value that applied or to `1e308`, spread over the decades so the far end
-is reached; a real domain contains no infinity, so the probe never calls
-the code at `inf` itself.
+with no domain at all, is exercised with finite values only. Nine draws
+in ten stay at everyday magnitudes (the special values near zero first,
+then modest ranges), and one in ten goes toward the reach: the value
+that applied, or else float64's maximum (`sys.float_info.max`), spread
+over the decades so the far end is reached. A real domain contains no
+infinity, so the probe never calls the code at `inf` itself.
 
 ## `assuming`: stating a premise
 

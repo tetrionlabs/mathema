@@ -495,7 +495,8 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     the `[float]` companion) runs along an unbounded direction, unless
     the claim states its own `let |inf| be`. Omitted, a `declared=`
     entry's `pseudo_infinity:` field applies, else the project's
-    `MATHEMA_PSEUDO_INFINITY`, else the carrier's maximum (1e308). A
+    `MATHEMA_PSEUDO_INFINITY`, else the carrier's maximum
+    (`sys.float_info.max` for float64). A
     proof never reads it. Where the value that applied bounds a
     direction of a claim's domain, the claim's rows state it with its
     source (`meta["mathema.pseudo_infinity"]` and the notes); a value

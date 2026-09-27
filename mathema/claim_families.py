@@ -2304,7 +2304,7 @@ def _library_reach(fn, cj, params: list, domain: dict, shapes: dict):
         one (the function is mathematically total where it does not
         overflow, and overflow is the `is_overflow_safe` row's fact,
         not this claim's), else the claim's pseudo-infinity, else the
-        f64 reach (1e308), each intersected with the parameter's own
+        carrier's maximum, each intersected with the parameter's own
         declared bound. Returns `(reach, note)`: the per-parameter
         `(lo, hi)` the corners are taken from and outside which a draw
         is not a trial, and the text the record carries, or `({},
@@ -2320,7 +2320,9 @@ def _library_reach(fn, cj, params: list, domain: dict, shapes: dict):
     if key is None:
         return {}, None
     pinf = operational_range(cj)
-    default_lo, default_hi = pinf if pinf is not None else (-1e308, 1e308)
+    from ._sampling import carrier_reach
+    default_lo, default_hi = (pinf if pinf is not None
+                              else (-carrier_reach(), carrier_reach()))
     regions = {}
     texts = []
     for row in computation_region(key, "is_overflow_safe"):
@@ -2360,7 +2362,7 @@ def _library_reach(fn, cj, params: list, domain: dict, shapes: dict):
         from .records import operational_infinity
         note = f"unbounded directions run to {operational_infinity(cj).render()}"
     else:
-        note = "unbounded directions run to magnitude 1e+308"
+        note = f"unbounded directions run to magnitude {carrier_reach():g}"
     return reach, note
 
 

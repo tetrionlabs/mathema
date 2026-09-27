@@ -353,8 +353,8 @@ def resolve_pseudo_infinity(claim_value,
         The pseudo-infinity that applies to a claim's computation, by
         precedence claim > function > environment (P6). None means no
         level set one: the computation runs to the carrier's own
-        maximum (1e308 for float64) and every consumer keeps its
-        default.
+        maximum (`sys.float_info.max` for float64) and every consumer
+        keeps its default.
 
     Raises:
         InvalidDomain: a function-level or environment value `let

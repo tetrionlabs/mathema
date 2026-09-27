@@ -29,6 +29,7 @@ mathematical stratum alongside.
 """
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 
 from .claim_families import _ACCIDENTAL_CRASHES
@@ -41,13 +42,17 @@ __all__ = ["PY_FLOAT64", "PY_INT", "PYTHON_PROFILES", "Representation",
 @dataclass(frozen=True)
 class Representation:
     """One carrier: its tag, how it overflows, the hazard ladder worth
-    probing on it, and the exception types that signal the MACHINE
-    failing (as opposed to a value-level rejection like ValueError,
-    which is the mathematics or the contract talking)."""
+    probing on it, the exception types that signal the MACHINE failing
+    (as opposed to a value-level rejection like ValueError, which is
+    the mathematics or the contract talking), and the largest finite
+    magnitude it represents (None for a carrier that grows without
+    bound). The maximum is how far a computation over the carrier can
+    reach along an unbounded direction."""
     tag: str
     overflow: str                       # arbitrary | inf | wrap | trap | ub
     ladder: tuple = ()
     machine_failures: tuple = field(default=())
+    max_magnitude: "float | None" = None
 
 
 #: Python's float: an IEEE-754 double. Overflow raises OverflowError
@@ -59,6 +64,7 @@ PY_FLOAT64 = Representation(
     overflow="inf",
     ladder=tuple(_REPRESENTATION_LADDER),
     machine_failures=(OverflowError, MemoryError, RecursionError),
+    max_magnitude=sys.float_info.max,
 )
 
 #: Python's int: arbitrary precision. Overflow cannot happen; the
@@ -67,6 +73,7 @@ PY_INT = Representation(
     tag="bigint",
     overflow="arbitrary",
     machine_failures=(MemoryError, RecursionError),
+    max_magnitude=None,
 )
 
 #: The profiles the Python runtime supplies, by the param kinds the

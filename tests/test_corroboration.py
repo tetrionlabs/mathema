@@ -74,14 +74,14 @@ def test_uncorroborated_disproof_downgrades_and_probe_supersedes(monkeypatch):
 def test_an_unbounded_exp_claim_is_proven_and_its_computation_overflows():
     # exact in real arithmetic over the whole line, so proven; math.exp
     # raises OverflowError past x = 709.78, which the companion reaches
-    # at its 1e308 corner, so the computation is what is falsified; on a
+    # at its float64-maximum corner, so the computation is what is falsified; on a
     # range inside the representable region the companion holds too
     def grow(x):
         return math.exp(x)
     proof, companion = _pair(grow, "f(x) == exp(x)")
     assert proof.verdict == "proven"
     assert companion.verdict == "falsified"
-    assert companion.counterexample == "x=1e+308"
+    assert companion.counterexample == "x=1.79769e+308"
     assert "raises OverflowError" in companion.sketch
     proof, companion = _pair(grow, "for x in [-700, 700], f(x) == exp(x)")
     assert (proof.verdict, companion.verdict) == ("proven", "holds")

@@ -16,12 +16,18 @@ import random
 _RNG_SEED = 20260718
 _SPECIALS = [0.0, 1.0, -1.0, 0.5, -0.5, 2.0, 1e-9, -1e-9, 1e6, -1e6]
 _LARGE = 1e6
-# how far an unbounded direction is exercised when no pseudo-infinity
-# applies: the float64 carrier's maximum, in round figures
-CARRIER_REACH = 1e308
-# the share of an undeclared parameter's draws spent along its far
-# decades, beyond the moderate magnitudes it is otherwise drawn from
+# the share of an unbounded direction's draws spent along its far
+# decades, out to the reach; the rest stay at everyday magnitudes
 _FAR_SHARE = 0.1
+
+
+def carrier_reach() -> float:
+    """How far an unbounded direction is exercised when no
+    pseudo-infinity applies: the float64 carrier's maximum
+    (`representations.PY_FLOAT64`)."""
+    from .representations import PY_FLOAT64
+    assert PY_FLOAT64.max_magnitude is not None
+    return PY_FLOAT64.max_magnitude
 
 # The string edge-case corpus the is_arbitrary_input_safe fuzzer draws
 # from: the inputs real code forgets, empty and whitespace, control
@@ -77,8 +83,9 @@ def _reach_ends(bounds) -> tuple[float, float, bool, bool]:
     lo, hi = float(bounds[0]), float(bounds[1])
     un_lo = math.isinf(lo) or bool(getattr(bounds, "reach_lo", False))
     un_hi = math.isinf(hi) or bool(getattr(bounds, "reach_hi", False))
-    return (-CARRIER_REACH if math.isinf(lo) else lo,
-            CARRIER_REACH if math.isinf(hi) else hi, un_lo, un_hi)
+    reach = carrier_reach()
+    return (-reach if math.isinf(lo) else lo,
+            reach if math.isinf(hi) else hi, un_lo, un_hi)
 
 
 def _moderate_bounds(lo: float, hi: float, un_lo: bool,
@@ -206,11 +213,11 @@ def _synth_scalar(rng: random.Random, bounds=None,
             return v
     if bounds is not None:
         lo, hi, un_lo, un_hi = _reach_ends(bounds)
+        if (un_lo or un_hi) and rng.random() < _FAR_SHARE:
+            # the far corner and the decades before it, never an
+            # infinity: a real domain contains none (P1)
+            return _far_draw(rng, lo, hi, un_lo, un_hi)
         if rng.random() < 0.3:
-            if rng.random() < 0.3 and (un_lo or un_hi):
-                # the far corner and the decades before it, never an
-                # infinity: a real domain contains none (P1)
-                return _far_draw(rng, lo, hi, un_lo, un_hi)
             flo, fhi = _moderate_bounds(lo, hi, un_lo, un_hi)
             span = fhi - flo
             # a relative step inside each end, at least one float (and

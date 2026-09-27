@@ -52,7 +52,8 @@ The companion runs the relation at every corner of the declared domain
 and at sampled interior points. A raise, a `NaN`, or an `inf` or a loss
 of precision where the relation fails on the executed values falsifies
 it, with that point as the witness. An unbounded direction runs to the
-claim's `|inf|` when one is declared, and otherwise out to `1e308`,
+claim's `|inf|` when one is declared, and otherwise out to float64's
+maximum (`sys.float_info.max`, about `1.8e308`),
 sampled log-uniformly so moderate magnitudes are visited too.
 
 <!-- example: companion run -->
@@ -80,7 +81,7 @@ for law, route in [("for x in [0, 1e6], f(x) == 1", "derive"),
 derive           one        proven
 derive           one[float] holds
 derive           one        proven
-derive           one[float] falsified x=-1e+308
+derive           one[float] falsified x=-1.79769e+308
 derive:math_only one        proven
 ```
 

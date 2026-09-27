@@ -30,10 +30,6 @@ def _conjecture_bits():
 
 _EXTREME = 1e10
 
-# how far a float companion reaches along an unbounded direction when the
-# claim declares no `|inf|`: the largest power of ten a float64 holds
-_FLOAT_REACH = 1e308
-
 # the name suffix, and the family, of a derive claim's computation
 # companion
 FLOAT_SUFFIX = "[float]"
@@ -772,7 +768,7 @@ def _reach_text(names, cj_domain, resolved, reach) -> str:
     if resolved is not None:
         return f"unbounded directions ({who}) run to {resolved.render()}"
     return (f"unbounded directions ({who}) run to magnitude "
-            f"{reach[1]:.0e}, sampled log-uniformly (no |inf| declared)")
+            f"{reach[1]:g}, sampled log-uniformly (no |inf| declared)")
 
 
 def _same_no_value(lv, rv) -> bool:
@@ -807,7 +803,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         directions running to the claim's resolved pseudo-infinity
         (`records.operational_range`: claim, function level or
         `MATHEMA_PSEUDO_INFINITY`) when one applies and to the carrier's
-        reach (1e308, sampled log-uniformly) otherwise. A raise, a NaN, or an inf or a precision loss where
+        maximum (`_sampling.carrier_reach`, sampled log-uniformly)
+        otherwise. A raise, a NaN, or an inf or a precision loss where
         the relation fails on the executed values falsifies it with
         that point as the witness; otherwise it holds, over the points
         it executed.
@@ -824,16 +821,17 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         corroboration budget of interior points.
     """
     from . import corroboration as C
+    from ._sampling import carrier_reach
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     from .records import operational_infinity, operational_range
     resolved = operational_infinity(cj)
     cap = operational_range(cj)
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
-                            cap=cap, reach=_FLOAT_REACH, sequences=True)
+                            cap=cap, reach=carrier_reach(), sequences=True)
     if deps is None:
         return None
     name = companion_name(parent.name)
-    reach = cap if cap is not None else (-_FLOAT_REACH, _FLOAT_REACH)
+    reach = cap if cap is not None else (-carrier_reach(), carrier_reach())
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
     interior = (C._CORROBORATION_BUDGET if budget is None
                 else max(0, int(budget) - len(deps["corners"])))

@@ -80,7 +80,7 @@ def test_unbounded_direction_without_pseudo_infinity_reaches_a_large_magnitude()
     assert probes["law"].verdict == "proven"
     comp = probes["law[float]"]
     assert comp.verdict == "falsified"
-    assert "1e+308" in comp.note
+    assert "1.79769e+308" in comp.note
 
 
 def test_a_declared_pseudo_infinity_bounds_the_companion():

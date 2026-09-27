@@ -184,7 +184,7 @@ Among the results, all found with no claims written:
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
   FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308, c=-5
+           counterexample x=[-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha=-1.79769e+308, c=-5
            [mathematics sound, implementation:numerical-instability]
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
@@ -200,7 +200,8 @@ it reports the counterexample and leaves the judgement to a person.
 
 `scale_equivariant[float]` is the proof's float companion: the same law run
 through the real code in floating point, where nothing bounds the inputs, so
-it reaches elements and an `alpha` of `-1e+308`. There the loop's arithmetic
+it reaches elements and an `alpha` at float64's lowest value, about
+`-1.8e+308`. There the loop's arithmetic
 overflows and subtracts one infinity from another, so both sides of the law
 come out NaN, and a NaN is no value: it agrees with nothing, not even the
 other side's NaN. The mathematics is sound and the float code does not

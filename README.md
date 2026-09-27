@@ -334,7 +334,7 @@ shifts the result the same way, with the `[float]` companions of those proofs
 holding across the stated domain, and it finds that reordering `x` does *not*
 leave the result unchanged, with the counterexample kept. Leave the domain out
 and every claim ranges over all of the reals, where the companions report the
-overflow at `1e+308` instead. The
+overflow at float64's maximum instead. The
 [API reference](https://mathema.tetrionlabs.com/api/) has the rest.
 
 ## CI

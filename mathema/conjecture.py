@@ -5047,10 +5047,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # direction, declared or bare, runs with finite values out to the
     # resolved pseudo-infinity, else the carrier's maximum (P1: a real
     # domain contains no infinity)
-    from ._sampling import CARRIER_REACH
+    from ._sampling import carrier_reach
     cj_domain, _approximated = _operational_domain(
         cj_domain, pinf if pinf is not None
-        else (-CARRIER_REACH, CARRIER_REACH), bare=bare)
+        else (-carrier_reach(), carrier_reach()), bare=bare)
     try:
         if cj.relation == "raises":
             code_l, aux_names = _validate(cj.lhs, set(kinds), extra)
