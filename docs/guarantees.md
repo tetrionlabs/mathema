@@ -84,10 +84,13 @@ which is over ℝ whatever the binding says. It is declared on the claim,
 and a claim's own declaration takes precedence over the levels beneath
 it. Those resolve in the order claim, function, project
 (`MATHEMA_PSEUDO_INFINITY`) and then the carrier's own maximum,
-`sys.float_info.max` (about `1.8e308`) for float64, and the value that applied, with its source, is rendered
-in a claim's output only where it bounds an unbounded direction of the
-claim's effective domain, so a claim whose every direction is already
-bounded says nothing about infinity at all. See [operational
+`sys.float_info.max` (about `1.8e308`) for float64. The value that
+applied is shown only where it bounds an unbounded direction of the
+claim's effective domain, as a plain binding in front of the
+computation rows' condition (`let |inf| be 1e+06, for x in R`), never
+in the claim's statement, with the level it came from recorded in
+`meta["mathema.pseudo_infinity"]`; a claim whose every direction is
+already bounded says nothing about infinity at all. See [operational
 infinity](grammar.md#operational-infinity-let-inf-be) for the grammar
 and a worked example.
 

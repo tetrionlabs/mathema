@@ -174,7 +174,12 @@ class Record:
                 if p.condition:
                     line += f"\n           {p.condition}"
             else:
-                line = f"  {mark} {p.name}: {p.statement}"
+                shown = p.statement
+                if (p.condition or "").startswith("let |inf| be ") \
+                        and "|inf|" not in (shown or ""):
+                    # the pseudo-infinity that bounded the computation
+                    shown = f"{p.condition.split(', ', 1)[0]}, {shown}"
+                line = f"  {mark} {p.name}: {shown}"
                 if p.verdict == "holds" and p.n:
                     line += f" (n={p.n})"
             if p.counterexample:
@@ -498,8 +503,10 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     `MATHEMA_PSEUDO_INFINITY`, else the carrier's maximum
     (`sys.float_info.max` for float64). A
     proof never reads it. Where the value that applied bounds a
-    direction of a claim's domain, the claim's rows state it with its
-    source (`meta["mathema.pseudo_infinity"]` and the notes); a value
+    direction of a claim's domain, the claim's computation rows show it
+    as `let |inf| be <value>` (the displayed claim, `condition` and the
+    notes) and record its level in `meta["mathema.pseudo_infinity"]`; a
+    value
     `let |inf| be` would refuse raises `InvalidDomain`.
 
     `extensive` reaches every route this call touches: `probe()`'s own

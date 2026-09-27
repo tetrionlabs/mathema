@@ -267,7 +267,8 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
             row["note"] = p.note
         if p.sketch:
             row["sketch"] = p.sketch
-        if p.condition and (p.route or "").split(":", 1)[0] == "derive":
+        if p.condition and ((p.route or "").split(":", 1)[0] == "derive"
+                            or p.condition.startswith("let |inf| be ")):
             row["condition"] = p.condition
         row["route"] = p.route
         # where the claim came from: an object whose `surface` names the

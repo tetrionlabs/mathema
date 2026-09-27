@@ -529,9 +529,11 @@ one for every function with the `MATHEMA_PSEUDO_INFINITY` environment
 variable. The claim's own binding wins over the function level, the
 function level over the project, and with none of them set the
 computation runs to float64's own maximum. Only the claim's own binding
-is part of the claim: the value that applied is output, rendered with
-its level where it bounds an unbounded direction of the claim's domain,
-and `mathema verify` treats a change in it as a stale record, not a
+is part of the claim: the value that applied is output. Where it bounds
+an unbounded direction of the claim's domain, the computation rows show
+it as a plain binding in front of their condition (`let |inf| be
+1e+100, for x in R`), whichever level it came from, and the level is
+recorded in `meta["mathema.pseudo_infinity"]`; `mathema verify` treats a change in it as a stale record, not a
 different claim. A claim whose every direction is bounded says nothing
 about infinity at any level:
 
@@ -568,11 +570,11 @@ MATHEMA_PSEUDO_INFINITY=1e100 python levels.py 1e50
 <!-- example: levels output -->
 ```text
 f(x) >= 0                   [float] holds     {'value': 1e+100, 'source': 'environment'}
-  unbounded directions (x) run to let |inf| be 1e+100 (MATHEMA_PSEUDO_INFINITY)
+  unbounded directions (x) run to let |inf| be 1e+100
 for x in [-3, 3], f(x) >= 0 [float] holds     None
   (every direction bounded)
 f(x) >= 0                   [float] holds     {'value': 1e+50, 'source': 'function'}
-  unbounded directions (x) run to let |inf| be 1e+50 (function level)
+  unbounded directions (x) run to let |inf| be 1e+50
 for x in [-3, 3], f(x) >= 0 [float] holds     None
   (every direction bounded)
 ```

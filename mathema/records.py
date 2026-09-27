@@ -286,9 +286,6 @@ PSEUDO_INFINITY_ENV = "MATHEMA_PSEUDO_INFINITY"
 # below this magnitude a project-level value is loud: overflow of a
 # float64 computation beyond it is never exercised
 PSEUDO_INFINITY_WARN_BELOW = 1e100
-# how each level is named where a resolved value is rendered
-_SOURCE_LABELS = {"claim": "claim", "function": "function level",
-                  "environment": PSEUDO_INFINITY_ENV}
 
 
 @dataclass(frozen=True)
@@ -302,19 +299,14 @@ class PseudoInfinity:
     value: float
     source: str
 
-    def label(self) -> str:
-        """The level, as rendered: `claim`, `function level`, or
-        `MATHEMA_PSEUDO_INFINITY`."""
-        return _SOURCE_LABELS.get(self.source, self.source)
-
     def magnitude(self) -> float:
         """The upper end of the operational range."""
         return pseudo_infinity_range(self.value)[1]
 
     def render(self) -> str:
-        """The binding with its source: `let |inf| be 1e+100
-        (MATHEMA_PSEUDO_INFINITY)`."""
-        return f"let |inf| be {self.magnitude():g} ({self.label()})"
+        """The binding as the claim grammar spells it: `let |inf| be
+        1e+100`. The level it came from is in `meta()`."""
+        return f"let |inf| be {self.magnitude():g}"
 
     def meta(self) -> dict:
         """The record's `mathema.pseudo_infinity` value."""

@@ -66,9 +66,9 @@ def test_the_half_line_bound_reaches_the_computation_and_not_the_proof():
         assert spelling not in proof.condition, proof.condition
     assert proof.condition.startswith("∀ x ∈ [0.0, inf]"), proof.condition
     assert companion.verdict == "holds", companion.note
-    assert "run to let |inf| be 1e+12 (claim)" in companion.note, \
+    assert "run to let |inf| be 1e+12" in companion.note, \
         companion.note
     assert "let |inf| be 1e+12" in companion.statement, companion.statement
     (probed,) = check_conjectures(gauss, [claim(law, route="probe")])
-    assert "approximates infinity as 1e+12 (claim)" in probed.note, \
+    assert "approximates infinity as 1e+12;" in probed.note, \
         probed.note

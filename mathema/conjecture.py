@@ -2723,8 +2723,9 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     (`records.resolve_pseudo_infinity`, read once per call), else to
     the carrier's maximum; the derive route never reads it. Where the
     resolved value bounds an unbounded direction of a claim's
-    effective domain, the claim's rows carry it with its source in
-    `meta["mathema.pseudo_infinity"]` (P8).
+    effective domain, the claim's rows carry it with its level in
+    `meta["mathema.pseudo_infinity"]`, and its computation rows show it
+    as a `let` in front of their `condition` (P8).
 
     The bundled library claims (`compendium.ensure_bundled`) are
     applied before anything is adjudicated, unless a project layer is
@@ -2818,6 +2819,8 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             # claim's domain: the value and its level are output (P7, P8)
             probe.meta = {**(probe.meta or {}),
                           "mathema.pseudo_infinity": stamp_pinf}
+            probe.condition = pseudo_infinity_condition(
+                cj, facts, domain, probe)
         if cj.meta:
             # declared meta (the spec's own extension object, e.g.
             # concepts) passes through under the probe's meta, the
@@ -3189,6 +3192,34 @@ def pseudo_infinity_stamp(cj, facts, parent_domain: "dict | None") -> "dict | No
     if not unbounded_directions(names, effective):
         return None
     return found.meta()
+
+
+def pseudo_infinity_condition(cj, facts, parent_domain: "dict | None",
+                              probe) -> "str | None":
+    """Intent:
+        A computation row's `condition` with the resolved
+        pseudo-infinity in front, as the grammar spells it: `let |inf|
+        be 1e+06, for x in R`, the row's own condition after the
+        binding, or the unbounded directions over R when it has none.
+        The row's condition unchanged for a derive row (a proof is over
+        the reals, P1) and for a claim-level value, which the statement
+        already carries.
+    """
+    from .domain import unbounded_directions
+    from .records import operational_infinity
+    found = operational_infinity(cj)
+    if (found is None or found.source == "claim"
+            or (probe.route or "").split(":", 1)[0] == "derive"):
+        return probe.condition
+    rest = probe.condition
+    if not rest:
+        names = [p for p in facts.params
+                 if facts.param_kinds.get(p, "unknown") in _DIRECTION_KINDS]
+        names += sorted(set(cj.free_vars or ()) - set(names))
+        effective = {**(parent_domain or {}), **(cj.domain or {})}
+        rest = "for " + ", ".join(
+            f"{p} in R" for p in unbounded_directions(names, effective))
+    return f"{found.render()}, {rest}"
 
 
 def _chain_statement(cj) -> str:
@@ -4938,7 +4969,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if unbounded_directions(directions, ctx.cj_domain):
             resolved = operational_infinity(cj)
             note = (f"{note}; the computation approximates infinity as "
-                    f"{resolved.magnitude():g} ({resolved.label()}); the "
+                    f"{resolved.magnitude():g}; the "
                     f"mathematics keeps the declared oo").lstrip("; ")
     region_claim = region_row_kind(cj.name) is not None
     if not region_claim and cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",

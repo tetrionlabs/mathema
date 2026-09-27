@@ -183,7 +183,7 @@ def test_sq_companion_holds_under_the_environment_value(monkeypatch):
     assert companion.verdict == "holds", companion.note
     assert companion.meta["mathema.pseudo_infinity"] == {
         "value": 1e100, "source": "environment"}
-    assert "let |inf| be 1e+100 (MATHEMA_PSEUDO_INFINITY)" in companion.note
+    assert "let |inf| be 1e+100" in companion.note
     assert "inf|" not in companion.statement
 
 
@@ -194,7 +194,7 @@ def test_sq_companion_holds_under_the_function_level_value():
     assert companion.verdict == "holds", companion.note
     assert companion.meta["mathema.pseudo_infinity"] == {
         "value": 1e100, "source": "function"}
-    assert "let |inf| be 1e+100 (function level)" in companion.note
+    assert "let |inf| be 1e+100" in companion.note
 
 
 @pytest.mark.needs_full_proof_budget
@@ -211,23 +211,22 @@ def test_sq_companion_holds_under_the_declared_entry_field():
 
 
 @pytest.mark.needs_full_proof_budget
-def test_the_claim_level_value_renders_with_its_source():
+def test_the_claim_level_value_renders_as_its_binding():
     _proof, companion = _proof_and_companion(
         sq, "let |inf| be 1e100, for x in R, f(x) >= 0")
     assert companion.verdict == "holds", companion.note
     assert companion.meta["mathema.pseudo_infinity"] == {
         "value": 1e100, "source": "claim"}
-    assert "let |inf| be 1e+100 (claim)" in companion.note
+    assert "let |inf| be 1e+100" in companion.note
 
 
-def test_the_probe_note_names_the_value_and_its_source(monkeypatch):
+def test_the_probe_note_names_the_value_and_meta_its_source(monkeypatch):
     monkeypatch.setenv("MATHEMA_PSEUDO_INFINITY", "1e6")
     (probed,) = check_conjectures(
         sq, [claim("for x in [0, oo), f(x) >= 0", route="probe")])
     assert probed.verdict == "holds", probed.note
-    assert ("the computation approximates infinity as 1e+06 "
-            "(MATHEMA_PSEUDO_INFINITY); the mathematics keeps the "
-            "declared oo") in probed.note, probed.note
+    assert ("the computation approximates infinity as 1e+06; the "
+            "mathematics keeps the declared oo") in probed.note, probed.note
     assert probed.meta["mathema.pseudo_infinity"] == {
         "value": 1e6, "source": "environment"}
 

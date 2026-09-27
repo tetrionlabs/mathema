@@ -757,7 +757,7 @@ def _reach_text(names, cj_domain, resolved, reach) -> str:
         How far the float companion ran along the claim's unbounded
         directions, in words, or an empty string when every coordinate
         is bounded (P8). `resolved` is the claim's resolved
-        pseudo-infinity, stated with its source; without one the
+        pseudo-infinity, stated as its `let` binding; without one the
         directions ran to the carrier's reach.
     """
     from .domain import unbounded_directions
