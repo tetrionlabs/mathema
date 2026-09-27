@@ -105,6 +105,7 @@ from dataclasses import dataclass
 import sympy
 from sympy.printing.str import StrPrinter
 
+from ._float_text import exact_float_text
 from ._math_vocab import _BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _SYMPY_FUNCS, _call_name
 from ._render_mode import (get_unicode_output as get_unicode_output,
                            set_unicode_output as set_unicode_output)
@@ -2803,6 +2804,15 @@ class _CanonicalPrinter(StrPrinter):
         # render even though self._unicode is True, see _print_Pi's
         # own note on why this exists.
         self._suppress_glyphs = suppress_glyphs
+
+    def _print_Float(self, expr):
+        # a float from a claim literal carries float64 precision, which
+        # sympy prints at 15 significant digits; a value needing 16 or 17
+        # gets them, so the text reads back as the same float
+        text = super()._print_Float(expr)
+        if expr._prec > 53:
+            return text
+        return exact_float_text(float(expr), text)
 
     def _print_Abs(self, expr):
         return f"abs({self._print(expr.args[0])})"

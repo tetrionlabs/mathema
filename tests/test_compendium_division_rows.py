@@ -38,7 +38,7 @@ def test_division_rows_state_the_non_zero_divisor(key, statement):
 @pytest.mark.parametrize("key", ["numpy.divide", "numpy.true_divide"])
 def test_division_states_where_the_quotient_stays_in_float_range(key):
     (row,) = [r for r in _rows(key) if r["name"] == "is_overflow_safe"]
-    assert row["statement"] == "abs(x1) <= 1.79769313486231e308 * abs(x2)"
+    assert row["statement"] == "abs(x1) <= 1.7976931348623157e308 * abs(x2)"
 
 
 @pytest.mark.parametrize("key", ["numpy.power", "numpy.float_power"])

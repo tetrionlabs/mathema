@@ -18,6 +18,7 @@ import os
 import re
 import unicodedata
 
+from ._float_text import exact_float_text
 from .records import (SUPPORTED_VERDICTS, classify_verdict,
                       pseudo_infinity_range, statement_text)
 from .routes import examine_predicates
@@ -2465,7 +2466,8 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         # stated only where it can bound an unbounded direction (P8)
         _, pinf_hi = pseudo_infinity_range(cj.pseudo_infinity)
         let_segments.append(
-            f"let |{'∞' if unicode else 'inf'}| be {pinf_hi:g}")
+            f"let |{'∞' if unicode else 'inf'}| be "
+            f"{exact_float_text(pinf_hi, f'{pinf_hi:g}')}")
     membership = "∈" if unicode else "in"
     for_segments = [
         f"{_display_symbol(param_renames[name]) if name in param_renames else name} "

@@ -44,6 +44,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from ._float_text import exact_float_text
 from .routes import examine_predicates
 
 
@@ -306,7 +307,8 @@ class PseudoInfinity:
     def render(self) -> str:
         """The binding as the claim grammar spells it: `let |inf| be
         1e+100`. The level it came from is in `meta()`."""
-        return f"let |inf| be {self.magnitude():g}"
+        value = self.magnitude()
+        return f"let |inf| be {exact_float_text(value, f'{value:g}')}"
 
     def meta(self) -> dict:
         """The record's `mathema.pseudo_infinity` value."""

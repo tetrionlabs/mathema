@@ -120,7 +120,7 @@ numpy.divide:
       statement: "x2 != 0"
       note: "Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises."
     - name: is_overflow_safe
-      statement: "abs(x1) <= 1.79769313486231e308 * abs(x2)"
+      statement: "abs(x1) <= 1.7976931348623157e308 * abs(x2)"
       note: "The quotient stays inside float64 range; a larger quotient returns an infinity with a RuntimeWarning."
 
 numpy.true_divide:
@@ -129,7 +129,7 @@ numpy.true_divide:
       statement: "x2 != 0"
       note: "Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises."
     - name: is_overflow_safe
-      statement: "abs(x1) <= 1.79769313486231e308 * abs(x2)"
+      statement: "abs(x1) <= 1.7976931348623157e308 * abs(x2)"
       note: "The quotient stays inside float64 range; a larger quotient returns an infinity with a RuntimeWarning."
 
 numpy.reciprocal:
