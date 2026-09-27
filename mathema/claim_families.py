@@ -3492,12 +3492,9 @@ def _computation_children(fn, facts, cj, domain: dict) -> list:
     numerical stability in its own spelling, and every other child at
     each target its suggestion gate names, all over the roll-up's
     domain and pseudo-infinity."""
-    from dataclasses import replace as _replace
-
     from . import families as _families
     from .conjecture import claim
     registry = _families.families()
-    call = f"f({', '.join(facts.params)})"
     out: list = []
     for name in _COMPUTATION_CHILDREN:
         family = registry.get(name)
