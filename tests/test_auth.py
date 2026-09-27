@@ -52,19 +52,6 @@ def test_pin_shape_is_enforced():
             auth.set_pin(bad)
 
 
-def test_totp_rfc6238_vectors_and_skew():
-    # RFC 6238 Appendix B, SHA-1, secret "12345678901234567890":
-    # T=59s -> 94287082, T=1111111109 -> 07081804
-    import base64
-    secret = base64.b32encode(b"12345678901234567890").decode().rstrip("=")
-    rec = {"method": "totp", "secret": secret, "key": "test"}
-    assert auth.verify_code("287082", record=rec, now=59)
-    assert auth.verify_code("081804", record=rec, now=1111111109)
-    assert not auth.verify_code("000000", record=rec, now=59)
-    # one window of clock skew each way, no more
-    assert auth.verify_code("287082", record=rec, now=59 + 30)
-    assert not auth.verify_code("287082", record=rec, now=59 + 120)
-
 
 def test_remove_and_unconfigured_gate_is_open():
     auth.set_pin("4321")
@@ -257,35 +244,23 @@ def test_concepts_curation_is_gated_too(project, monkeypatch):
                         ["symmetry"], [], by="agent")
 
 
-# --- TOTP enrolment shows its secret on the terminal only ------------------
 
-def _pin_set_totp():
-    from argparse import Namespace
-    from mathema.cli import cmd_pin
-    return cmd_pin(Namespace(action="set", totp=True))
+# --- authenticator-app codes are not offered in this release ---------------
 
-
-def test_totp_enrolment_without_a_terminal_is_refused_and_writes_nothing(
-        monkeypatch, capsys):
-    monkeypatch.setattr(auth, "_tty_available", lambda: False)
-    assert _pin_set_totp() == 2
-    out = capsys.readouterr()
-    assert auth.configured() is None
-    assert "otpauth://" not in out.out + out.err
-    assert "interactive terminal" in out.out + out.err
+def test_pin_set_offers_no_totp_option(capsys):
+    from mathema.cli import main
+    with pytest.raises(SystemExit) as e:
+        main(["pin", "set", "--totp"])
+    assert e.value.code == 2
+    assert "--totp" in capsys.readouterr().err
 
 
-def test_totp_secret_goes_to_the_terminal_never_to_stdout(monkeypatch,
-                                                         capsys):
-    shown: list = []
-    monkeypatch.setattr(auth, "_tty_available", lambda: True)
-    monkeypatch.setattr(auth, "_write_to_tty", shown.append)
-    assert _pin_set_totp() == 0
-    record = auth.configured()
-    assert record is not None and record["method"] == "totp"
-    out = capsys.readouterr()
-    assert record["secret"] not in out.out + out.err
-    assert "otpauth://" not in out.out + out.err
-    assert any(record["secret"] in s for s in shown)
-    assert any("otpauth://" in s for s in shown)
-    assert f"key {record['key']}" in out.out
+def test_a_stored_totp_credential_fails_closed():
+    # a credential enrolled with an earlier experimental flag must not
+    # quietly switch the gate off: every gated write is refused, with
+    # the way out named
+    auth._write_config({"key": "abc123", "method": "totp",
+                        "secret": "JBSWY3DPEHPK3PXP", "created": "2026-09-01"})
+    assert auth.configured() is not None
+    with pytest.raises(HumanVerificationError, match="does not support"):
+        auth.require_human("accept")
