@@ -185,3 +185,16 @@ an object is missing. Three ways to make it resolvable:
   anything a `mathema.language_adaptors` adaptor accepts.
 
 [Extending mathema](extending.md) documents the two entry-point groups.
+
+A language may also supply a derive strategy for claims quantified over
+it, a `derive` method taking `param`, `lhs`, `relation`, `rhs`,
+`functions` (the target as `f` and under its own name, with every
+function the claim binds) and `refinements` (each key in force mapped
+to the whole-number range it keeps), and returning a `ProofResult` or
+None. It is found through any refinements wrapped around the language
+and runs under the wall-clock cap. A proof it returns is the claim's
+derive verdict, on the route `derive:<mechanism>` named by the result's
+`mathema.derive_route`; anything else leaves the claim to the probe,
+and a disproof it claims is read as undecided, since only an executed
+witness falsifies. mathema-language's recursive row languages prove
+fold claims this way, on `derive:induction`.

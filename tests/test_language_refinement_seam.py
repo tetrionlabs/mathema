@@ -128,3 +128,18 @@ def test_the_seam_is_on_the_extension_surface():
                  "refinement_keys", "UnknownRefinement", "REFINEMENT_GROUP"):
         assert name in extension.SURFACE["languages"], name
     assert LanguageRef("json").refinement("depth") is None
+
+
+def pairs(language, interval):
+    """A refinement on the number of letter pairs, whose members only
+    ever have an even length."""
+    return RefinedLanguage(language, "pairs_len", interval, measure=len,
+                           plain=lambda n: "ab" * (n // 2) if n % 2 == 0 else None)
+
+
+def test_where_no_member_has_the_bound_s_measure_the_nearest_ones_are_visited(words):
+    even = StringLanguage("even_words", char_ok=str.isalpha, pool="ab")
+    refined = pairs(even, (0, 7))
+    assert max(len(h.value) for h in refined.hazards()) == 6
+    outside = refined.outside(random.Random(0))
+    assert outside == "abababab", outside

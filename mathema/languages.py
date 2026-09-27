@@ -430,6 +430,11 @@ class UnknownRefinement(UnknownLanguage):
         self.vocabulary = refinement_keys()
 
 
+#: how many measures inside (or past) a bound are tried when no member
+#: has the bound's own measure
+_NEAREST = 3
+
+
 class RefinedLanguage:
     """The members of `base` whose `measure` lies in `interval`, the
     kit a refinement key is built from (`L[ascii, len <= 80]` is
@@ -439,7 +444,9 @@ class RefinedLanguage:
     each bound are hazards, from `plain(n)` (a simplest member of
     measure `n`, which may or may not be a base member) where given, else
     built, each of kind `hazard_kind`, and a base member one past a
-    bound is the outside draw. `schema` is merged into the persisted
+    bound is the outside draw; where no member has a bound's measure
+    exactly, the nearest within a few steps inside (or past) it stands
+    in. `schema` is merged into the persisted
     form (`{"maxLength": 80}`). A value the measure cannot be taken of
     is not a member."""
 
@@ -524,13 +531,18 @@ class RefinedLanguage:
         rng = random.Random(0)
         out: list = []
         seen: list = []
-        edges = [self.lo] + ([self.hi] if self.hi is not None else [self.lo + 256])
-        for n in edges:
-            value = self._member_of(rng, n)
-            if value is not None and value not in seen and self.contains(value):
-                seen.append(value)
-                out.append(HazardValue(self.hazard_kind, value,
-                                       f"a member of {self.key} {n}, at the bound"))
+        top = self.hi if self.hi is not None else self.lo + 256
+        for steps in (range(self.lo, min(self.lo + _NEAREST, top) + 1),
+                      range(top, max(top - _NEAREST, self.lo) - 1, -1)):
+            for n in steps:
+                value = self._member_of(rng, n)
+                if value is not None and self.contains(value):
+                    if value not in seen:
+                        seen.append(value)
+                        at = "at the bound" if n in (self.lo, top) else "nearest the bound"
+                        out.append(HazardValue(self.hazard_kind, value,
+                                               f"a member of {self.key} {n}, {at}"))
+                    break
         for h in self.base.hazards():
             try:
                 repeated = h.value in seen
@@ -541,7 +553,9 @@ class RefinedLanguage:
         return tuple(out)
 
     def outside(self, rng: random.Random):
-        for n in ([self.hi + 1] if self.hi is not None else []) + ([self.lo - 1] if self.lo > 0 else []):
+        past = ([self.hi + i for i in range(1, _NEAREST + 1)] if self.hi is not None else []) \
+            + [n for n in range(self.lo - 1, self.lo - 1 - _NEAREST, -1) if n >= 0]
+        for n in past:
             value = self._member_of(rng, n)
             if value is not None and not self.contains(value):
                 return value
@@ -769,13 +783,40 @@ def describe_language(ref) -> dict:
             "kind": language.kind, "schema": language.to_json()}
 
 
+def derive_strategy(language) -> "tuple | None":
+    """Intent:
+        `(derive, refinements)` when the language, beneath any
+        refinements wrapped around it, supplies a `derive` method: the
+        method, and each refinement key mapped to the closed whole-number
+        range `(lo, hi)` it keeps (`hi` None when unbounded, a key
+        refined twice keeping the intersection). None when no layer
+        supplies one.
+
+    Notes:
+        A strategy is called as `derive(param=, lhs=, relation=, rhs=,
+        functions=, refinements=)` and returns a `ProofResult` or None.
+    """
+    refinements: dict = {}
+    layer = language
+    while isinstance(layer, RefinedLanguage):
+        lo, hi = layer.lo, layer.hi
+        if layer.key in refinements:
+            seen_lo, seen_hi = refinements[layer.key]
+            lo = max(lo, seen_lo)
+            hi = seen_hi if hi is None else hi if seen_hi is None else min(hi, seen_hi)
+        refinements[layer.key] = (lo, hi)
+        layer = layer.base
+    hook = getattr(layer, "derive", None)
+    return (hook, refinements) if callable(hook) else None
+
+
 __all__ = [
     "ADAPTOR_GROUP", "HAZARD_KINDS", "HazardValue",
     "KINDS", "LANGUAGE_GROUP", "LEVELS", "Language", "Problem",
     "STRING_HAZARDS", "StringLanguage", "UnknownLanguage",
     "REFINEMENT_GROUP", "RefinedLanguage", "UnknownRefinement",
     "adapt_annotation", "describe_language", "language_adaptors", "language_problems",
-    "refinement_keys", "register_refinement", "unregister_refinement",
+    "derive_strategy", "refinement_keys", "register_refinement", "unregister_refinement",
     "language_vocabulary", "register_language", "resolve",
     "resolve_language", "resolves", "unregister_language",
 ]

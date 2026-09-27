@@ -4170,6 +4170,66 @@ def _family_owns_claim(family) -> bool:
                                OutputPredicateFamily))
 
 
+def _language_strategy_proof(cj, fn, bound_funcs, cj_domain, extensive):
+    """Intent:
+        The derive verdict a language's own strategy gives a claim whose
+        one quantified parameter ranges over that language, or None when
+        there is no strategy, the claim quantifies more than that
+        parameter, or the strategy answers with nothing usable. A proof
+        carries `mathema.derive_strategy` (the language's name) in its
+        meta; an undecided or unliftable answer keeps its sketch; a
+        disproof becomes undecided, since only an executed witness
+        falsifies.
+
+    Notes:
+        The strategy runs under the wall-clock cap, and one that raises
+        is treated as having no answer.
+    """
+    from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, FAST_TIMEOUT_SECONDS, _with_timeout
+    from .domain import LanguageRef
+    from .languages import derive_strategy, resolve_language
+    from .symbolic._proof_support import ProofResult
+    if len(cj_domain) != 1:
+        return None
+    ((param, bound),) = cj_domain.items()
+    pieces = getattr(bound, "pieces", ())
+    if len(pieces) != 1 or not isinstance(pieces[0], LanguageRef):
+        return None
+    try:
+        language = resolve_language(pieces[0])
+    except Exception:
+        return None
+    found = derive_strategy(language)
+    if found is None:
+        return None
+    hook, refinements = found
+    functions = {**{name: v for name, v in bound_funcs.items() if callable(v)},
+                 getattr(fn, "__name__", "f"): fn, "f": fn}
+    cap = EXTENSIVE_TIMEOUT_SECONDS if extensive else FAST_TIMEOUT_SECONDS
+    try:
+        result = _with_timeout(
+            lambda: hook(param=param, lhs=cj.lhs, relation=cj.relation, rhs=cj.rhs,
+                         functions=functions, refinements=refinements),
+            cap)
+    except TimeoutError:
+        return None
+    except Exception:
+        return None
+    if not isinstance(result, ProofResult):
+        return None
+    meta = {**(result.meta or {}), "mathema.derive_strategy": language.name}
+    if result.status == "proven":
+        return ProofResult("proven", sketch=result.sketch, quantifier=result.quantifier,
+                           meta=meta)
+    if result.status == "disproven":
+        return ProofResult("undecided",
+                           sketch=f"the language's strategy claimed a disproof it did not "
+                                  f"execute ({result.sketch}), so the probe decides")
+    if result.status in ("undecided", "unliftable"):
+        return ProofResult(result.status, sketch=result.sketch)
+    return None
+
+
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            facts, bound_funcs, assumption) -> None:
     """Intent:
@@ -4433,11 +4493,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     elif language_params:
         # a string or structured value has no symbolic reading, and a
         # real symbol standing in for one would prove real-only facts
-        # it does not have, so the lift is declined outright; a FINITE
-        # language is still swept point by point by the brute-force
-        # fallback below, which is the one derive mechanism it admits
+        # it does not have, so the lift is declined outright unless the
+        # language supplies its own derive strategy; a FINITE language
+        # is still swept point by point by the brute-force fallback
+        # below, which is the one derive mechanism it admits
         from .symbolic._proof_support import ProofResult
-        proof = ProofResult(
+        proof = _language_strategy_proof(cj, fn, bound_funcs, cj_domain,
+                                         extensive) or ProofResult(
             "unliftable",
             sketch=(row_reason if row_reason.startswith("the body reads") else
                     ", ".join(language_params) + " quantified over a "
@@ -4513,7 +4575,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # it. The one wider mechanism that stays plain "derive" is the
         # guard-boundary domain split, which is default-path and cheap.
         mechanism = proof.meta.get("mathema.derive_route")
-        if mechanism == "brute_force":
+        if proof.meta.get("mathema.derive_strategy") is not None:
+            # a language's own strategy decided it, named by the
+            # mechanism it states
+            route = f"derive:{mechanism or 'language'}"
+        elif mechanism == "brute_force":
             # a different kind of evidence from the wider symbolic
             # mechanisms, not a wider version of them: every point of a
             # finite region was visited. It gets its own subroute so a
