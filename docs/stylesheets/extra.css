@@ -8,6 +8,14 @@
    ink in both schemes, carrying the paper-coloured mark. */
 
 @font-face {
+  font-family: "Space Grotesk"; font-style: normal; font-weight: 400;
+  font-display: swap; src: url("../assets/fonts/space-grotesk-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Grotesk"; font-style: normal; font-weight: 500;
+  font-display: swap; src: url("../assets/fonts/space-grotesk-500.woff2") format("woff2");
+}
+@font-face {
   font-family: "Space Grotesk"; font-style: normal; font-weight: 600;
   font-display: swap; src: url("../assets/fonts/space-grotesk-600.woff2") format("woff2");
 }
@@ -72,17 +80,112 @@
 
 .md-typeset h1,
 .md-typeset h2,
-.md-typeset h3,
-.md-header__title {
+.md-typeset h3 {
   font-family: var(--font-display);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
-.md-header__button.md-logo img,
-.md-header__button.md-logo svg {
-  height: 1.4rem;
-  width: 1.4rem;
+/* The header, set like the Labs site's nav: a 64px ink bar carrying
+   the mark, the TETRION [LABS] wordmark, the product name, and the
+   bracketed links on the right. The bar is translucent ink over a
+   blur, and gains its rule once the page scrolls. */
+.md-header.mx-nav {
+  background: color-mix(in srgb, var(--ink) 82%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: var(--paper);
+  border-bottom: 1px solid transparent;
+  box-shadow: none;
+  transition: border-color .3s;
+}
+.md-header.mx-nav.md-header--shadow { border-bottom-color: var(--line-dark); box-shadow: none; }
+.mx-navin { height: 3.2rem; padding: 0 .4rem; }
+.mx-navin > .mx-home { margin: 0 12px 0 .4rem; }
+.mx-navin > .mx-navlinks { margin-right: 6px; }
+.mx-home {
+  display: inline-flex; align-items: center; gap: 12px;
+  color: inherit; text-decoration: none; flex: none;
+}
+.mx-home img { width: 22px; height: 22px; display: block; }
+.mx-home:hover .wm { color: var(--accent); }
+.mx-home:hover .brk { transform: none; }
+
+/* The wordmark: TETRION in the display face at 600, then LABS at 500
+   in the muted tone, inside thin bracket strokes. The accent never
+   appears in it except as the hover colour of the whole link. */
+.wm {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-display); font-weight: var(--wm-weight-tetrion);
+  letter-spacing: var(--wm-tracking); color: var(--paper);
+  font-size: 15px; line-height: 1.2; transition: color .2s;
+}
+.wm .wm-gap { font-size: 0; }
+.wm .labs {
+  color: var(--dmute); font-weight: var(--wm-weight-labs);
+  margin-left: .1em; display: inline-flex; align-items: stretch;
+}
+.mx-nav .wm .labs .brk { border-width: 1.6px; }
+
+.mx-product {
+  font-family: var(--font-display); font-weight: 600; font-size: 15px;
+  letter-spacing: .01em; color: var(--paper); flex: none;
+  padding-left: 12px; border-left: 1px solid var(--line-dark);
+  line-height: 22px; transition: color .2s;
+}
+.mx-product:hover { color: var(--accent); }
+
+.mx-navlinks {
+  display: flex; gap: 6px; margin-left: auto; flex: none;
+  font-family: var(--font-display); font-weight: 400;
+  font-size: 13.5px; letter-spacing: .06em;
+}
+.mx-navlinks a {
+  color: var(--dmute); padding: 8px 10px; border-radius: 4px;
+  transition: color .2s; line-height: 1.3;
+}
+.mx-navlinks a:hover { color: var(--accent); }
+.mx-navlinks a[aria-current] { color: var(--paper); }
+.mx-navlinks a[aria-current] .brk { color: var(--accent); }
+.mx-navlinks .brk { border-width: 1.4px; }
+
+/* Search and the scheme toggle follow the links; the inline search
+   field sits on the ink bar in both schemes. */
+.mx-nav .md-header__option,
+.mx-nav .md-search { flex: none; }
+.mx-nav .md-header__button { color: var(--dmute); }
+.mx-nav .md-header__button:hover { color: var(--accent); opacity: 1; }
+@media screen and (min-width: 60em) {
+  .mx-nav .md-search__form {
+    background-color: var(--ink-2); border: 1px solid var(--line-dark);
+    border-radius: 4px; height: 1.8rem;
+  }
+  .mx-nav .md-search__input { height: 1.7rem; font-size: .7rem; color: var(--paper); }
+  .mx-nav .md-search__input::placeholder { color: var(--dmute); }
+  .mx-nav .md-search__icon[for="__search"] { top: .3rem; }
+  .mx-nav .md-search__icon { color: var(--dmute); }
+  .mx-nav .md-search__output { top: 1.9rem; }
+  [data-md-toggle="search"]:checked ~ .md-header.mx-nav .md-search__form {
+    background-color: var(--ink-2); border-color: var(--dmute);
+  }
+}
+
+/* A taller header moves everything that is positioned under it. */
+.md-typeset :target { --md-scroll-margin: 4.4rem; }
+@media screen and (min-width: 60em) { .md-sidebar { top: 3.2rem; } }
+
+/* The site hides its middle links at phone width; below the docs'
+   own drawer breakpoint the product name and GitHub stay. */
+@media screen and (max-width: 76.1875em) { .mx-navlinks .mx-hide-m { display: none; } }
+@media screen and (max-width: 44.9375em) {
+  .mx-navlinks .mx-hide-s { display: none; }
+  .mx-navlinks { letter-spacing: .03em; gap: 0; }
+  .mx-navlinks a { padding: 8px 5px; }
+}
+@media screen and (max-width: 36em) {
+  .mx-home .wm { display: none; }
+  .mx-navin > .mx-home { margin-right: 8px; }
+  .mx-product { padding-left: 8px; }
 }
 
 /* The bracket eyebrow, `[ label ]`: each bracket is a butt-capped
@@ -90,11 +193,15 @@
 .brkw { display: inline-flex; align-items: stretch; }
 .brk {
   width: .38em; border: 2px solid currentColor; flex: none;
-  align-self: stretch;
+  align-self: stretch; transition: transform .25s;
 }
 .brk.l { border-right: none; }
 .brk.r { border-left: none; }
-.brkw .bin { padding: .06em .5em; white-space: nowrap; }
+.brkw .bin { padding: .06em .14em; white-space: nowrap; }
+.eyebrow .bin { padding: .06em .5em; }
+a:hover > .brk.l { transform: translateX(-2px); }
+a:hover > .brk.r { transform: translateX(2px); }
+@media (prefers-reduced-motion: reduce) { .brk { transition: none; } }
 .eyebrow {
   font-family: var(--font-display); font-size: .6rem; font-weight: 600;
   letter-spacing: .22em; text-transform: uppercase;
