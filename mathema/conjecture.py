@@ -628,6 +628,9 @@ def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
             return None, (f"{p} is quantified over a language with no "
                           "field reading")
         plain, length_only = field_reads(facts.tree, p)
+        if not (plain or length_only):
+            return None, (f"the body reads no field of {p}, so the lift "
+                          "declines and the probe adjudicates")
         for f in plain:
             bound = schema[p].get(f)
             if not _is_numeric_bound(bound):
@@ -4310,11 +4313,16 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # ordinary prover runs
         derive_domain = _derive_operational_domain(
             cj, {**row_domain, **cj_domain}, facts)
-        proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
-                          domain=derive_domain, tolerance=cj.tolerance,
-                          extensive=extensive, funcs=bound_funcs or None,
-                          assumption=assumption,
-                          assume_defined=ctx.assume_defined)
+        from .symbolic._base import row_fields
+        # each row-bound parameter expands into exactly the field keys
+        # bounded above, whatever class its rows are
+        with row_fields({p: [k for k in row_domain if k.startswith(f"{p}.")]
+                         for p in language_params}):
+            proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
+                              domain=derive_domain, tolerance=cj.tolerance,
+                              extensive=extensive, funcs=bound_funcs or None,
+                              assumption=assumption,
+                              assume_defined=ctx.assume_defined)
     elif language_params:
         # a string or structured value has no symbolic reading, and a
         # real symbol standing in for one would prove real-only facts

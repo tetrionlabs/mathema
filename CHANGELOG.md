@@ -31,11 +31,30 @@ Notable changes to mathema are recorded here from its first public release onwar
   language to members of that many code points; its outside draw is the
   member one past the bound. An `Annotated[str, MaxLen(80)]` parameter
   infers the refined language through the text adaptor.
-- The derive route over a row language lifts the fields the body reads:
-  a numeric field is one symbol bounded by its constraints (one side is
-  enough), a text field read only as `len(o.sku)` is a whole number
-  bounded by its length, and a field read any other way declines the
-  lift with the field named, leaving the claim to the probe.
+- The derive route over a row language lifts the fields the body reads,
+  through an attribute (`o.qty`) or a subscript (`o["qty"]`), for a row
+  of any class an adaptor reads: a numeric field is one symbol bounded
+  by its constraints (one side is enough), a text field read only as
+  `len(o.sku)` is a whole number bounded by its length, and a field read
+  any other way, or a row the body reads no field of, declines the lift
+  with the reason, leaving the claim to the probe.
+- Over a language, a value's length renders as `len(s)`; the canonical
+  form keeps `dim(s, 0)`.
+- A claim over a language visits every hazard of the language once
+  before any random member. The hazards are a risk factor like a wide
+  interval: they raise the trial budget up front and mark down the
+  confidence score, and a language with more hazards than the budget
+  raises the trial count to them, which the sampling line states.
+- A registered family's probe may end its result with a mapping merged
+  into the record's `meta`, which reaches the record whichever route's
+  report stands; `mathema.language` merges per key.
+- The language adaptors are asked in an explicit order,
+  `__mathema_adaptor_priority__` then name, and `language_adaptors()`
+  is on the extension surface.
+- A new entry-point group, `mathema.lexicon`: a package's worked claims
+  join `mathema.lexicon`'s `entries()`, `search()` and `find()`, marked
+  with where each came from, and are held to the checks mathema's own
+  lexicon is, through `lexicon_problems` on the extension surface.
 - A language domain renders the missing value as `missing` in both
   modes (`L[unicode]|missing`), never as `∅`, which reads as the empty
   language.
