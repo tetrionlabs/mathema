@@ -18,7 +18,7 @@ mathema.registry.load_specs(root)             # read the whole spec store
 mathema.registry.load_claims(path)            # parse an authoring-shape claims file
 ```
 
-## `check(fn, claims=None, domain=None, trials=None, trials_scale=1.0, extensive=False, declared=None, known_premises=None)`
+## `check(fn, claims=None, domain=None, trials=None, trials_scale=1.0, extensive=False, declared=None, known_premises=None, pseudo_infinity=None)`
 
 Verify a function's claims, each adjudicated against the real
 function: mathema's suggested standard claims when `claims` is
@@ -47,6 +47,15 @@ own bindings in its `domain` and `condition`, the parent's share in
 `meta["mathema.parent_domain"]`. The `excluding` keyword reads the
 parent domain only: a parameter bounded only inside one claim has no
 function-level outside to exclude.
+
+`pseudo_infinity` is the function level of the operational infinity:
+how far the computation of each claim (the probe route and the `[float]`
+companion) is exercised along an unbounded direction, unless the claim
+binds its own `let |inf| be`. Left out, a `declared=` entry's
+`pseudo_infinity:` field applies, then the project's
+`MATHEMA_PSEUDO_INFINITY`, then float64's own maximum. A proof never
+reads it; see [operational
+infinity](../grammar.md#operational-infinity-let-inf-be).
 
 A parameter or return type hinted with a mathema type marker
 (`Annotated[float, Probability]`, `Annotated[list, Shape("m", "n")]`)
@@ -85,26 +94,26 @@ def ema(x: list, alpha: float) -> float:
 >>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (-10, 10)})
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
-           counterexample alpha=-5.44324 -> -504886.9526187774, alpha=9.99998 -> -2491045.924006212 (not increasing)
+           counterexample alpha=-5.44324 -> -504886.9526187774, alpha=10 -> -2491080.279764588 (not increasing)
   FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
-           counterexample alpha=3.09918 -> 43.62072599569275, alpha=10 -> 21771.614551164577 (not decreasing)
+           counterexample alpha=-8.34575 -> 1100.270649780719, alpha=10 -> 1138.3250235869998 (not decreasing)
   FALSIFY affine[alpha]: d(f(x, alpha), alpha, alpha) = 0
-           counterexample alpha=3.53765, h=0.02: curvature estimate 3.12726 does not settle affine
+           counterexample alpha=8.52571, h=0.02: curvature estimate 3.64706e+06 does not settle affine
   FALSIFY convex[alpha]: d(f(x, alpha), alpha, alpha) >= 0
-           counterexample alpha=8.52571, h=0.02: curvature estimate -221.981 does not settle convex
+           counterexample alpha=1.55438, h=0.02: curvature estimate -49.227 does not settle convex
   FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
-           counterexample alpha=-0.594668, h=0.02: curvature estimate 1222.99 does not settle concave
+           counterexample alpha=7.32889, h=0.02: curvature estimate 4463.56 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=192)
   holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=20)
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([0, 902023, 21859.3, 865038, -999998, 740637, -77557.7, 946318], -8.89934): -999998.0 vs -7639061686900.594
+           counterexample ([-1e+06, 743857, -1e+06, -640264], -0.0903704): -1000000.0 vs -1219873.1423334838
   FALSIFY bounded_upper: f(x, alpha) <= max(x)
-           counterexample ([103173, 1e+06, -993405, -514945, 606668, -999998], 6.56264): 6722876822.250346 vs 1000000.0
+           counterexample ([-18798, -1e+06, 614127, -980079, 539619], -3.76273): 359952260.7389567 vs 614127.441618376
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([519138, 999998, 1e+06, 0, 917863, 745687, -818085], 10): -248319487748.5595 vs -814138493405.3986
+           counterexample ([0, -233862, -563795, -582346, 312626], 9.38242): 969404644.5167232 vs 4408328610.953807
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
   holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)

@@ -50,6 +50,18 @@ class _Interrupted:
         raise _WallClockExpired()
 
 
+
+class _RaisingShowMissing:
+    _MAP = {"spot": "S", "strike": "K"}
+
+    @staticmethod
+    def symbol_for_param(name):
+        return _RaisingShowMissing._MAP.get(name)
+
+    @staticmethod
+    def show_missing(cj):
+        raise ValueError("provider bug")
+
 @pytest.fixture()
 def install(monkeypatch):
     """Register `provider` as the `symbology` entry point, loaded
@@ -103,6 +115,21 @@ def test_a_provider_raising_in_its_function_hook_drops_all_its_renames(install):
     assert text == default
     assert "let S" not in text
     assert len(caught) == 1
+
+
+def test_a_provider_raising_in_show_missing_renders_with_one_warning(install):
+    # a provider never crashes a render: the missing-values preference
+    # falls back to mathema's default and the failure is named once
+    default = render_claim_text(claim(_CLAIM), unicode=False)
+    install(_RaisingShowMissing)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        first = render_claim_text(claim(_CLAIM), unicode=False)
+        second = render_claim_text(claim(_CLAIM), unicode=False)
+    assert first == second
+    assert "|missing" in first and "|missing" in default
+    messages = [str(w.message) for w in caught]
+    assert len(messages) == 1 and "provider bug" in messages[0]
 
 
 def test_a_wall_clock_interrupt_inside_a_provider_is_not_swallowed(install):

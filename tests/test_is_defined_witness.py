@@ -8,8 +8,9 @@ everywhere in the domain) and the restriction, a claim named
 holds). A falsification names a concrete point,
 and calling the real function there disagrees with the claim: it
 raises where the claim says defined, or returns where the claim says it
-raises. When no such point is found, the verdict is `unknown` with the
-corroboration flags, never `falsified`.
+raises. When no such point is found, the structural disproof is kept as
+an uncorroborated flag and the claim is adjudicated by execution, never
+`falsified` without a witness.
 """
 import re
 
@@ -100,10 +101,14 @@ def test_a_premise_that_excludes_the_pole_is_never_falsified():
     assert probe.counterexample is None
 
 
-def test_a_disproof_with_no_reproducing_point_is_unknown_and_flagged():
+def test_a_disproof_with_no_reproducing_point_falls_to_execution_and_is_flagged():
+    # the structural disproof is not reproduced, so region equivalence
+    # is undecided and the probe half adjudicates by execution; the
+    # engine-bug flag stays on the record
     probe = _only(reciprocal_pole, "for x in [2, 5], is_defined(f)")
-    assert probe.verdict == "unknown"
+    assert probe.verdict == "holds"
     assert probe.meta.get("mathema.corroboration") == "uncorroborated"
+    assert "UNCORROBORATED" in probe.note
 
 
 def test_the_correct_claims_still_prove():

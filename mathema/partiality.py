@@ -32,12 +32,20 @@ The `math` module's own partiality (sqrt, log, asin, ...) ships
 registered out of the box, so an ordinary caller of those needs no
 declaration.
 
+`register_no_value_when(target, region)` states a region where the
+target returns no value WITHOUT raising (numpy's `sqrt` returns nan for
+a negative input): a caller's value claim over it is false exactly as
+over a raise region, with `NO_VALUE` standing where an exception name
+would. The compendium's `is_defined` rows register through it.
+
 Not to be confused with a LEMMA in the claim sense, which is a named
 claim another claim rests on through an `assuming` premise (see
 docs/lemmas.md). A lemma is established by adjudication; a partiality
 declaration is asserted.
 """
 from .symbolic._partiality import (   # noqa: F401
+    NO_VALUE as NO_VALUE,
     qualified_name as qualified_name,
+    register_no_value_when as register_no_value_when,
     register_raises_when as register_raises_when,
 )

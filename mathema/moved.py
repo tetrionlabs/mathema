@@ -102,14 +102,12 @@ def find_moved(root: str, verified: dict, declared: dict,
         Source is parsed only when an orphan exists, so a store with
         none pays one resolve per key and nothing else.
     """
+    from .compendium import is_library_record
     orphans: dict = {}
     for key, info in verified.items():
         entry = (info or {}).get("entry") or {}
         form = (entry.get("identity") or {}).get("form")
-        rows = entry.get("claims") or []
-        if not form or (rows and all(
-                (r.get("meta") or {}).get("mathema.surface") == "compendium"
-                for r in rows if isinstance(r, dict))):
+        if not form or is_library_record(entry):
             continue
         if resolve(key) is None:
             orphans[key] = form

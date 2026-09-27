@@ -10,7 +10,7 @@ Every tool adjudicates through mathema's own machinery, none accepts
 a caller-supplied verdict, and acceptance is deliberately absent."""
 from __future__ import annotations
 
-import inspect
+from ..._signatures import callable_signature
 
 
 def resolve_target(target: str, root: str = ".") -> dict:
@@ -22,7 +22,7 @@ def resolve_target(target: str, root: str = ".") -> dict:
     functions = []
     for key, fn in sorted(t.functions.items()):
         try:
-            sig = str(inspect.signature(fn))
+            sig = str(callable_signature(fn))
         except (TypeError, ValueError):
             sig = "(...)"
         functions.append({"key": key, "signature": sig})

@@ -68,3 +68,25 @@ def test_repo_tooling_stays_out_of_the_distribution():
     an installed wheel."""
     find = _pyproject()["tool"]["setuptools"]["packages"]["find"]
     assert any("_devtools" in pattern for pattern in find.get("exclude", []))
+
+
+def test_every_bundled_compendium_file_is_declared_package_data():
+    """Each `mathema/compendium/**/*.yaml` file matches a declared
+    package-data pattern, expanded the way setuptools expands it
+    (`glob` relative to the package directory, recursive), so the
+    wheel carries every bundled compendium file."""
+    import glob
+    import os
+    pkg_dir = str(_ROOT / "mathema" / "compendium")
+    patterns = _pyproject()["tool"]["setuptools"]["package-data"].get(
+        "mathema.compendium", [])
+    declared: set = set()
+    for pattern in patterns:
+        declared.update(
+            os.path.normpath(p) for p in glob.glob(
+                os.path.join(glob.escape(pkg_dir), pattern), recursive=True))
+    bundled = {os.path.normpath(p) for p in glob.glob(
+        os.path.join(glob.escape(pkg_dir), "**", "*.yaml"), recursive=True)}
+    assert bundled, "no bundled compendium files found"
+    missing = sorted(os.path.relpath(p, pkg_dir) for p in bundled - declared)
+    assert not missing, f"not shipped in the wheel: {missing}"

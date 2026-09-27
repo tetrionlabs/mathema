@@ -1,0 +1,31 @@
+# Claims about the standard math module's functions. The mathematical
+# raise regions of sqrt, log, log2, log10, asin and acos (a ValueError
+# outside the real domain) ship registered in code
+# (symbolic/_partiality.py) and are not repeated here. An
+# `is_overflow_safe` row, and a `raises` row whose type is a machine
+# failure (OverflowError), state facts about the computation on float64
+# and never enter a proof.
+compendium: math
+versions: "*"
+
+math.sqrt:
+  claims:
+    - name: sqrt_nonneg
+      statement: "for x in [0, inf], f(x) >= 0"
+      note: "Square root; raises ValueError for x < 0 and never returns a complex result."
+
+math.exp:
+  claims:
+    - name: exp_positive
+      statement: "for x in [-700, 700], f(x) > 0"
+    - name: is_overflow_safe
+      statement: "x <= 709.782712893384"
+      note: "Exponential; raises OverflowError above roughly x = 709.78."
+    - name: exp_overflow_raises
+      statement: "for x in (709.782712893384, oo), raises(f(x), OverflowError)"
+
+math.log:
+  claims:
+    - name: log_monotone
+      statement: "for x in (0, inf], d(f(x), x) > 0"
+      note: "Natural logarithm; raises ValueError at x <= 0 (math.log(0) does not return -inf)."

@@ -135,6 +135,7 @@ nav:
   - Command reference:
       - mathema check: modes/check.md
       - mathema verify: modes/verify.md
+      - mathema compendium: modes/compendium.md
       - mathema audit: modes/audit.md
       - mathema claims: modes/claims.md
       - mathema accept: modes/accept.md

@@ -64,6 +64,7 @@ from .authoring import (DomainError, claims as claims_decorator,
                         reject_missing, resolve_declared, retrieve)
 from .claim_families import _register_builtin_claim_families
 from .conjecture import Conjecture, check_conjectures, claim
+from .probing import quiet_while_probing as _quiet_while_probing
 from .diagnostics import critical_points
 from .compiled import CompiledForm, compile_form, numeric_check
 from .forms import (Form, SubstitutedForm, Substitution, closed_forms,
@@ -103,7 +104,7 @@ _register_dot_family()
 _register_fold_family()
 _register_sum_family()
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "status", "track_claims",
            "tagged", "Record", "claims", "registry", "SPEC_VERSION",
@@ -173,7 +174,12 @@ class Record:
                 if p.condition:
                     line += f"\n           {p.condition}"
             else:
-                line = f"  {mark} {p.name}: {p.statement}"
+                shown = p.statement
+                if (p.condition or "").startswith("let |inf| be ") \
+                        and "|inf|" not in (shown or ""):
+                    # the pseudo-infinity that bounded the computation
+                    shown = f"{p.condition.split(', ', 1)[0]}, {shown}"
+                line = f"  {mark} {p.name}: {shown}"
                 if p.verdict == "holds" and p.n:
                     line += f" (n={p.n})"
             if p.counterexample:
@@ -235,13 +241,14 @@ def _doc_only_facts(fn) -> Facts:
     import hashlib
     import inspect
 
+    from ._signatures import callable_signature
     from .intent import parse_doc
 
     doc = inspect.getdoc(fn) or ""
     parsed = parse_doc(doc)
     name = getattr(fn, "__name__", "callable")
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
         params = [n for n, p in sig.parameters.items()
                   if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
                   and p.default is p.empty]
@@ -413,11 +420,12 @@ def _domains_from_claims(claims) -> dict:
         caller sees. Where two claims bound the same parameter, the
         first stands: the battery only needs one legal region to
         synthesise a call in, and each claim is still adjudicated
-        against its own domain regardless. The built-in battery is the
-        only reader: these regions never become a function-level domain
-        for any claim.
+        against its own domain regardless. A `let` binding of a single
+        value is a pin for that claim's calls, not a region, and is left
+        out. The built-in battery is the only reader: these regions
+        never become a function-level domain for any claim.
     """
-    from .conjecture import claim as _claim
+    from .conjecture import _single_point, claim as _claim
 
     out: dict = {}
     for c in claims or ():
@@ -425,16 +433,23 @@ def _domains_from_claims(claims) -> dict:
             parsed = _claim(c) if isinstance(c, str) else c
         except Exception:
             continue
+        pinned = set(getattr(parsed, "free_vars", None) or ())
         for name, bound in (getattr(parsed, "domain", None) or {}).items():
+            if name in pinned and _single_point(bound) is not None:
+                # a `let p be 0` pin passes that value to this claim's
+                # calls only; it is no region for the battery
+                continue
             out.setdefault(name, bound)
     return out
 
 
+@_quiet_while_probing
 def check(fn, claims: list | None = None, domain: dict | None = None,
          trials: int | None = None,
          trials_scale: float = 1.0, extensive: bool = False,
          declared: dict | None = None,
-         known_premises: dict | None = None) -> Record:
+         known_premises: dict | None = None,
+         pseudo_infinity=None) -> Record:
     """Verify a function's claims, each adjudicated against the real
     function.
 
@@ -446,7 +461,10 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
 
     check is IO-free: it reads only what travels with the function
     object (decorator, docstring, type markers) and never touches the
-    filesystem. The file-declared layer, the highest-precedence
+    project's files. What mathema itself ships about libraries (the
+    bundled compendium: numpy's sqrt has no value below zero, ...)
+    applies to every call, as the engine's own knowledge; a project's
+    own compendium files apply once `compendium.install(root)` ran. The file-declared layer, the highest-precedence
     authoring surface, therefore reaches it only through `declared=`,
     a retrieved entry from `mathema.retrieve(fn, root)`. Call-site
     `claims=` still wins per claim name over everything retrieved.
@@ -484,6 +502,20 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     then includes. Data only; it never satisfies a premise, and
     check() itself stays IO-free.
 
+    `pseudo_infinity` is the function level of the operational
+    infinity: how far each claim's computation (the probe route and
+    the `[float]` companion) runs along an unbounded direction, unless
+    the claim states its own `let |inf| be`. Omitted, a `declared=`
+    entry's `pseudo_infinity:` field applies, else the project's
+    `MATHEMA_PSEUDO_INFINITY`, else the carrier's maximum
+    (`sys.float_info.max` for float64). A
+    proof never reads it. Where the value that applied bounds a
+    direction of a claim's domain, the claim's computation rows show it
+    as `let |inf| be <value>` (the displayed claim, `condition` and the
+    notes) and record its level in `meta["mathema.pseudo_infinity"]`; a
+    value
+    `let |inf| be` would refuse raises `InvalidDomain`.
+
     `extensive` reaches every route this call touches: `probe()`'s own
     critical-point sampling hints and `domain_safe[...]` probe, and a
     `route="derive"` claim's case-split fallback. Default `False`
@@ -511,10 +543,12 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     authoring.declared_from_function's own decorator-over-docstring rule
     for the same reasoning one layer in).
     """
+    from .compendium import ensure_bundled
     from .probing import _RISK, _SPECIALS
     from .spec import declare, entry_claims
     from .types import _TYPE_PROBE_TRIALS, domain_from_signature, type_probes
 
+    ensure_bundled()
     facts = analyze(fn)
     # the function-level parent domain: signature markers, then an
     # explicit domain= winning per parameter. Each claim is adjudicated
@@ -597,12 +631,20 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         merged_entry = merge_entries(authored, {"claims": explicit},
                                      on_conflict="silent")
     all_claims = entry_claims(merged_entry)
+    if pseudo_infinity is None and declared is not None:
+        pseudo_infinity = declared.get("pseudo_infinity")
     if all_claims:
         probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
                                             trials=trials, trials_scale=trials_scale,
                                             facts=facts, extensive=extensive,
                                             known_premises=known_premises,
-                                            float_companions=True)
+                                            float_companions=True,
+                                            pseudo_infinity=pseudo_infinity)
+    else:
+        # a bad function-level or project value refuses even with
+        # nothing to adjudicate
+        from .records import resolve_pseudo_infinity
+        resolve_pseudo_infinity(None, pseudo_infinity)
     from .concepts import Concept, concepts_for, flat_union
     sources = concepts_for(facts, probes)
     dismissed = set(((declared or {}).get("meta") or {}).get(

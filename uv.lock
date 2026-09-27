@@ -1248,7 +1248,7 @@ requires-dist = [
     { name = "coverage", marker = "extra == 'coverage'", specifier = ">=7" },
     { name = "mathema", extras = ["coverage", "mcp", "numpy", "smt"], marker = "extra == 'all'" },
     { name = "mathema", extras = ["coverage", "numpy"], marker = "extra == 'test'" },
-    { name = "mathema-symbology", marker = "extra == 'symbology'" },
+    { name = "mathema-symbology", marker = "extra == 'symbology'", specifier = ">=0.3" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2,<3" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
     { name = "mkdocs-llmstxt", marker = "extra == 'docs'", specifier = ">=0.2" },
@@ -1271,14 +1271,14 @@ provides-extras = ["docs", "numpy", "test", "dev", "mcp", "smt", "coverage", "sy
 
 [[package]]
 name = "mathema-symbology"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/3a/c5a4c97d0353d3b5c0a2c6fa67e743a3529b37ce4641d334f8e44e3a19c0/mathema_symbology-0.2.0.tar.gz", hash = "sha256:8c8bdfc22995b6cb3f2288a4d25ac7608df55877d708d54e16cf1433f754076d", size = 21043, upload-time = "2026-09-14T14:19:58.763Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e6/bf/4c861826f72846cfa555cac516087536341e503a8b00ac90d9a6c440cc68/mathema_symbology-0.3.0.tar.gz", hash = "sha256:1648a6b4e12bf20d1b8fc511a5db5089769b118ce2baf638379dc958d3db828a", size = 22568, upload-time = "2026-09-24T23:26:53.872Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e2/1f/5c68c211551d496603a3e69aed23890198b7699f6beb100949ebd1393c96/mathema_symbology-0.2.0-py3-none-any.whl", hash = "sha256:8cd7be9a183218325571994c2129349c57c23c4068f40ba575df49bb9f74df26", size = 17325, upload-time = "2026-09-14T14:19:57.425Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/52/77e3df8bc0097d05dc11d14bb8b6904d8c1cece63fed71ae68427c6b4a68/mathema_symbology-0.3.0-py3-none-any.whl", hash = "sha256:33095489649f2f48e97f985b68ef3c73e97917cb11814dd4b5c69e53b3a7f0b6", size = 18261, upload-time = "2026-09-24T23:26:52.513Z" },
 ]
 
 [[package]]

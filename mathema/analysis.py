@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from . import identity
 from . import types as _types
 from .intent import parse_doc
+from ._signatures import callable_signature
 
 _IO_FUNCS = {"print", "input", "open", "exec", "eval", "__import__"}
 _IO_MODULES = {"os", "sys", "subprocess", "socket", "requests", "urllib",
@@ -148,6 +149,18 @@ def _root_name(node: ast.AST) -> str | None:
     while isinstance(node, (ast.Attribute, ast.Subscript, ast.Call)):
         node = node.func if isinstance(node, ast.Call) else node.value
     return node.id if isinstance(node, ast.Name) else None
+
+
+def _dotted_chain(node: ast.AST) -> str | None:
+    """`a.b.c` for an attribute chain made only of names, else None."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
 
 
 class SourceUnavailable(RuntimeError):
@@ -422,7 +435,7 @@ def finite_annotation_domains(fn) -> dict:
     import typing as t
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return {}
     out = {}
@@ -648,7 +661,10 @@ def _call_groups(fdef: ast.FunctionDef, name: str) -> tuple[dict[str, list[str]]
                     groups["external"].append(f.id)
         elif isinstance(f, ast.Attribute):
             root = _root_name(f.value)
-            label = f"{root}.{f.attr}" if root else f.attr
+            # a plain dotted chain keeps every name (`np.linalg.norm`);
+            # a chain through a call or subscript keeps its root
+            chain = _dotted_chain(f)
+            label = chain or (f"{root}.{f.attr}" if root else f.attr)
             if root in _MATH_MODULES:
                 if label not in groups["math"]:
                     groups["math"].append(label)

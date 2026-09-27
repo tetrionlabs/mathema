@@ -8,6 +8,8 @@ genuine counterexample. A NaN that only propagates a missing INPUT
 stays the missing-value axis's business."""
 import math
 
+import pytest
+
 from mathema.analysis import analyze_source
 from mathema.conjecture import check_conjectures, claim
 from mathema.gates import _point_evaluator
@@ -57,3 +59,26 @@ def test_a_nan_that_propagates_a_missing_input_is_not_a_counterexample():
     kit = _point_evaluator(cj, identity, analyze_source(identity),
                            cj.domain, {})
     assert kit["evaluate"]({"x": float("nan")}) is None
+
+
+def test_not_equal_is_falsified_by_a_nan_result():
+    # a NaN is no value, so no relation holds at it, `!=` included
+    np = pytest.importorskip("numpy")
+
+    def root(x: float) -> float:
+        return float(np.sqrt(x))
+
+    (p,) = check_conjectures(
+        root, [claim("for x in [-4, -1], f(x) != 5", route="probe")])
+    assert p.verdict == "falsified"
+    assert "f returned nan" in p.counterexample
+    (x,) = p.meta["mathema.counterexample_args"]
+    assert -4 <= x <= -1
+
+
+def test_a_nan_from_a_bound_function_names_that_function():
+    (p,) = check_conjectures(
+        identity, [claim("for x in [-1, 1], f(x) != g(x)", route="probe",
+                         funcs={"g": nan_everywhere})])
+    assert p.verdict == "falsified"
+    assert "g returned nan" in p.counterexample

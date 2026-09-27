@@ -63,9 +63,11 @@ each function is in the call graph, so a function the rest of the code leans
 on counts for more than a leaf helper, while implementation stays a plain
 ratio of lines. Clarity has a ceiling set by how much of a function's
 behaviour the claim vocabulary can express at all, so 100 belongs to pure,
-fully claimed functions and anything above 60 is doing well; a function that
-calls a library with no [compendium](claims-transfer.md) entry cannot reach
-100 until one covers it.
+fully claimed functions and anything above 60 is doing well; a function
+cannot reach 100 while a function it calls has no settled definedness row
+in its own record, whether that callee is your own or a library's (a
+library's rows come from a [compendium](claims-transfer.md) claims file,
+verified).
 
 [`mathema badges`](modes/badges.md) documents how each score is computed, and
 [`mathema coverage`](modes/check.md) the implementation layer on its own.

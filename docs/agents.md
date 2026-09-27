@@ -82,7 +82,7 @@ Two pieces, both optional:
   environment. [The MCP interface](modes/mcp.md) lists every tool.
 - **Agent skills.** `mathema init --agents` vendors skills and per-tool
   instructions from the
-  [mathema-agents](https://github.com/tetrionlabs/mathema-agents) repository
-  (not yet public), which teach an agent to run the claim loop properly rather
+  public [mathema-agents](https://github.com/tetrionlabs/mathema-agents)
+  repository, which teach an agent to run the claim loop properly rather
   than guess at it. It is the one command in mathema that fetches anything,
   and only when you run it. See [mathema init](modes/init.md).

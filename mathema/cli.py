@@ -42,6 +42,7 @@ import sys
 from typing import NoReturn
 
 from .targets import TargetError, resolve, resolve_function
+from ._signatures import callable_signature
 
 
 def _bad_argument(message: str) -> NoReturn:
@@ -124,11 +125,10 @@ def _check_rows(args) -> list[dict]:
         raise TargetError(f"no functions found in {args.target}")
     domain = _parse_domain(args.domain)
     if domain:
-        import inspect
         params: set = set()
         for fn in target.functions.values():
             try:
-                params |= set(inspect.signature(fn).parameters)
+                params |= set(callable_signature(fn).parameters)
             except (TypeError, ValueError):
                 continue
         unknown = sorted(set(domain) - params)
@@ -138,11 +138,15 @@ def _check_rows(args) -> list[dict]:
                           f"{args.target}")
     verified_store = load_verified(root)
     declared_store = load_declared(root)
+    from .compendium import external_premises, install
+    install(root)
+    premises = external_premises(root, verified=verified_store)
     for name, fn in sorted(target.functions.items()):
         rec = check(fn, claims=list(args.claim) if args.claim else None,
                     domain=domain or None,
                     trials_scale=args.trials_scale,
-                    declared=retrieve(fn, root, store=declared_store))
+                    declared=retrieve(fn, root, store=declared_store),
+                    known_premises=premises)
         # the one gate (verify.gate): provenance population, so a
         # falsified suggestion surfaces in the printed detail (real
         # knowledge, and a reason not to adopt) but never gates;
@@ -253,6 +257,33 @@ def _format_check(rows: list[dict], fmt: str) -> str:
     return "\n".join(lines)
 
 
+def _warn_small_pseudo_infinity() -> None:
+    """Intent:
+        One loud stderr line when the project-level pseudo-infinity
+        (`MATHEMA_PSEUDO_INFINITY`) is below 1e100: values beyond it
+        are not checked for computation, and an explicit domain for the
+        variables states the same bound where a reader sees it. A value `let
+        |inf| be` would refuse is left to the adjudication's own
+        refusal.
+    """
+    import os
+
+    from .domain import InvalidDomain
+    from .records import (PSEUDO_INFINITY_ENV, PSEUDO_INFINITY_WARN_BELOW,
+                          environment_pseudo_infinity)
+    try:
+        value = environment_pseudo_infinity()
+    except InvalidDomain:
+        return
+    if value is not None and value < PSEUDO_INFINITY_WARN_BELOW:
+        raw = os.environ.get(PSEUDO_INFINITY_ENV, "").strip()
+        print(f"warning: {PSEUDO_INFINITY_ENV}={raw} is below 1e100: "
+              f"values beyond {raw} are not checked for computation; a "
+              f"better approach might be to set an explicit domain for "
+              f"the variables (for x in [lo, hi], ...)",
+              file=sys.stderr)
+
+
 def cmd_check(args) -> int:
     """`mathema check`: one-off interactive verification of a single
     function (or file) against its built-in laws and any inline
@@ -261,6 +292,7 @@ def cmd_check(args) -> int:
     claim in any mode; skipped claims and unenforced domains under
     `--strict`), 0 otherwise, suitable for a pre-commit check on a
     single target."""
+    _warn_small_pseudo_infinity()
     rows = _check_rows(args)
     out = _format_check(rows, args.format)
     if args.output:
@@ -305,6 +337,7 @@ def cmd_verify(args) -> int:
     from .verify import verify_project
 
     _validate_trials_scale(args.trials_scale)
+    _warn_small_pseudo_infinity()
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
@@ -325,10 +358,19 @@ def cmd_verify(args) -> int:
             return 0
         print(text)
         return 0
+    from .verify import resolve_claims_file
+    keys, files = [], []
+    for target in args.target or []:
+        path = resolve_claims_file(target, args.root)
+        if path is None:
+            keys.append(target)
+        else:
+            files.append(path)
     result = verify_project(args.root, all=args.all,
                             strict=args.strict,
                             trials_scale=args.trials_scale,
-                            only=args.target or None)
+                            only=keys or None,
+                            files=files or None)
     as_json = getattr(args, "format", "text") == "json"
     if result.nothing_declared:
         if as_json:
@@ -1161,8 +1203,8 @@ _GITATTRIBUTES_BLOCK = (
 )
 _MATHEMA_GITIGNORE = (
     "# Regenerated from the code or local-only, so not committed. The\n"
-    "# verified records, meta (locks/policy), compendium and badges are the\n"
-    "# evidence and config, and ARE committed.\n"
+    "# verified records, meta (locks/policy) and badges are the evidence\n"
+    "# and config, and ARE committed.\n"
     "/declared/\n"
     "/issues/\n"
 )
@@ -1535,7 +1577,9 @@ def _print_describe_detail(key: str, fn, args) -> int:
     """`describe_detail()`'s result, printed as `mathema describe`'s
     single-function view: signature + identity hashes, inferred
     domains (each tagged with its source), claims (statement + LaTeX +
-    verified verdict when one exists), then the tier ladder; one
+    verified verdict when one exists), the careful lines (known edges
+    just outside a declared domain, information only), then the tier
+    ladder; one
     section per tier, in ladder order, `--tier` narrowing to just one
     (accepted either by name or by its 1-5 ladder position, translated
     to the real tier name here so `describe_detail()` itself only ever
@@ -1566,6 +1610,10 @@ def _print_describe_detail(key: str, fn, args) -> int:
     else:
         print("  (none declared)")
     print()
+    if detail.get("careful"):
+        for line in detail["careful"]:
+            print(line)
+        print()
     if detail.get("concepts"):
         print("Concepts: " + ", ".join(detail["concepts"]))
     if detail.get("references"):
@@ -2510,28 +2558,52 @@ def cmd_badges(args) -> int:
 
 
 def cmd_compendium(args) -> int:
-    """`mathema compendium export <library>`: write a partial compendium
-    SKELETON for <library> from this project's verified claims, verified
-    bound claims become `claims`, verified `raises(...)` become
-    `raises_when`, and AST-detected nan/inf returns become `nan_when`;
-    `limitations` are stubbed as TODOs. The result is declared until a
-    consumer verifies or trusts it, so review and complete it before
-    shipping (curate limitations, confirm the AST-guessed nan regions)."""
+    """`mathema compendium status [<library>]`: where the project stands
+    with each third-party library its functions call (the claims files
+    about it, the called functions with no claims, and how many rows of
+    the rest are verified locally, trusted, falsified or unsettled),
+    writing nothing. `mathema compendium export <library>`: for a
+    library author, write the proven and held claims this project's
+    verified store holds about <library>'s functions as a compendium
+    claims file (`compendium: <library>`, `versions: ">=<installed
+    major.minor>"`), by default to `claims/<library>.claims.yaml` under
+    the root, for downstream projects to use. Each row carries the
+    verdict it reached as its claimed level; a consumer verifies or
+    accepts it before resting a claim on it. `mathema compendium
+    update [--dry-run]`: pin the non-default literal arguments the
+    project's calls pass into rows of its own compendium files, and
+    widen a used row's own `versions:` range once verify has recorded
+    it holding on the installed version, printing every change."""
     import os
-
-    from .compendium.export import write_compendium
-    from .spec import load_verified
 
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    if args.action == "update":
+        from .compendium.update import run_update
+        for line in run_update(root, dry_run=args.dry_run):
+            print(line)
+        return 0
+    if args.action == "status":
+        from .compendium.status import compendium_status, render_status
+        data = compendium_status(root, args.library)
+        if args.json:
+            import json
+            print(json.dumps(data, indent=2))
+        else:
+            print(render_status(data))
+        return 0
+    from .compendium.export import write_compendium
+    from .spec import load_verified
+
+    if not args.library:
+        raise TargetError("compendium export needs the library to export "
+                          "(mathema compendium export mylib)")
     if not any(k.split(".")[0] == args.library for k in load_verified(root)):
         raise TargetError(f"no verified records for library "
                           f"{args.library!r} under {root}; nothing to export")
-    path = write_compendium(args.library, root=root, out_dir=args.out)
-    print(f"wrote compendium skeleton for {args.library!r} to {path}")
-    print("(a partial skeleton: complete the TODOs, confirm nan_when, and "
-          "verify or trust it downstream, it is declared until then)")
+    path = write_compendium(args.library, root=root, out=args.out)
+    print(f"wrote the {args.library!r} compendium claims file to {path}")
     return 0
 
 
@@ -2594,6 +2666,10 @@ def main(argv: list[str] | None = None) -> int:
                                  description="Claim-Driven Development: turn "
                                              "software intent into verifiable "
                                              "evidence.")
+    from . import __version__
+    ap.add_argument("--version", action="version",
+                    version=f"mathema {__version__}",
+                    help="print the installed mathema version and exit")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     pc = sub.add_parser("check", help="interactive: adjudicate one file, "
@@ -2635,8 +2711,13 @@ def main(argv: list[str] | None = None) -> int:
                                        "changed (strict by default)")
     pv.add_argument("target", nargs="*",
                     help="dotted key(s) to re-verify and re-stamp on their "
-                         "own (e.g. after a merge); omit to sweep the whole "
-                         "project")
+                         "own (e.g. after a merge), or claims file path(s) "
+                         "whose every entry is adjudicated up front (a "
+                         "library's compendium file included, "
+                         "mathema/compendium/... naming a bundled one); "
+                         "omit to sweep the whole project, where library "
+                         "claims are adjudicated only for the library "
+                         "functions the project calls")
     pv.add_argument("--root", default=None,
                     help="project root holding .mathema/verified and claimspec.yaml")
     pv.add_argument("--all", action="store_true",
@@ -2700,17 +2781,45 @@ def main(argv: list[str] | None = None) -> int:
                          "--root, or pass an explicit DIR")
     pb.set_defaults(fn=cmd_badges)
 
-    pcomp = sub.add_parser("compendium", help="export a partial compendium "
-                           "skeleton for a library from this project's "
-                           "verified claims")
-    pcomp.add_argument("action", choices=["export"],
-                       help="export: write a compendium skeleton")
-    pcomp.add_argument("library", help="the importable package name to export "
-                       "verified claims for (e.g. mylib)")
+    pcomp = sub.add_parser("compendium", help="the claims about the "
+                           "libraries a project calls: status reports "
+                           "where the project stands with each; update "
+                           "brings the project's compendium files in "
+                           "line with its calls; export publishes a "
+                           "library author's own verified claims as a "
+                           "compendium claims file")
+    pcomp.add_argument("action", choices=["status", "update", "export"],
+                       help="status: for each third-party library the "
+                            "project's functions call, its claims files, "
+                            "the called functions with no claims, and how "
+                            "many rows are verified locally, trusted, "
+                            "falsified or unsettled (writes nothing); "
+                            "update: for each call passing a non-default "
+                            "literal argument no row pins, add pinned "
+                            "copies of the function's rows to the "
+                            "project's compendium file (unverified until "
+                            "verify runs), and widen a used row's own "
+                            "versions range once verify recorded it "
+                            "holding on the installed version; "
+                            "export: for a library author, write the "
+                            "library's proven and held claims from the "
+                            "verified store as a claims file with "
+                            "compendium: and versions:, for downstream "
+                            "projects to use")
+    pcomp.add_argument("library", nargs="?", default=None,
+                       help="status: one library to report on (default: "
+                            "every third-party library called); export: "
+                            "the importable package name to export "
+                            "verified claims for (e.g. mylib)")
     pcomp.add_argument("--root", default=None,
                        help="project root holding .mathema/verified")
-    pcomp.add_argument("--out", default=None, metavar="DIR",
-                       help="output directory (default compendium/<library>/)")
+    pcomp.add_argument("--out", default=None, metavar="PATH",
+                       help="export: output file (default "
+                            "claims/<library>.claims.yaml under --root)")
+    pcomp.add_argument("--json", action="store_true",
+                       help="status: the same report as JSON")
+    pcomp.add_argument("--dry-run", action="store_true",
+                       help="update: print the changes, write nothing")
     pcomp.set_defaults(fn=cmd_compendium)
 
     pa = sub.add_parser("audit", help="population report: every function "

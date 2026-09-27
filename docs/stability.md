@@ -6,7 +6,7 @@ at your own code owes you a straight answer about its own churn.
 
 ## Where mathema is today
 
-mathema is at **0.6.0 and pre-1.0**. It is feature-complete and
+mathema is at **0.6.1 and pre-1.0**. It is feature-complete and
 heavily tested (over 3,200 tests), and the concepts are settled. The
 Python API is **likely to change before 1.0**. That is the honest
 statement, not a formality: if you build on the library surface today,
@@ -112,7 +112,7 @@ mathema is the engine. These sit alongside it:
   record format are not mathema's to change unilaterally. Anything
   that reads or writes that shape interoperates with mathema's records
   without importing mathema.
-- **[mathema-symbology](https://github.com/tetrionlabs/mathema-symbology)**:
+- **[mathema-symbology](https://github.com/aaronbyrnephd/mathema-symbology)**:
   conventional notation. A claim written in the reader's own symbols
   is a claim the reader will actually check, so this supplies
   domain-conventional symbols for parameter and function names when

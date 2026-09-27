@@ -25,11 +25,12 @@ _SYMPY_FUNCS = {
     # same as the lowercase spelling
     "Abs": sympy.Abs, "Min": sympy.Min, "Max": sympy.Max,
     # np.minimum/np.maximum are numpy's elementwise two-argument min/max,
-    # a different function from np.min/np.max (which reduce over an array,
-    # like bare min(xs)/max(xs), and aren't lifted at all), same
-    # _call_name() module-qualified resolution as sin/sqrt/etc. routes
-    # "minimum"/"maximum" here regardless of whether the call was spelled
-    # np.minimum(...) or numpy.minimum(...). Mapped to the same sympy.Min/
+    # a different function from np.min/np.max, which reduce over an
+    # array and take the axis as their second argument (so _call_name()
+    # declines those with more than one argument; with one, a scalar's
+    # max is the scalar). The module-qualified resolution routes
+    # "minimum"/"maximum" here whether the call was spelled
+    # np.minimum(...) or numpy.minimum(...), mapped to the same sympy.Min/
     # Max as bare min/max, so _resolve_clamps() (symbolic.py) treats an
     # np.minimum/np.maximum clamp identically to a hand-written one.
     "minimum": sympy.Min, "maximum": sympy.Max,
@@ -165,7 +166,11 @@ def _call_name(node: ast.Call) -> str | None:
     `sin(x)` and module-qualified `math.sin(x)`/`np.sin(x)`/`numpy.sin(x)`
     all resolve to `'sin'`; numpy's scalar elementwise functions are the
     same operations `math`'s are, over the same scalar-parameter scope
-    lift() already requires, so they get the same treatment. Uses
+    lift() already requires, so they get the same treatment. Only a
+    `module.name` call resolves, so `np.linalg.norm(v)` is None, never
+    `norm`; and numpy's reductions `min`/`max`/`amin`/`amax` with more
+    than one argument are None, since numpy's second argument is the
+    axis, not a second operand. Uses
     analysis.py's own _MATH_MODULES rather than a second, separately
     maintained list, analyze_source()'s "known name" classification and
     lift()'s "known call" classification must agree, or a function can be
@@ -176,6 +181,10 @@ def _call_name(node: ast.Call) -> str | None:
     f = node.func
     if isinstance(f, ast.Name):
         return f.id
-    if isinstance(f, ast.Attribute) and _root_name(f.value) in _MATH_MODULES:
+    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) \
+            and f.value.id in _MATH_MODULES:
+        if f.value.id in ("np", "numpy") and len(node.args) > 1 \
+                and f.attr in ("min", "max", "amin", "amax"):
+            return None
         return f.attr
     return None

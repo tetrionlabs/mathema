@@ -35,13 +35,13 @@ def sq(t: float, x: float, sigma: float) -> float:
 
 
 def test_monotonicity_via_first_derivative():
-    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive", pseudo_infinity=1e100)])
+    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive")])
     assert results[0].verdict == "proven"
 
 
 def test_pde_heat_equation_proven():
     results = check_conjectures(
-        heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive", pseudo_infinity=1e100)])
+        heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -50,7 +50,7 @@ def test_pde_wrong_solution_is_unknown_without_an_executed_witness():
     # point evaluation against the function, so no executed witness
     # exists and a falsification needs one
     results = check_conjectures(
-        not_heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive", pseudo_infinity=1e100)])
+        not_heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive")])
     assert results[0].verdict == "unknown"
     assert results[0].meta["mathema.corroboration"] == "uncorroborated"
 
@@ -96,13 +96,17 @@ def test_lowercase_sum_on_derive_route_hints_at_capitalized_form():
 
 def test_not_equal_and_approx_equal_relations_on_probe_route():
     # sq(t, x, sigma) = x**2, always >= 0, so it's genuinely never -1,
-    # unlike cube(x) = x**3, which *does* equal -1 at x = -1.
-    assert check_conjectures(sq, [claim("f(t, x, sigma) != -1", route="probe")])[0].verdict == "holds"
-    assert check_conjectures(cube, [claim("f(x) ~= x^3", route="probe")])[0].verdict == "holds"
+    # unlike cube(x) = x**3, which *does* equal -1 at x = -1. Both are
+    # bounded: over the whole line the probe reaches x = 1e308, where
+    # x ** 2 and x ** 3 raise OverflowError.
+    assert check_conjectures(sq, [claim("for x in [-1e6, 1e6], f(t, x, sigma) != -1",
+                                        route="probe")])[0].verdict == "holds"
+    assert check_conjectures(cube, [claim("for x in [-1e6, 1e6], f(x) ~= x^3",
+                                          route="probe")])[0].verdict == "holds"
 
 
 def test_approx_equal_provable_on_derive_route_like_equality():
-    results = check_conjectures(cube, [claim("f(x) ~= x^3", route="derive", pseudo_infinity=1e100)])
+    results = check_conjectures(cube, [claim("f(x) ~= x^3", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -189,7 +193,7 @@ def test_ito_drift_coefficient_matching():
     results = check_conjectures(sq, [claim(
         "let mu be [-5, 5], "
         "2*mu*x + sigma**2 == d(f(t,x,sigma), t) + mu*d(f(t,x,sigma), x) "
-        "+ 0.5*sigma**2*d(f(t,x,sigma), x, x)", route="derive", pseudo_infinity=1e100)])
+        "+ 0.5*sigma**2*d(f(t,x,sigma), x, x)", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1403,9 +1407,9 @@ def test_proven_fold_claim_reaches_the_reasoning_chain():
 # --- proof quantifiers and readable sketches --------------------------------
 
 def test_proven_scalar_claim_carries_a_quantifier():
-    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive", pseudo_infinity=1e100)])
+    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive")])
     assert results[0].verdict == "proven"
-    assert results[0].condition == "∀ x ∈ [-1e+100, 1e+100] ⊂ ℝ ∪ {∅}"
+    assert results[0].condition == "∀ x ∈ ℝ"
 
 
 def test_proven_scalar_claim_quantifier_reflects_a_declared_domain():
@@ -1994,7 +1998,7 @@ def gaussian_pdf(x: float, mu: float, sigma: float) -> float:
 def test_derivative_at_a_point_proves_projectile_range_maximized_at_45_degrees():
     results = check_conjectures(
         projectile_range, [claim("for g in [9, 10], "
-                                 "d(f(v0,theta,g), theta)@{theta=pi/4} == 0", route="derive", pseudo_infinity=1e100)])
+                                 "d(f(v0,theta,g), theta)@{theta=pi/4} == 0", route="derive")])
     # g bounded away from 0: the division's raising region is excluded
     assert results[0].verdict == "proven"
 
@@ -2010,7 +2014,7 @@ def test_derivative_at_a_point_with_multiple_substitutions():
 def test_plain_derivative_claim_without_evaluation_bar_still_works():
     results = check_conjectures(
         projectile_range, [claim("for g in [9, 10], d(f(v0,theta,g), theta) "
-                                 "== 2*v0**2*cos(2*theta)/g", route="derive", pseudo_infinity=1e100)])
+                                 "== 2*v0**2*cos(2*theta)/g", route="derive")])
     assert results[0].verdict == "proven"
 
 

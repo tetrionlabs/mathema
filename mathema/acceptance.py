@@ -573,18 +573,20 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             "actions": []}
     if as_ == "trusted":
         # external testimony (a compendium row) accepted at the
-        # level its curator claims: the row's verdict becomes that
+        # level the row claims: the row's verdict becomes that
         # level, provenance meta marks it testimony, and premises
         # resting on it cap at that level, never higher
         meta = target.get("meta") or {}
-        if meta.get("mathema.surface") != "compendium" or verdict != "declared":
+        if meta.get("mathema.surface") != "compendium" \
+                or base not in ("declared", "unknown", "skipped"):
             raise AcceptanceError(
                 f"{claim_name} is {verdict!r}"
                 + ("" if meta.get("mathema.surface") == "compendium"
                    else " and not compendium-sourced")
-                + ": --as trusted applies to an unaccepted compendium "
-                  "row (verdict 'declared'); anything else is either "
-                  "already evidence or needs the ordinary flow")
+                + ": --as trusted applies to a compendium row verify "
+                  "could not settle (verdict declared, unknown or "
+                  "skipped); anything else is either already evidence "
+                  "or needs the ordinary flow")
         claimed = meta.get("mathema.compendium_claimed", "holds")
         plan["accepted"] = {"as": "trusted",
                             "at": datetime.date.today().isoformat(),
@@ -597,7 +599,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         plan["new_verdict"] = claimed
         plan["actions"].append(
             f"trust {claim_name} at its claimed level ({claimed}), on "
-            f"the word of {meta.get('mathema.stub') or 'its compendium entry'}; "
+            f"the word of {meta.get('mathema.compendium') or 'its compendium entry'}; "
             f"`mathema verify` re-adjudicating this key replaces the "
             f"testimony with a local verdict")
         return plan
@@ -717,11 +719,11 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         if parent:
             # a float companion is no authored law: nothing declares it
             # and no corrected statement replaces it; retiring it records
-            # that the implementation does not carry the proven law there
+            # that the computation does not carry the proven law there
             plan["actions"].append(
                 f"{claim_name!r} is the float companion of {parent!r}, "
                 f"spawned by its proof; the discovery records where the "
-                f"implementation fails the proven law, and verify leaves "
+                f"computation fails the proven law, and verify leaves "
                 f"it retired while the law stands")
             return plan
         # the discovery itself is always recordable, whatever the
@@ -949,6 +951,55 @@ def corrected_stub(plan: dict) -> dict | None:
             "route": route if route in ("probe", "derive") else "best"}
 
 
+def _carry_trust(c: dict, accepted: dict, history: list) -> None:
+    """Intent:
+        Carry a trusted acceptance onto a freshly adjudicated row. A
+        local verdict that contradicts the trusted level (falsified), or
+        is at least as strong as it (proven over a trusted proven or
+        holds, holds over a trusted holds), is evidence that replaces
+        it: the acceptance is marked stale. A weaker consistent local
+        verdict (holds under a trusted proven) leaves the acceptance
+        standing at its level, and the row says what was seen: its note
+        reads `trusted as: proven, strongest evidence seen: holds` and
+        `meta["mathema.strongest_evidence"]` holds the local verdict. A
+        re-adjudication that cannot settle the row (unknown, skipped)
+        leaves the acceptance standing too, never `invalidated`, with
+        `meta["mathema.trusted_unsettled"]` recording what the sweep got.
+    """
+    meta = dict(c.get("meta") or {})
+    fresh = c.get("verdict") or ""
+    if classify_verdict(fresh) == "invalidated":
+        fresh = meta.get("mathema.regressed_to") or fresh
+    level = accepted.get("level") or "holds"
+    kind = classify_verdict(fresh)
+    meta.pop("mathema.strongest_evidence", None)
+    if kind in ("unknown", "skipped", "declared"):
+        c["verdict"] = level
+        meta.pop("mathema.regressed_to", None)
+        if meta.get("mathema.previous_verdict") == level:
+            meta.pop("mathema.previous_verdict")
+        meta["mathema.trusted_unsettled"] = fresh
+    elif kind == "holds" and classify_verdict(level) == "proven":
+        c["verdict"] = level
+        meta.pop("mathema.regressed_to", None)
+        meta.pop("mathema.trusted_unsettled", None)
+        if meta.get("mathema.previous_verdict") == level:
+            meta.pop("mathema.previous_verdict")
+        meta["mathema.strongest_evidence"] = fresh
+        c["note"] = (f"trusted as: {level}, strongest evidence seen: "
+                     f"{fresh}")
+    else:
+        meta.pop("mathema.trusted_unsettled", None)
+        accepted["stale"] = True
+        history.append({"at": datetime.date.today().isoformat(),
+                        "event": "stale",
+                        "reason": f"a local verdict ({fresh}) replaces the "
+                                  f"trusted level"})
+    c["meta"] = meta
+    c["accepted"] = accepted
+    c["acceptance_history"] = history
+
+
 def carry_acceptance(spec: dict, key: str, path: str) -> None:
     """Intent:
         At record-write time, carry each claim's acceptance state
@@ -957,7 +1008,10 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
         decision must never be silently dropped by a re-run.
 
     Notes:
-        Three rules ride along. A changed form marks the acceptance
+        A trusted acceptance (testimony at the level a row claims)
+        stands until a local verdict contradicts it or is at least as
+        strong (`_carry_trust`). Three rules
+        ride along for the others. A changed form marks the acceptance
         stale (it was a decision about a different function; a new
         sign-off is required) and the stale marker is itself a history
         event. A still-valid risk acceptance re-applies the
@@ -1019,6 +1073,9 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
             continue
         accepted = dict(prior["accepted"])
         history = list(prior.get("acceptance_history") or [])
+        if accepted.get("as") == "trusted" and not accepted.get("stale"):
+            _carry_trust(c, accepted, history)
+            continue
         if accepted.get("form") != fresh_form and not accepted.get("stale"):
             accepted["stale"] = True
             history.append({"at": datetime.date.today().isoformat(),

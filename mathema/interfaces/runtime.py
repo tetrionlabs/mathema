@@ -51,7 +51,7 @@ from typing import Any, Callable, Protocol, runtime_checkable
 #: `runtime` is the ability to call the function at concrete points
 #: (the adaptor contract above); `frontend` is source-level analysis
 #: (a Facts with body structure, enabling the lifting derive routes);
-#: `globals` is visibility of the implementation's ambient state
+#: `globals` is visibility of the function's ambient state
 #: (module globals, argument mutation), which the examine route's
 #: empirical half reads and which never crosses a process boundary.
 RUNTIME_CAPABILITIES = frozenset({"runtime", "frontend", "globals"})
@@ -67,12 +67,14 @@ class PointRuntime(Protocol):
     point: `True` (holds there), `False` (a genuine counterexample),
     `None` (inconclusive: the law's own plumbing failed, an infinity
     only the law's own arithmetic produced, a NaN propagated from a
-    missing input). An inf the callable itself returned is an executed
-    value like any other, so a relation that fails on it is a
-    counterexample; a NaN computed from non-missing inputs is a value
-    the relation is decided against: no ordering holds for it, and it
-    equals no number. `probe_finite(point)` reports an
-    implementation-failure detail string (a raise, a NaN, an inf or a
+    missing input). An executed value is read per P4: a raise, a NaN
+    computed from non-missing inputs (a scalar, or an element of an
+    array or list), or an infinity returned for a finite input is no
+    value and fails every relation, `!=` included; two sides at the
+    same infinity are one extended-real point and agree (`==`, `<=`,
+    `>=` hold there, no strict order does); a NaN agrees with nothing,
+    another NaN included. `probe_finite(point)` reports an
+    computation-failure detail string (a raise, a NaN, an inf or a
     deviation past a magnitude-scaled tolerance where the relation
     fails) or `None`.
     `admits(point)` is domain-and-assumption membership.

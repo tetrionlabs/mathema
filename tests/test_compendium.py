@@ -1,22 +1,38 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The compendium: curated facts about well-known libraries, the
-typing-stubs model, renamed for what it is. Bundled starters load version-gated, a project
-file shadows them per function, raise regions reach the partiality
-registry, nan regions become hazard boundaries for callers, and a
-compendium-backed premise is NAMED in the missing-prerequisite note without
-its verdict ever entering the evidence chain."""
+"""A compendium is a claims file about a library's functions: the
+file-level `compendium:` and `versions:` fields name the library and
+the version range. Bundled files load version-gated, a project file
+shadows them per function, the rows carry the compendium surface, and
+a compendium-backed premise is NAMED in the missing-prerequisite note
+without its verdict ever entering the evidence chain."""
 import textwrap
 
+import pytest
+
 from mathema.compendium import (_version_in_range, compendium_functions,
-                                install, load_compendium_packs,
-                                premise_names)
+                                load_library_claims, premise_names)
+from mathema.spec import ClaimsFileError, load_declared, validate_claims_file
 
 
-def test_bundled_starters_load_for_installed_packages():
-    packs = {p.package: p for p in load_compendium_packs(".")}
-    assert "math" in packs                    # stdlib: always applicable
-    assert "numpy" in packs                   # installed in the test venv
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(text))
+
+
+def test_bundled_files_load_for_installed_libraries():
+    lib = load_library_claims(".")
+    assert lib["math.sqrt"]["compendium"] == "math"          # stdlib: always
+    assert lib["numpy.clip"]["compendium"] == "numpy"         # in the test venv
+    assert lib["numpy.sqrt"]["versions"] == ">=1.24,<3"
+    assert lib["numpy.sqrt"]["source"] == \
+        "mathema/compendium/numpy/scalars.claims.yaml"
+    rows = {r["name"]: r for r in lib["numpy.sqrt"]["entry"]["claims"]}
+    assert set(rows) == {"is_defined", "is_defined_over_complex"}
+    row = rows["is_defined"]
+    assert row["name"] == "is_defined" and row["statement"] == "x >= 0"
+    assert row["source"] == "compendium"
+    assert row["meta"]["mathema.compendium"].startswith("compendium:numpy-")
     assert "numpy.clip" in compendium_functions(".")
 
 
@@ -29,43 +45,109 @@ def test_version_gating_is_the_light_range_spelling():
     assert not _version_in_range("2.0", "~=2.0")
 
 
+def test_a_claims_file_may_name_its_library_and_version_range():
+    validate_claims_file({"compendium": "numpy", "versions": ">=1.24,<3",
+                          "numpy.sqrt": {"claims": [
+                              {"name": "is_defined",
+                               "statement": "x >= 0"}]}}, "c.claims.yaml")
+    validate_claims_file({"compendium": "math", "versions": "*"}, "m.yaml")
+    validate_claims_file({"compendium": "numpy", "versions": ">=2"}, "n.yaml")
+
+
+@pytest.mark.parametrize("data, field", [
+    ({"compendium": ""}, "compendium"),
+    ({"compendium": 3}, "compendium"),
+    ({"compendium": "num py"}, "compendium"),
+    ({"compendium": "numpy", "versions": "~=2.0"}, "versions"),
+    ({"compendium": "numpy", "versions": 2}, "versions"),
+    ({"compendium": "numpy", "versions": ">=1,<2,<3"}, "versions"),
+    ({"versions": ">=1"}, "versions"),
+])
+def test_a_malformed_library_field_is_refused_naming_the_field(data, field):
+    with pytest.raises(ClaimsFileError) as info:
+        validate_claims_file(data, "lib.claims.yaml")
+    assert str(info.value).startswith(f"lib.claims.yaml: {field}:")
+
+
 def test_a_project_file_shadows_the_bundled_one(tmp_path):
-    stub_dir = tmp_path / ".mathema" / "compendium"
-    stub_dir.mkdir(parents=True)
-    (stub_dir / "numpy.yaml").write_text(textwrap.dedent("""
-        package: numpy
+    _write(tmp_path / "claims" / "numpy.claims.yaml", """
+        compendium: numpy
         versions: "*"
-        functions:
-          numpy.clip:
-            params: [x, lo, hi]
-            claims:
-              - name: clip_lower
-                statement: 'assuming lo <= hi, for x in [-9, 9], lo <= f(x, lo, hi)'
-    """))
-    sf = compendium_functions(str(tmp_path))["numpy.clip"]
-    assert "[-9, 9]" in sf.claims[0]["statement"]
+        numpy.clip:
+          claims:
+            - name: clip_lower
+              statement: 'assuming a_min <= a_max, for a in [-9, 9], a_min <= f(a, a_min, a_max)'
+    """)
+    info = load_library_claims(str(tmp_path))["numpy.clip"]
+    assert info["source"] == "claims/numpy.claims.yaml"
+    (row,) = info["entry"]["claims"]
+    assert "[-9, 9]" in row["statement"]
+    # every other bundled key is untouched
+    assert load_library_claims(str(tmp_path))["numpy.sqrt"]["source"] \
+        .startswith("mathema/compendium/")
 
 
 def test_a_stale_entry_contributes_nothing(tmp_path):
-    stub_dir = tmp_path / ".mathema" / "compendium"
-    stub_dir.mkdir(parents=True)
-    (stub_dir / "old.yaml").write_text(textwrap.dedent("""
-        package: numpy
+    _write(tmp_path / "claims" / "old.claims.yaml", """
+        compendium: numpy
         versions: ">=99"
-        functions:
-          numpy.stale_only_fn:
-            params: [x]
-            claims:
-              - name: stale_only_claim
-                statement: 'for x in [-9, 9], f(x) <= 1'
-    """))
+        numpy.stale_only_fn:
+          claims:
+            - name: stale_only_claim
+              statement: 'for x in [-9, 9], f(x) <= 1'
+    """)
     # a name the bundled compendium does not cover, so this asserts the
     # version gate (>=99 excludes the installed numpy), not shadowing
     assert "numpy.stale_only_fn" not in compendium_functions(str(tmp_path))
     assert "stale_only_claim" not in premise_names(str(tmp_path))
+    assert "numpy.stale_only_fn" not in load_declared(str(tmp_path))
 
 
-def test_a_compendium_premise_is_named_but_never_trusted(tmp_path):
+def test_a_library_that_is_not_importable_contributes_nothing(tmp_path):
+    _write(tmp_path / "claims" / "ghost.claims.yaml", """
+        compendium: no_such_library_here
+        no_such_library_here.f:
+          claims:
+            - name: bounded
+              statement: 'for x in [0, 1], f(x) <= 1'
+    """)
+    assert "no_such_library_here.f" not in load_library_claims(str(tmp_path))
+    assert "no_such_library_here.f" not in load_declared(str(tmp_path))
+
+
+def test_rows_of_a_project_compendium_file_carry_the_compendium_surface(
+        tmp_path):
+    _write(tmp_path / "claims" / "numpy.claims.yaml", """
+        compendium: numpy
+        numpy.tanh:
+          claims:
+            - name: tanh_bounded
+              statement: 'for x in [-1, 1], -1 <= f(x) <= 1'
+              meta: {mathema.compendium_claimed: proven}
+    """)
+    entry = load_declared(str(tmp_path))["numpy.tanh"]["entry"]
+    (row,) = entry["claims"]
+    assert row["source"] == "compendium"
+    assert row["meta"]["mathema.compendium_claimed"] == "proven"
+    assert row["meta"]["mathema.compendium"].startswith("compendium:numpy-")
+    from mathema.spec import authored_block, entry_claims
+    (cj,) = entry_claims(entry)
+    assert cj.source == "compendium"
+    assert authored_block({"mathema.surface": cj.source}) == \
+        {"surface": "compendium"}
+
+
+def test_the_bundled_directory_is_not_a_project_claims_file():
+    # the bundled files are read by the library loader, never as the
+    # declared layer of a project tree that happens to contain them
+    import os
+
+    import mathema
+    root = os.path.dirname(os.path.dirname(os.path.abspath(mathema.__file__)))
+    assert not any(k.startswith("numpy.") for k in load_declared(root))
+
+
+def test_a_compendium_premise_is_named_but_never_trusted():
     import mathema
 
     def widened(x: float) -> float:
@@ -83,41 +165,195 @@ def test_a_compendium_premise_is_named_but_never_trusted(tmp_path):
     assert "never trusted silently" in (row.note or "")
 
 
-def test_compendium_raise_regions_reach_the_partiality_registry(tmp_path):
-    stub_dir = tmp_path / ".mathema" / "compendium"
-    stub_dir.mkdir(parents=True)
-    (stub_dir / "kernellib.yaml").write_text(textwrap.dedent("""
-        package: math
-        versions: "*"
-        functions:
-          kernellib.stable_kernel:
-            params: [u, tol]
-            raises_when:
-              - condition: 'u <= tol'
-                exception: ValueError
-    """))
-    install(str(tmp_path))
-    from mathema.symbolic._partiality import _PARTIALITY_LEMMAS
-    assert "kernellib.stable_kernel" in _PARTIALITY_LEMMAS
-    import sympy
-    builder, exc = _PARTIALITY_LEMMAS["kernellib.stable_kernel"][-1]
-    u, tol = sympy.symbols("a b", real=True)
-    assert builder(u, tol) == sympy.Le(u, tol)
-    assert exc == "ValueError"
-
-
-def test_nan_regions_become_hazard_boundaries_for_callers():
+def test_is_defined_regions_become_hazard_boundaries_for_callers():
     import numpy
 
     def root_gap(x: float, y: float) -> float:
         """Gap between the roots."""
         return numpy.sqrt(x) - numpy.sqrt(y)
 
+    from mathema.compendium import install
     install(".")
     from mathema.analysis import analyze_source
     from mathema.hazards import hazard_points
     points = [h for h in hazard_points(root_gap, analyze_source(root_gap))
               if h.kind == "compendium"]
     assert any(h.value == 0.0 and "numpy.sqrt" in h.at for h in points)
-    assert {h.source for h in points} == {
-        s for s in {h.source for h in points} if s.startswith("compendium:numpy")}
+    assert points and all(h.source.startswith("compendium:numpy")
+                          for h in points)
+
+
+def test_region_boundaries_are_solved_over_the_reals():
+    from mathema.compendium import _boundaries
+    assert _boundaries("abs(x) > 1") == [-1.0, 1.0]
+    assert _boundaries("x >= 0") == [0.0]
+    assert _boundaries("-1 < x") == [-1.0]
+    assert _boundaries("x + y > 1") == []
+
+
+@pytest.mark.parametrize("spelling", ["np.arcsin(x)", "numpy.arcsin(x)",
+                                      "arcsin(x)"])
+def test_every_import_spelling_of_a_call_gets_the_hazard(tmp_path, spelling):
+    import importlib.util
+    (tmp_path / "hz.py").write_text(textwrap.dedent(f'''
+        import numpy
+        import numpy as np
+        from numpy import arcsin
+
+        def to_angle(x: float) -> float:
+            """Angle whose sine is x."""
+            return float({spelling})
+    '''))
+    spec = importlib.util.spec_from_file_location("hz", tmp_path / "hz.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    from mathema.analysis import analyze_source
+    from mathema.compendium import install
+    from mathema.hazards import hazard_points
+    install(".")
+    values = sorted(h.value for h in hazard_points(
+        mod.to_angle, analyze_source(mod.to_angle), kinds=["compendium"]))
+    assert values == [-1.0, 1.0]
+
+
+def test_an_empty_reduction_is_a_hazard_on_sequence_parameters():
+    import numpy as np
+
+    def average_of(xs: list) -> float:
+        """Mean of the values."""
+        return float(np.mean(xs))
+
+    from mathema.analysis import analyze_source
+    from mathema.compendium import install
+    from mathema.hazards import hazard_points
+    install(".")
+    (point,) = hazard_points(average_of, analyze_source(average_of),
+                             kinds=["compendium"])
+    assert point.param == "xs" and point.value is None
+    assert point.at == "numpy.mean: empty sequence, outside (dim(a) >= 1)"
+
+
+def test_library_rows_reach_the_partiality_registry_with_their_labels(
+        tmp_path):
+    import sympy
+
+    from mathema.compendium import install, register_library_claims
+    from mathema.partiality import NO_VALUE
+    from mathema.symbolic._partiality import _PARTIALITY_LEMMAS
+    _write(tmp_path / "claims" / "math.claims.yaml", """
+        compendium: math
+        math.acosh:
+          claims:
+            - name: is_defined
+              statement: 'x >= 1'
+            - name: below_one_raises
+              statement: 'for x in [-10, 10], assuming x < 1, raises(f(x), ValueError)'
+    """)
+    names = register_library_claims(str(tmp_path))
+    assert ("math.acosh", "is_defined") in names
+    assert ("math.acosh", "below_one_raises") in names
+    rows = _PARTIALITY_LEMMAS["math.acosh"]
+    assert [label for _b, label in rows] == [NO_VALUE, "ValueError"]
+    u = sympy.Symbol("u", real=True)
+    assert rows[0][0](u) == sympy.Lt(u, 1)
+    raises_region = rows[1][0](u)
+    assert raises_region.subs(u, 0) == sympy.true
+    assert raises_region.subs(u, 2) == sympy.false
+    assert raises_region.subs(u, -11) == sympy.false
+    # the same root again is a no-op; another root replaces these rows
+    install(str(tmp_path))
+    assert len(_PARTIALITY_LEMMAS["math.acosh"]) == 2
+    install(".")
+    assert "math.acosh" not in _PARTIALITY_LEMMAS
+
+
+def test_a_row_whose_region_does_not_build_is_reported_once(tmp_path):
+    from mathema.compendium import register_library_claims, uninstall
+    _write(tmp_path / "claims" / "math.claims.yaml", """
+        compendium: math
+        math.acosh:
+          claims:
+            - name: is_defined
+              statement: 'y >= 1'
+    """)
+    with pytest.warns(UserWarning, match=r"'is_defined' of math\.acosh"):
+        register_library_claims(str(tmp_path))
+    uninstall()
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        register_library_claims(str(tmp_path))
+
+
+
+def test_a_compendium_file_naming_the_projects_own_package_is_ignored(
+        tmp_path, monkeypatch):
+    # the export of a project's own library, inside its own tree: the
+    # package is installed (editable), so the file would apply
+    import mathema.compendium as comp
+    from mathema.verify import verify_project
+    real = comp._installed_version
+    monkeypatch.setattr(comp, "_installed_version",
+                        lambda lib, aliases=(): "1.0" if lib == "mylib" else real(lib, aliases))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    _write(tmp_path / "mylib" / "__init__.py", '''
+        def f(x: float) -> float:
+            """One more than x."""
+            return x + 1.0
+    ''')
+    _write(tmp_path / "claims" / "c.claims.yaml", """
+        mylib.f:
+          claims:
+            - name: grows
+              statement: 'for x in [0, 1], f(x) >= x'
+    """)
+    _write(tmp_path / "claims" / "mylib.claims.yaml", """
+        compendium: mylib
+        versions: ">=1.0"
+        mylib.f:
+          claims:
+            - name: grows
+              statement: 'for x in [0, 1], f(x) >= x'
+              meta: {mathema.compendium_claimed: holds}
+            - name: bounded
+              statement: 'for x in [0, 1], f(x) <= 2'
+    """)
+    declared = load_declared(str(tmp_path))
+    assert declared["mylib.f"]["source"] == "claims/c.claims.yaml"
+    rows = declared["mylib.f"]["entry"]["claims"]
+    assert [r["name"] for r in rows] == ["grows"]
+    assert (rows[0].get("meta") or {}).get("mathema.surface") != "compendium"
+    assert "mylib.f" not in load_library_claims(str(tmp_path))
+    result = verify_project(str(tmp_path))
+    notes = [line for line in result.lines if "mylib.claims.yaml" in line]
+    assert len(notes) == 1, result.lines
+    assert notes[0].startswith("note ")
+    assert "own package" in notes[0]
+    assert not any("library claims from" in line for line in result.lines)
+
+
+def test_a_bundled_entry_states_its_prose_as_row_notes_not_intent():
+    # intent is a function's own statement of purpose; what a claims
+    # file says about a library's behaviour rides the row it explains
+    import glob
+    import os
+
+    import yaml
+
+    from mathema.compendium import _bundled_dir
+    paths = glob.glob(os.path.join(_bundled_dir(), "**", "*.claims.yaml"),
+                      recursive=True)
+    assert paths
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        for key, entry in data.items():
+            if isinstance(entry, dict):
+                assert "intent" not in entry, (path, key)
+    lib = load_library_claims(None)
+    (sqrt_row,) = [r for r in lib["numpy.sqrt"]["entry"]["claims"]
+                   if r["name"] == "is_defined"]
+    assert "never raises" in sqrt_row["note"]
+    exp_rows = {r["name"]: r for r in lib["numpy.exp"]["entry"]["claims"]}
+    assert "709.78" in exp_rows["is_overflow_safe"]["note"]
+    assert "note" not in exp_rows["is_defined"]
