@@ -77,11 +77,17 @@ def test_the_order_of_two_assuming_clauses_is_kept():
 @pytest.mark.parametrize("law", [
     "assuming f is defined, assuming n >= 3, for a in R^(n,n), f(a) >= 0",
     "assuming base holds, assuming n >= 3, for a in R^(n,n), f(a) >= 0",
-    "assuming A is symmetric, assuming n >= 3, for A in R^(n,n), f(A) >= 0",
 ])
 def test_two_assuming_clauses_that_are_not_both_relations_are_refused(law):
     with pytest.raises(InvalidConjecture, match="one `assuming` clause"):
         claim(law)
+
+
+def test_a_structure_premise_clause_joins_a_relation_clause():
+    canon = canonical_claim_text(claim(
+        "assuming A is symmetric, assuming n >= 3, for A in R^(n,n), "
+        "det(A) == det(A.T)"))
+    assert canon.startswith("assuming A is symmetric and n >= 3, "), canon
 
 
 def test_a_parenthesised_conjunction_says_how_to_write_it():

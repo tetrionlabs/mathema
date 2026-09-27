@@ -2810,6 +2810,10 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                       pseudo_infinity=None) -> list[Probe]:
     """Adjudicate proposed claims against the live function.
 
+    Throughout, bars around one of the matrices `fn`'s signature
+    declares read as its determinant, and the `abs` of such a matrix
+    renders with its call spelling (`grammar.bars_over_matrices`).
+
     `trials` omitted (`None`) uses the same structural-risk-based
     adaptive budget `probe()`'s own laws always have
     (`probing._starting_budget`), a claim about a structurally
@@ -2875,6 +2879,32 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     Raises:
         InvalidDomain: a function-level or `MATHEMA_PSEUDO_INFINITY`
             value that `let |inf| be` would refuse.
+    """
+    from .grammar import _BAR_MATRICES, bars_over_matrices
+    from .types import matrix_param_names
+    try:
+        fn_mats = matrix_param_names(fn)
+    except Exception:
+        fn_mats = frozenset()
+    with bars_over_matrices(fn_mats | _BAR_MATRICES.get()):
+        return _check_conjectures(
+            fn, conjectures, domain=domain, trials=trials,
+            trials_scale=trials_scale, facts=facts, extensive=extensive,
+            known_premises=known_premises,
+            float_companions=float_companions,
+            pseudo_infinity=pseudo_infinity)
+
+
+def _check_conjectures(fn, conjectures: list[Conjecture],
+                       domain: dict | None = None, trials: int | None = None,
+                       trials_scale: float = 1.0, facts=None,
+                       extensive: bool = False,
+                       known_premises: dict | None = None,
+                       float_companions: bool = False,
+                       pseudo_infinity=None) -> list[Probe]:
+    """Intent:
+        `check_conjectures`' adjudication, under the bar reading it
+        sets.
     """
     from .compendium import ensure_bundled
     from .records import resolve_pseudo_infinity

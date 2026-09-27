@@ -2425,6 +2425,20 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
                              else (right,))]
                 return sympy.MatMul(*factors, evaluate=False)
             return left * right
+        if isinstance(node, ast.BinOp) and isinstance(node.op,
+                                                      (ast.Mult, ast.Pow)):
+            left = _node_to_sympy(node.left, funcs, matrix_names)
+            right = _node_to_sympy(node.right, funcs, matrix_names)
+            if isinstance(left, sympy.MatrixExpr):
+                # `*` and `**` act element by element on matrices: the
+                # Hadamard product and power, written A ∘ B and A^∘k
+                from sympy.matrices.expressions.hadamard import (
+                    HadamardPower, HadamardProduct)
+                if isinstance(node.op, ast.Pow):
+                    return HadamardPower(left, right)
+                if isinstance(right, sympy.MatrixExpr):
+                    return HadamardProduct(left, right)
+            return _BINOPS[type(node.op)](left, right)
     if isinstance(node, ast.Constant):
         if isinstance(node.value, complex) and not isinstance(node.value, (int, float)):
             v = node.value
@@ -3087,14 +3101,19 @@ def _abs_calls_to_bars(text: str) -> str:
         bar of its own. `|x - 1|` is not one, so `abs(x - 1)` keeps
         the call spelling (the grammar reads `|x - 1|` on input too);
         every string this returns folds back to the same `abs(...)`
-        calls under `_fold_bars`. The scan is by balanced parens
+        calls under `_fold_bars`. Within `bars_over_matrices`, the
+        `abs` of a matrix keeps the call spelling, since bars around a
+        matrix are its determinant. The scan is by balanced parens
         (`_find_balanced_call`), since an argument can itself contain
         parens, and inner calls are rewritten first, so an outer
         argument holding an inner `|y|` keeps the call spelling too.
     """
+    mats = _BAR_MATRICES.get()
+
     def rewrite(m, args, call_end):
         inner = _abs_calls_to_bars(args)
-        if "|" not in inner and re.fullmatch(_BAR_TOKEN, inner):
+        if "|" not in inner and re.fullmatch(_BAR_TOKEN, inner) \
+                and not (mats and _bars_hold_matrix(inner, mats)):
             return f"|{inner}|"
         return f"abs({inner})"
 

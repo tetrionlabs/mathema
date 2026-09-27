@@ -318,8 +318,11 @@ def array_value_uses(srcs, names, callables=frozenset({"f"})) -> list:
         arithmetic, a comparison, a vocabulary call, or on their own.
         A name only handed to `f` (or a bound function), subscripted,
         measured with `dim`/`len`, or iterated in a comprehension is
-        not a value use.
+        not a value use; a table's column read (`df["returns"]`, when
+        `names` maps the name to `"table"`) is one, since the column
+        is a vector.
     """
+    names_ranks = names if isinstance(names, dict) else {}
     names = set(names)
     found: list = []
     for src in srcs:
@@ -337,8 +340,10 @@ def array_value_uses(srcs, names, callables=frozenset({"f"})) -> list:
             parent = parents.get(id(node))
             if isinstance(parent, ast.keyword):
                 parent = parents.get(id(parent))
-            if parent is not None and _is_pass_through(node, parent,
-                                                       callables):
+            column = (isinstance(parent, ast.Subscript)
+                      and names_ranks.get(node.id) == "table")
+            if parent is not None and not column \
+                    and _is_pass_through(node, parent, callables):
                 continue
             if node.id not in found:
                 found.append(node.id)

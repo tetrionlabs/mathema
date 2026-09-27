@@ -2190,8 +2190,9 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
 
     # `eps`/`epsilon`/`ε` are the claim's tolerance, not parameters to
     # rename
+    from .linalg import VOCABULARY
     excluded = (funcs | {"f", "eps", "epsilon", "ε"} | set(cj.free_vars)
-                | reserved_names())
+                | reserved_names() | VOCABULARY)
     real_params = _ordered_real_param_names(cj, excluded)
 
     param_renames: dict = {}
@@ -2384,7 +2385,26 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     `pi` or `oo` suppresses that constant's usual unicode glyph
     (`π`/`∞`) for this render, printing the plain word instead; see
     `_auto_renames`'s own docstring for why suppressing beats renaming
-    here."""
+    here.
+
+    Bars around a matrix read as its determinant, so the `abs` of a
+    matrix the claim's domain declares keeps its call spelling."""
+    from .grammar import _BAR_MATRICES, bars_over_matrices
+    from .linalg import declared_matrix_names
+    mats = declared_matrix_names(cj.domain) | _BAR_MATRICES.get()
+    with bars_over_matrices(mats):
+        return _render_claim_text(cj, unicode=unicode,
+                                  long_param_threshold=long_param_threshold,
+                                  canonical=canonical)
+
+
+def _render_claim_text(cj, *, unicode: bool | None,
+                       long_param_threshold: int,
+                       canonical: bool) -> str:
+    """Intent:
+        `render_claim_text`'s rendering, under whatever bar reading
+        `grammar.bars_over_matrices` has set.
+    """
     from .grammar import get_unicode_output, render_domain, render_law_expr
     from ._providers import get_provider, report_provider_failure
     from ._scan import sub_outside_strings

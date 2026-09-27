@@ -1218,6 +1218,9 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         return one(p, "float", bound)
 
     def one(p: str, k: str, bounds) -> str:
+        if k == "table":
+            return ("Table(equal-length columns, len∈[2,8], each drawn "
+                    "as a free Seq)")
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
                 and not bounds.excluded):

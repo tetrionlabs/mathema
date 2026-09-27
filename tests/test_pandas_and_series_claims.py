@@ -155,7 +155,16 @@ def test_a_returned_dataframe_compares_element_by_element(same, shifted,
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 
-def test_the_scalar_derive_route_never_reads_a_column():
-    p = _one(column_pandas, "for c in [-2, 2], f(df, c) == c * df.returns",
-             "derive")
+@pytest.mark.parametrize("law", [
+    "for c in [-2, 2], f(df, c) == c * df.returns",
+    'for c in [-2, 2], f(df, c) == c * df["returns"]',
+])
+def test_the_scalar_derive_route_never_reads_a_column(law):
+    p = _one(column_pandas, law, "derive")
     assert p.verdict == "unknown", (p.verdict, p.note)
+
+
+def test_the_sampling_note_says_a_table_was_drawn():
+    p = _one(column_pandas, "for c in [-2, 2], f(df, c) == c * df.returns",
+             "probe")
+    assert "df~Table(" in p.meta["mathema.sampling"], p.meta
