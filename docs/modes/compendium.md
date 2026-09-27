@@ -131,7 +131,10 @@ project does not call keeps its range.
 
 `update` prints every change it makes, and writes nothing with
 `--dry-run`. Run it again and a call its rows already cover changes
-nothing.
+nothing. A rewritten file keeps the comment block at its top; any
+other YAML comment is lost, and `update` warns, naming the file, when
+a file it rewrites (or would, under `--dry-run`) has one. Keep a row's
+annotation in its `note:` field, which survives every rewrite.
 
 ## `export`: publishing a library's verified claims
 
