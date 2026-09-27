@@ -8,6 +8,8 @@ git-diffable render and the four emitters."""
 import json
 import re
 
+import pytest
+
 from mathema.badges import (_SVG_PALETTE, BadgeScores, clarity_score,
                             render_svg, ci_snapshot, render_triangle,
                             repo_badges, shields_payloads, triangle_area,
@@ -461,3 +463,27 @@ def test_is_compendium_safe_is_not_a_clarity_reducer(tmp_path):
     assert clarity_score(mod.root_of, verified_claims=[row],
                          root=str(tmp_path)) == \
         clarity_score(mod.root_of, verified_claims=[], root=str(tmp_path))
+
+
+@pytest.mark.parametrize("family", [
+    "is_computation_safe", "is_repeatable", "is_memory_safe",
+    "is_precision_safe", "is_order_invariant", "is_concurrency_safe",
+    "is_carrier_consistent", "is_compendium_safe"])
+@pytest.mark.parametrize("verdict, route", [
+    ("proven", "derive"), ("holds", "probe"), ("falsified", "probe")])
+def test_a_roll_up_or_reserved_family_credits_no_clarity_source(
+        tmp_path, family, verdict, route):
+    mod = _load(tmp_path, f"bc_rollup_{family}",
+                "def double(x: float) -> float:\n"
+                "    '''Twice.'''\n"
+                "    return 2.0 * x\n")
+    row = {"name": family, "statement": f"{family}(f)",
+           "verdict": verdict, "route": route}
+    assert clarity_score(mod.double, verified_claims=[row]) == \
+        clarity_score(mod.double, verified_claims=[])
+
+
+def test_every_reserved_family_is_named_as_crediting_no_source():
+    from mathema.badges import _NO_SOURCE
+    from mathema.claim_families import RESERVED_FAMILIES
+    assert set(RESERVED_FAMILIES) <= _NO_SOURCE
