@@ -41,12 +41,27 @@ jobs:
       # by docs_hooks/language_reference.py. The repository is private
       # until release, so the checkout needs a token that can read it; a
       # build without one (a fork's pull request) checks the site alone.
+      # the ref is the variable when set, else the package's latest
+      # release tag, else main before its first release
+      - name: resolve the language reference's release
+        id: langref
+        if: ${{ env.LANGUAGE_DOCS_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ env.LANGUAGE_DOCS_TOKEN }}
+          PINNED: ${{ vars.MATHEMA_LANGUAGE_DOCS_REF }}
+        run: |
+          ref="$PINNED"
+          if [ -z "$ref" ]; then
+            ref=$(gh api repos/tetrionlabs/mathema-language/tags --paginate --jq '.[].name' \
+                  | grep -E '^v[0-9]' | sort -V | tail -n 1)
+          fi
+          echo "ref=${ref:-main}" >> "$GITHUB_OUTPUT"
       - name: fetch the language reference
         if: ${{ env.LANGUAGE_DOCS_TOKEN != '' }}
         uses: actions/checkout@v4
         with:
           repository: tetrionlabs/mathema-language
-          ref: ${{ vars.MATHEMA_LANGUAGE_DOCS_REF || 'main' }}
+          ref: ${{ steps.langref.outputs.ref }}
           path: _external/mathema-language
           token: ${{ env.LANGUAGE_DOCS_TOKEN }}
           sparse-checkout: docs
