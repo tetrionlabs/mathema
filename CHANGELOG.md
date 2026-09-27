@@ -8,6 +8,10 @@ Notable changes to mathema are recorded here from its first public release onwar
   with the `string-domain-missing` gap, naming the parameter and the
   spelling that fixes it, as the automatic probes already were; it used
   to draw real numbers for the string and falsify on them.
+- A function whose parameters are all strings and which returns no
+  number is no longer offered `is_numerically_stable` among its
+  suggested claims; it keeps the arbitrary-input family and the purity
+  claims.
 - A parameter's kind is read through a quoted annotation (every one under
   `from __future__ import annotations`), `typing.`, `Optional[...]` and a
   union with `None`, so `Optional[str]` is a string parameter and
