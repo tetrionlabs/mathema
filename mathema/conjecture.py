@@ -566,6 +566,18 @@ def _runtime_det(value) -> float:
     return float(np.linalg.det(np.asarray(value, dtype=float)))
 
 
+def _real_or_complex(real_fn, complex_fn):
+    """A law function that computes a complex argument (a Python or
+    numpy complex) with its `cmath` counterpart and anything else with
+    its `math` one."""
+    def call(v):
+        if isinstance(v, complex):
+            return complex_fn(complex(v))
+        return real_fn(v)
+    call.__name__ = getattr(real_fn, "__name__", "call")
+    return call
+
+
 _SAFE_FUNCS = {
     "abs": abs, "min": min, "max": max, "len": len, "sum": sum,
     "dim": _runtime_dim, "det": _runtime_det,
@@ -578,9 +590,16 @@ _SAFE_FUNCS = {
     # Abs/Min/Max synonyms so a claim written that way adjudicates on
     # either route
     "Abs": abs, "Min": min, "Max": max,
-    "sqrt": math.sqrt, "exp": math.exp, "log": math.log,
-    "log10": math.log10, "log2": math.log2,
-    "sin": math.sin, "cos": math.cos, "tan": math.tan,
+    # over C (a complex argument) each elementary function is its
+    # principal complex value, as the derive route reads it
+    "sqrt": _real_or_complex(math.sqrt, _cmath.sqrt),
+    "exp": _real_or_complex(math.exp, _cmath.exp),
+    "log": _real_or_complex(math.log, _cmath.log),
+    "log10": _real_or_complex(math.log10, _cmath.log10),
+    "log2": _real_or_complex(math.log2, lambda z: _cmath.log(z, 2)),
+    "sin": _real_or_complex(math.sin, _cmath.sin),
+    "cos": _real_or_complex(math.cos, _cmath.cos),
+    "tan": _real_or_complex(math.tan, _cmath.tan),
     "norm": abs,   # see symbolic.py's _SYMPY_FUNCS: same placeholder scope
     "floor": math.floor, "ceil": math.ceil,
     # parity with _math_vocab._SYMPY_FUNCS (the derive route's own
@@ -593,8 +612,12 @@ _SAFE_FUNCS = {
     # object; math.gamma's own pole raises at non-positive integers
     # behave like any other raising sample.
     "factorial": lambda v: math.gamma(v + 1),
-    "asin": math.asin, "acos": math.acos, "atan": math.atan,
-    "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh,
+    "asin": _real_or_complex(math.asin, _cmath.asin),
+    "acos": _real_or_complex(math.acos, _cmath.acos),
+    "atan": _real_or_complex(math.atan, _cmath.atan),
+    "sinh": _real_or_complex(math.sinh, _cmath.sinh),
+    "cosh": _real_or_complex(math.cosh, _cmath.cosh),
+    "tanh": _real_or_complex(math.tanh, _cmath.tanh),
     "gamma": math.gamma, "lgamma": math.lgamma,
     "erf": math.erf, "erfc": math.erfc,
     # complex accessors (the derive route's re/im/conjugate/arg): each
@@ -3398,11 +3421,13 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     companions = [p for p in probes if p.name not in link_names]
     if combined.verdict != "proven" or len(companions) != len(links):
         return combined, None
+    from .gates import companion_carrier
+    descriptor, _carrier, carrier_word = companion_carrier(cj.domain)
     companion = _combine_conjunction(
-        companions, companion_name(cj.name), _chain_statement(cj), labels,
-        what="float companion")
-    companion.note = (f"the computation of {cj.name} in float64, executed "
-                      f"link by link; {companion.note}")
+        companions, companion_name(cj.name, descriptor), _chain_statement(cj),
+        labels, what="float companion")
+    companion.note = (f"the computation of {cj.name} in {carrier_word}, "
+                      f"executed link by link; {companion.note}")
     broken = next((p for p in companions if p.verdict == "falsified"), None)
     if broken is not None:
         companion.stratum = broken.stratum
@@ -3913,7 +3938,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
             note = (f"{note}; let-declared free variable(s) {resolved} "
                    f"match real parameter(s) of this function, deferred "
                    f"to the real parameter's own kind")
-    if cj.relation in ("<=", ">="):
+    if cj.relation in ("<=", ">=", "<", ">"):
         complex_typed = sorted(
             p for p, bound in cj_domain.items()
             if bound == "C" or getattr(bound, "base_type", None) == "C")
@@ -5663,14 +5688,22 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             rel_tol=_declared_rel_tol(cj))
         if ok is None:
             # structurally unanswerable on this route: an ordering over
-            # values that do not order (a complex return), or two
+            # values that do not order (a complex value), or two
             # matrices of mismatched shape. Not falsified, not a bad
             # sample; skip, as the derive route refuses the same.
+            # Equality and closeness over complex values are answered.
+            if is_complex_value(lv) or is_complex_value(rv):
+                why = (f"; ordering ({cj.relation}) over complex values "
+                       f"isn't meaningful ({type(lv).__name__} vs "
+                       f"{type(rv).__name__}), only equality and "
+                       f"closeness are")
+            else:
+                why = (f"; {cj.relation} over {type(lv).__name__} vs "
+                       f"{type(rv).__name__} values isn't meaningful as a "
+                       f"single verdict (mismatched matrix shapes, or "
+                       f"values that do not compare)")
             return Probe(cj.name, statement, "skipped", route="probe",
-                         note=note + f"; ordering ({cj.relation}) over "
-                              f"{type(lv).__name__} vs {type(rv).__name__} "
-                              f"values isn't meaningful as a single verdict "
-                              f"(a complex value, or mismatched matrix shapes)")
+                         note=note + why)
         if ok and cj.tolerance is None:
             gap = ordering_shortfall(lv, rv, cj.relation)
             if gap > absorbed:

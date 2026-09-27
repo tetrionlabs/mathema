@@ -203,6 +203,42 @@ def _inline_lambdas(stmt: ast.stmt, lambdas: dict) -> ast.stmt:
 _COMPLEX_OUT: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_complex_regions", default=None)
 
+# the names of the parameters the walk's domain binds to C
+_COMPLEX_NAMES: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_complex_names", default=frozenset())
+
+
+def _complex_typed(expr) -> bool:
+    """Intent:
+        Whether a lifted call argument is complex-typed: known not to
+        be real (`is_extended_real is False`), or reading a symbol
+        created complex (a `complex`-annotated parameter) or a
+        parameter the walk's domain binds to C.
+    """
+    if isinstance(expr, tuple) or not isinstance(expr, sympy.Basic):
+        return False
+    if expr.is_extended_real is False:
+        return True
+    names = _COMPLEX_NAMES.get()
+    return any((sym.is_complex and sym.is_extended_real is not True)
+               or str(sym) in names for sym in expr.free_symbols)
+
+
+def _lemma_applies(condition, args: list) -> bool:
+    """Intent:
+        Whether a registered lemma speaks for a call with these
+        arguments: a region stated with an ordering (`applies_to ==
+        "real"`, a compendium `is_defined: x >= 0` row) is a statement
+        over real inputs and does not apply at a complex-typed
+        argument; a region over C (`"complex"`) applies only at one;
+        any other lemma always applies.
+    """
+    applies_to = getattr(condition, "applies_to", "all")
+    if applies_to == "all":
+        return True
+    complex_arg = any(_complex_typed(a) for a in args)
+    return complex_arg if applies_to == "complex" else not complex_arg
+
 
 def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
                     scope: dict, missed: "list | None" = None,
@@ -265,6 +301,8 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
                 break
             try:
                 args = [_expr_to_sympy(a, dict(env)) for a in node.args]
+                if not _lemma_applies(condition, args):
+                    continue
                 region = condition(*args)
             except TimeoutError:
                 raise
@@ -600,9 +638,13 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                 stop(stmt)
                 return
     token = _COMPLEX_OUT.set(complex_out)
+    names_token = _COMPLEX_NAMES.set(frozenset(
+        name for name, bound in (domain or {}).items()
+        if bound == "C" or getattr(bound, "base_type", None) == "C"))
     try:
         walk(strip_docstring(facts.tree.body), sympy.true, dict(params))
     finally:
+        _COMPLEX_NAMES.reset(names_token)
         _COMPLEX_OUT.reset(token)
     first = (unread or missed or [None])[0]
     return guards, first

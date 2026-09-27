@@ -2711,8 +2711,19 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                                      if shape == "matrix" else [])}
 
     def corners():
+        from .probing import _bound_is_complex
+        from .representations import PY_COMPLEX128
         for p in params:
             if p in call_pins:
+                continue
+            if _bound_is_complex((domain or {}).get(p)):
+                # the plane's far points on both axes, at the reach
+                span = reach.get(p)
+                r = (max(abs(span[0]), abs(span[1])) if span is not None
+                     else float(PY_COMPLEX128.max_magnitude or 0.0))
+                for v in (complex(-r, 0.0), complex(r, 0.0),
+                          complex(0.0, -r), complex(0.0, r)):
+                    yield {**draw(), p: v}
                 continue
             ends = reach.get(p) or _interval_ends((domain or {}).get(p))
             if ends is None:

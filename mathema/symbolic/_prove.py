@@ -1385,8 +1385,8 @@ def _witness_candidates(ext_params: dict, domain: dict) -> "tuple | None":
     """Intent:
         Exact candidate witness points over the declared box: the
         midpoint, then the all-low and all-high corners; an unbounded
-        name sits at 1. Returns (points, base) or None when a bound's
-        endpoints can't be read at all.
+        name, or one ranging over C, sits at 1. Returns (points, base)
+        or None when a bound's endpoints can't be read at all.
     """
     from ._proof_support import _exact_endpoint
     from ..domain import bound_to_sympy_set
@@ -1400,6 +1400,10 @@ def _witness_candidates(ext_params: dict, domain: dict) -> "tuple | None":
             continue
         try:
             sset = bound_to_sympy_set(bound)
+            if sset == sympy.S.Complexes:
+                # the plane has no endpoints: like an unbounded name
+                base[sym] = sympy.Integer(1)
+                continue
             lo, hi = _exact_endpoint(sset.inf), _exact_endpoint(sset.sup)
         except TimeoutError:
             raise
@@ -1649,6 +1653,10 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
         # `G < 0` guards the hull straddles
         truth = _relational_truth_over_domain(cond, domain, ext_params)
         if truth is False:
+            continue
+        if isinstance(cond, sympy.Eq) and _roots_outside_domain(cond, domain):
+            # every point where the guard holds is excluded from the
+            # domain (`z == 0` over `C \ {0}`)
             continue
         if assumptions.excludes_guard(cond, domain, ext_params):
             continue
@@ -2255,8 +2263,8 @@ def _kink_in_domain(loci: list, domain: dict) -> "str | None":
 
 def _roots_outside_domain(locus, domain: dict) -> bool:
     """Whether an equality over a single declared parameter has finitely
-    many real roots, none of them inside that parameter's declared
-    bound."""
+    many roots, none of them inside that parameter's declared bound:
+    its real roots, or over C its complex ones."""
     from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     from ..domain import domain_contains
     if not isinstance(locus, sympy.Eq) or len(locus.free_symbols) != 1:
@@ -2265,10 +2273,13 @@ def _roots_outside_domain(locus, domain: dict) -> bool:
     bound = domain.get(str(sym))
     if bound is None:
         return False
+    from ..probing import _bound_is_complex
+    plane = _bound_is_complex(bound)
     try:
         roots = _with_timeout(
-            lambda: sympy.solveset(locus.lhs - locus.rhs, sym,
-                                   domain=sympy.S.Reals),
+            lambda: sympy.solveset(
+                locus.lhs - locus.rhs, sym,
+                domain=sympy.S.Complexes if plane else sympy.S.Reals),
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
         return False
@@ -2276,8 +2287,15 @@ def _roots_outside_domain(locus, domain: dict) -> bool:
         return False
     if not isinstance(roots, sympy.FiniteSet):
         return False
+
+    def number(r):
+        # a root on the real line as the real number it is, else complex
+        value = complex(r)
+        if value.imag != 0:
+            return value
+        return int(value.real) if value.real.is_integer() else value.real
     try:
-        return not any(domain_contains(float(r), bound) for r in roots)
+        return not any(domain_contains(number(r), bound) for r in roots)
     except Exception:
         return False
 

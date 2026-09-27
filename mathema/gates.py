@@ -94,8 +94,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     import math
     from .domain import (_as_int_if_whole, bound_to_sympy_set,
                          domain_contains, is_missing, operational_domain)
-    from .probing import (ComplexResult, _synth, complex_is_a_raise,
-                          holds_nan, is_complex_value, same_infinity)
+    from .probing import (ComplexResult, _bound_is_complex, _fmt_value, _synth,
+                          complex_is_a_raise, holds_inf, holds_nan,
+                          is_complex_value, same_infinity)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     # the gates verify VALUE claims by calling fn at a point; a
@@ -165,6 +166,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 calls_nonfinite[0] = (
                     f"{label} returned "
                     f"{'nan' if out != out else '-inf' if out < 0 else 'inf'}")
+            elif calls_nonfinite[0] is None and isinstance(out, complex) \
+                    and (holds_nan(out) or holds_inf(out)) \
+                    and _finite_arguments(a, kw):
+                # a NaN or an infinity in either component is no value
+                calls_nonfinite[0] = (
+                    f"{label} returned nan" if holds_nan(out) else
+                    f"{label} returned {_fmt_value(complex(out))}")
             return out
         return _wrapped
 
@@ -188,6 +196,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     int_names = {name for name in names
                  if _integer_bound(cj_domain.get(name))
                  or kinds.get(name) in ("int", "bool")}
+    # coordinates the claim quantifies over the complex plane: drawn,
+    # cornered and compared as complex values
+    complex_names = {name for name in names
+                     if _bound_is_complex(cj_domain.get(name))}
 
     def _typed(point):
         # a whole-number coordinate of an integer domain is passed as an
@@ -214,10 +226,20 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # abs(inf - inf) = NaN; abs-difference is only for the finite
         # case.
         rel = cj.relation
-        both_finite = all(abs(v) != float("inf") for v in (lv, rv))
         if same_infinity(lv, rv):
             # one extended-real point: equal, so no strict order
             return rel in ("==", "~=", "<=", ">=")
+        if isinstance(lv, complex) or isinstance(rv, complex):
+            # over C equality and closeness compare by abs(lv - rv);
+            # ordering has no complex reading
+            finite = not any(holds_inf(v) for v in (lv, rv))
+            close = lv == rv or (finite and abs(lv - rv) <= tol)
+            if rel in ("==", "~="):
+                return close
+            if rel == "!=":
+                return not (lv == rv) if cj.tolerance is None else not close
+            return None
+        both_finite = all(abs(v) != float("inf") for v in (lv, rv))
         if rel in ("==", "~="):
             return lv == rv or (both_finite and abs(lv - rv) <= tol)
         if rel == "!=":
@@ -245,6 +267,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return (isinstance(v, (int, float)) and not isinstance(v, bool)
                 and v == v)
 
+    def _complex_pair(lv, rv):
+        # two numbers, at least one of them complex
+        return (any(isinstance(v, complex) for v in (lv, rv))
+                and all(isinstance(v, (int, float, complex))
+                        and not isinstance(v, bool) for v in (lv, rv)))
+
     def evaluate(point):
         _reset()
         try:
@@ -264,6 +292,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if _same_no_value(lv, rv):
                 return cj.relation in ("==", "~=", "<=", ">=")
             return False
+        if _complex_pair(lv, rv) and not (holds_nan(lv) or holds_nan(rv)):
+            if (holds_inf(lv) or holds_inf(rv)) and not calls_nonfinite[0]:
+                # an infinity only the law's own arithmetic produced
+                return None
+            return _relation_holds(lv, rv, slack)
         if _real(lv) and _real(rv):
             if (abs(lv) == float("inf") or abs(rv) == float("inf")) \
                     and not calls_nonfinite[0]:
@@ -331,9 +364,20 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                         f"({calls_nonfinite[0]})")
             return (f"{calls_nonfinite[0]}, and an infinity for a finite "
                     f"input is no value")
-        for v in (lv, rv):
-            if isinstance(v, complex):
+        if _complex_pair(lv, rv):
+            # over C: equality and closeness within a magnitude-scaled
+            # tolerance; an infinity or a NaN only the law's own
+            # arithmetic produced says nothing about the code
+            if holds_nan(lv) or holds_nan(rv) or holds_inf(lv) \
+                    or holds_inf(rv) or cj.relation not in ("==", "~=", "!="):
                 return None
+            scaled = slack + 1e-7 * max(abs(lv), abs(rv), 1.0)
+            if _relation_holds(lv, rv, scaled):
+                return None
+            return (f"the relation fails on the executed values "
+                    f"({_fmt_value(complex(lv))} {cj.relation} "
+                    f"{_fmt_value(complex(rv))}), past the magnitude-scaled "
+                    f"tolerance: precision loss")
         if any(isinstance(v, float) and v != v for v in (lv, rv)):
             return ("the computation returns NaN here"
                     if calls_nonfinite[0] else None)
@@ -392,6 +436,22 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         if name in seq_names:
             # a sequence's declared bound is per element
             return _synth("sequence", rng, b)
+        if name in complex_names:
+            # both components, each inside the pseudo-infinity range
+            # when one applies
+            b = cj_domain.get(name)
+            if isinstance(b, tuple):
+                c1, c2 = complex(b[0]), complex(b[1])
+                z = complex(rng.uniform(min(c1.real, c2.real),
+                                        max(c1.real, c2.real)),
+                            rng.uniform(min(c1.imag, c2.imag),
+                                        max(c1.imag, c2.imag)))
+            else:
+                z = complex(_synth("complex", rng, b))
+            if cap is None:
+                return z
+            return complex(min(max(z.real, cap_lo), cap_hi),
+                           min(max(z.imag, cap_lo), cap_hi))
         if reach is not None and cap is None:
             ends = (-math.inf, math.inf) if b is None else _ends(b)
             if ends is not None and (math.isinf(ends[0]) or math.isinf(ends[1])):
@@ -416,6 +476,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             bound = cj_domain.get(n)
             v = point.get(n)
             if bound is None or v is None or n in seq_names:
+                continue
+            if isinstance(v, complex):
+                if not domain_contains(v, bound):
+                    return False
                 continue
             try:
                 fv = float(v)
@@ -465,16 +529,38 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # a sequence's corner is a short list at the per-element edge
         return [value] * 3 if name in seq_names else value
 
-    edges = {n: (_endpoint(n, "lo"), _endpoint(n, "hi")) for n in names}
+    def _complex_corners(name):
+        # a rectangle's four corners, else the plane's far points on
+        # both axes (+-R, +-R*1j at the cap or reach), an excluded
+        # point left out
+        bound = cj_domain.get(name)
+        pieces = (getattr(bound, "pieces", None) or
+                  ((bound,) if isinstance(bound, tuple) else ()))
+        rect = next((p for p in pieces if isinstance(p, tuple)
+                     and any(isinstance(v, complex) for v in p)), None)
+        if rect is not None:
+            c1, c2 = complex(rect[0]), complex(rect[1])
+            points = [complex(re, im) for re in (c1.real, c2.real)
+                      for im in (c1.imag, c2.imag)]
+        else:
+            r = max(abs(cap_lo), abs(cap_hi))
+            points = [complex(-r, 0.0), complex(r, 0.0),
+                      complex(0.0, -r), complex(0.0, r)]
+        kept = [z for z in dict.fromkeys(points)
+                if bound is None or domain_contains(z, bound)]
+        return kept or points[:1]
+
+    edges = {n: (_complex_corners(n) if n in complex_names else
+                 [_endpoint(n, "lo"), _endpoint(n, "hi")]) for n in names}
     if len(names) <= 6:
-        # every corner of the box: 2^k points for k coordinates
+        # every corner of the box: 2^k points for k real coordinates
+        # (four per complex coordinate)
         import itertools
-        corners = [{n: _corner_value(n, e[i]) for n, e, i in
-                    zip(names, (edges[n] for n in names), choice)}
-                   for choice in itertools.product((0, 1), repeat=len(names))]
+        corners = [{n: _corner_value(n, v) for n, v in zip(names, choice)}
+                   for choice in itertools.product(*(edges[n] for n in names))]
     else:
-        corners = [{n: _corner_value(n, edges[n][i]) for n in names}
-                   for i in (0, 1)]
+        corners = [{n: _corner_value(n, edges[n][min(i, len(edges[n]) - 1)])
+                    for n in names} for i in (0, 1)]
 
     # this dict is the point-runtime kit; `interfaces.runtime` states
     # its contract (and the narrower obligation of a foreign runner
@@ -729,9 +815,25 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
     return falsified
 
 
-def companion_name(parent_name: str) -> str:
-    """The name of a claim's float companion: `<parent name>[float]`."""
-    return f"{parent_name}{FLOAT_SUFFIX}"
+def companion_name(parent_name: str, descriptor: str = "float") -> str:
+    """The name of a claim's computation companion: `<parent
+    name>[float]`, or `<parent name>[complex]` for a claim over C."""
+    return f"{parent_name}[{descriptor}]"
+
+
+def companion_carrier(cj_domain: "dict | None") -> tuple:
+    """Intent:
+        The carrier a claim's companion computes in, as `(descriptor,
+        representation, carrier name)`: complex128 (`("complex",
+        PY_COMPLEX128, "complex128")`) when the claim's domain binds a
+        coordinate in C, else float64 (`("float", PY_FLOAT64,
+        "float64")`).
+    """
+    from .probing import _bound_is_complex
+    from .representations import PY_COMPLEX128, PY_FLOAT64
+    if any(_bound_is_complex(b) for b in (cj_domain or {}).values()):
+        return "complex", PY_COMPLEX128, "complex128"
+    return "float", PY_FLOAT64, "float64"
 
 
 def companion_descriptor(name: str) -> tuple[str, ...]:
@@ -826,12 +928,15 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     from .records import operational_infinity, operational_range
     resolved = operational_infinity(cj)
     cap = operational_range(cj)
+    descriptor, carrier, carrier_word = companion_carrier(cj_domain)
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
-                            cap=cap, reach=carrier_reach(), sequences=True)
+                            cap=cap, reach=carrier.max_magnitude,
+                            sequences=True)
     if deps is None:
         return None
-    name = companion_name(parent.name)
-    reach = cap if cap is not None else (-carrier_reach(), carrier_reach())
+    name = companion_name(parent.name, descriptor)
+    top = float(carrier.max_magnitude or carrier_reach())
+    reach = cap if cap is not None else (-top, top)
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
     interior = (C._CORROBORATION_BUDGET if budget is None
                 else max(0, int(budget) - len(deps["corners"])))
@@ -850,12 +955,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         return Probe(
             name, parent.statement, "unknown", route="probe",
             n=progress.checked,
-            note=f"the computation of {parent.name} in float64; "
+            note=f"the computation of {parent.name} in {carrier_word}; "
                  f"the sweep hit the {FAST_TIMEOUT_SECONDS}s wall-clock cap"
                  + (f" executing {at}" if at else "")
                  + (f"; {reach_text}" if reach_text else ""),
             meta={"mathema.timeout": "fast"})
-    what = (f"the computation of {parent.name} in float64, executed at "
+    what = (f"the computation of {parent.name} in {carrier_word}, executed at "
             f"{sweep.checked} points (every domain corner, then sampled "
             f"interior points)"
             + (f"; {reach_text}" if reach_text else ""))
@@ -882,7 +987,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             # evidence that the mathematics is sound and the code is not
             stratum={"mathematics": "sound", "blame": "implementation",
                      "cause": "implementation:numerical-instability",
-                     "representation": "f64", "witness": pt})
+                     "representation": carrier.tag, "witness": pt})
     if sweep.checked == 0:
         return Probe(name, parent.statement, "skipped", route="probe",
                      note=f"{what}; no in-domain point satisfied the "

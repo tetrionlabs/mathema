@@ -139,7 +139,9 @@ def test_a_library_key_keeps_its_docstring_intent_and_exports_row_notes(
                     f"sys.exit(main(['verify', '--root', {str(tmp_path)!r}]))"],
                    capture_output=True, text=True, env=env)
     from mathema.compendium import load_library_claims
-    (bundled,) = load_library_claims(None)["numpy.arcsin"]["entry"]["claims"]
+    (bundled,) = [r for r in
+                  load_library_claims(None)["numpy.arcsin"]["entry"]["claims"]
+                  if r["name"] == "is_defined"]
     store = tmp_path / ".mathema" / "verified"
     entry = yaml.safe_load(
         (store / "numpy.arcsin.yaml").read_text())["numpy.arcsin"]

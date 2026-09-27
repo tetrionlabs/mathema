@@ -781,12 +781,17 @@ class _RowRegion(NamedTuple):
     `raises` row. On the computation stratum `label` is the family name
     and `region` the stated region where the computation is safe in
     that respect (`is_overflow_safe`), or the exception name and the
-    region where the call raises it (a machine-failure `raises` row)."""
+    region where the call raises it (a machine-failure `raises` row).
+    `applies_to` names the arguments the region speaks for: `"real"`
+    for a region stated with an ordering (`x >= 0` has no complex
+    reading), `"complex"` for a row over C (`for x in C \\ {0},
+    is_defined(f)`), `"all"` otherwise (`x2 != 0`)."""
     params: list
     region: object
     label: str
     stratum: str
     texts: list
+    applies_to: str = "all"
 
 
 def _machine_failure_types() -> frozenset:
@@ -829,8 +834,12 @@ def _row_region(key: str, row: dict) -> "_RowRegion | None":
     except Exception as e:
         raise _Unbuildable(f"the statement does not parse ({e})") from None
     kind = region_row_kind(name)
+    if cj.relation == "is_defined":
+        # the bare form (`is_defined(f)`): totality over its domain.
+        # Over C less some points, those points have no value at a
+        # complex argument; anything else states no region
+        return _complex_row_region(key, cj)
     if kind is not None and cj.relation == kind:
-        # the bare form (`is_defined(f)`): totality, no region to state
         return None
     if kind is not None and cj.relation != "raises":
         links = cj.links or [(cj.lhs, cj.relation, cj.rhs)]
@@ -847,8 +856,10 @@ def _row_region(key: str, row: dict) -> "_RowRegion | None":
         texts = [f"{lhs} {rel} {rhs}" for lhs, rel, rhs in links]
         if REGION_ROW_STRATA[kind] == "computation":
             return _RowRegion(params, region, kind, "computation", texts)
+        ordering = any(rel in ("<", "<=", ">", ">=") for _l, rel, _r in links)
         return _RowRegion(params, sympy.Not(region).to_nnf(), NO_VALUE,
-                          "mathematics", texts)
+                          "mathematics", texts,
+                          "real" if ordering else "all")
     if cj.relation != "raises" or not cj.rhs:
         return None
     used = sorted(set(cj.domain) | set(_names_in(cj.assuming or ""))
@@ -878,6 +889,43 @@ def _row_region(key: str, row: dict) -> "_RowRegion | None":
     return _RowRegion(params, sympy.And(*parts), exc_name, stratum, texts)
 
 
+def _complex_row_region(key: str, cj) -> "_RowRegion | None":
+    """Intent:
+        The region a bare `is_defined(f)` row over C states: the points
+        its domain excludes (`for x in C \\ {0}, is_defined(f)`), where
+        the call has no value at a complex argument, as a mathematics
+        guard that applies to complex arguments only. None for a row
+        whose domain binds nothing in C or excludes nothing.
+    """
+    import sympy
+
+    from ..symbolic._partiality import NO_VALUE
+    parts = []
+    names = []
+    for p, bound in (cj.domain or {}).items():
+        if getattr(bound, "base_type", None) != "C" and bound != "C":
+            continue
+        excluded = sorted((v for v in getattr(bound, "excluded", ())
+                           if isinstance(v, (int, float, complex))
+                           and not isinstance(v, bool)),
+                          key=lambda v: (complex(v).real, complex(v).imag))
+        if excluded:
+            names.append(p)
+            parts.append((p, excluded))
+    if not parts:
+        return None
+    params = _signature_params(key, names)
+    env = {p: sympy.Symbol(p, real=True) for p in params}
+    stray = [p for p in names if p not in env]
+    if stray:
+        raise _Unbuildable(f"{', '.join(stray)} is not a parameter of {key}")
+    region = sympy.Or(*[sympy.Eq(env[p], sympy.sympify(v))
+                        for p, excluded in parts for v in excluded])
+    texts = [f"{p} != {v}" for p, excluded in parts for v in excluded]
+    return _RowRegion(params, region, NO_VALUE, "mathematics", texts,
+                      "complex")
+
+
 def _names_in(text: str) -> list:
     """The identifiers a relation text reads that are not calls."""
     import re
@@ -887,10 +935,12 @@ def _names_in(text: str) -> list:
                               "inf", "oo", "pi", "e", "E")]
 
 
-def _builder(params: list, region):
+def _builder(params: list, region, applies_to: str = "all"):
     """The callable the partiality registry takes: the call's
     positional arguments (sympy expressions) substituted for the row's
-    parameter symbols."""
+    parameter symbols. Its `applies_to` attribute names the arguments
+    the region speaks for (`_RowRegion.applies_to`), read by the
+    partiality walk."""
     import sympy
     syms = [sympy.Symbol(p, real=True) for p in params]
     needed = {i for i, s in enumerate(syms) if s in region.free_symbols}
@@ -900,6 +950,7 @@ def _builder(params: list, region):
             return sympy.false
         return region.subs({syms[i]: args[i] for i in needed},
                            simultaneous=True)
+    build.applies_to = applies_to  # type: ignore[attr-defined]
     return build
 
 
@@ -975,7 +1026,7 @@ def register_library_claims(root: "str | None" = ".") -> list:
                     "source": _row_source(info)})
                 names.append((key, str(row.get("name"))))
                 continue
-            build = _builder(built.params, built.region)
+            build = _builder(built.params, built.region, built.applies_to)
             register_raises_when(key, build, built.label)
             rows.append((key, build))
             names.append((key, str(row.get("name"))))

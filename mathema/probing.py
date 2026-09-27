@@ -542,18 +542,24 @@ def call_arguments(fn, params, values: dict) -> "tuple[list, dict]":
 
 def holds_nan(value) -> bool:
     """True when a value is a NaN or contains one: a Python or numpy
-    float NaN, or a NaN element of a numpy array or a nested list or
-    tuple. A value that is not numeric at all holds no NaN."""
+    float NaN, a complex value with a NaN component, or a NaN element
+    of a numpy array or a nested list or tuple. A value that is not numeric at all holds no NaN."""
     if isinstance(value, bool):
         return False
     if isinstance(value, float):
         return value != value
+    if isinstance(value, complex):
+        # no value when either component is a NaN
+        return value.real != value.real or value.imag != value.imag
     if isinstance(value, (list, tuple)):
         return any(holds_nan(v) for v in value)
     if hasattr(value, "dtype") and hasattr(value, "shape"):
         try:
             import numpy
-            return bool(numpy.isnan(numpy.asarray(value, dtype=float)).any())
+            arr = numpy.asarray(value)
+            if arr.dtype.kind != "c":
+                arr = arr.astype(float)
+            return bool(numpy.isnan(arr).any())
         except (TypeError, ValueError, ImportError):
             return False
     return False
@@ -563,13 +569,16 @@ def holds_inf(value) -> int:
     """Intent:
         The sign of an infinity a value is or contains: 1 for `inf`, -1
         for `-inf` (when both occur, the first found), 0 for none. Reads
-        Python and numpy floats, numpy arrays, and nested lists and
+        Python and numpy floats, complex values (the real part, then
+        the imaginary part), numpy arrays, and nested lists and
         tuples; a value that is not numeric holds no infinity.
     """
     if isinstance(value, bool):
         return 0
     if isinstance(value, float):
         return (1 if value > 0 else -1) if value in (_INF, -_INF) else 0
+    if isinstance(value, complex):
+        return holds_inf(value.real) or holds_inf(value.imag)
     if isinstance(value, (list, tuple)):
         for v in value:
             sign = holds_inf(v)
@@ -579,7 +588,11 @@ def holds_inf(value) -> int:
     if hasattr(value, "dtype") and hasattr(value, "shape"):
         try:
             import numpy
-            arr = numpy.asarray(value, dtype=float)
+            arr = numpy.asarray(value)
+            if arr.dtype.kind == "c":
+                arr = numpy.concatenate([arr.real.ravel(), arr.imag.ravel()])
+            else:
+                arr = arr.astype(float)
             found = arr[numpy.isinf(arr)]
         except (TypeError, ValueError, ImportError):
             return 0
@@ -595,6 +608,8 @@ def same_infinity(lv, rv) -> bool:
         Whether two values are the same infinity, inf and inf or -inf
         and -inf: two overflows toward one infinity are the same
         extended-real point, so the computation is consistent there.
+        Two complex values are the same point only when both
+        components agree, one of them infinite.
         A NaN is the absence of a value and never the same as anything,
         another NaN included; a finite value is not an infinity.
     """
@@ -602,6 +617,16 @@ def same_infinity(lv, rv) -> bool:
         if isinstance(v, bool) or not isinstance(v, float):
             return 0
         return 1 if v == _INF else -1 if v == -_INF else 0
+    if isinstance(lv, complex) or isinstance(rv, complex):
+        # one point of the plane only when both components agree, an
+        # infinite one among them and no NaN in either
+        if not all(isinstance(v, (int, float, complex))
+                   and not isinstance(v, bool) for v in (lv, rv)):
+            return False
+        a, b = complex(lv), complex(rv)
+        if holds_nan(a) or holds_nan(b) or not holds_inf(a):
+            return False
+        return a.real == b.real and a.imag == b.imag
     return sign(lv) != 0 and sign(lv) == sign(rv)
 
 
@@ -617,7 +642,12 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     shapes), which the caller reads as skip, never falsify.
     `exact_inequality` makes `!=` compare exactly (see
     `_scalar_relation`), and `rel_tol` is the relative allowance `==`
-    and a toleranced `!=` get on top of `slack`."""
+    and a toleranced `!=` get on top of `slack`. A 0-d numpy value (a
+    numpy scalar) is a scalar. Over complex values `==`, `~=` and `!=`
+    compare by `abs(a - b)`, with the tolerance rules of reals; an
+    ordering over a complex value is unanswerable."""
+    lv, rv = (v.item() if getattr(v, "shape", None) == ()
+              and hasattr(v, "item") else v for v in (lv, rv))
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,
@@ -630,10 +660,14 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                            or isinstance(lv, (list, tuple))
                            or isinstance(rv, (list, tuple))):
         try:
-            a = np.asarray(lv, dtype=float)
-            b = np.asarray(rv, dtype=float)
+            kind = complex if (np.iscomplexobj(lv) or np.iscomplexobj(rv)) \
+                else float
+            a = np.asarray(lv, dtype=kind)
+            b = np.asarray(rv, dtype=kind)
         except Exception:
             return None
+        if kind is complex and relation not in ("==", "~=", "!="):
+            return None     # an ordering over complex values
         try:
             if relation in ("==", "~="):
                 return bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
@@ -772,6 +806,18 @@ def ordering_shortfall(lv, rv, relation: str) -> float:
 # importers of mathema.probing.
 
 
+def _complex_component(rng: random.Random) -> float:
+    """One part of a complex draw: uniform on [-10, 10], or with the
+    far share a draw along the whole line out to complex128's
+    per-component maximum (`_sampling._far_draw`)."""
+    from ._sampling import _FAR_SHARE, _far_draw
+    from .representations import PY_COMPLEX128
+    if rng.random() < _FAR_SHARE:
+        reach = float(PY_COMPLEX128.max_magnitude or 0.0)
+        return _far_draw(rng, -reach, reach, True, True)
+    return rng.uniform(-10, 10)
+
+
 def _sample_bare_named_set(rng: random.Random, name: str):
     if name == "Z":
         return (rng.choice([0, 1, -1, 2, -2]) if rng.random() < 0.3
@@ -779,12 +825,16 @@ def _sample_bare_named_set(rng: random.Random, name: str):
     if name == "N":
         return rng.choice([0, 1, 2]) if rng.random() < 0.3 else rng.randint(0, 1000)
     if name == "C":
-        # a square patch of the plane, with the plane's own landmark
-        # values favored the way the real specials pool favors 0/1/-1.
+        # the plane's own landmark values favored the way the real
+        # specials pool favors 0/1/-1; otherwise the real and the
+        # imaginary part are each drawn from the everyday/far split: a
+        # square patch around the origin, or (the far share) a
+        # magnitude log-uniform over the decades out to complex128's
+        # per-component maximum
         if rng.random() < 0.3:
             return rng.choice([0j, 1 + 0j, -1 + 0j, 1j, -1j,
                                1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j])
-        return complex(rng.uniform(-10, 10), rng.uniform(-10, 10))
+        return complex(_complex_component(rng), _complex_component(rng))
     return rng.uniform(-10, 10)   # "R"
 
 

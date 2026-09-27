@@ -16,55 +16,82 @@ numpy.sqrt:
   claims:
     - name: is_defined
       statement: "x >= 0"
-      note: "Principal square root; a negative input returns nan with a RuntimeWarning, never raises."
+      note: "Over real inputs. Principal square root; a negative input returns nan with a RuntimeWarning, never raises."
+    - name: is_defined_over_complex
+      statement: "for x in C, is_defined(f)"
+      note: "Complex input: the principal square root, defined on the whole plane."
 
 numpy.log:
   claims:
     - name: is_defined
       statement: "x > 0"
-      note: "Natural logarithm; x = 0 returns -inf and x < 0 returns nan, never raises."
+      note: "Over real inputs. Natural logarithm; x = 0 returns -inf and x < 0 returns nan, never raises."
+    - name: is_defined_over_complex
+      statement: "for x in C \\ {0}, is_defined(f)"
+      note: "Complex input: the principal logarithm, defined everywhere but 0, where it returns -inf+0j."
 
 numpy.log2:
   claims:
     - name: is_defined
       statement: "x > 0"
-      note: "Base-2 logarithm; x = 0 returns -inf and x < 0 returns nan."
+      note: "Over real inputs. Base-2 logarithm; x = 0 returns -inf and x < 0 returns nan."
+    - name: is_defined_over_complex
+      statement: "for x in C \\ {0}, is_defined(f)"
+      note: "Complex input: defined everywhere but 0, where it returns -inf+0j."
 
 numpy.log10:
   claims:
     - name: is_defined
       statement: "x > 0"
-      note: "Base-10 logarithm; x = 0 returns -inf and x < 0 returns nan."
+      note: "Over real inputs. Base-10 logarithm; x = 0 returns -inf and x < 0 returns nan."
+    - name: is_defined_over_complex
+      statement: "for x in C \\ {0}, is_defined(f)"
+      note: "Complex input: defined everywhere but 0, where it returns -inf+0j."
 
 numpy.log1p:
   claims:
     - name: is_defined
       statement: "x > -1"
-      note: "log(1 + x); x = -1 returns -inf and x < -1 returns nan."
+      note: "Over real inputs. log(1 + x); x = -1 returns -inf and x < -1 returns nan."
+    - name: is_defined_over_complex
+      statement: "for x in C \\ {-1}, is_defined(f)"
+      note: "Complex input: defined everywhere but -1, where it returns -inf+0j."
 
 numpy.arcsin:
   claims:
     - name: is_defined
       statement: "-1 <= x <= 1"
-      note: "Inverse sine; input outside [-1, 1] returns nan with a RuntimeWarning."
+      note: "Over real inputs. Inverse sine; input outside [-1, 1] returns nan with a RuntimeWarning."
+    - name: is_defined_over_complex
+      statement: "for x in C, is_defined(f)"
+      note: "Complex input: the principal inverse sine, defined on the whole plane."
 
 numpy.arccos:
   claims:
     - name: is_defined
       statement: "-1 <= x <= 1"
-      note: "Inverse cosine; input outside [-1, 1] returns nan with a RuntimeWarning."
+      note: "Over real inputs. Inverse cosine; input outside [-1, 1] returns nan with a RuntimeWarning."
+    - name: is_defined_over_complex
+      statement: "for x in C, is_defined(f)"
+      note: "Complex input: the principal inverse cosine, defined on the whole plane."
 
 numpy.arccosh:
   claims:
     - name: is_defined
       statement: "x >= 1"
-      note: "Inverse hyperbolic cosine; x < 1 returns nan with a RuntimeWarning."
+      note: "Over real inputs. Inverse hyperbolic cosine; x < 1 returns nan with a RuntimeWarning."
+    - name: is_defined_over_complex
+      statement: "for x in C, is_defined(f)"
+      note: "Complex input: the principal inverse hyperbolic cosine, defined on the whole plane."
 
 numpy.arctanh:
   claims:
     - name: is_defined
       statement: "-1 < x < 1"
-      note: "Inverse hyperbolic tangent; abs(x) = 1 returns an infinity and abs(x) > 1 returns nan."
+      note: "Over real inputs. Inverse hyperbolic tangent; abs(x) = 1 returns an infinity and abs(x) > 1 returns nan."
+    - name: is_defined_over_complex
+      statement: "for x in C \\ {1, -1}, is_defined(f)"
+      note: "Complex input: defined everywhere but 1 and -1, where the real part is an infinity."
 
 numpy.exp:
   claims:

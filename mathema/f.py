@@ -46,19 +46,26 @@ def sort_seq(xs):
 
 def _is_nonfinite(out) -> bool:
     """True when a value is a silent non-finite number (nan/inf), a
-    Python or numpy scalar or a numpy array; False for a genuinely
+    Python or numpy scalar (a complex one with a non-finite component)
+    or a numpy array; False for a genuinely
     non-numeric value, which is not this predicate's concern."""
     import math
     if isinstance(out, bool):
         return False
     if isinstance(out, (int, float)):
         return math.isnan(out) or math.isinf(out)
+    if isinstance(out, complex):
+        # a NaN or an infinity in either component
+        import cmath
+        return not cmath.isfinite(out)
     try:
         import numpy as np
     except ImportError:
         return False
     try:
-        arr = np.asarray(out, dtype=float)
+        arr = np.asarray(out)
+        if arr.dtype.kind != "c":
+            arr = arr.astype(float)
     except (TypeError, ValueError):
         return False
     return not bool(np.isfinite(arr).all())

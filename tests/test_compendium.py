@@ -27,7 +27,9 @@ def test_bundled_files_load_for_installed_libraries():
     assert lib["numpy.sqrt"]["versions"] == ">=1.24,<3"
     assert lib["numpy.sqrt"]["source"] == \
         "mathema/compendium/numpy/scalars.claims.yaml"
-    (row,) = lib["numpy.sqrt"]["entry"]["claims"]
+    rows = {r["name"]: r for r in lib["numpy.sqrt"]["entry"]["claims"]}
+    assert set(rows) == {"is_defined", "is_defined_over_complex"}
+    row = rows["is_defined"]
     assert row["name"] == "is_defined" and row["statement"] == "x >= 0"
     assert row["source"] == "compendium"
     assert row["meta"]["mathema.compendium"].startswith("compendium:numpy-")
@@ -349,7 +351,8 @@ def test_a_bundled_entry_states_its_prose_as_row_notes_not_intent():
             if isinstance(entry, dict):
                 assert "intent" not in entry, (path, key)
     lib = load_library_claims(None)
-    (sqrt_row,) = lib["numpy.sqrt"]["entry"]["claims"]
+    (sqrt_row,) = [r for r in lib["numpy.sqrt"]["entry"]["claims"]
+                   if r["name"] == "is_defined"]
     assert "never raises" in sqrt_row["note"]
     exp_rows = {r["name"]: r for r in lib["numpy.exp"]["entry"]["claims"]}
     assert "709.78" in exp_rows["is_overflow_safe"]["note"]

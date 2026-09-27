@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from .claim_families import _ACCIDENTAL_CRASHES
 from .hazards import _REPRESENTATION_LADDER
 
-__all__ = ["PY_FLOAT64", "PY_INT", "PYTHON_PROFILES", "Representation",
+__all__ = ["PY_COMPLEX128", "PY_FLOAT64", "PY_INT", "PYTHON_PROFILES", "Representation",
            "machine_failure_types"]
 
 
@@ -67,6 +67,17 @@ PY_FLOAT64 = Representation(
     max_magnitude=sys.float_info.max,
 )
 
+#: Python's complex (numpy's complex128): a pair of IEEE-754 doubles,
+#: the real and the imaginary part. Each part overflows as a float64
+#: does, so the largest finite magnitude is float64's, per component.
+PY_COMPLEX128 = Representation(
+    tag="c128",
+    overflow="inf",
+    ladder=tuple(_REPRESENTATION_LADDER),
+    machine_failures=(OverflowError, MemoryError, RecursionError),
+    max_magnitude=sys.float_info.max,
+)
+
 #: Python's int: arbitrary precision. Overflow cannot happen; the
 #: machine failures it can still exhibit are resource exhaustion.
 PY_INT = Representation(
@@ -80,6 +91,7 @@ PY_INT = Representation(
 #: analysis vocabulary uses.
 PYTHON_PROFILES: dict[str, Representation] = {
     "scalar": PY_FLOAT64,
+    "complex": PY_COMPLEX128,
     "int": PY_INT,
 }
 
