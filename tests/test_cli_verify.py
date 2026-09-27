@@ -510,3 +510,49 @@ def test_a_wrapper_reverifies_when_the_library_function_it_calls_changes(
     r = _run(tmp_path)
     assert "0 fresh" in r.stdout, r.stdout
     assert r.stdout.count("dependency changed") >= 2, r.stdout
+
+
+def _check(root, *extra):
+    script = ("import sys; from mathema.cli import main; "
+              f"sys.exit(main(['check', 'funcs.py', '--root', {str(root)!r}"
+              + "".join(f", {a!r}" for a in extra) + "]))")
+    return subprocess.run([sys.executable, "-c", script], cwd=str(root),
+                          capture_output=True, text=True,
+                          env=_env_with_repo_on_path())
+
+
+def test_a_claims_file_wholly_in_another_grammar_is_warned_about_once(
+        tmp_path):
+    """Every claim of a file in a grammar this checker does not
+    adjudicate is most often a `grammar:` line copied from somewhere:
+    verify and check say so once, naming the file and the grammar."""
+    funcs_path = tmp_path / "funcs.py"
+    _write_funcs(funcs_path)
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "funcs.claims.yaml").write_text(
+        "grammar: python-expression\n"
+        "funcs.add:\n"
+        "  claims:\n"
+        "    - name: commutative\n"
+        '      statement: "f(a, b) == f(b, a)"\n'
+        "funcs.clamp01:\n"
+        "  claims:\n"
+        "    - name: at_most_one\n"
+        '      statement: "f(x) <= 1"\n')
+    (tmp_path / "claims" / "mixed.claims.yaml").write_text(
+        "funcs.gated_sqrt:\n"
+        "  claims:\n"
+        "    - name: nonneg\n"
+        '      statement: "for x in [0, 4], f(x) >= 0"\n'
+        "    - name: other_tool\n"
+        '      statement: "f(x) >= 0"\n'
+        "      grammar: python-expression\n")
+    for r in (_run(tmp_path), _check(tmp_path)):
+        text = r.stdout + r.stderr
+        warned = [ln for ln in text.splitlines()
+                  if "does not adjudicate" in ln]
+        assert len(warned) == 1, text
+        assert "funcs.claims.yaml" in warned[0], warned
+        assert "'python-expression'" in warned[0], warned
+        assert "omit `grammar:`" in warned[0], warned
+        assert "mixed.claims.yaml" not in warned[0], warned
