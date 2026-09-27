@@ -82,6 +82,22 @@ code actually does.
         - Nonnegative
         - Shape
 
+## `mathema.runtime_types`
+
+::: mathema.runtime_types
+    options:
+      members:
+        - RuntimeTypeAdapter
+        - Detection
+        - AbstractVec
+        - AbstractMat
+        - AbstractTable
+        - RuntimeType
+        - adapters
+        - detect_parameters
+        - realise
+        - observe
+
 ## `mathema.identity`
 
 ::: mathema.identity
