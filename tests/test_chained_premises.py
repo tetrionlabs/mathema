@@ -72,3 +72,18 @@ def test_a_premise_comparing_with_a_comparison_is_refused():
     p = _one(gap, "for a in [-2, 2], b in [-2, 2], "
                   "assuming a < (0 < b), f(a, b) > 0")
     assert p.verdict == "skipped", (p.verdict, p.counterexample)
+
+
+def reciprocal_pole(x):
+    return 1 / (x - 1)
+
+
+@pytest.mark.parametrize("premise", ["x > 2", "2 < x < 9"])
+def test_a_definedness_claim_under_a_premise_reads_its_region(premise):
+    p = _one(reciprocal_pole, f"assuming {premise}, is_defined(f)")
+    assert p.verdict != "falsified", (p.verdict, p.counterexample)
+
+
+def test_a_chained_premise_around_the_pole_still_falsifies_definedness():
+    p = _one(reciprocal_pole, "assuming 0 < x < 9, is_defined(f)")
+    assert p.verdict == "falsified", (p.verdict, p.counterexample)

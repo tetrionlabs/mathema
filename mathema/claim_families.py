@@ -2617,10 +2617,10 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         premise = premise[len("assuming"):].strip()
     assumed = []
     for part in _split_top_and(premise):
-        links = _parse_assuming_links(part)
-        if links is None:
+        premise_links = _parse_assuming_links(part)
+        if premise_links is None:
             return None
-        for rel_parts in links:
+        for rel_parts in premise_links:
             if rel_parts.relation not in _COMPARISONS:
                 return None
             try:
