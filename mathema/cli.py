@@ -2558,21 +2558,38 @@ def cmd_badges(args) -> int:
 
 
 def cmd_compendium(args) -> int:
-    """`mathema compendium export <library>`: write the proven and held
-    claims this project's verified store holds about <library>'s
-    functions as a compendium claims file (`compendium: <library>`,
-    `versions: ">=<installed major.minor>"`), by default to
-    `claims/<library>.claims.yaml` under the root. Each row carries the
+    """`mathema compendium status [<library>]`: where the project stands
+    with each third-party library its functions call (the claims files
+    about it, the called functions with no claims, and how many rows of
+    the rest are verified locally, trusted, falsified or unsettled),
+    writing nothing. `mathema compendium export <library>`: for a
+    library author, write the proven and held claims this project's
+    verified store holds about <library>'s functions as a compendium
+    claims file (`compendium: <library>`, `versions: ">=<installed
+    major.minor>"`), by default to `claims/<library>.claims.yaml` under
+    the root, for downstream projects to use. Each row carries the
     verdict it reached as its claimed level; a consumer verifies or
     accepts it before resting a claim on it."""
     import os
 
-    from .compendium.export import write_compendium
-    from .spec import load_verified
-
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    if args.action == "status":
+        from .compendium.status import compendium_status, render_status
+        data = compendium_status(root, args.library)
+        if args.json:
+            import json
+            print(json.dumps(data, indent=2))
+        else:
+            print(render_status(data))
+        return 0
+    from .compendium.export import write_compendium
+    from .spec import load_verified
+
+    if not args.library:
+        raise TargetError("compendium export needs the library to export "
+                          "(mathema compendium export mylib)")
     if not any(k.split(".")[0] == args.library for k in load_verified(root)):
         raise TargetError(f"no verified records for library "
                           f"{args.library!r} under {root}; nothing to export")
@@ -2755,20 +2772,34 @@ def main(argv: list[str] | None = None) -> int:
                          "--root, or pass an explicit DIR")
     pb.set_defaults(fn=cmd_badges)
 
-    pcomp = sub.add_parser("compendium", help="export this project's "
-                           "verified claims about a library as a "
-                           "compendium claims file")
-    pcomp.add_argument("action", choices=["export"],
-                       help="export: write the library's proven and held "
-                            "claims as a claims file with compendium: and "
-                            "versions:")
-    pcomp.add_argument("library", help="the importable package name to export "
-                       "verified claims for (e.g. mylib)")
+    pcomp = sub.add_parser("compendium", help="the claims about the "
+                           "libraries a project calls: status reports "
+                           "where the project stands with each; export "
+                           "publishes a library author's own verified "
+                           "claims as a compendium claims file")
+    pcomp.add_argument("action", choices=["status", "export"],
+                       help="status: for each third-party library the "
+                            "project's functions call, its claims files, "
+                            "the called functions with no claims, and how "
+                            "many rows are verified locally, trusted, "
+                            "falsified or unsettled (writes nothing); "
+                            "export: for a library author, write the "
+                            "library's proven and held claims from the "
+                            "verified store as a claims file with "
+                            "compendium: and versions:, for downstream "
+                            "projects to use")
+    pcomp.add_argument("library", nargs="?", default=None,
+                       help="status: one library to report on (default: "
+                            "every third-party library called); export: "
+                            "the importable package name to export "
+                            "verified claims for (e.g. mylib)")
     pcomp.add_argument("--root", default=None,
                        help="project root holding .mathema/verified")
     pcomp.add_argument("--out", default=None, metavar="PATH",
-                       help="output file (default "
+                       help="export: output file (default "
                             "claims/<library>.claims.yaml under --root)")
+    pcomp.add_argument("--json", action="store_true",
+                       help="status: the same report as JSON")
     pcomp.set_defaults(fn=cmd_compendium)
 
     pa = sub.add_parser("audit", help="population report: every function "

@@ -346,7 +346,50 @@ def _alias_origins(fn, facts) -> dict:
                     and not node.level:
                 for a in node.names:
                     origin[a.asname or a.name] = f"{node.module}.{a.name}"
+            elif isinstance(node, ast.ImportFrom) and node.level:
+                base = _relative_base(fn, node.level)
+                if base is None:
+                    continue
+                module = f"{base}.{node.module}" if node.module else base
+                for a in node.names:
+                    origin[a.asname or a.name] = f"{module}.{a.name}"
     return origin
+
+
+def _relative_base(fn, level: int) -> "str | None":
+    """The package a relative import `level` dots deep resolves against
+    inside `fn`'s module, or None when it cannot be told."""
+    package = (getattr(fn, "__globals__", {}) or {}).get("__package__")
+    if not isinstance(package, str) or not package:
+        return None
+    parts = package.split(".")
+    if level - 1 >= len(parts):
+        return None
+    return ".".join(parts[:len(parts) - (level - 1)])
+
+
+def resolved_calls(fn, facts) -> list:
+    """Intent:
+        Every call `fn` makes whose name resolves through a name `fn`
+        reaches (an import alias, a module-level function, a closure
+        variable, a local or relative import), as the dotted key it
+        calls, once each in first-seen order: `np.sqrt(x)` calls
+        `numpy.sqrt`, a same-module helper `pkg.mod.helper`. A builtin,
+        a method on a local value and any other name no alias explains
+        are left out.
+    """
+    origin = _alias_origins(fn, facts)
+    out: list = []
+    for group in (getattr(facts, "call_groups", None) or {}).values():
+        for name in group:
+            head, dot, rest = name.partition(".")
+            base = origin.get(head)
+            if base is None:
+                continue
+            key = f"{base}.{rest}" if dot else base
+            if key not in out:
+                out.append(key)
+    return out
 
 
 def _resolve_called_keys(fn, facts) -> list:
