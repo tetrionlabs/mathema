@@ -556,3 +556,33 @@ def test_a_claims_file_wholly_in_another_grammar_is_warned_about_once(
         assert "'python-expression'" in warned[0], warned
         assert "omit `grammar:`" in warned[0], warned
         assert "mixed.claims.yaml" not in warned[0], warned
+
+
+def test_a_verified_claim_moved_to_another_grammar_warns_without_blocking(
+        tmp_path):
+    """A claim with a real verdict recorded under mathema that now
+    declares another grammar is no longer adjudicated here: verify says
+    so once on the key's line, the run does not fail on it, and the
+    JSON row names the change."""
+    funcs_path = tmp_path / "funcs.py"
+    _write_funcs(funcs_path)
+    _seed_run(tmp_path, funcs_path)
+    _foreign_then_native(tmp_path, with_grammar=False)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    _foreign_then_native(tmp_path, with_grammar=True)
+    r, doc = _json_run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    rows = {row["claim"]: row for entry in doc["keys"]
+            if entry["key"] == "funcs.add" for row in entry["claims"]}
+    assert rows["commutative"]["grammar_changed"] == {"from": "mathema",
+                                                      "to": "other"}
+    _foreign_then_native(tmp_path, with_grammar=False)
+    _run(tmp_path)
+    _foreign_then_native(tmp_path, with_grammar=True)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    warning = ("warning: claim commutative of funcs.add was verified under "
+               "mathema; its grammar is now 'other', so mathema no longer "
+               "adjudicates it")
+    assert (r.stdout + r.stderr).count(warning) == 1, r.stdout + r.stderr
