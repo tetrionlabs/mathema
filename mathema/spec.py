@@ -18,6 +18,7 @@ import os
 import re
 import unicodedata
 
+from ._float_text import exact_float_text
 from .records import (SUPPORTED_VERDICTS, classify_verdict,
                       pseudo_infinity_range, statement_text)
 from .routes import examine_predicates
@@ -267,7 +268,8 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
             row["note"] = p.note
         if p.sketch:
             row["sketch"] = p.sketch
-        if p.condition and (p.route or "").split(":", 1)[0] == "derive":
+        if p.condition and ((p.route or "").split(":", 1)[0] == "derive"
+                            or p.condition.startswith("let |inf| be ")):
             row["condition"] = p.condition
         row["route"] = p.route
         # where the claim came from: an object whose `surface` names the
@@ -1265,8 +1267,9 @@ class ClaimsFileError(ValueError):
 
 _CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
                  "grammar", "funcs", "pseudo_infinity", "meta", "authored",
-                 "source", "family", "note")
-_ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references")
+                 "source", "family", "note", "versions")
+_ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references",
+                 "pseudo_infinity")
 
 
 _ENTRY_ANNOTATIONS = ("an entry's annotations go in `meta:` (structured "
@@ -1347,12 +1350,66 @@ def _auto_name_of(statement: str) -> "str | None":
         return None
 
 
+_FILE_FIELDS = ("grammar", "compendium", "versions", "aliases")
+
+
+def _library_fields_problem(data: dict) -> "tuple[str, str] | None":
+    """Intent:
+        Why a claims file's `compendium`, `versions` or `aliases` field
+        does not read, as `(field, problem)`, or None when each is
+        absent or well formed. `compendium` names the library the
+        file's claims are about; `versions` is the library version
+        range the claims apply to (`"*"`, `">=X"` or `">=X,<Y"`);
+        `aliases` lists the library's other names (a distribution name,
+        a key prefix), and no two keys may name one function through
+        them. Both need a `compendium` beside them.
+    """
+    from .compendium import valid_version_range
+    lib = data.get("compendium")
+    if "compendium" in data and (not isinstance(lib, str) or not lib.strip()
+                                 or any(ch.isspace() for ch in lib.strip())):
+        return ("compendium", f"must name the library the claims are "
+                              f"about (compendium: numpy), not {lib!r}")
+    if "versions" in data:
+        versions = data.get("versions")
+        if "compendium" not in data:
+            return ("versions", "a version range needs `compendium:` "
+                                "naming the library it ranges over")
+        if not isinstance(versions, str) \
+                or not valid_version_range(versions):
+            return ("versions", f"{versions!r} is not a version range "
+                                f"(use \"*\", \">=X\" or \">=X,<Y\")")
+    if "aliases" in data:
+        aliases = data.get("aliases")
+        if "compendium" not in data:
+            return ("aliases", "aliases need `compendium:` naming the "
+                               "library they are other names for")
+        if not isinstance(aliases, list) or not all(
+                isinstance(a, str) and a.strip()
+                and not any(ch.isspace() for ch in a) for a in aliases):
+            return ("aliases", f"must be a list of the library's other "
+                               f"names (aliases: [PyYAML]), not {aliases!r}")
+        from .compendium import alias_key
+        seen: dict = {}
+        for key in data:
+            if key in _FILE_FIELDS:
+                continue
+            canonical = alias_key(key, str(lib), aliases)
+            if canonical in seen:
+                return (key, f"names the same function as "
+                             f"{seen[canonical]!r} ({canonical})")
+            seen[canonical] = key
+    return None
+
+
 def validate_claims_file(data, rel_path: str) -> None:
     """Intent:
         Check one parsed claims file's shape, and normalize a tolerance
         written as numeric text (YAML reads `1e-6` as a string) to its
-        number. The shape: a mapping of function keys (plus an optional
-        file-level `grammar`) to entries; an entry is a mapping whose
+        number. The shape: a mapping of function keys (plus the optional
+        file-level `grammar`, and `compendium` and `versions` on a file
+        of claims about a library's functions) to entries; an entry is
+        a mapping whose
         `claims` is a list of mappings; each claim states its law as
         text under `statement` (or `law`), names it at most once per
         key, and gives a readable `domain` and a non-negative
@@ -1373,8 +1430,11 @@ def validate_claims_file(data, rel_path: str) -> None:
         raise ClaimsFileError(
             f"{rel_path}: the top level is a {type(data).__name__}, not a "
             f"mapping of function keys to entries")
+    problem = _library_fields_problem(data)
+    if problem:
+        fail(*problem)
     for key, entry in data.items():
-        if key == "grammar":
+        if key in _FILE_FIELDS:
             continue
         if entry is None:
             continue
@@ -1390,6 +1450,9 @@ def validate_claims_file(data, rel_path: str) -> None:
                           f"{near!r}?)")
             fail(key, f"unknown field {field_name!r}; "
                       f"{_ENTRY_ANNOTATIONS}")
+        problem = _pseudo_infinity_problem(entry.get("pseudo_infinity"))
+        if problem:
+            fail(key, f"`pseudo_infinity`: {problem}")
         claims = entry.get("claims")
         if claims is None:
             continue
@@ -1444,6 +1507,21 @@ def validate_claims_file(data, rel_path: str) -> None:
                               f"number, not {tol!r}")
                 if isinstance(tol, str):
                     c["tolerance"] = value
+            problem = _pseudo_infinity_problem(c.get("pseudo_infinity"))
+            if problem:
+                fail(key, f"{label}: `pseudo_infinity`: {problem}")
+            if "versions" in c:
+                from .compendium import valid_version_range
+                row_range = c.get("versions")
+                if "compendium" not in data:
+                    fail(key, f"{label}: `versions` ranges a library "
+                              f"row, and needs `compendium:` naming the "
+                              f"library")
+                if not isinstance(row_range, str) \
+                        or not valid_version_range(row_range):
+                    fail(key, f"{label}: `versions`: {row_range!r} is not "
+                              f"a version range (use \"*\", \">=X\" or "
+                              f"\">=X,<Y\")")
             domain = c.get("domain")
             if domain is not None:
                 if not isinstance(domain, dict):
@@ -1453,6 +1531,92 @@ def validate_claims_file(data, rel_path: str) -> None:
                     problem = _domain_problem(bound)
                     if problem:
                         fail(key, f"{label}: `domain` for {param}: {problem}")
+
+
+def _pseudo_infinity_problem(value) -> "str | None":
+    """Intent:
+        Why a claims-file `pseudo_infinity` value is refused, in the
+        words a bad `let |inf| be` gets, or None when it is absent or
+        a finite positive magnitude.
+    """
+    if value is None:
+        return None
+    from .domain import InvalidDomain
+    from .records import _checked_magnitude
+    try:
+        _checked_magnitude(value)
+    except InvalidDomain as e:
+        return str(e)
+    return None
+
+
+def _bundled_compendium_dir() -> str:
+    """The directory of the compendium files mathema ships."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "compendium")
+
+
+def claims_file_paths(root: str = ".", *,
+                      exclude: "tuple[str, ...]" = ()) -> list:
+    """Intent:
+        Every claims file under `root` (`*.claims.yaml`,
+        `claims/*.yaml`, `claimspec.yaml`), shallow first and then by
+        path, skipping tool and environment directories and any
+        directory in `exclude` (compared by real path).
+    """
+    skip = {os.path.realpath(d) for d in exclude}
+    files: list[tuple[int, str]] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS
+                       and os.path.realpath(os.path.join(dirpath, d))
+                       not in skip]
+        for name in sorted(filenames):
+            if _is_claim_file(dirpath, name):
+                rel = os.path.relpath(dirpath, root)
+                depth = 0 if rel == "." else len(rel.split(os.sep))
+                files.append((depth, os.path.join(dirpath, name)))
+    return [path for _, path in sorted(files)]
+
+
+def read_claims_file(path: str, rel_path: str) -> "dict | None":
+    """Intent:
+        One claims file parsed and shape-checked, or None when it is
+        empty.
+
+    Raises:
+        ClaimsFileError: malformed YAML or a shape problem, naming the
+            file.
+    """
+    import yaml
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        where = f" at line {mark.line + 1}" if mark is not None else ""
+        raise ClaimsFileError(f"{rel_path}: malformed YAML{where}") from None
+    if data is None:
+        return None
+    validate_claims_file(data, rel_path)
+    return data
+
+
+def stamp_library_rows(data: dict, tag: str) -> None:
+    """Intent:
+        Mark every claim row of a library claims file (one declaring
+        `compendium:`) as compendium testimony: its authoring surface
+        is `compendium` and its meta names the library and version it
+        was stated for (`mathema.compendium: compendium:numpy-2.2`).
+        A row that states either itself keeps its own.
+    """
+    for key, entry in data.items():
+        if key in _FILE_FIELDS or not isinstance(entry, dict):
+            continue
+        for c in entry.get("claims") or []:
+            c.setdefault("source", "compendium")
+            meta = dict(c.get("meta") or {})
+            meta.setdefault("mathema.compendium", tag)
+            c["meta"] = meta
 
 
 def load_declared(root: str = ".") -> dict:
@@ -1468,33 +1632,34 @@ def load_declared(root: str = ".") -> dict:
     materialized VIEW of the merged surfaces (docsync's output for
     people and agents), and reading it back in would make every claim
     exist in two authoritative places at once. The authoring surfaces
-    are the only input."""
-    import yaml
-    files: list[tuple[int, str]] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
-        for name in sorted(filenames):
-            if _is_claim_file(dirpath, name):
-                path = os.path.join(dirpath, name)
-                rel = os.path.relpath(dirpath, root)
-                depth = 0 if rel == "." else len(rel.split(os.sep))
-                files.append((depth, path))
+    are the only input.
 
+    A file declaring `compendium: <library>` holds claims about that
+    library's functions: its rows are stamped as compendium testimony
+    (`stamp_library_rows`), and the whole file is left out when the
+    library is not importable or its installed version is outside the
+    file's `versions` range, or when the library is the project's own
+    package (`compendium.names_own_package`), whose claims the project
+    states as its own. The bundled compendium directory is never read
+    as part of a project tree; `compendium.load_library_claims` reads
+    it."""
+    from .compendium import (applicable_tag, mark_row_versions,
+                             names_own_package, pop_library_fields)
     merged: dict = {}
-    for _, path in sorted(files):          # shallow first, deep last → deep wins
+    # shallow first, deep last, so the deeper file wins
+    for path in claims_file_paths(root, exclude=(_bundled_compendium_dir(),)):
         rel_path = os.path.relpath(path, root)
-        try:
-            with open(path, encoding="utf-8") as fh:
-                data = yaml.safe_load(fh)
-        except yaml.YAMLError as e:
-            mark = getattr(e, "problem_mark", None)
-            where = f" at line {mark.line + 1}" if mark is not None else ""
-            raise ClaimsFileError(
-                f"{rel_path}: malformed YAML{where}") from None
+        data = read_claims_file(path, rel_path)
         if data is None:
             continue
-        validate_claims_file(data, rel_path)
         file_grammar = data.pop("grammar", None)
+        library, versions, aliases = pop_library_fields(data)
+        if library is not None:
+            tag = applicable_tag(library, versions, aliases)
+            if tag is None or names_own_package(library, root):
+                continue
+            stamp_library_rows(data, tag)
+            mark_row_versions(data, library, aliases)
         for key, entry in data.items():
             if entry is None:
                 continue
@@ -1548,7 +1713,9 @@ def load_claims(path: str) -> dict:
     data = yaml.safe_load(open(path)) or {}
     if not isinstance(data, dict):
         return {}
+    from .compendium import pop_library_fields
     file_grammar = data.pop("grammar", "mathema")
+    pop_library_fields(data)
     out: dict = {}
     for key, entry in data.items():
         out[key] = entry_claims(entry, default_grammar=file_grammar)
@@ -1620,6 +1787,8 @@ def _let_sections(cj) -> list:
         if bound is not None:
             from .domain import render_domain_bound
             sections.append(f"let {name} be {render_domain_bound(bound)}")
+    for name, value in sorted((getattr(cj, "param_pins", None) or {}).items()):
+        sections.append(f"let {name} be {value!r}")
     return sections
 
 def callable_ref(fn) -> "str | None":
@@ -1646,6 +1815,54 @@ def callable_ref(fn) -> "str | None":
     for part in qual.split("."):
         obj = getattr(obj, part, None) if obj is not None else None
     return f"{mod}.{qual}" if obj is fn else None
+
+
+def _claim_variable_names(cj) -> "set | None":
+    """Intent:
+        The variable names a claim's relation reads (every name outside
+        a call's function position, the math constants aside), or None
+        when some part of it does not read as an expression.
+    """
+    import ast as _ast
+
+    from ._math_vocab import MATH_CONSTANTS
+    from .grammar import normalize
+    # a raises claim's right side names an exception type
+    texts = [cj.lhs] if cj.relation == "raises" else [cj.lhs, cj.rhs]
+    for lhs, _rel, rhs in cj.links or ():
+        texts += [lhs, rhs]
+    names: set = set()
+    for text in texts:
+        if not text or not str(text).strip():
+            continue
+        try:
+            tree = _ast.parse(normalize(str(text)), mode="eval")
+        except (SyntaxError, ValueError):
+            return None
+        called = {id(node.func) for node in _ast.walk(tree)
+                  if isinstance(node, _ast.Call)}
+        names |= {node.id for node in _ast.walk(tree)
+                  if isinstance(node, _ast.Name) and id(node) not in called}
+    return names - set(MATH_CONSTANTS) - {"eps", "epsilon", "ε"}
+
+
+def pseudo_infinity_bounds_something(cj) -> bool:
+    """Intent:
+        Whether a claim's authored `let |inf| be` can bound anything: some
+        name the relation reads is unbounded in its declared domain,
+        or has no declared domain at all. False only when the claim
+        has no binding, or every name it reads is provably bounded, so
+        an inert binding leaves the claim's text and identity (P8);
+        anything unreadable keeps the binding.
+    """
+    if getattr(cj, "pseudo_infinity", None) is None:
+        return False
+    names = _claim_variable_names(cj)
+    if names is None:
+        return True
+    from .domain import unbounded_directions
+    return bool(unbounded_directions(sorted(names), cj.domain or {},
+                                     unsure_unbounded=True))
 
 
 def declare(cj) -> dict:
@@ -1698,10 +1915,10 @@ def declare(cj) -> dict:
         out["tolerance"] = cj.tolerance
     if getattr(cj, "meta", None):
         out["meta"] = dict(cj.meta)
-    if getattr(cj, "pseudo_infinity", None) is not None:
-        # the operational infinity magnitude for the extreme-value
-        # checks, emitted only when the author set it (an ordinary
-        # bounded-domain claim never states it); applied symmetrically
+    if pseudo_infinity_bounds_something(cj):
+        # the operational infinity magnitude, emitted only when the
+        # author set it and it can bound an unbounded direction (P8);
+        # applied symmetrically
         _, hi = pseudo_infinity_range(cj.pseudo_infinity)
         out["pseudo_infinity"] = hi
     if cj.funcs:
@@ -2258,12 +2475,16 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         f"let {name} be "
         f"{render_domain(cj.domain[name], ascii_mode=not unicode, show_missing=domain_show_missing)}"
         for name in sorted(cj.free_vars) if name in cj.domain]
-    if getattr(cj, "pseudo_infinity", None) is not None:
+    let_segments += [f"let {name} be {value!r}" for name, value in
+                     sorted((getattr(cj, "param_pins", None) or {}).items())]
+    if pseudo_infinity_bounds_something(cj):
         # the operational infinity magnitude, in the one claim-text
-        # spelling (the bars mean magnitude, applied symmetrically)
+        # spelling (the bars mean magnitude, applied symmetrically),
+        # stated only where it can bound an unbounded direction (P8)
         _, pinf_hi = pseudo_infinity_range(cj.pseudo_infinity)
         let_segments.append(
-            f"let |{'∞' if unicode else 'inf'}| be {pinf_hi:g}")
+            f"let |{'∞' if unicode else 'inf'}| be "
+            f"{exact_float_text(pinf_hi, f'{pinf_hi:g}')}")
     membership = "∈" if unicode else "in"
     for_segments = [
         f"{_display_symbol(param_renames[name]) if name in param_renames else name} "

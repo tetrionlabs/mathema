@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Hazard knowledge: where an implementation can diverge from the
+"""Hazard knowledge: where the computation can diverge from the
 mathematics it encodes.
 
 A hazard is a concrete input location (or class of locations) where
@@ -50,11 +50,13 @@ class HazardPoint:
 # --- hazard knowledge: restricted-builtin real domains ---------------
 
 # Real math functions whose own domain is narrower than sympy's
-# symbolic generalization. Membership here is what makes a call a
-# hazard at all; _SAFE_RANGE below carries the accepted ranges for
-# the non-factorial names.
+# symbolic generalization, in math's spellings and numpy's (`arcsin`,
+# `log10`, ...; `_call_name` reduces `np.log10(x)` to `log10`).
+# Membership here is what makes a call a hazard at all; _SAFE_RANGE
+# below carries the accepted ranges for the non-factorial names.
 _RESTRICTED_DOMAIN_NAMES = frozenset(
-    {"factorial", "sqrt", "log", "asin", "acos", "gamma", "lgamma"})
+    {"factorial", "sqrt", "log", "asin", "acos", "gamma", "lgamma",
+     "arcsin", "arccos", "log2", "log10", "log1p", "arccosh", "arctanh"})
 
 # name -> (lo, lo_inclusive, hi, hi_inclusive) real math function's own
 # accepted range. gamma/lgamma are the conservative half of their real
@@ -69,6 +71,13 @@ _SAFE_RANGE = {
     "acos": (-1.0, True, 1.0, True),
     "gamma": (0.0, False, math.inf, True),
     "lgamma": (0.0, False, math.inf, True),
+    "arcsin": (-1.0, True, 1.0, True),
+    "arccos": (-1.0, True, 1.0, True),
+    "log2": (0.0, False, math.inf, True),
+    "log10": (0.0, False, math.inf, True),
+    "log1p": (-1.0, False, math.inf, True),
+    "arccosh": (1.0, True, math.inf, True),
+    "arctanh": (-1.0, False, 1.0, False),
 }
 
 
@@ -119,7 +128,7 @@ def _restricted_domain_targets(fn, facts) -> dict:
 # (exp overflows near 710, cosh/sinh near 711, gamma near 171.6,
 # factorial for any large integer), the is_extremity_safe relevance
 # set: a parameter fed bare into one of these is where the
-# implementation's representable range ends well before the
+# computation's representable range ends well before the
 # mathematics does.
 _OVERFLOW_PRONE_NAMES = frozenset(
     {"exp", "expm1", "cosh", "sinh", "gamma", "factorial"})
@@ -130,6 +139,58 @@ def _overflow_prone_params(fn, facts) -> set:
     function; the set is_extremity_safe[param] is worth suggesting
     for at all."""
     return set(_bare_call_targets(facts, _OVERFLOW_PRONE_NAMES))
+
+
+# the power functions whose result leaves float range at moderate
+# arguments, beside `**` itself
+_POWER_NAMES = frozenset({"power", "float_power", "pow"})
+
+
+def _overflow_targets(fn, facts) -> set:
+    """Intent:
+        The is_overflow_safe suggestion gate: every real parameter the
+        body raises to a power (`**`, `pow`, `power`), passes inside
+        any expression to an overflow-prone function (`exp`, `cosh`,
+        ...), or feeds bare to one (the is_extremity_safe set).
+
+    Notes:
+        A source-level scan over the whole argument expression, unlike
+        `_bare_call_targets`: `exp(2 * x)` overflows in `x` just as
+        `exp(x)` does. Sequence, string and boolean parameters are
+        not overflow targets.
+    """
+    out = set(_overflow_prone_params(fn, facts))
+    tree = facts.tree
+    if tree is None:
+        return out
+    scalars = {p for p in facts.params
+               if facts.param_kinds.get(p) not in ("sequence", "string",
+                                                    "bool")}
+
+    def names_in(node) -> set:
+        return {n.id for n in ast.walk(node)
+                if isinstance(n, ast.Name) and n.id in scalars}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            out |= names_in(node)
+        elif isinstance(node, ast.Call) and _call_name(node) in (
+                _OVERFLOW_PRONE_NAMES | _POWER_NAMES):
+            for arg in node.args:
+                out |= names_in(arg)
+    return out & scalars if scalars else set()
+
+
+def _recursion_targets(fn, facts) -> set:
+    """The is_recursion_safe suggestion gate: every numeric parameter
+    of a body that calls itself (`facts.recursion`), since the depth a
+    recursion reaches is driven by its arguments; nothing for a body
+    that does not recurse."""
+    if not getattr(facts, "recursion", False):
+        return set()
+    return {p for p in facts.params
+            if facts.param_kinds.get(p) not in ("sequence", "string",
+                                                 "bool")}
 
 
 # --- hazard knowledge: missing-value guards --------------------------
@@ -244,8 +305,9 @@ def _pole_hazard_points(fn, facts, domain: dict) -> list[HazardPoint]:
 def _builtin_edge_points(fn, facts, domain: dict) -> list[HazardPoint]:
     """The domain edges of every restricted builtin a parameter is
     actually passed to: log's zero, asin/acos's unit endpoints, sqrt's
-    zero, factorial's negative and non-integer neighbours. These are
-    where the implementation's accepted range ends however fine the
+    zero, factorial's negative and non-integer neighbours, and the
+    same edges of numpy's spellings (arcsin, log10, log1p's -1, ...). These are
+    where the computation's accepted range ends however fine the
     mathematics is on paper."""
     out: list[HazardPoint] = []
     for param, names in _restricted_domain_targets(fn, facts).items():
@@ -285,9 +347,13 @@ def _extreme_candidates(bounds, pseudo_infinity=None) -> list[float]:
 
     Notes:
         `pseudo_infinity` is the resolved (lo, hi) operational range
-        or None. Candidates are filtered by domain membership, so an
-        excluded endpoint or a bound shape domain_contains rejects
-        contributes nothing.
+        or None. Under a range, an unbounded side keeps the ladder's
+        rungs at or inside it and adds the range's own end, so the
+        overflow scales below the reach are still visited. An end a
+        `domain.ReachInterval` marks is unbounded, its value the reach.
+        Candidates are filtered by domain membership, so an excluded
+        endpoint or a bound shape domain_contains rejects contributes
+        nothing.
     """
     from .grammar import domain_contains
 
@@ -305,18 +371,29 @@ def _extreme_candidates(bounds, pseudo_infinity=None) -> list[float]:
             lo, hi = float(bounds[0]), float(bounds[1])
         except (TypeError, ValueError):
             lo = hi = None
-    if lo is not None and abs(lo) != float("inf"):
+    reach_lo = bool(getattr(bounds, "reach_lo", False))
+    reach_hi = bool(getattr(bounds, "reach_hi", False))
+    if reach_lo and pseudo_infinity is None and lo is not None:
+        pseudo_infinity = (lo, abs(lo))
+    if reach_hi and pseudo_infinity is None and hi is not None:
+        pseudo_infinity = (-abs(hi), hi)
+    if lo is not None and abs(lo) != float("inf") and not reach_lo:
         raw.append(lo)
-    if hi is not None and abs(hi) != float("inf"):
+    if hi is not None and abs(hi) != float("inf") and not reach_hi:
         raw.append(hi)
-    unbounded_hi = hi is None or hi == float("inf")
-    unbounded_lo = lo is None or lo == -float("inf")
+    unbounded_hi = hi is None or hi == float("inf") or reach_hi
+    unbounded_lo = lo is None or lo == -float("inf") or reach_lo
     if unbounded_hi:
-        raw.extend([pseudo_infinity[1]] if pseudo_infinity is not None
-                   else list(_REPRESENTATION_LADDER))
+        raw.extend(list(_REPRESENTATION_LADDER) if pseudo_infinity is None
+                   else [v for v in _REPRESENTATION_LADDER
+                         if v <= pseudo_infinity[1]]
+                   + [pseudo_infinity[1]])
     if unbounded_lo:
-        raw.extend([pseudo_infinity[0]] if pseudo_infinity is not None
-                   else [-v for v in _REPRESENTATION_LADDER])
+        raw.extend([-v for v in _REPRESENTATION_LADDER]
+                   if pseudo_infinity is None
+                   else [-v for v in _REPRESENTATION_LADDER
+                         if -v >= pseudo_infinity[0]]
+                   + [pseudo_infinity[0]])
     out: list[float] = []
     for cand in raw:
         if admitted(cand) and cand not in out:
@@ -728,3 +805,102 @@ def hazard_points(fn, facts, domain: dict | None = None,
         except Exception:
             continue
     return out
+
+
+# --- careful: known edges just outside a declared domain --------------
+
+#: an edge counts as close to a bound within this factor of it, or
+#: within `_CAREFUL_ABSOLUTE` of it for a bound near zero
+_CAREFUL_FACTOR = 10.0
+_CAREFUL_ABSOLUTE = 1.0
+
+
+def _careful_number(value: float) -> str:
+    """A number as a careful line prints it: an integer bare, a
+    magnitude of at least 1 to two decimals, anything smaller in
+    general format (`709.78`, `700`, `0.5`)."""
+    if float(value).is_integer():
+        return str(int(value))
+    if abs(value) >= 1:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+    return f"{value:g}"
+
+
+def _near_bound(edge: float, bound: float) -> bool:
+    """Whether an edge outside a domain is close to the bound it lies
+    beyond: within 1 of it, or on the same side of zero and within a
+    factor of 10 of it."""
+    if abs(edge - bound) <= _CAREFUL_ABSOLUTE:
+        return True
+    if edge == 0 or bound == 0 or (edge > 0) != (bound > 0):
+        return False
+    big, small = max(abs(edge), abs(bound)), min(abs(edge), abs(bound))
+    return big <= _CAREFUL_FACTOR * small
+
+
+def _known_edges(fn, facts) -> list:
+    """Intent:
+        Every edge mathema knows about in `fn`'s own parameters, as
+        `(param, value, what)` with `what` the plain reading of the
+        edge: a covered call's overflow-safe region
+        (`compendium.computation_edges`), a restricted builtin's real
+        domain edge (`_SAFE_RANGE`), and a pole the fast critical-point
+        search finds.
+    """
+    from .compendium import computation_edges
+    out: list = []
+    for param, value, key, above in computation_edges(fn, facts):
+        side = "past" if above else "below"
+        out.append((param, value,
+                    f"{key} overflows {side} {param} = "
+                    f"{_careful_number(value)}"))
+    for param, names in _restricted_domain_targets(fn, facts).items():
+        for name in sorted(names - {"factorial"}):
+            lo, lo_incl, hi, hi_incl = _SAFE_RANGE[name]
+            if not math.isinf(lo):
+                out.append((param, lo, f"{name} needs {param} "
+                            f"{'>=' if lo_incl else '>'} "
+                            f"{_careful_number(lo)}"))
+            if not math.isinf(hi):
+                out.append((param, hi, f"{name} needs {param} "
+                            f"{'<=' if hi_incl else '<'} "
+                            f"{_careful_number(hi)}"))
+    for point in _pole_hazard_points(fn, facts, {}):
+        if point.value is not None:
+            out.append((point.param, point.value,
+                        f"a pole at {point.param} = "
+                        f"{_careful_number(point.value)}"))
+    return out
+
+
+def careful_edges(fn, facts, domains: list) -> list[str]:
+    """Intent:
+        The careful lines for `fn`: each known edge (`_known_edges`)
+        that lies outside one of `domains` but close to the bound it
+        lies beyond (`_near_bound`), read as "numpy.exp overflows past
+        x = 709.78 (the domain stops at 700)". `domains` are the
+        declared domains to read against, each a dict of parameter to
+        `(lo, hi)` floats. Information about where a passing domain
+        ends, never a verdict.
+    """
+    lines: list[str] = []
+    try:
+        edges = _known_edges(fn, facts)
+    except Exception:
+        return lines
+    for domain in domains:
+        for param, value, what in edges:
+            ends = domain.get(param)
+            if ends is None:
+                continue
+            lo, hi = ends
+            if value > hi and not math.isinf(hi) and _near_bound(value, hi):
+                where = f"the domain stops at {_careful_number(hi)}"
+            elif value < lo and not math.isinf(lo) and _near_bound(value, lo):
+                where = f"the domain starts at {_careful_number(lo)}"
+            else:
+                continue
+            line = f"careful: {what} ({where})"
+            if line not in lines:
+                lines.append(line)
+    return lines

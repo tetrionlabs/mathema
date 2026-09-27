@@ -100,10 +100,12 @@ from __future__ import annotations
 
 import ast
 import re
+from dataclasses import dataclass
 
 import sympy
 from sympy.printing.str import StrPrinter
 
+from ._float_text import exact_float_text
 from ._math_vocab import _BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _SYMPY_FUNCS, _call_name
 from ._render_mode import (get_unicode_output as get_unicode_output,
                            set_unicode_output as set_unicode_output)
@@ -751,6 +753,21 @@ _LET_PSEUDO_INF = re.compile(
     r"|(?P<rejected>(?:\+-|±|\+/-)?\s*(?:inf|oo|infinity)))"
     r"\s+be\s+(?P<rhs>.+)$", re.DOTALL)
 _LET_SEGMENT_HAS_IN = re.compile(r"\bin\b")
+# `let axis be None` / `let keepdims be True`: a literal value for a
+# named parameter, passed on every call the claim makes rather than
+# sampled (a number already reads as a single-point `let ... be` bound)
+_LET_PIN_LITERALS = {"None": None, "True": True, "False": False}
+
+
+@dataclass(frozen=True)
+class ParameterPin:
+    """A `let <parameter> be <literal>` binding whose literal is not a
+    number (`None`, `True`, `False`): the value the parameter is
+    passed at on every call the claim makes."""
+    value: object
+
+    def render(self) -> str:
+        return repr(self.value)
 _LET_FUNC_VALUE = re.compile(r"^\w+(?:\.\w+)+$")
 # `d(<expr>/d<var>)` -> `d(<expr>, <var>)` (also mixed/higher-order,
 # `d(<expr>/dx^2dy)` -> `d(<expr>, x, x, y)`, and curly `∂` instead of
@@ -1030,6 +1047,11 @@ def extract_let_bindings(
                 fname = dm.group(1)
                 bounds = unmask_strings(dm.group(2).strip(), literals)
                 _refuse_binding_subject(fname)
+                if bounds in _LET_PIN_LITERALS:
+                    free_domain[fname] = ParameterPin(
+                        _LET_PIN_LITERALS[bounds])
+                    text = ",".join(segments[1:]).strip()
+                    continue
                 if fname in _BASE_SET_NAMES or bounds in _RESERVED_CARRIERS:
                     # the representation-declaration spelling: rebinding
                     # a named set's machine carrier, the same shape as
@@ -2600,7 +2622,8 @@ _SPECIAL_RENDER_CALLS = {
 def parse_raises(law: str) -> tuple[str, str | None] | None:
     """Recognize the raises(...) predicate form (declared-schema.md,
     "Domain is a claim field"): `raises(f(x))` asserts the call raises,
-    `raises(f(x), ValueError)` asserts it raises specifically that.
+    `raises(f(x), ValueError)` asserts it raises specifically that, the
+    name bare or dotted (`raises(f(a), numpy.linalg.LinAlgError)`).
     Returns (call_source, exception_name | None), or None when the law
     isn't a raises predicate at all."""
     try:
@@ -2616,7 +2639,17 @@ def parse_raises(law: str) -> tuple[str, str | None] | None:
         return ast.unparse(node.args[0]), None
     if len(node.args) == 2 and isinstance(node.args[1], ast.Name):
         return ast.unparse(node.args[0]), node.args[1].id
+    if len(node.args) == 2 and _is_dotted_name(node.args[1]):
+        # a dotted exception path, `numpy.linalg.LinAlgError`
+        return ast.unparse(node.args[0]), ast.unparse(node.args[1])
     return None
+
+
+def _is_dotted_name(node) -> bool:
+    """True for an `a.b.c` attribute chain rooted at a plain name."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return isinstance(node, ast.Name)
 
 
 
@@ -2846,6 +2879,15 @@ class _CanonicalPrinter(StrPrinter):
         # render even though self._unicode is True, see _print_Pi's
         # own note on why this exists.
         self._suppress_glyphs = suppress_glyphs
+
+    def _print_Float(self, expr):
+        # a float from a claim literal carries float64 precision, which
+        # sympy prints at 15 significant digits; a value needing 16 or 17
+        # gets them, so the text reads back as the same float
+        text = super()._print_Float(expr)
+        if expr._prec > 53:
+            return text
+        return exact_float_text(float(expr), text)
 
     def _print_Abs(self, expr):
         return f"abs({self._print(expr.args[0])})"

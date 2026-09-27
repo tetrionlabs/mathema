@@ -20,7 +20,7 @@ corrupt) residual:
   `meta["mathema.corroboration_reason"] = "exact arithmetic only"`, and
   the note says that instead of naming an engine bug.
 - a `proven` is exact in real arithmetic and says nothing about the
-  float implementation. That is a claim of its own, the `<name>[float]`
+  float computation. That is a claim of its own, the `<name>[float]`
   companion a derive proof spawns (gates._float_companion): the sweep
   below executes the relation against the real code at the domain's
   corners and sampled interior points, and a raise, a NaN, or an inf or
@@ -62,7 +62,7 @@ class Corroboration:
 @dataclass
 class StabilitySweep:
     """A float sweep's outcome: `fragile_point` is the first in-domain
-    point where the implementation breaks (else None), `detail` naming
+    point where the computation breaks (else None), `detail` naming
     the failure, `checked` how many in-domain points were executed, and
     `in_flight` the point being executed when the sweep was cut short
     (a wall-clock cap), else None."""
@@ -154,9 +154,9 @@ def sweep_stability(probe_finite: Callable[[dict], "str | None"],
                     budget: int = _CORROBORATION_BUDGET,
                     progress: "StabilitySweep | None" = None) -> StabilitySweep:
     """Intent:
-        Execute a claim's relation against the real implementation
+        Execute a claim's relation against the real code
         across the declared domain: the corners first (where a
-        division, sqrt, log or exp implementation breaks), then `budget`
+        division, sqrt, log or exp breaks in float), then `budget`
         sampled interior points. `probe_finite(point)` returns a failure
         description (a raise, a NaN, or an inf or a deviation past a
         magnitude-scaled tolerance where the relation fails) or None

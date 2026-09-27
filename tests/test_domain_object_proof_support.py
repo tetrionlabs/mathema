@@ -126,10 +126,9 @@ def test_derive_route_handles_an_excluded_pole_without_crashing(tmp_path):
     finally:
         sys.path.remove(str(tmp_path))
         sys.modules.pop("fixture", None)
-    # pinned: derive leaves the excluded-pole simplification undecided
-    # today and the empirical fallback supplies holds, a derive-side
-    # improvement flips this to proven deliberately
-    assert results[0].verdict == "holds"
+    # the division guard `1 - r == 0` holds only at the excluded point,
+    # so the derive route proves the claim over the rest of the domain
+    assert results[0].verdict == "proven"
 
 
 def test_derive_route_handles_a_union_domain_without_crashing(tmp_path):

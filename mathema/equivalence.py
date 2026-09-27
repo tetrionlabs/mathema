@@ -19,10 +19,13 @@ with the executed raise as the witness. A complex result under a real
 claim counts as a raise (unless that side is annotated `complex`). A
 point where both sides raise the same exception type is agreement (the
 two behave the same there); different exception types at the same point
-falsify, with the executed pair as the witness. A drawn point where
-either side returns a non-finite float or something non-numeric is not
-adjudicated, and every such point is counted in the record's sampling
-meta rather than dropped silently.
+falsify, with the executed pair as the witness. A value is read per
+P4: two sides at the same infinity agree; a NaN from non-missing inputs
+agrees with nothing, and an infinity disagrees with a value or the
+opposite infinity. A drawn point with a missing input, or where either
+side returns something non-numeric, is not adjudicated, and every such
+point is counted in the record's sampling meta rather than dropped
+silently.
 """
 from __future__ import annotations
 
@@ -95,9 +98,8 @@ def _draw_in_domain(value, bound) -> bool:
     """Intent:
         Whether a synthesized draw is actually inside the claim's
         domain before either function is called: the sampler can
-        return an excluded value after its retry budget, and draws an
-        infinite declared endpoint deliberately, both fine as value-
-        claim stressors and both wrong as shared equivalence points.
+        return an excluded value after its retry budget, fine as a
+        value-claim stressor and wrong as a shared equivalence point.
         A sequence draw checks each element; a non-numeric draw (a
         string kind) passes, membership is a numeric question here.
     """
@@ -612,7 +614,9 @@ def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
 
 def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     from .conjecture import DEFAULT_TOLERANCE
-    from .probing import _fmt, _fmt_value, _synth, complex_is_a_raise
+    from .domain import is_missing
+    from .probing import (_fmt, _fmt_value, _synth, complex_is_a_raise,
+                          holds_nan, same_infinity)
 
     cj = case.cj
     kinds = {p: case.facts.param_kinds.get(p, "unknown")
@@ -652,8 +656,21 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
             discarded["non_numeric"] += 1
             continue
         if not (_finite(fv) and _finite(gv)):
-            discarded["not_compared"] += 1
-            continue
+            if any(is_missing(a) or holds_nan(a) for a in args):
+                # a missing input: its NaN is the missing-value
+                # policy's business, not compared here
+                discarded["not_compared"] += 1
+                continue
+            # no value from non-missing inputs (P4): two sides at the
+            # same infinity are one extended-real point and agree; a
+            # NaN agrees with nothing, and an infinity disagrees with a
+            # value and with the opposite infinity
+            checked += 1
+            if same_infinity(fv, gv):
+                continue
+            cx = (_fmt(tuple(args), names=tuple(kinds))
+                  + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
+            break
         checked += 1
         scale = max(abs(fv), abs(gv), 1.0)
         if abs(fv - gv) > tol + rel_slack * scale:
@@ -684,8 +701,9 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
             n=checked, counterexample=cx,
             note=f"{case.note}; the two implementations disagree at an "
                  f"executed shared point, a raise on one side against a "
-                 f"value on the other, or different exceptions, counting "
-                 f"as a disagreement{aside}",
+                 f"value on the other, different exceptions, or no value "
+                 f"(a NaN, or an infinity other than the other side's), "
+                 f"counting as a disagreement{aside}",
             meta=meta), "sampled")
     if state.proof is not None and state.proof.status == "disproven":
         # the symbolic rung claimed inequivalence but no executed point

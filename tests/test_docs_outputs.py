@@ -303,6 +303,7 @@ class _Driver:
         os.environ.setdefault("MATHEMA_EXTENSIVE_TIMEOUT", "120")
         env = dict(os.environ)
         env.pop("VIRTUAL_ENV", None)
+        env.pop("MATHEMA_PSEUDO_INFINITY", None)
         env["PATH"] = _wrappers(workdir) + os.pathsep + env.get("PATH", "")
         self.env = env
 
@@ -533,6 +534,7 @@ def test_the_output_shown_is_the_output_a_run_gives(example, tmp_path):
                    "before": before}, fh)
     env = dict(os.environ)
     env.pop("VIRTUAL_ENV", None)
+    env.pop("MATHEMA_PSEUDO_INFINITY", None)
     env["XDG_CONFIG_HOME"] = os.path.join(workdir, ".config")
     env["MATHEMA_FAST_TIMEOUT"] = "60"
     env["MATHEMA_EXTENSIVE_TIMEOUT"] = "120"

@@ -257,7 +257,7 @@ LEXICON: dict[str, str] = {
                                    "f(x) == 2*x"),
     # a premise resting on ANOTHER function's claim, the key dotted
     # before the claim name; resolution prefers an in-batch sibling,
-    # then the verified layer (materialised library-stub rows included)
+    # then the verified layer (library rows verify adjudicated included)
     "assuming_qualified_prerequisite": (
         "assuming numpy.clip.clip_lower holds, "
         "for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)"),

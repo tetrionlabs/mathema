@@ -23,6 +23,7 @@ import re
 from .analysis import _read_block
 from .conjecture import claim as _claim
 from .spec import declare as _declare
+from ._signatures import callable_signature
 
 
 def _fn_key(fn) -> str:
@@ -395,7 +396,6 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
     function's own existing guards (if any) is always safe."""
     def decorator(fn):
         import functools
-        import inspect
 
         from .grammar import is_missing, domain_contains, render_domain
         from .types import domain_from_signature
@@ -412,7 +412,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
                     f"{declared_domain[p]} on {fn.__name__!r}; these must "
                     "not diverge")
         merged_domain = {**domain_from_signature(fn), **declared_domain, **explicit}
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
 
         def _check_scalar(value, bounds) -> bool:
             """`True` when `value` is a candidate this `bounds` shape
@@ -536,7 +536,6 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     are the same precondition stated once."""
     import ast
     import functools
-    import inspect
 
     from .grammar import extract_assuming_clause, normalize
 
@@ -595,7 +594,7 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
 
     def decorator(fn):
         premises = _premises(fn)
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
@@ -654,7 +653,6 @@ def enforce_structure(key: str | None = None, root: str = "."):
     `is_<prop>(param)` claim, so `is_<prop>(A)` as a precondition and
     the runtime guard are the same statement made once."""
     import functools
-    import inspect
 
     from . import matrices as _mtx
     from .grammar import parse_domain_safety, normalize
@@ -682,7 +680,7 @@ def enforce_structure(key: str | None = None, root: str = "."):
 
     def decorator(fn):
         declared = _declared(fn)
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):

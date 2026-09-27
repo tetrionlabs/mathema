@@ -345,9 +345,10 @@ def scale_rows(tmp_path_factory):
 def test_a_claim_dim_name_aliases_the_marker_name(scale_rows):
     # the claim names the axes p, q; the marker names them m, n. They
     # are the SAME dimensions (per axis), so the claim holds with p/q
-    # bound from the real shape, no conflict
+    # bound from the real shape, no conflict (c bounded: over R the
+    # probe reaches c = 1e308, where c * x overflows)
     (p,) = check_conjectures(scale_rows, [claim(
-        "assuming p >= 2 and q >= 2, for a in R^(p*q), c in R, "
+        "assuming p >= 2 and q >= 2, for a in R^(p*q), c in [-10, 10], "
         "dim(f(a, c), 1) == q", route="probe")])
     assert p.verdict == "holds", (p.verdict, p.note)
 

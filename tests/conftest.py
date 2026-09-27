@@ -42,6 +42,42 @@ def _len_refinement():
     unregister_refinement("len")
 
 
+@pytest.fixture(autouse=True)
+def _no_project_pseudo_infinity(monkeypatch):
+    """A project-level `MATHEMA_PSEUDO_INFINITY` set on this machine
+    moves how far every unbounded direction is exercised, so every
+    test starts without one; a test about the project level sets its
+    own."""
+    monkeypatch.delenv("MATHEMA_PSEUDO_INFINITY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _library_claims_isolated():
+    """Installing library claims (`compendium.install`, which `verify`,
+    `write_spec` and `mathema check` do) registers process-wide
+    partiality guards and a hazard generator; every test starts and
+    ends with the registries as they were, so no verdict depends on
+    which test ran earlier in the same process. The baseline is the
+    bundled library claims alone, the state every `check()` starts
+    from."""
+    from mathema import compendium, hazards
+    from mathema.symbolic import _partiality
+    compendium.ensure_bundled()
+    lemmas = {k: list(v) for k, v in _partiality._PARTIALITY_LEMMAS.items()}
+    computation = {k: list(v) for k, v in compendium._COMPUTATION.items()}
+    generators = dict(hazards._GENERATORS)
+    installed = dict(compendium._INSTALLED)
+    yield
+    _partiality._PARTIALITY_LEMMAS.clear()
+    _partiality._PARTIALITY_LEMMAS.update(lemmas)
+    compendium._COMPUTATION.clear()
+    compendium._COMPUTATION.update(computation)
+    hazards._GENERATORS.clear()
+    hazards._GENERATORS.update(generators)
+    compendium._INSTALLED.clear()
+    compendium._INSTALLED.update(installed)
+
+
 def pytest_addoption(parser):
     parser.addoption("--extensive", action="store_true", default=False,
                      help="run the extensive-ladder proof corpus (slower, opt-in)")

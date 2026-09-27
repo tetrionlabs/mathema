@@ -404,6 +404,25 @@ class Interval(tuple):
         return f"{left}{self[0]}, {self[1]}{right}"
 
 
+class ReachInterval(Interval):
+    """The computation's reading of an unbounded direction: an
+    `Interval` whose `reach_lo`/`reach_hi` end is the finite magnitude
+    (the pseudo-infinity, else the carrier's maximum) standing in for
+    an infinite end, closed there. A sampler reads the marked end as
+    unbounded, drawing log-uniformly over the decades up to it, and
+    every other consumer sees an ordinary finite interval. `bare` marks
+    a parameter no domain was declared for, sampled as an undeclared
+    parameter is, plus the far draws."""
+    def __new__(cls, lo: float, hi: float, closed_lo: bool = True,
+                closed_hi: bool = True, *, reach_lo: bool = False,
+                reach_hi: bool = False, bare: bool = False):
+        self = super().__new__(cls, lo, hi, closed_lo, closed_hi)
+        self.reach_lo = reach_lo
+        self.reach_hi = reach_hi
+        self.bare = bare
+        return self
+
+
 class _MissingType:
     """The one canonical sentinel for a missing/null value inside a
     domain's `excluded`/unioned set, spelled `∅`/`missing`/`NA`/`nan`
@@ -2094,6 +2113,108 @@ def bound_context(sym, bound):
     if isinstance(bound, tuple) and not isinstance(bound, frozenset) and len(bound) == 2:
         return interval_predicate(bound)
     return None
+
+
+def _reach_piece(bound, lo_reach: float, hi_reach: float):
+    """Intent:
+        One interval with its infinite ends replaced by the reach
+        (`domain.ReachInterval`, closed at a reach end), or the bound
+        unchanged when it is not an interval with an infinite end.
+    """
+    if not (isinstance(bound, tuple) and not isinstance(bound, frozenset)
+            and len(bound) == 2) or isinstance(bound, ReachInterval):
+        return bound
+    try:
+        lo, hi = float(bound[0]), float(bound[1])
+    except (TypeError, ValueError):
+        return bound
+    lo_inf, hi_inf = lo == -math.inf, hi == math.inf
+    if not (lo_inf or hi_inf):
+        return bound
+    return ReachInterval(
+        lo_reach if lo_inf else bound[0], hi_reach if hi_inf else bound[1],
+        True if lo_inf else getattr(bound, "closed_lo", True),
+        True if hi_inf else getattr(bound, "closed_hi", True),
+        reach_lo=lo_inf, reach_hi=hi_inf)
+
+
+def operational_domain(cj_domain: dict, reach: "tuple[float, float]",
+                        bare=()):
+    """Intent:
+        The computation's reading of a claim's domain: every infinite
+        interval end, including one inside a union of real pieces and
+        the whole line of a bare `R`, replaced by the reach (the
+        resolved pseudo-infinity, else the carrier's maximum), and every
+        name in `bare` (a real parameter no domain was declared for)
+        given the whole reach, marked as undeclared. Every finite end
+        and every other bound stays as declared. Returns the rewritten
+        copy and a rendering of each interval change.
+
+    Notes:
+        The probe stage's reading, and only the probe stage's: the
+        operational infinity bounds the computation, never the
+        mathematics (P1, P6), so a proof is over the declared domain
+        with infinity as infinity. A real domain contains no infinity:
+        the rewritten ends are finite, and the sampler draws an
+        unbounded direction log-uniformly over the decades up to the
+        reach (`_sampling._synth_scalar`). Integer and natural types
+        and vector spaces are not rewritten.
+    """
+    from dataclasses import replace as _replace
+    lo_reach, hi_reach = reach
+    rewritten: dict = {}
+    changes: list = []
+    for p, bound in cj_domain.items():
+        if isinstance(bound, Domain):
+            if bound.base_type != "R" or bound.dims:
+                rewritten[p] = bound
+            elif not bound.pieces:
+                rewritten[p] = _replace(bound, pieces=(ReachInterval(
+                    lo_reach, hi_reach, reach_lo=True, reach_hi=True,
+                    bare=True),))
+            else:
+                rewritten[p] = _replace(bound, pieces=tuple(
+                    _reach_piece(piece, lo_reach, hi_reach)
+                    for piece in bound.pieces))
+            continue
+        rewritten[p] = _reach_piece(bound, lo_reach, hi_reach)
+        if rewritten[p] is not bound:
+            changes.append(f"{p} in {rewritten[p]!r}")
+    for p in bare:
+        if rewritten.get(p) is None:
+            rewritten[p] = ReachInterval(lo_reach, hi_reach, reach_lo=True,
+                                         reach_hi=True, bare=True)
+    return rewritten, changes
+
+
+def unbounded_directions(names, cj_domain: dict, *,
+                         unsure_unbounded: bool = False) -> list:
+    """Intent:
+        The names among `names` whose bound in `cj_domain` is unbounded
+        in some direction: no bound at all, or an infinite end. A bound
+        whose ends cannot be read counts as bounded, or as unbounded
+        when `unsure_unbounded` is set.
+    """
+    out = []
+    for n in names:
+        b = (cj_domain or {}).get(n)
+        if b is None:
+            out.append(n)
+            continue
+        try:
+            if isinstance(b, tuple) and not isinstance(b, frozenset):
+                lo, hi = float(b[0]), float(b[1])
+            else:
+                sset = bound_to_sympy_set(b)
+                lo, hi = float(sset.inf), float(sset.sup)
+        except Exception:
+            if unsure_unbounded:
+                out.append(n)
+            continue
+        if math.isinf(lo) or math.isinf(hi) \
+                or getattr(b, "reach_lo", False) or getattr(b, "reach_hi", False):
+            out.append(n)
+    return out
 
 
 def bound_to_sympy_set(bound):

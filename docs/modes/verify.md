@@ -6,7 +6,7 @@ record (new or changed code), and refreshes the machine records so the
 next run has a baseline.
 
 ```bash
-mathema verify [<key> ...] [--root .]
+mathema verify [<key> | <claims file> ...] [--root .]
 ```
 
 Given one or more store keys (canonical dotted `module.qualname`), the
@@ -24,6 +24,7 @@ names no record fails as a clear per-key problem line, exit 2.
 | Flag | Meaning |
 |---|---|
 | `<key> ...` | zero or more store keys to confine the sweep to; omit for the whole store |
+| `<claims file> ...` | a claims file path: every entry in it is adjudicated up front, a library's [compendium](../claims-transfer.md#in-the-compendium) file included (see [Library claims](#library-claims-lazy-by-default-a-file-up-front)) |
 | `--root` | project root holding `.mathema/verified` and `claimspec.yaml` (default `.`) |
 | `--all` | re-adjudicate everything, ignoring form-hash freshness |
 | `--strict` / `--lenient` | one strictness pair shared with `check`; strict is the default here (CI gates a settled store), `--lenient` reports unverifiable claims and accepted risk instead of failing on them |
@@ -104,10 +105,17 @@ mathema.write_spec(softmax)
 <!-- example: sweep session -->
 ```
 $ mathema verify --root .
+ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
 ok   functions.softmax: fresh
-1 fresh (form unchanged, skipped), 0 adjudicated, 0 problem(s)
+1 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
+
+`softmax` calls `math.exp`, and the bundled [compendium](../claims-transfer.md)
+states claims about it, so the sweep adjudicates those against the
+installed library too (once, and fresh from then on), which is what a
+premise resting on them reads. It adjudicates no other `math` function:
+see [Library claims](#library-claims-lazy-by-default-a-file-up-front).
 
 Drop the normalization on purpose (`return exps` instead of dividing
 by the total):
@@ -135,8 +143,9 @@ and re-run:
 <!-- example: sweep session -->
 ```
 $ mathema verify --root .
+ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
 FAIL functions.softmax: form changed; 1 proven, 1 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
-0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -166,13 +175,56 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 <!-- example: sweep session -->
 ```
 $ mathema verify --root .
+ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
 ok   functions.softmax: form changed; 1 proven, 2 holds, 0 falsified
-0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+1 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
 Back to clean, and the baseline is refreshed; the next `verify` will
 be fresh again until the code or the claim set actually changes.
+
+## Library claims: lazy by default, a file up front
+
+The default sweep is lazy about the claims mathema bundles for
+libraries: only the library functions your project uses are
+adjudicated, the ones a swept function calls (through its import
+aliases, so `np.sqrt` is `numpy.sqrt`) or a claim rests a premise on,
+plus any already in the store. A project that never calls numpy
+verifies none of numpy's rows, and a new call brings its callee's rows
+in on the next sweep. A compendium file in your own project is a
+claims file in the tree like any other, and the sweep adjudicates all
+of it.
+
+To adjudicate a whole claims file up front, name it. Every entry in the
+file is adjudicated and recorded like any sweep, whether or not your
+code calls it:
+
+```bash
+mathema verify claims/numpy.claims.yaml
+```
+
+A bundled file is named by the path records give it,
+`mathema/compendium/...`:
+
+<!-- example: eager session -->
+```
+$ mathema verify mathema/compendium/math.claims.yaml --root .
+ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
+FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- 1 unknown claim(s); compendium:math declares 'log_monotone' for math.log; mathema verify recorded it unknown against the installed library: accept it (mathema accept math.log log_monotone --as trusted) or let mathema verify adjudicate it against the installed library
+ok   math.sqrt: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 1 holds, 0 falsified
+0 fresh (form unchanged, skipped), 3 adjudicated, 1 problem(s)
+grammars detected: mathema; verified by this run: mathema
+```
+
+The run gates like any other: `math.log`'s derivative row cannot be
+settled against a function with no Python source, so it fails, naming
+the two ways forward. A file whose library is not importable, or is
+installed at a version outside the file's `versions` range, adjudicates
+nothing and says so on one line (`note claims/numpy.claims.yaml:
+numpy 1.20.0 is outside the file's range >=1.24,<3; nothing in it was
+adjudicated`). An ordinary claims file named the same way confines the
+sweep to its entries.
 
 ## Unknown claims and accepted risk
 
@@ -208,16 +260,17 @@ the sign of the lifted sum), so the dependent claim is `unknown`.
 `shifts_with_start` proves on the derive route, and every proof spawns
 a `shifts_with_start[float]` companion, the same law checked in
 floating point (see
-[the evidence ladder](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)),
+[the evidence ladder](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)),
 which holds. The second proven claim in the count is
 `dependencies_current`, which `verify` adds to every record:
 
 <!-- example: sweep session -->
 ```
 $ mathema verify --root .
+ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
 FAIL balances.running_total: no baseline record; 2 proven, 2 holds, 0 falsified, 1 unknown  <- 1 unknown claim(s)
 ok   functions.softmax: fresh
-1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+2 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -285,8 +338,9 @@ history over:
 $ mathema verify --root .
 FAIL balances.running_total: cannot resolve to a live function (declared in .mathema/verified/balances.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total
 FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
+ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
 ok   functions.softmax: fresh
-1 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
+2 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 

@@ -109,9 +109,10 @@ include = ["mathema*"]
 exclude = ["mathema._devtools*"]
 
 [tool.setuptools.package-data]
-# the bundled compendium (mathema/compendium/*.yaml) ships with the
-# package; the loader reads the files beside its own source
-"mathema.compendium" = ["*.yaml"]
+# the bundled compendium ships with the package, top-level files and
+# the per-library subdirectories alike (mathema/compendium/**/*.yaml);
+# the loader reads the files beside its own source
+"mathema.compendium" = ["*.yaml", "**/*.yaml"]
 # PEP 561: without this marker a type checker ignores the annotations
 # in the installed package and every imported name resolves to Any,
 # however carefully the source is typed

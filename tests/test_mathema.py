@@ -695,19 +695,25 @@ def test_conjecture_derive_route_unliftable_is_skipped():
 
 def test_claim_helper_strings():
     from mathema.claims import claim
-    c = claim("f(-x) == -f(x)", pseudo_infinity=1e100)
+    c = claim("f(-x) == -f(x)")
     assert c.lhs == "f(-x)" and c.rhs == "-f(x)" and c.relation == "=="
-    c2 = claim("min(x) <= f(x, alpha)", name="lower", pseudo_infinity=1e100)
+    c2 = claim("min(x) <= f(x, alpha)", name="lower")
     assert c2.name == "lower" and c2.relation == "<="
 
     def cube2(x: float) -> float:
         return x ** 3
 
-    results = mathema.claims.check(cube2, [claim("f(-x) == -f(x)", pseudo_infinity=1e100),
-                                           claim("f(x) >= 0", pseudo_infinity=1e100)])
+    results = mathema.claims.check(cube2, [claim("f(-x) == -f(x)"),
+                                           claim("f(x) >= 0")])
     by = {p.name: p.verdict for p in results}
     assert by["f_x_eq_f_x"] == "proven"           # auto-named; best-route proof
     assert list(by.values()).count("falsified") == 1
+    # x**3 >= 0 is false over the reals: a derive disproof with an
+    # executed witness, not an overflow
+    (neg,) = [p for p in results if p.name == "f_x_ge_0"]
+    assert (neg.verdict, neg.route) == ("falsified", "derive")
+    assert neg.meta.get("mathema.corroboration") == "reproduced"
+    assert float(neg.counterexample.split("=", 1)[1]) < 0, neg.counterexample
 
 
 def test_check_accepts_claims_alongside_built_in_probes():

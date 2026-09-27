@@ -114,7 +114,7 @@ function. The derive rows are witnessed by the call at the pole itself (`even`
 fails at `x = -1` because `f(1)` raises), which says the claim has no value
 there, not whether its mathematics holds, so they carry no tag.
 `[implementation:representation]` means the mathematics was fine and the
-implementation fell over, here because the integer `1` is admitted by the
+computation fell over, here because the integer `1` is admitted by the
 domain and raises. `is_defined` is the same pole seen from the other side: a
 claim named `is_defined` states the region on which `f` returns, and it is
 proven because `f` returns on exactly `1 - x != 0` and raises everywhere else.
@@ -148,7 +148,7 @@ mathema check options.py --claim "f(s,k,r,t,sigma) == s - k*exp(-r*t)"
 
 <!-- example: parity output -->
 ```text
-FAIL options.put_call_parity_gap: source, no side effects; claims 1/2 adjudicated (0 proven, 0 holds, 1 falsified, 1 skipped)  <- 1 falsified claim(s)
+FAIL options.put_call_parity_gap: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 The counterexample is `s = 1, k = 1, r = 1, t = -1, sigma = 1`, a negative
@@ -178,13 +178,13 @@ Among the results, all found with no claims written:
 <!-- example: finds output match=subset -->
 ```text
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([2.01488, 3.30692, -6.39418, 3.78355, 6.96564, 7.97935], -9.1034): -6.39418363288563 vs -45761.14174665739
+           counterexample ([-8.45341, 4.50714, -6.81355, 9.56619, 9.82492, -3.48464], -3.87612): -8.453411994413011 vs -31170.68185339262
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([6.22429, 5.95714, 3.98826, -6.56235, 7.20359, 1.66103, -8.45295], -5.87836): 78066.38231536481 vs -1129152.7241483687
+           counterexample ([0, 4.3345], -8.15071): -35.32926960780323 vs 39.66377358173939
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
   FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-1e+308, -1e+308, -1e+308], alpha=-1e+308, c=-5
+           counterexample x=[-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha=-1.79769e+308, c=-5
            [mathematics sound, implementation:numerical-instability]
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
@@ -200,8 +200,13 @@ it reports the counterexample and leaves the judgement to a person.
 
 `scale_equivariant[float]` is the proof's float companion: the same law run
 through the real code in floating point, where nothing bounds the inputs, so
-it reaches elements near `1e+308` and the arithmetic overflows. The
-mathematics is sound and the float code does not follow it out there.
+it reaches elements and an `alpha` at float64's lowest value, about
+`-1.8e+308`. There the loop's arithmetic
+overflows and subtracts one infinity from another, so both sides of the law
+come out NaN, and a NaN is no value: it agrees with nothing, not even the
+other side's NaN. The mathematics is sound and the float code does not
+follow it out there; a domain for `alpha`, or a `let |inf| be ...` binding,
+is the fix.
 
 [A first look](first-look.md) takes `ema` through domains, both evidence
 routes and the stored record.

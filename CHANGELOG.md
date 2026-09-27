@@ -2,8 +2,72 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
-## Unreleased
+## 0.6.1
 
+- The wheel now ships the bundled compendium. The 0.6.0 wheel carried
+  none of its compendium files (the package-data pattern missed the
+  per-library directories), so `is_compendium_safe(numpy)` was `unknown`
+  for every installed copy and numpy calls counted as uncovered in the
+  clarity score.
+- A compendium is now an ordinary claims file whose keys are a library's
+  functions, with file-level fields beside `grammar`: `compendium:`
+  naming the library, `versions:` the installed versions its claims
+  apply to (`"*"`, `">=X"` or `">=X,<Y"`), and optionally `aliases:`,
+  other names for the library (a distribution name such as `PyYAML`, a
+  key prefix such as `np`). A row may carry its own `versions:`. A
+  project states its own compendium in any claims file, such as
+  `claims/numpy.claims.yaml`, shadowing the bundled entry per function.
+  The bundled compendium covers `math` and 28 numpy functions, now
+  including `divide`, `true_divide` and `reciprocal`.
+- The 0.6.0 compendium shape (`package:`, `functions:`, `params`,
+  `raises_when`, `nan_when`, `limitations`) and the
+  `.mathema/compendium/` directory are gone; a definedness region is an
+  `is_defined` row, and what the library does outside it is the row's
+  `note:`.
+- `mathema verify` adjudicates the rows of the library functions a
+  project calls or rests a premise on against the installed library,
+  and those rows gate the run until verified locally or accepted with
+  `mathema accept <key> <row> --as trusted`. `mathema verify <claims
+  file>` adjudicates every row of that file up front.
+- Mathematics and computation are separate. The derive route proves a
+  claim over the reals, with infinity as infinity, and reads nothing
+  about float64; what the code does in float64 is the computation's
+  question, answered by execution: the `[float]` companion every proof
+  spawns and the probe route. A raise, a NaN from non-missing inputs or
+  an infinity from a finite input is no value, and fails every relation.
+- The operational infinity resolves at three levels, the claim (`let
+  |inf| be`), the function (a claims-file entry's `pseudo_infinity:`,
+  or `check(fn, pseudo_infinity=)`) and the project
+  (`MATHEMA_PSEUDO_INFINITY`), else the carrier's maximum. It bounds
+  only the computation, never a claim's identity, and is shown as a
+  plain `let |inf| be ...` in front of a computation row's condition
+  only where it bounds an unbounded direction. Along an unbounded
+  direction, nine draws in ten stay at everyday magnitudes and one in
+  ten goes toward the reach.
+- The computation-safety families are organised by the three questions
+  they answer: does it run on my domain, is the answer right in
+  float64, is it repeatable. New: `is_overflow_safe` (with a
+  restriction form stating where the computation stays in float range),
+  `is_recursion_safe`, and two roll-ups, `is_computation_safe(f)` for
+  the first two questions and `is_repeatable(f)` for the third, where a
+  function taking a seed or generator is held to `is_reproducible`.
+  `is_memory_safe`, `is_precision_safe`, `is_order_invariant`,
+  `is_concurrency_safe` and `is_carrier_consistent` are reserved:
+  `skipped` in this release.
+- The clarity score reads each call's hazard from the callee's own
+  record (`CLARITY_ALGO` entropy-dimensions@1.2), so clarity scores move
+  once with this release.
+- `mathema compendium status` reports, for each third-party library the
+  project calls, its claims files, the called functions with no claims,
+  and how many rows are verified locally, trusted or unsettled.
+  `mathema compendium update` pins the non-default literal arguments
+  the project's calls pass into rows of its own compendium files, and
+  widens a used row's own `versions:` once it holds on the installed
+  version. `mathema compendium export <library>` writes a library's
+  proven and held rows as a claims file for downstream projects.
+- `mathema describe` lists the edges just outside a passing domain that
+  the computation rows know about, as information, never a verdict.
+- `mathema --version` prints the installed version.
 - Language domains: `for text in L[unicode], ...` quantifies a string
   parameter over a named language. mathema parses, renders and records
   `L[...]`; the names come from the `mathema-language` package
@@ -76,8 +140,7 @@ Notable changes to mathema are recorded here from its first public release onwar
   declared language: the near non-members come from the language, a
   witness says whether it lies inside or outside it, and shrinking never
   crosses the boundary. The derive route lifts a schema language's
-  numeric fields, so a claim over rows can reach `proven`. A field
-  binding deeper than one level is refused by name.
+  numeric fields, so a claim over rows can reach `proven`.
 - Two results compare by their values whatever their leaves are: a
   parser's nested result holding `None` or strings is equal to itself,
   a ragged value is compared leaf by leaf, records that do not subtract
@@ -87,6 +150,17 @@ Notable changes to mathema are recorded here from its first public release onwar
   ordering over such values is unanswerable, as before.
 - A string concatenation in a claim keeps its order when rendered
   (`s + "0"` never becomes `"0" + s`).
+- A language may supply its own derive strategy, a `derive` method
+  found through any refinements around it and called for a claim
+  quantified over it; a proof it returns is the claim's derive verdict
+  on the route `derive:<mechanism>` it names, and anything else leaves
+  the claim to the probe.
+- A witness too deep for Python to print is summarised by its type and
+  depth, `<Node nested 2100 levels deep (1050 Node records)>`, instead
+  of the adjudication raising.
+- A claim resolves each language once for all its draws; where no
+  member sits exactly on a refinement's bound, the nearest ones inside
+  and past it are visited.
 
 ## 0.6.0
 

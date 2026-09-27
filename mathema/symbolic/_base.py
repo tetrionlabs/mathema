@@ -23,6 +23,7 @@ import sympy
 from .._math_vocab import (_BINOPS, _MATH_ATTRS, _SYMPY_FUNCS,
                            _call_name, _root_name)
 from ..finite_sets import OpaqueRegistry, is_opaque_eligible
+from .._signatures import callable_signature
 
 
 # One canonical pair of tables for negating/rendering sympy
@@ -377,10 +378,9 @@ def _dataclass_fields(fn, param: str) -> list[str] | None:
     dataclass-typed, or any of its own fields isn't itself scalar (a
     nested dataclass or a sequence-typed field stays out of scope)."""
     import dataclasses
-    import inspect
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return None
     p = sig.parameters.get(param)
@@ -565,10 +565,9 @@ def _read_field_keys(fn, param: str, tree) -> "list[str] | None":
         field any other way, or the parameter is not a dataclass.
     """
     import dataclasses
-    import inspect
     import typing
     try:
-        annotation = inspect.signature(fn).parameters[param].annotation
+        annotation = callable_signature(fn).parameters[param].annotation
     except (TypeError, ValueError, KeyError):
         return None
     if not dataclasses.is_dataclass(annotation):

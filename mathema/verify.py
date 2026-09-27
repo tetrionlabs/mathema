@@ -20,6 +20,7 @@ in `gates.py`; this module gates adjudication OUTCOMES, not evidence.)
 """
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import dataclass, field
 
@@ -116,8 +117,11 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
         under that name rather than as the fresh `falsified`.
 
     Notes:
-        Only a stored `invalidated` is carried over; every other
-        verdict is already the probe's own.
+        A stored `invalidated` is carried over, and so is the accepted
+        level of a trusted row the sweep could not settle
+        (`mathema.trusted_unsettled`) or settled only more weakly
+        (`mathema.strongest_evidence`, with the row's note), with that
+        marker; every other verdict is already the probe's own.
     """
     import yaml
 
@@ -128,9 +132,21 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
         return
     stored = {c.get("name"): c.get("verdict")
               for c in entry.get("claims") or []}
+    trusted = {c.get("name"): c for c in entry.get("claims") or []
+               if {"mathema.trusted_unsettled", "mathema.strongest_evidence"}
+               & set(c.get("meta") or {})}
     for p in probes:
         if classify_verdict(stored.get(p.name) or "") == "invalidated":
             p.verdict = stored[p.name]
+        elif p.name in trusted:
+            row = trusted[p.name]
+            p.verdict = stored[p.name]
+            p.meta = {**(p.meta or {}), **{
+                k: v for k, v in (row.get("meta") or {}).items()
+                if k in ("mathema.trusted_unsettled",
+                         "mathema.strongest_evidence")}}
+            if "mathema.strongest_evidence" in (row.get("meta") or {}):
+                p.note = row.get("note") or p.note
 
 
 def gate(claims, *, strict: bool,
@@ -554,14 +570,18 @@ def _union_verified_membership(current_claims: list,
 def verify_project(root: str = ".", *, all: bool = False,
                    strict: bool = True,
                    trials_scale: float = 1.0,
-                   only: "list | None" = None) -> VerifyResult:
+                   only: "list | None" = None,
+                   files: "list | None" = None) -> VerifyResult:
     """The test-runner sweep as a library call: for every key the
     declared/verified stores know, re-adjudicate if the function's form
     hash, claims fingerprint, or a dependency changed (`all=True`
     forces everything), rewrite the record, and gate each key's
     adjudicated claims through `gate`. `only` restricts the sweep to the
     given dotted keys (the single-key re-verify the reconcile workflow
-    points at); None sweeps the whole population.
+    points at); None sweeps the whole population. `files` names claims
+    files whose every entry is adjudicated up front, whether or not the
+    project calls it (`claims_file_entries`); with `files` the sweep is
+    restricted to their entries plus any `only` keys.
 
     Notes:
         `dependencies_current` claims are settled AFTER the whole sweep
@@ -582,13 +602,235 @@ def verify_project(root: str = ".", *, all: bool = False,
         # silenced, every other warning still surfaces.
         warnings.simplefilter("ignore", StateDependenceWarning)
         return _verify_sweep(root, all=all, strict=strict,
-                             trials_scale=trials_scale, only=only)
+                             trials_scale=trials_scale, only=only,
+                             files=files)
+
+
+def resolve_claims_file(target: str, root: str = ".") -> "str | None":
+    """Intent:
+        The claims file a `mathema verify` target names, or None when
+        the target is not a path to one (a dotted key). A path is read
+        as given, then under `root`; `mathema/compendium/...`, the
+        spelling a record gives a bundled file, names the file mathema
+        ships.
+    """
+    import os
+    if not target.endswith((".yaml", ".yml")):
+        return None
+    from .compendium import _bundled_dir
+    candidates = [target, os.path.join(root, target)]
+    prefix = os.path.join("mathema", "compendium") + os.sep
+    if target.replace("/", os.sep).startswith(prefix):
+        candidates.append(os.path.join(
+            _bundled_dir(), target.replace("/", os.sep)[len(prefix):]))
+    for path in candidates:
+        if os.path.isfile(path):
+            return os.path.abspath(path)
+    return None
+
+
+def claims_file_entries(path: str, root: str,
+                        library_claims: dict) -> "tuple[dict, bool, list]":
+    """Intent:
+        The entries of one claims file as the sweep adjudicates them:
+        `(entries, is_library, lines)`, `entries` mapping each key to
+        `{"entry", "source"}`, `is_library` whether the file declares
+        `compendium:`, and `lines` the one-line notes the sweep prints.
+        A compendium file's key takes the entry that applies to it
+        (`load_library_claims`, where a project file shadows a bundled
+        one), else the file's own, stamped as compendium testimony.
+
+    Notes:
+        A compendium file whose library is not importable, or is
+        installed outside the file's `versions` range, contributes no
+        entries and one line saying which; so does one naming the
+        project's own package.
+    """
+    from .compendium import (_display_path, _installed_version,
+                             applicable_tag, mark_row_versions,
+                             names_own_package, pop_library_fields)
+    from .spec import read_claims_file, stamp_library_rows
+    where = _display_path(path, root)
+    data = read_claims_file(path, where) or {}
+    file_grammar = data.pop("grammar", None)
+    library, versions, aliases = pop_library_fields(data)
+    entries: dict = {}
+    if library is None:
+        for key, entry in data.items():
+            if isinstance(entry, dict):
+                entry = dict(entry)
+                if file_grammar:
+                    entry.setdefault("grammar", file_grammar)
+                entries[key] = {"entry": entry, "source": where}
+        return entries, False, []
+    if names_own_package(library, root) and not where.startswith(
+            os.path.join("mathema", "compendium")):
+        return {}, True, [
+            f"note {where}: `compendium: {library}` names this project's "
+            f"own package; nothing in it was adjudicated"]
+    tag = applicable_tag(library, versions, aliases)
+    if tag is None:
+        installed = _installed_version(library, aliases)
+        why = (f"{library} is not importable here" if installed is None
+               else f"{library} {installed} is outside the file's range "
+                    f"{versions}")
+        return {}, True, [f"note {where}: {why}; nothing in it was "
+                          f"adjudicated"]
+    stamp_library_rows(data, tag)
+    mark_row_versions(data, library, aliases)
+    for key, entry in data.items():
+        if not isinstance(entry, dict):
+            continue
+        info = library_claims.get(key)
+        entries[key] = ({"entry": info["entry"], "source": info["source"]}
+                        if info else {"entry": entry, "source": where})
+    return entries, True, []
+
+
+def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
+    """Intent:
+        Whether a library function's calls would now pass a different
+        value than the record states (`mathema.defaults` on each row,
+        per function the claim calls): a default the installed library
+        changed, a parameter added or removed. Such a record is stale even though the claims and the
+        form are not.
+    """
+    from .conjecture import claim_defaults
+    from .spec import entry_claims
+    try:
+        current = entry_claims(merged_entry or {})
+    except Exception:
+        return False
+    now: dict = {}
+    for cj in current:
+        resolved = claim_defaults(fn, cj)
+        if resolved:
+            now[cj.name] = resolved
+    names = {cj.name for cj in current}
+    recorded = {c.get("name"): (c.get("meta") or {}).get("mathema.defaults")
+                for c in (verified_entry or {}).get("claims") or []
+                if c.get("name") in names
+                and (c.get("meta") or {}).get("mathema.defaults")}
+    return now != recorded
+
+
+def _pseudo_infinity_moved(fn, facts, merged_entry: dict,
+                           verified_entry: dict) -> bool:
+    """Intent:
+        Whether the operational infinity a claim's computation runs to
+        would now differ from what the record states
+        (`mathema.pseudo_infinity` on the claim's rows): a changed or
+        removed `MATHEMA_PSEUDO_INFINITY`, entry field or `let |inf|
+        be`, compared only where it bounds an unbounded direction (P8).
+        Such a record is stale, its claims unchanged (P7).
+    """
+    from dataclasses import replace
+
+    from .conjecture import pseudo_infinity_stamp
+    from .records import resolve_pseudo_infinity
+    from .spec import entry_claims
+    from .types import domain_from_signature
+    try:
+        current = entry_claims(merged_entry or {})
+        parent = domain_from_signature(fn)
+    except Exception:
+        return False
+    function_level = (merged_entry or {}).get("pseudo_infinity")
+    now: dict = {}
+    for cj in current:
+        resolved = replace(cj, resolved_pseudo_infinity=resolve_pseudo_infinity(
+            cj.pseudo_infinity, function_level))
+        stamp = pseudo_infinity_stamp(resolved, facts, parent)
+        if stamp is not None:
+            now[cj.name] = stamp
+    names = {cj.name for cj in current}
+    recorded: dict = {}
+    for c in (verified_entry or {}).get("claims") or []:
+        meta = c.get("meta") or {}
+        # a companion row belongs to the claim it was spawned from
+        base = meta.get("mathema.companion_of") or c.get("name") or ""
+        stamp = meta.get("mathema.pseudo_infinity")
+        if base in names and stamp:
+            recorded[base] = stamp
+    return now != recorded
+
+
+def _unsettled_library_hints(key: str, claims: list) -> list:
+    """Intent:
+        For each library row this sweep left unsettled (declared,
+        unknown or skipped), the line naming both ways to settle it:
+        accept it as trusted, or let verify adjudicate it against the
+        installed library.
+    """
+    from .compendium import _compendium_hint
+    out: list = []
+    for c in claims:
+        name, verdict, meta, _note = _claim_fields(c)
+        if meta.get("mathema.surface") != "compendium":
+            continue
+        if classify_verdict(verdict) not in ("declared", "unknown",
+                                             "skipped"):
+            continue
+        out.append(_compendium_hint(
+            meta.get("mathema.compendium") or "a compendium", name, key,
+            verdict))
+    return out
+
+
+def _library_population(root: str, verified: dict, declared: dict,
+                        library_claims: dict) -> dict:
+    """Intent:
+        The library claim keys this sweep adjudicates, mapped to the
+        claims file each one's rows come from: every key a swept
+        function calls (through its import aliases, `np.sqrt` is
+        `numpy.sqrt`), every key a swept claim names as a premise
+        (`assuming numpy.clip.clip_lower holds`, or the bare row name),
+        and every key already in the verified store. A project that
+        never calls a library adjudicates none of its keys.
+    """
+    from . import analyze
+    from .compendium import _referenced_names, library_keys_called
+    from .conjecture import _resolve_func_ref
+
+    if not library_claims:
+        return {}
+    by_row: dict = {}
+    for lkey, info in library_claims.items():
+        for c in info["entry"].get("claims") or []:
+            if c.get("name"):
+                by_row.setdefault(c["name"], set()).add(lkey)
+    wanted: set = {k for k in verified if k in library_claims}
+    for key in set(verified) | set(declared):
+        if key in library_claims:
+            continue
+        rows = list(((declared.get(key) or {}).get("entry") or {})
+                    .get("claims") or [])
+        rows += list(((verified.get(key) or {}).get("entry") or {})
+                     .get("claims") or [])
+        fn = _resolve_func_ref(key, root=root)
+        if fn is not None:
+            try:
+                facts = analyze(fn)
+                wanted |= library_keys_called(fn, facts,
+                                              library_claims=library_claims)
+                from .authoring import resolve_declared
+                rows += list(resolve_declared(fn, file_entry={})
+                             .get("claims") or [])
+            except Exception:
+                pass
+        for name in _referenced_names(rows):
+            head, _, row = name.rpartition(".")
+            if head in library_claims:
+                wanted.add(head)
+            wanted |= by_row.get(name, set())
+    return {k: library_claims[k]["source"] for k in sorted(wanted)}
 
 
 def _verify_sweep(root: str = ".", *, all: bool = False,
                   strict: bool = True,
                   trials_scale: float = 1.0,
-                  only: "list | None" = None) -> VerifyResult:
+                  only: "list | None" = None,
+                  files: "list | None" = None) -> VerifyResult:
     """Intent:
         The sweep body of `verify_project`, which shields it from the
         per-key state-dependence warning chatter.
@@ -596,9 +838,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     from . import analyze, check
     from .compendium import external_premises as _external_premises
     from .compendium import install as _install_compendium
-    from .compendium import materialize_referenced_entries
+    from .compendium import load_library_claims
     _install_compendium(root)
-    stub_premises = _external_premises(root)
+    library_claims = load_library_claims(root)
+    stub_premises = _external_premises(root, library_claims=library_claims)
     from .authoring import resolve_declared
     from .conjecture import (GRAMMAR, InvalidConjecture,
                              _resolve_func_ref)
@@ -609,6 +852,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        write_yaml)
 
     out = VerifyResult()
+    from .compendium import own_package_compendium_files
+    for where, library in own_package_compendium_files(root):
+        out.lines.append(
+            f"note {where}: `compendium: {library}` names this project's "
+            f"own package, so the file is ignored; its claims are the "
+            f"project's own, stated in its ordinary claims files")
     integrity_warned: set = set()
     from .auth import acceptance_policy_problems, load_policy
     from .locks import load_locks, lock_state
@@ -618,7 +867,38 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     declared = load_declared(root)
     from .spec import unreadable_verified
     broken = unreadable_verified(root)
-    keys = sorted(set(verified) | set(declared) | set(broken))
+    # the library functions this project calls or rests a premise on
+    # join the population with their library claims, so each is
+    # adjudicated against the installed library; project-declared keys
+    # keep their own entry
+    library = _library_population(root, verified, declared, library_claims)
+    for lkey in library:
+        if lkey not in declared:
+            info = library_claims[lkey]
+            declared[lkey] = {"entry": copy.deepcopy(info["entry"]),
+                              "source": info["source"]}
+    # a claims file named up front: every entry in it is adjudicated,
+    # a library's whether or not the project calls it
+    eager: set = set()
+    for path in files or []:
+        entries, is_library, notes = claims_file_entries(
+            path, root, library_claims)
+        out.lines.extend(notes)
+        for fkey, info in entries.items():
+            eager.add(fkey)
+            if is_library:
+                library.setdefault(fkey, info["source"])
+            if fkey not in declared:
+                declared[fkey] = {"entry": copy.deepcopy(info["entry"]),
+                                  "source": info["source"]}
+    if files is not None:
+        only = list(only or []) + sorted(eager)
+        if not only:
+            return out
+    # library keys first, so a premise resting on one sees the verdict
+    # this run records for it
+    keys = sorted(set(verified) | set(declared) | set(broken),
+                  key=lambda k: (k not in library, k))
     # a function can be locked before it has any record or claims; its
     # lock is still checked
     lock_only = sorted(set(locks) - set(keys))
@@ -711,20 +991,22 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         declared_info = declared.get(key)
         source = (declared_info or verified_info)["source"]
         fn = _resolve_func_ref(key, root=root)
+        if fn is None and key in eager and key in library:
+            out.lines.append(f"note {key}: not importable from the "
+                             f"installed library; nothing adjudicated")
+            continue
         if fn is None:
-            rows = verified_entry.get("claims") or []
-            # `all` is this function's own --all flag here, so the
-            # builtin is spelled via any()
-            if rows and not any((r.get("meta") or {}).get(
-                    "mathema.surface") != "compendium" for r in rows):
-                # a compendium key whose package is not importable
-                # here: testimony pending acceptance, never a sweep
-                # failure. Its rows still resolve premises once
-                # accepted; reverification needs the library.
+            from .compendium import is_library_record
+            if is_library_record(verified_entry):
+                # a compendium key whose library is not importable
+                # here: testimony, never a sweep failure. Its rows
+                # still resolve premises at their recorded verdicts;
+                # adjudicating them again needs the library.
                 out.lines.append(
-                    f"note {key}: stub testimony only, library not "
-                    f"importable here; accept rows --as trusted, or "
-                    f"install the package for the sweep to reverify")
+                    f"note {key}: library claims only, the library is "
+                    f"not importable here; accept rows --as trusted, or "
+                    f"install the library for the sweep to adjudicate "
+                    f"them")
                 continue
             msg = f"{key}: cannot resolve to a live function"
             out.problems.append(msg)
@@ -910,8 +1192,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         premise_now = _premise_state(current_claims, stub_premises)
         recorded_premises = (verified_entry.get("meta") or {}).get(
             "mathema.premise_state")
+        defaults_moved = _defaults_moved(fn, merged_entry, verified_entry)
+        pinf_moved = _pseudo_infinity_moved(fn, facts_now, merged_entry,
+                                            verified_entry)
         is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
-                    and recorded_fp == current_fp
+                    and recorded_fp == current_fp and not defaults_moved
+                    and not pinf_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
         deps_now = function_dependencies(fn, facts_now) if is_fresh else None
@@ -971,14 +1257,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # (an empty declared set means no claims, not "go conjecture")
         from .spec import attach_recorded_pins
         attach_recorded_pins(claims, verified_entry or None)
-        if materialize_referenced_entries(root, claims, stub_premises):
-            # a referenced compendium row just entered the verified store at
-            # declared status; re-resolve so this key's notes and any
-            # later key's premises see it
-            stub_premises = _external_premises(root)
         rec = check(fn, claims=claims if claims else [],
                     trials_scale=trials_scale,
-                    known_premises=stub_premises)
+                    known_premises=stub_premises,
+                    pseudo_infinity=merged_entry.get("pseudo_infinity"))
         rec.probes = [p for p in rec.probes
                       if getattr(p, "name", None) not in withheld]
         rec.probes, late_notes = _strip_retired_probes(
@@ -990,6 +1272,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         rec.probes.append(dependencies_current_probe(rec.dependencies,
                                                      root=root))
         why = ("dependency changed" if dependency_changed
+               else "defaults changed" if defaults_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
+               else "pseudo-infinity changed" if pinf_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh
                else "targeted re-verify" if only and is_fresh
                else "no baseline record" if not recorded_form
@@ -1002,6 +1290,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                declared_intent=merged_entry.get("intent"))
         _carry_recorded_verdicts(rec.probes, written, key)
         out.adjudicated += 1
+        if key in library:
+            # this key's rows now resolve premises at their local verdict
+            stub_premises = _external_premises(
+                root, library_claims=library_claims)
         pending.append((key, why, list(rec.probes), rec, rec.dependencies,
                         accepted, rec.facts.unresolved, verified_info))
 
@@ -1059,8 +1351,27 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
 
     # phase 3: gate every key through the one policy and render lines
     for key, why, claims_for_gate, rec, deps, accepted, unres, _vinfo in pending:
+        is_library = key in library
+        # a library key gates like the project's own claims: a row
+        # neither verified here nor accepted (`--as trusted`) fails.
+        # The unresolved-global-name check is the one rule it skips:
+        # that check reads the analysed body of the project's own
+        # function, and a library's body is not what its rows are about
         report = gate(claims_for_gate, strict=strict,
-                      accepted_risk=accepted, unresolved=unres)
+                      accepted_risk=accepted,
+                      unresolved=() if is_library else unres)
+        hints = (_unsettled_library_hints(key, claims_for_gate)
+                 if is_library and report.problems else [])
+        standing = [
+            f"{name} stays trusted at its accepted level ({verdict}): the "
+            f"sweep could not settle it ({meta['mathema.trusted_unsettled']})"
+            for name, verdict, meta, _n in map(_claim_fields, claims_for_gate)
+            if meta.get("mathema.trusted_unsettled")]
+        standing += [
+            f"{name} trusted as: {verdict}, strongest evidence seen: "
+            f"{meta['mathema.strongest_evidence']}"
+            for name, verdict, meta, _n in map(_claim_fields, claims_for_gate)
+            if meta.get("mathema.strongest_evidence")]
         state = "FAIL" if report.problems or key_problems.get(key) else "ok"
         if key in lock_messages:
             # the record is left as it was, so its counts describe code
@@ -1070,18 +1381,25 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 line += "; " + "; ".join(report.problems)
         elif why == "fresh":
             line = f"{state:4} {key}: fresh"
+            if is_library:
+                line += f"; library claims from {library[key]}"
             if report.problems:
-                line += "; " + "; ".join(report.problems)
+                line += "; " + "; ".join(report.problems + hints)
         else:
-            line = f"{state:4} {key}: {why}; {summary_counts(report)}"
+            line = (f"{state:4} {key}: "
+                    + (f"library claims from {library[key]}; "
+                       if is_library else "")
+                    + f"{why}; {summary_counts(report)}")
             if report.foreign:
                 grammars = sorted({_claim_fields(p)[2]
                                    ["mathema.foreign_grammar"]
                                    for p in report.foreign})
                 line += (f", {len(report.foreign)} not this grammar "
                          f"({', '.join(grammars)})")
+            if standing:
+                line += "; " + "; ".join(standing)
             if report.problems:
-                line += "  <- " + "; ".join(report.problems)
+                line += "  <- " + "; ".join(report.problems + hints)
         out.problems.extend(f"{key}: {p}" for p in report.problems)
         out.lines.append(line)
         out.keys.append({
@@ -1093,6 +1411,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          else []) + key_problems.get(key, [])
                         + list(report.problems),
             "integrity_mismatch": key in integrity_warned,
+            **({"library_claims": library[key]} if is_library else {}),
             "counts": {"proven": report.proven, "holds": report.holds,
                        "refuted": report.refuted,
                        "falsified": report.falsified,
