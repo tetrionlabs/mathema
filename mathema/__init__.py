@@ -419,11 +419,12 @@ def _domains_from_claims(claims) -> dict:
         caller sees. Where two claims bound the same parameter, the
         first stands: the battery only needs one legal region to
         synthesise a call in, and each claim is still adjudicated
-        against its own domain regardless. The built-in battery is the
-        only reader: these regions never become a function-level domain
-        for any claim.
+        against its own domain regardless. A `let` binding of a single
+        value is a pin for that claim's calls, not a region, and is left
+        out. The built-in battery is the only reader: these regions
+        never become a function-level domain for any claim.
     """
-    from .conjecture import claim as _claim
+    from .conjecture import _single_point, claim as _claim
 
     out: dict = {}
     for c in claims or ():
@@ -431,7 +432,12 @@ def _domains_from_claims(claims) -> dict:
             parsed = _claim(c) if isinstance(c, str) else c
         except Exception:
             continue
+        pinned = set(getattr(parsed, "free_vars", None) or ())
         for name, bound in (getattr(parsed, "domain", None) or {}).items():
+            if name in pinned and _single_point(bound) is not None:
+                # a `let p be 0` pin passes that value to this claim's
+                # calls only; it is no region for the battery
+                continue
             out.setdefault(name, bound)
     return out
 
