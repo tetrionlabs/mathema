@@ -105,10 +105,11 @@ def test_export_writes_where_it_is_told(tmp_path):
     assert out.exists()
 
 
-def test_a_library_key_records_and_exports_the_curated_intent(tmp_path):
-    # a key from a compendium file carries its curator's `intent:`, not
-    # the library docstring's first line (a signature for a ufunc, a
-    # paragraph for numpy.mean)
+def test_a_library_key_keeps_its_docstring_intent_and_exports_row_notes(
+        tmp_path):
+    # a library key's record states the function's own intent like any
+    # function's; what the compendium file says about the library's
+    # behaviour is a row's note, and export writes it on that row
     import subprocess
     import sys
     import textwrap
@@ -124,10 +125,6 @@ def test_a_library_key_records_and_exports_the_curated_intent(tmp_path):
         def angle(x: float) -> float:
             """Arcsine through numpy."""
             return float(np.arcsin(x))
-
-        def avg(xs: list) -> float:
-            """Mean through numpy."""
-            return float(np.mean(xs))
     '''))
     (tmp_path / "claims").mkdir()
     (tmp_path / "claims" / "c.claims.yaml").write_text(textwrap.dedent("""
@@ -135,10 +132,6 @@ def test_a_library_key_records_and_exports_the_curated_intent(tmp_path):
           claims:
             - name: bounded
               statement: 'for x in [-1, 1], -2 <= f(x) <= 2'
-        qpkg.mod.avg:
-          claims:
-            - name: finite
-              statement: 'for xs in R^n, min(xs) <= f(xs) <= max(xs)'
     """))
     env = dict(__import__("os").environ, PYTHONPATH=str(tmp_path))
     subprocess.run([sys.executable, "-c",
@@ -146,13 +139,33 @@ def test_a_library_key_records_and_exports_the_curated_intent(tmp_path):
                     f"sys.exit(main(['verify', '--root', {str(tmp_path)!r}]))"],
                    capture_output=True, text=True, env=env)
     from mathema.compendium import load_library_claims
-    curated = {k: load_library_claims(".")[k]["entry"]["intent"]
-               for k in ("numpy.arcsin", "numpy.mean")}
+    (bundled,) = load_library_claims(None)["numpy.arcsin"]["entry"]["claims"]
     store = tmp_path / ".mathema" / "verified"
-    for key, intent in curated.items():
-        entry = yaml.safe_load((store / f"{key}.yaml").read_text())[key]
-        assert entry["intent"] == intent
-        assert entry["meta"]["mathema.intent_provenance"] == "compendium"
+    entry = yaml.safe_load(
+        (store / "numpy.arcsin.yaml").read_text())["numpy.arcsin"]
+    assert (entry.get("meta") or {}).get("mathema.intent_provenance") != \
+        "compendium"
+    assert entry.get("intent") != bundled["note"]
     data = export_compendium("numpy", root=str(tmp_path))
-    for key, intent in curated.items():
-        assert data[key]["intent"] == intent
+    assert "intent" not in data["numpy.arcsin"]
+    (row,) = [r for r in data["numpy.arcsin"]["claims"]
+              if r["name"] == "is_defined"]
+    assert row["note"] == bundled["note"]
+
+
+def test_export_writes_the_note_a_claims_file_states_on_the_row(tmp_path):
+    _seed_verified(tmp_path, "lib.mod.f", [
+        {"name": "bounded", "statement": "0 <= f(x) <= 1",
+         "verdict": "holds", "route": "probe",
+         "note": "sampled 200 points"}])
+    claims = tmp_path / "claims"
+    claims.mkdir()
+    (claims / "lib.claims.yaml").write_text(
+        "lib.mod.f:\n"
+        "  claims:\n"
+        "    - name: bounded\n"
+        "      statement: '0 <= f(x) <= 1'\n"
+        "      note: 'a logistic squash, so the ends are never reached'\n")
+    (row,) = export_compendium("lib", root=str(tmp_path))["lib.mod.f"][
+        "claims"]
+    assert row["note"] == "a logistic squash, so the ends are never reached"

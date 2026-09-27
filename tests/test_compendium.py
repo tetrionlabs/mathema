@@ -328,3 +328,29 @@ def test_a_compendium_file_naming_the_projects_own_package_is_ignored(
     assert notes[0].startswith("note ")
     assert "own package" in notes[0]
     assert not any("library claims from" in line for line in result.lines)
+
+
+def test_a_bundled_entry_states_its_prose_as_row_notes_not_intent():
+    # intent is a function's own statement of purpose; what a claims
+    # file says about a library's behaviour rides the row it explains
+    import glob
+    import os
+
+    import yaml
+
+    from mathema.compendium import _bundled_dir
+    paths = glob.glob(os.path.join(_bundled_dir(), "**", "*.claims.yaml"),
+                      recursive=True)
+    assert paths
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        for key, entry in data.items():
+            if isinstance(entry, dict):
+                assert "intent" not in entry, (path, key)
+    lib = load_library_claims(None)
+    (sqrt_row,) = lib["numpy.sqrt"]["entry"]["claims"]
+    assert "never raises" in sqrt_row["note"]
+    exp_rows = {r["name"]: r for r in lib["numpy.exp"]["entry"]["claims"]}
+    assert "709.78" in exp_rows["is_overflow_safe"]["note"]
+    assert "note" not in exp_rows["is_defined"]
