@@ -12,6 +12,11 @@ Notable changes to mathema are recorded here from its first public release onwar
   number is no longer offered `is_numerically_stable` among its
   suggested claims; it keeps the arbitrary-input family and the purity
   claims.
+- A recorded counterexample replays as the value that broke the claim: a
+  string witness that reads as a complex number (`"j"`, `"2J"`) stays a
+  string, and a complex witness is now stored tagged
+  (`{"complex": "1+2j"}`); an older record's complex spelling still
+  replays where the parameter can hold one.
 - A parameter's kind is read through a quoted annotation (every one under
   `from __future__ import annotations`), `typing.`, `Optional[...]` and a
   union with `None`, so `Optional[str]` is a string parameter and

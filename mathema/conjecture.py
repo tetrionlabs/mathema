@@ -129,7 +129,9 @@ def _yaml_safe_args(args) -> list:
     out = []
     for v in args:
         if isinstance(v, complex) and not isinstance(v, (int, float)):
-            out.append(f"{v.real:g}{v.imag:+g}j")
+            # tagged, so a string witness that reads as a complex
+            # number (`"j"`) can never be mistaken for one
+            out.append({"complex": f"{v.real:g}{v.imag:+g}j"})
         elif isinstance(v, (list, tuple)):
             out.append(_yaml_safe_args(v))
         else:
@@ -336,12 +338,18 @@ def _sample_in_domain(value, bound) -> bool:
         return True
 
 
-def _pinned_arg_sets(cj, arity: int) -> list:
+def _pinned_arg_sets(cj, arity: int, kinds: "list | None" = None) -> list:
     """Intent:
         The claim's recorded counterexamples (`Conjecture.pins`) as
         replayable argument tuples, restored from their YAML-safe
         spellings; entries with the wrong arity are skipped rather
         than misapplied.
+
+    Notes:
+        A complex witness is stored tagged, `{"complex": "1+2j"}`. An
+        older record stored it as a bare string, which is read as a
+        complex number only where the parameter's kind can hold one:
+        a string parameter's `"j"` stays the string it was.
     """
     out = []
     for pin in cj.pins or []:
@@ -349,8 +357,13 @@ def _pinned_arg_sets(cj, arity: int) -> list:
         if not isinstance(stored, list) or len(stored) != arity:
             continue
         restored = []
-        for v in stored:
-            if isinstance(v, str) and ("j" in v or "J" in v):
+        for i, v in enumerate(stored):
+            kind = kinds[i] if kinds is not None and i < len(kinds) else None
+            if isinstance(v, dict) and set(v) == {"complex"}:
+                restored.append(complex(v["complex"]))
+                continue
+            if (isinstance(v, str) and ("j" in v or "J" in v)
+                    and kind not in ("string", "dict", "sequence", "bool")):
                 try:
                     restored.append(complex(v))
                     continue
@@ -4617,7 +4630,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the largest exact ordering violation the default allowance
     # absorbed, and the arguments it happened at
     absorbed, absorbed_at = 0.0, None
-    pinned = _pinned_arg_sets(cj, len(kinds))
+    pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # a literal argument in the claim's own call (`f(values, "nope",
     # 0.35)`) fixes that parameter to the literal; the call passes it
     # verbatim, so sampling must not overwrite it with a synthesized
