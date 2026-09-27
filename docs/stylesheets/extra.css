@@ -118,8 +118,9 @@
   display: inline-flex; align-items: center;
   font-family: var(--font-display); font-weight: var(--wm-weight-tetrion);
   letter-spacing: var(--wm-tracking); color: var(--paper);
-  font-size: 15px; line-height: 1.2; transition: color .2s;
+  line-height: 1.2; transition: color .2s;
 }
+.mx-nav .wm { font-size: 15px; }
 .wm .wm-gap { font-size: 0; }
 .wm .labs {
   color: var(--dmute); font-weight: var(--wm-weight-labs);
@@ -226,6 +227,50 @@
 @media (prefers-reduced-motion: reduce) {
   .md-tabs__link::before, .md-tabs__link::after { transition: none; }
 }
+
+/* The footer, on ink in both schemes like the header. The previous
+   and next links sit quietly above a rule; below it is the site's
+   footer block: the mark and wordmark, then the legal line in the
+   muted tone with underlined links. */
+.md-footer.mx-footer {
+  background: var(--ink); color: var(--dmute);
+  border-top: 1px solid var(--line-dark);
+}
+.mx-footer .md-footer__inner { padding: 0 .8rem; gap: 1rem; }
+.mx-footer .md-footer__link {
+  margin: 1.2rem 0 1.4rem; align-items: start; color: var(--dmute);
+  transition: color .2s;
+}
+.mx-footer .md-footer__link:hover,
+.mx-footer .md-footer__link:focus { opacity: 1; color: var(--accent); }
+.mx-footer .md-footer__link--prev .md-footer__title { display: block; }
+.mx-footer .md-footer__title {
+  padding: 0; margin: 0; max-width: 100%;
+  font-family: var(--font-display); font-size: 15px; letter-spacing: .01em;
+}
+.mx-footer .md-footer__title .md-ellipsis { color: var(--paper); transition: color .2s; }
+.mx-footer .md-footer__link:hover .md-ellipsis { color: var(--accent); }
+.mx-footer .md-footer__direction {
+  display: block; opacity: 1; margin-bottom: .2rem;
+  font-size: 12px; letter-spacing: .22em; text-transform: uppercase;
+}
+.mx-footer .md-footer__link--prev .md-footer__direction::before { content: "\2190  "; }
+.mx-footer .md-footer__link--next .md-footer__direction::after { content: "  \2192"; }
+
+.mx-footer__meta { border-top: 1px solid var(--line-dark); }
+.mx-footer__inner {
+  padding: 44px .8rem 60px; font-size: 13.5px; color: var(--dmute);
+}
+.mx-footer .fwm { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.mx-footer .fwm img { width: 18px; height: 18px; display: block; }
+.mx-footer .fwm .labs .brk { border-width: 1.4px; }
+.mx-footer .legal { max-width: 70ch; line-height: 1.8; }
+.mx-footer .legal p { margin: 0 0 8px; }
+.mx-footer .legal a {
+  color: var(--dmute); text-decoration: underline; text-underline-offset: 3px;
+}
+.mx-footer .legal a:hover,
+.mx-footer .legal a:focus { color: var(--accent); }
 
 /* The bracket eyebrow, `[ label ]`: each bracket is a butt-capped
    border rather than a glyph, drawn like the strokes of the mark. */
