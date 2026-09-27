@@ -266,9 +266,11 @@ them and shows how to register your own. An alphabet language is a
 Kleene star: it contains the empty string, and `L[ascii] \ {""}` is
 the way to exclude it. Union with a finite set of members and the
 missing-value policy read exactly as they do for a numeric domain:
-`L[alnum] ∪ {"n/a"}`, `L[ascii] \ {∅}`. There is no length syntax; a
-length is a premise, `assuming len(s) <= 80, for s in L[ascii], len(f(s)) <= 80`,
-and a very long input is a hazard the probe visits on its own. A name
+`L[alnum] ∪ {"n/a"}`, `L[ascii] \ {missing}`. A length bound goes inside
+the brackets, `L[ascii, len <= 80]`, `L[unicode, len > 20]` or
+`L[unicode, len in [1, 80]]`, lengths counted in code points as Python's
+`len` counts them; without one, a very long input is a hazard the probe
+visits on its own. A name
 mathema cannot resolve is refused with the vocabulary and the package
 that provides one; nothing is ever read as a wider language than the
 one written.

@@ -8,7 +8,7 @@ a name stands for, or of structured values a schema stands for, written
 ```
 for s in L[unicode], f(f(s)) == f(s)
 for s in L[unicode] \ {""}, len(f(s)) >= 1
-for s in L[unicode] \ {∅}, len(f(s)) <= len(s)
+for s in L[unicode] \ {missing}, len(f(s)) <= len(s)
 ```
 
 ## Three words
@@ -51,6 +51,31 @@ regular, predicate, schema) and its persisted form. A claim over a
 language is stamped `grammar: mathema/language`, the dialect of the claim
 grammar that reads language vocabulary; a claim over a finite set stays
 plain `mathema`.
+
+## Length bounds
+
+A length bound refines a language inside its brackets:
+
+```
+for s in L[ascii, len <= 80], len(f(s)) <= 80
+for s in L[unicode, len > 20], len(f(s)) <= len(s)
+for s in L[unicode, len in [1, 80]], f(s) in L[unicode, len in [1, 80]]
+```
+
+A length is Python's `len`: a count of code points, not of bytes and
+not of the characters a reader sees (`"é"` can be one code point or
+two). The refined language is a language of its own: every member the
+probe draws fits the bound, the members at both bounds are hazards it
+always visits, and a member one past the bound is its outside draw, so
+`excluded_outside_domain(s)` checks that the function refuses the 81st
+character. `L[unicode, len >= 1]` is the same set as `L[unicode] \ {""}`.
+A parameter annotated `Annotated[str, MaxLen(80)]` (annotated_types,
+pydantic) infers `L[unicode, len <= 80]` when the text adaptor is
+installed, and the record's note says so.
+
+A language domain spells the missing value as a word in both modes,
+`L[unicode]|missing` and `L[unicode] \ {missing}`: to a reader of formal
+languages `∅` is the empty language, a different set.
 
 ## Membership and containment
 

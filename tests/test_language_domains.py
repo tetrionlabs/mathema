@@ -130,16 +130,16 @@ def test_the_rendered_domain_is_a_fixed_point(text, ascii_mode):
 def test_rendering_states_the_resolved_missing_policy():
     included = _bound("s in L[letters]")
     assert render_domain(included, ascii_mode=True) == "L[letters]|missing"
-    assert render_domain(included, ascii_mode=False) == "L[letters] ∪ {∅}"
+    assert render_domain(included, ascii_mode=False) == "L[letters]|missing"
     excluded = _bound("s in L[letters] \\ {∅}")
     assert render_domain(excluded, ascii_mode=True) == "L[letters] \\ {missing}"
-    assert render_domain(excluded, ascii_mode=False) == "L[letters] \\ {∅}"
+    assert render_domain(excluded, ascii_mode=False) == "L[letters] \\ {missing}"
 
 
 def test_a_union_with_a_finite_set_and_an_exclusion_render_as_written():
     bound = _bound('s in L[letters] | {"n/a"} \\ {""}')
     assert render_domain(bound, ascii_mode=False) == \
-        'L[letters] ∪ {"n/a"} \\ {""} ∪ {∅}'
+        'L[letters] ∪ {"n/a"} \\ {""}|missing'
 
 
 @pytest.mark.parametrize("text", SPELLINGS)

@@ -26,6 +26,14 @@ Notable changes to mathema are recorded here from its first public release onwar
   value is never found in another, and `f(x) in [0, 1]` is read as the
   chain `0 <= f(x) <= 1`. Both are decided by execution; a missing value
   is a member of nothing unless the right-hand side says so.
+- A length bound inside a language piece, `L[ascii, len <= 80]`,
+  `L[unicode, len > 20]`, `L[unicode, len in [1, 80]]`, refines the
+  language to members of that many code points; its outside draw is the
+  member one past the bound. An `Annotated[str, MaxLen(80)]` parameter
+  infers the refined language through the text adaptor.
+- A language domain renders the missing value as `missing` in both
+  modes (`L[unicode]|missing`), never as `∅`, which reads as the empty
+  language.
 - The lexicon's language rows spell the string parameter `s`, and gain
   `language_closure`, `containment_absent` and
   `membership_interval_reduces_to_chain`.

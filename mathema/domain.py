@@ -253,7 +253,13 @@ _PIECE_NAMED = re.compile(r"^(R|Z|N|C|ℝ|ℤ|ℕ|ℂ)$")
 # is refused, as any unknown bare name is), so `L^2` never reads as a
 # space.
 _PIECE_LANGUAGE = re.compile(
-    r"^(?:L|\U0001d543)\[\s*(?P<name>[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\s*\]$")
+    r"^(?:L|\U0001d543)\[\s*(?P<name>[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\s*"
+    r"(?:,\s*(?P<refine>.+?))?\s*\]$")
+# a length refinement inside a language piece, `L[ascii, len <= 80]`:
+# one bound, or an interval of lengths; a length counts code points
+_LEN_BOUND = re.compile(r"^len\s*(?P<op><=|<|>=|>)\s*(?P<n>\d+)$")
+_LEN_INTERVAL = re.compile(
+    r"^len\s+in\s+(?P<lb>[\[(])\s*(?P<lo>\d+)\s*,\s*(?P<hi>\d+)\s*(?P<rb>[\])])$")
 # Sampling-intensity modifiers, not a parameter binding at all: `n=500`
 # in the same comma-list sets domain["n"] (how many draws/rows, not a
 # bound on any variable); domain means scope *and* intensity of
@@ -454,9 +460,75 @@ class LanguageRef:
     the name. A frozen dataclass rather than a tuple, since every
     interval test in this module reads a tuple piece as `(lo, hi)`."""
     name: str
+    #: the lengths the piece keeps, an `Interval` of code-point counts
+    #: (`L[ascii, len <= 80]`), or None for every member
+    length: object = None
+
+    @property
+    def text(self) -> str:
+        """What sits inside the brackets: the name, then any length
+        refinement, `ascii, len <= 80`."""
+        if self.length is None:
+            return self.name
+        return f"{self.name}, {render_length(self.length)}"
 
     def __repr__(self) -> str:
-        return f"L[{self.name}]"
+        return f"L[{self.text}]"
+
+
+def _whole(v) -> str:
+    return str(int(v)) if float(v).is_integer() else str(v)
+
+
+def render_length(length) -> str:
+    """A length refinement as text: `len <= 80` or `len < 80` for an
+    upper bound from zero, `len >= 1` or `len > 20` for a lower bound
+    alone, and `len in [1, 80]` for both."""
+    lo, hi = length[0], length[1]
+    closed_lo = getattr(length, "closed_lo", True)
+    closed_hi = getattr(length, "closed_hi", True)
+    if hi == float("inf"):
+        return f"len {'>=' if closed_lo else '>'} {_whole(lo)}"
+    if lo == 0 and closed_lo:
+        return f"len {'<=' if closed_hi else '<'} {_whole(hi)}"
+    return (f"len in {'[' if closed_lo else '('}{_whole(lo)}, "
+            f"{_whole(hi)}{']' if closed_hi else ')'}")
+
+
+def length_range(length) -> "tuple[int, int | None]":
+    """The closed integer range of lengths a refinement keeps, the
+    upper end None when unbounded."""
+    lo, hi = length[0], length[1]
+    first = int(lo) if getattr(length, "closed_lo", True) else int(lo) + 1
+    if hi == float("inf"):
+        return first, None
+    last = int(hi) if getattr(length, "closed_hi", True) else int(hi) - 1
+    return first, last
+
+
+def _parse_length(text: str, whole: str):
+    """The `Interval` a refinement spells, or InvalidDomain naming the
+    spellings that are read."""
+    t = text.strip()
+    m = _LEN_BOUND.match(t)
+    if m is not None:
+        n, op = float(m.group("n")), m.group("op")
+        length = {"<=": Interval(0.0, n), "<": Interval(0.0, n, True, False),
+                  ">=": Interval(n, float("inf")),
+                  ">": Interval(n, float("inf"), False, True)}[op]
+    else:
+        m = _LEN_INTERVAL.match(t)
+        if m is None:
+            raise InvalidDomain(
+                f"{whole!r}: a language refinement is a length bound, "
+                f"`len <= 80`, `len > 20` or `len in [1, 80]`, lengths "
+                f"counted in code points; {t!r} is not one")
+        length = Interval(float(m.group("lo")), float(m.group("hi")),
+                          m.group("lb") == "[", m.group("rb") == "]")
+    first, last = length_range(length)
+    if last is not None and last < max(first, 0):
+        raise InvalidDomain(f"{whole!r}: no length satisfies {t!r}")
+    return length
 
 
 @dataclass(frozen=True)
@@ -911,7 +983,7 @@ def _render_set_member(v, *, ascii_mode: bool) -> str:
 
 def _render_piece(piece, *, ascii_mode: bool, as_int: bool = False) -> str:
     if isinstance(piece, LanguageRef):
-        return f"L[{piece.name}]"
+        return repr(piece)
     if isinstance(piece, str):
         return piece if ascii_mode else _TYPE_GLYPH.get(piece, piece)
     if isinstance(piece, frozenset):
@@ -1038,16 +1110,18 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         # exclusion set, and the resolved missing-value policy in the
         # same two spellings every other shape uses. No type clause: the
         # `L[...]` piece is the type.
+        # The missing value is spelled as a word in both modes: to a
+        # reader of formal languages `∅` is the empty language, so
+        # `L[unicode] ∪ {∅}` would read as a different set.
+        if show_missing and not missing_included:
+            numeric_excluded = numeric_excluded | {MISSING}
         text = " ∪ ".join(_render_piece(p, ascii_mode=ascii_mode)
                           for p in real_pieces)
         if numeric_excluded:
             text += " \\ " + _render_piece(frozenset(numeric_excluded),
-                                           ascii_mode=ascii_mode)
-        if show_missing:
-            if ascii_mode:
-                text += "|missing" if missing_included else ""
-            elif not missing_merged:
-                text += " ∪ {∅}" if missing_included else " \\ {∅}"
+                                           ascii_mode=True)
+        if show_missing and missing_included:
+            text += "|missing"
         return text
     if not real_pieces or fully_unbounded:
         text = dom.base_type if ascii_mode else _TYPE_GLYPH.get(dom.base_type, dom.base_type)
@@ -1140,7 +1214,9 @@ def domain_bound_to_json(b) -> str | dict:
             out["dims"] = list(b.dims)
         return out
     if isinstance(b, LanguageRef):
-        return {"language": b.name}
+        if b.length is None:
+            return {"language": b.name}
+        return {"language": b.name, "len": domain_bound_to_json(b.length)}
     if isinstance(b, str):
         return b
     if isinstance(b, frozenset):
@@ -1173,7 +1249,8 @@ def domain_bound_from_json(v):
     if isinstance(v, list):
         return Interval(_endpoint_from_json(v[0]), _endpoint_from_json(v[1]))
     if "language" in v:
-        return LanguageRef(str(v["language"]))
+        return LanguageRef(str(v["language"]),
+                           domain_bound_from_json(v["len"]) if "len" in v else None)
     if "base_type" in v:
         return Domain(base_type=v["base_type"],
                       pieces=tuple(domain_bound_from_json(p) for p in v["pieces"]),
@@ -1241,7 +1318,9 @@ def _parse_piece(text: str):
             return None
     m = _PIECE_LANGUAGE.match(text)
     if m is not None:
-        return LanguageRef(m.group("name"))
+        refine = m.group("refine")
+        return LanguageRef(m.group("name"),
+                           _parse_length(refine, text) if refine else None)
     m = _PIECE_NAMED.match(text)
     if m is not None:
         return _SUBSET_ASCII.get(m.group(1), m.group(1))
@@ -1401,8 +1480,8 @@ def _parse_binding(part: str):
         pieces = []
 
     # a language piece (`L[ascii]`) makes the whole binding a language
-    # domain: no numeric type clause, no dimension power (a length is a
-    # premise, `assuming len(s) <= 80`), and no interval or named set
+    # domain: no numeric type clause, no dimension power (a length
+    # bound sits inside the piece, `L[ascii, len <= 80]`), and no interval or named set
     # beside it in the union; a finite set of literal members is fine
     if any(isinstance(p, LanguageRef) for p in pieces):
         if type_explicit is not None:
@@ -1411,8 +1490,8 @@ def _parse_binding(part: str):
                     f"contradicts it for {name!r}")
         if space_dims:
             return (f"{part!r}: a language domain has no dimension power; "
-                    f"bound a length with a premise, 'assuming "
-                    f"len({name}) <= 80', for {name!r}")
+                    f"bound a length inside the brackets, "
+                    f"'L[ascii, len <= 80]', for {name!r}")
         if any(not isinstance(p, (LanguageRef, frozenset)) for p in pieces):
             return (f"{part!r}: a language domain can be unioned with a "
                     f"finite set of members, not with an interval or a "

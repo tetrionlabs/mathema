@@ -595,6 +595,30 @@ def _language_field_bounds(cj_domain: dict) -> dict:
     return out
 
 
+def _annotated_length(hint):
+    """Intent:
+        The length refinement an `Annotated[str, ...]` hint's markers
+        state, read by attribute (`max_length`, `min_length`, as
+        annotated_types and pydantic spell them), as an `Interval` of
+        code-point counts, or None when no marker states one.
+    """
+    import typing
+    from .domain import Interval
+    if typing.get_origin(hint) is not typing.Annotated:
+        return None
+    lo, hi = 0, None
+    for marker in typing.get_args(hint)[1:]:
+        found = getattr(marker, "max_length", None)
+        if isinstance(found, int):
+            hi = found if hi is None else min(hi, found)
+        found = getattr(marker, "min_length", None)
+        if isinstance(found, int):
+            lo = max(lo, found)
+    if hi is None and lo == 0:
+        return None
+    return Interval(float(lo), float("inf") if hi is None else float(hi))
+
+
 def _adaptor_inferred_domains(fn, facts, cj_domain: dict) -> dict:
     """Intent:
         `{param: (language domain, adaptor name, annotation text)}` for
@@ -621,8 +645,9 @@ def _adaptor_inferred_domains(fn, facts, cj_domain: dict) -> dict:
         if found is None:
             continue
         language, adaptor = found
+        length = _annotated_length(hint)
         if resolves(language.name):
-            ref = LanguageRef(language.name)
+            ref = LanguageRef(language.name, length)
         elif isinstance(hint, type) and resolves(
                 f"{hint.__module__}.{hint.__qualname__}"):
             ref = LanguageRef(f"{hint.__module__}.{hint.__qualname__}")
@@ -3715,11 +3740,11 @@ def _validate_claim(cj, statement: str, note: str, facts,
                                  note=f"{note}; {e}",
                                  meta={"mathema.probe_gap":
                                        "language-unresolved"})
-                resolved_sources.append(f"{p} in L[{piece.name}] ({source})")
+                resolved_sources.append(f"{p} in L[{piece.text}] ({source})")
                 real_kind = facts.param_kinds.get(p)
                 if not _kind_compatible(language.kind, real_kind):
                     note = (f"{note}; {p} is quantified over "
-                            f"L[{piece.name}], whose members are "
+                            f"L[{piece.text}], whose members are "
                             f"{language.kind} values, but the real "
                             f"parameter {p!r} is {real_kind!r}; the stated "
                             f"language is used as written")

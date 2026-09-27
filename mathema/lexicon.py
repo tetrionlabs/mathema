@@ -384,6 +384,7 @@ LEXICON: dict[str, str] = {
     "language_missing_excluded":
         "for s in L[unicode] \\ {∅}, len(f(s)) <= len(s)",
     "language_closure": "for s in L[unicode], f(s) in L[unicode]",
+    "language_length_bound": "for s in L[unicode, len <= 80], len(f(s)) <= 80",
     "containment_absent": 'for s in L[unicode], "<" not in f(s)',
     "membership_interval_reduces_to_chain": "for x in [0, 1], f(x) in [0, 1]",
 }
@@ -482,7 +483,7 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "language_alphabet", "language_contraction",
         "language_excluding_empty", "language_membership_symbol",
         "language_section", "language_missing_excluded",
-        "language_closure", "containment_absent",
+        "language_closure", "language_length_bound", "containment_absent",
         "membership_interval_reduces_to_chain"),
 }
 
@@ -512,6 +513,8 @@ TAGS: dict[str, tuple[str, ...]] = {
     "language_section": ("string", "round trip", "inverse", "escape",
                          "unescape", "parser", "renderer"),
     "language_missing_excluded": ("string", "missing", "None"),
+    "language_length_bound": ("string", "length", "max length", "maxlength",
+                              "at most", "len", "characters"),
     "language_closure": ("string", "in", "member", "closure", "output language",
                          "element of"),
     "containment_absent": ("string", "not in", "contains", "substring", "token",
@@ -1017,7 +1020,7 @@ def unescape_angle(s: str) -> str:
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "collapse_spaces": (collapse_spaces, [
         "language_alphabet", "language_contraction",
-        "language_missing_excluded", "language_closure",
+        "language_missing_excluded", "language_closure", "language_length_bound",
     ]),
     "escape_angle": (escape_angle, [
         "language_membership_symbol", "language_section",

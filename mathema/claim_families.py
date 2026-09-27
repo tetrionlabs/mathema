@@ -1099,7 +1099,7 @@ def _language_pieces(bounds) -> list:
     """
     from .domain import LanguageRef
     from .languages import resolve_language
-    return [(piece.name, resolve_language(piece)) for piece in bounds.pieces
+    return [(piece.text, resolve_language(piece)) for piece in bounds.pieces
             if isinstance(piece, LanguageRef)]
 
 

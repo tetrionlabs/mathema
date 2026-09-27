@@ -463,6 +463,9 @@ def resolve(ref) -> tuple:
     Raises:
         UnknownLanguage: nothing serves the name.
     """
+    if isinstance(ref, LanguageRef) and ref.length is not None:
+        base, source = resolve(LanguageRef(ref.name))
+        return _LengthRefined(base, ref), source
     name = ref.name if isinstance(ref, LanguageRef) else str(ref)
     if name in _REGISTRY:
         return _REGISTRY[name], "registered"
@@ -524,6 +527,114 @@ def resolves(name: str) -> bool:
     return True
 
 
+class _LengthRefined:
+    """The members of `base` whose length lies in a refinement,
+    `L[ascii, len <= 80]`; a length counts code points. Random members
+    come from the base by rejection, then by cutting a run of base
+    members to a chosen length; the members at both bounds are hazards,
+    and a base member one past a bound is the outside draw."""
+
+    def __init__(self, base, ref) -> None:
+        from .domain import length_range, render_length
+        self.base = base
+        self.name = ref.text
+        self.kind = base.kind
+        self.level = base.level
+        self.lo, self.hi = length_range(ref.length)
+        self.bound_text = render_length(ref.length)
+
+    def _fits(self, value) -> bool:
+        try:
+            n = len(value)
+        except TypeError:
+            return False
+        return n >= self.lo and (self.hi is None or n <= self.hi)
+
+    def contains(self, value) -> bool:
+        return self._fits(value) and bool(self.base.contains(value))
+
+    def explain(self, value):
+        if self.base.contains(value) and not self._fits(value):
+            return [Problem("", self.bound_text, value)]
+        return self.base.explain(value)
+
+    def _build(self, rng: random.Random, target: int):
+        """A base member of exactly `target` code points, or None."""
+        if target < 0:
+            return None
+        for _ in range(100):
+            s = self.base.sample(rng)
+            if isinstance(s, str) and len(s) == target:
+                return s
+        for _ in range(100):
+            run = ""
+            for _ in range(target + 8):
+                if len(run) >= target:
+                    break
+                piece = self.base.sample(rng)
+                if not isinstance(piece, str):
+                    return None
+                run += piece
+            candidate = run[:target]
+            if len(candidate) == target and self.base.contains(candidate):
+                return candidate
+        return None
+
+    def sample(self, rng: random.Random):
+        for _ in range(50):
+            s = self.base.sample(rng)
+            if self._fits(s):
+                return s
+        top = self.hi if self.hi is not None else self.lo + 40
+        for _ in range(20):
+            s = self._build(rng, rng.randint(self.lo, max(self.lo, min(top, self.lo + 300))))
+            if s is not None and self.contains(s):
+                return s
+        raise ValueError(f"L[{self.name}]: no member of this length was found")
+
+    def members(self, limit: int):
+        members = self.base.members(limit)
+        if members is None:
+            return None
+        return tuple(m for m in members if self._fits(m))
+
+    def hazards(self) -> tuple:
+        rng = random.Random(0)
+        out = [h for h in self.base.hazards() if self.contains(h.value)]
+        seen = {h.value for h in out if isinstance(h.value, str)}
+        edges = [self.lo] + ([self.hi] if self.hi is not None else [self.lo + 256])
+        for n in edges:
+            s = self._build(rng, n)
+            if s is not None and s not in seen and self.contains(s):
+                seen.add(s)
+                out.append(HazardValue("length", s, f"a member of length {n}, at the bound"))
+        return tuple(out)
+
+    def outside(self, rng: random.Random):
+        for n in ([self.hi + 1] if self.hi is not None else []) + ([self.lo - 1] if self.lo > 0 else []):
+            s = self._build(rng, n)
+            if s is not None and not self.contains(s):
+                return s
+        s = self.base.outside(rng)
+        return None if s is None or self.contains(s) else s
+
+    def shrink(self, value) -> Iterable:
+        return [s for s in self.base.shrink(value) if self.contains(s)]
+
+    def fields(self):
+        return self.base.fields()
+
+    def render(self, ascii_mode: bool = True) -> str:
+        return f"L[{self.name}]"
+
+    def to_json(self) -> dict:
+        out = dict(self.base.to_json())
+        out["minLength"] = self.lo
+        if self.hi is not None:
+            out["maxLength"] = self.hi
+        return out
+
+
 def resolve_language(ref):
     """The `Language` behind a `LanguageRef` or a bare name; see
     `resolve` for the precedence and the refusal."""
@@ -534,7 +645,7 @@ def describe_language(ref) -> dict:
     """The record's statement of a resolved language: its name, where
     it came from, its level and kind, and its persisted form."""
     language, source = resolve(ref)
-    return {"name": ref.name if isinstance(ref, LanguageRef) else str(ref),
+    return {"name": ref.text if isinstance(ref, LanguageRef) else str(ref),
             "source": source, "level": language.level,
             "kind": language.kind, "schema": language.to_json()}
 
