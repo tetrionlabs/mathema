@@ -256,57 +256,6 @@ def compendium_functions(root: str = ".") -> dict:
             for key, info in load_library_claims(root).items()}
 
 
-def _covered_by_library(root: str = ".") -> dict:
-    """`{root_library: {covered short function name, ...}}` from the
-    applicable library claims files (`numpy` -> {`sqrt`, `inv`,
-    `clip`, ...}); a key counts as covered whatever rows it states."""
-    out: dict = {}
-    for key in compendium_functions(root):
-        lib, _, short = key.rpartition(".")
-        out.setdefault(lib.split(".")[0], set()).add(short)
-    return out
-
-
-def _resolve_called_roots(fn, facts) -> list:
-    """Every call `fn` makes, resolved to `(root_library, short_name)`
-    through fn's import aliases, so `np.sqrt` reads as `("numpy", "sqrt")`
-    and a bare `arcsin` from `from numpy import arcsin` as
-    `("numpy", "arcsin")`. `root_library` is None for a local or builtin
-    call. Aliases come from module-level globals AND the function's own
-    local imports (a lazy `import numpy as np` inside the body binds np
-    only locally, never in __globals__) AND from-imports. A chained
-    call (`np.linalg.norm`) resolves through its first name."""
-    import ast
-    alias_root: dict = {}
-    for alias, mod in (getattr(fn, "__globals__", {}) or {}).items():
-        name = getattr(mod, "__name__", "") or ""
-        if name:
-            alias_root[alias] = name.split(".")[0]
-    tree = getattr(facts, "tree", None)
-    if tree is not None:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for a in node.names:
-                    alias_root[a.asname or a.name.split(".")[0]] = \
-                        a.name.split(".")[0]
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                for a in node.names:
-                    alias_root.setdefault(a.asname or a.name,
-                                          node.module.split(".")[0])
-    called: set = set()
-    for group in (getattr(facts, "call_groups", None) or {}).values():
-        called.update(group)
-    out: list = []
-    for name in called:
-        alias, dot, _rest = name.partition(".")
-        short = name.rsplit(".", 1)[-1]
-        if dot:                                   # a dotted call, np.arcsin
-            out.append((alias_root.get(alias), short))
-        else:                                     # a bare call, arcsin
-            out.append((alias_root.get(name), name))
-    return out
-
-
 def _alias_origins(fn, facts) -> dict:
     """Intent:
         Every name `fn` can reach a module or a module's function
@@ -441,27 +390,6 @@ def libraries_called(fn, facts, root: str = ".") -> set:
     # covers THIRD-PARTY libraries (numpy, ...) only
     return {key.split(".")[0] for key in library_keys_called(fn, facts, root)
             if key.split(".")[0] not in stdlib}
-
-
-def hazard_call_sites(fn, facts, root: str = ".") -> tuple:
-    """`(covered, uncovered)` counts of `fn`'s calls into external
-    (non-stdlib) libraries, split by whether a compendium exists for the
-    library at all. A covered call is a REDUCIBLE hazard,
-    `is_compendium_safe` samples the callee's known nan/raise regions and
-    can clear it; an uncovered call is a black box, no model of where it
-    fails exists, so nothing can clear it. The clarity metric charges the
-    two differently for exactly this reason."""
-    stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
-    covered_libs = set(_covered_by_library(root))
-    covered = uncovered = 0
-    for rootlib, _short in _resolve_called_roots(fn, facts):
-        if not rootlib or rootlib in stdlib:
-            continue                              # local, builtin, or stdlib
-        if rootlib in covered_libs:
-            covered += 1
-        else:
-            uncovered += 1
-    return covered, uncovered
 
 
 def is_library_record(entry: dict) -> bool:

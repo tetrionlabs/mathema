@@ -378,28 +378,27 @@ def test_a_library_row_verified_as_holds_reduces_less_than_proven(tmp_path):
 def test_a_claims_file_alone_does_not_move_a_callers_clarity(tmp_path):
     # testimony is not evidence: until verify records the rows, the
     # caller's call keeps its full charge
-    import pytest
-    pytest.importorskip("yaml")
-    mod = _load(tmp_path, "cl12_yaml",
-                "import yaml\n"
-                "def dumped(x: float) -> str:\n"
-                "    '''x as YAML.'''\n"
-                "    return yaml.safe_dump(x)\n")
-    before = clarity_score(mod.dumped, verified_claims=[], root=str(tmp_path))
-    bits = _residual(mod.dumped, tmp_path)
+    mod = _load(tmp_path, "cl12_sympy",
+                "import sympy\n"
+                "def root_text(x: float) -> str:\n"
+                "    \'\'\'The square root of x, as text.\'\'\'\n"
+                "    return str(sympy.sqrt(x))\n")
+    before = clarity_score(mod.root_text, verified_claims=[],
+                           root=str(tmp_path))
+    bits = _residual(mod.root_text, tmp_path)
     (tmp_path / "claims").mkdir()
-    (tmp_path / "claims" / "yaml.claims.yaml").write_text(
-        "compendium: yaml\n"
+    (tmp_path / "claims" / "sympy.claims.yaml").write_text(
+        "compendium: sympy\n"
         "versions: '*'\n"
-        "yaml.safe_dump:\n"
+        "sympy.sqrt:\n"
         "  claims:\n"
         "    - name: is_defined\n"
         "      statement: 'is_defined(f)'\n")
     from mathema.compendium import load_library_claims
-    assert "yaml.safe_dump" in load_library_claims(str(tmp_path))
-    assert clarity_score(mod.dumped, verified_claims=[],
+    assert "sympy.sqrt" in load_library_claims(str(tmp_path))
+    assert clarity_score(mod.root_text, verified_claims=[],
                          root=str(tmp_path)) == before
-    assert _residual(mod.dumped, tmp_path) == bits
+    assert _residual(mod.root_text, tmp_path) == bits
 
 
 _HELPER_PKG = (
@@ -420,9 +419,11 @@ def test_a_first_party_helpers_proven_definedness_reduces_its_caller(
            [{"name": "is_defined", "statement": "is_defined(f)",
              "verdict": "proven", "route": "derive"}])
     # the helper's full charge is removed by its proven definedness
+    import pytest
+
     from mathema.badges import _BITS
     assert _residual(mod.caller, bare) - _residual(mod.caller, proved) == \
-        _BITS["hazard_call"]
+        pytest.approx(_BITS["hazard_call"])
 
 
 def test_a_callee_with_no_record_keeps_the_full_charge(tmp_path):
@@ -448,3 +449,15 @@ def test_only_settled_definedness_rows_count_as_callee_evidence(tmp_path):
             {"name": "is_defined", "statement": "is_defined(f)",
              "verdict": "unknown", "route": "derive"}])
     assert _residual(mod.caller, other) == _residual(mod.caller, bare)
+
+
+def test_is_compendium_safe_is_not_a_clarity_reducer(tmp_path):
+    # it stays a family a claim can state, but the call's hazard is
+    # read from the callee's own record, never from the caller's check
+    mod = _load(tmp_path, "cl12_family", _NP_CALLER.replace(
+        "import numpy as np", "import math as np"))
+    row = {"name": "is_compendium_safe", "statement": "is_compendium_safe(numpy)",
+           "verdict": "holds", "route": "probe"}
+    assert clarity_score(mod.root_of, verified_claims=[row],
+                         root=str(tmp_path)) == \
+        clarity_score(mod.root_of, verified_claims=[], root=str(tmp_path))
