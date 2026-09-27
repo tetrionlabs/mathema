@@ -298,8 +298,22 @@ a:hover > .brk.r { transform: translateX(2px); }
   background: var(--ink);
   color: var(--paper);
   border-bottom: 1px solid var(--line-dark);
+  position: relative;
+  overflow: hidden;
 }
-.mx-hero__inner { padding: 4rem .8rem 3.5rem; }
+/* The faint lattice behind the hero: a 56px grid of rules, faded out
+   from the top centre by a radial mask, as on the Labs site. */
+.mx-hero::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(var(--line-dark) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-dark) 1px, transparent 1px);
+  background-size: 56px 56px;
+  opacity: .28;
+  -webkit-mask-image: radial-gradient(90% 70% at 50% 20%, #000 0%, #0000 70%);
+  mask-image: radial-gradient(90% 70% at 50% 20%, #000 0%, #0000 70%);
+}
+.mx-hero__inner { position: relative; padding: 4rem .8rem 3.5rem; }
 .mx-hero h1 {
   font-family: var(--font-display); font-weight: 600;
   font-size: clamp(1.9rem, 5vw, 3rem); line-height: 1.06;
