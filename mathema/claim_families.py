@@ -1124,18 +1124,121 @@ def _is_reproducible_derive(fn, facts, lhs_src: str, rhs_src: str,
                "closed form), and deterministic implies reproducible")
 
 
+#: parameter names read as a seed or a random generator
+_SEED_NAMES = frozenset({"seed", "rng", "random_state", "key"})
+
+
+def _seed_annotation_kind(annotation) -> "str | None":
+    """Intent:
+        Which generator type a parameter annotation names:
+        `"generator"` (numpy's `Generator`), `"random_state"` (numpy's
+        `RandomState`), `"random"` (`random.Random`), or None. A string
+        annotation is read by its last dotted name.
+    """
+    if annotation is None:
+        return None
+    text = annotation if isinstance(annotation, str) else (
+        f"{getattr(annotation, '__module__', '')}."
+        f"{getattr(annotation, '__qualname__', repr(annotation))}")
+    last = text.strip("'\" ").rsplit(".", 1)[-1]
+    if last == "Generator" and ("numpy" in text or "np." in text
+                                or text.strip("'\" ") == "Generator"):
+        return "generator"
+    if last == "RandomState":
+        return "random_state"
+    if last == "Random" and ("random" in text.lower()):
+        return "random"
+    return None
+
+
+def seed_parameter(fn, facts) -> "str | None":
+    """Intent:
+        The parameter that seeds `fn`'s randomness: one named `seed`,
+        `rng`, `random_state` or `key`, or one annotated as a numpy
+        `Generator` or `RandomState` or a `random.Random`; the first
+        such parameter, or None when the function takes none.
+    """
+    import inspect
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        signature = None
+    for p in facts.params:
+        if p in _SEED_NAMES:
+            return p
+        if signature is not None and p in signature.parameters:
+            annotation = signature.parameters[p].annotation
+            if annotation is not inspect.Parameter.empty \
+                    and _seed_annotation_kind(annotation) is not None:
+                return p
+    return None
+
+
+def _seed_factory(fn, param: str):
+    """Intent:
+        A function from an integer seed to the value `param` is passed:
+        a fresh numpy `Generator`, `RandomState` or `random.Random`
+        seeded with it when the annotation names one, else the integer
+        itself.
+    """
+    import inspect
+    try:
+        annotation = inspect.signature(fn).parameters[param].annotation
+    except (TypeError, ValueError, KeyError):
+        annotation = None
+    kind = (None if annotation is inspect.Parameter.empty
+            else _seed_annotation_kind(annotation))
+    if kind == "generator":
+        import numpy
+        return numpy.random.default_rng
+    if kind == "random_state":
+        import numpy
+        return numpy.random.RandomState
+    if kind == "random":
+        return random.Random
+    return lambda s: s
+
+
+def _same_result(first, second) -> bool:
+    """Whether two results of the same call agree: equal values, equal
+    arrays, or NaN in the same places."""
+    try:
+        import numpy
+        if isinstance(first, numpy.ndarray) or isinstance(second,
+                                                          numpy.ndarray):
+            return bool(numpy.array_equal(numpy.asarray(first),
+                                          numpy.asarray(second),
+                                          equal_nan=True))
+    except ImportError:
+        pass
+    try:
+        if first == second:
+            return True
+    except Exception:
+        return False
+    return (isinstance(first, float) and isinstance(second, float)
+            and first != first and second != second)
+
+
 def _reproducible_probe(fn, facts, cj, domain: dict, rng: random.Random,
                         trials: int):
     """Empirical half of is_reproducible: two calls at the same inputs
-    with the recognized RNG state captured and restored between them
-    (the stdlib `random` global state, and numpy's legacy global state
-    when numpy is importable) must return the same value, same seed,
-    same run. Divergence falsifies with the pair as witness; a
-    passed-in generator object is out of this v1's scope. Agreement
-    across trials holds (specific states were tested, not all)."""
+    with the same seed must return the same value. When the function
+    takes a seed or a generator (`seed_parameter`), the seed is held
+    fixed across the pair (a fresh generator of the annotated type,
+    built from the same integer seed, for each call) and every other
+    argument is drawn once and passed to both. Otherwise the recognized
+    global RNG state (the stdlib `random` global state, and numpy's
+    legacy global state when numpy is importable) is captured and
+    restored between the two calls. Divergence falsifies with the pair
+    as witness; a raising point says nothing about seeds and is not
+    counted. Agreement across trials holds (specific seeds were tested,
+    not all)."""
     if not facts.params:
         return None
-    target = facts.params[0]
+    seed = seed_parameter(fn, facts)
+    target = seed if seed is not None else facts.params[0]
+    build = _seed_factory(fn, seed) if seed is not None else None
 
     def rng_states():
         states = [("random", random.getstate, random.setstate)]
@@ -1149,9 +1252,14 @@ def _reproducible_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     def trial(args):
         call_args = list(args)
-        call_args[facts.params.index(target)] = _synth(
-            facts.param_kinds.get(target, "unknown"), rng,
-            domain.get(target))
+        index = facts.params.index(target)
+        if build is not None:
+            fixed = rng.randint(0, 2 ** 31 - 1)
+            call_args[index] = build(fixed)
+        else:
+            call_args[index] = _synth(
+                facts.param_kinds.get(target, "unknown"), rng,
+                domain.get(target))
         captured = [(setter, getter()) for _, getter, setter in rng_states()]
         try:
             with _pinned_float_env():
@@ -1160,17 +1268,21 @@ def _reproducible_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return None   # a raising point says nothing about seeds
         for setter, state in captured:
             setter(state)
+        if build is not None:
+            call_args[index] = build(fixed)
         try:
             with _pinned_float_env():
                 second = fn(*call_args)
         except Exception as exc:
-            return (f"same inputs, same restored RNG state: the first "
-                    f"call returned {first!r} but the second raised "
+            return (f"same inputs, same seed: the first call returned "
+                    f"{first!r} but the second raised "
                     f"{type(exc).__name__}")
-        agree = (first == second
-                 or (isinstance(first, float) and isinstance(second, float)
-                     and (first != first and second != second)))
-        if not agree:
+        if not _same_result(first, second):
+            if build is not None:
+                return (f"same inputs, the same {seed} ({fixed}), "
+                        f"different results: {first!r} then {second!r}, "
+                        f"the computation is not reproducible from its "
+                        f"seed")
             return (f"same inputs, same restored RNG state, different "
                     f"results: {first!r} then {second!r}, the "
                     f"computation is not reproducible up to its seed")
@@ -3354,16 +3466,17 @@ def _memory_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
 
 #: the children of is_computation_safe, in the order the roll-up runs
-#: and reports them; each is relevant to a function when its own
-#: suggestion gate names a target there, except the three always run
+#: and reports them: the families that answer "does it run on my
+#: domain" and "is the answer right in float64". Each is relevant to a
+#: function when its own suggestion gate names a target there, except
+#: numerical stability, which always runs. Repeatability is
+#: is_repeatable's question.
 _COMPUTATION_CHILDREN = (
     "is_overflow_safe", "is_numerically_stable", "is_representation_safe",
     "is_extremity_safe", "is_pole_safe", "is_builtin_safe",
     "is_missing_safe", "is_empty_safe", "is_recursion_safe",
-    "is_deterministic", "is_state_safe", "is_arbitrary_input_safe",
-    "is_compendium_safe")
-_ALWAYS_RELEVANT_CHILDREN = frozenset({"is_numerically_stable",
-                                       "is_deterministic", "is_state_safe"})
+    "is_arbitrary_input_safe", "is_compendium_safe")
+_ALWAYS_RELEVANT_CHILDREN = frozenset({"is_numerically_stable"})
 
 
 def _is_computation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -3375,11 +3488,10 @@ def _is_computation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
 
 
 def _computation_children(fn, facts, cj, domain: dict) -> list:
-    """The child claims is_computation_safe runs for this function: the
-    always-relevant three (numerical stability, determinism, state
-    safety) in their own spellings, and every other child at each
-    target its suggestion gate names, all over the roll-up's domain
-    and pseudo-infinity."""
+    """The child claims is_computation_safe runs for this function:
+    numerical stability in its own spelling, and every other child at
+    each target its suggestion gate names, all over the roll-up's
+    domain and pseudo-infinity."""
     from dataclasses import replace as _replace
 
     from . import families as _families
@@ -3395,31 +3507,75 @@ def _computation_children(fn, facts, cj, domain: dict) -> list:
             out.append(claim(f"g(f, {', '.join(facts.params)}) == 1",
                              name=name, route="best",
                              funcs={"g": "mathema.f.finite_no_error"}))
-        elif name in _ALWAYS_RELEVANT_CHILDREN:
-            out.append(claim(f"{call} == {call}", name=name, route="best"))
         else:
             for target in family.suggest_targets(fn, facts):
                 out.append(claim(f"{name}({target})",
                                  name=f"{name}[{target}]", route="best"))
+    return _over_parent(out, cj, domain)
+
+
+def _over_parent(children: list, cj, domain: dict) -> list:
+    """A roll-up's child claims over the roll-up's own domain and
+    pseudo-infinity."""
+    from dataclasses import replace as _replace
     return [_replace(c, domain=dict(domain or {}),
                      pseudo_infinity=getattr(cj, "pseudo_infinity", None),
                      resolved_pseudo_infinity=getattr(
                          cj, "resolved_pseudo_infinity", None))
-            for c in out]
+            for c in children]
 
 
 def _computation_probe(fn, facts, cj, domain: dict, rng: random.Random,
                        trials: int):
-    """Empirical half of is_computation_safe(f): adjudicate every
-    relevant child (`_computation_children`) in one nested
-    `check_conjectures` call and roll the verdicts up. Any child
-    falsified falsifies the roll-up with that child's name and witness;
-    every child holding or proven makes it hold, never proven (P3, a
-    roll-up of executed facts about one implementation); anything else
-    is unknown. The note lists each child's verdict and
-    `meta["mathema.children"]` carries them as a mapping."""
+    """Empirical half of is_computation_safe(f): the roll-up
+    (`_roll_up`) of every relevant child (`_computation_children`)."""
+    return _roll_up(fn, facts, _computation_children(fn, facts, cj, domain),
+                    trials)
+
+
+def _repeatable_children(fn, facts, cj, domain: dict) -> list:
+    """The child claims is_repeatable runs for this function, over the
+    roll-up's domain: `is_reproducible` (same seed, same answer) when
+    the function takes a seed or a generator (`seed_parameter`), else
+    `is_deterministic` (same input, same answer), and `is_state_safe`
+    always."""
+    from .conjecture import claim
+    call = f"f({', '.join(facts.params)})"
+    first = ("is_reproducible" if seed_parameter(fn, facts) is not None
+             else "is_deterministic")
+    out = [claim(f"{call} == {call}", name=name, route="best")
+           for name in (first, "is_state_safe")]
+    return _over_parent(out, cj, domain)
+
+
+def _is_repeatable_derive(fn, facts, lhs_src: str, rhs_src: str,
+                          relation: str, domain: dict | None = None,
+                          tolerance: float | None = None):
+    """Structural half of is_repeatable: decline. The roll-up is the
+    conjunction of its children's verdicts and holds at best."""
+    return None
+
+
+def _repeatable_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                      trials: int):
+    """Empirical half of is_repeatable(f): the roll-up (`_roll_up`) of
+    `_repeatable_children`."""
+    return _roll_up(fn, facts, _repeatable_children(fn, facts, cj, domain),
+                    trials)
+
+
+def _roll_up(fn, facts, children: list, trials: int):
+    """Intent:
+        Adjudicate a roll-up's child claims in one nested
+        `check_conjectures` call and roll the verdicts up. Any child
+        falsified falsifies the roll-up with that child's name and
+        witness; every child holding or proven makes it hold, never
+        proven (P3, a roll-up of executed facts about one
+        implementation); anything else is unknown. The note lists each
+        child's verdict and `meta["mathema.children"]` carries them as
+        a mapping. None when there are no children.
+    """
     from .conjecture import check_conjectures
-    children = _computation_children(fn, facts, cj, domain)
     if not children:
         return None
     probes = check_conjectures(fn, children, facts=facts, trials=trials)
@@ -3571,3 +3727,10 @@ def _register_builtin_claim_families() -> None:
     _families.register("is_computation_safe", SafetyFamily(
         "is_computation_safe", derive=_is_computation_safe_derive,
         probe=_computation_probe, whole_function=True))
+    # is_repeatable is the roll-up for "is it repeatable": the seed
+    # decides whether its first child is is_reproducible or
+    # is_deterministic, and is_state_safe always joins; declared by the
+    # author, never battery-suggested
+    _families.register("is_repeatable", SafetyFamily(
+        "is_repeatable", derive=_is_repeatable_derive,
+        probe=_repeatable_probe, whole_function=True))

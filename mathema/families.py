@@ -151,16 +151,16 @@ GROUPS: dict[str, tuple[str, ...]] = {
     # or varied on (is_deterministic is one member inside it)
     "stateless": ("is_state_safe", "is_deterministic",
                   "is_reproducible"),
-    # the children of is_computation_safe, the computation-safety
-    # hierarchy: every fact about one implementation that execution
-    # establishes (is_memory_safe is reserved and not yet adjudicated;
-    # is_computation_safe itself is the roll-up, declared by name)
+    # the children of is_computation_safe: the facts about one
+    # implementation that answer "does it run" and "is it right in
+    # float64" (is_memory_safe is reserved and not yet adjudicated;
+    # is_computation_safe itself is the roll-up, declared by name;
+    # repeatability is is_repeatable's, over the stateless cluster)
     "computation_safe": ("is_overflow_safe", "is_numerically_stable",
                          "is_representation_safe", "is_extremity_safe",
                          "is_pole_safe", "is_builtin_safe",
                          "is_missing_safe", "is_empty_safe",
-                         "is_recursion_safe", "is_deterministic",
-                         "is_state_safe", "is_arbitrary_input_safe",
+                         "is_recursion_safe", "is_arbitrary_input_safe",
                          "is_compendium_safe"),
 }
 

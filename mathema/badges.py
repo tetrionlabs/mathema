@@ -92,14 +92,15 @@ _SAFETY_SOURCE = {
     "is_arbitrary_input_safe": "is_arbitrary_input_safe",
     # the computation-safety hierarchy's new members credit existing
     # sources: an overflow is a representation hazard, a recursion limit
-    # an accidental crash. is_computation_safe credits nothing itself
-    # (its children do) and is_memory_safe is not adjudicated.
+    # an accidental crash. is_computation_safe and is_repeatable credit
+    # nothing themselves (their children do) and is_memory_safe is not
+    # adjudicated.
     "is_overflow_safe": "is_representation_safe",
     "is_recursion_safe": "is_arbitrary_input_safe",
 }
 # families a claim may state that reduce no source: a call's hazard is
 # read from the callee's own record, not from a check at the call site
-_NO_SOURCE = frozenset({"is_compendium_safe"})
+_NO_SOURCE = frozenset({"is_compendium_safe", "is_repeatable"})
 
 
 def _strength(verdict: str, route: str) -> float:

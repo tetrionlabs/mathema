@@ -118,8 +118,8 @@ A few consequences worth knowing:
   beside `is_extremity_safe` and `is_pole_safe`, `is_recursion_safe`
   credits the accidental-crash source beside `is_arbitrary_input_safe`,
   and `is_empty_safe` the missing-value source beside `is_missing_safe`.
-  `is_computation_safe` credits nothing itself, since its children do,
-  and `is_memory_safe` is not adjudicated. No weight moves.
+  `is_computation_safe` and `is_repeatable` credit nothing themselves,
+  since their children do, and `is_memory_safe` is not adjudicated. No weight moves.
 - **A call is only as clear as its callee's own record.** Every
   function a function calls, one of your own or a library's, is a
   source of uncertainty in *where it can go wrong*, charged in full

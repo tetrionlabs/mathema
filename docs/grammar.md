@@ -342,16 +342,21 @@ nothing behind.
 | Spelling | What you learn | Usual fix |
 |---|---|---|
 | `is_deterministic` | the same inputs give the same output on every call | remove the hidden input (a clock, a global counter, an unseeded random draw) |
-| `is_reproducible` | the same inputs give the same output once the random seed is fixed | draw from a generator the caller can seed |
+| `is_reproducible` | the same inputs give the same output once the random seed is fixed; a parameter named `seed`, `rng`, `random_state` or `key`, or one annotated as a numpy `Generator` or `RandomState` or a `random.Random`, is the seed, held fixed while nothing else varies | draw from a generator the caller can seed |
 | `is_state_safe` | the call changes nothing outside itself: no argument mutated, no global written | copy before modifying, and return the result instead of storing it |
 
-`is_computation_safe(f)` is the roll-up: every child that applies to
-the function, drawn from the first two questions (a child applies when
-the battery would suggest it for the function) together with
-`is_numerically_stable`, `is_deterministic` and `is_state_safe`, which
-always apply. It is declared by the author, never suggested; it is
-`holds` at best, never `proven`, its note names each child's verdict,
-and a falsified child falsifies it with that child's name and witness.
+Two roll-ups summarise the questions; the children stay individual
+claims. `is_computation_safe(f)` answers the first two: every child
+that applies to the function (a child applies when the battery would
+suggest it for the function) together with `is_numerically_stable`,
+which always applies. `is_repeatable(f)` answers the third, and the
+seed decides how: a function that takes a seed or a generator is held
+to `is_reproducible` (same seed, same answer), any other to
+`is_deterministic` (same input, same answer), and `is_state_safe`
+always joins. Each roll-up is declared by the author, never suggested;
+it is `holds` at best, never `proven`, its note names each child's
+verdict, and a falsified child falsifies it with that child's name and
+witness.
 `is_finite_valued` is a documented roll-up, not a registered family:
 `is_defined` and `is_overflow_safe` over the domain together say the
 function returns a finite value everywhere on it.

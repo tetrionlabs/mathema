@@ -50,7 +50,9 @@ SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_builtin_safe",
                                # parsed. A predicate asserts itself;
                                # there is no relation to spell.
                                "is_state_safe", "is_deterministic",
-                               "is_reproducible", "is_defined"})
+                               "is_reproducible", "is_defined",
+                               # the repeatability roll-up
+                               "is_repeatable"})
 
 # Matrix STRUCTURE predicates: facts about a matrix VALUE (a parameter
 # or an f(...) output), examined the same way safety predicates are but
