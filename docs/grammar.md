@@ -578,8 +578,10 @@ for x in [-3, 3], f(x) >= 0 [float] holds     None
 
 The value a project sets hides every overflow beyond it, so `mathema
 verify` and `mathema check` warn once on stderr when
-`MATHEMA_PSEUDO_INFINITY` is below `1e100`, in case it was left over from
-an experiment. The probe route reads the same value: an unbounded
+`MATHEMA_PSEUDO_INFINITY` is below `1e100`: values beyond it are not
+checked for computation, and an explicit domain for the variables
+(`for x in [lo, hi], ...`) is usually the better way to say the same
+thing, since it is part of the claim a reader sees. The probe route reads the same value: an unbounded
 direction, declared (`for x in [0, oo)`, `for x in R`) or a parameter
 with no domain at all, is exercised with finite values only, out to the
 value that applied or to `1e308`, spread over the decades so the far end

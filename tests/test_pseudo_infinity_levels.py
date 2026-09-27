@@ -349,8 +349,10 @@ def _cli(tmp_path, *args, pseudo_infinity):
                           capture_output=True, text=True, env=env)
 
 
-_WARNING = ("MATHEMA_PSEUDO_INFINITY=1e6 is below 1e100: a leftover? "
-            "overflow beyond it is not exercised")
+_WARNING = ("MATHEMA_PSEUDO_INFINITY=1e6 is below 1e100: values beyond "
+            "1e6 are not checked for computation; a better approach might "
+            "be to set an explicit domain for the variables "
+            "(for x in [lo, hi], ...)")
 
 
 def test_verify_and_check_warn_loudly_on_a_small_project_value(tmp_path):
@@ -360,6 +362,6 @@ def test_verify_and_check_warn_loudly_on_a_small_project_value(tmp_path):
         r = _cli(tmp_path, *args, pseudo_infinity="1e6")
         assert r.stderr.count(_WARNING) == 1, (args, r.stderr)
         quiet = _cli(tmp_path, *args, pseudo_infinity="1e100")
-        assert "a leftover?" not in quiet.stderr, (args, quiet.stderr)
+        assert "is below 1e100" not in quiet.stderr, (args, quiet.stderr)
         unset = _cli(tmp_path, *args, pseudo_infinity=None)
-        assert "a leftover?" not in unset.stderr, (args, unset.stderr)
+        assert "is below 1e100" not in unset.stderr, (args, unset.stderr)

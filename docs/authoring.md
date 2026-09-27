@@ -345,7 +345,8 @@ import. A function's claims-file entry can set its own with a
 wins over both; with none of the three set, the computation runs to
 float64's maximum, `1e308`. A proof never reads any of them. `mathema
 verify` and `mathema check` warn once on stderr when the project value
-is below `1e100`, since overflow beyond it is then never exercised; see
+is below `1e100`, since values beyond it are then not checked for
+computation, and suggest an explicit domain for the variables instead; see
 [operational infinity](grammar.md#operational-infinity-let-inf-be).
 
 ### `is_pole_safe(param)` / `is_builtin_safe(param)`

@@ -260,9 +260,9 @@ def _format_check(rows: list[dict], fmt: str) -> str:
 def _warn_small_pseudo_infinity() -> None:
     """Intent:
         One loud stderr line when the project-level pseudo-infinity
-        (`MATHEMA_PSEUDO_INFINITY`) is below 1e100: a value that small
-        is usually left over from an experiment, and overflow of a
-        float64 computation beyond it is never exercised. A value `let
+        (`MATHEMA_PSEUDO_INFINITY`) is below 1e100: values beyond it
+        are not checked for computation, and an explicit domain for the
+        variables states the same bound where a reader sees it. A value `let
         |inf| be` would refuse is left to the adjudication's own
         refusal.
     """
@@ -277,8 +277,10 @@ def _warn_small_pseudo_infinity() -> None:
         return
     if value is not None and value < PSEUDO_INFINITY_WARN_BELOW:
         raw = os.environ.get(PSEUDO_INFINITY_ENV, "").strip()
-        print(f"warning: {PSEUDO_INFINITY_ENV}={raw} is below 1e100: a "
-              f"leftover? overflow beyond it is not exercised",
+        print(f"warning: {PSEUDO_INFINITY_ENV}={raw} is below 1e100: "
+              f"values beyond {raw} are not checked for computation; a "
+              f"better approach might be to set an explicit domain for "
+              f"the variables (for x in [lo, hi], ...)",
               file=sys.stderr)
 
 
