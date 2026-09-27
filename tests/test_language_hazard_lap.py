@@ -103,3 +103,14 @@ def test_a_small_trial_budget_still_finishes_the_lap():
     assert "needle" in str(p.counterexample)
     assert q.verdict == "holds", (q.verdict, q.note)
     assert q.n >= len(crowded.hazards()) - 1
+
+
+def test_the_members_at_a_bound_come_first_and_plain(letters):
+    from mathema.probing import _language_lap
+    import random
+    bound = parse_binding("s in L[any_text, len in [3, 81]]")[1]
+    lap = _language_lap(random.Random(0), bound)
+    assert [lap.next(), lap.next()] == ["a" * 3, "a" * 81]
+    (p,) = check_conjectures(headline, [claim("for s in L[any_text, len <= 81], f(s) == s")])
+    assert p.verdict == "falsified"
+    assert p.counterexample.startswith("('" + "a" * 81 + "')"), p.counterexample

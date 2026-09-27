@@ -770,20 +770,26 @@ def _sample_domain(rng: random.Random, dom: Domain,
 def _language_lap(rng: random.Random, dom) -> "_SpecialCycle | None":
     """Intent:
         One lap over every hazard of a language domain, for the first
-        draws of a parameter bound to it, dispensed once each in a
-        seeded order. `None` when the bound is not a language domain or
-        has no hazard to visit.
+        draws of a parameter bound to it: the length hazards (the
+        members at a length bound among them) first, in the language's
+        order, then the rest once each in a seeded order. `None` when
+        the bound is not a language domain or has no hazard to visit.
     """
     if _classify_bound(dom) != "language":
         return None
     values = _language_hazards(dom)
-    return _SpecialCycle(rng, values=values) if values else None
+    if not values:
+        return None
+    lengths = [v for v, kind in _language_hazards(dom, kinds=True) if kind == "length"]
+    rest = [v for v, kind in _language_hazards(dom, kinds=True) if kind != "length"]
+    return _SpecialCycle(rng, values=rest, first=lengths)
 
 
-def _language_hazards(dom) -> list:
+def _language_hazards(dom, kinds: bool = False) -> list:
     """Intent:
         Every hazard of a language domain's pieces, the members of the
-        domain's excluded set left out, in the languages' own order.
+        domain's excluded set left out, in the languages' own order;
+        with `kinds`, `(value, kind)` pairs.
     """
     from .domain import LanguageRef
     from .languages import resolve_language
@@ -801,7 +807,7 @@ def _language_hazards(dom) -> list:
             except TypeError:
                 excluded = False
             if not excluded:
-                values.append(h.value)
+                values.append((h.value, h.kind) if kinds else h.value)
     return values
 
 

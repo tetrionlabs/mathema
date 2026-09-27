@@ -619,21 +619,36 @@ class _LengthRefined:
             return None
         return tuple(m for m in members if self._fits(m))
 
+    def _plain(self, rng: random.Random, n: int):
+        """A base member of exactly `n` code points, one repeated simple
+        character where the base admits one (`"a" * n`), else built."""
+        if n < 0:
+            return None
+        for ch in ("a", "0", "x", "A", " "):
+            if self.base.contains(ch * n):
+                return ch * n
+        return self._build(rng, n)
+
     def hazards(self) -> tuple:
+        """The members at each bound first, each a plain repetition
+        where the base admits one, then the base's hazards that fit."""
         rng = random.Random(0)
-        out = [h for h in self.base.hazards() if self.contains(h.value)]
-        seen = {h.value for h in out if isinstance(h.value, str)}
+        out: list = []
+        seen: set = set()
         edges = [self.lo] + ([self.hi] if self.hi is not None else [self.lo + 256])
         for n in edges:
-            s = self._build(rng, n)
+            s = self._plain(rng, n)
             if s is not None and s not in seen and self.contains(s):
                 seen.add(s)
                 out.append(HazardValue("length", s, f"a member of length {n}, at the bound"))
+        for h in self.base.hazards():
+            if self.contains(h.value) and not (isinstance(h.value, str) and h.value in seen):
+                out.append(h)
         return tuple(out)
 
     def outside(self, rng: random.Random):
         for n in ([self.hi + 1] if self.hi is not None else []) + ([self.lo - 1] if self.lo > 0 else []):
-            s = self._build(rng, n)
+            s = self._plain(rng, n)
             if s is not None and not self.contains(s):
                 return s
         s = self.base.outside(rng)

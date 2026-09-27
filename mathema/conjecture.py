@@ -3341,6 +3341,109 @@ def _merge_under(meta: dict, extra: dict) -> dict:
     return out
 
 
+_WITNESS_SHRINK_EVALUATIONS = 400
+
+
+def _failure_at(cj, kinds, env, args, code_l, code_r) -> "str | None":
+    """Intent:
+        The counterexample text the claim fails with at `args` (a raise,
+        a membership, or a comparison, in the claim loop's own words),
+        or None when it holds there or cannot be evaluated.
+    """
+    from .domain import domain_contains
+    trial_env = dict(env)
+    for p, v in zip(kinds, args):
+        trial_env[p] = v
+    try:
+        lv = eval(code_l, {"__builtins__": {}}, trial_env)
+        rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
+    except Exception as e:
+        return (f"{_fmt(tuple(args))}: raised {type(e).__name__}, narrow "
+                "the claim's domain to where every call returns, or state "
+                "the raising region as its own raises(...) claim")
+    if cj.relation in ("in", "not in"):
+        if cj.rhs_bound is not None:
+            member = (not is_missing(lv)) and domain_contains(lv, cj.rhs_bound)
+        else:
+            try:
+                member = lv in rv  # type: ignore[operator]
+            except TypeError:
+                return None
+        if member != (cj.relation == "in"):
+            return (f"{_fmt(tuple(args))}: {lv!r} is "
+                    f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
+        return None
+    if is_missing(lv) or is_missing(rv):
+        return None
+    slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
+    ok = relation_holds_elementwise(lv, rv, cj.relation, slack,
+                                    exact_inequality=cj.tolerance is None,
+                                    rel_tol=_declared_rel_tol(cj))
+    if ok is False:
+        return f"{_fmt(tuple(args))}: {lv!r} vs {rv!r}"
+    return None
+
+
+def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
+    """Intent:
+        `(args, counterexample, steps)`: the witness shrunk inside each
+        language-bound parameter's language, one of the language's own
+        `shrink` candidates at a time, keeping a candidate only when it
+        is in the claim's domain for that parameter and the claim still
+        fails there, within `_WITNESS_SHRINK_EVALUATIONS` evaluations;
+        None when the failure does not reproduce.
+    """
+    from .domain import LanguageRef, domain_contains
+    from .languages import resolve_language
+    args = list(args)
+    current = _failure_at(cj, kinds, env, args, code_l, code_r)
+    if current is None:
+        return None
+    budget, steps = _WITNESS_SHRINK_EVALUATIONS, 0
+    names = list(kinds)
+    improved = True
+    while improved and budget > 0:
+        improved = False
+        for i, p in enumerate(names):
+            bound = cj_domain.get(p)
+            if getattr(bound, "base_type", None) != "L":
+                continue
+            languages = []
+            for piece in bound.pieces:
+                if isinstance(piece, LanguageRef):
+                    try:
+                        languages.append(resolve_language(piece))
+                    except Exception:
+                        continue
+            for language in languages:
+                try:
+                    if not language.contains(args[i]):
+                        continue
+                    candidates = list(language.shrink(args[i]))
+                except Exception:
+                    continue
+                for candidate in candidates:
+                    if budget <= 0:
+                        break
+                    try:
+                        inside = domain_contains(candidate, bound)
+                    except Exception:
+                        inside = False
+                    if not inside:
+                        continue
+                    budget -= 1
+                    trial = [*args[:i], candidate, *args[i + 1:]]
+                    failure = _failure_at(cj, kinds, env, trial, code_l, code_r)
+                    if failure is not None:
+                        args, current, steps, improved = trial, failure, steps + 1, True
+                        break
+                if improved:
+                    break
+            if improved:
+                break
+    return args, current, steps
+
+
 def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Probe":
     """Intent:
         Decide which report stands when a route="best"/"derive" claim
@@ -5458,6 +5561,19 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 else f"{a}={env[a]!r}" for a in aux) if aux else "")
             cx = f"{_fmt(tuple(args))}{aux_part}: {lv!r} vs {rv!r}"
             break
+    shrunk_meta: dict = {}
+    if cx is not None and cx_stratum is None and assum_eval is None and not aux \
+            and any(getattr(cj_domain.get(p), "base_type", None) == "L" for p in kinds):
+        # a witness over a language is shrunk inside the language, as
+        # the hazard families' witnesses are
+        found = _shrink_language_witness(
+            cj, kinds, cj_domain, env, args, code_l, code_r)
+        if found is not None:
+            args, cx, steps = found
+            shrunk_meta = {"mathema.witness_shrunk": {"steps": steps}}
+            if steps:
+                note = (f"{note}; the witness was shrunk inside the language "
+                        f"in {steps} step{'s' if steps != 1 else ''}").lstrip("; ")
     if cx is not None:
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,
                      counterexample=cx, note=note, stratum=cx_stratum,
@@ -5465,7 +5581,8 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                kinds, cj_domain, checked, critical_hints, truncated_hints,
                                lap_floor),
                           "mathema.confidence": _probe_density(risk, checked),
-                          "mathema.counterexample_args": _yaml_safe_args(args)})
+                          "mathema.counterexample_args": _yaml_safe_args(args),
+                          **shrunk_meta})
     if checked == 0:
         why = ("; no sampled point satisfied the assuming clause"
                if assum_eval is not None else "; no evaluable inputs")
