@@ -47,6 +47,11 @@ extra_css:
   - stylesheets/tokens.css
   - stylesheets/extra.css
 
+# the mathema-language package's reference, under /language/reference/,
+# when its docs are present at build time (see the hook's docstring)
+hooks:
+  - docs_hooks/language_reference.py
+
 markdown_extensions:
   - admonition
   - pymdownx.details

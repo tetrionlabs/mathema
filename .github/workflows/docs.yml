@@ -43,6 +43,25 @@ jobs:
 
       - uses: astral-sh/setup-uv@v4
 
+      # The mathema-language reference, imported under /language/reference/
+      # by docs_hooks/language_reference.py. A deploy always carries it:
+      # the checkout needs the MATHEMA_LANGUAGE_DOCS_TOKEN secret (a
+      # fine-grained token with read access to tetrionlabs/mathema-language
+      # contents) while that repository is private, and the ref is the
+      # MATHEMA_LANGUAGE_DOCS_REF repository variable (a release tag),
+      # else main.
+      - name: Fetch the language reference
+        uses: actions/checkout@v4
+        with:
+          repository: tetrionlabs/mathema-language
+          ref: ${{ vars.MATHEMA_LANGUAGE_DOCS_REF || 'main' }}
+          path: _external/mathema-language
+          token: ${{ secrets.MATHEMA_LANGUAGE_DOCS_TOKEN }}
+          sparse-checkout: docs
+
+      - name: The language reference is present
+        run: test -f _external/mathema-language/docs/reference.yml
+
       - name: Build the site (strict)
         env:
           LEGAL_FOOTER: ${{ vars.DOCS_LEGAL_FOOTER }}

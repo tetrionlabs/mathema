@@ -128,8 +128,18 @@ format characters, combining marks, surrogates, the characters whose
 NFKC form differs, the astral planes), the hazard families
 `is_length_safe` and `is_encoding_safe`, and the schema adaptors that
 turn a dataclass, a `TypedDict`, a pydantic model or a JSON Schema into
-the language of its rows. Without it, a claim over `L[unicode]` reports
-`skipped` with the message naming the package.
+the language of its rows (a SQLAlchemy table and a Django model too).
+Without it, a claim over `L[unicode]` reports `skipped` with the message
+naming the package.
+
+The package keeps its own reference, published on this site as
+[the language reference](/language/reference/): every language and its
+membership test, the hazards, a page for each row adaptor with what it
+reads and which validator decides membership, how to write an adaptor
+of your own, and a catalogue of claims worth writing about a function
+over text, each one run by the package's tests and held to the verdict
+printed beside it. This page stays with the grammar and with what a
+record states.
 
 ## Writing your own
 

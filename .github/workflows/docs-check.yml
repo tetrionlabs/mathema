@@ -11,6 +11,7 @@ on:
       - "docs/**"
       - "**.md"
       - "mkdocs.yml"
+      - "docs_hooks/**"
       - ".github/workflows/docs-check.yml"
   pull_request:
     paths: *docs-paths
@@ -26,6 +27,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      LANGUAGE_DOCS_TOKEN: ${{ secrets.MATHEMA_LANGUAGE_DOCS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,6 +37,19 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e '.[docs]'
+      # the mathema-language reference, imported under /language/reference/
+      # by docs_hooks/language_reference.py. The repository is private
+      # until release, so the checkout needs a token that can read it; a
+      # build without one (a fork's pull request) checks the site alone.
+      - name: fetch the language reference
+        if: ${{ env.LANGUAGE_DOCS_TOKEN != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: tetrionlabs/mathema-language
+          ref: ${{ vars.MATHEMA_LANGUAGE_DOCS_REF || 'main' }}
+          path: _external/mathema-language
+          token: ${{ env.LANGUAGE_DOCS_TOKEN }}
+          sparse-checkout: docs
       # --strict promotes warnings to errors, so an orphaned page or a
       # dangling anchor fails here rather than at deploy time
       - run: mkdocs build --strict
