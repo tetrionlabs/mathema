@@ -265,6 +265,15 @@ _ASPECT_OF: dict[str, str] = {member: aspect
                               for member in members}
 
 
+def claim_base_name(claim_name: str) -> str:
+    """Intent:
+        The family part of a claim name: what precedes a pin
+        (`is_defined@axis=0`, a row pinned to a call's arguments) and a
+        bracket (`convex[x]`, `is_defined[2]`, `f_x_ge_0[float]`).
+    """
+    return str(claim_name or "").split("@", 1)[0].split("[", 1)[0]
+
+
 def claim_aspect(claim_name: str) -> tuple[str, str]:
     """Intent:
         The `(aspect, target)` a claim name occupies: the question it

@@ -106,10 +106,16 @@ numpy.mean:
   claims:
     - name: "is_defined"
       statement: "dim(a) >= 1"
-    - name: "is_defined[axis=1]"
+    - name: "is_defined@axis=1"
       statement: "let axis be 1, dim(a) >= 1"
       note: "pinned for the call in quant.rows_mean (line 14), which passes axis=1"
 ```
+
+A pinned row is named after the row it copies and the arguments it
+pins, `<row>@<parameter>=<value>`, with a comma between pins
+(`is_defined@axis=1,ddof=1`). A bracket after a claim name means
+something else: it names the computation a companion claim runs in
+(`[float]`).
 
 The rows go into the project's compendium file for the library,
 `claims/numpy.claims.yaml`, created with `compendium:` and a

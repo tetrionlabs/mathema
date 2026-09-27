@@ -377,7 +377,7 @@ def _claim_family(cj, fn, facts):
     predicate additionally dispatches by its relation (the structured
     field the grammar parsed) when the display name doesn't match,
     a renamed predicate claim still reaches its family."""
-    base = cj.name.split("[", 1)[0]
+    base = families.claim_base_name(cj.name)
     family = families.families().get(base)
     if family is not None and family.can_handle(fn, facts, cj.name) \
             and _statement_is_family_claim(cj, base, family, facts):
@@ -422,10 +422,10 @@ REGION_ROW_STRATA = {"is_defined": "mathematics",
 
 def region_row_kind(name) -> "str | None":
     """The region family a claim name belongs to (`is_defined` for
-    `is_defined` and `is_defined[2]`, `is_overflow_safe` for
+    `is_defined`, `is_defined[2]` and `is_defined@axis=0`, `is_overflow_safe` for
     `is_overflow_safe` and `is_overflow_safe[x]`), or None for any
     other name."""
-    base = str(name or "").split("[", 1)[0]
+    base = families.claim_base_name(name)
     return base if base in REGION_ROW_STRATA else None
 
 
@@ -3434,7 +3434,7 @@ def _stamp_examine_route(probe, cj, fn, facts) -> None:
     is_safety = cj.relation in routes.examine_predicates()
     if not is_safety:
         from .claim_families import SafetyFamily
-        base = cj.name.split("[", 1)[0]
+        base = families.claim_base_name(cj.name)
         base_family = families.families().get(base)
         is_safety = (isinstance(base_family, SafetyFamily)
                      and _statement_is_family_claim(cj, base, base_family,
@@ -5061,7 +5061,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         "implementation:accidental-crash",
                     "is_overflow_safe": "implementation:overflow",
                     "is_recursion_safe": "implementation:recursion-depth",
-                }.get(cj.name.split("[", 1)[0]) or (
+                }.get(families.claim_base_name(cj.name)) or (
                     algo_meta or {}).get("mathema.cause")
                 return Probe(cj.name, statement, "falsified", n=checked,
                              route=probe_route, counterexample=cx, note=note,

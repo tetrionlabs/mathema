@@ -69,7 +69,7 @@ def test_a_non_default_literal_argument_gains_a_pinned_row(tmp_path):
     rows = {c["name"]: c for c in data["numpy.mean"]["claims"]}
     # the key's existing row is kept, and a pinned copy joins it
     assert rows["is_defined"]["statement"] == "dim(a) >= 1"
-    pinned = rows["is_defined[axis=1]"]
+    pinned = rows["is_defined@axis=1"]
     assert pinned["statement"] == "let axis be 1, dim(a) >= 1"
     assert "upd.rows_mean" in pinned["note"]
     assert "numpy.mean" in r.stdout and "axis=1" in r.stdout, r.stdout
@@ -101,7 +101,7 @@ def test_dry_run_writes_nothing(tmp_path):
     r = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path),
              "--dry-run")
     assert r.returncode == 0, r.stderr
-    assert "is_defined[axis=1]" in r.stdout, r.stdout
+    assert "is_defined@axis=1" in r.stdout, r.stdout
     assert not (tmp_path / "claims" / "numpy.claims.yaml").exists()
 
 
@@ -189,11 +189,11 @@ def test_a_pinned_row_leaves_the_smoke_call_at_the_defaults():
     from mathema.compendium import ensure_bundled
     ensure_bundled()
     rec = mathema.check(np.mean, claims=[
-        claim("let axis be 0, dim(a) >= 1", name="is_defined[axis=0]")])
+        claim("let axis be 0, dim(a) >= 1", name="is_defined@axis=0")])
     rows = {p.name: p for p in rec.probes}
     assert "callable" not in rows, rows["callable"].note
-    assert rows["is_defined[axis=0]"].verdict == "holds", \
-        rows["is_defined[axis=0]"].note
+    assert rows["is_defined@axis=0"].verdict == "holds", \
+        rows["is_defined@axis=0"].note
 
 
 _COMMENTED = """\
@@ -251,3 +251,22 @@ def test_a_header_comment_alone_raises_no_warning(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "wrote" in r.stdout, r.stdout
     assert "WARN" not in r.stdout, r.stdout
+
+
+def test_a_pinned_row_name_reads_its_family_before_the_at():
+    from mathema.conjecture import region_row_kind
+    from mathema.families import claim_base_name
+    assert claim_base_name("is_defined@axis=0") == "is_defined"
+    assert claim_base_name("is_defined@axis=0,ddof=1") == "is_defined"
+    assert claim_base_name("is_defined[2]@axis=0") == "is_defined"
+    assert claim_base_name("convex[x]") == "convex"
+    assert region_row_kind("is_defined@axis=0") == "is_defined"
+    assert region_row_kind("is_overflow_safe@axis=0") == "is_overflow_safe"
+
+
+def test_a_pinned_row_name_passes_validation():
+    from mathema.spec import validate_claims_file
+    validate_claims_file({"compendium": "numpy", "numpy.mean": {"claims": [
+        {"name": "is_defined@axis=0,ddof=1",
+         "statement": "let axis be 0, let ddof be 1, dim(a) >= 1"}]}},
+        "numpy.claims.yaml")

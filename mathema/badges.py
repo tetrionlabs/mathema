@@ -129,12 +129,12 @@ def _claim_kind(name: str, statement: str) -> str:
     """Classify a claim into a behavioural KIND, from its name aspect
     first, then its statement shape. Cheap: string inspection only, no
     lift, so the badge stays CI-fast."""
-    from .families import claim_aspect
+    from .families import claim_aspect, claim_base_name
     from .matrices import PROPERTIES as _MATRIX
     stmt = statement or ""
     if stmt.startswith("raises(") or " raises(" in stmt:
         return "partiality"
-    base = (name or "").split("[", 1)[0]
+    base = claim_base_name(name or "")
     aspect = claim_aspect(name or "")[0]
     if aspect in ("monotonicity", "shape", "symmetry"):
         return aspect
@@ -409,7 +409,8 @@ def _reductions(verified_claims, pure: bool) -> dict:
             continue
         if st <= 0:
             continue
-        base = name.split("[", 1)[0]
+        from .families import claim_base_name
+        base = claim_base_name(name)
         if base in _NO_SOURCE:
             continue
         if base in _SAFETY_SOURCE:

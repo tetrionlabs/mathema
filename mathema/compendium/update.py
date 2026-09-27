@@ -9,7 +9,7 @@ Two kinds of change, each printed:
   argument (`np.mean(a, axis=1)`) that no row of that function pins
   gains rows pinning it: every unpinned row of the function is copied
   with the arguments bound first (`let axis be 1, dim(a) >= 1`), named
-  after the row and the pins (`is_defined[axis=1]`) and noting the call
+  after the row and the pins (`is_defined@axis=1`) and noting the call
   site. The rows go into the project's compendium file for the library
   (`claims/<library>.claims.yaml`, created with `compendium:` and a
   `versions:` range from the installed version when there is none),
@@ -181,7 +181,7 @@ def _pinned_row(row: dict, pins: dict, site: CallSite) -> dict:
                      for p, v in sorted(pins.items()))
     tag = ",".join(f"{p}={_render_value(v)}" for p, v in sorted(pins.items()))
     statement = str(row.get("statement") or row.get("law") or "")
-    return {"name": f"{row.get('name')}[{tag}]",
+    return {"name": f"{row.get('name')}@{tag}",
             "statement": f"{lets}, {statement}",
             "note": (f"pinned for the call in {site.caller} (line "
                      f"{site.line}), which passes {tag}")}
