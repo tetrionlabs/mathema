@@ -614,6 +614,10 @@ def _bind_params(fn, facts) -> tuple[dict, dict]:
                if facts.tree is not None else [])
         if not keys and facts.tree is not None:
             keys = _read_field_keys(fn, p, facts.tree) or []
+        elif fields and facts.tree is not None:
+            # a declared field read only as `len(p.field)` is its length
+            _, length_only = field_reads(facts.tree, p)
+            keys += [f"{p}.{f}.len" for f in length_only if f in fields]
         if keys:
             for k in keys:
                 # a `len(p.field)` key is a length: a whole number, never negative

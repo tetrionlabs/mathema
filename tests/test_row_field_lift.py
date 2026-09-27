@@ -18,6 +18,7 @@ from mathema.languages import Problem
 
 ROWS = '''
     from dataclasses import dataclass
+    from typing import Annotated, Optional
 
 
     @dataclass
@@ -26,6 +27,19 @@ ROWS = '''
         price: float
         kind: str
         sku: str
+
+
+    @dataclass
+    class Annotated_Order:
+        qty: int
+        price: float
+        kind: Optional[str]
+        sku: Annotated[str, "at most eight"]
+
+
+    def labelled_annotated(o: Annotated_Order) -> float:
+        """Quantity times price, plus one per character of the sku."""
+        return o.qty * o.price + len(o.sku)
 
 
     def total(o: Order) -> float:
@@ -166,3 +180,12 @@ def test_a_categorical_field_the_body_reads_declines_naming_the_field(orders):
 def test_the_best_route_still_samples_what_derive_declines(orders):
     (p,) = check_conjectures(orders.discounted, [claim("for o in L[lift_rows.Order], f(o) >= 0")])
     assert p.verdict == "holds", (p.verdict, p.note)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_len_lifts_when_every_field_annotation_is_a_typing_form(orders):
+    # a typing form (Optional, Annotated) is accepted by the older
+    # expansion rule, and len(o.sku) must still lift as a length
+    p = _derive(orders.labelled_annotated,
+                "for o in L[lift_rows.Annotated_Order], f(o) >= 0")
+    assert p.verdict == "proven", (p.verdict, p.note, p.sketch)
