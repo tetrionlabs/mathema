@@ -88,3 +88,18 @@ def test_verify_adjudicates_the_division_rows_to_holds(tmp_path, monkeypatch):
         assert rows[key]["is_defined"] == "holds", (key, rows[key])
     for key in ("numpy.divide", "numpy.true_divide"):
         assert rows[key]["is_overflow_safe"] == "holds", (key, rows[key])
+
+
+def test_the_is_defined_note_quotes_the_overflow_region_once():
+    import mathema
+    from mathema.compendium import ensure_bundled
+    from mathema.conjecture import claim
+    ensure_bundled()
+    region = "abs(x1) <= 1.7976931348623157e308 * abs(x2)"
+    rec = mathema.check(np.divide, claims=[
+        claim("x2 != 0", name="is_defined"),
+        claim(region, name="is_overflow_safe")])
+    (row,) = [p for p in rec.probes if p.name == "is_defined"]
+    assert row.verdict == "holds", row.note
+    assert f"numpy.divide ({region})" in row.note, row.note
+    assert row.note.count(region) == 1, row.note

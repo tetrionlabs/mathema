@@ -2408,6 +2408,12 @@ def _region_interval(region, symbol):
         return None
 
 
+def _squashed_link(link) -> tuple:
+    """A `(lhs, relation, rhs)` link with the whitespace removed from
+    each side, so two spellings of one link compare equal."""
+    return tuple("".join(str(part or "").split()) for part in link)
+
+
 def _overflow_safe_rows(fn, cj) -> "tuple[list, list, str]":
     """Intent:
         The recorded `is_overflow_safe` region of the function a claim
@@ -2433,10 +2439,16 @@ def _overflow_safe_rows(fn, cj) -> "tuple[list, list, str]":
                 links.extend(parsed.links
                              or [(parsed.lhs, parsed.relation, parsed.rhs)])
                 texts.append(text)
-    own = list(getattr(cj, "overflow_safe", ()) or ())
-    if own:
-        links.extend(own)
-        texts.extend(f"{lhs} {rel} {rhs}" for lhs, rel, rhs in own)
+    # a link the compendium row and a sibling claim both state (the
+    # row adjudicated beside this claim) is kept once
+    seen = {_squashed_link(link) for link in links}
+    for link in getattr(cj, "overflow_safe", ()) or ():
+        if _squashed_link(link) in seen:
+            continue
+        seen.add(_squashed_link(link))
+        links.append(link)
+        lhs, rel, rhs = link
+        texts.append(f"{lhs} {rel} {rhs}")
     owner = key if key is not None else str(getattr(fn, "__name__", "f"))
     return links, texts, owner
 
