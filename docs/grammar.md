@@ -276,6 +276,14 @@ superscripts wherever they read back as the same space; a dimension
 named with an `x` (the superscript `ˣ` is the separator) or with a
 letter that has no superscript form is shown as `ℝ^(x,n)` instead.
 
+Over `C` equality and closeness are adjudicated like any other value
+claim: `==` compares exactly and `~=` compares `abs(a - b)` against the
+same tolerance as over the reals, while an ordering (`<`, `<=`, `>`,
+`>=`) is refused, since complex numbers have no order. The computation
+companion of a claim over `C` runs in complex128 and is named
+`<claim>[complex]`, with corners on both axes at float64's largest
+magnitude; a NaN or an infinity in either component is no value.
+
 The excluded-point form is how you state a claim around a pole. The
 finite-set form is how a string-valued parameter that selects a branch
 becomes something the derive route can reason about, since it can then

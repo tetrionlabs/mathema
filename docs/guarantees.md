@@ -40,8 +40,10 @@ below zero, a division by zero), a `raise` the function's own source
 states, and a library's `is_defined` row, since a function undefined at
 a point of its domain is not the function the claim describes. The
 computation is one implementation executed in one language, one runtime
-and one carrier (float64 today), and everything that belongs to it, a
-raise and its type, a NaN, an overflow, a loss of precision, a recursion
+and one carrier, and the carrier follows the domain: float64 for a claim
+over `R`, complex128 for one over `C` (its companion is
+`<name>[complex]`). Everything that belongs to the computation, a raise
+and its type, a NaN, an overflow, a loss of precision, a recursion
 limit, is established only by running that implementation, belongs to
 that implementation, and never transfers to another, however the two
 are related mathematically.

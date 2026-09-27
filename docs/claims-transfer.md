@@ -112,6 +112,28 @@ explicit raise. A `raises(f(x), Exc)` row with an ordinary type
 (`ValueError`) is mathematics too, added only where the exception type
 itself matters.
 
+A region stated with an ordering (`x >= 0`, `-1 <= x <= 1`) is a
+statement over real inputs, since the complex numbers have no order:
+at a call whose argument is complex (a parameter the claim binds in
+`C`, a `complex` annotation, or an expression the derive route knows is
+complex) it does not apply. Where a library computes a function over
+the complex plane, its row for complex input is a bare `is_defined(f)`
+over `C`, less the points where it has no value there, and those
+points are a guard at complex arguments only:
+
+```yaml
+numpy.log:
+  claims:
+    - name: is_defined
+      statement: "x > 0"
+    - name: is_defined_over_complex
+      statement: "for x in C \\ {0}, is_defined(f)"
+```
+
+numpy's square root, inverse sine, inverse cosine and inverse
+hyperbolic cosine are defined on the whole plane; its logarithms have
+no value at 0, `log1p` at -1 and `arctanh` at 1 and -1.
+
 **Computation.** A computation-safety family in restriction form
 states the region where one implementation is safe in that respect:
 `is_overflow_safe: x <= 709.782712893384` on `numpy.exp` says numpy's
