@@ -180,3 +180,11 @@ def test_the_cli_prints_the_hint_under_the_function(tmp_path, capsys):
     assert ("hint: returns is used as a vector; this module imports "
             "pandas: annotate `returns: pd.Series` to sample it as one") \
         in out, out
+
+
+@pytest.mark.parametrize("fn", [mean_of, series_mean, polars_mean])
+def test_a_law_transform_acts_on_the_drawn_value_before_it_is_realised(fn):
+    p = _verdict(fn, "for xs in [-1, 1]^n, let c be [0.1, 10], "
+                     "f(g(xs, c)) ~= c*f(xs)",
+                 funcs={"g": "mathema.f.scale_seq"})
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)

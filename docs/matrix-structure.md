@@ -40,6 +40,14 @@ The markers, by level: `Real`, `Finite` (element-wise); `Symmetric`,
 `PositiveSemidefinite` (spectral). Each maps to a registry predicate
 (`Symmetric` to `is_symmetric`, and so on).
 
+A matrix parameter is drawn as nested lists unless its signature names
+another runtime type: `A: np.ndarray`, or `Mat("n", "n",
+runtime="numpy.ndarray")` beside the structure markers, samples it as a
+2-D array, so `def transpose(A: np.ndarray): return A.T` holds `for A
+in R^(n,n), f(f(A)) == A` where a list of lists would raise at `.T`.
+Nested lists are drawn up to 64 per axis. See [runtime
+types](runtime-types.md).
+
 A declared structure is **entailment-closed**: `PositiveDefinite` also
 asserts `is_symmetric` (and everything symmetry implies), because a
 positive-definite matrix is symmetric. Declaring the specific property

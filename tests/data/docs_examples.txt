@@ -73,6 +73,8 @@
 [x] docs/multi-function-claims.md:ratio          run output
 [x] docs/quickstart.md:falsify                   file run output run output run output
 [x] docs/quickstart.md:docstring                 file run output run output
+[x] docs/runtime-types.md:rt-mean                run verdicts verdicts  (requires)
+[-] docs/runtime-types.md:105
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
 [ ] docs/symbology.md:127
@@ -84,4 +86,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 71 examples checked, 4 output fences not yet marked
+# 72 examples checked, 4 output fences not yet marked

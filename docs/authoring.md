@@ -349,6 +349,11 @@ is below `1e100`, since values beyond it are then not checked for
 computation, and suggest an explicit domain for the variables instead; see
 [operational infinity](grammar.md#operational-infinity-let-inf-be).
 
+A claims-file entry's `runtime_types:` field names the runtime type of
+a parameter whose signature names none, for code that cannot be
+annotated (`runtime_types: {returns: pandas.Series}`); see [runtime
+types](runtime-types.md).
+
 ### `is_pole_safe(param)` / `is_builtin_safe(param)`
 
 Two family-derive-only predicates (`route="derive"` always, neither

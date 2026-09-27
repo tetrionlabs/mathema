@@ -10,7 +10,7 @@ reference: [that page](api.md) covers what you use to write and check
 claims. The surface here is narrower in audience and wider in what it
 exposes.
 
-## The four entry-point groups
+## The five entry-point groups
 
 | Group | What it registers | Discovered by |
 |---|---|---|
@@ -18,6 +18,7 @@ exposes.
 | `mathema.capabilities` | a presentation hook: how should something already computed be shown | `mathema._providers` |
 | `mathema.mcp_tools` | extra tools for the MCP server | `mathema.interfaces.mcp.server` |
 | `mathema.target_resolvers` | a resolver for language-tagged target keys (`ts:...`) | `mathema._target_resolvers` |
+| `mathema.runtime_types` | a runtime type adapter: how a vector, matrix or table is realised as the object a function receives (see [runtime types](runtime-types.md#adding-a-runtime-type)) | `mathema.runtime_types` |
 
 A claim family answers "can this be proven." A capability answers "how
 should this be shown." They are separate mechanisms with separate
