@@ -290,10 +290,14 @@ a:hover > .brk.l { transform: translateX(-2px); }
 a:hover > .brk.r { transform: translateX(2px); }
 @media (prefers-reduced-motion: reduce) { .brk { transition: none; } }
 .eyebrow {
-  font-family: var(--font-display); font-size: .6rem; font-weight: 600;
+  font-family: var(--font-display); font-size: .7rem; font-weight: 600;
   letter-spacing: .22em; text-transform: uppercase;
   color: var(--md-accent-fg-color); margin-bottom: 1rem;
 }
+/* A section label opens a new section: a section-sized gap above, and
+   its heading tucked close beneath it. */
+.md-typeset p:has(> .eyebrow) { margin: 3.2rem 0 .5rem; }
+.md-typeset p:has(> .eyebrow) + h2 { margin-top: .3rem; }
 
 /* The home page hero, full width above the Markdown content. It sits
    on ink in both schemes, so it always takes the dark-ground accent. */
