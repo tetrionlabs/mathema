@@ -467,3 +467,46 @@ def test_a_row_skipped_as_another_grammars_claim_never_supersedes():
     verified["claims"][0]["meta"] = {}
     assert [c["kind"] for c in claim_conflicts(add, declared, verified)] \
         == ["supersession"]
+
+
+def _write_lib(tmp_path, step):
+    (tmp_path / "lib.py").write_text(
+        f"def g(x: float) -> float:\n    return x + {step}\n")
+
+
+def test_a_wrapper_reverifies_when_the_library_function_it_calls_changes(
+        tmp_path):
+    """A wrapper calling `lib.g(x)` and one calling `g(x)` after
+    `from lib import g` both depend on g's form. The record keeps the
+    form each callee had when the wrapper was adjudicated, so a change
+    to g re-adjudicates both, whether or not g has a record of its
+    own."""
+    _write_lib(tmp_path, 1)
+    (tmp_path / "wrap.py").write_text(
+        "import lib\n"
+        "from lib import g\n\n\n"
+        "def through_module(x: float) -> float:\n"
+        "    return lib.g(x)\n\n\n"
+        "def through_name(x: float) -> float:\n"
+        "    return g(x)\n")
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "wrap.claims.yaml").write_text(
+        "wrap.through_module:\n"
+        "  claims:\n"
+        "    - name: above\n"
+        '      statement: "for x in [0, 1], f(x) >= x"\n'
+        "wrap.through_name:\n"
+        "  claims:\n"
+        "    - name: above\n"
+        '      statement: "for x in [0, 1], f(x) >= x"\n')
+    r = _run(tmp_path)
+    assert "2 adjudicated" in r.stdout, r.stdout + r.stderr
+    stored = (tmp_path / ".mathema" / "verified"
+              / "wrap.through_module.yaml").read_text()
+    assert "lib.g" in stored and "form:" in stored, stored
+    r = _run(tmp_path)
+    assert "2 fresh" in r.stdout, r.stdout
+    _write_lib(tmp_path, 2)
+    r = _run(tmp_path)
+    assert "0 fresh" in r.stdout, r.stdout
+    assert r.stdout.count("dependency changed") >= 2, r.stdout
