@@ -237,3 +237,49 @@ def test_a_trusted_row_stands_until_a_verdict_contradicts_it(
     assert row["verdict"] == "proven"
     assert row["accepted"].get("stale") is True
     assert "mathema.trusted_unsettled" not in (row.get("meta") or {})
+
+
+def _trusted_row(level, fresh, route="probe"):
+    from mathema.acceptance import _carry_trust
+    c = {"name": "rising", "statement": "for x in (0, 100], d(f(x), x) > 0",
+         "verdict": fresh, "route": route, "note": "sampled 200 points",
+         "meta": {"mathema.surface": "compendium"}}
+    accepted = {"as": "trusted", "by": "test", "level": level,
+                "verdict": level}
+    _carry_trust(c, accepted, [])
+    return c
+
+
+def test_a_weaker_consistent_local_verdict_leaves_the_trust_standing():
+    row = _trusted_row("proven", "holds")
+    assert row["verdict"] == "proven"
+    assert not row["accepted"].get("stale")
+    assert row["note"] == "trusted as: proven, strongest evidence seen: holds"
+    assert row["meta"]["mathema.strongest_evidence"] == "holds"
+    assert "mathema.trusted_unsettled" not in row["meta"]
+
+
+def test_a_contradicting_local_verdict_replaces_the_trust():
+    row = _trusted_row("proven", "falsified")
+    assert row["verdict"] == "falsified"
+    assert row["accepted"]["stale"] is True
+    assert "mathema.strongest_evidence" not in row["meta"]
+    assert row["acceptance_history"][-1]["event"] == "stale"
+
+
+@pytest.mark.parametrize("level, fresh", [("holds", "proven"),
+                                          ("proven", "proven"),
+                                          ("holds", "holds")])
+def test_a_local_verdict_at_least_as_strong_replaces_the_trust(level, fresh):
+    row = _trusted_row(level, fresh)
+    assert row["verdict"] == fresh
+    assert row["accepted"]["stale"] is True
+    assert "mathema.strongest_evidence" not in row["meta"]
+    assert row["note"] == "sampled 200 points"
+
+
+def test_an_unsettled_local_verdict_keeps_todays_reading():
+    row = _trusted_row("proven", "unknown")
+    assert row["verdict"] == "proven"
+    assert row["meta"]["mathema.trusted_unsettled"] == "unknown"
+    assert "mathema.strongest_evidence" not in row["meta"]
