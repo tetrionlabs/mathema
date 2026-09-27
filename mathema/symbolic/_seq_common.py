@@ -64,6 +64,36 @@ _ACTIVE_TRANSFORMS: contextvars.ContextVar = contextvars.ContextVar(
 ELEM_MAP_KEY = "__mathema_elem_map__"
 
 
+def map_sequence_elements(expr, base, mapper, scalar_args: tuple):
+    """Intent:
+        Apply an elementwise law transform to a closed form: every
+        element `base[k]` of the sequence becomes
+        `mapper(base[k], *scalar_args)`, by exact structural
+        replacement (`xreplace`), so no element is matched by a
+        pattern it only resembles.
+
+    Raises:
+        NotSymbolic: when the replacement leaves the expression
+            unchanged, since a transform that was not applied would
+            read `f(g(xs, c))` as `f(xs)`.
+    """
+    if isinstance(expr, tuple):
+        mapped = tuple(_map_elements_once(t, base, mapper, scalar_args)
+                       for t in expr)
+    else:
+        mapped = _map_elements_once(expr, base, mapper, scalar_args)
+    if mapped == expr:
+        raise NotSymbolic(f"the elementwise transform leaves the closed "
+                          f"form unchanged: no element of {base} appears "
+                          f"in it")
+    return mapped
+
+
+def _map_elements_once(expr, base, mapper, scalar_args: tuple):
+    elements = [e for e in expr.atoms(sympy.Indexed) if e.base == base]
+    return expr.xreplace({e: mapper(e, *scalar_args) for e in elements})
+
+
 def transform_bindings(funcs: dict) -> dict:
     """The subset of a claim's resolved `funcs` that are registered
     elementwise transforms: law name -> mapper. Matching is by the
@@ -269,11 +299,14 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
         any sub-decision does not settle.
 
     Notes:
-        Each Indexed element is replaced by a fresh real symbol bounded
-        by its sequence's own declared element domain, so the summand
-        decision runs through the ordinary decider (Piecewise branches
-        decided one by one when it stalls). Sound for >=/<=/>/<; an
-        equality has no termwise reading here.
+        Each distinct Indexed element is replaced by its own fresh real
+        symbol bounded by its sequence's declared element domain, so
+        the summand decision runs through the ordinary decider
+        (Piecewise branches decided one by one when it stalls). A
+        summand that reads an element moving with the bound index
+        together with one that does not (`xs[i]*xs[0]`) is not decided
+        termwise: its sign depends on a pair of elements. Sound for
+        >=/<=/>/<; an equality has no termwise reading here.
     """
     import sympy
 
@@ -305,6 +338,9 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
                 return sympy.Sum(coeff * inner.function, *inner.limits)
         return None
 
+    def _bound_index(t):
+        return t.limits[0][0] if t.limits else None
+
     for t in terms:
         as_sum = _as_sum(t)
         (sums if as_sum is not None else rest).append(
@@ -314,18 +350,30 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
 
     def _element_env(expr):
         subs, bounds = {}, {}
-        for idx in expr.atoms(sympy.Indexed):
+        ordered = sorted(expr.atoms(sympy.Indexed), key=sympy.default_sort_key)
+        for k, idx in enumerate(ordered):
             base = str(idx.base)
-            fresh = sympy.Symbol(f"_elt_{base}", real=True)
+            fresh = sympy.Symbol(f"_elt_{base}_{k}", real=True)
             subs[idx] = fresh
             bound = domain.get(base)
             if bound is not None:
                 bounds[str(fresh)] = bound
         return subs, bounds
 
-    def _nonneg(expr, strict: bool) -> bool:
+    def _mixes_positions(expr, index) -> bool:
+        # the term at position i reads an element that moves with i and
+        # one that does not: its sign is a fact about a pair of
+        # elements, not about each term on its own
+        elements = expr.atoms(sympy.Indexed)
+        moving = [e for e in elements
+                  if any(index in ix.free_symbols for ix in e.indices)]
+        return bool(moving) and len(moving) != len(elements)
+
+    def _nonneg(expr, strict: bool, index=None) -> bool:
+        if index is not None and _mixes_positions(expr, index):
+            return False
         subs, bounds = _element_env(expr)
-        scalar = expr.subs(subs)
+        scalar = expr.xreplace(subs)
         for s in scalar.free_symbols:
             if str(s) not in bounds and str(s) in domain:
                 bounds[str(s)] = domain[str(s)]
@@ -376,7 +424,7 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
                             assum = _SIGN_ASSUMPTIONS[type(cnd)]
                             baked = sympy.Symbol(cnd.lhs.name, real=True,
                                                  **assum)
-                            value = value.subs(cnd.lhs, baked)
+                            value = value.xreplace({cnd.lhs: baked})
                         else:
                             remaining.append(cnd)
                     context = (None if not remaining
@@ -394,7 +442,7 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
         return False
 
     for t in sums:
-        if not _nonneg(t.function, strict=False):
+        if not _nonneg(t.function, strict=False, index=_bound_index(t)):
             return None
     remainder = sympy.Add(*rest) if rest else sympy.S.Zero
     rem_ok_strict = False
@@ -431,7 +479,8 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
                                            None, syms).status == "proven"
             except Exception:
                 nonempty = False
-            if nonempty and _nonneg(t.function, strict=True):
+            if nonempty and _nonneg(t.function, strict=True,
+                                    index=_bound_index(t)):
                 strict_found = True
                 break
         if not strict_found:

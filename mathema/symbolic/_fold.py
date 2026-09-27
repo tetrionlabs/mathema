@@ -626,16 +626,8 @@ def _fold_eval_mapped(fold: "FoldLift", subs: dict):
     if elem_map is None or fold.seq is None:
         return out
     mapper, scalar_args = elem_map
-
-    def is_elem(e):
-        return isinstance(e, sympy.Indexed) and e.base == fold.seq
-
-    def mapped(e):
-        return mapper(e, *scalar_args)
-
-    if isinstance(out, tuple):
-        return tuple(t.replace(is_elem, mapped) for t in out)
-    return out.replace(is_elem, mapped)
+    from ._seq_common import map_sequence_elements
+    return map_sequence_elements(out, fold.seq, mapper, scalar_args)
 
 
 def _fold_view(fold: "FoldLift") -> SeqLiftView:
