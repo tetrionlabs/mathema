@@ -53,6 +53,8 @@
 [x] docs/lemmas.md:weakest                       run output  (after)
 [x] docs/lemmas.md:orphan                        run output  (after)
 [x] docs/mathema-docstring.md:ema                file run output repl repl run output run output
+[x] docs/matrix-structure.md:semantics           run verdicts verdicts
+[x] docs/matrix-structure.md:vocabulary          run verdicts verdicts
 [x] docs/matrix-structure.md:identities          run verdicts
 [x] docs/matrix-structure.md:enforce-structure   run  (requires)
 [x] docs/modes/accept.md:balance                 file file session session run file session session
@@ -75,6 +77,8 @@
 [x] docs/quickstart.md:falsify                   file run output run output run output
 [x] docs/quickstart.md:docstring                 file run output run output
 [x] docs/runtime-types.md:rt-mean                run verdicts verdicts  (requires)
+[x] docs/runtime-types.md:rt-series              run verdicts verdicts  (requires)
+[x] docs/runtime-types.md:rt-frame               run verdicts verdicts  (requires)
 [-] docs/runtime-types.md:105
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
@@ -87,4 +91,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 72 examples checked, 4 output fences not yet marked
+# 76 examples checked, 4 output fences not yet marked

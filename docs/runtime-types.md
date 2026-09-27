@@ -128,9 +128,86 @@ declared, a raise falsifies as always.
 numpy, pandas and polars stay optional: an adapter whose library is not
 installed is absent, and a parameter it would have claimed is sampled
 as a list. Install them with the `numpy`, `pandas` and `polars`
-extras. Claims over a table's columns come with the column syntax of a
-later release; today a table parameter is realised and observed, but a
-claim cannot yet name a column.
+extras.
+
+## Series and DataFrames in claims
+
+A claim over vectors reads the same whatever the runtime type: the
+drawn vector is evaluated as an array, the function receives its own
+runtime type, and a returned `Series`, `DataFrame` or array compares
+element by element. So one claim text holds for a `numpy.ndarray`, a
+`pandas.Series` and a `polars.Series` alike, and every vector construct
+works on it: `norm`, `dot`, `mean`, `returns * c`, `returns + c` (see
+[matrix structure](matrix-structure.md) for what each operator means).
+
+<!-- example: rt-series run requires=pandas -->
+```python
+import numpy as np
+import pandas as pd
+import polars as pl
+
+
+def scale_numpy(returns: np.ndarray, c: float):
+    return returns * c
+
+
+def scale_pandas(returns: pd.Series, c: float):
+    return returns * c
+
+
+def scale_polars(returns: pl.Series, c: float):
+    return returns * c
+```
+
+<!-- example: rt-series verdicts fn=scale_pandas requires=pandas -->
+```
+for returns in R^n, c in [-2, 2], f(returns, c) == c * returns   # holds
+for returns in R^n, c in [-2, 2], norm(f(returns, c)) ~= abs(c) * norm(returns)   # holds
+for returns in R^n, c in [-2, 2], mean(f(returns, c)) ~= c * mean(returns)   # holds
+for returns in R^n, c in [-2, 2], mean(f(returns, c)) ~= mean(returns) + c   # falsified
+```
+
+<!-- example: rt-series verdicts fn=scale_polars requires=polars -->
+```
+for returns in R^n, c in [-2, 2], f(returns, c) == c * returns   # holds
+for returns in R^n, c in [-2, 2], dot(f(returns, c), returns) ~= c * norm(returns)**2   # holds
+```
+
+A table parameter (a `pandas.DataFrame` or `polars.DataFrame`) is drawn
+with one column per name the claim or the body reads, and a claim reads
+a column as a vector, by attribute or by item: `df.returns`,
+`df["returns"]`. A returned DataFrame compares with another column by
+column, and its own columns read the same way (`f(df)["a"]`); the
+arithmetic of a whole table (`f(df) - 1`) is not claim syntax yet.
+
+<!-- example: rt-frame run requires=pandas -->
+```python
+import pandas as pd
+
+
+def scale_column(df: pd.DataFrame, c: float):
+    return df["returns"] * c
+
+
+def shifted(df: pd.DataFrame):
+    return df + 1
+```
+
+<!-- example: rt-frame verdicts fn=scale_column requires=pandas -->
+```
+for c in [-2, 2], f(df, c) == c * df.returns   # holds
+for c in [-2, 2], f(df, c) == c * df["returns"]   # holds
+for c in [-2, 2], f(df, c) == df.returns + c   # falsified
+```
+
+<!-- example: rt-frame verdicts fn=shifted requires=pandas -->
+```
+f(df)["a"] == df["a"] + 1   # holds
+f(df) == df   # falsified
+```
+
+The derive route does not yet read a column or a Series method; such a
+claim is adjudicated by sampling.
 
 ## Adding a runtime type
 

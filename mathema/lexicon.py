@@ -31,6 +31,11 @@ has been reviewed), see `spec.render_claim_text()` for the renderer
 this module exercises."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas
+
 LEXICON: dict[str, str] = {
     # one construct at a time -----------------------------------
     "relation_eq": "f(x) == x",
@@ -131,6 +136,54 @@ LEXICON: dict[str, str] = {
     # the same bars around a matrix expression are its determinant
     "matrix_determinant_bars_compound":
         "for A in R^(n,n), B in R^(n,n), |A @ B| == |A| * |B|",
+    # linear algebra the numpy way: `*` and `**` elementwise (the
+    # Hadamard product, the elementwise power), `@` the matrix product,
+    # `matrix_power` the matrix power, an explicit `abs` elementwise
+    "matrix_hadamard_trace":
+        "for A in R^(n,n), B in R^(n,n), trace(A * B) == trace(A.T @ B)",
+    "matrix_power_word": "for A in R^(n,n), matrix_power(A, 2) == A @ A",
+    "matrix_elementwise_abs":
+        "for A in R^(n,n), trace(abs(A)) >= abs(trace(A))",
+    # norms: Euclidean on a vector, Frobenius on a matrix, `norm(A, 2)`
+    # the spectral norm
+    "vector_triangle_inequality":
+        "for x in R^n, y in R^n, norm(x + y) <= norm(x) + norm(y)",
+    "matrix_frobenius_norm":
+        "for A in R^(n,n), norm(A) ~= sqrt(trace(A.T @ A))",
+    "matrix_spectral_norm": "for A in R^(n,n), norm(A, 2) <= norm(A)",
+    # the vocabulary words
+    "vector_dot": "for x in R^n, y in R^n, dot(x, y) == dot(y, x)",
+    "vector_outer": "for x in R^n, y in R^n, outer(x, y).T == outer(y, x)",
+    "matrix_kron_transpose":
+        "for A in R^(n,n), B in R^(n,n), kron(A, B).T == kron(A.T, B.T)",
+    "matrix_diag_trace": "for A in R^(n,n), sum(diag(A)) ~= trace(A)",
+    "matrix_rank_transpose": "for A in R^(n,n), rank(A.T) == rank(A)",
+    "matrix_eigvals_trace": "for A in R^(n,n), sum(eigvals(A)) ~= trace(A)",
+    "matrix_eigvalsh_positive": ("assuming A is positive definite, "
+                                 "for A in R^(n,n), min(eigvalsh(A)) > 0"),
+    "matrix_cond_at_least_one": "for A in R^(n,n), cond(A) >= 1",
+    # a vector of the claim's own, sized by the matrix's dimension
+    "matrix_solve": ("let b be R^n, assuming det(A) != 0, "
+                     "for A in R^(n,n), A @ solve(A, b) ~= b"),
+    "matrix_pinv": "for A in R^(m,n), A @ pinv(A) @ A ~= A",
+    # `x.T @ A @ x` is a number; `x != 0` says x is not the zero vector
+    "matrix_quadratic_form": ("assuming A is positive definite and x != 0, "
+                              "for A in R^(n,n), x in R^n, x.T @ A @ x > 0"),
+    # a structure premise beside a relation premise
+    "matrix_structure_and_relation_premise":
+        ("assuming A is symmetric and det(A) != 0, "
+         "for A in R^(n,n), inv(A) ~= inv(A).T"),
+    "matrix_row_and_column": "for A in R^(n,n), A[0, :] == A.T[:, 0]",
+    "matrix_axis_sum":
+        "for A in R^(n,n), sum(A, axis=0) ~= sum(A.T, axis=1)",
+    "matrix_axis_mean":
+        "for A in R^(m,n), mean(A, axis=1) ~= sum(A, axis=1) / n",
+    # a decomposition is a claim about its factors
+    "matrix_qr_factors":
+        "let q = numpy.linalg.qr, for A in R^(n,n), q(A)[0] @ q(A)[1] ~= A",
+    # a DataFrame's column, as an attribute or an item, is a vector
+    "table_column_attribute": "for c in [-2, 2], f(df, c) == c * df.returns",
+    "table_column_item": 'for c in [-2, 2], f(df, c) == c * df["returns"]',
     "inferred_literal_domain": "raises(f(50, 0), ValueError)",
     # let: alias, function binding, free variable -----------------
     "let_alias": ("let m = m1, for m1 in [0.1,1000], x1 in [-100,100], "
@@ -398,6 +451,17 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "matrix_output_symmetric_postfix", "matrix_transpose_sugar",
         "matrix_determinant_sugar", "matrix_determinant_bars_compound",
         "inferred_literal_domain"),
+    "linear_algebra": (
+        "matrix_hadamard_trace", "matrix_power_word",
+        "matrix_elementwise_abs", "vector_triangle_inequality",
+        "matrix_frobenius_norm", "matrix_spectral_norm", "vector_dot",
+        "vector_outer", "matrix_kron_transpose", "matrix_diag_trace",
+        "matrix_rank_transpose", "matrix_eigvals_trace",
+        "matrix_eigvalsh_positive", "matrix_cond_at_least_one",
+        "matrix_solve", "matrix_pinv", "matrix_quadratic_form",
+        "matrix_structure_and_relation_premise", "matrix_row_and_column",
+        "matrix_axis_sum", "matrix_axis_mean", "matrix_qr_factors",
+        "table_column_attribute", "table_column_item"),
     "lets": (
         "let_alias", "let_function_dotted", "let_free_var_closed",
         "named_under_test", "let_alias_for_under_test",
@@ -651,6 +715,11 @@ def add_two(x: float, y: float) -> float:
 def matmul(A, B):
     """The matrix product."""
     return A @ B
+
+
+def scale_column(df: "pandas.DataFrame", c: float):
+    """The `returns` column of a pandas DataFrame, scaled by `c`."""
+    return df["returns"] * c
 
 
 def cosine_phase(φ: float) -> float:
@@ -956,6 +1025,8 @@ def gd_convergence_factor(alpha: float, q: float) -> float:
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "add_two": (add_two, ["abs_bars_compound"]),
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
+    "scale_column": (scale_column, ["table_column_attribute",
+                                    "table_column_item"]),
     "nearly_identity": (nearly_identity, [
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex", "latex_varepsilon",
