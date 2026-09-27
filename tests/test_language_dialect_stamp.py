@@ -59,3 +59,10 @@ def test_the_record_carries_the_dialect(tmp_path):
         assert p.grammar == "mathema/language"
     finally:
         unregister_language("letters")
+
+
+def test_a_language_written_only_on_the_right_of_in_stamps_the_dialect():
+    assert claim("for n in N, f(n) in L[digit]").grammar == "mathema/language"
+    assert claim('for s in L[unicode], "<" not in f(s)').grammar == "mathema/language"
+    assert claim("for x in [0, 2], f(x) in {1, 2}").grammar == "mathema"
+    assert claim("for x in [0, 2], f(x) in [0, 1]").grammar == "mathema"

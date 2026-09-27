@@ -1247,9 +1247,10 @@ def claim(law: str, name: str | None = None, source: str = "user",
     if grammar == GRAMMAR and linalg.mentions_matrix_ops(lhs, rhs):
         grammar = f"{GRAMMAR}/linalg"
     elif grammar == GRAMMAR and any(getattr(b, "base_type", None) == "L"
-                                    for b in dom.values()):
-        # the language dialect: a claim quantified over a language is
-        # read with the language vocabulary; a finite-set domain stays
+                                    for b in (*dom.values(), rhs_bound)):
+        # the language dialect: a claim that writes a language, as a
+        # domain or on the right of `in`, is read with the language
+        # vocabulary; a finite-set domain stays
         # the base grammar, and the matrix dialect wins when both apply
         grammar = f"{GRAMMAR}/language"
     if let_pseudo_inf is not None:
