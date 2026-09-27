@@ -196,10 +196,12 @@ def test_the_roll_up_holds_on_a_small_pure_function_and_names_its_children(tmp_p
     assert p.route == "probe:algorithmic"
     children = p.meta.get("mathema.children")
     assert isinstance(children, dict) and children
-    for always in ("is_numerically_stable", "is_deterministic",
-                   "is_state_safe"):
-        assert always in children, children
-        assert f"{always}: {children[always]}" in (p.note or "")
+    assert "is_numerically_stable" in children, children
+    assert (f"is_numerically_stable: {children['is_numerically_stable']}"
+            in (p.note or ""))
+    # repeatability is is_repeatable's question, not this roll-up's
+    for other in ("is_deterministic", "is_reproducible", "is_state_safe"):
+        assert other not in children, children
     assert all(v in ("holds", "proven") for v in children.values()), children
 
 
@@ -220,8 +222,7 @@ def test_the_roll_up_is_falsified_by_an_overflowing_child(tmp_path):
 
 
 def test_the_roll_up_never_reaches_proven(tmp_path):
-    # every child of a lifted body proves on derive (determinism,
-    # state safety); the roll-up is still a fact about one
+    # a child of a lifted body may prove on derive; the roll-up is still a fact about one
     # implementation and stays at holds (P3)
     half = _load(tmp_path, '''
         def half(x: float) -> float:
@@ -246,8 +247,10 @@ def test_the_hierarchy_is_registered():
 def test_the_computation_safe_group_lists_the_children():
     from mathema.families import GROUPS
     members = set(GROUPS["computation_safe"])
-    assert {"is_overflow_safe", "is_recursion_safe", "is_numerically_stable",
-            "is_deterministic", "is_state_safe"} <= members
+    assert {"is_overflow_safe", "is_recursion_safe",
+            "is_numerically_stable"} <= members
+    assert not members & {"is_deterministic", "is_reproducible",
+                          "is_state_safe"}
     assert "is_computation_safe" not in members
     assert "is_memory_safe" not in members
     assert "is_defined" not in members
