@@ -264,7 +264,9 @@ def test_the_new_families_credit_existing_clarity_buckets_only():
     assert set(_SAFETY_SOURCE.values()) == {
         "is_state_safe", "is_deterministic", "is_numerically_stable",
         "is_representation_safe", "is_missing_safe",
-        "is_arbitrary_input_safe", "is_compendium_safe"}
+        "is_arbitrary_input_safe"}
+    # a call's hazard is read from the callee's own record (clarity @1.2)
+    assert "is_compendium_safe" not in _SAFETY_SOURCE
 
 
 def test_region_row_kind_names_the_two_region_families():
