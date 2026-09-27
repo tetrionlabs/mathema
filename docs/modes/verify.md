@@ -388,3 +388,16 @@ closing lines name every grammar seen across the whole run versus what
 this particular command actually verifies, `verify` never adjudicates
 a foreign-grammar claim itself, whatever module owns that grammar; that
 needs real data/context a static sweep can't provide.
+
+A claim that already has a real verdict recorded under mathema
+(proven, holds or falsified) and now declares another grammar, on the
+claim, its entry or its file, is warned about under the key's line,
+never counted as a failure:
+
+<!-- illustration -->
+```text
+     warning: claim commutative of funcs.add was verified under mathema; its grammar is now 'other', so mathema no longer adjudicates it
+```
+
+The claim's row in `--format json` carries `grammar_changed: {from:
+"mathema", to: "other"}`.
