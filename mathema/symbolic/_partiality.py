@@ -31,15 +31,15 @@ through the caller's own scope resolving it to a registered function,
 the spelling alone never decides, since guessing the origin wrong would
 falsify with a lemma about the wrong function.
 
-Every region here is mathematics: the real domain of a primitive
-(`sqrt` below zero, `log` at or below zero, `asin` outside [-1, 1],
-division by zero, a fractional power of a negative base), a region a
-library's `is_defined` row states, or a raise the function's own source
-states. Nothing here depends on the float carrier's range or precision,
-so `math.exp` has no row and `x ** 3` has no overflow region: a proof
-over the reals is a proof over the reals, and where the computation
-leaves the doubles is found by executing it (the `[float]` companion,
-the probe route), never by this walk.
+Every region here is mathematics: the real domain of a primitive (`sqrt`
+below zero, `log` at or below zero, `asin` outside [-1, 1], division by
+zero, a fractional power of a negative base), a region a library's
+`is_defined` row states, or a raise the function's own source states.
+Nothing here depends on the float number representation's range or
+precision, so `math.exp` has no row and `x ** 3` has no overflow region: a
+proof over the reals is a proof over the reals, and where the computation
+leaves the doubles is found by executing it (the `[float]` companion, the
+probe route), never by this walk.
 """
 import ast
 import contextvars

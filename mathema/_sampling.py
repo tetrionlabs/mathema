@@ -21,10 +21,10 @@ _LARGE = 1e6
 _FAR_SHARE = 0.1
 
 
-def carrier_reach() -> float:
+def representation_reach() -> float:
     """How far an unbounded direction is exercised when no
-    pseudo-infinity applies: the float64 carrier's maximum
-    (`representations.PY_FLOAT64`)."""
+    pseudo-infinity applies: the float64 number representation's
+    maximum (`representations.PY_FLOAT64`)."""
     from .representations import PY_FLOAT64
     assert PY_FLOAT64.max_magnitude is not None
     return PY_FLOAT64.max_magnitude
@@ -76,14 +76,14 @@ def _finite_bounds(lo: float, hi: float) -> tuple[float, float]:
 def _reach_ends(bounds) -> tuple[float, float, bool, bool]:
     """Intent:
         An interval's finite ends and which of them is unbounded: an
-        infinite end reads as the carrier's reach, and an end a
-        `ReachInterval` marks already holds its reach. A real domain
+        infinite end reads as the number representation's reach, and
+        an end a `ReachInterval` marks already holds its reach. A real domain
         contains no infinity, so no end is ever infinite here.
     """
     lo, hi = float(bounds[0]), float(bounds[1])
     un_lo = math.isinf(lo) or bool(getattr(bounds, "reach_lo", False))
     un_hi = math.isinf(hi) or bool(getattr(bounds, "reach_hi", False))
-    reach = carrier_reach()
+    reach = representation_reach()
     return (-reach if math.isinf(lo) else lo,
             reach if math.isinf(hi) else hi, un_lo, un_hi)
 

@@ -900,12 +900,13 @@ def _parse_pseudo_infinity(form: str, rhs: str) -> float:
     return magnitude
 
 
-# the named sets a representation declaration rebinds, and the carrier
-# vocabulary it rebinds them to (`let Z be i64`). Reserved: the parser
-# refuses both spellings with guidance rather than reading either as an
-# ordinary free-variable binding, so the future meaning stays free.
+# the named sets a representation declaration rebinds, and the number
+# representation vocabulary it rebinds them to (`let Z be i64`). Reserved:
+# the parser refuses both spellings with guidance rather than reading
+# either as an ordinary free-variable binding, so the future meaning stays
+# free.
 _BASE_SET_NAMES = frozenset({"R", "Z", "N", "C"})
-_RESERVED_CARRIERS = frozenset({
+_RESERVED_REPRESENTATIONS = frozenset({
     "i8", "i16", "i32", "i64", "i128",
     "u8", "u16", "u32", "u64", "u128",
     "f16", "f32", "f64", "bigint", "f64int",
@@ -1041,19 +1042,21 @@ def extract_let_bindings(
                         _LET_PIN_LITERALS[bounds])
                     text = ",".join(segments[1:]).strip()
                     continue
-                if fname in _BASE_SET_NAMES or bounds in _RESERVED_CARRIERS:
-                    # the representation-declaration spelling: rebinding
-                    # a named set's machine carrier, the same shape as
-                    # `let |inf| be 1e6` rebinding infinity. Reserved
-                    # rather than squattable, so the future meaning is
-                    # not taken by an accidental free-variable binding.
+                if (fname in _BASE_SET_NAMES
+                        or bounds in _RESERVED_REPRESENTATIONS):
+                    # the representation-declaration spelling: rebinding a
+                    # named set's machine number representation, the same
+                    # shape as `let |inf| be 1e6` rebinding infinity.
+                    # Reserved rather than squattable, so the future
+                    # meaning is not taken by an accidental free-variable
+                    # binding.
                     raise InvalidDomain(
                         f"`let {fname} be {bounds}` is reserved for "
                         f"representation declarations (binding a named "
-                        f"set to a machine carrier such as i64 or f32), "
-                        f"which are not supported yet; a free variable "
-                        f"cannot be named {fname!r} and a carrier name "
-                        f"cannot be a bound")
+                        f"set to a machine number representation such as "
+                        f"i64 or f32), which are not supported yet; a free "
+                        f"variable cannot be named {fname!r} and a number "
+                        f"representation name cannot be a bound")
                 parsed_binding = parse_binding(f"{fname} in {bounds}")
                 if parsed_binding is None:
                     # parse_binding has no bare-scalar shape (`for x in

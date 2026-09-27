@@ -32,7 +32,7 @@ function as an object over the reals and its declared sets, the same in
 every language and on every machine, and it is what the derive route
 reasons about: a `proven` means the claim holds in exact real
 arithmetic over the declared domain, with infinity as infinity, and
-nothing about the carrier the code happens to run on enters that
+nothing about the number representation the code happens to run on enters that
 reasoning, no largest double, no overflow threshold, no operational
 infinity. What does enter is the mathematics of definedness, namely the
 real domain of the primitives (a root of a negative, a logarithm at or
@@ -40,7 +40,7 @@ below zero, a division by zero), a `raise` the function's own source
 states, and a library's `is_defined` row, since a function undefined at
 a point of its domain is not the function the claim describes. The
 computation is one implementation executed in one language, one runtime
-and one carrier, and the carrier follows the domain: float64 for a claim
+and one number representation, and the number representation follows the domain: float64 for a claim
 over `R`, complex128 for one over `C` (its companion is
 `<name>[complex]`). Everything that belongs to the computation, a raise
 and its type, a NaN, an overflow, a loss of precision, a recursion
@@ -60,7 +60,7 @@ nothing, not even another NaN. The reading does not change with the
 kind of claim, so a witness means the same thing wherever it appears in
 the record.
 
-The carrier never overturns a proof. Where the derive route closes a
+The number representation never overturns a proof. Where the derive route closes a
 claim, the computation's verdict lives on the `<name>[float]` companion
 the proof spawns, which runs the real function at the corners of the
 declared domain and across its interior and is falsified, with a
@@ -85,7 +85,7 @@ which is over ℝ whatever the binding says. It is declared on the claim,
 `let |inf| be 1e100` in the grammar or `pseudo_infinity=` in Python,
 and a claim's own declaration takes precedence over the levels beneath
 it. Those resolve in the order claim, function, project
-(`MATHEMA_PSEUDO_INFINITY`) and then the carrier's own maximum,
+(`MATHEMA_PSEUDO_INFINITY`) and then the number representation's own maximum,
 `sys.float_info.max` (about `1.8e308`) for float64. The value that
 applied is shown only where it bounds an unbounded direction of the
 claim's effective domain, as a plain binding in front of the

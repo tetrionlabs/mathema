@@ -864,13 +864,13 @@ def companion_name(parent_name: str, descriptor: str = "float") -> str:
     return f"{parent_name}[{descriptor}]"
 
 
-def companion_carrier(cj_domain: "dict | None") -> tuple:
+def companion_representation(cj_domain: "dict | None") -> tuple:
     """Intent:
-        The carrier a claim's companion computes in, as `(descriptor,
-        representation, carrier name)`: complex128 (`("complex",
-        PY_COMPLEX128, "complex128")`) when the claim's domain binds a
-        coordinate in C, else float64 (`("float", PY_FLOAT64,
-        "float64")`).
+        The number representation a claim's companion computes in,
+        as `(descriptor, representation, its name)`: complex128
+        (`("complex", PY_COMPLEX128, "complex128")`) when the claim's
+        domain binds a coordinate in C, else float64 (`("float",
+        PY_FLOAT64, "float64")`).
     """
     from .probing import _bound_is_complex
     from .representations import PY_COMPLEX128, PY_FLOAT64
@@ -903,7 +903,7 @@ def _reach_text(names, cj_domain, resolved, reach) -> str:
         directions, in words, or an empty string when every coordinate
         is bounded (P8). `resolved` is the claim's resolved
         pseudo-infinity, stated as its `let` binding; without one the
-        directions ran to the carrier's reach.
+        directions ran to the number representation's reach.
     """
     from .domain import unbounded_directions
     unbounded = unbounded_directions(names, cj_domain)
@@ -940,19 +940,18 @@ def _finite_arguments(args, kwargs) -> bool:
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      assum=(), budget=None) -> "Probe | None":
     """Intent:
-        The computation claim a derive proof spawns. `parent` is
-        proven in exact arithmetic, which is all a derive `proven`
-        says; the companion `<name>[float]` is the same relation
-        executed against the REAL code in float: at every corner of
-        the declared domain and at sampled interior points, unbounded
-        directions running to the claim's resolved pseudo-infinity
-        (`records.operational_range`: claim, function level or
-        `MATHEMA_PSEUDO_INFINITY`) when one applies and to the carrier's
-        maximum (`_sampling.carrier_reach`, sampled log-uniformly)
-        otherwise. A raise, a NaN, or an inf or a precision loss where
-        the relation fails on the executed values falsifies it with
-        that point as the witness; otherwise it holds, over the points
-        it executed.
+        The computation claim a derive proof spawns. `parent` is proven in
+        exact arithmetic, which is all a derive `proven` says; the
+        companion `<name>[float]` is the same relation executed against
+        the REAL code in float: at every corner of the declared domain and
+        at sampled interior points, unbounded directions running to the
+        claim's resolved pseudo-infinity (`records.operational_range`:
+        claim, function level or `MATHEMA_PSEUDO_INFINITY`) when one
+        applies and to the number representation's maximum
+        (`_sampling.representation_reach`, sampled log-uniformly)
+        otherwise. A raise, a NaN, or an inf or a precision loss where the
+        relation fails on the executed values falsifies it with that point
+        as the witness; otherwise it holds, over the points it executed.
 
     Notes:
         `None` when the claim has no point evaluation against the code
@@ -966,19 +965,20 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         corroboration budget of interior points.
     """
     from . import corroboration as C
-    from ._sampling import carrier_reach
+    from ._sampling import representation_reach
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     from .records import operational_infinity, operational_range
     resolved = operational_infinity(cj)
     cap = operational_range(cj)
-    descriptor, carrier, carrier_word = companion_carrier(cj_domain)
+    descriptor, representation, representation_word = \
+        companion_representation(cj_domain)
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
-                            cap=cap, reach=carrier.max_magnitude,
+                            cap=cap, reach=representation.max_magnitude,
                             sequences=True)
     if deps is None:
         return None
     name = companion_name(parent.name, descriptor)
-    top = float(carrier.max_magnitude or carrier_reach())
+    top = float(representation.max_magnitude or representation_reach())
     reach = cap if cap is not None else (-top, top)
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
     interior = (C._CORROBORATION_BUDGET if budget is None
@@ -998,13 +998,14 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         return Probe(
             name, parent.statement, "unknown", route="probe",
             n=progress.checked,
-            note=f"the computation of {parent.name} in {carrier_word}; "
+            note=f"the computation of {parent.name} in "
+                 f"{representation_word}; "
                  f"the sweep hit the {FAST_TIMEOUT_SECONDS}s wall-clock cap"
                  + (f" executing {at}" if at else "")
                  + (f"; {reach_text}" if reach_text else ""),
             meta={"mathema.timeout": "fast"})
-    what = (f"the computation of {parent.name} in {carrier_word}, executed at "
-            f"{sweep.checked} points (every domain corner, then sampled "
+    what = (f"the computation of {parent.name} in {representation_word}, "
+            f"executed at {sweep.checked} points (every domain corner, then sampled "
             f"interior points)"
             + (f"; {reach_text}" if reach_text else ""))
     if sweep.fragile_point is not None:
@@ -1030,7 +1031,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             # evidence that the mathematics is sound and the code is not
             stratum={"mathematics": "sound", "blame": "implementation",
                      "cause": "implementation:numerical-instability",
-                     "representation": carrier.tag, "witness": pt})
+                     "representation": representation.tag, "witness": pt})
     if sweep.checked == 0:
         return Probe(name, parent.statement, "skipped", route="probe",
                      note=f"{what}; no in-domain point satisfied the "

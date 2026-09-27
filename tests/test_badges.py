@@ -468,7 +468,7 @@ def test_is_compendium_safe_is_not_a_clarity_reducer(tmp_path):
 @pytest.mark.parametrize("family", [
     "is_computation_safe", "is_repeatable", "is_memory_safe",
     "is_precision_safe", "is_order_invariant", "is_concurrency_safe",
-    "is_carrier_consistent", "is_compendium_safe"])
+    "is_representation_consistent", "is_compendium_safe"])
 @pytest.mark.parametrize("verdict, route", [
     ("proven", "derive"), ("holds", "probe"), ("falsified", "probe")])
 def test_a_roll_up_or_reserved_family_credits_no_clarity_source(

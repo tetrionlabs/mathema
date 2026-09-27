@@ -95,8 +95,8 @@ class Probe:
     #     symbolic disproof was corroborated by a reproduced witness)
     #   cause: an "implementation:*" reason code, iff blame is
     #     "implementation" (reason_codes group 5)
-    #   representation: the carrier the evidence holds under ("f64",
-    #     "bigint"; representations.py)
+    #   representation: the number representation the evidence holds
+    #     under ("f64", "bigint"; representations.py)
     #   witness: short text naming the fragile point or failure
     # Persisted as meta["mathema.stratum"] (spec.to_spec folds it), so
     # the on-disk shape needs no schema change at CDD spec v0.2.0.
@@ -346,9 +346,9 @@ def resolve_pseudo_infinity(claim_value,
     """Intent:
         The pseudo-infinity that applies to a claim's computation, by
         precedence claim > function > environment (P6). None means no
-        level set one: the computation runs to the carrier's own
-        maximum (`sys.float_info.max` for float64) and every consumer
-        keeps its default.
+        level set one: the computation runs to the number
+        representation's own maximum (`sys.float_info.max` for float64)
+        and every consumer keeps its default.
 
     Raises:
         InvalidDomain: a function-level or environment value `let
@@ -367,7 +367,8 @@ def resolve_pseudo_infinity(claim_value,
 def operational_infinity(cj) -> "PseudoInfinity | None":
     """The pseudo-infinity a claim's computation runs to, with its
     source: the one adjudication resolved onto the claim, else the
-    claim's own `let |inf| be`, else None (the carrier's maximum)."""
+    claim's own `let |inf| be`, else None (the number
+    representation's maximum)."""
     resolved = getattr(cj, "resolved_pseudo_infinity", None)
     if resolved is not None:
         return resolved
@@ -378,7 +379,7 @@ def operational_infinity(cj) -> "PseudoInfinity | None":
 def operational_range(cj) -> tuple[float, float] | None:
     """The (lo, hi) range a claim's computation runs to along an
     unbounded direction (`operational_infinity`), or None for the
-    carrier's maximum."""
+    number representation's maximum."""
     found = operational_infinity(cj)
     return pseudo_infinity_range(found.value) if found is not None else None
 

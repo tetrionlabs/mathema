@@ -65,9 +65,10 @@ def test_the_bundled_overflow_rows_are_overflow_safe_rows_with_a_bare_is_defined
                 "numpy.sinh"):
         assert rows(key, "is_defined") == ["is_defined(f)"], key
     assert rows("math.exp", "is_overflow_safe") == ["x <= 709.782712893384"]
-    # the probe exercises an unbounded direction with finite values up
-    # to the carrier's maximum, never at infinity itself (math.exp(inf)
-    # is inf, not an overflow), so the row needs no |inf| of its own
+    # the probe exercises an unbounded direction with finite values up to
+    # the number representation's maximum, never at infinity itself
+    # (math.exp(inf) is inf, not an overflow), so the row needs no |inf|
+    # of its own
     assert rows("math.exp", "exp_overflow_raises") == [
         "for x in (709.782712893384, oo), raises(f(x), OverflowError)"]
 

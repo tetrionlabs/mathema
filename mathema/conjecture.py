@@ -2799,9 +2799,9 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     infinity (a claims-file entry's `pseudo_infinity:`, or
     `check(fn, pseudo_infinity=)`). Each claim's computation runs to
     the value resolved claim > function > `MATHEMA_PSEUDO_INFINITY`
-    (`records.resolve_pseudo_infinity`, read once per call), else to
-    the carrier's maximum; the derive route never reads it. Where the
-    resolved value bounds an unbounded direction of a claim's
+    (`records.resolve_pseudo_infinity`, read once per call), else to the
+    number representation's maximum; the derive route never reads it.
+    Where the resolved value bounds an unbounded direction of a claim's
     effective domain, the claim's rows carry it with its level in
     `meta["mathema.pseudo_infinity"]`, and its computation rows show it
     as a `let` in front of their `condition` (P8).
@@ -3476,12 +3476,13 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     companions = [p for p in probes if p.name not in link_names]
     if combined.verdict != "proven" or len(companions) != len(links):
         return combined, None
-    from .gates import companion_carrier
-    descriptor, _carrier, carrier_word = companion_carrier(cj.domain)
+    from .gates import companion_representation
+    descriptor, _representation, representation_word = \
+        companion_representation(cj.domain)
     companion = _combine_conjunction(
         companions, companion_name(cj.name, descriptor), _chain_statement(cj),
         labels, what="float companion")
-    companion.note = (f"the computation of {cj.name} in {carrier_word}, "
+    companion.note = (f"the computation of {cj.name} in {representation_word}, "
                       f"executed link by link; {companion.note}")
     broken = next((p for p in companions if p.verdict == "falsified"), None)
     if broken is not None:
@@ -5014,8 +5015,9 @@ def _machine_failure_stratum(exc, witness: str) -> dict | None:
     Notes:
         `mathematics` is deliberately absent: a machine failure alone
         says nothing about whether the mathematical claim holds, only
-        that the carrier gave out before the value existed. The
-        verdict stays falsified either way; this only classifies.
+        that the number representation gave out before the value
+        existed. The verdict stays falsified either way; this only
+        classifies.
     """
     for exc_type, cause in _MACHINE_FAILURE_CAUSES.items():
         if isinstance(exc, exc_type):
@@ -5180,14 +5182,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      note=f"{note}; the registered family for this claim's "
                           "own name couldn't decide it, and the generic "
                           "sampling loop has no meaning for this predicate")
-    # the generic loop's reading of the domain: every unbounded
-    # direction, declared or bare, runs with finite values out to the
-    # resolved pseudo-infinity, else the carrier's maximum (P1: a real
-    # domain contains no infinity)
-    from ._sampling import carrier_reach
+    # the generic loop's reading of the domain: every unbounded direction,
+    # declared or bare, runs with finite values out to the resolved
+    # pseudo-infinity, else the number representation's maximum (P1: a
+    # real domain contains no infinity)
+    from ._sampling import representation_reach
+    reach_max = representation_reach()
     cj_domain, _approximated = _operational_domain(
-        cj_domain, pinf if pinf is not None
-        else (-carrier_reach(), carrier_reach()), bare=bare)
+        cj_domain, pinf if pinf is not None else (-reach_max, reach_max),
+        bare=bare)
     try:
         if cj.relation == "raises":
             code_l, aux_names = _validate(cj.lhs, set(kinds), extra)
@@ -5631,7 +5634,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                       f"within ε evaluate cleanly), a clamp at the raising "
                       f"operation's argument would remove the instability")
                 # nudged inputs evaluating cleanly IS the maths-sound
-                # evidence: the failure lives in the carrier's last ulp
+                # evidence: the failure lives in the number
+                # representation's last ulp
                 cx_stratum = {"mathematics": "sound",
                               "blame": "implementation",
                               "cause": "implementation:sub-epsilon-boundary",

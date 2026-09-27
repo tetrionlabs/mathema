@@ -2456,13 +2456,13 @@ def _overflow_safe_rows(fn, cj) -> "tuple[list, list, str]":
 def _is_defined_reach(fn, cj, params: list, domain: dict, shapes: dict,
                       links: list, texts: list, owner: str):
     """Intent:
-        How far an `is_defined` probe runs each scalar parameter, for
-        any function: inside its recorded `is_overflow_safe` region
-        (`links`, see `_overflow_safe_rows`) when one is recorded, since
-        where the computation overflows is that claim's fact and not
-        this one's; else to the claim's pseudo-infinity, else to the
-        carrier's maximum; each intersected with the parameter's own
-        declared bound. Returns `(reach, note)`: the per-parameter
+        How far an `is_defined` probe runs each scalar parameter, for any
+        function: inside its recorded `is_overflow_safe` region (`links`,
+        see `_overflow_safe_rows`) when one is recorded, since where the
+        computation overflows is that claim's fact and not this one's;
+        else to the claim's pseudo-infinity, else to the number
+        representation's maximum; each intersected with the parameter's
+        own declared bound. Returns `(reach, note)`: the per-parameter
         `(lo, hi)` the corners are taken from and outside which a draw
         is not a trial, and the text the record carries.
     """
@@ -2470,12 +2470,13 @@ def _is_defined_reach(fn, cj, params: list, domain: dict, shapes: dict,
 
     import sympy
 
-    from ._sampling import carrier_reach
+    from ._sampling import representation_reach
     from .compendium import _relation
     from .records import operational_range
     pinf = operational_range(cj)
+    reach_max = representation_reach()
     default_lo, default_hi = (pinf if pinf is not None
-                              else (-carrier_reach(), carrier_reach()))
+                              else (-reach_max, reach_max))
     env = {p: sympy.Symbol(p, real=True) for p in params}
     regions: dict = {}
     for lhs, rel, rhs in links:
@@ -2520,7 +2521,8 @@ def _is_defined_reach(fn, cj, params: list, domain: dict, shapes: dict,
         from .records import operational_infinity
         note = f"unbounded directions run to {operational_infinity(cj).render()}"
     else:
-        note = f"unbounded directions run to magnitude {carrier_reach():g}"
+        note = (f"unbounded directions run to magnitude "
+                f"{representation_reach():g}")
     return reach, note
 
 
@@ -3385,9 +3387,9 @@ def _is_overflow_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                              relation: str, domain: dict | None = None,
                              tolerance: float | None = None):
     """Structural half of is_overflow_safe: decline. Whether a
-    computation overflows is a fact about one carrier, established
-    by executing it (P3, P13); a derive proof over the reals says
-    nothing about it."""
+    computation overflows is a fact about one number representation,
+    established by executing it (P3, P13); a derive proof over the
+    reals says nothing about it."""
     return None
 
 
@@ -3475,11 +3477,11 @@ _MEMORY_SAFETY_NOTE = ("memory safety needs a resource cap and is not "
 #: computation-safety families named now and adjudicated in a later
 #: release, with the question each answers
 RESERVED_FAMILIES = {
-    "is_precision_safe": "right in a narrower carrier",
+    "is_precision_safe": "right in a narrower number representation",
     "is_order_invariant": "the same answer whatever the reduction order",
     "is_concurrency_safe": "runs correctly under concurrent calls",
-    "is_carrier_consistent": "the same answer across the computations "
-                             "the descriptor names",
+    "is_representation_consistent": "the same answer across the "
+                                    "computations the descriptor names",
 }
 
 

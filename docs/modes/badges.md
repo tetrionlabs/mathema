@@ -121,7 +121,7 @@ A few consequences worth knowing:
   `is_computation_safe` and `is_repeatable` credit nothing themselves,
   since their children do. `is_memory_safe` and the reserved families
   (`is_precision_safe`, `is_order_invariant`, `is_concurrency_safe`,
-  `is_carrier_consistent`) are not adjudicated in this release and
+  `is_representation_consistent`) are not adjudicated in this release and
   credit nothing either. No weight moves.
 - **A call is only as clear as its callee's own record.** Every
   function a function calls, one of your own or a library's, is a

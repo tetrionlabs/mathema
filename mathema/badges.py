@@ -108,7 +108,7 @@ _NO_SOURCE = frozenset({
     "is_computation_safe", "is_repeatable",
     "is_memory_safe",
     "is_precision_safe", "is_order_invariant", "is_concurrency_safe",
-    "is_carrier_consistent"})
+    "is_representation_consistent"})
 
 
 def _strength(verdict: str, route: str) -> float:

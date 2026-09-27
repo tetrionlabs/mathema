@@ -384,11 +384,11 @@ class Interval(tuple):
 class ReachInterval(Interval):
     """The computation's reading of an unbounded direction: an
     `Interval` whose `reach_lo`/`reach_hi` end is the finite magnitude
-    (the pseudo-infinity, else the carrier's maximum) standing in for
-    an infinite end, closed there. A sampler reads the marked end as
-    unbounded, drawing log-uniformly over the decades up to it, and
-    every other consumer sees an ordinary finite interval. `bare` marks
-    a parameter no domain was declared for, sampled as an undeclared
+    (the pseudo-infinity, else the number representation's maximum)
+    standing in for an infinite end, closed there. A sampler reads the
+    marked end as unbounded, drawing log-uniformly over the decades up to
+    it, and every other consumer sees an ordinary finite interval. `bare`
+    marks a parameter no domain was declared for, sampled as an undeclared
     parameter is, plus the far draws."""
     def __new__(cls, lo: float, hi: float, closed_lo: bool = True,
                 closed_hi: bool = True, *, reach_lo: bool = False,
@@ -1805,13 +1805,13 @@ def operational_domain(cj_domain: dict, reach: "tuple[float, float]",
                         bare=()):
     """Intent:
         The computation's reading of a claim's domain: every infinite
-        interval end, including one inside a union of real pieces and
-        the whole line of a bare `R`, replaced by the reach (the
-        resolved pseudo-infinity, else the carrier's maximum), and every
-        name in `bare` (a real parameter no domain was declared for)
-        given the whole reach, marked as undeclared. Every finite end
-        and every other bound stays as declared. Returns the rewritten
-        copy and a rendering of each interval change.
+        interval end, including one inside a union of real pieces and the
+        whole line of a bare `R`, replaced by the reach (the resolved
+        pseudo-infinity, else the number representation's maximum), and
+        every name in `bare` (a real parameter no domain was declared for)
+        given the whole reach, marked as undeclared. Every finite end and
+        every other bound stays as declared. Returns the rewritten copy
+        and a rendering of each interval change.
 
     Notes:
         The probe stage's reading, and only the probe stage's: the
