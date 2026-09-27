@@ -334,10 +334,11 @@ def _display_path(path: str, root: str) -> str:
 def load_library_claims(root: "str | None" = ".") -> dict:
     """Intent:
         Every applicable library claim entry, keyed by dotted function
-        (`numpy.sqrt`): `{"entry", "compendium", "versions", "source"}`,
-        where `entry` is the claims-file entry with its rows stamped as
-        compendium testimony, `compendium` the library, `versions` the
-        range the file declares, and `source` the file it came from.
+        (`numpy.sqrt`): `{"entry", "compendium", "versions", "source",
+        "bundled"}`, where `entry` is the claims-file entry with its rows
+        stamped as compendium testimony, `compendium` the library,
+        `versions` the range the file declares, `source` the file it
+        came from, and `bundled` whether that file ships with mathema.
         `root=None` reads the bundled files only.
 
     Notes:
@@ -378,7 +379,8 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         for key, entry in data.items():
             if isinstance(entry, dict):
                 out[key] = {"entry": entry, "compendium": library,
-                            "versions": versions, "source": where}
+                            "versions": versions, "source": where,
+                            "bundled": path in shipped}
     return out
 
 
@@ -981,8 +983,11 @@ def register_library_claims(root: "str | None" = ".") -> list:
     Notes:
         A row that reads an array's shape or a matrix (`dim(a) >= 1`,
         `det(a) != 0`) states no scalar region and is left to the
-        hazard generator; any other row whose region cannot be built is
-        reported once with `warnings.warn`, naming the key and the row.
+        hazard generator. Any other row whose region cannot be built
+        registers nothing: a row of a project file is reported once per
+        process with `warnings.warn`, naming the key and the row; a
+        bundled row is not warned about, and `mathema compendium status`
+        names it beside its function (`status.compendium_status`).
     """
     import warnings
 
@@ -1004,7 +1009,8 @@ def register_library_claims(root: "str | None" = ".") -> list:
             except _Unbuildable as e:
                 reason = str(e)
                 label = (key, str(row.get("name")), reason)
-                if reason != "shape" and label not in _REPORTED:
+                if (reason != "shape" and not info.get("bundled")
+                        and label not in _REPORTED):
                     _REPORTED.add(label)
                     warnings.warn(
                         f"mathema: compendium row {row.get('name')!r} of "

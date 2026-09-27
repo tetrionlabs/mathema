@@ -136,6 +136,26 @@ def _row_state(row: "dict | None") -> "tuple[str, str | None]":
     return "unsettled", None
 
 
+def _unregistered_rows(key: str, rows: list) -> dict:
+    """Intent:
+        Each fact row of `key` whose region cannot be built, and so
+        registers no guard or computation row, mapped to the reason.
+        A row reading an array's shape or a matrix is left to the
+        hazard generator and is not listed.
+    """
+    from . import _row_region, _Unbuildable, row_is_fact
+    out: dict = {}
+    for row in rows:
+        if not row_is_fact(row):
+            continue
+        try:
+            _row_region(key, row)
+        except _Unbuildable as e:
+            if str(e) != "shape":
+                out[str(row.get("name"))] = str(e)
+    return out
+
+
 def compendium_status(root: str = ".",
                       library: "str | None" = None) -> dict:
     """Intent:
@@ -149,7 +169,8 @@ def compendium_status(root: str = ".",
         with rows to its call count, its number of rows, and how many
         are `verified` (proven or holds here), `trusted` (by accepted
         level), `falsified` and `unsettled` (never adjudicated here,
-        unknown or skipped).
+        unknown or skipped), and `unregistered`, each row whose region
+        cannot be built mapped to the reason (`_unregistered_rows`).
 
     Notes:
         A call is counted once per project function that makes it.
@@ -185,7 +206,8 @@ def compendium_status(root: str = ".",
                         ((verified.get(key) or {}).get("entry") or {})
                         .get("claims") or []}
             counts: dict = {"calls": n, "rows": len(rows), "verified": 0,
-                            "trusted": {}, "falsified": 0, "unsettled": 0}
+                            "trusted": {}, "falsified": 0, "unsettled": 0,
+                            "unregistered": _unregistered_rows(key, rows)}
             for row in rows:
                 state, level = _row_state(recorded.get(row["name"]))
                 if state == "trusted":
@@ -235,6 +257,8 @@ def render_status(data: dict) -> str:
                 + (f" ({levels})" if levels else "")
                 + f", {c['falsified']} falsified, "
                   f"{c['unsettled']} unsettled")
+            lines.extend(f"  {'':<{width}}  not registered: {name} ({why})"
+                         for name, why in c["unregistered"].items())
         if lib["no_claims"]:
             lines.append("  no claims: " + ", ".join(lib["no_claims"]))
         blocks.append("\n".join(lines))
