@@ -559,13 +559,15 @@ def _stated_kind(bound) -> str:
 def _language_field_bounds(cj_domain: dict) -> dict:
     """Intent:
         `{param: {field: bound}}` for every parameter bound to a
-        single schema language, the one-deep numeric field domains its
-        `fields()` states (an `Interval`, a named number set, a numeric
-        `Domain`); a union of languages, a language without fields, or
-        a field whose bound is not numeric leaves the parameter out,
-        and the lift then declines it as any language.
+        single schema language, from the one-deep field domains its
+        `fields()` states: a numeric field keeps its bound (an
+        `Interval`, one side open or both, a named number set, a
+        numeric `Domain`), a text field stated as a language keeps that
+        `LanguageRef`, and a field with no reading (a categorical,
+        None) is present with the bound None. A union of languages or
+        a language without fields leaves the parameter out.
     """
-    from .domain import Domain, LanguageRef
+    from .domain import LanguageRef
     from .languages import resolve_language
     out: dict = {}
     for p, b in cj_domain.items():
@@ -578,21 +580,68 @@ def _language_field_bounds(cj_domain: dict) -> dict:
             fields = resolve_language(refs[0]).fields()
         except Exception:
             continue
-        if not fields:
-            continue
-        numeric: dict = {}
-        for name, bound in fields.items():
-            if isinstance(bound, Domain):
-                if bound.base_type == "L":
-                    numeric = {}
-                    break
-            elif not (bound in ("Z", "N", "R") or isinstance(bound, tuple)):
-                numeric = {}
-                break
-            numeric[name] = bound
-        if numeric:
-            out[p] = numeric
+        if fields:
+            out[p] = dict(fields)
     return out
+
+
+def _is_numeric_bound(bound) -> bool:
+    from .domain import Domain
+    if isinstance(bound, Domain):
+        return bound.base_type in ("R", "Z", "N")
+    return bound in ("Z", "N", "R") or isinstance(bound, tuple)
+
+
+def _length_domain(bound):
+    """Intent:
+        The domain of `len(p.field)` for a text field: its language's
+        length bound as a whole-number interval, or N.
+    """
+    from .domain import Domain, Interval, LanguageRef
+    length = getattr(bound, "length", None) if isinstance(bound, LanguageRef) else None
+    if length is None:
+        return "N"
+    from .domain import length_range
+    lo, hi = length_range(length)
+    return Domain(base_type="N" if hi is None else "Z",
+                  pieces=() if hi is None else (Interval(float(lo), float(hi)),),
+                  explicit_type=True)
+
+
+def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
+    """Intent:
+        `(field_domain, reason)`: the `p.field` and `p.field.len`
+        bounds the lift binds for every language-bound parameter, from
+        the fields the body reads, or `(None, reason)` naming the first
+        parameter or field with no symbolic reading: a parameter whose
+        language states no fields, or a field read as a value that is
+        not a number (a categorical, text read as text).
+    """
+    from .domain import LanguageRef
+    from .symbolic._base import field_reads
+    schema = _language_field_bounds(cj_domain)
+    out: dict = {}
+    for p, b in cj_domain.items():
+        if getattr(b, "base_type", None) != "L":
+            continue
+        if p not in schema or facts.tree is None:
+            return None, (f"{p} is quantified over a language with no "
+                          "field reading")
+        plain, length_only = field_reads(facts.tree, p)
+        for f in plain:
+            bound = schema[p].get(f)
+            if not _is_numeric_bound(bound):
+                return None, (f"the body reads {p}.{f}, a field with no "
+                              "numeric reading, so the lift declines and "
+                              "the probe adjudicates")
+            out[f"{p}.{f}"] = bound
+        for f in length_only:
+            bound = schema[p].get(f)
+            if not isinstance(bound, LanguageRef):
+                return None, (f"the body reads len({p}.{f}), and {p}.{f} "
+                              "is not a text field")
+            out[f"{p}.{f}.len"] = _length_domain(bound)
+    return out, ""
 
 
 def _annotated_length(hint):
@@ -4217,7 +4266,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             return None
     language_params = sorted(p for p, b in cj_domain.items()
                              if getattr(b, "base_type", None) == "L")
-    schema_fields = _language_field_bounds(cj_domain)
+    row_domain, row_reason = (_row_lift_domain(fn, facts, cj_domain)
+                              if language_params else (None, ""))
     if cj.relation in ("in", "not in"):
         # membership is decided by execution: the lift has no reading
         # of a value's membership in a language or a set
@@ -4227,15 +4277,14 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             sketch=f"`{cj.relation}` is decided by execution: the symbolic "
                    "lift has no reading of membership in a language or a "
                    "set, so the probe route adjudicates it")
-    elif language_params and all(p in schema_fields for p in language_params):
-        # every language-bound parameter is a SCHEMA language whose
-        # fields the lift reads one symbol at a time: the field bounds
-        # become that symbol's domain, a claim-level `o.field` binding
-        # overriding, and the ordinary prover runs
-        field_domain = {f"{p}.{k}": b for p, bounds in schema_fields.items()
-                        for k, b in bounds.items()}
+    elif language_params and row_domain is not None:
+        # every language-bound parameter is a SCHEMA language and the
+        # body reads only numeric fields of it (or a text field through
+        # len()): each field read is one symbol bounded by its field
+        # domain, a claim-level `o.field` binding overriding, and the
+        # ordinary prover runs
         derive_domain = _derive_operational_domain(
-            cj, {**field_domain, **cj_domain}, facts)
+            cj, {**row_domain, **cj_domain}, facts)
         proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
                           domain=derive_domain, tolerance=cj.tolerance,
                           extensive=extensive, funcs=bound_funcs or None,
@@ -4250,7 +4299,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         from .symbolic._proof_support import ProofResult
         proof = ProofResult(
             "unliftable",
-            sketch=(", ".join(language_params) + " quantified over a "
+            sketch=(row_reason if row_reason.startswith("the body reads") else
+                    ", ".join(language_params) + " quantified over a "
                     "language domain: the symbolic lift has no reading "
                     "of a string or structured value, so only a finite "
                     "language, swept point by point, is decided on this "

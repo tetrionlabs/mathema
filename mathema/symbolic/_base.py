@@ -457,6 +457,79 @@ def _dict_key_tree(tree: ast.FunctionDef, param: str) -> dict:
     return root
 
 
+def field_reads(tree: ast.FunctionDef, param: str) -> "tuple[list[str], list[str]]":
+    """Intent:
+        `(plain, length_only)`: the fields `param` is read through
+        (`param.qty`) anywhere in the body, and the fields read only as
+        `len(param.sku)`, each in first-occurrence order. A field read
+        both ways is plain. An attribute in call position
+        (`param.method(...)`) is not a field read.
+    """
+    call_funcs = {id(node.func) for node in ast.walk(tree)
+                  if isinstance(node, ast.Call)}
+    in_len: set = set()
+    length_fields: list[str] = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "len" and len(node.args) == 1
+                and not node.keywords):
+            arg = node.args[0]
+            if (isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name)
+                    and arg.value.id == param):
+                in_len.add(id(arg))
+                if arg.attr not in length_fields:
+                    length_fields.append(arg.attr)
+    plain: list[str] = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                and node.value.id == param and id(node) not in in_len
+                and id(node) not in call_funcs and node.attr not in plain):
+            plain.append(node.attr)
+    return plain, [f for f in length_fields if f not in plain]
+
+
+def _numeric_annotation(t) -> bool:
+    """Whether a field annotation reads as a number: `int`, `float`,
+    either under `Annotated[...]`, or their names as strings."""
+    import typing
+    if typing.get_origin(t) is typing.Annotated:
+        t = typing.get_args(t)[0]
+    if isinstance(t, str):
+        return t.strip().lower() in ("int", "float")
+    return t in (int, float)
+
+
+def _read_field_keys(fn, param: str, tree) -> "list[str] | None":
+    """Intent:
+        The composite keys a dataclass parameter lifts into when its
+        declared fields are not all numeric: one per field the body
+        reads, each of which must be a numeric field, plus
+        `<param>.<field>.len` for a field read only as
+        `len(param.field)`. None when the body reads a non-numeric
+        field any other way, or the parameter is not a dataclass.
+    """
+    import dataclasses
+    import inspect
+    import typing
+    try:
+        annotation = inspect.signature(fn).parameters[param].annotation
+    except (TypeError, ValueError, KeyError):
+        return None
+    if not dataclasses.is_dataclass(annotation):
+        return None
+    try:
+        hints = typing.get_type_hints(annotation, include_extras=True)
+    except Exception:
+        hints = {f.name: f.type for f in dataclasses.fields(annotation)}
+    declared = {f.name for f in dataclasses.fields(annotation)}
+    plain, length_only = field_reads(tree, param)
+    if not (plain or length_only) or not set(plain + length_only) <= declared:
+        return None
+    if any(not _numeric_annotation(hints.get(f)) for f in plain):
+        return None
+    return [f"{param}.{f}" for f in plain] + [f"{param}.{f}.len" for f in length_only]
+
+
 def _attr_keys_used(tree: ast.FunctionDef, param: str) -> list[str]:
     """Attribute fields `param` is READ through anywhere in the body
     (`param.rate`), the attribute counterpart of `_dict_keys_used`,
@@ -539,9 +612,13 @@ def _bind_params(fn, facts) -> tuple[dict, dict]:
         keys = ([f"{p}.{fld}" for fld in fields] if fields
                else [f"{p}.{k}" for k in _dict_keys_used(facts.tree, p)]
                if facts.tree is not None else [])
+        if not keys and facts.tree is not None:
+            keys = _read_field_keys(fn, p, facts.tree) or []
         if keys:
             for k in keys:
-                params[k] = sympy.Symbol(k, real=True)
+                # a `len(p.field)` key is a length: a whole number, never negative
+                params[k] = (sympy.Symbol(k, integer=True, nonnegative=True)
+                             if k.endswith(".len") else sympy.Symbol(k, real=True))
             aggregate[p] = keys
         else:
             # a complex-annotated parameter genuinely receives complex
@@ -928,6 +1005,13 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
             return _array_elementwise_binop(op, left, right)
         return op(left, right)
     if isinstance(node, ast.Call):
+        if (isinstance(node.func, ast.Name) and node.func.id == "len"
+                and len(node.args) == 1 and not node.keywords
+                and isinstance(node.args[0], ast.Attribute)
+                and isinstance(node.args[0].value, ast.Name)):
+            composite = f"{node.args[0].value.id}.{node.args[0].attr}.len"
+            if composite in env:
+                return env[composite]
         if (isinstance(node.func, ast.Name)
                 and isinstance(env.get(node.func.id), _LocalLambda)
                 and not node.keywords):

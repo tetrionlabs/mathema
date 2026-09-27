@@ -31,6 +31,11 @@ Notable changes to mathema are recorded here from its first public release onwar
   language to members of that many code points; its outside draw is the
   member one past the bound. An `Annotated[str, MaxLen(80)]` parameter
   infers the refined language through the text adaptor.
+- The derive route over a row language lifts the fields the body reads:
+  a numeric field is one symbol bounded by its constraints (one side is
+  enough), a text field read only as `len(o.sku)` is a whole number
+  bounded by its length, and a field read any other way declines the
+  lift with the field named, leaving the claim to the probe.
 - A language domain renders the missing value as `missing` in both
   modes (`L[unicode]|missing`), never as `∅`, which reads as the empty
   language.
