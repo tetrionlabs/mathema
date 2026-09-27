@@ -1348,17 +1348,19 @@ def _auto_name_of(statement: str) -> "str | None":
         return None
 
 
-_FILE_FIELDS = ("grammar", "compendium", "versions")
+_FILE_FIELDS = ("grammar", "compendium", "versions", "aliases")
 
 
 def _library_fields_problem(data: dict) -> "tuple[str, str] | None":
     """Intent:
-        Why a claims file's `compendium` or `versions` field does not
-        read, as `(field, problem)`, or None when both are absent or
-        well formed. `compendium` names the library the file's claims
-        are about; `versions` is the library version range the claims
-        apply to (`"*"`, `">=X"` or `">=X,<Y"`), and needs a
-        `compendium` beside it.
+        Why a claims file's `compendium`, `versions` or `aliases` field
+        does not read, as `(field, problem)`, or None when each is
+        absent or well formed. `compendium` names the library the
+        file's claims are about; `versions` is the library version
+        range the claims apply to (`"*"`, `">=X"` or `">=X,<Y"`);
+        `aliases` lists the library's other names (a distribution name,
+        a key prefix), and no two keys may name one function through
+        them. Both need a `compendium` beside them.
     """
     from .compendium import valid_version_range
     lib = data.get("compendium")
@@ -1375,6 +1377,26 @@ def _library_fields_problem(data: dict) -> "tuple[str, str] | None":
                 or not valid_version_range(versions):
             return ("versions", f"{versions!r} is not a version range "
                                 f"(use \"*\", \">=X\" or \">=X,<Y\")")
+    if "aliases" in data:
+        aliases = data.get("aliases")
+        if "compendium" not in data:
+            return ("aliases", "aliases need `compendium:` naming the "
+                               "library they are other names for")
+        if not isinstance(aliases, list) or not all(
+                isinstance(a, str) and a.strip()
+                and not any(ch.isspace() for ch in a) for a in aliases):
+            return ("aliases", f"must be a list of the library's other "
+                               f"names (aliases: [PyYAML]), not {aliases!r}")
+        from .compendium import alias_key
+        seen: dict = {}
+        for key in data:
+            if key in _FILE_FIELDS:
+                continue
+            canonical = alias_key(key, str(lib), aliases)
+            if canonical in seen:
+                return (key, f"names the same function as "
+                             f"{seen[canonical]!r} ({canonical})")
+            seen[canonical] = key
     return None
 
 
@@ -1607,7 +1629,8 @@ def load_declared(root: str = ".") -> dict:
     states as its own. The bundled compendium directory is never read
     as part of a project tree; `compendium.load_library_claims` reads
     it."""
-    from .compendium import applicable_tag, names_own_package
+    from .compendium import (applicable_tag, names_own_package,
+                             pop_library_fields)
     merged: dict = {}
     # shallow first, deep last, so the deeper file wins
     for path in claims_file_paths(root, exclude=(_bundled_compendium_dir(),)):
@@ -1616,10 +1639,9 @@ def load_declared(root: str = ".") -> dict:
         if data is None:
             continue
         file_grammar = data.pop("grammar", None)
-        library = data.pop("compendium", None)
-        versions = data.pop("versions", "*")
+        library, versions, aliases = pop_library_fields(data)
         if library is not None:
-            tag = applicable_tag(library, versions)
+            tag = applicable_tag(library, versions, aliases)
             if tag is None or names_own_package(library, root):
                 continue
             stamp_library_rows(data, tag)
@@ -1676,9 +1698,9 @@ def load_claims(path: str) -> dict:
     data = yaml.safe_load(open(path)) or {}
     if not isinstance(data, dict):
         return {}
+    from .compendium import pop_library_fields
     file_grammar = data.pop("grammar", "mathema")
-    data.pop("compendium", None)
-    data.pop("versions", None)
+    pop_library_fields(data)
     out: dict = {}
     for key, entry in data.items():
         out[key] = entry_claims(entry, default_grammar=file_grammar)

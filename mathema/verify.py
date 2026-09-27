@@ -647,13 +647,13 @@ def claims_file_entries(path: str, root: str,
         project's own package.
     """
     from .compendium import (_display_path, _installed_version,
-                             applicable_tag, names_own_package)
+                             applicable_tag, names_own_package,
+                             pop_library_fields)
     from .spec import read_claims_file, stamp_library_rows
     where = _display_path(path, root)
     data = read_claims_file(path, where) or {}
     file_grammar = data.pop("grammar", None)
-    library = data.pop("compendium", None)
-    versions = str(data.pop("versions", "*"))
+    library, versions, aliases = pop_library_fields(data)
     entries: dict = {}
     if library is None:
         for key, entry in data.items():
@@ -668,9 +668,9 @@ def claims_file_entries(path: str, root: str,
         return {}, True, [
             f"note {where}: `compendium: {library}` names this project's "
             f"own package; nothing in it was adjudicated"]
-    tag = applicable_tag(library, versions)
+    tag = applicable_tag(library, versions, aliases)
     if tag is None:
-        installed = _installed_version(library)
+        installed = _installed_version(library, aliases)
         why = (f"{library} is not importable here" if installed is None
                else f"{library} {installed} is outside the file's range "
                     f"{versions}")

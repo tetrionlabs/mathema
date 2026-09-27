@@ -292,7 +292,7 @@ def test_a_compendium_file_naming_the_projects_own_package_is_ignored(
     from mathema.verify import verify_project
     real = comp._installed_version
     monkeypatch.setattr(comp, "_installed_version",
-                        lambda lib: "1.0" if lib == "mylib" else real(lib))
+                        lambda lib, aliases=(): "1.0" if lib == "mylib" else real(lib, aliases))
     monkeypatch.syspath_prepend(str(tmp_path))
     _write(tmp_path / "mylib" / "__init__.py", '''
         def f(x: float) -> float:

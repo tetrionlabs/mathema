@@ -31,6 +31,22 @@ numpy.clip:
       statement: "assuming a_min <= a_max, for a in [-1e6, 1e6], a_min <= f(a, a_min, a_max)"
 ```
 
+A third, optional file-level field, `aliases`, lists other names the
+library goes by. The installed version is looked up under the library
+name and then under each alias, so a file about an import name whose
+distribution is called something else still applies:
+
+```yaml
+compendium: yaml
+aliases: [PyYAML]
+versions: ">=6"
+```
+
+An alias is also a key prefix: a key written under one (`np.cbrt` in a
+file with `compendium: numpy` and `aliases: [np]`) is the library's key
+(`numpy.cbrt`), and two keys naming the same function that way are
+refused.
+
 The parameter names are the library's own (`inspect.signature`, so
 numpy's `clip` takes `a`, `a_min` and `a_max`), and every row is a
 claim like any other, with a `note:` on the row where the library's

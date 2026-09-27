@@ -75,9 +75,11 @@ def _library_files(root: str) -> dict:
         if not isinstance(library, str):
             continue
         versions = str(data.get("versions", "*"))
+        aliases = tuple(data.get("aliases") or ())
         out.setdefault(library, []).append({
             "source": where, "origin": origin, "versions": versions,
-            "in_range": applicable_tag(library, versions) is not None})
+            "in_range": applicable_tag(library, versions,
+                                       aliases) is not None})
     return out
 
 

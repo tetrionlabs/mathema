@@ -102,7 +102,7 @@ def test_verify_readjudicates_when_a_library_default_moves(
     from mathema.verify import verify_project
     real = comp._installed_version
     monkeypatch.setattr(comp, "_installed_version",
-                        lambda lib: "1.0" if lib == "extlib" else real(lib))
+                        lambda lib, aliases=(): "1.0" if lib == "extlib" else real(lib, aliases))
     site = tmp_path / "site"
     (site / "extlib").mkdir(parents=True)
     source = site / "extlib" / "__init__.py"

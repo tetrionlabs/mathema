@@ -190,7 +190,7 @@ def test_a_trusted_row_stands_until_a_verdict_contradicts_it(
     from mathema.verify import verify_project
     real = comp._installed_version
     monkeypatch.setattr(comp, "_installed_version",
-                        lambda lib: "1.0" if lib == "extlib" else real(lib))
+                        lambda lib, aliases=(): "1.0" if lib == "extlib" else real(lib, aliases))
     site = tmp_path / "site"
     source = site / "extlib" / "__init__.py"
     _write(source, '''
@@ -298,7 +298,7 @@ def test_a_sweep_keeps_a_trusted_proof_over_a_local_holds(
     from mathema.verify import verify_project
     real = comp._installed_version
     monkeypatch.setattr(comp, "_installed_version",
-                        lambda lib: "1.0" if lib == "extlib" else real(lib))
+                        lambda lib, aliases=(): "1.0" if lib == "extlib" else real(lib, aliases))
     site = tmp_path / "site"
     _write(site / "extlib" / "__init__.py", '''
         def squared(x: float) -> float:

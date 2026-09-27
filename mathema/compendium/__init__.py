@@ -85,26 +85,49 @@ def valid_version_range(spec: str) -> bool:
     return all(re.fullmatch(rf"(?:>=|<)\s*{version}", p) for p in parts)
 
 
-def _installed_version(package: str) -> "str | None":
+def _installed_version(package: str,
+                       aliases: "tuple | list" = ()) -> "str | None":
+    """Intent:
+        The installed version of the library `package` names, `"*"` for
+        the standard library, or None when it is not installed. Tried
+        as a distribution name first, then each of `aliases` (a file's
+        `aliases:`, such as `PyYAML` for `yaml`), then through the
+        distributions `importlib.metadata.packages_distributions`
+        reports for each of those names as an import name.
+    """
     stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
     if package in ("math",) or package in stdlib:   # stdlib: always present
         return "*"
+    from importlib import metadata
+    names = [package, *[a for a in aliases if a != package]]
+    for name in names:
+        try:
+            return metadata.version(name)
+        except Exception:
+            continue
     try:
-        from importlib import metadata
-        return metadata.version(package)
+        provided = metadata.packages_distributions()
     except Exception:
         return None
+    for name in names:
+        for dist in provided.get(name) or []:
+            try:
+                return metadata.version(dist)
+            except Exception:
+                continue
+    return None
 
 
-def applicable_tag(library: str, versions: str = "*") -> "str | None":
+def applicable_tag(library: str, versions: str = "*",
+                   aliases: "tuple | list" = ()) -> "str | None":
     """Intent:
         The provenance tag a library claims file's rows carry
         (`compendium:numpy-2.2`, `compendium:math` for the standard
         library), or None when the file does not apply here: the
-        library is not importable, or its installed version is outside
-        `versions`.
+        library is not installed under its name or any of `aliases`,
+        or its installed version is outside `versions`.
     """
-    installed = _installed_version(library)
+    installed = _installed_version(library, aliases)
     if installed is None:
         return None
     if installed == "*":
@@ -112,6 +135,46 @@ def applicable_tag(library: str, versions: str = "*") -> "str | None":
     if not _version_in_range(installed, str(versions)):
         return None
     return f"compendium:{library}-{'.'.join(installed.split('.')[:2])}"
+
+
+class LibraryFields(NamedTuple):
+    """The file-level fields of a compendium file: the library it is
+    about (None for an ordinary claims file), the version range, and the
+    other names the library goes by."""
+    library: "str | None"
+    versions: str
+    aliases: tuple
+
+
+def alias_key(key: str, library: str, aliases: "tuple | list") -> str:
+    """Intent:
+        `key` spelled under the library's own name: a key written under
+        an alias prefix (`np.cbrt` with alias `np` of `numpy`) becomes
+        the library's key (`numpy.cbrt`); any other key is unchanged.
+    """
+    for alias in aliases:
+        if key == alias or key.startswith(alias + "."):
+            return library + key[len(alias):]
+    return key
+
+
+def pop_library_fields(data: dict) -> LibraryFields:
+    """Intent:
+        Remove the file-level `compendium`, `versions` and `aliases`
+        fields from a parsed claims file and return them, re-keying a
+        compendium file's entries written under an alias prefix to the
+        library's own key (`alias_key`). An ordinary claims file keeps
+        its keys.
+    """
+    library = data.pop("compendium", None)
+    versions = str(data.pop("versions", "*"))
+    aliases = tuple(str(a) for a in (data.pop("aliases", None) or ()))
+    if library is not None and aliases:
+        for key in list(data):
+            renamed = alias_key(key, str(library), aliases)
+            if renamed != key:
+                data[renamed] = data.pop(key)
+    return LibraryFields(library, versions, aliases)
 
 
 def own_packages(root: str = ".") -> frozenset:
@@ -232,13 +295,12 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         data = read_claims_file(path, where)
         if not data or "compendium" not in data:
             continue
-        library = data.pop("compendium")
+        library, versions, aliases = pop_library_fields(data)
         if path not in shipped and names_own_package(library, root or "."):
             # the project's own package: its claims, not a library's
             continue
-        versions = str(data.pop("versions", "*"))
         data.pop("grammar", None)
-        tag = applicable_tag(library, versions)
+        tag = applicable_tag(library, versions, aliases)
         if tag is None:
             continue
         stamp_library_rows(data, tag)
