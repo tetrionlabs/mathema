@@ -2,12 +2,13 @@
 
 A compendium is a claims file about a library's functions rather than
 your own (see [Claims transfer](../claims-transfer.md#in-the-compendium)).
-This verb has two actions: `status`, for a project that calls
-libraries, and `export`, for a library author publishing their own
-verified claims.
+This verb has three actions: `status` and `update`, for a project
+that calls libraries, and `export`, for a library author publishing
+their own verified claims.
 
 ```bash
 mathema compendium status [<library>] [--root .] [--json]
+mathema compendium update [--root .] [--dry-run]
 mathema compendium export <library> [--out PATH] [--root .]
 ```
 
@@ -88,6 +89,49 @@ closes that gap, and `mathema verify` adjudicates them against the
 numpy you have installed. `status` reads the stores and claims files
 and writes nothing. `--json` prints the same report as data, and a
 library name confines it to that library.
+
+## `update`: rows for the calls the project makes
+
+A library row states what a function does at its defaults. A call
+that passes something else, `np.mean(a, axis=1)` rather than
+`np.mean(a)`, is a different computation, and no row speaks for it
+until one pins the argument. `update` reads every call the project's
+functions make to a library function that has rows, the positional
+and keyword arguments as written, and for each call that passes a
+non-default literal no row pins yet it copies each of the function's
+rows with the arguments bound first:
+
+```yaml
+numpy.mean:
+  claims:
+    - name: "is_defined"
+      statement: "dim(a) >= 1"
+    - name: "is_defined[axis=1]"
+      statement: "let axis be 1, dim(a) >= 1"
+      note: "pinned for the call in quant.rows_mean (line 14), which passes axis=1"
+```
+
+The rows go into the project's compendium file for the library,
+`claims/numpy.claims.yaml`, created with `compendium:` and a
+`versions:` range from the installed version when the project has
+none. Adding a function to that file shadows the bundled entry for it,
+so the bundled rows are copied in beside the pinned ones. New rows are
+unverified until `mathema verify` adjudicates them. An argument that is
+not a literal (`axis=k`) cannot be pinned, and `update` says so rather
+than guessing a value.
+
+A row can carry its own `versions:` range, which overrides the file's
+for that row. A row whose range excludes the installed version is
+still adjudicated by `mathema verify` when the project calls its
+function, and is never used as a fact (a guard, a sampling hint)
+meanwhile. Once verify has recorded such a row holding or proven on
+the installed version, `update` widens the row's range just enough to
+include it (`<2` becomes `<2.6` on numpy 2.5). A row of a function the
+project does not call keeps its range.
+
+`update` prints every change it makes, and writes nothing with
+`--dry-run`. Run it again and a call its rows already cover changes
+nothing.
 
 ## `export`: publishing a library's verified claims
 

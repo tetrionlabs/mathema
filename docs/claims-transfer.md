@@ -47,6 +47,12 @@ file with `compendium: numpy` and `aliases: [np]`) is the library's key
 (`numpy.cbrt`), and two keys naming the same function that way are
 refused.
 
+A row can also carry its own `versions:` range, overriding the file's
+for that row alone. A row whose range excludes the installed version is
+never used as a fact, and is still adjudicated when the project calls
+the function, so [`mathema compendium update`](modes/compendium.md#update-rows-for-the-calls-the-project-makes)
+can widen its range once it holds on the installed version.
+
 The parameter names are the library's own (`inspect.signature`, so
 numpy's `clip` takes `a`, `a_min` and `a_max`), and every row is a
 claim like any other, with a `note:` on the row where the library's
