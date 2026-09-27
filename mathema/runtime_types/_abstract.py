@@ -28,7 +28,7 @@ class AbstractVec:
     def __len__(self) -> int:
         return len(self.values)
 
-    def observed(self) -> tuple:
+    def non_missing(self) -> tuple:
         """The values at the positions that are not missing, in order."""
         return tuple(v for k, v in enumerate(self.values)
                      if k not in self.missing)
