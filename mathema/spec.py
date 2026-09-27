@@ -1266,7 +1266,7 @@ class ClaimsFileError(ValueError):
 
 _CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
                  "grammar", "funcs", "pseudo_infinity", "meta", "authored",
-                 "source", "family", "note")
+                 "source", "family", "note", "versions")
 _ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references",
                  "pseudo_infinity")
 
@@ -1509,6 +1509,18 @@ def validate_claims_file(data, rel_path: str) -> None:
             problem = _pseudo_infinity_problem(c.get("pseudo_infinity"))
             if problem:
                 fail(key, f"{label}: `pseudo_infinity`: {problem}")
+            if "versions" in c:
+                from .compendium import valid_version_range
+                row_range = c.get("versions")
+                if "compendium" not in data:
+                    fail(key, f"{label}: `versions` ranges a library "
+                              f"row, and needs `compendium:` naming the "
+                              f"library")
+                if not isinstance(row_range, str) \
+                        or not valid_version_range(row_range):
+                    fail(key, f"{label}: `versions`: {row_range!r} is not "
+                              f"a version range (use \"*\", \">=X\" or "
+                              f"\">=X,<Y\")")
             domain = c.get("domain")
             if domain is not None:
                 if not isinstance(domain, dict):
@@ -1630,8 +1642,8 @@ def load_declared(root: str = ".") -> dict:
     states as its own. The bundled compendium directory is never read
     as part of a project tree; `compendium.load_library_claims` reads
     it."""
-    from .compendium import (applicable_tag, names_own_package,
-                             pop_library_fields)
+    from .compendium import (applicable_tag, mark_row_versions,
+                             names_own_package, pop_library_fields)
     merged: dict = {}
     # shallow first, deep last, so the deeper file wins
     for path in claims_file_paths(root, exclude=(_bundled_compendium_dir(),)):
@@ -1646,6 +1658,7 @@ def load_declared(root: str = ".") -> dict:
             if tag is None or names_own_package(library, root):
                 continue
             stamp_library_rows(data, tag)
+            mark_row_versions(data, library, aliases)
         for key, entry in data.items():
             if entry is None:
                 continue

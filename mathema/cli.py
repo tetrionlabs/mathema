@@ -2569,12 +2569,21 @@ def cmd_compendium(args) -> int:
     major.minor>"`), by default to `claims/<library>.claims.yaml` under
     the root, for downstream projects to use. Each row carries the
     verdict it reached as its claimed level; a consumer verifies or
-    accepts it before resting a claim on it."""
+    accepts it before resting a claim on it. `mathema compendium
+    update [--dry-run]`: pin the non-default literal arguments the
+    project's calls pass into rows of its own compendium files, and
+    widen a used row's own `versions:` range once verify has recorded
+    it holding on the installed version, printing every change."""
     import os
 
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    if args.action == "update":
+        from .compendium.update import run_update
+        for line in run_update(root, dry_run=args.dry_run):
+            print(line)
+        return 0
     if args.action == "status":
         from .compendium.status import compendium_status, render_status
         data = compendium_status(root, args.library)
@@ -2774,15 +2783,24 @@ def main(argv: list[str] | None = None) -> int:
 
     pcomp = sub.add_parser("compendium", help="the claims about the "
                            "libraries a project calls: status reports "
-                           "where the project stands with each; export "
-                           "publishes a library author's own verified "
-                           "claims as a compendium claims file")
-    pcomp.add_argument("action", choices=["status", "export"],
+                           "where the project stands with each; update "
+                           "brings the project's compendium files in "
+                           "line with its calls; export publishes a "
+                           "library author's own verified claims as a "
+                           "compendium claims file")
+    pcomp.add_argument("action", choices=["status", "update", "export"],
                        help="status: for each third-party library the "
                             "project's functions call, its claims files, "
                             "the called functions with no claims, and how "
                             "many rows are verified locally, trusted, "
                             "falsified or unsettled (writes nothing); "
+                            "update: for each call passing a non-default "
+                            "literal argument no row pins, add pinned "
+                            "copies of the function's rows to the "
+                            "project's compendium file (unverified until "
+                            "verify runs), and widen a used row's own "
+                            "versions range once verify recorded it "
+                            "holding on the installed version; "
                             "export: for a library author, write the "
                             "library's proven and held claims from the "
                             "verified store as a claims file with "
@@ -2800,6 +2818,8 @@ def main(argv: list[str] | None = None) -> int:
                             "claims/<library>.claims.yaml under --root)")
     pcomp.add_argument("--json", action="store_true",
                        help="status: the same report as JSON")
+    pcomp.add_argument("--dry-run", action="store_true",
+                       help="update: print the changes, write nothing")
     pcomp.set_defaults(fn=cmd_compendium)
 
     pa = sub.add_parser("audit", help="population report: every function "

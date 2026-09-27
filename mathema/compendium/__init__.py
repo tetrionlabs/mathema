@@ -158,6 +158,74 @@ def alias_key(key: str, library: str, aliases: "tuple | list") -> str:
     return key
 
 
+#: the meta key marking a row whose own `versions:` range excludes the
+#: installed library: adjudicated like any row, never used as a fact
+OUTSIDE_VERSIONS = "mathema.outside_versions"
+
+
+def mark_row_versions(data: dict, library: str,
+                      aliases: "tuple | list" = ()) -> None:
+    """Intent:
+        Apply each row's own `versions:` range (it overrides the
+        file's for that row): a row whose range excludes the installed
+        library is marked with `OUTSIDE_VERSIONS` in its meta, naming
+        the range. Such a row is still adjudicated when the project
+        uses its function, and is never used as a fact (a derive guard,
+        a sampling hint, a computation region).
+    """
+    installed = _installed_version(library, aliases)
+    if installed is None or installed == "*":
+        return
+    for key, entry in data.items():
+        if not isinstance(entry, dict):
+            continue
+        for row in entry.get("claims") or []:
+            spec = row.get("versions") if isinstance(row, dict) else None
+            if spec is None or _version_in_range(installed, str(spec)):
+                continue
+            row["meta"] = {**(row.get("meta") or {}),
+                           OUTSIDE_VERSIONS: str(spec)}
+
+
+def row_pins(row: dict) -> dict:
+    """Intent:
+        The library parameters a row pins, `{parameter: value}`: each
+        `let p be None/True/False` binding, and each `let p be <number>`
+        whose name the statement never reads (`let axis be 1, dim(a) >=
+        1`). {} for a row that pins nothing or does not parse.
+    """
+    import re
+
+    from ..conjecture import _single_point, claim
+    try:
+        cj = claim(str(row.get("statement") or row.get("law") or ""),
+                   name=row.get("name"))
+    except Exception:
+        return {}
+    pins = dict(getattr(cj, "param_pins", None) or {})
+    text = " ".join(str(t) for t in (cj.lhs, cj.rhs, cj.assuming) if t)
+    named = set(re.findall(r"\b[A-Za-z_]\w*\b", text))
+    for name in sorted(cj.free_vars or ()):
+        point = _single_point((cj.domain or {}).get(name))
+        if point is not None and name not in named:
+            pins[name] = (int(point) if isinstance(point, float)
+                          and point.is_integer() else point)
+    return pins
+
+
+def row_is_fact(row: dict) -> bool:
+    """Intent:
+        Whether a library row states a fact about every call of its
+        function: not outside its own `versions:` range, and not
+        pinned to particular arguments (a pinned row speaks for the
+        calls that pass them, so it is adjudicated but never registered
+        as a region).
+    """
+    if (row.get("meta") or {}).get(OUTSIDE_VERSIONS):
+        return False
+    return not row_pins(row)
+
+
 def pop_library_fields(data: dict) -> LibraryFields:
     """Intent:
         Remove the file-level `compendium`, `versions` and `aliases`
@@ -304,6 +372,7 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         if tag is None:
             continue
         stamp_library_rows(data, tag)
+        mark_row_versions(data, library, aliases)
         for key, entry in data.items():
             if isinstance(entry, dict):
                 out[key] = {"entry": entry, "compendium": library,
@@ -597,7 +666,7 @@ def _region_texts(entry: dict, families) -> list:
     out: list = []
     for row in entry.get("claims") or []:
         kind = region_row_kind(row.get("name", ""))
-        if kind is None or kind not in families:
+        if kind is None or kind not in families or not row_is_fact(row):
             continue
         try:
             cj = claim(str(row.get("statement") or row.get("law") or ""),
@@ -877,6 +946,8 @@ def register_library_claims(root: "str | None" = ".") -> list:
     names: list = []
     for key, info in sorted(library_claims.items()):
         for row in info["entry"].get("claims") or []:
+            if not row_is_fact(row):
+                continue
             try:
                 built = _row_region(key, row)
             except _Unbuildable as e:

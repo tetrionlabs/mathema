@@ -647,8 +647,8 @@ def claims_file_entries(path: str, root: str,
         project's own package.
     """
     from .compendium import (_display_path, _installed_version,
-                             applicable_tag, names_own_package,
-                             pop_library_fields)
+                             applicable_tag, mark_row_versions,
+                             names_own_package, pop_library_fields)
     from .spec import read_claims_file, stamp_library_rows
     where = _display_path(path, root)
     data = read_claims_file(path, where) or {}
@@ -677,6 +677,7 @@ def claims_file_entries(path: str, root: str,
         return {}, True, [f"note {where}: {why}; nothing in it was "
                           f"adjudicated"]
     stamp_library_rows(data, tag)
+    mark_row_versions(data, library, aliases)
     for key, entry in data.items():
         if not isinstance(entry, dict):
             continue

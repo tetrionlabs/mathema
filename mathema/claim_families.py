@@ -2580,7 +2580,11 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if not params:
         return None
     bare = cj.relation == kind
-    conjunct = not bare and "[" in cj.name
+    # an indexed row names one conjunct by number (`is_defined[2]`); a
+    # row pinned to a call's arguments (`is_defined[axis=1]`) states
+    # the whole region
+    import re as _re
+    conjunct = not bare and bool(_re.search(r"\[\d+\]$", cj.name))
     links = [] if bare else (list(cj.links)
                              or [(cj.lhs, cj.relation, cj.rhs)])
     compiled = []
