@@ -1542,6 +1542,22 @@ def _bound_by_calls(tree) -> set:
     return bound
 
 
+def _sides(lv, rv) -> str:
+    """Intent:
+        The two compared values of a failed relation, `left vs right`;
+        two strings that differ yet read the same (a composed and a
+        decomposed character) are both spelled out.
+    """
+    if isinstance(lv, str) and isinstance(rv, str):
+        import unicodedata
+
+        from .probing import spell_text
+        alike = lv != rv and (unicodedata.normalize("NFC", lv)
+                              == unicodedata.normalize("NFC", rv))
+        return f"{spell_text(lv, force=alike)} vs {spell_text(rv, force=alike)}"
+    return f"{lv!r} vs {rv!r}"
+
+
 def _names_in_claim(cj) -> set:
     """Intent:
         Every bare name the claim's statement reads, across its sides
@@ -5003,7 +5019,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
             aux_part = ("; " + ", ".join(
                 f"{a}={env[a]:.3g}" if isinstance(env[a], (int, float))
                 else f"{a}={env[a]!r}" for a in aux) if aux else "")
-            cx = f"{_fmt(tuple(args))}{aux_part}: {lv!r} vs {rv!r}"
+            cx = f"{_fmt(tuple(args))}{aux_part}: {_sides(lv, rv)}"
             break
     if cx is not None:
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,

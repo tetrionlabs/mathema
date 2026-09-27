@@ -12,6 +12,11 @@ Notable changes to mathema are recorded here from its first public release onwar
   number is no longer offered `is_numerically_stable` among its
   suggested claims; it keeps the arbitrary-input family and the purity
   claims.
+- A witness a reader cannot see is spelled out: a string holding
+  combining marks, format characters or unusual spaces is followed by
+  its escaped form (`s='プ' ('\u30d5\u309a')`), and two compared sides
+  that differ yet read the same are both spelled out. Ordinary text is
+  shown as it is.
 - An integer result too large for a float (factorial over `N`) is
   compared exactly and no longer crashes adjudication with an
   OverflowError.

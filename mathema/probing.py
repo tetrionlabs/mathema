@@ -796,6 +796,30 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
 
 
+def _hides_characters(s: str) -> bool:
+    """Whether printing `s` would hide some of its characters from a
+    reader: a combining mark, a format character, or a space other than
+    the ordinary one. Controls need no help; `repr` escapes them."""
+    import unicodedata
+    for c in s:
+        cat = unicodedata.category(c)
+        if cat in ("Mn", "Mc", "Me", "Cf", "Zl", "Zp") or (cat == "Zs" and c != " "):
+            return True
+    return False
+
+
+def spell_text(s: str, *, force: bool = False) -> str:
+    """A string for a witness: its repr, followed by its escaped form in
+    parentheses when printing it would hide characters (or `force`, for
+    two sides that differ yet read the same)."""
+    shown = repr(s)
+    if force or _hides_characters(s):
+        escaped = ascii(s)
+        if escaped != shown:
+            return f"{shown} ({escaped})"
+    return shown
+
+
 def _fmt_value(v) -> str:
     """One computed or sampled value, legibly, shared by _fmt() (an
     argument tuple) and every check closure's own failure `detail`
@@ -811,6 +835,8 @@ def _fmt_value(v) -> str:
         return "[" + ", ".join(_fmt_value(x) for x in v) + "]"
     if isinstance(v, tuple):
         return "(" + ", ".join(_fmt_value(x) for x in v) + ")"
+    if isinstance(v, str):
+        return spell_text(v)
     return repr(v)
 
 
