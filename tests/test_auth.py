@@ -255,3 +255,37 @@ def test_concepts_curation_is_gated_too(project, monkeypatch):
     with pytest.raises(HumanVerificationError):
         accept_concepts(str(project), "gatefix.settle",
                         ["symmetry"], [], by="agent")
+
+
+# --- TOTP enrolment shows its secret on the terminal only ------------------
+
+def _pin_set_totp():
+    from argparse import Namespace
+    from mathema.cli import cmd_pin
+    return cmd_pin(Namespace(action="set", totp=True))
+
+
+def test_totp_enrolment_without_a_terminal_is_refused_and_writes_nothing(
+        monkeypatch, capsys):
+    monkeypatch.setattr(auth, "_tty_available", lambda: False)
+    assert _pin_set_totp() == 2
+    out = capsys.readouterr()
+    assert auth.configured() is None
+    assert "otpauth://" not in out.out + out.err
+    assert "interactive terminal" in out.out + out.err
+
+
+def test_totp_secret_goes_to_the_terminal_never_to_stdout(monkeypatch,
+                                                         capsys):
+    shown: list = []
+    monkeypatch.setattr(auth, "_tty_available", lambda: True)
+    monkeypatch.setattr(auth, "_write_to_tty", shown.append)
+    assert _pin_set_totp() == 0
+    record = auth.configured()
+    assert record is not None and record["method"] == "totp"
+    out = capsys.readouterr()
+    assert record["secret"] not in out.out + out.err
+    assert "otpauth://" not in out.out + out.err
+    assert any(record["secret"] in s for s in shown)
+    assert any("otpauth://" in s for s in shown)
+    assert f"key {record['key']}" in out.out

@@ -2209,12 +2209,21 @@ def cmd_pin(args) -> int:
         return 0
     # set / rotate
     if args.totp:
+        # the secret is shown on the controlling terminal only, so it can
+        # never land in a pipe, a log or a non-interactive caller's output
+        if not auth._tty_available():
+            print("TOTP enrolment shows its secret once and needs an "
+                  "interactive terminal; run `mathema pin set --totp` "
+                  "yourself rather than through a non-interactive caller; "
+                  "nothing was written")
+            return 2
         info = auth.set_totp()
-        print("TOTP credential set (experimental). Enrol it ONCE into "
-              "any authenticator app;\nthis secret is not shown again:")
-        print(f"  secret: {info['secret']}")
-        print(f"  {info['uri']}")
-        print(f"key {info['key']}")
+        auth._write_to_tty(
+            "Enrol this TOTP secret ONCE into any authenticator app; it "
+            "is not shown again:\n"
+            f"  secret: {info['secret']}\n  {info['uri']}\n")
+        print(f"TOTP credential set (experimental, key {info['key']}); "
+              f"the secret was shown on your terminal only")
     else:
         pin = auth.prompt_new_pin()
         info = auth.set_pin(pin)

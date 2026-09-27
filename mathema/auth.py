@@ -174,6 +174,15 @@ def _tty_available() -> bool:
         return False
 
 
+def _write_to_tty(text: str) -> None:
+    """Write `text` to the controlling terminal and nowhere else, so a
+    secret meant for the person at the keyboard never reaches stdout, a
+    pipe, a log file or a captured subprocess."""
+    with open("/dev/tty", "w", encoding="utf-8") as tty:
+        tty.write(text)
+        tty.flush()
+
+
 def _prompt_code(action: str) -> str:
     """Read a code from the controlling terminal, and only from there:
     a caller without a real `/dev/tty` (a pipe, a captured subprocess)

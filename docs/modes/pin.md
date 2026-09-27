@@ -140,7 +140,11 @@ TOTP secret into any authenticator app, the same 6-digit
 rotate-every-30-seconds codes used for GitHub or Google 2FA. One QR
 scan at setup; afterwards the prompt accepts the app's current code,
 and a code an agent observes in a transcript is dead half a minute
-later. The mechanism is built and tested; the static PIN is the
+later. Enrolment needs an interactive terminal: the secret and its
+`otpauth://` link are written to the terminal only, never to standard
+output, so they cannot end up in a pipe, a log or an agent's
+transcript, and without a terminal nothing is written at all. The
+mechanism is built and tested; the static PIN is the
 promoted path for now. The `verified_by: {method, key}` stamp is an
 open seam: a stronger backend verifies its own way and records its own
 method and key.
