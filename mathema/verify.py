@@ -1205,6 +1205,18 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             _dependency_state(d, verified) in ("stale", "invalidated")
             for d in deps_now or [])
         if is_fresh and not dependency_changed:
+            # a callee's form stored when this record was adjudicated
+            # against the callee's live form: a change re-adjudicates
+            # whether or not the callee has a record of its own
+            stored_forms = {d.get("key"): d.get("form") for d in
+                            verified_entry.get("dependencies") or []
+                            if d.get("kind") == "function"
+                            and d.get("key") and d.get("form")}
+            dependency_changed = any(
+                d.get("key") in stored_forms and d.get("form")
+                and d.get("form") != stored_forms[d.get("key")]
+                for d in deps_now or [] if d.get("kind") == "function")
+        if is_fresh and not dependency_changed:
             # a module-level constant is compared by VALUE against this
             # record's own stored dependency entry, the form hash
             # cannot see a global change, so this check is what keeps

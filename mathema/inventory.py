@@ -871,6 +871,65 @@ def is_test_covered(fn, coverage_data: dict[str, set[int]] | None) -> bool | Non
 
 
 
+def _module_attribute_callees(fn, name: str, module) -> list[dict]:
+    """Intent:
+        The functions `fn` reaches through a module it references by
+        `name`: every `name.attr` (or `name.sub.attr`) read in the body
+        that resolves to a plain function, recorded like a directly
+        named callee, with its dotted key, source location and form.
+
+    Notes:
+        Empty when the body cannot be read. An attribute that resolves
+        to anything but a function (a constant, a class, a submodule
+        not called through) is not a callee and is left out.
+    """
+    from .analysis import get_tree
+    try:
+        _src, fdef = get_tree(fn)
+    except Exception:
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for node in ast.walk(fdef):
+        if not isinstance(node, ast.Attribute):
+            continue
+        path: list[str] = []
+        cur: ast.expr = node
+        while isinstance(cur, ast.Attribute):
+            path.append(cur.attr)
+            cur = cur.value
+        if not (isinstance(cur, ast.Name) and cur.id == name):
+            continue
+        obj = module
+        for attr in reversed(path):
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                break
+        if obj is None or not inspect.isfunction(obj):
+            continue
+        dotted = ".".join([name, *reversed(path)])
+        if dotted in seen:
+            continue
+        seen.add(dotted)
+        dep: dict = {"name": dotted, "kind": "function",
+                     "key": f"{obj.__module__}.{obj.__qualname__}"}
+        try:
+            src = inspect.getsourcefile(obj)
+            if src:
+                dep["file"] = src
+        except TypeError:
+            pass
+        line = getattr(getattr(obj, "__code__", None), "co_firstlineno",
+                       None)
+        if line is not None:
+            dep["line"] = line
+        callee_facts = quiet_facts(obj)
+        if callee_facts is not None:
+            dep["form"] = callee_facts.form
+        out.append(dep)
+    return out
+
+
 def function_dependencies(fn, facts=None) -> list[dict]:
     """One-deep dependency records for the verified spec: every callee
     this function references (sibling functions, classes, modules,
@@ -879,7 +938,10 @@ def function_dependencies(fn, facts=None) -> list[dict]:
     each with its dotted key, source file and line (so an agent goes
     straight there, never grepping), and, for a plain function; its
     current `form` hash, which is what freshness checks compare against
-    the callee's own verified record. One level deep is enough by
+    the callee's own verified record and against the form stored when
+    this function was adjudicated. A function reached through a
+    referenced module (`lib.g(x)`) is recorded as its own callee beside
+    the module. One level deep is enough by
     design: freshness composes, an unchanged callee form means that
     callee's own claims still stand."""
     facts = facts if facts is not None else quiet_facts(fn)
@@ -933,6 +995,8 @@ def function_dependencies(fn, facts=None) -> list[dict]:
             if callee_facts is not None:
                 dep["form"] = callee_facts.form
         out.append(dep)
+        if kind == "module":
+            out.extend(_module_attribute_callees(fn, name, obj))
     try:
         sig = inspect.signature(fn)
     except (TypeError, ValueError):
