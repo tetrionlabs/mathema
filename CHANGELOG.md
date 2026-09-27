@@ -12,6 +12,9 @@ Notable changes to mathema are recorded here from its first public release onwar
   number is no longer offered `is_numerically_stable` among its
   suggested claims; it keeps the arbitrary-input family and the purity
   claims.
+- An integer result too large for a float (factorial over `N`) is
+  compared exactly and no longer crashes adjudication with an
+  OverflowError.
 - A recorded counterexample replays as the value that broke the claim: a
   string witness that reads as a complex number (`"j"`, `"2J"`) stays a
   string, and a complex witness is now stored tagged

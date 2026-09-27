@@ -569,8 +569,16 @@ def ordering_shortfall(lv, rv, relation: str) -> float:
                 or not isinstance(lv, (int, float)) \
                 or not isinstance(rv, (int, float)):
             return 0.0
-        gap = sign * (lv - rv)
-        return gap if gap > 0 and math.isfinite(gap) else 0.0
+        # the difference is taken exactly, so an integer too large for
+        # a float never has to be converted unless it is the answer
+        exact = (lv - rv) if relation == "<=" else (rv - lv)
+        if exact <= 0:
+            return 0.0
+        try:
+            gap = float(exact)
+        except OverflowError:
+            return 0.0
+        return gap if math.isfinite(gap) else 0.0
     from .matrices import _numpy
     np = _numpy()
     if np is None:
