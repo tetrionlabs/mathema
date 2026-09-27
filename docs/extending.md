@@ -83,6 +83,33 @@ vocabulary and the group to register under. An output-contract
 predicate registered under a name shaped `output_<slug>` or
 `is_<slug>_output` joins the grammar the way `is_<slug>_safe` does.
 
+## What a family probe returns
+
+A family's empirical half is the callable it registers under
+`"probe:algorithmic"`, called as `probe(fn, facts, claim, domain, rng,
+trials)`, and it answers `None` to decline or a tuple:
+
+| Form | Meaning |
+|---|---|
+| `(verdict, checked, cx)` | the verdict, how many trials ran, and the witness (a falsification must carry one) |
+| `(verdict, checked, cx, established)` | the same, with `established` naming why the coverage was exhaustive, which is the only way a probe may say `proven` |
+| either form, then a mapping | the mapping is merged into the record's `meta` |
+
+The trailing mapping is how a probe states what it resolved while it
+ran, the target language it held the output to, say, so that a `holds`
+record is not silent about what held. Use namespaced keys
+(`"my_package.target"`), since the record is shared with everything
+else that writes to it. The mapping travels with the probe's own
+report, so it is on the record whenever that report is the one that
+stands, and it is copied, never shared. One key merges rather than
+replaces: under `"mathema.language"` core already writes a description
+of every `L[...]` binding, one entry per parameter, and a family's
+entries sit beside those, so `{"mathema.language": {"return": [...]}}`
+from `output_in_language` lands next to the parameter's own entry.
+The mapping is an addition to the return shape, so a probe written
+against the three- or four-element forms keeps working unchanged and
+the extension API version stays where it is.
+
 ## Injected facts
 
 A resolver-built proxy may carry a `__mathema_facts__` attribute

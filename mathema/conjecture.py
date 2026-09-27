@@ -2711,8 +2711,12 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         probe.tolerance = cj.tolerance
         languages = _language_meta({**domain, **(cj.domain or {})})
         if languages:
-            # what every `L[...]` binding resolved to, on the record
-            probe.meta = {**(probe.meta or {}), "mathema.language": languages}
+            # what every `L[...]` binding resolved to, on the record,
+            # beside any entry a family wrote under the same key (its
+            # `return`, say)
+            earlier = (probe.meta or {}).get("mathema.language")
+            merged = {**earlier, **languages} if isinstance(earlier, dict) else languages
+            probe.meta = {**(probe.meta or {}), "mathema.language": merged}
         if cj.domain and not probe.condition:
             # every quantified row carries its region as the ONE
             # canonical rendered condition, real parameter names,
@@ -4829,18 +4833,20 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         setup = sampling()
         algo_result = algo_route(fn, facts, cj, cj_domain, setup.rng, setup.budget)
         if algo_result is not None:
-            if len(algo_result) == 4:
-                verdict, checked, cx, established = algo_result
-            else:
-                verdict, checked, cx = algo_result
-                established = None
+            import copy
+
+            from .claim_families import split_probe_result
+            verdict, checked, cx, established, family_meta = \
+                split_probe_result(algo_result)
+            # what the family says it resolved, copied onto the record
+            family_meta = copy.deepcopy(family_meta) if family_meta else {}
             if verdict == "proven":
                 # an ESTABLISHED empirical examination: the guard only
                 # lets this through with the exhaustive-coverage
                 # sketch, so the surety is real however it was reached
                 return Probe(cj.name, statement, "proven", n=checked,
                              route=probe_route, sketch=established,
-                             note=note)
+                             note=note, meta=family_meta)
             if verdict == "falsified":
                 # two safety families whose falsification is BY
                 # CONSTRUCTION about the implementation stratum:
@@ -4856,12 +4862,14 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                              stratum=({"blame": "implementation",
                                        "cause": family_cause,
                                        "witness": cx}
-                                      if family_cause else None))
+                                      if family_cause else None),
+                             meta=family_meta)
             if verdict == "holds":
                 return Probe(cj.name, statement, "holds", n=checked,
-                             route=probe_route, note=note)
+                             route=probe_route, note=note, meta=family_meta)
             return Probe(cj.name, statement, "skipped", route=probe_route,
-                         note=note + f"; {cx or 'no evaluable inputs'}")
+                         note=note + f"; {cx or 'no evaluable inputs'}",
+                         meta=family_meta)
     if cj.relation in routes.examine_predicates():
         # only reachable when the registered family declined, the
         # generic sampling loop below has no meaning for a

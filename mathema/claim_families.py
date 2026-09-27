@@ -1846,6 +1846,35 @@ def _guarded_safety_derive(derive):
     return run
 
 
+def split_probe_result(result) -> tuple:
+    """Intent:
+        A family probe's result as `(verdict, checked, cx, established,
+        meta)`. The accepted forms are `(verdict, checked, cx)` and
+        `(verdict, checked, cx, established)`, either one optionally
+        followed by a mapping merged into the record's `meta`; a missing
+        sketch or mapping comes back as `None`.
+    Raises:
+        ValueError: the result has neither three nor four elements
+        before the optional mapping.
+    """
+    from collections.abc import Mapping
+    items = tuple(result)
+    meta = None
+    if len(items) in (4, 5) and isinstance(items[-1], Mapping):
+        meta, items = dict(items[-1]), items[:-1]
+    if len(items) == 3:
+        verdict, checked, cx = items
+        established = None
+    elif len(items) == 4:
+        verdict, checked, cx, established = items
+    else:
+        raise ValueError(f"a family probe returned {len(tuple(result))} "
+                         f"elements; expected (verdict, checked, cx), "
+                         f"optionally with an established sketch, then "
+                         f"optionally a meta mapping")
+    return verdict, checked, cx, established, meta
+
+
 def _guarded_safety_probe(probe):
     """Wrap a safety member's empirical half in the family verdict
     contract. Trials may falsify (with a witness), hold, or decline;
@@ -1855,16 +1884,13 @@ def _guarded_safety_probe(probe):
     the hazard class fully enumerated and every case observed. The
     verdict carries surety, so an established empirical examination
     proves; anything short of exhaustive coverage holds at best. A
+    trailing meta mapping (see `split_probe_result`) passes through. A
     contract violation raises, same as the derive guard."""
     def run(fn, facts, cj, domain, rng, trials):
         result = probe(fn, facts, cj, domain, rng, trials)
         if result is None:
             return None
-        if len(result) == 4:
-            verdict, checked, cx, established = result
-        else:
-            verdict, checked, cx = result
-            established = None
+        verdict, checked, cx, established, meta = split_probe_result(result)
         if verdict == "proven" and not established:
             raise ValueError("safety trials claimed proven without an "
                              "established-coverage sketch, sampling "
@@ -1877,6 +1903,8 @@ def _guarded_safety_probe(probe):
             raise ValueError("safety probe falsified without a concrete "
                              "counterexample, a safety falsification "
                              "must carry its witness")
+        if meta is not None:
+            return (verdict, checked, cx, established, meta)
         return (verdict, checked, cx, established)
     return run
 
