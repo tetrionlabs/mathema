@@ -2070,7 +2070,8 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     (`π`/`∞`) for this render, printing the plain word instead; see
     `_auto_renames`'s own docstring for why suppressing beats renaming
     here."""
-    from .grammar import get_unicode_output, render_domain, render_law_expr
+    from .conjecture import GRAMMAR
+    from .grammar import display_len, get_unicode_output, render_domain, render_law_expr
     from ._providers import get_provider, report_provider_failure
     from ._scan import sub_outside_strings
 
@@ -2207,6 +2208,12 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         # the negation is part of the claim, whatever shape the
         # statement took above
         statement = f"not {statement}"
+    # over a language, the length of a value reads as `len(...)`;
+    # `len` is sugar for `dim(..., 0)`, so the text reparses to the
+    # same canonical form
+    language_len = getattr(cj, "grammar", "") == f"{GRAMMAR}/language"
+    if language_len:
+        statement = display_len(statement)
 
     # let/for's own displayed symbol never reaches ast.parse individually
     # (both are plain f-string text, joined into the final claim string
@@ -2270,7 +2277,7 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         # predicate statements themselves.
         # already canonical (grammar._canonical_assuming spells the
         # definedness premise `f is defined`), so nothing to rewrite
-        assuming_text = cj.assuming
+        assuming_text = display_len(cj.assuming) if language_len else cj.assuming
         if unicode:
             for joined in sorted(examine_predicates()):
                 assuming_text = assuming_text.replace(

@@ -766,18 +766,18 @@
  },
  "language_contraction": {
   "input": "for s in L[unicode], len(f(s)) <= len(s)",
-  "unicode": "∀ s ∈ L[unicode]|missing, dim(f(s), 0) ≤ dim(s, 0)",
-  "ascii": "for s in L[unicode]|missing, dim(f(s), 0) <= dim(s, 0)"
+  "unicode": "∀ s ∈ L[unicode]|missing, len(f(s)) ≤ len(s)",
+  "ascii": "for s in L[unicode]|missing, len(f(s)) <= len(s)"
  },
  "language_excluding_empty": {
   "input": "for s in L[unicode] \\ {\"\"}, len(f(s)) >= 1",
-  "unicode": "∀ s ∈ L[unicode] \\ {\"\"}|missing, dim(f(s), 0) ≥ 1",
-  "ascii": "for s in L[unicode] \\ {\"\"}|missing, dim(f(s), 0) >= 1"
+  "unicode": "∀ s ∈ L[unicode] \\ {\"\"}|missing, len(f(s)) ≥ 1",
+  "ascii": "for s in L[unicode] \\ {\"\"}|missing, len(f(s)) >= 1"
  },
  "language_membership_symbol": {
   "input": "for s ∈ L[unicode], len(f(s)) >= len(s)",
-  "unicode": "∀ s ∈ L[unicode]|missing, dim(f(s), 0) ≥ dim(s, 0)",
-  "ascii": "for s in L[unicode]|missing, dim(f(s), 0) >= dim(s, 0)"
+  "unicode": "∀ s ∈ L[unicode]|missing, len(f(s)) ≥ len(s)",
+  "ascii": "for s in L[unicode]|missing, len(f(s)) >= len(s)"
  },
  "language_section": {
   "input": "let u = mathema.lexicon.unescape_angle, for s in L[unicode], u(f(s)) == s",
@@ -786,8 +786,8 @@
  },
  "language_missing_excluded": {
   "input": "for s in L[unicode] \\ {∅}, len(f(s)) <= len(s)",
-  "unicode": "∀ s ∈ L[unicode] \\ {missing}, dim(f(s), 0) ≤ dim(s, 0)",
-  "ascii": "for s in L[unicode] \\ {missing}, dim(f(s), 0) <= dim(s, 0)"
+  "unicode": "∀ s ∈ L[unicode] \\ {missing}, len(f(s)) ≤ len(s)",
+  "ascii": "for s in L[unicode] \\ {missing}, len(f(s)) <= len(s)"
  },
  "language_closure": {
   "input": "for s in L[unicode], f(s) in L[unicode]",
@@ -796,8 +796,8 @@
  },
  "language_length_bound": {
   "input": "for s in L[unicode, len <= 80], len(f(s)) <= 80",
-  "unicode": "∀ s ∈ L[unicode, len <= 80]|missing, dim(f(s), 0) ≤ 80",
-  "ascii": "for s in L[unicode, len <= 80]|missing, dim(f(s), 0) <= 80"
+  "unicode": "∀ s ∈ L[unicode, len <= 80]|missing, len(f(s)) ≤ 80",
+  "ascii": "for s in L[unicode, len <= 80]|missing, len(f(s)) <= 80"
  },
  "containment_absent": {
   "input": "for s in L[unicode], \"<\" not in f(s)",

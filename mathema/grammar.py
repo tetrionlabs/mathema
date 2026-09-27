@@ -1839,6 +1839,27 @@ def _fold_dim_sugar(text: str) -> str:
     return text
 
 
+_DIM_CALL = re.compile(r"\bdim\(")
+
+
+def display_len(text: str) -> str:
+    """Intent:
+        `dim(X, 0)` -> `len(X)` in rendered claim text, nested calls
+        included; every other axis keeps `dim`, and a quoted literal is
+        left untouched. The inverse of the `len` half of
+        `_fold_dim_sugar`, so the displayed text parses back to the same
+        canonical form.
+    """
+    def rewrite(m, args, call_end):
+        parts = _split_commas(args)
+        if len(parts) == 2 and parts[1].strip() == "0":
+            return f"len({display_len(parts[0].strip())})"
+        return f"dim({display_len(args)})"
+
+    return outside_strings(
+        lambda masked: _rewrite_balanced_calls(masked, _DIM_CALL, rewrite), text)
+
+
 def _replace_pv_call(text: str) -> str:
     """`P.V.(` -> `cauchy_pv(`: the principal-value operator renders
     and reads as the traditional `P.V.` spelling, but that text isn't
