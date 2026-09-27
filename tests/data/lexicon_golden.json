@@ -760,33 +760,48 @@
   "ascii": "assuming min(m, n) >= 3, for a in R^(m,n)|missing, f(a) = a[2][2]"
  },
  "language_alphabet": {
-  "input": "for text in L[unicode], f(f(text)) == f(text)",
-  "unicode": "∀ text ∈ L[unicode] ∪ {∅}, f(f(text)) = f(text)",
-  "ascii": "for text in L[unicode]|missing, f(f(text)) = f(text)"
+  "input": "for s in L[unicode], f(f(s)) == f(s)",
+  "unicode": "∀ s ∈ L[unicode] ∪ {∅}, f(f(s)) = f(s)",
+  "ascii": "for s in L[unicode]|missing, f(f(s)) = f(s)"
  },
  "language_contraction": {
-  "input": "for text in L[unicode], len(f(text)) <= len(text)",
-  "unicode": "∀ text ∈ L[unicode] ∪ {∅}, dim(f(text), 0) ≤ dim(text, 0)",
-  "ascii": "for text in L[unicode]|missing, dim(f(text), 0) <= dim(text, 0)"
+  "input": "for s in L[unicode], len(f(s)) <= len(s)",
+  "unicode": "∀ s ∈ L[unicode] ∪ {∅}, dim(f(s), 0) ≤ dim(s, 0)",
+  "ascii": "for s in L[unicode]|missing, dim(f(s), 0) <= dim(s, 0)"
  },
  "language_excluding_empty": {
-  "input": "for text in L[unicode] \\ {\"\"}, len(f(text)) >= 1",
-  "unicode": "∀ text ∈ L[unicode] \\ {\"\"} ∪ {∅}, dim(f(text), 0) ≥ 1",
-  "ascii": "for text in L[unicode] \\ {\"\"}|missing, dim(f(text), 0) >= 1"
+  "input": "for s in L[unicode] \\ {\"\"}, len(f(s)) >= 1",
+  "unicode": "∀ s ∈ L[unicode] \\ {\"\"} ∪ {∅}, dim(f(s), 0) ≥ 1",
+  "ascii": "for s in L[unicode] \\ {\"\"}|missing, dim(f(s), 0) >= 1"
  },
  "language_membership_symbol": {
-  "input": "for text ∈ L[unicode], len(f(text)) >= len(text)",
-  "unicode": "∀ text ∈ L[unicode] ∪ {∅}, dim(f(text), 0) ≥ dim(text, 0)",
-  "ascii": "for text in L[unicode]|missing, dim(f(text), 0) >= dim(text, 0)"
+  "input": "for s ∈ L[unicode], len(f(s)) >= len(s)",
+  "unicode": "∀ s ∈ L[unicode] ∪ {∅}, dim(f(s), 0) ≥ dim(s, 0)",
+  "ascii": "for s in L[unicode]|missing, dim(f(s), 0) >= dim(s, 0)"
  },
  "language_section": {
-  "input": "let u = mathema.lexicon.unescape_angle, for text in L[unicode], u(f(text)) == text",
-  "unicode": "let u = mathema.lexicon.unescape_angle, ∀ text ∈ L[unicode] ∪ {∅}, u(f(text)) = text",
-  "ascii": "let u = mathema.lexicon.unescape_angle, for text in L[unicode]|missing, u(f(text)) = text"
+  "input": "let u = mathema.lexicon.unescape_angle, for s in L[unicode], u(f(s)) == s",
+  "unicode": "let u = mathema.lexicon.unescape_angle, ∀ s ∈ L[unicode] ∪ {∅}, u(f(s)) = s",
+  "ascii": "let u = mathema.lexicon.unescape_angle, for s in L[unicode]|missing, u(f(s)) = s"
  },
  "language_missing_excluded": {
-  "input": "for text in L[unicode] \\ {∅}, len(f(text)) <= len(text)",
-  "unicode": "∀ text ∈ L[unicode] \\ {∅}, dim(f(text), 0) ≤ dim(text, 0)",
-  "ascii": "for text in L[unicode] \\ {missing}, dim(f(text), 0) <= dim(text, 0)"
+  "input": "for s in L[unicode] \\ {∅}, len(f(s)) <= len(s)",
+  "unicode": "∀ s ∈ L[unicode] \\ {∅}, dim(f(s), 0) ≤ dim(s, 0)",
+  "ascii": "for s in L[unicode] \\ {missing}, dim(f(s), 0) <= dim(s, 0)"
+ },
+ "language_closure": {
+  "input": "for s in L[unicode], f(s) in L[unicode]",
+  "unicode": "∀ s ∈ L[unicode] ∪ {∅}, f(s) ∈ L[unicode]",
+  "ascii": "for s in L[unicode]|missing, f(s) in L[unicode]"
+ },
+ "containment_absent": {
+  "input": "for s in L[unicode], \"<\" not in f(s)",
+  "unicode": "∀ s ∈ L[unicode] ∪ {∅}, '<' ∉ f(s)",
+  "ascii": "for s in L[unicode]|missing, '<' not in f(s)"
+ },
+ "membership_interval_reduces_to_chain": {
+  "input": "for x in [0, 1], f(x) in [0, 1]",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, 0 ≤ f(x) ≤ 1",
+  "ascii": "for x in [0.0, 1.0]:float|missing, 0 <= f(x) <= 1"
  }
 }

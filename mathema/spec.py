@@ -2156,7 +2156,9 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     _REL_GLYPH = {"==": "=", "<=": "≤" if unicode else "<=",
                   ">=": "≥" if unicode else ">=", "!=": "≠" if unicode else "!=",
                   "~=": "≈" if unicode else "~=", "<": "<", ">": ">",
-                  "=:=": "≡" if unicode else "=:="}
+                  "=:=": "≡" if unicode else "=:=",
+                  "in": "∈" if unicode else "in",
+                  "not in": "∉" if unicode else "not in"}
     lhs_text, rhs_text = apply_safe_renames(cj.lhs), apply_safe_renames(cj.rhs)
     if cj.links:
         # a chained comparison: render the full chain (first link's lhs,
@@ -2192,6 +2194,11 @@ def render_claim_text(cj, *, unicode: bool | None = None,
             statement = f"{lhs_display} {cj.relation.replace('_', ' ')}"
         else:
             statement = f"{cj.relation}({lhs_display})"
+    elif getattr(cj, "rhs_bound", None) is not None:
+        # a membership in a domain: the rhs is domain text, rendered
+        # as written, never through the expression renderer
+        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs))
+        statement = f"{lhs} {_REL_GLYPH[cj.relation]} {cj.rhs}"
     else:
         lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs))
         rhs = apply_unsafe_backticks(render_law_expr(rhs_text, renamed_funcs, unicode, suppress_glyphs))

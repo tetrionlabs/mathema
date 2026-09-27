@@ -372,17 +372,20 @@ LEXICON: dict[str, str] = {
     # mathema-language package. The claims are the ones a parser or a
     # normaliser earns: idempotence, a length bound, a section (an
     # inverse on the image)
-    "language_alphabet": "for text in L[unicode], f(f(text)) == f(text)",
-    "language_contraction": "for text in L[unicode], len(f(text)) <= len(text)",
+    "language_alphabet": "for s in L[unicode], f(f(s)) == f(s)",
+    "language_contraction": "for s in L[unicode], len(f(s)) <= len(s)",
     "language_excluding_empty":
-        'for text in L[unicode] \\ {""}, len(f(text)) >= 1',
+        'for s in L[unicode] \\ {""}, len(f(s)) >= 1',
     "language_membership_symbol":
-        "for text ∈ L[unicode], len(f(text)) >= len(text)",
+        "for s ∈ L[unicode], len(f(s)) >= len(s)",
     "language_section":
-        "let u = mathema.lexicon.unescape_angle, for text in L[unicode], "
-        "u(f(text)) == text",
+        "let u = mathema.lexicon.unescape_angle, for s in L[unicode], "
+        "u(f(s)) == s",
     "language_missing_excluded":
-        "for text in L[unicode] \\ {∅}, len(f(text)) <= len(text)",
+        "for s in L[unicode] \\ {∅}, len(f(s)) <= len(s)",
+    "language_closure": "for s in L[unicode], f(s) in L[unicode]",
+    "containment_absent": 'for s in L[unicode], "<" not in f(s)',
+    "membership_interval_reduces_to_chain": "for x in [0, 1], f(x) in [0, 1]",
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -478,7 +481,9 @@ SECTIONS: dict[str, tuple[str, ...]] = {
     "languages": (
         "language_alphabet", "language_contraction",
         "language_excluding_empty", "language_membership_symbol",
-        "language_section", "language_missing_excluded"),
+        "language_section", "language_missing_excluded",
+        "language_closure", "containment_absent",
+        "membership_interval_reduces_to_chain"),
 }
 
 
@@ -507,6 +512,12 @@ TAGS: dict[str, tuple[str, ...]] = {
     "language_section": ("string", "round trip", "inverse", "escape",
                          "unescape", "parser", "renderer"),
     "language_missing_excluded": ("string", "missing", "None"),
+    "language_closure": ("string", "in", "member", "closure", "output language",
+                         "element of"),
+    "containment_absent": ("string", "not in", "contains", "substring", "token",
+                           "never contains", "escape"),
+    "membership_interval_reduces_to_chain": ("in", "interval", "range", "between",
+                                             "chain", "bounded output"),
     "domain_natural_numbers": ("natural", "counting", "nonnegative integer"),
     "domain_complex": ("complex numbers", "imaginary", "plane"),
     "raises_typed": ("exception", "error", "raises", "precondition"),
@@ -983,34 +994,34 @@ def gd_convergence_factor(alpha: float, q: float) -> float:
     return 1.0 - alpha * q
 
 
-def collapse_spaces(text: str) -> str:
+def collapse_spaces(s: str) -> str:
     """Runs of whitespace collapsed to one space, the ends stripped: a
     normaliser, so applying it twice is applying it once, and the
     result is never longer than the input."""
-    return " ".join(text.split())
+    return " ".join(s.split())
 
 
-def escape_angle(text: str) -> str:
+def escape_angle(s: str) -> str:
     """Angle brackets and ampersands written as their entities, so the
-    text is inert markup. Never shorter than its input, and
+    s is inert markup. Never shorter than its input, and
     `unescape_angle` undoes it exactly; it is not idempotent, since an
     ampersand it wrote is escaped again on a second pass."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def unescape_angle(text: str) -> str:
+def unescape_angle(s: str) -> str:
     """The inverse of `escape_angle` on its image."""
-    return text.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
+    return s.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
 
 
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "collapse_spaces": (collapse_spaces, [
         "language_alphabet", "language_contraction",
-        "language_missing_excluded",
+        "language_missing_excluded", "language_closure",
     ]),
     "escape_angle": (escape_angle, [
         "language_membership_symbol", "language_section",
-        "language_excluding_empty",
+        "language_excluding_empty", "containment_absent",
     ]),
     "add_two": (add_two, ["abs_bars_compound"]),
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
@@ -1065,7 +1076,7 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "discounted_price": (discounted_price, [
         "named_under_test", "let_alias_for_under_test",
     ]),
-    "cubed": (cubed, ["odd_function"]),
+    "cubed": (cubed, ["odd_function", "membership_interval_reduces_to_chain"]),
     "unit_sqrt": (unit_sqrt, ["is_compendium_safe_scoped"]),
     "clipped_ratio": (clipped_ratio, ["is_compendium_safe"]),
     "unguarded_arcsin": (unguarded_arcsin, ["is_compendium_safe"]),

@@ -358,7 +358,7 @@ _SUPERSCRIPT_RUN = re.compile(f"⁻?[{_SUPERSCRIPT_DIGITS}]+")
 
 _UNICODE = {
     "≤": "<=", "≥": ">=", "≠": "!=", "−": "-", "·": "*", "×": "*",
-    "π": "pi", "√": "sqrt", "∀": "for ", "∈": " in ", "∞": "oo",
+    "π": "pi", "√": "sqrt", "∀": "for ", "∈": " in ", "∉": " not in ", "∞": "oo",
     # the double-struck L (U+1D543) spells a language domain on input,
     # `𝕃[ascii]`; the rendered form is always the plain `L[...]`, so a
     # record displays the same everywhere
@@ -2282,6 +2282,37 @@ def split_relation(law: str) -> tuple[str, str, str]:
             f"[lo, hi], ...` element bound) or state the sum with "
             f"Sum(expr, var, lo, hi)")
     raise NoRelation(f"no relation (==, !=, <=, >=, <, >) in {law!r}")
+
+
+_MEMBERSHIP = re.compile(r"\s+(not\s+in|in)\s+")
+
+
+def split_membership(law: str) -> "tuple[str, str, str] | None":
+    """`(lhs, relation, rhs)` at the first top-level `in` or `not in`
+    of a law that carries no ordinary relation at the top level, the
+    relation `"in"` or `"not in"`; None otherwise. The keyword is
+    word-bounded, so `sin(x)` never splits, and string literals are
+    masked, so an `in` inside one is data. The right-hand side is
+    either a domain (`L[slug]`, `[0, 1]`, `{"a", "b"}`), read by the
+    domain grammar, or a value the left-hand side is looked up in."""
+    text = law.strip()
+    if _split_top_level(text, RELATIONS) is not None \
+            or _split_top_level(text, ("=",)) is not None:
+        return None
+    masked, literals = mask_strings(text)
+    depth = 0
+    for i, ch in enumerate(masked):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif depth == 0 and ch.isspace():
+            m = _MEMBERSHIP.match(masked, i)
+            if m is not None and masked[:i].strip():
+                rel = "not in" if m.group(1).startswith("not") else "in"
+                return (unmask_strings(masked[:i], literals).strip(), rel,
+                        unmask_strings(masked[m.end():], literals).strip())
+    return None
 
 
 _AST_REL = {ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">=",

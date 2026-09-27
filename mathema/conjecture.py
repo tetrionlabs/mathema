@@ -42,7 +42,8 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       extract_outcome_clause, _split_top_level,
                       is_reserved, normalize,
                       parse_domain_safety, parse_raises, split_quantifier,
-                      split_relation_chain, unexpanded_prime_message,
+                      split_membership, split_relation_chain,
+                      unexpanded_prime_message,
                       UnreadableSpelling)
 from . import linalg
 from ._scan import _split_commas, blank_strings
@@ -764,7 +765,8 @@ class Conjecture:
     name: str
     lhs: str
     rhs: str
-    relation: str = "=="        # "==" | "<=" | ">="
+    relation: str = "=="        # "==" | "<=" | ">=" | ... | "in" | "not in"
+    rhs_bound: object = None    # the domain a membership relation's rhs names, else None
     source: str = "user"
     route: str = "best"         # "best" (default cascade) | "probe" | "derive" | "examine" (see claim-driven-
                                  # development/0.1.0/claim-anatomy.md). "best" is
@@ -1065,6 +1067,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
     ds = None if r is not None else parse_domain_safety(text)
     negated = False
     links: list = []
+    rhs_bound = None
     if r is not None:
         lhs, exc = r
         rel, rhs = "raises", (exc or "")
@@ -1099,16 +1102,27 @@ def claim(law: str, name: str | None = None, source: str = "user",
                 "reference (`=> self.<claim_name>`); to make one "
                 "relation conditional on another, state the premise "
                 "as `assuming <relation>, <statement>`")
-        try:
-            links = split_relation_chain(text)
-        except NoRelation as e:
-            raise InvalidConjecture(str(e)) from e
-        lhs, rel, rhs = links[0]
-        if len(links) == 1:
-            links = []
+        membership = split_membership(text)
+        if membership is not None:
+            lhs, rel, rhs = membership
+            rhs_bound = _membership_bound(rhs)
+            chain = _membership_as_chain(lhs, rel, rhs_bound)
+            if chain is not None:
+                # `f(x) in [0, 1]` is the chain `0 <= f(x) <= 1`, which
+                # every route already reads; the membership spelling
+                # is sugar for it, and the chain is the canonical text
+                text, membership, rhs_bound = chain, None, None
+        if membership is None:
+            try:
+                links = split_relation_chain(text)
+            except NoRelation as e:
+                raise InvalidConjecture(str(e)) from e
+            lhs, rel, rhs = links[0]
+            if len(links) == 1:
+                links = []
     # a residual `|` is a bar the grammar could not pair with another,
     # and left in place it reaches rendering as unparseable text
-    for _side in (lhs, rhs):
+    for _side in ((lhs,) if rhs_bound is not None else (lhs, rhs)):
         if _side and "|" in blank_strings(_side):
             raise InvalidConjecture(
                 f"the bars in {_side!r} do not pair up. Each opening bar "
@@ -1130,7 +1144,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
     # SyntaxError wherever the side is next parsed
     if r is None and ds is None:
         for _lhs, _rel, _rhs in (links or [(lhs, rel, rhs)]):
-            for _side in (_lhs, _rhs):
+            for _side in ((_lhs,) if rhs_bound is not None else (_lhs, _rhs)):
                 try:
                     ast.parse(_side, mode="eval")
                 except SyntaxError:
@@ -1193,6 +1207,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
         # treat it as the function it is rather than refusing
         bound_funcs[unbound] = unbound
     return Conjecture(name=name, lhs=lhs, rhs=rhs, relation=rel,
+                      rhs_bound=rhs_bound,
                       source=source, route=route, grammar=grammar,
                       funcs=bound_funcs, domain=dom,
                       free_vars=frozenset(let_domain),
@@ -1200,6 +1215,43 @@ def claim(law: str, name: str | None = None, source: str = "user",
                       negated=negated, assuming=assuming, outcome=outcome or "",
                       links=links, pseudo_infinity=pseudo_infinity,
                       meta=dict(meta or {}), raw=law)
+
+
+def _membership_bound(rhs: str):
+    """Intent:
+        The domain a membership relation's right-hand side names
+        (`L[slug]`, `[0, 1]`, `{"a", "b"}`, `Z`), read by the domain
+        grammar, or None when the text is not a domain and the
+        relation is value containment (`"<" not in f(s)`).
+    """
+    from .domain import InvalidDomain, parse_binding
+    try:
+        parsed = parse_binding(f"_ in {rhs}")
+    except InvalidDomain:
+        return None
+    return None if parsed is None else parsed[1]
+
+
+def _membership_as_chain(lhs: str, rel: str, bound) -> "str | None":
+    """Intent:
+        The chained comparison a membership in a plain numeric
+        interval reduces to (`f(x) in [0, 1]` -> `0 <= f(x) <= 1`,
+        open endpoints strict), or None for any other right-hand
+        side, including `not in`, which has no chain form.
+    """
+    from .domain import Interval
+    if rel != "in" or not isinstance(bound, Interval):
+        return None
+    lo, hi = bound
+    if not all(isinstance(v, (int, float)) for v in (lo, hi)):
+        return None
+    left = "<=" if getattr(bound, "closed_lo", True) else "<"
+    right = "<=" if getattr(bound, "closed_hi", True) else "<"
+    return f"{_num(lo)} {left} {lhs} {right} {_num(hi)}"
+
+
+def _num(v) -> str:
+    return str(int(v)) if float(v).is_integer() else repr(float(v))
 
 
 _NOT_CLAIM_SYNTAX = {
@@ -1730,9 +1782,11 @@ def _undeclared_names(cj, declared: set) -> list[str]:
         relation (a safety predicate, `f =:= g`), whose operands are
         read differently.
     """
-    if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">", "raises"):
+    if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">", "raises",
+                           "in", "not in"):
         return []
-    sides = [cj.lhs] if cj.relation == "raises" else [cj.lhs, cj.rhs]
+    sides = [cj.lhs] if cj.relation == "raises" or cj.rhs_bound is not None \
+        else [cj.lhs, cj.rhs]
     for link in cj.links or ():
         sides += [link[0], link[2]]
     premise = re.sub(r"^assuming\s+", "", (cj.assuming or "").strip())
@@ -3358,7 +3412,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
         with any validation-stage inferences appended.
     """
     _KNOWN_RELATIONS = frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
-                                  "=:=",
+                                  "=:=", "in", "not in",
                                   "raises"}) | routes.examine_predicates()
     if cj.relation not in _KNOWN_RELATIONS:
         # a malformed/unrecognized relation is a validation skip, caught
@@ -3386,7 +3440,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
     bare_reserved = (_find_bare_reserved_name(cj.lhs, param_set)
                     if cj.relation != "raises" else None) \
         or (_find_bare_reserved_name(cj.rhs, param_set)
-            if cj.rhs and cj.relation != "raises"
+            if cj.rhs and cj.relation != "raises" and cj.rhs_bound is None
             and cj.relation not in routes.examine_predicates() else None)
     if bare_reserved is not None:
         # a purely syntactic mistake (a recognized function's name
@@ -3670,6 +3724,18 @@ def _validate_claim(cj, statement: str, note: str, facts,
                             f"parameter {p!r} is {real_kind!r}; the stated "
                             f"language is used as written")
         note = f"{note}; " + ", ".join(resolved_sources)
+    if getattr(cj.rhs_bound, "base_type", None) == "L":
+        # a membership's right-hand language resolves up front too
+        from .languages import UnknownLanguage, resolve
+        for piece in cj.rhs_bound.pieces:
+            if isinstance(piece, LanguageRef):
+                try:
+                    resolve(piece)
+                except UnknownLanguage as e:
+                    return Probe(cj.name, statement, "skipped", route=None,
+                                 note=f"{note}; {e}",
+                                 meta={"mathema.probe_gap":
+                                       "language-unresolved"})
     strange_types = sorted(
         f"{p} ({bound.base_type})" for p, bound in cj_domain.items()
         if getattr(bound, "base_type", None) not in (None, *KNOWN_BASE_TYPES))
@@ -4127,7 +4193,16 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     language_params = sorted(p for p, b in cj_domain.items()
                              if getattr(b, "base_type", None) == "L")
     schema_fields = _language_field_bounds(cj_domain)
-    if language_params and all(p in schema_fields for p in language_params):
+    if cj.relation in ("in", "not in"):
+        # membership is decided by execution: the lift has no reading
+        # of a value's membership in a language or a set
+        from .symbolic._proof_support import ProofResult
+        proof = ProofResult(
+            "unliftable",
+            sketch=f"`{cj.relation}` is decided by execution: the symbolic "
+                   "lift has no reading of membership in a language or a "
+                   "set, so the probe route adjudicates it")
+    elif language_params and all(p in schema_fields for p in language_params):
         # every language-bound parameter is a SCHEMA language whose
         # fields the lift reads one symbol at a time: the field bounds
         # become that symbol's domain, a claim-level `o.field` binding
@@ -4648,7 +4723,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      note=f"{note}; is_defined adjudicates by region "
                           f"equivalence on the derive route only")
     if cj.relation not in (frozenset({"==", "~=", "!=", "<=", ">=", "<", ">",
-                                      "raises"})
+                                      "in", "not in", "raises"})
                            | (routes.examine_predicates()
                               & routes.route_capabilities("probe"))):
         # a safety predicate passes only when the capability table says
@@ -4723,7 +4798,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           "own name couldn't decide it, and the generic "
                           "sampling loop has no meaning for this predicate")
     try:
-        if cj.relation == "raises":
+        if cj.relation == "raises" or cj.rhs_bound is not None:
             code_l, aux_names = _validate(cj.lhs, set(kinds), extra)
             code_r = None
         else:
@@ -5069,7 +5144,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
             break
         try:
             lv = eval(code_l, {"__builtins__": {}}, env)
-            rv = eval(code_r, {"__builtins__": {}}, env)
+            rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
         except Exception as e:
             if any(is_missing(v) for v in args):
                 # missing-value behavior is its own axis
@@ -5178,6 +5253,26 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   "the raising region as its own raises(...) claim")
             cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args)))
             break
+        if cj.relation in ("in", "not in"):
+            # membership is exact: a value is in the language or the
+            # set, or it is not, and a missing value is in neither
+            # unless the right-hand side admits it in so many words
+            if cj.rhs_bound is not None:
+                from .domain import domain_contains
+                member = (not is_missing(lv)) and domain_contains(lv, cj.rhs_bound)
+            else:
+                try:
+                    member = lv in rv  # type: ignore[operator]
+                except TypeError:
+                    # a value that cannot be looked up in this rhs:
+                    # unanswerable at this point, not a counterexample
+                    continue
+            checked += 1
+            if member != (cj.relation == "in"):
+                cx = (f"{_fmt(tuple(args))}: {lv!r} is "
+                      f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
+                break
+            continue
         if (is_missing(lv) or is_missing(rv)) and not (
                 not any(is_missing(v) for v in args)
                 and any(isinstance(v, float) and v != v for v in (lv, rv))):

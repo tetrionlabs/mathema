@@ -21,6 +21,14 @@ Notable changes to mathema are recorded here from its first public release onwar
   API version is unchanged.
 - A claim over a language domain is stamped `grammar: mathema/language`;
   `𝕃[...]` is accepted on input.
+- Two new relations, `in` and `not in` (`∈`, `∉`): `f(s) in L[slug]`
+  holds every output to a language or a set, `"<" not in f(s)` says a
+  value is never found in another, and `f(x) in [0, 1]` is read as the
+  chain `0 <= f(x) <= 1`. Both are decided by execution; a missing value
+  is a member of nothing unless the right-hand side says so.
+- The lexicon's language rows spell the string parameter `s`, and gain
+  `language_closure`, `containment_absent` and
+  `membership_interval_reduces_to_chain`.
 - `excluded_outside_domain(s)` and `is_arbitrary_input_safe(s)` read a
   declared language: the near non-members come from the language, a
   witness says whether it lies inside or outside it, and shrinking never

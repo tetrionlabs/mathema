@@ -6,9 +6,9 @@ a name stands for, or of structured values a schema stands for, written
 `L[<name>]` where a numeric claim writes `R` or `[0, 1]`.
 
 ```
-for text in L[unicode], f(f(text)) == f(text)
-for text in L[unicode] \ {""}, len(f(text)) >= 1
-for text in L[unicode] \ {∅}, len(f(text)) <= len(text)
+for s in L[unicode], f(f(s)) == f(s)
+for s in L[unicode] \ {""}, len(f(s)) >= 1
+for s in L[unicode] \ {∅}, len(f(s)) <= len(s)
 ```
 
 ## Three words
@@ -51,6 +51,30 @@ regular, predicate, schema) and its persisted form. A claim over a
 language is stamped `grammar: mathema/language`, the dialect of the claim
 grammar that reads language vocabulary; a claim over a finite set stays
 plain `mathema`.
+
+## Membership and containment
+
+The output side has two spellings of its own. `f(s) in L[slug]` says
+every output is a member of a language (or a finite set, or a named
+number set); `∈` and `∉` are the Unicode forms, and a plain numeric
+interval on the right is read as the chain it means, so
+`f(x) in [0, 1]` is recorded as `0 <= f(x) <= 1`. `"<" not in f(s)`
+says the value on the left is never found in the value on the right,
+Python's own containment, which is how a claim states that an escaper
+never emits a character. Both are decided by execution: a member is a
+member or it is not, a missing value is a member of nothing unless the
+right-hand side admits it in so many words, and the derive route
+declines with the reason.
+
+```
+for s in L[slug], f(s) in L[slug]
+for s in L[unicode], f(s) ∉ L[ascii]
+for s in L[unicode], "<" not in f(s)
+for x in [0, 1], f(x) in [0, 1]
+```
+
+In order: closure into the language, an output that always leaves
+ASCII, a token that is never emitted, and the chain `0 <= f(x) <= 1`.
 
 ## Installing the languages
 

@@ -251,8 +251,8 @@ A function over text has a domain too: not an interval of numbers but
 a language, a set of strings. `L[<name>]` quantifies over one:
 
 ```
-for text in L[unicode], f(f(text)) == f(text)
-for text in L[unicode], len(f(text)) <= len(text)
+for s in L[unicode], f(f(s)) == f(s)
+for s in L[unicode], len(f(s)) <= len(s)
 for s in L[digit] \ {""}, f(s + "0") == 10 * f(s)
 ```
 
@@ -267,7 +267,7 @@ Kleene star: it contains the empty string, and `L[ascii] \ {""}` is
 the way to exclude it. Union with a finite set of members and the
 missing-value policy read exactly as they do for a numeric domain:
 `L[alnum] ∪ {"n/a"}`, `L[ascii] \ {∅}`. There is no length syntax; a
-length is a premise, `assuming len(text) <= 80, for text in L[ascii], len(f(text)) <= 80`,
+length is a premise, `assuming len(s) <= 80, for s in L[ascii], len(f(s)) <= 80`,
 and a very long input is a hazard the probe visits on its own. A name
 mathema cannot resolve is refused with the vocabulary and the package
 that provides one; nothing is ever read as a wider language than the
@@ -275,12 +275,12 @@ one written.
 
 Think of the function as a map between languages, and the claims
 write themselves. A normaliser is idempotent (`collapse` above) and a
-contraction (`len(f(text)) <= len(text)`); an escaper never shortens
-(`len(f(text)) >= len(text)`); a parser and its renderer are a section
+contraction (`len(f(s)) <= len(s)`); an escaper never shortens
+(`len(f(s)) >= len(s)`); a parser and its renderer are a section
 and a retraction, stated with a `let`-bound inverse:
 
 ```
-let u = html.unescape, for text in L[unicode], u(f(text)) == text
+let u = html.unescape, for s in L[unicode], u(f(s)) == s
 let dump = json.dumps, for s in L[json], f(dump(f(s))) == f(s)
 ```
 
