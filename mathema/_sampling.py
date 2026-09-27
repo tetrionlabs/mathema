@@ -100,6 +100,10 @@ class _SpecialCycle:
     def guaranteed_remaining(self) -> bool:
         return self._dispensed < len(self._values)
 
+    def lap_size(self) -> int:
+        """How many values one full lap dispenses."""
+        return len(self._values)
+
 
 def _synth_scalar(rng: random.Random, bounds=None,
                   specials: "_SpecialCycle | None" = None,

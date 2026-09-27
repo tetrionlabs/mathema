@@ -5006,6 +5006,15 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
     rng, specials, risk, budget = setup.rng, setup.specials, setup.risk, setup.budget
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
+    from .probing import _language_lap
+    # a language-bound parameter's first draws are one lap over its
+    # language's hazards
+    language_laps = {p: lap for p in kinds
+                     if (lap := _language_lap(rng, cj_domain.get(p))) is not None}
+    if language_laps:
+        # the trial budget covers the longest lap, so every hazard is
+        # visited however small the budget the risk policy chose
+        budget = max(budget, max(lap.lap_size() for lap in language_laps.values()))
     checked, cx, cx_stratum = 0, None, None
     # the largest exact ordering violation the default allowance
     # absorbed, and the arguments it happened at
@@ -5092,7 +5101,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                            None) == "L":
                     # a mapping parameter quantified over a language: the
                     # members ARE the mappings, drawn from the language
-                    v = _synth(k, rng, cj_domain.get(p))
+                    v = _synth(k, rng, cj_domain.get(p), lap=language_laps.get(p))
                     env[p] = v
                     args.append(v)
                     continue
@@ -5142,7 +5151,7 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     v = _synth(k, rng, cj_domain.get(p),
                               specials=specials, extra=critical_hints.get(p),
                               extra_cycle=extra_cycles.get(p),
-                              length=length)
+                              length=length, lap=language_laps.get(p))
                 env[p] = v
                 args.append(v)
         for a_name in aux:

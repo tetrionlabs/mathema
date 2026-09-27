@@ -736,6 +736,36 @@ def _sample_domain(rng: random.Random, dom: Domain,
     return value
 
 
+def _language_lap(rng: random.Random, dom) -> "_SpecialCycle | None":
+    """Intent:
+        One lap over every hazard of a language domain, for the first
+        draws of a parameter bound to it: each piece's hazards, the
+        members of the domain's excluded set left out, dispensed once
+        each in a seeded order. `None` when the bound is not a language
+        domain or has no hazard to visit.
+    """
+    from .domain import LanguageRef
+    from .languages import resolve_language
+    if _classify_bound(dom) != "language":
+        return None
+    values = []
+    for piece in dom.pieces or ():
+        if not isinstance(piece, LanguageRef):
+            continue
+        try:
+            hazards = resolve_language(piece).hazards()
+        except Exception:
+            continue
+        for h in hazards:
+            try:
+                excluded = h.value in dom.excluded
+            except TypeError:
+                excluded = False
+            if not excluded:
+                values.append(h.value)
+    return _SpecialCycle(rng, values=values) if values else None
+
+
 def _sample_language(rng: random.Random, dom: Domain):
     """Intent:
         One member of a language domain: a piece chosen uniformly (a
@@ -747,8 +777,9 @@ def _sample_language(rng: random.Random, dom: Domain):
     Notes:
         The hazard corpus is the language's own (`Language.hazards`,
         every value of which is a member), so a draw never leaves the
-        declared language; the guaranteed lap over every hazard is the
-        per-parameter cycle the claim loop threads in.
+        declared language; the guaranteed lap over every hazard is
+        `_language_lap`, the per-parameter cycle the claim loop threads
+        in through `_synth`'s `lap`.
     """
     from .domain import LanguageRef, MISSING as _MISSING
     from .languages import resolve_language
@@ -812,7 +843,8 @@ def _synth(kind: str, rng: random.Random, bounds=None,
           specials: "_SpecialCycle | None" = None,
           extra: list[float] | None = None,
           extra_cycle: "_SpecialCycle | None" = None,
-          length: "int | None" = None):
+          length: "int | None" = None,
+          lap: "_SpecialCycle | None" = None):
     # `kind == "sequence"` is checked first, unconditionally, before any
     # bounds-shape dispatch below, a Domain/frozenset/"Z"/"N" bound
     # means something different for a sequence (a per-element domain)
@@ -822,7 +854,10 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     if _classify_bound(bounds) == "language":
         # a language bound is the parameter's own domain whatever kind
         # the body suggested (a mapping read, an iteration): the author
-        # said the value IS a member, so it is drawn as one
+        # said the value IS a member, so it is drawn as one, the
+        # language's hazards first when a lap is threaded in
+        if lap is not None and lap.guaranteed_remaining():
+            return lap.next()
         return _sample_language(rng, bounds)
     if kind == "dict":
         # a mapping parameter with no key list to hand (the automatic
