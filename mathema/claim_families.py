@@ -2437,7 +2437,7 @@ def _overflow_safe_rows(fn, cj) -> "tuple[list, list, str]":
     if own:
         links.extend(own)
         texts.extend(f"{lhs} {rel} {rhs}" for lhs, rel, rhs in own)
-    owner = key or getattr(fn, "__name__", "f")
+    owner = key if key is not None else str(getattr(fn, "__name__", "f"))
     return links, texts, owner
 
 
