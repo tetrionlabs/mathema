@@ -986,11 +986,48 @@ def sample_bound(bound, rng: random.Random, kind: str = "scalar"):
     return _synth(kind, rng, bound)
 
 
+def _nesting_depth(v) -> int:
+    """How many container levels a value nests, counted with an
+    explicit stack: lists, tuples, sets, dicts and the fields of
+    objects with a `__dict__`."""
+    deepest = 0
+    stack = [(v, 0)]
+    seen: set = set()
+    while stack:
+        node, level = stack.pop()
+        if isinstance(node, (str, bytes, int, float, complex, bool)) or node is None:
+            deepest = max(deepest, level)
+            continue
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        if isinstance(node, dict):
+            kids = list(node.values())
+        elif isinstance(node, (list, tuple, set, frozenset)):
+            kids = list(node)
+        elif hasattr(node, "__dict__"):
+            kids = list(vars(node).values())
+        else:
+            deepest = max(deepest, level)
+            continue
+        deepest = max(deepest, level + 1)
+        stack.extend((k, level + 1) for k in kids)
+    return deepest
+
+
 def _fmt_value(v) -> str:
     """One computed or sampled value, legibly, shared by _fmt() (an
     argument tuple) and every check closure's own failure `detail`
     string (the actual result(s) being compared, not just the inputs
-    that produced them)."""
+    that produced them). A value nested too deep for Python to print
+    is named by its type and its depth instead."""
+    try:
+        return _fmt_value_of(v)
+    except RecursionError:
+        return f"<{type(v).__name__} nested {_nesting_depth(v)} levels deep>"
+
+
+def _fmt_value_of(v) -> str:
     if isinstance(v, float):
         return f"{v:.6g}"
     if isinstance(v, complex):
@@ -998,9 +1035,9 @@ def _fmt_value(v) -> str:
         # Python's parenthesized repr
         return f"{v.real:.6g}{v.imag:+.6g}j"
     if isinstance(v, list):
-        return "[" + ", ".join(_fmt_value(x) for x in v) + "]"
+        return "[" + ", ".join(_fmt_value_of(x) for x in v) + "]"
     if isinstance(v, tuple):
-        return "(" + ", ".join(_fmt_value(x) for x in v) + ")"
+        return "(" + ", ".join(_fmt_value_of(x) for x in v) + ")"
     return repr(v)
 
 
