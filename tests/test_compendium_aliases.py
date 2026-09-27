@@ -126,3 +126,32 @@ def test_an_alias_key_and_the_library_key_for_one_function_are_refused():
             "PyYAML.safe_load": {"claims": []}}
     with pytest.raises(ClaimsFileError, match="yaml.safe_load"):
         validate_claims_file(data, "yaml.claims.yaml")
+
+
+def test_status_reads_the_version_through_the_files_aliases(tmp_path):
+    from importlib import metadata
+
+    from mathema.compendium.status import compendium_status
+    _write(tmp_path / "claims" / "yamlish.claims.yaml", """
+        compendium: yamlish
+        aliases: [also_missing_xyz, PyYAML]
+        yamlish.safe_load:
+          claims:
+            - name: is_defined
+              statement: "is_defined(f)"
+    """)
+    (entry,) = compendium_status(str(tmp_path), "yamlish")["libraries"]
+    assert entry["version"] == metadata.version("PyYAML")
+
+
+def test_status_without_aliases_finds_no_version_for_an_unknown_name(tmp_path):
+    from mathema.compendium.status import compendium_status
+    _write(tmp_path / "claims" / "yamlish.claims.yaml", """
+        compendium: yamlish
+        yamlish.safe_load:
+          claims:
+            - name: is_defined
+              statement: "is_defined(f)"
+    """)
+    (entry,) = compendium_status(str(tmp_path), "yamlish")["libraries"]
+    assert entry["version"] is None

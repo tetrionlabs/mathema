@@ -22,19 +22,15 @@ def _is_stdlib(head: str) -> bool:
     return head in stdlib or head == "builtins"
 
 
-def _library_version(library: str) -> "str | None":
-    """The installed distribution version of `library`, read through the
-    distribution that provides the import name when the two differ."""
-    from importlib import metadata
-    try:
-        return metadata.version(library)
-    except Exception:
-        pass
-    try:
-        dists = metadata.packages_distributions().get(library) or []
-        return metadata.version(dists[0]) if dists else None
-    except Exception:
-        return None
+def _library_version(library: str, files: list) -> "str | None":
+    """The installed version of `library`, read through the loader's own
+    lookup (`_installed_version`) with every alias its claims `files`
+    declare."""
+    from . import _installed_version
+    aliases: list = []
+    for f in files:
+        aliases += [a for a in f.get("aliases", ()) if a not in aliases]
+    return _installed_version(library, aliases)
 
 
 def _in_project(head: str, root: str) -> bool:
@@ -54,9 +50,10 @@ def _in_project(head: str, root: str) -> bool:
 
 def _library_files(root: str) -> dict:
     """Intent:
-        `{library: [{"source", "origin", "versions", "in_range"}]}` for
-        every claims file declaring `compendium:`, bundled ones first,
-        whether or not its range admits the installed version.
+        `{library: [{"source", "origin", "versions", "aliases",
+        "in_range"}]}` for every claims file declaring `compendium:`,
+        bundled ones first, whether or not its range admits the
+        installed version.
     """
     from . import _bundled_dir, _display_path, applicable_tag
     from ..spec import claims_file_paths, read_claims_file
@@ -78,6 +75,7 @@ def _library_files(root: str) -> dict:
         aliases = tuple(data.get("aliases") or ())
         out.setdefault(library, []).append({
             "source": where, "origin": origin, "versions": versions,
+            "aliases": list(aliases),
             "in_range": applicable_tag(library, versions,
                                        aliases) is not None})
     return out
@@ -172,7 +170,8 @@ def compendium_status(root: str = ".",
     verified = load_verified(root)
     libraries = []
     for lib, funcs in calls.items():
-        entry: dict = {"library": lib, "version": _library_version(lib),
+        entry: dict = {"library": lib,
+                       "version": _library_version(lib, files.get(lib, [])),
                        "calls": sum(funcs.values()),
                        "files": files.get(lib, []), "no_claims": [],
                        "functions": {}}
