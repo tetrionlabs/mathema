@@ -100,6 +100,9 @@
   transition: border-color .3s;
 }
 .md-header.mx-nav.md-header--shadow { border-bottom-color: var(--line-dark); box-shadow: none; }
+/* Over paper the translucent ink would read as grey, so the light
+   scheme keeps the bar solid. */
+[data-md-color-scheme="default"] .md-header.mx-nav { background: var(--ink); }
 .mx-navin { height: 3.2rem; padding: 0 .4rem; }
 .mx-navin > .mx-home { margin: 0 12px 0 .4rem; }
 .mx-navin > .mx-navlinks { margin-right: 6px; }
