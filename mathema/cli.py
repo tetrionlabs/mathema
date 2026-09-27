@@ -377,7 +377,7 @@ def cmd_verify(args) -> int:
             _emit_json({"passed": True, "nothing_declared": True,
                         "keys": [], "problems": [],
                         "totals": {"fresh": 0, "adjudicated": 0,
-                                   "problems": 0}},
+                                   "problems": 0, "skip_reasons": {}}},
                        getattr(args, "output", None))
             return 0
         if args.target:
@@ -397,7 +397,8 @@ def cmd_verify(args) -> int:
             "grammar_verified_here": GRAMMAR,
             "totals": {"fresh": result.fresh,
                        "adjudicated": result.adjudicated,
-                       "problems": len(result.problems)},
+                       "problems": len(result.problems),
+                       "skip_reasons": _skip_reasons(result.keys)},
         }, getattr(args, "output", None))
         return _verify_exit(args, result)
     lines = list(result.lines)
@@ -413,6 +414,23 @@ def cmd_verify(args) -> int:
            f"{', '.join(other_grammars)}" if other_grammars else ""))
     print("\n".join(lines))
     return _verify_exit(args, result)
+
+
+def _skip_reasons(keys: list) -> dict:
+    """Intent:
+        How many claims the sweep skipped, per reason: each skipped
+        row counted under its `reason` code (`foreign-grammar`, ...),
+        or its `blocked_by` code when it has no reason.
+    """
+    counts: dict = {}
+    for entry in keys:
+        for row in entry.get("claims") or []:
+            if not str(row.get("verdict") or "").startswith("skipped"):
+                continue
+            reason = str(row.get("reason") or row.get("blocked_by")
+                         or "skipped")
+            counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _verify_exit(args, result) -> int:

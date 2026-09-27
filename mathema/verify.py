@@ -934,6 +934,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          "integrity_mismatch": False, "counts": {},
                          "claims": []})
     key_problems: dict = {}   # key -> failure lines raised outside the gate
+    # key -> claim name -> the pending re-authored text, for the rows
+    supersessions: dict = {}
     # an orphan record (its key no longer resolves) whose form hash
     # matches a function with no record: old key -> new keys, and the
     # reverse, so both sides of a likely move name the rename remedy
@@ -1077,6 +1079,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
             for conflict in _conflicts:
                 if conflict.get("kind") == "supersession":
+                    supersessions.setdefault(key, {})[conflict["claim"]] = \
+                        conflict["authored"]
                     msg = (f"{key}: claim {conflict['claim']!r} was "
                            f"re-authored but is already verified, the "
                            f"verified version keeps adjudicating; adopt the "
@@ -1435,7 +1439,24 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        "foreign_grammar": len(report.foreign)},
             # claim_row reads a live Probe or a stored claim dict alike,
             # so fresh and re-adjudicated keys serialize identically
-            "claims": [claim_row(c, accepted_risk=accepted)
+            "claims": [_with_supersession(
+                           claim_row(c, accepted_risk=accepted), key,
+                           supersessions.get(key, {}))
                        for c in claims_for_gate],
         })
     return out
+
+
+def _with_supersession(row: dict, key: str, pending: dict) -> dict:
+    """Intent:
+        A claim row with its pending supersession, when the claim was
+        re-authored after it was verified: `supersession` holds the
+        re-authored text and the command that adopts it, while the
+        verified version keeps adjudicating.
+    """
+    authored = pending.get(row.get("claim"))
+    if authored is not None:
+        row["supersession"] = {
+            "authored": authored,
+            "adopt": f"mathema accept {key} {row['claim']} --as superseded"}
+    return row

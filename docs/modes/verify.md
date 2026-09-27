@@ -29,7 +29,7 @@ names no record fails as a clear per-key problem line, exit 2.
 | `--all` | re-adjudicate everything, ignoring form-hash freshness |
 | `--strict` / `--lenient` | one strictness pair shared with `check`; strict is the default here (CI gates a settled store), `--lenient` reports unverifiable claims and accepted risk instead of failing on them |
 | `--status [TARGET]` | report fresh/stale per `@track_claims`-tagged function, adjudicate nothing, exit 0; an optional TARGET (dotted name or file path) is imported first so its tagged functions register |
-| `--format` | `text` (default) or `json`: the whole sweep as data; per-key entries with `why`, gate `counts`, and claim rows in the same vocabulary `check --format compact` and the MCP tools speak (`stance`/`verdict`/`route`/`source`/`gates`, `counterexample` iff refuted). Exit codes are identical either way |
+| `--format` | `text` (default) or `json`: the whole sweep as data; per-key entries with `why`, gate `counts`, and claim rows in the same vocabulary `check --format compact` and the MCP tools speak (`stance`/`verdict`/`route`/`source`/`gates`, `counterexample` iff refuted, `supersession` iff the claim was re-authored after it was verified: the new text and the `mathema accept` command that adopts it); `totals.skip_reasons` counts the skipped claims per reason. Exit codes are identical either way |
 | `--output FILE` | write the report to a file instead of stdout |
 
 Store keys are canonical dotted `module.qualname` names, resolved by
