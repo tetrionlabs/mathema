@@ -38,6 +38,8 @@ EXPECTED_SURFACE = {
     "store": ("load_declared", "load_verified", "save_verified_entry"),
     "index": ("build_index",),
     "evidence": ("evidence_rank", "SUPPORTED_VERDICTS"),
+    "lexicon": ("LEXICON_GROUP", "LexiconSource", "lexicon_source", "lexicon_problems",
+                "write_lexicon_golden"),
     "languages": ("Language", "LanguageRef", "StringLanguage", "Problem",
                   "HazardValue", "KINDS", "LEVELS", "HAZARD_KINDS",
                   "STRING_HAZARDS", "language_problems",

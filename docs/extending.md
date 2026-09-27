@@ -20,6 +20,7 @@ exposes.
 | `mathema.target_resolvers` | a resolver for language-tagged target keys (`ts:...`) | `mathema._target_resolvers` |
 | `mathema.languages` | a named language a claim quantifies over with `L[<name>]` | `mathema.languages` |
 | `mathema.language_adaptors` | an adaptor turning an imported object (a schema class, a type) into a language, or `None` for "not mine" | `mathema.languages` |
+| `mathema.lexicon` | worked claims (rows, sections, tags, example functions) that join mathema's lexicon | `mathema.lexicon` |
 
 A claim family answers "can this be proven." A capability answers "how
 should this be shown." They are separate mechanisms with separate
@@ -119,6 +120,32 @@ The mapping is an addition to the return shape, so a probe written
 against the three- or four-element forms keeps working unchanged and
 the extension API version stays where it is.
 
+## Registered lexicons
+
+A package's worked claims join mathema's lexicon through the
+`mathema.lexicon` group. The entry point's name is the lexicon's name,
+and the object it loads (a module is the usual choice) provides
+`LEXICON`, a mapping of row keys to claim text, and optionally
+`SECTIONS`, `TAGS` and `EXAMPLE_FUNCTIONS`, in the shapes
+`mathema.lexicon` uses for its own. Installed, the rows are included in
+`entries()`, `search()`, `find()`, `get()` and `show()`, a section reads
+`<name>/<section>`, `find()` marks each row with the lexicon it came
+from, and `origin(key)` says the same. A row reusing a key another
+lexicon already has is skipped with a warning, mathema's own rows
+winning. mathema's `LEXICON` and its golden snapshot stay mathema's
+alone, so nothing about them depends on what is installed.
+
+A package lexicon is held to the checks mathema's own is, by the same
+code: `lexicon_problems(lexicon_source(name, module), golden=path,
+expected=verdicts)` returns every check with a problem (it parses and
+renders in both forms, matches its own golden snapshot, is a fixed
+point of render and parse in both modes, has a stable canonical form
+that reaches the same verdict, survives the declared store and the
+verified record, states its missing-value policy, has sections that
+partition it and tags that find it, has an example function for every
+row, and lands on every pinned verdict and witness), and
+`write_lexicon_golden` writes the snapshot for review.
+
 ## Injected facts
 
 A resolver-built proxy may carry a `__mathema_facts__` attribute
@@ -150,6 +177,7 @@ Everything a provider may import lives in
 | `index` | `build_index` |
 | `evidence` | `evidence_rank`, `SUPPORTED_VERDICTS` |
 | `languages` | `Language`, `LanguageRef`, `StringLanguage`, `Problem`, `HazardValue`, `KINDS`, `LEVELS`, `HAZARD_KINDS`, `STRING_HAZARDS`, `language_problems`, `register_language`, `unregister_language`, `resolve_language`, `describe_language`, `language_vocabulary`, `UnknownLanguage`, `language_adaptors` |
+| `lexicon` | `LEXICON_GROUP`, `LexiconSource`, `lexicon_source`, `lexicon_problems`, `write_lexicon_golden` |
 | `families` | `SafetyFamily`, `OutputPredicateFamily`, `ProofResult`, `probe_trials`, `call_with_target`, `synth_other_params`, `format_point`, `pinned_float_env` |
 | `sampling` | `sample_bound`, `shrink` |
 

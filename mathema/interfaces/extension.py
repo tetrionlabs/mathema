@@ -69,6 +69,11 @@ from ..languages import Language as Language
 from ..languages import Problem as Problem
 from ..languages import StringLanguage as StringLanguage
 from ..languages import UnknownLanguage as UnknownLanguage
+from ..lexicon import LEXICON_GROUP as LEXICON_GROUP
+from ..lexicon import LexiconSource as LexiconSource
+from ..lexicon import lexicon_source as lexicon_source
+from ..lexicon_checks import lexicon_problems as lexicon_problems
+from ..lexicon_checks import write_lexicon_golden as write_lexicon_golden
 from ..languages import describe_language as describe_language
 from ..languages import language_problems as language_problems
 from ..languages import language_adaptors as language_adaptors
@@ -140,6 +145,10 @@ SURFACE: dict[str, tuple[str, ...]] = {
     "evidence": ("evidence_rank", "SUPPORTED_VERDICTS"),
     # language domains: the protocol a language satisfies, the kit that
     # builds one, the registry a package serves, and the hazard corpus
+    # a package lexicon: the group it registers under, the shape it is
+    # read into, and the checks mathema's own lexicon is held to
+    "lexicon": ("LEXICON_GROUP", "LexiconSource", "lexicon_source", "lexicon_problems",
+                "write_lexicon_golden"),
     "languages": ("Language", "LanguageRef", "StringLanguage", "Problem",
                   "HazardValue", "KINDS", "LEVELS", "HAZARD_KINDS",
                   "STRING_HAZARDS", "language_problems",
