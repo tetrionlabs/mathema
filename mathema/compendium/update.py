@@ -225,19 +225,32 @@ def _widened(spec: str, installed: str) -> str:
     return ",".join(parts)
 
 
+def _header_lines(lines: list) -> int:
+    """How many of a file's first lines form its leading comment block:
+    the comment lines before the first line of YAML, with the blank
+    lines around and between them."""
+    count = 0
+    for i, line in enumerate(lines):
+        if line.strip() and not line.lstrip().startswith("#"):
+            break
+        count = i + 1
+    return count
+
+
 def _leading_comment(path: str) -> "str | None":
-    """The comment block at the top of a file, as a `write_yaml`
-    header, or None."""
-    lines: list = []
+    """The comment block at the top of a file, blank lines before it
+    skipped, as a `write_yaml` header, or None."""
     try:
         with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                if not line.startswith("#"):
-                    break
-                lines.append(line[1:].strip())
+            lines = fh.read().splitlines()
     except OSError:
         return None
-    return "\n".join(lines) or None
+    block = [line.strip() for line in lines[:_header_lines(lines)]]
+    while block and not block[0]:
+        block = block[1:]
+    while block and not block[-1]:
+        block = block[:-1]
+    return "\n".join(line[1:].strip() for line in block) or None
 
 
 def _comments_beyond_header(path: str) -> bool:
@@ -249,10 +262,7 @@ def _comments_beyond_header(path: str) -> bool:
             lines = fh.read().splitlines()
     except OSError:
         return False
-    body = lines
-    while body and body[0].startswith("#"):
-        body = body[1:]
-    return yaml_has_comments("\n".join(body))
+    return yaml_has_comments("\n".join(lines[_header_lines(lines):]))
 
 
 def plan_update(root: str = ".") -> dict:

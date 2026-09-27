@@ -270,3 +270,26 @@ def test_a_pinned_row_name_passes_validation():
         {"name": "is_defined@axis=0,ddof=1",
          "statement": "let axis be 0, let ddof be 1, dim(a) >= 1"}]}},
         "numpy.claims.yaml")
+
+
+def test_a_header_after_a_leading_blank_line_survives(tmp_path):
+    _project(tmp_path, _AXIS_ONE)
+    path = tmp_path / "claims" / "numpy.claims.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent("""
+        # numpy rows for this project
+        # kept with the project
+        compendium: numpy
+        versions: ">=1.24"
+        numpy.mean:
+          claims:
+            - name: is_defined
+              statement: "dim(a) >= 1"
+    """))
+    assert path.read_text().startswith("\n")
+    r = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    assert "WARN" not in r.stdout, r.stdout
+    text = path.read_text()
+    assert text.startswith(
+        "# numpy rows for this project\n# kept with the project\n"), text
