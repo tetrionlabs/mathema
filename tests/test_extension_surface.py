@@ -43,7 +43,7 @@ EXPECTED_SURFACE = {
                   "STRING_HAZARDS", "language_problems",
                   "register_language", "unregister_language",
                   "resolve_language", "describe_language",
-                  "language_vocabulary", "UnknownLanguage"),
+                  "language_vocabulary", "UnknownLanguage", "language_adaptors"),
     "families": ("SafetyFamily", "OutputPredicateFamily", "ProofResult",
                  "probe_trials", "call_with_target", "synth_other_params",
                  "format_point", "pinned_float_env"),

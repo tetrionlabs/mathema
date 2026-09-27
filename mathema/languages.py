@@ -427,7 +427,28 @@ def _loaded_adaptors() -> tuple:
             warnings.warn(f"mathema: language adaptor {ep.value!r} registered "
                           f"under {ep.name!r} failed to load ({e!r}), "
                           f"skipping it", stacklevel=2)
-    return tuple(out)
+    return tuple(sorted(out, key=lambda item: (-_adaptor_priority(item[1]), item[0])))
+
+
+def _adaptor_priority(adapt) -> int:
+    """Intent:
+        An adaptor's `__mathema_adaptor_priority__`, or 0 when it has
+        none or it is not an int.
+    """
+    value = getattr(adapt, "__mathema_adaptor_priority__", 0)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def language_adaptors() -> tuple:
+    """The registered `mathema.language_adaptors` adaptors as
+    `(name, adapt)` pairs, in the order they are asked: a higher
+    `__mathema_adaptor_priority__` first (an int on the adaptor, 0 when
+    absent), then by entry-point name. A library-specific adaptor (one
+    that recognises a model class of its own library) sets a higher
+    priority than a structural one (any dataclass), so a class both
+    would accept goes to the specific one. An adaptor that fails to
+    load is skipped with a warning."""
+    return _loaded_adaptors()
 
 
 def _import_dotted(name: str):
@@ -654,7 +675,7 @@ __all__ = [
     "ADAPTOR_GROUP", "HAZARD_KINDS", "HazardValue",
     "KINDS", "LANGUAGE_GROUP", "LEVELS", "Language", "Problem",
     "STRING_HAZARDS", "StringLanguage", "UnknownLanguage",
-    "adapt_annotation", "describe_language", "language_problems",
+    "adapt_annotation", "describe_language", "language_adaptors", "language_problems",
     "language_vocabulary", "register_language", "resolve",
     "resolve_language", "resolves", "unregister_language",
 ]

@@ -73,7 +73,14 @@ through `routes.safety_predicates()` / `routes.examine_predicates()`.
 first, then the `mathema.languages` entry point of that name, then a
 dotted path to a `Language` object, and last the `mathema.language_adaptors`
 adaptors, each called as `adapt(obj)` on the imported object and
-answering a `Language` or `None`. A language is any object satisfying
+answering a `Language` or `None`. The adaptors are asked in an explicit
+order: an adaptor may carry `__mathema_adaptor_priority__`, an int
+(0 when absent), and a higher one is asked first, ties going to the
+entry-point name. An adaptor that recognises a library's own model
+classes sets a higher priority than a structural one, so a SQLAlchemy
+class that is also a dataclass goes to the SQLAlchemy adaptor rather
+than the dataclass one; `language_adaptors()` returns the registry in
+that order, for a package that builds on the adaptors itself. A language is any object satisfying
 the `Language` protocol; `language_problems(obj)` lists what one is
 missing, and a registered or loaded object that fails it is skipped
 with a warning, never served. Core ships no language: the alphabets,
@@ -142,7 +149,7 @@ Everything a provider may import lives in
 | `store` | `load_declared`, `load_verified`, `save_verified_entry` |
 | `index` | `build_index` |
 | `evidence` | `evidence_rank`, `SUPPORTED_VERDICTS` |
-| `languages` | `Language`, `LanguageRef`, `StringLanguage`, `Problem`, `HazardValue`, `KINDS`, `LEVELS`, `HAZARD_KINDS`, `STRING_HAZARDS`, `language_problems`, `register_language`, `unregister_language`, `resolve_language`, `describe_language`, `language_vocabulary`, `UnknownLanguage` |
+| `languages` | `Language`, `LanguageRef`, `StringLanguage`, `Problem`, `HazardValue`, `KINDS`, `LEVELS`, `HAZARD_KINDS`, `STRING_HAZARDS`, `language_problems`, `register_language`, `unregister_language`, `resolve_language`, `describe_language`, `language_vocabulary`, `UnknownLanguage`, `language_adaptors` |
 | `families` | `SafetyFamily`, `OutputPredicateFamily`, `ProofResult`, `probe_trials`, `call_with_target`, `synth_other_params`, `format_point`, `pinned_float_env` |
 | `sampling` | `sample_bound`, `shrink` |
 

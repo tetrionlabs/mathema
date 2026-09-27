@@ -71,6 +71,7 @@ from ..languages import StringLanguage as StringLanguage
 from ..languages import UnknownLanguage as UnknownLanguage
 from ..languages import describe_language as describe_language
 from ..languages import language_problems as language_problems
+from ..languages import language_adaptors as language_adaptors
 from ..languages import language_vocabulary as language_vocabulary
 from ..languages import register_language as register_language
 from ..languages import resolve_language as resolve_language
@@ -144,7 +145,7 @@ SURFACE: dict[str, tuple[str, ...]] = {
                   "STRING_HAZARDS", "language_problems",
                   "register_language", "unregister_language",
                   "resolve_language", "describe_language",
-                  "language_vocabulary", "UnknownLanguage"),
+                  "language_vocabulary", "UnknownLanguage", "language_adaptors"),
     # assembling a claim family: the two kits, the proof result a derive
     # half returns, and the trial loop a probe half reports through
     "families": ("SafetyFamily", "OutputPredicateFamily", "ProofResult",
