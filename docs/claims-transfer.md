@@ -154,8 +154,12 @@ takes the row at the level it claims (the row's `meta:
 {mathema.compendium_claimed: proven}`, `holds` when it states none),
 and every conclusion resting on it caps there, with the provenance
 (`compendium:numpy-2.5/clip_lower`) named in the record. Accepting is
-a statement of trust, which a later verify that does settle the row
-replaces with the local verdict.
+a statement of trust. A later verify replaces it only with a local
+verdict that contradicts it (`falsified`) or is at least as strong (a
+`proven` replaces a trusted `proven` or `holds`, a `holds` a trusted
+`holds`). A weaker local verdict that agrees leaves the trust standing
+at its level, and the row says what was seen: `trusted as: proven,
+strongest evidence seen: holds`.
 
 ### Guarding a numpy hazard, and superseding the finding
 

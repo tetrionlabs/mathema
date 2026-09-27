@@ -360,6 +360,10 @@ accepted at the level the row claims (its `meta:
 row's verdict becomes that level, the acceptance records the source
 (`compendium:numpy-2.5`), and every conclusion resting on the row
 caps there. A row verify did settle needs no verb at all, since a
-premise resting on it already resolves at the local verdict. See
+premise resting on it already resolves at the local verdict. A later
+sweep replaces the trust only with a local verdict that contradicts it
+or is at least as strong; a weaker one that agrees (a `holds` under a
+trusted `proven`) leaves it standing, and the row's note reads
+`trusted as: proven, strongest evidence seen: holds`. See
 [Claims transfer](../claims-transfer.md).
 

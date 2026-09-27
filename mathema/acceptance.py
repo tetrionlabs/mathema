@@ -573,7 +573,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             "actions": []}
     if as_ == "trusted":
         # external testimony (a compendium row) accepted at the
-        # level its curator claims: the row's verdict becomes that
+        # level the row claims: the row's verdict becomes that
         # level, provenance meta marks it testimony, and premises
         # resting on it cap at that level, never higher
         meta = target.get("meta") or {}
@@ -954,24 +954,40 @@ def corrected_stub(plan: dict) -> dict | None:
 def _carry_trust(c: dict, accepted: dict, history: list) -> None:
     """Intent:
         Carry a trusted acceptance onto a freshly adjudicated row. A
-        re-adjudication that settles the row (a proof, a holds, a
-        falsification) is evidence, and it replaces the trusted level:
-        the acceptance is marked stale. One that cannot settle it
-        (unknown, skipped) leaves the acceptance standing: the row keeps
-        its accepted level, never `invalidated`, and
-        `meta["mathema.trusted_unsettled"]` records what the sweep got.
+        local verdict that contradicts the trusted level (falsified), or
+        is at least as strong as it (proven over a trusted proven or
+        holds, holds over a trusted holds), is evidence that replaces
+        it: the acceptance is marked stale. A weaker consistent local
+        verdict (holds under a trusted proven) leaves the acceptance
+        standing at its level, and the row says what was seen: its note
+        reads `trusted as: proven, strongest evidence seen: holds` and
+        `meta["mathema.strongest_evidence"]` holds the local verdict. A
+        re-adjudication that cannot settle the row (unknown, skipped)
+        leaves the acceptance standing too, never `invalidated`, with
+        `meta["mathema.trusted_unsettled"]` recording what the sweep got.
     """
     meta = dict(c.get("meta") or {})
     fresh = c.get("verdict") or ""
     if classify_verdict(fresh) == "invalidated":
         fresh = meta.get("mathema.regressed_to") or fresh
-    if classify_verdict(fresh) in ("unknown", "skipped", "declared"):
-        level = accepted.get("level") or "holds"
+    level = accepted.get("level") or "holds"
+    kind = classify_verdict(fresh)
+    meta.pop("mathema.strongest_evidence", None)
+    if kind in ("unknown", "skipped", "declared"):
         c["verdict"] = level
         meta.pop("mathema.regressed_to", None)
         if meta.get("mathema.previous_verdict") == level:
             meta.pop("mathema.previous_verdict")
         meta["mathema.trusted_unsettled"] = fresh
+    elif kind == "holds" and classify_verdict(level) == "proven":
+        c["verdict"] = level
+        meta.pop("mathema.regressed_to", None)
+        meta.pop("mathema.trusted_unsettled", None)
+        if meta.get("mathema.previous_verdict") == level:
+            meta.pop("mathema.previous_verdict")
+        meta["mathema.strongest_evidence"] = fresh
+        c["note"] = (f"trusted as: {level}, strongest evidence seen: "
+                     f"{fresh}")
     else:
         meta.pop("mathema.trusted_unsettled", None)
         accepted["stale"] = True
@@ -992,8 +1008,9 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
         decision must never be silently dropped by a re-run.
 
     Notes:
-        A trusted acceptance (testimony at a curator's level) stands
-        until a verdict contradicts it (`_carry_trust`). Three rules
+        A trusted acceptance (testimony at the level a row claims)
+        stands until a local verdict contradicts it or is at least as
+        strong (`_carry_trust`). Three rules
         ride along for the others. A changed form marks the acceptance
         stale (it was a decision about a different function; a new
         sign-off is required) and the stale marker is itself a history

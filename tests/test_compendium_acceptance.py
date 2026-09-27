@@ -283,3 +283,65 @@ def test_an_unsettled_local_verdict_keeps_todays_reading():
     assert row["verdict"] == "proven"
     assert row["meta"]["mathema.trusted_unsettled"] == "unknown"
     assert "mathema.strongest_evidence" not in row["meta"]
+
+
+def test_a_sweep_keeps_a_trusted_proof_over_a_local_holds(
+        tmp_path, monkeypatch):
+    # a row the probe route can only sample (derive cannot read the
+    # body), accepted as trusted at the proven level it claims while it
+    # was unsettled: the local holds leaves the trust standing
+    import sys
+
+    import mathema.compendium as comp
+    from mathema.acceptance import apply_acceptance, plan_acceptance
+    from mathema.spec import integrity_checksum
+    from mathema.verify import verify_project
+    real = comp._installed_version
+    monkeypatch.setattr(comp, "_installed_version",
+                        lambda lib: "1.0" if lib == "extlib" else real(lib))
+    site = tmp_path / "site"
+    _write(site / "extlib" / "__init__.py", '''
+        def squared(x: float) -> float:
+            """x squared, through its decimal text."""
+            return float(format(x * x, ".17g"))
+    ''')
+    monkeypatch.syspath_prepend(str(site))
+    proj = tmp_path / "proj"
+    _write(proj / "claims" / "extlib.claims.yaml", """
+        compendium: extlib
+        versions: ">=1.0"
+        extlib.squared:
+          claims:
+            - name: nonneg
+              statement: 'for x in [0, 10], f(x) >= 0'
+              meta: {mathema.compendium_claimed: proven}
+    """)
+
+    def sweep(**kw):
+        sys.modules.pop("extlib", None)
+        comp.uninstall()
+        return verify_project(str(proj), **kw)
+
+    sweep()
+    assert _rows(proj, "extlib.squared")["nonneg"]["verdict"] == "holds"
+    # the row as an earlier sweep left it, unsettled
+    path = proj / ".mathema" / "verified" / "extlib.squared.yaml"
+    doc = yaml.safe_load(path.read_text())
+    entry = doc["extlib.squared"]
+    for c in entry["claims"]:
+        if c["name"] == "nonneg":
+            c["verdict"] = "unknown"
+    entry["identity"]["integrity"] = integrity_checksum(entry)
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    apply_acceptance(plan_acceptance(str(proj), "extlib.squared", "nonneg",
+                                     "trusted", by="test"))
+    result = sweep(all=True)
+    row = _rows(proj, "extlib.squared")["nonneg"]
+    assert row["meta"]["mathema.strongest_evidence"] == "holds", row
+    assert row["verdict"] == "proven"
+    assert not row["accepted"].get("stale")
+    assert row["note"] == "trusted as: proven, strongest evidence seen: holds"
+    assert not result.problems, result.lines
+    line = next(x for x in result.lines if "extlib.squared" in x)
+    assert "nonneg trusted as: proven, strongest evidence seen: holds" in \
+        line, line

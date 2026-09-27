@@ -119,8 +119,9 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
     Notes:
         A stored `invalidated` is carried over, and so is the accepted
         level of a trusted row the sweep could not settle
-        (`mathema.trusted_unsettled`), with that marker; every other
-        verdict is already the probe's own.
+        (`mathema.trusted_unsettled`) or settled only more weakly
+        (`mathema.strongest_evidence`, with the row's note), with that
+        marker; every other verdict is already the probe's own.
     """
     import yaml
 
@@ -131,16 +132,21 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
         return
     stored = {c.get("name"): c.get("verdict")
               for c in entry.get("claims") or []}
-    trusted = {c.get("name"): (c.get("meta") or {})["mathema.trusted_unsettled"]
-               for c in entry.get("claims") or []
-               if "mathema.trusted_unsettled" in (c.get("meta") or {})}
+    trusted = {c.get("name"): c for c in entry.get("claims") or []
+               if {"mathema.trusted_unsettled", "mathema.strongest_evidence"}
+               & set(c.get("meta") or {})}
     for p in probes:
         if classify_verdict(stored.get(p.name) or "") == "invalidated":
             p.verdict = stored[p.name]
         elif p.name in trusted:
+            row = trusted[p.name]
             p.verdict = stored[p.name]
-            p.meta = {**(p.meta or {}),
-                      "mathema.trusted_unsettled": trusted[p.name]}
+            p.meta = {**(p.meta or {}), **{
+                k: v for k, v in (row.get("meta") or {}).items()
+                if k in ("mathema.trusted_unsettled",
+                         "mathema.strongest_evidence")}}
+            if "mathema.strongest_evidence" in (row.get("meta") or {}):
+                p.note = row.get("note") or p.note
 
 
 def gate(claims, *, strict: bool,
@@ -1252,6 +1258,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             f"sweep could not settle it ({meta['mathema.trusted_unsettled']})"
             for name, verdict, meta, _n in map(_claim_fields, claims_for_gate)
             if meta.get("mathema.trusted_unsettled")]
+        standing += [
+            f"{name} trusted as: {verdict}, strongest evidence seen: "
+            f"{meta['mathema.strongest_evidence']}"
+            for name, verdict, meta, _n in map(_claim_fields, claims_for_gate)
+            if meta.get("mathema.strongest_evidence")]
         state = "FAIL" if report.problems or key_problems.get(key) else "ok"
         if key in lock_messages:
             # the record is left as it was, so its counts describe code
