@@ -374,3 +374,96 @@ def test_verify_format_json_keeps_the_exit_code_and_the_text_path(tmp_path):
     text, js = _run(root), _run(root, "--format", "json")
     assert text.returncode == js.returncode
     assert "fresh" in text.stdout and not text.stdout.startswith("{")
+
+
+def _foreign_then_native(tmp_path, with_grammar: bool):
+    body = ("grammar: other\n" if with_grammar else "") + (
+        "funcs.add:\n"
+        "  claims:\n"
+        "    - name: commutative\n"
+        '      statement: "f(a, b) == f(b, a)"\n'
+        "    - name: above_clamp\n"
+        '      statement: "let g = funcs.clamp01, for a in [0, 1], '
+        'b in [0, 1], f(a, b) >= g(a)"\n')
+    (tmp_path / "claims").mkdir(exist_ok=True)
+    (tmp_path / "claims" / "add.claims.yaml").write_text(body)
+
+
+def test_removing_a_foreign_grammar_adjudicates_the_claims_it_skipped(
+        tmp_path):
+    """A claim skipped as another grammar's is stored as the claim it
+    is, `let` sections included, so once the grammar line goes the
+    unchanged claims adjudicate under mathema's grammar: never read as
+    re-authored, never pinned to the old grammar."""
+    funcs_path = tmp_path / "funcs.py"
+    _write_funcs(funcs_path)
+    _seed_run(tmp_path, funcs_path)
+    _foreign_then_native(tmp_path, with_grammar=True)
+    r = _run(tmp_path)
+    assert "2 not this grammar (other)" in r.stdout, r.stdout + r.stderr
+    stored = (tmp_path / ".mathema" / "verified" / "funcs.add.yaml")
+    assert "let g = " in stored.read_text(), stored.read_text()
+
+    _foreign_then_native(tmp_path, with_grammar=False)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "re-authored" not in r.stdout + r.stderr, r.stdout
+    assert "not this grammar" not in r.stdout, r.stdout
+    text = stored.read_text()
+    assert "let g = " in text, text
+    assert "grammar: other" not in text, text
+    assert "foreign_grammar" not in text, text
+
+    r = _run(tmp_path, "--all")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "re-authored" not in r.stdout + r.stderr, r.stdout
+
+
+def test_toggling_a_file_grammar_makes_every_entry_in_it_stale(tmp_path):
+    funcs_path = tmp_path / "funcs.py"
+    _write_funcs(funcs_path)
+    _seed_run(tmp_path, funcs_path)
+    body = ("funcs.add:\n"
+            "  claims:\n"
+            "    - name: commutative\n"
+            '      statement: "f(a, b) == f(b, a)"\n'
+            "funcs.clamp01:\n"
+            "  claims:\n"
+            "    - name: at_most_one\n"
+            '      statement: "f(x) <= 1"\n')
+    (tmp_path / "claims").mkdir()
+    path = tmp_path / "claims" / "funcs.claims.yaml"
+    path.write_text(body)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    r = _run(tmp_path)
+    assert "2 adjudicated" not in r.stdout, r.stdout
+    for text in ("grammar: other\n" + body, body):
+        path.write_text(text)
+        r = _run(tmp_path)
+        assert "2 adjudicated" in r.stdout, (text, r.stdout)
+        assert r.stdout.count("claims changed") >= 2, r.stdout
+
+
+def test_a_row_skipped_as_another_grammars_claim_never_supersedes():
+    """A record written before skipped rows kept their `let` sections
+    holds the bare relation; it established no verdict, so the authored
+    claim is not reported as re-authored against it."""
+    from mathema.sync import claim_conflicts
+
+    def add(a: float, b: float) -> float:
+        return a + b
+
+    declared = {"claims": [{
+        "name": "above_clamp",
+        "statement": "let g = funcs.clamp01, for a in [0, 1], "
+                     "b in [0, 1], f(a, b) >= g(a)"}]}
+    verified = {"grammar": "mathema", "claims": [{
+        "name": "above_clamp", "statement": "f(a, b) >= g(a)",
+        "verdict": "skipped", "grammar": "other",
+        "meta": {"mathema.foreign_grammar": "other"}}]}
+    assert claim_conflicts(add, declared, verified) == []
+    verified["claims"][0]["verdict"] = "holds"
+    verified["claims"][0]["meta"] = {}
+    assert [c["kind"] for c in claim_conflicts(add, declared, verified)] \
+        == ["supersession"]
