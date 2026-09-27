@@ -6,7 +6,7 @@ at your own code owes you a straight answer about its own churn.
 
 ## Where mathema is today
 
-mathema is at **0.6.0 and pre-1.0**. It is feature-complete and
+mathema is at **0.6.1 and pre-1.0**. It is feature-complete and
 heavily tested (over 3,200 tests), and the concepts are settled. The
 Python API is **likely to change before 1.0**. That is the honest
 statement, not a formality: if you build on the library surface today,
@@ -118,6 +118,11 @@ mathema is the engine. These sit alongside it:
   domain-conventional symbols for parameter and function names when
   rendering claims. Install with `pip install "mathema[symbology]"`.
   See [Symbology and rendering](symbology.md).
+- **[mathema-language](https://github.com/tetrionlabs/mathema-language)**:
+  the languages a claim quantifies over with `L[...]`: the alphabets
+  and predicate languages, the hazard families over text, and the
+  schema adaptors for rows. Core parses and records `L[...]` and
+  resolves no name itself; the extra `language` installs it.
 - **[mathema-agents](https://github.com/tetrionlabs/mathema-agents)**:
   agent-facing setup. Skills and per-tool adapters that teach a coding
   agent how to drive the CDD loop properly. `mathema init --agents`

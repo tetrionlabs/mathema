@@ -80,8 +80,11 @@ def test_build_issue_record_omitted_claims_uses_suggest_claims():
                      "even", "odd", "idempotent", "is_deterministic",
                      "is_state_safe", "is_numerically_stable",
                      "is_representation_safe[x]"}
+    # 2x + 1 overflows where the probe reaches x = 1e308, so the
+    # float computation is not numerically stable over the whole line
     assert set(record["meta"]["mathema.issue"]["failing_claims"]) == \
-        {"monotonic_decreasing[x]", "even", "odd", "idempotent"}
+        {"monotonic_decreasing[x]", "even", "odd", "idempotent",
+         "is_numerically_stable"}
 
 
 def test_build_issue_record_explicit_empty_list_means_no_claims_at_all():

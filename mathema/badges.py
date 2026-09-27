@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 # calibration change (the constants below) bumps the minor (@1.1); a
 # structural change (a dimension added or removed, an entailment changed)
 # bumps the major (@2). ci_snapshot records it beside the score.
-CLARITY_ALGO = "entropy-dimensions@1.1"
+CLARITY_ALGO = "entropy-dimensions@1.2"
 
 # The @1 constants, one labelled set so a recalibration is a new set plus a
 # version bump and past scores stay reproducible. Every number is the a-
@@ -48,9 +48,9 @@ _BITS: dict[str, float] = {
     "safety_pure": 0.15, "safety_impure": 0.8,
     "safety_numeric": 0.2, "safety_numeric_loop": 0.4,
     "safety_seq": 0.4, "safety_str": 1.0,
-    # failure: a raise site, a covered hazard call (reducible), an
-    # uncovered one (a black box: irreducible, it has no reducer at all)
-    "raise": 0.5, "hazard_covered": 0.5, "hazard_uncovered": 2.0,
+    # failure: a raise site, and a call into another function, whose
+    # hazard only that callee's own recorded definedness evidence reduces
+    "raise": 0.5, "hazard_call": 2.0,
     # structural (examine-route) facts the code exhibits without a declared
     # claim: visible purity, an unguarded signature. Weaker than a verified
     # examine, so they lift the floor without reaching a claim's credit.
@@ -90,8 +90,25 @@ _SAFETY_SOURCE = {
     "is_missing_safe": "is_missing_safe",
     "is_empty_safe": "is_missing_safe",
     "is_arbitrary_input_safe": "is_arbitrary_input_safe",
-    "is_compendium_safe": "is_compendium_safe",
+    # the computation-safety hierarchy's new members credit existing
+    # sources: an overflow is a representation hazard, a recursion limit
+    # an accidental crash. The roll-ups and the unadjudicated families
+    # credit nothing themselves (see _NO_SOURCE).
+    "is_overflow_safe": "is_representation_safe",
+    "is_recursion_safe": "is_arbitrary_input_safe",
 }
+# families a claim may state that reduce no source: a call's hazard is
+# read from the callee's own record, not from a check at the call site
+# (is_compendium_safe); a roll-up's children credit their own sources
+# (is_computation_safe, is_repeatable); and a family this release does
+# not adjudicate settles nothing (is_memory_safe, and the reserved
+# families, claim_families.RESERVED_FAMILIES)
+_NO_SOURCE = frozenset({
+    "is_compendium_safe",
+    "is_computation_safe", "is_repeatable",
+    "is_memory_safe",
+    "is_precision_safe", "is_order_invariant", "is_concurrency_safe",
+    "is_carrier_consistent"})
 
 
 def _strength(verdict: str, route: str) -> float:
@@ -112,12 +129,12 @@ def _claim_kind(name: str, statement: str) -> str:
     """Classify a claim into a behavioural KIND, from its name aspect
     first, then its statement shape. Cheap: string inspection only, no
     lift, so the badge stays CI-fast."""
-    from .families import claim_aspect
+    from .families import claim_aspect, claim_base_name
     from .matrices import PROPERTIES as _MATRIX
     stmt = statement or ""
     if stmt.startswith("raises(") or " raises(" in stmt:
         return "partiality"
-    base = (name or "").split("[", 1)[0]
+    base = claim_base_name(name or "")
     aspect = claim_aspect(name or "")[0]
     if aspect in ("monotonicity", "shape", "symmetry"):
         return aspect
@@ -164,22 +181,11 @@ def _statement_relation(statement: str) -> str | None:
         return None
 
 
-def _verified_claims_for(fn, root: str) -> list:
-    """The verified-store claim rows for one function (`name`/`verdict`/
-    `route` each), or `[]` when it has no verified record. This is the
-    COMMITTED knowledge, what `mathema verify` adjudicated and wrote, not
-    a live re-derivation: a function nobody has claimed and verified has
-    an empty behavioural record on purpose."""
-    from .spec import load_verified
-    key = f"{getattr(fn, '__module__', '')}.{getattr(fn, '__qualname__', '')}"
-    entry = (load_verified(root).get(key) or {}).get("entry") or {}
-    return entry.get("claims") or []
-
-
 @dataclass(frozen=True)
 class _Profile:
-    """The structural + hazard surface behind a function's clarity, all
-    from `analyze_source` and the compendium hazard scan (no lift)."""
+    """The structural + hazard surface behind a function's clarity: the
+    shape from `analyze_source` (no lift), and each callee with the
+    evidence its own record holds."""
     params: tuple = ()            # kinds: scalar / sequence / matrix / string
     guarded: int = 0             # parameters with a real accept/reject boundary
     cx: int = 0                  # decision points (the branch surface)
@@ -189,14 +195,83 @@ class _Profile:
     pure: bool = True
     str_params: int = 0
     n_raises: int = 0
-    covered_calls: int = 0
-    uncovered_calls: int = 0
+    # each function called, by dotted key, with the share of the call's
+    # hazard its own recorded definedness evidence removes
+    callees: tuple = ()
 
 
-def _clarity_profile(fn, facts=None, root: str = ".") -> _Profile | None:
+def _callee_evidence(entry: dict) -> float:
+    """Intent:
+        The share of a call's hazard the callee's own record removes:
+        the strongest settled definedness row it holds (an `is_defined`
+        row, bare or a restriction, or a `raises` row). Proven removes
+        it all; a holds removes what a holds removes of any source, by
+        mechanism; a row accepted as trusted counts as a holds, never as
+        proven. Anything else (no record, a bound, an unsettled or
+        falsified row) removes nothing.
+    """
+    from .conjecture import region_row_kind
+    from .records import classify_verdict
+    best = 0.0
+    for row in (entry or {}).get("claims") or []:
+        if not isinstance(row, dict):
+            continue
+        meta = row.get("meta") or {}
+        if meta.get("mathema.companion_of") or \
+                meta.get("mathema.corroboration") == "uncorroborated":
+            continue
+        statement = str(row.get("statement") or row.get("law") or "")
+        if region_row_kind(row.get("name")) != "is_defined" and not (
+                statement.startswith("raises(") or " raises(" in statement):
+            continue
+        accepted = row.get("accepted") or {}
+        verdict = classify_verdict(row.get("verdict") or "")
+        if accepted.get("as") == "trusted" and not accepted.get("stale"):
+            strength = _HOLDS_DEFAULT if verdict in ("proven", "holds") \
+                else 0.0
+        elif verdict in ("proven", "holds"):
+            strength = _strength(verdict, row.get("route") or "")
+        else:
+            strength = 0.0
+        best = max(best, strength)
+    return best
+
+
+def _callees(fn, facts, root: str, store: dict,
+             library_keys: "frozenset | None" = None) -> tuple:
+    """Intent:
+        `((key, evidence), ...)` for each function `fn` calls, once per
+        callee: a project function or a library function, resolved
+        through `fn`'s import aliases (`compendium.resolved_calls`),
+        with `_callee_evidence` of its record in `store`. A builtin, a
+        method on a local value, and a standard-library function no
+        library claims file states rows for are left out.
+    """
+    import sys
+
+    from .compendium import load_library_claims, resolved_calls
+    stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
+    if library_keys is None:
+        library_keys = frozenset(load_library_claims(root))
+    out = []
+    for key in resolved_calls(fn, facts):
+        head = key.split(".")[0]
+        if key not in library_keys and (head in stdlib or head == "builtins"):
+            continue
+        entry = (store.get(key) or {}).get("entry") or {}
+        out.append((key, _callee_evidence(entry)))
+    return tuple(out)
+
+
+def _clarity_profile(fn, facts=None, root: str = ".",
+                     store: "dict | None" = None,
+                     library_keys: "frozenset | None" = None
+                     ) -> _Profile | None:
     """Assemble a function's `_Profile`, or None when its source is
     unavailable (a builtin, a C extension): nothing to characterise
-    structurally, so it leaves the clarity roll-up rather than scoring 0."""
+    structurally, so it leaves the clarity roll-up rather than scoring 0.
+    `store` is the verified store the callees' evidence is read from
+    (loaded from `root` when None)."""
     import ast
     import warnings
     if fn is None:
@@ -239,25 +314,27 @@ def _clarity_profile(fn, facts=None, root: str = ".") -> _Profile | None:
     param_kinds = tuple("string" if p in str_params else kinds.get(p, "scalar")
                         for p in params)
     guarded = sum(1 for p in params if guards.get(p) not in (None, "none"))
-    cov = unc = 0
+    if store is None:
+        from .spec import load_verified
+        store = load_verified(root)
     try:
-        from .compendium import hazard_call_sites
-        cov, unc = hazard_call_sites(fn, facts, root)
+        callees = _callees(fn, facts, root, store, library_keys)
     except Exception:
-        pass
+        callees = ()
     return _Profile(
         params=param_kinds, guarded=guarded, cx=cx,
         output=getattr(facts, "returns_kind", "scalar") or "none",
         numeric=numeric, loops=len(getattr(facts, "loops", []) or []),
         pure=bool(getattr(facts, "is_pure", True)),
         str_params=len(str_params), n_raises=n_raises,
-        covered_calls=cov, uncovered_calls=unc)
+        callees=callees)
 
 
 def _clarity_sources(p: _Profile) -> list:
     """The entropy sources of one function, `(dimension, bits, reducer)`.
-    `reducer` names which claim group (or structural baseline) clears it;
-    `None` means irreducible (a black-box call). See `_BITS`."""
+    `reducer` names which claim group (or structural baseline) clears
+    it; a call's reducer is `callee:<key>`, cleared only by that
+    callee's own recorded evidence. See `_BITS`."""
     C = _BITS
     s: list = [("identity", C["graph"] + C["region"] * p.cx, "identity")]
     s.append(("form", _EXTENT_BITS.get(p.output, 1.0), "extent"))
@@ -280,10 +357,8 @@ def _clarity_sources(p: _Profile) -> list:
         s.append(("safety", C["safety_str"], "safety:is_arbitrary_input_safe"))
     for _ in range(p.n_raises):
         s.append(("failure", C["raise"], "raises"))
-    for _ in range(p.covered_calls):
-        s.append(("failure", C["hazard_covered"], "safety:is_compendium_safe"))
-    for _ in range(p.uncovered_calls):
-        s.append(("failure", C["hazard_uncovered"], None))
+    for key, _evidence in p.callees:
+        s.append(("failure", C["hazard_call"], f"callee:{key}"))
     return s
 
 
@@ -301,9 +376,6 @@ def _reductions(verified_claims, pure: bool) -> dict:
         "safety:is_representation_safe": C["base_safety"],
         "safety:is_missing_safe": C["base_safety"],
         "safety:is_arbitrary_input_safe": C["base_arbitrary_input"],
-        # a covered library call is a hazard until is_compendium_safe is
-        # verified: no structural baseline
-        "safety:is_compendium_safe": 0.0,
     }
 
     def bump(key, val):
@@ -325,10 +397,10 @@ def _reductions(verified_claims, pure: bool) -> dict:
         meta = claim.get("meta") or {}
         if meta.get("mathema.companion_of"):
             # a float companion executes its parent's relation against the
-            # implementation in float across the domain. Holding, it
+            # code in float64 across the domain. Holding, it
             # establishes its family (is_numerically_stable) for the
             # function; falsified, it is a defect in the parent's
-            # implementation and says nothing about the family as a whole
+            # computation and says nothing about the family as a whole
             from .records import classify_verdict
             family = _SAFETY_SOURCE.get(meta.get("mathema.family") or "")
             if family and classify_verdict(claim.get("verdict") or "") in (
@@ -337,7 +409,10 @@ def _reductions(verified_claims, pure: bool) -> dict:
             continue
         if st <= 0:
             continue
-        base = name.split("[", 1)[0]
+        from .families import claim_base_name
+        base = claim_base_name(name)
+        if base in _NO_SOURCE:
+            continue
         if base in _SAFETY_SOURCE:
             bump("safety:" + _SAFETY_SOURCE[base], st)
             continue
@@ -361,8 +436,41 @@ def _reductions(verified_claims, pure: bool) -> dict:
     return r
 
 
+def clarity_bits(fn=None, verified_claims=None, root: str = ".",
+                 facts=None, store: "dict | None" = None,
+                 library_keys: "frozenset | None" = None
+                 ) -> "tuple[float, float] | None":
+    """Intent:
+        The entropy behind `clarity_score`: `(h0, h_remaining)`, the
+        a-priori bits of the function's sources and the bits its
+        verified claims, and its callees' recorded evidence, leave. None
+        when the source is unavailable.
+    """
+    if store is None:
+        from .spec import load_verified
+        store = load_verified(root)
+    if verified_claims is None:
+        key = (f"{getattr(fn, '__module__', '')}."
+               f"{getattr(fn, '__qualname__', '')}")
+        verified_claims = (((store.get(key) or {}).get("entry") or {})
+                           .get("claims") or []) if fn is not None else []
+    profile = _clarity_profile(fn, facts, root, store, library_keys)
+    if profile is None:
+        return None
+    reductions = _reductions(verified_claims, profile.pure)
+    reductions.update({f"callee:{key}": evidence
+                       for key, evidence in profile.callees})
+    h0 = h_rem = 0.0
+    for _dim, bits, reducer in _clarity_sources(profile):
+        h0 += bits
+        h_rem += bits * (1.0 - reductions.get(reducer, 0.0))
+    return h0, h_rem
+
+
 def clarity_score(fn=None, verified_claims=None, root: str = ".",
-                        facts=None) -> int | None:
+                        facts=None, store: "dict | None" = None,
+                        library_keys: "frozenset | None" = None
+                        ) -> int | None:
     """Intent:
         The clarity score for one function, 0-100: the
         fraction of what is KNOWABLE about its behaviour that its VERIFIED
@@ -376,26 +484,24 @@ def clarity_score(fn=None, verified_claims=None, root: str = ".",
     Notes:
         A dimension that CANNOT apply (a total function with no failure
         modes) carries zero entropy and drops out of the denominator, it
-        is not free score. An UNCOVERED library call is irreducible (no
-        compendium models where it fails), so it caps clarity below 100.
+        is not free score. Each function it calls (a project function or
+        a library function) is a hazard that only the callee's own
+        recorded definedness evidence reduces, read one level down and
+        never further: a callee with no such evidence keeps the whole
+        charge, so it caps clarity below 100.
         A witnessed falsification of a LIVE claim counts as knowledge;
         a claim retired into the record's discoveries is history, and
         the score follows whatever replaced it. Structural facts the code shows
         (visible purity, an unguarded signature) count as examine-route
-        evidence. Reads the COMMITTED verified store, no re-adjudication.
+        evidence. Reads the COMMITTED verified store (`store`, loaded
+        from `root` when None), no re-adjudication.
         The algorithm is versioned: `CLARITY_ALGO`.
     """
-    if verified_claims is None:
-        verified_claims = _verified_claims_for(fn, root) if fn is not None else []
-    profile = _clarity_profile(fn, facts, root)
-    if profile is None:
+    bits = clarity_bits(fn, verified_claims, root, facts, store,
+                        library_keys)
+    if bits is None:
         return None
-    sources = _clarity_sources(profile)
-    reductions = _reductions(verified_claims, profile.pure)
-    h0 = h_rem = 0.0
-    for _dim, bits, reducer in sources:
-        h0 += bits
-        h_rem += bits * (1.0 - reductions.get(reducer, 0.0))
+    h0, h_rem = bits
     if h0 <= 0:
         return 0
     return round(100 * (1.0 - h_rem / h0))
@@ -493,6 +599,8 @@ def repo_badges(targets=None, root: str = ".",
     functions = _population(targets, root)
     weights = centrality_weights(functions)
     verified = load_verified(root)
+    from .compendium import load_library_claims
+    library_keys = frozenset(load_library_claims(root))
     coverage_data = read_test_coverage(root) if implementation else None
     freshness = coverage_freshness(root) if implementation else None
 
@@ -523,7 +631,8 @@ def repo_badges(targets=None, root: str = ".",
         intent = docstring_sync(fn, root=root).percent
         intent_pairs.append((w, intent))
         claims = (verified.get(key) or {}).get("entry", {}).get("claims") or []
-        behav = clarity_score(fn, verified_claims=claims, root=root)
+        behav = clarity_score(fn, verified_claims=claims, root=root,
+                              store=verified, library_keys=library_keys)
         if behav is not None:
             behav_pairs.append((w, behav))
         per_function[key] = {"implementation": impl,

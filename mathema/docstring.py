@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 
 from .analysis import _parse_notes, _read_block
 from .authoring import parse_docstring_claims
+from ._signatures import callable_signature
 
 _INTENT_HEADER = "intent:"
 _CLAIMS_HEADER = "claims:"
@@ -325,7 +326,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
                    if p not in ("self", "cls")]
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
         annotated_params = {n for n, p in sig.parameters.items()
                             if p.annotation is not inspect.Parameter.empty}
         return_annotated = sig.return_annotation is not inspect.Signature.empty

@@ -29,6 +29,7 @@ from .inventory import (coverage_freshness, derivability_report,
                         is_test_covered, mutated_globals, purity_reason,
                         read_test_coverage, scope_dependencies,
                         structural_complexity, typing_info)
+from ._signatures import callable_signature
 
 
 def _source_span(fn) -> str | None:
@@ -202,7 +203,7 @@ def _describe_signature(fn) -> str:
     import warnings
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return "(...)"
     try:
@@ -366,8 +367,9 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
     step): its signature and identity hashes, every inferred domain
     (types/docstring/finite-value sources, each tagged with which one),
     every claim (file-declared merged with whatever's on the live
-    function, plus a verified verdict when one exists), and the tier
-    ladder, `source`/`normalized`/`structural` share one plain,
+    function, plus a verified verdict when one exists), the careful
+    lines (`_careful_lines`: known edges just outside a declared
+    domain, never a verdict), and the tier ladder, `source`/`normalized`/`structural` share one plain,
     indented rendering (`_tier_text.render_structure_plain`), `lifted`/
     `canonical` are a second, separate rendering of the real lift
     result's own shape (`_tier_text.render_lifted_plain` /
@@ -424,6 +426,8 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
         claims.append({"name": c.get("name"), "statement": statement, "latex": latex,
                        "verdict": v.get("verdict") if v else None})
 
+    careful = _careful_lines(fn, facts, root, merged_entry, claims)
+
     tier_names = tiers_mod.TIERS if tier is None else (tier,)
     ladder = {}
     name_map = seq_params = None
@@ -463,7 +467,63 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
         if facts is not None else []
     return {"key": key, "signature": _describe_signature(fn), "identity": identity,
            "domains": domains, "claims": claims, "tiers": ladder,
-           "concepts": concepts, "references": references}
+           "concepts": concepts, "references": references,
+           "careful": careful}
+
+
+def _bound_ends(bound) -> "tuple[float, float] | None":
+    """A domain bound's `(lo, hi)` as floats, +-inf for an unbounded
+    end, or None for a bound that is no set of reals."""
+    from .domain import bound_to_sympy_set
+    try:
+        sset = bound_to_sympy_set(bound)
+        return float(sset.inf), float(sset.sup)
+    except Exception:
+        return None
+
+
+def _careful_lines(fn, facts, root: str, merged_entry: dict,
+                   claims: list) -> list:
+    """Intent:
+        `describe`'s careful lines (`hazards.careful_edges`) read
+        against every domain the function declares and no record has
+        refuted: the signature's domain, and each claim's own domain
+        over it for a claim whose recorded verdict is not a refutation
+        (an unverified claim counts).
+
+    Notes:
+        Installs the project's library claims for `root`, so a covered
+        call's computation rows are known. Best-effort: any failure
+        gives no lines.
+    """
+    from .compendium import install
+    from .hazards import careful_edges
+    from .records import stance
+    from .spec import entry_claims
+    from .types import domain_from_signature
+    if facts is None:
+        return []
+    try:
+        install(root)
+        parent = {p: e for p, b in domain_from_signature(fn).items()
+                  if (e := _bound_ends(b)) is not None}
+        verdicts = {c["name"]: c["verdict"] for c in claims}
+        domains = [parent] if parent else []
+        for c in merged_entry.get("claims") or []:
+            verdict = verdicts.get(c.get("name"))
+            if verdict and stance(verdict) == "refuted":
+                continue
+            try:
+                (cj,) = entry_claims({"claims": [c]})
+            except Exception:
+                continue
+            own = {p: e for p, b in (cj.domain or {}).items()
+                   if (e := _bound_ends(b)) is not None}
+            if own:
+                domains.append({**parent, **own})
+        return careful_edges(fn, facts, domains)
+    except Exception:
+        return []
 
 
 def describe_rows(targets: list[str]) -> list[dict]:

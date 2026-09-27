@@ -30,11 +30,7 @@ def _conjecture_bits():
 
 _EXTREME = 1e10
 
-# how far a float companion reaches along an unbounded direction when the
-# claim declares no `|inf|`: the largest power of ten a float64 holds
-_FLOAT_REACH = 1e308
-
-# the name suffix, and the family, of a derive claim's implementation
+# the name suffix, and the family, of a derive claim's computation
 # companion
 FLOAT_SUFFIX = "[float]"
 FLOAT_FAMILY = "is_numerically_stable"
@@ -71,7 +67,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         for THIS claim: `evaluate(point)` decides the original claim's
         relation at a concrete point by calling the real `fn` (True =
         holds, False = a genuine counterexample, None = can't tell);
-        `probe_finite(point)` returns an implementation-failure detail
+        `probe_finite(point)` returns a computation-failure detail
         (a raise, a NaN, an inf or a deviation past a magnitude-scaled
         tolerance where the relation fails) or None; `admits(point)` is
         in-domain-and-assumption membership; `sample(name, rng)` draws
@@ -85,8 +81,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         `None` when the claim can't be numerically evaluated at all (a
         calculus form d/lim/integrate, or an uncompilable law): the
         caller then marks a disproof uncorroborated and spawns no float
-        companion. An unbounded direction runs to `cap`'s resolved
-        pseudo-infinity range when one is declared, else to `reach`
+        companion. An unbounded direction runs to `cap`, the claim's
+        resolved pseudo-infinity range, when one applies, else to `reach`
         when given (the float companion's large magnitude, sampled
         log-uniformly so moderate magnitudes are visited too), else to
         +-`_EXTREME`. A sequence parameter is evaluable only with
@@ -97,9 +93,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     """
     import math
     from .domain import (_as_int_if_whole, bound_to_sympy_set,
-                         domain_contains, is_missing)
-    from .probing import (ComplexResult, _synth, complex_is_a_raise,
-                          is_complex_value)
+                         domain_contains, is_missing, operational_domain)
+    from .probing import (ComplexResult, _bound_is_complex, _fmt_value, _synth,
+                          complex_is_a_raise, holds_inf, holds_nan,
+                          is_complex_value, same_infinity)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     # the gates verify VALUE claims by calling fn at a point; a
@@ -146,7 +143,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # tagged the same way, since an inf or NaN the law's own arithmetic
     # produced says nothing about the code either
     calls_raised = [None]
-    calls_nonfinite = [False]
+    # the first callee that returned a nan or an infinity for finite,
+    # non-missing arguments, as the witness text ("f returned inf")
+    calls_nonfinite: list = [None]
 
     def _tag(callee, label):
         # a complex result under a real claim counts as a raise too
@@ -161,15 +160,25 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if complex_raises and is_complex_value(out):
                 calls_raised[0] = "a complex result"
                 raise ComplexResult(label, out)
-            if isinstance(out, float) and (out != out
-                                           or abs(out) == float("inf")):
-                calls_nonfinite[0] = True
+            if calls_nonfinite[0] is None and isinstance(out, float) \
+                    and (out != out or abs(out) == float("inf")) \
+                    and _finite_arguments(a, kw):
+                calls_nonfinite[0] = (
+                    f"{label} returned "
+                    f"{'nan' if out != out else '-inf' if out < 0 else 'inf'}")
+            elif calls_nonfinite[0] is None and isinstance(out, complex) \
+                    and (holds_nan(out) or holds_inf(out)) \
+                    and _finite_arguments(a, kw):
+                # a NaN or an infinity in either component is no value
+                calls_nonfinite[0] = (
+                    f"{label} returned nan" if holds_nan(out) else
+                    f"{label} returned {_fmt_value(complex(out))}")
             return out
         return _wrapped
 
     def _reset():
         calls_raised[0] = None
-        calls_nonfinite[0] = False
+        calls_nonfinite[0] = None
 
     base_env = {"f": _tag(fn, "f"), **_SAFE_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
@@ -187,6 +196,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     int_names = {name for name in names
                  if _integer_bound(cj_domain.get(name))
                  or kinds.get(name) in ("int", "bool")}
+    language_names = {name for name in names
+                      if getattr(cj_domain.get(name), "base_type", None) == "L"}
+    # coordinates the claim quantifies over the complex plane: drawn,
+    # cornered and compared as complex values
+    complex_names = {name for name in names
+                     if _bound_is_complex(cj_domain.get(name))}
 
     def _typed(point):
         # a whole-number coordinate of an integer domain is passed as an
@@ -204,12 +219,28 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return lv, rv
 
     def _relation_holds(lv, rv, tol):
-        # inf-aware: two sides that overflow to the SAME infinity are
-        # equal (an identity like sinh(-x) == -sinh(x) still holds at
-        # overflow, both -inf), not a spurious inequality from
-        # abs(inf - inf) = NaN. Native comparison handles inf/-inf;
-        # abs-difference is only for the finite case.
+        # inf-aware: an infinity here is one the law's own arithmetic
+        # produced (a callee's own nan or inf is no value, read before
+        # this: two sides at the same infinity, inf and inf or -inf and
+        # -inf, are one extended-real point and agree; a NaN is the
+        # absence of a value and agrees with nothing, another NaN
+        # included; no value against a value fails). Native comparison handles inf/-inf, never
+        # abs(inf - inf) = NaN; abs-difference is only for the finite
+        # case.
         rel = cj.relation
+        if same_infinity(lv, rv):
+            # one extended-real point: equal, so no strict order
+            return rel in ("==", "~=", "<=", ">=")
+        if isinstance(lv, complex) or isinstance(rv, complex):
+            # over C equality and closeness compare by abs(lv - rv);
+            # ordering has no complex reading
+            finite = not any(holds_inf(v) for v in (lv, rv))
+            close = lv == rv or (finite and abs(lv - rv) <= tol)
+            if rel in ("==", "~="):
+                return close
+            if rel == "!=":
+                return not (lv == rv) if cj.tolerance is None else not close
+            return None
         both_finite = all(abs(v) != float("inf") for v in (lv, rv))
         if rel in ("==", "~="):
             return lv == rv or (both_finite and abs(lv - rv) <= tol)
@@ -238,6 +269,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return (isinstance(v, (int, float)) and not isinstance(v, bool)
                 and v == v)
 
+    def _complex_pair(lv, rv):
+        # two numbers, at least one of them complex
+        return (any(isinstance(v, complex) for v in (lv, rv))
+                and all(isinstance(v, (int, float, complex))
+                        and not isinstance(v, bool) for v in (lv, rv)))
+
     def evaluate(point):
         _reset()
         try:
@@ -248,6 +285,20 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # rule), so it reproduces a disproof; a plumbing raise
             # stays inconclusive
             return False if calls_raised[0] else None
+        if calls_nonfinite[0] is not None:
+            # a nan or an infinity the code returned for finite inputs
+            # is no value: against a value every relation fails. Two
+            # sides overflowing toward the same infinity are one
+            # extended-real point and agree, as equal sides; a NaN is
+            # the absence of a value and agrees with nothing
+            if _same_no_value(lv, rv):
+                return cj.relation in ("==", "~=", "<=", ">=")
+            return False
+        if _complex_pair(lv, rv) and not (holds_nan(lv) or holds_nan(rv)):
+            if (holds_inf(lv) or holds_inf(rv)) and not calls_nonfinite[0]:
+                # an infinity only the law's own arithmetic produced
+                return None
+            return _relation_holds(lv, rv, slack)
         if _real(lv) and _real(rv):
             if (abs(lv) == float("inf") or abs(rv) == float("inf")) \
                     and not calls_nonfinite[0]:
@@ -264,17 +315,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # opaque disproof reproduces), and ordering over non-orderable
         # values proves nothing. A NaN that propagates a missing input
         # is the missing-policy axis's business, inconclusive here; a
-        # NaN computed from non-missing inputs is read as IEEE reads
-        # it: no ordering holds, it equals no number, and two NaN
-        # sides agree, as the probe route's comparison has it
-        nan_sides = [isinstance(v, float) and v != v for v in (lv, rv)]
-        if any(nan_sides):
-            if any(is_missing(v) for v in point.values()):
+        # NaN computed from non-missing inputs, a scalar or an element
+        # of an array or list, is no value and fails every relation,
+        # `!=` included: it agrees with nothing, another NaN included
+        # (P4)
+        if holds_nan(lv) or holds_nan(rv):
+            if any(is_missing(v) or holds_nan(v) for v in point.values()):
                 return None
-            if cj.relation in ("==", "~="):
-                return all(nan_sides)
-            if cj.relation == "!=":
-                return not all(nan_sides)
             return False
         if cj.relation in ("==", "~="):
             try:
@@ -289,7 +336,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return None
 
     def probe_finite(point):
-        # an implementation failure only: a raise from the code, a NaN
+        # a computation failure only: a raise from the code, a NaN
         # or an inf the code returned where the relation then fails, or
         # a deviation past a MAGNITUDE-SCALED tolerance (so a correct
         # large-magnitude identity is not flagged, only catastrophic
@@ -300,17 +347,41 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         try:
             lv, rv = _values(point)
         except Exception:
-            # only a raise from the function under test is an
-            # implementation failure; the law's own plumbing failing
+            # only a raise from the function under test is a
+            # computation failure; the law's own plumbing failing
             # says nothing about the code
             if calls_raised[0]:
-                return f"the implementation raises {calls_raised[0]} here"
+                return f"the computation raises {calls_raised[0]} here"
             return None
-        for v in (lv, rv):
-            if isinstance(v, complex):
+        if calls_nonfinite[0] is not None:
+            # no value at a finite input: an overflow, a pole, a nan.
+            # Two sides at the same infinity are one extended-real
+            # point and agree, as equal sides; a NaN, or an infinity
+            # against a value, is a failure
+            if _same_no_value(lv, rv) and cj.relation in ("==", "~=",
+                                                          "<=", ">="):
                 return None
+            if calls_nonfinite[0].endswith("nan"):
+                return (f"the computation returns NaN here "
+                        f"({calls_nonfinite[0]})")
+            return (f"{calls_nonfinite[0]}, and an infinity for a finite "
+                    f"input is no value")
+        if _complex_pair(lv, rv):
+            # over C: equality and closeness within a magnitude-scaled
+            # tolerance; an infinity or a NaN only the law's own
+            # arithmetic produced says nothing about the code
+            if holds_nan(lv) or holds_nan(rv) or holds_inf(lv) \
+                    or holds_inf(rv) or cj.relation not in ("==", "~=", "!="):
+                return None
+            scaled = slack + 1e-7 * max(abs(lv), abs(rv), 1.0)
+            if _relation_holds(lv, rv, scaled):
+                return None
+            return (f"the relation fails on the executed values "
+                    f"({_fmt_value(complex(lv))} {cj.relation} "
+                    f"{_fmt_value(complex(rv))}), past the magnitude-scaled "
+                    f"tolerance: precision loss")
         if any(isinstance(v, float) and v != v for v in (lv, rv)):
-            return ("the implementation returns NaN here"
+            return ("the computation returns NaN here"
                     if calls_nonfinite[0] else None)
         if not (_real(lv) and _real(rv)):
             return None
@@ -322,7 +393,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         if _relation_holds(lv, rv, scaled):
             return None
         if overflowed:
-            return (f"the implementation overflows to inf here, and the "
+            return (f"the computation overflows to inf here, and the "
                     f"relation fails on the executed values ({lv!r} "
                     f"{cj.relation} {rv!r})")
         return (f"the relation fails on the executed values ({lv!r} "
@@ -354,14 +425,35 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                     cap_hi if math.isinf(hi) else hi)
         return int(round(value)) if name in int_names else value
 
+    # under a pseudo-infinity, a declared unbounded direction samples
+    # out to it and no further
+    sample_domain = (operational_domain(cj_domain, (cap_lo, cap_hi))[0]
+                     if cap is not None else cj_domain)
+
     def sample(name, rng):
         # an unbounded parameter samples within the pseudo-infinity
         # range (or the reach), so a declared range bounds the draws
         # too, not only the corners
-        b = cj_domain.get(name)
+        b = sample_domain.get(name)
         if name in seq_names:
             # a sequence's declared bound is per element
             return _synth("sequence", rng, b)
+        if name in complex_names:
+            # both components, each inside the pseudo-infinity range
+            # when one applies
+            b = cj_domain.get(name)
+            if isinstance(b, tuple):
+                c1, c2 = complex(b[0]), complex(b[1])
+                z = complex(rng.uniform(min(c1.real, c2.real),
+                                        max(c1.real, c2.real)),
+                            rng.uniform(min(c1.imag, c2.imag),
+                                        max(c1.imag, c2.imag)))
+            else:
+                z = complex(_synth("complex", rng, b))
+            if cap is None:
+                return z
+            return complex(min(max(z.real, cap_lo), cap_hi),
+                           min(max(z.imag, cap_lo), cap_hi))
         if reach is not None and cap is None:
             ends = (-math.inf, math.inf) if b is None else _ends(b)
             if ends is not None and (math.isinf(ends[0]) or math.isinf(ends[1])):
@@ -386,6 +478,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             bound = cj_domain.get(n)
             v = point.get(n)
             if bound is None or v is None or n in seq_names:
+                continue
+            if n in language_names or isinstance(v, complex):
+                # a language coordinate is judged by its language and a
+                # complex one as a complex value, never coerced to a real
+                if not domain_contains(v, bound):
+                    return False
                 continue
             try:
                 fv = float(v)
@@ -435,16 +533,59 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # a sequence's corner is a short list at the per-element edge
         return [value] * 3 if name in seq_names else value
 
-    edges = {n: (_endpoint(n, "lo"), _endpoint(n, "hi")) for n in names}
+    def _language_edges(name):
+        # a language coordinate has no numeric ends: its corners are the
+        # language's own hazard values, the empty string and the long
+        # one where the language has them, else two sampled members
+        from .domain import LanguageRef
+        from .languages import resolve_language
+        values: list = []
+        for piece in cj_domain[name].pieces:
+            if isinstance(piece, LanguageRef):
+                values.extend(resolve_language(piece).hazards())
+        by_kind = {h.kind: h.value for h in values}
+        first = by_kind.get("empty", values[0].value if values else None)
+        last = by_kind.get("length", values[-1].value if values else None)
+        if first is None or last is None:
+            import random as _random
+            drawn = sample(name, _random.Random(0))
+            first = drawn if first is None else first
+            last = drawn if last is None else last
+        return first, last
+
+    def _complex_corners(name):
+        # a rectangle's four corners, else the plane's far points on
+        # both axes (+-R, +-R*1j at the cap or reach), an excluded
+        # point left out
+        bound = cj_domain.get(name)
+        pieces = (getattr(bound, "pieces", None) or
+                  ((bound,) if isinstance(bound, tuple) else ()))
+        rect = next((p for p in pieces if isinstance(p, tuple)
+                     and any(isinstance(v, complex) for v in p)), None)
+        if rect is not None:
+            c1, c2 = complex(rect[0]), complex(rect[1])
+            points = [complex(re, im) for re in (c1.real, c2.real)
+                      for im in (c1.imag, c2.imag)]
+        else:
+            r = max(abs(cap_lo), abs(cap_hi))
+            points = [complex(-r, 0.0), complex(r, 0.0),
+                      complex(0.0, -r), complex(0.0, r)]
+        kept = [z for z in dict.fromkeys(points)
+                if bound is None or domain_contains(z, bound)]
+        return kept or points[:1]
+
+    edges = {n: (list(_language_edges(n)) if n in language_names else
+                 _complex_corners(n) if n in complex_names else
+                 [_endpoint(n, "lo"), _endpoint(n, "hi")]) for n in names}
     if len(names) <= 6:
-        # every corner of the box: 2^k points for k coordinates
+        # every corner of the box: 2^k points for k real coordinates
+        # (four per complex coordinate)
         import itertools
-        corners = [{n: _corner_value(n, e[i]) for n, e, i in
-                    zip(names, (edges[n] for n in names), choice)}
-                   for choice in itertools.product((0, 1), repeat=len(names))]
+        corners = [{n: _corner_value(n, v) for n, v in zip(names, choice)}
+                   for choice in itertools.product(*(edges[n] for n in names))]
     else:
-        corners = [{n: _corner_value(n, edges[n][i]) for n in names}
-                   for i in (0, 1)]
+        corners = [{n: _corner_value(n, edges[n][min(i, len(edges[n]) - 1)])
+                    for n in names} for i in (0, 1)]
 
     # this dict is the point-runtime kit; `interfaces.runtime` states
     # its contract (and the narrower obligation of a foreign runner
@@ -703,52 +844,97 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
     return falsified
 
 
-def companion_name(parent_name: str) -> str:
-    """The name of a claim's float companion: `<parent name>[float]`."""
-    return f"{parent_name}{FLOAT_SUFFIX}"
+def companion_name(parent_name: str, descriptor: str = "float") -> str:
+    """The name of a claim's computation companion: `<parent
+    name>[float]`, or `<parent name>[complex]` for a claim over C."""
+    return f"{parent_name}[{descriptor}]"
 
 
-def _reach_text(names, cj_domain, cap, reach) -> str:
+def companion_carrier(cj_domain: "dict | None") -> tuple:
+    """Intent:
+        The carrier a claim's companion computes in, as `(descriptor,
+        representation, carrier name)`: complex128 (`("complex",
+        PY_COMPLEX128, "complex128")`) when the claim's domain binds a
+        coordinate in C, else float64 (`("float", PY_FLOAT64,
+        "float64")`).
+    """
+    from .probing import _bound_is_complex
+    from .representations import PY_COMPLEX128, PY_FLOAT64
+    if any(_bound_is_complex(b) for b in (cj_domain or {}).values()):
+        return "complex", PY_COMPLEX128, "complex128"
+    return "float", PY_FLOAT64, "float64"
+
+
+def companion_descriptor(name: str) -> tuple[str, ...]:
+    """The computation descriptor a companion's name carries in its
+    last bracket, one entry per comma-separated item: `law[float]`
+    gives `("float",)`, and a descriptor naming more of the computation
+    (`law[float, cpython3.12]`) gives each part. A name with no
+    trailing bracket gives `()`.
+
+    Only a companion row's name holds a descriptor; whether a row is a
+    companion is read from its meta (`mathema.companion_of`), since a
+    parameter target (`is_overflow_safe[x]`) or a conjunct index has
+    the same shape.
+    """
+    if not name.endswith("]") or "[" not in name:
+        return ()
+    inside = name[name.rindex("[") + 1:-1]
+    return tuple(part.strip() for part in inside.split(",") if part.strip())
+
+
+def _reach_text(names, cj_domain, resolved, reach) -> str:
     """Intent:
         How far the float companion ran along the claim's unbounded
         directions, in words, or an empty string when every coordinate
-        is bounded.
+        is bounded (P8). `resolved` is the claim's resolved
+        pseudo-infinity, stated as its `let` binding; without one the
+        directions ran to the carrier's reach.
     """
-    import math
-    from .domain import bound_to_sympy_set
-    unbounded = []
-    for n in names:
-        b = cj_domain.get(n)
-        if b is None:
-            unbounded.append(n)
-            continue
-        try:
-            lo, hi = ((float(b[0]), float(b[1])) if isinstance(b, tuple) else
-                      (float(bound_to_sympy_set(b).inf),
-                       float(bound_to_sympy_set(b).sup)))
-        except Exception:
-            continue
-        if math.isinf(lo) or math.isinf(hi):
-            unbounded.append(n)
+    from .domain import unbounded_directions
+    unbounded = unbounded_directions(names, cj_domain)
     if not unbounded:
         return ""
     who = ", ".join(unbounded)
-    if cap is not None:
-        return f"unbounded directions ({who}) run to the declared |inf|"
+    if resolved is not None:
+        return f"unbounded directions ({who}) run to {resolved.render()}"
     return (f"unbounded directions ({who}) run to magnitude "
-            f"{reach[1]:.0e}, sampled log-uniformly (no |inf| declared)")
+            f"{reach[1]:g}, sampled log-uniformly (no |inf| declared)")
+
+
+def _same_no_value(lv, rv) -> bool:
+    """Intent:
+        Whether two sides that have no value agree: only when both are
+        the same infinity (`probing.same_infinity`), one extended-real
+        point. A NaN never agrees, not even with another NaN, and an
+        infinity never agrees with a value or the opposite infinity.
+    """
+    from .probing import same_infinity
+    return same_infinity(lv, rv)
+
+
+def _finite_arguments(args, kwargs) -> bool:
+    """Whether every argument of a call is a finite, non-missing value
+    (a number, or a list or tuple of them); a non-numeric argument
+    counts as finite."""
+    from .domain import is_missing
+    from .probing import holds_inf, holds_nan
+    return not any(is_missing(v) or holds_nan(v) or holds_inf(v)
+                   for v in (*args, *kwargs.values()))
 
 
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      assum=(), budget=None) -> "Probe | None":
     """Intent:
-        The implementation claim a derive proof spawns. `parent` is
+        The computation claim a derive proof spawns. `parent` is
         proven in exact arithmetic, which is all a derive `proven`
         says; the companion `<name>[float]` is the same relation
         executed against the REAL code in float: at every corner of
         the declared domain and at sampled interior points, unbounded
-        directions running to the claim's `pseudo_infinity` when one is
-        declared and to a large magnitude (1e308, sampled log-uniformly)
+        directions running to the claim's resolved pseudo-infinity
+        (`records.operational_range`: claim, function level or
+        `MATHEMA_PSEUDO_INFINITY`) when one applies and to the carrier's
+        maximum (`_sampling.carrier_reach`, sampled log-uniformly)
         otherwise. A raise, a NaN, or an inf or a precision loss where
         the relation fails on the executed values falsifies it with
         that point as the witness; otherwise it holds, over the points
@@ -766,17 +952,21 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         corroboration budget of interior points.
     """
     from . import corroboration as C
+    from ._sampling import carrier_reach
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    cap = getattr(cj, "pseudo_infinity", None)
+    from .records import operational_infinity, operational_range
+    resolved = operational_infinity(cj)
+    cap = operational_range(cj)
+    descriptor, carrier, carrier_word = companion_carrier(cj_domain)
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
-                            cap=cap, reach=_FLOAT_REACH, sequences=True)
+                            cap=cap, reach=carrier.max_magnitude,
+                            sequences=True)
     if deps is None:
         return None
-    from .records import pseudo_infinity_range
-    name = companion_name(parent.name)
-    reach = (pseudo_infinity_range(cap) if cap is not None
-             else (-_FLOAT_REACH, _FLOAT_REACH))
-    reach_text = _reach_text(deps["names"], cj_domain, cap, reach)
+    name = companion_name(parent.name, descriptor)
+    top = float(carrier.max_magnitude or carrier_reach())
+    reach = cap if cap is not None else (-top, top)
+    reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
     interior = (C._CORROBORATION_BUDGET if budget is None
                 else max(0, int(budget) - len(deps["corners"])))
     progress = C.StabilitySweep()
@@ -794,12 +984,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         return Probe(
             name, parent.statement, "unknown", route="probe",
             n=progress.checked,
-            note=f"the implementation of {parent.name}, executed in float; "
+            note=f"the computation of {parent.name} in {carrier_word}; "
                  f"the sweep hit the {FAST_TIMEOUT_SECONDS}s wall-clock cap"
                  + (f" executing {at}" if at else "")
                  + (f"; {reach_text}" if reach_text else ""),
             meta={"mathema.timeout": "fast"})
-    what = (f"the implementation of {parent.name}, executed in float at "
+    what = (f"the computation of {parent.name} in {carrier_word}, executed at "
             f"{sweep.checked} points (every domain corner, then sampled "
             f"interior points)"
             + (f"; {reach_text}" if reach_text else ""))
@@ -809,19 +999,24 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                   + ("" if not reach_text else
                      "lower the |inf| binding, " if cap is not None else
                      "declare an |inf| for the unbounded directions, ")
-                  + "fix the implementation, or state the claim with "
+                  + "fix the code, or state the claim with "
                     "route derive:math_only")
+        # a covered call's computation region, when the compendium
+        # states one and the failing point lies outside it
+        from .compendium import computation_diagnosis
+        covered = computation_diagnosis(fn, facts, sweep.fragile_point)
         return Probe(
             name, parent.statement, "falsified", route="probe",
             n=sweep.checked, counterexample=pt, note=what,
-            sketch=f"{parent.name} is proven in exact arithmetic, but the "
-                   f"implementation fails it at {pt}: {sweep.detail}; "
-                   f"{remedy}",
+            sketch=f"{parent.name} is mathematically proven, but its "
+                   f"computation fails at {pt}: {sweep.detail}; "
+                   + (f"{covered}; " if covered else "")
+                   + f"{remedy}",
             # the proof that coexists with the executed break is the
             # evidence that the mathematics is sound and the code is not
             stratum={"mathematics": "sound", "blame": "implementation",
                      "cause": "implementation:numerical-instability",
-                     "representation": "f64", "witness": pt})
+                     "representation": carrier.tag, "witness": pt})
     if sweep.checked == 0:
         return Probe(name, parent.statement, "skipped", route="probe",
                      note=f"{what}; no in-domain point satisfied the "

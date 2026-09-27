@@ -13,10 +13,7 @@ def portfolio_variance(w, s1, s2, rho):
 
 
 def _verdict(fn, law):
-    # an operational infinity keeps float overflow at huge |w| out of
-    # the unbounded weight direction these certificates are about
-    return check_conjectures(fn, [claim(law, route="derive",
-                                        pseudo_infinity=1e100)])[0]
+    return check_conjectures(fn, [claim(law, route="derive")])[0]
 
 
 def test_second_derivative_positive_definite_form_proves():

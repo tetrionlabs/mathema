@@ -28,8 +28,8 @@ print(mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (-10, 10)}))
 
 The `domain=` states a plausible range for the data and the smoothing
 factor. Without one, every claim ranges over all of the reals, out to the
-largest double, and a float implementation overflows long before it gets
-there (see [operational infinity](grammar.md#operational-infinity-let-inf-be)).
+largest double, and the computation in float64 overflows long before it
+gets there (see [operational infinity](grammar.md#operational-infinity-let-inf-be)).
 With no `claims=` argument, mathema still runs the probes every
 function gets (`is_deterministic`, `is_state_safe`,
 `is_numerically_stable`, `is_representation_safe`), plus whichever
@@ -43,26 +43,26 @@ scalar parameter. This is the real, unedited result:
 ```text
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
-           counterexample alpha=-5.44324 -> -504886.9526187774, alpha=9.99998 -> -2491045.924006212 (not increasing)
+           counterexample alpha=-5.44324 -> -504886.9526187774, alpha=10 -> -2491080.279764588 (not increasing)
   FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
-           counterexample alpha=3.09918 -> 43.62072599569275, alpha=10 -> 21771.614551164577 (not decreasing)
+           counterexample alpha=-8.34575 -> 1100.270649780719, alpha=10 -> 1138.3250235869998 (not decreasing)
   FALSIFY affine[alpha]: d(f(x, alpha), alpha, alpha) = 0
-           counterexample alpha=3.53765, h=0.02: curvature estimate 3.12726 does not settle affine
+           counterexample alpha=8.52571, h=0.02: curvature estimate 3.64706e+06 does not settle affine
   FALSIFY convex[alpha]: d(f(x, alpha), alpha, alpha) >= 0
-           counterexample alpha=8.52571, h=0.02: curvature estimate -221.981 does not settle convex
+           counterexample alpha=1.55438, h=0.02: curvature estimate -49.227 does not settle convex
   FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
-           counterexample alpha=-0.594668, h=0.02: curvature estimate 1222.99 does not settle concave
+           counterexample alpha=7.32889, h=0.02: curvature estimate 4463.56 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=192)
   holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=20)
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([0, 902023, 21859.3, 865038, -999998, 740637, -77557.7, 946318], -8.89934): -999998.0 vs -7639061686900.594
+           counterexample ([-1e+06, 743857, -1e+06, -640264], -0.0903704): -1000000.0 vs -1219873.1423334838
   FALSIFY bounded_upper: f(x, alpha) <= max(x)
-           counterexample ([103173, 1e+06, -993405, -514945, 606668, -999998], 6.56264): 6722876822.250346 vs 1000000.0
+           counterexample ([-18798, -1e+06, 614127, -980079, 539619], -3.76273): 359952260.7389567 vs 614127.441618376
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([519138, 999998, 1e+06, 0, 917863, 745687, -818085], 10): -248319487748.5595 vs -814138493405.3986
+           counterexample ([0, -233862, -563795, -582346, 312626], 9.38242): 969404644.5167232 vs 4408328610.953807
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
   holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)
@@ -76,7 +76,7 @@ a thing you can paste into a REPL rather than a claim to take on faith.
 Two of these are genuinely informative rather than noise. The bounds
 fail because nothing here constrains `alpha` to `[0, 1]`, and outside
 that range `ema` is not a weighted average at all, which the sampler
-demonstrates at `alpha=-8.9`. `permutation_invariant` fails because
+demonstrates at `alpha=-3.8`. `permutation_invariant` fails because
 `ema` is order-sensitive by design, which is what "exponentially
 weighted" means. mathema does not know that is intentional, so it
 reports the counterexample and lets a reader judge it.
@@ -98,7 +98,7 @@ statement about the code, so it has none. That `[float]` row is the law's
 float companion, a separate claim that runs the same law through the
 real code in floating point, at the domain's corners and at sampled
 points inside it. Both hold here. Drop the `domain=` and they do not:
-the corners then sit near `1e+308`, where `alpha * v` overflows to
+the corners then sit at float64's maximum, about `1.8e+308`, where `alpha * v` overflows to
 infinity and the next step of the loop gives `nan`, so each companion is
 falsified with that point as its witness, tagged `[mathematics sound,
 implementation:numerical-instability]`, while the proofs stand. A claim
@@ -121,7 +121,7 @@ the picture, not just the wording (an excerpt, from the bounds on):
   proven  bounded_upper: f(x, alpha) ≤ max(x)
   holds   bounded_upper[float]: f(x, alpha) <= max(x) (n=44)
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([-673463, -60729.5, -94289.3, -931377, 0, 1e+06], 0.267296): -23166.535816151183 vs -92190.67916852141
+           counterexample ([695629, -872086, 877239, -920417, 645545, -723837], 0.473872): -245875.01695061612 vs 158020.8572389645
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ ∪ {∅}
   holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)
@@ -205,7 +205,7 @@ still not liftable, and probe stays the only route for them.
 
 The third row is the proof's float companion, as in step 1. With
 `alpha` fixed at `1.0` the loop only copies elements, nothing overflows,
-and it holds at all 44 points it ran, including elements near `1e+308`.
+and it holds at all 44 points it ran, including elements at float64's maximum.
 
 ## Step 4: keep the record
 
@@ -217,7 +217,7 @@ print(open(".mathema/verified/ema.yaml").read())
 
 runs step 3's check again and writes the results to
 `.mathema/verified/ema.yaml`, the durable record a **provable codebase**
-keeps instead of trusting the implementation alone (trimmed):
+keeps instead of trusting the code alone (trimmed):
 
 <!-- example: ema output match=subset -->
 ```yaml
@@ -251,7 +251,7 @@ ema:
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
       n: 44
-      note: "the implementation of collapses_derived, executed in float at 44 points (every domain corner, then sampled interior points); unbounded directions (x) run to magnitude 1e+308, sampled log-uniformly (no |inf| declared)"
+      note: "the computation of collapses_derived in float64, executed at 44 points (every domain corner, then sampled interior points); unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
       route: "probe"
     - name: "collapses_probed"
       statement: "f(x, 1.0) = x[-1]"
@@ -283,7 +283,7 @@ ema:
       claim: "instantiates: summation, folded-sum"
       basis: "deterministic concept tagging"
   lineage:
-    generated_by: "mathema 0.6.0"
+    generated_by: "mathema 0.6.1"
     CDD_spec_version: "0.2.0"
 ```
 

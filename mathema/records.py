@@ -44,6 +44,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from ._float_text import exact_float_text
 from .routes import examine_predicates
 
 
@@ -169,7 +170,7 @@ _SOURCE_VOCAB = {"mathema": "suggested", "docstring": "docstring",
                  # the Conjecture default: a claim passed at the call
                  # site, mapped deliberately rather than falling through
                  "user": "ad_hoc",
-                 # a compendium row materialised into the store
+                 # a row from a compendium claims file
                  "compendium": "compendium"}
 
 
@@ -279,6 +280,107 @@ def pseudo_infinity_range(value) -> tuple[float, float] | None:
     if isinstance(value, (tuple, list)):
         return float(value[0]), float(value[1])
     return -float(value), float(value)
+
+
+# the environment variable naming the project-level pseudo-infinity
+PSEUDO_INFINITY_ENV = "MATHEMA_PSEUDO_INFINITY"
+# below this magnitude a project-level value is loud: overflow of a
+# float64 computation beyond it is never exercised
+PSEUDO_INFINITY_WARN_BELOW = 1e100
+
+
+@dataclass(frozen=True)
+class PseudoInfinity:
+    """The operational infinity that applies to one claim's
+    computation (P6): the magnitude `value` and the level it came
+    from, `source`, one of `claim` (`let |inf| be`), `function` (the
+    claims-file entry's `pseudo_infinity:`, or `check(fn,
+    pseudo_infinity=)`) or `environment` (`MATHEMA_PSEUDO_INFINITY`).
+    """
+    value: float
+    source: str
+
+    def magnitude(self) -> float:
+        """The upper end of the operational range."""
+        return pseudo_infinity_range(self.value)[1]
+
+    def render(self) -> str:
+        """The binding as the claim grammar spells it: `let |inf| be
+        1e+100`. The level it came from is in `meta()`."""
+        value = self.magnitude()
+        return f"let |inf| be {exact_float_text(value, f'{value:g}')}"
+
+    def meta(self) -> dict:
+        """The record's `mathema.pseudo_infinity` value."""
+        return {"value": self.magnitude(), "source": self.source}
+
+
+def _checked_magnitude(value) -> float:
+    """Intent:
+        A pseudo-infinity stated outside claim text (a function-level
+        value, the environment) read exactly as the claim grammar reads
+        `let |inf| be <value>`.
+
+    Raises:
+        InvalidDomain: the same refusal a bad `let |inf| be` gets.
+    """
+    from .grammar import _parse_pseudo_infinity
+    return _parse_pseudo_infinity("bars", str(value))
+
+
+def environment_pseudo_infinity() -> "float | None":
+    """Intent:
+        The project-level pseudo-infinity, `MATHEMA_PSEUDO_INFINITY`,
+        read at call time; None when unset or empty.
+
+    Raises:
+        InvalidDomain: a value `let |inf| be` would refuse.
+    """
+    import os
+    raw = os.environ.get(PSEUDO_INFINITY_ENV, "").strip()
+    return _checked_magnitude(raw) if raw else None
+
+
+def resolve_pseudo_infinity(claim_value,
+                            function_value) -> "PseudoInfinity | None":
+    """Intent:
+        The pseudo-infinity that applies to a claim's computation, by
+        precedence claim > function > environment (P6). None means no
+        level set one: the computation runs to the carrier's own
+        maximum (`sys.float_info.max` for float64) and every consumer
+        keeps its default.
+
+    Raises:
+        InvalidDomain: a function-level or environment value `let
+            |inf| be` would refuse.
+    """
+    if claim_value is not None:
+        return PseudoInfinity(claim_value, "claim")
+    if function_value is not None:
+        return PseudoInfinity(_checked_magnitude(function_value), "function")
+    env = environment_pseudo_infinity()
+    if env is not None:
+        return PseudoInfinity(env, "environment")
+    return None
+
+
+def operational_infinity(cj) -> "PseudoInfinity | None":
+    """The pseudo-infinity a claim's computation runs to, with its
+    source: the one adjudication resolved onto the claim, else the
+    claim's own `let |inf| be`, else None (the carrier's maximum)."""
+    resolved = getattr(cj, "resolved_pseudo_infinity", None)
+    if resolved is not None:
+        return resolved
+    value = getattr(cj, "pseudo_infinity", None)
+    return PseudoInfinity(value, "claim") if value is not None else None
+
+
+def operational_range(cj) -> tuple[float, float] | None:
+    """The (lo, hi) range a claim's computation runs to along an
+    unbounded direction (`operational_infinity`), or None for the
+    carrier's maximum."""
+    found = operational_infinity(cj)
+    return pseudo_infinity_range(found.value) if found is not None else None
 
 
 def statement_text(relation: str, lhs: str, rhs: str | None) -> str:

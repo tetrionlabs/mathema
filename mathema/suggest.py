@@ -538,7 +538,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
             # a region claim() can't state simply isn't suggested
             pass
 
-    # The implementation-safety predicates, gated per registered
+    # The computation-safety predicates, gated per registered
     # family: each SafetyFamily names the parameters it is
     # structurally relevant for (is_builtin_safe only where the body
     # passes the parameter to a restricted-domain builtin,

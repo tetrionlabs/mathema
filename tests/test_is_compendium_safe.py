@@ -30,21 +30,42 @@ def test_the_numpy_compendium_covers_the_expected_surface():
     from mathema.compendium import compendium_functions
     numpy = {k: v for k, v in compendium_functions().items()
              if k.startswith("numpy.")}
+
+    def defined_on(key):
+        return [c["statement"] for c in numpy[key].get("claims") or []
+                if c["name"] == "is_defined"]
+
+    def overflow_safe_on(key):
+        return [c["statement"] for c in numpy[key].get("claims") or []
+                if c["name"] == "is_overflow_safe"]
+
     # expanded coverage across the hazard categories (domain nan,
     # overflow, division, reductions, bounds)
     assert len(numpy) >= 25
-    # domain-nan functions carry precise single-variable nan_when regions
-    assert numpy["numpy.sqrt"].nan_when == ("x < 0",)
-    assert numpy["numpy.arcsin"].nan_when == ("abs(x) > 1",)
-    assert numpy["numpy.log1p"].nan_when == ("x < -1",)
-    assert numpy["numpy.arccosh"].nan_when == ("x < 1",)
+    # domain-nan functions state the region where they return a value
+    assert defined_on("numpy.sqrt") == ["x >= 0"]
+    assert defined_on("numpy.arcsin") == ["-1 <= x <= 1"]
+    assert defined_on("numpy.log1p") == ["x > -1"]
+    assert defined_on("numpy.arccosh") == ["x >= 1"]
+    assert defined_on("numpy.arctanh") == ["-1 < x < 1"]
     # overflow / division functions are covered (caught empirically)
     assert {"numpy.exp", "numpy.divide", "numpy.reciprocal"} <= set(numpy)
-    # reductions carry the empty-input region
-    assert numpy["numpy.mean"].nan_when == ("len(a) == 0",)
+    # the exponentials are mathematically total (a bare is_defined) and
+    # overflow-safe only below their threshold, an inf past it: the
+    # threshold is a computation fact, stated by an is_overflow_safe row
+    assert overflow_safe_on("numpy.exp") == ["x <= 709.782712893384"]
+    assert overflow_safe_on("numpy.expm1") == ["x <= 709.782712893384"]
+    assert overflow_safe_on("numpy.exp2") == ["x < 1024"]
+    assert overflow_safe_on("numpy.cosh") == ["-710.475860073944 < x < 710.475860073944"]
+    assert overflow_safe_on("numpy.sinh") == ["-710.475860073944 < x < 710.475860073944"]
+    for key in ("numpy.exp", "numpy.expm1", "numpy.exp2", "numpy.cosh",
+                "numpy.sinh"):
+        assert defined_on(key) == ["is_defined(f)"], key
+    # reductions are defined on a non-empty array only
+    assert defined_on("numpy.mean") == ["dim(a) >= 1"]
     # bounds carry claims, not hazards
-    assert len(numpy["numpy.clip"].claims) == 2
-    assert numpy["numpy.tanh"].claims
+    assert len(numpy["numpy.clip"]["claims"]) == 2
+    assert numpy["numpy.tanh"]["claims"]
 
 
 def test_unguarded_numpy_nan_falsifies_with_a_finite_witness(tmp_path):
@@ -114,3 +135,31 @@ def test_a_bound_supersedes_the_compendium_falsification():
     bounded = _v(unguarded_arcsin,
                  "for x in [-1, 1], is_compendium_safe(numpy)")
     assert bounded.verdict == "holds"
+
+
+def test_a_raise_inside_the_library_falsifies(tmp_path):
+    # numpy.average raises ZeroDivisionError from its own code when the
+    # weights sum to zero: a failure of the covered call, not a guard
+    pytest.importorskip("numpy")
+    mod = _load(tmp_path, '''
+        import numpy as np
+        def weighted(x: float) -> float:
+            """Average of 1 and 2, weighted by x and -x."""
+            return float(np.average([1.0, 2.0], weights=[x, -x]))
+    ''', name="raising_lib")
+    pr = _v(mod.weighted, "for x in [1, 2], is_compendium_safe(numpy)")
+    assert pr.verdict == "falsified"
+    assert "raised ZeroDivisionError inside numpy" in pr.counterexample
+
+
+def test_the_callers_own_guard_is_not_a_library_failure(tmp_path):
+    pytest.importorskip("numpy")
+    mod = _load(tmp_path, '''
+        import numpy as np
+        def to_angle(x: float) -> float:
+            """Angle whose sine is x, refusing out-of-range input."""
+            if abs(x) > 1:
+                raise ValueError("x must lie in [-1, 1]")
+            return float(np.arcsin(x))
+    ''', name="guarded_lib")
+    assert _v(mod.to_angle, "is_compendium_safe(numpy)").verdict == "holds"

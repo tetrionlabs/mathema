@@ -73,8 +73,8 @@ expression in which both Gaussian terms cancel and `sigma` disappears,
 establishing the identity for the whole region at once. The second row is
 that proof's `[float]` companion, a separate claim that runs the same identity
 through the real code in floating point at the region's corners and across its
-interior, because a proof is about the mathematics and whether the
-implementation keeps up with it in f64 is a different question, answered here
+interior, because a proof is about the mathematics and whether its
+computation keeps up with it in float64 is a different question, answered here
 by `holds`. The [claim grammar](https://mathema.tetrionlabs.com/grammar/) has
 the full notation.
 
@@ -108,9 +108,10 @@ The same distinction reaches claims no amount of test-running could establish.
 Four defining properties of the logistic function include a limit at infinity and an
 improper integral over the whole real line, and all four come back proven, with a
 fifth row for the symmetry identity's `[float]` companion (the calculus claims
-spawn none, having no point to execute). The two identities carry a range
-because this code overflows below about `x = -709.78`, and stated over the
-whole line mathema falsifies them there:
+spawn none, having no point to execute). The two identities carry a range for
+the sake of that companion rather than the proof: stated over the whole line
+both are still proven, and the companion is falsified instead where this code
+overflows, below about `x = -709.78`:
 
 <!-- example: sigmoid file=sigmoid.py -->
 ```python
@@ -172,7 +173,7 @@ sampling lands exactly on `x == 1` with probability zero, so a property-based
 run can pass a thousand trials here and report nothing, whereas mathema solves
 the lifted expression for where the denominator vanishes and makes sure that
 point is tried. Every falsification rests on an executed witness, never on a
-symbolic argument alone, and the bracketed tag marks an implementation that
+symbolic argument alone, and the bracketed tag marks a computation that
 fell over (the integer `1` raising where the domain admits it). `is_defined`
 reads the other way round: it states the region on which `f` returns, and
 `1 - x != 0` is exactly that region.
@@ -333,7 +334,7 @@ shifts the result the same way, with the `[float]` companions of those proofs
 holding across the stated domain, and it finds that reordering `x` does *not*
 leave the result unchanged, with the counterexample kept. Leave the domain out
 and every claim ranges over all of the reals, where the companions report the
-overflow at `1e+308` instead. The
+overflow at float64's maximum instead. The
 [API reference](https://mathema.tetrionlabs.com/api/) has the rest.
 
 ## CI
@@ -373,8 +374,9 @@ pip install "mathema[all]"    # numpy, z3, MCP server, coverage
 
 The extras can also be taken one at a time: `mcp` exposes mathema's tools to
 an agent, `smt` adds z3 as a fallback decision procedure, `numpy` enables
-array-shaped claims, `coverage` reads a native `.coverage` report and
-`symbology` adds conventional notation.
+array-shaped claims, `coverage` reads a native `.coverage` report,
+`symbology` adds conventional notation and `language` brings the named
+languages a claim quantifies text and structured values over.
 
 ## Documentation
 
@@ -394,7 +396,7 @@ array-shaped claims, `coverage` reads a native `.coverage` report and
 The full documentation, including the command reference, is at
 **[mathema.tetrionlabs.com](https://mathema.tetrionlabs.com)**.
 
-mathema is at 0.6.0 and pre-1.0, feature-complete for its current scope and
+mathema is at 0.6.1 and pre-1.0, feature-complete for its current scope and
 covered by over 3,500 tests; the claim grammar and record format are settled by
 the spec, but the Python API is likely to change before 1.0.
 
@@ -407,7 +409,9 @@ families and the YAML record schema), maintained independently under
 that reads or writes that shape interoperates with mathema's records without
 importing it. `mathema.SPEC_VERSION` states the targeted version and every
 record stamps it. [mathema-symbology](https://github.com/aaronbyrnephd/mathema-symbology)
-renders claims in a field's conventional notation, and
+renders claims in a field's conventional notation,
+[mathema-language](https://github.com/tetrionlabs/mathema-language) provides
+the languages behind `L[...]` (alphabets, predicate languages, schemas), and
 [mathema-agents](https://github.com/tetrionlabs/mathema-agents) teaches coding
 agents to drive the claim loop properly, vendored by an explicit, opt-in
 `mathema init --agents`.

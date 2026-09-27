@@ -47,6 +47,11 @@ extra_css:
   - stylesheets/tokens.css
   - stylesheets/extra.css
 
+# the mathema-language package's reference, under /language/reference/,
+# when its docs are present at build time (see the hook's docstring)
+hooks:
+  - docs_hooks/language_reference.py
+
 markdown_extensions:
   - admonition
   - pymdownx.details
@@ -131,10 +136,12 @@ nav:
       - Conditional claims: conditional-claims.md
       - Lemmas: lemmas.md
       - Matrix structure and linear algebra: matrix-structure.md
+      - Language domains: language.md
       - Multi-function claims: multi-function-claims.md
   - Command reference:
       - mathema check: modes/check.md
       - mathema verify: modes/verify.md
+      - mathema compendium: modes/compendium.md
       - mathema audit: modes/audit.md
       - mathema claims: modes/claims.md
       - mathema accept: modes/accept.md

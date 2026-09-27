@@ -49,12 +49,17 @@ call, before any law runs, from the target function's own structure:
 
 - **Higher**, from a base of 128 up to a max of 256, for a
   structurally riskier function, more branches, more loops, a wider
-  or unbounded declared domain.
+  or unbounded declared domain, or a language domain, which adds 32
+  for every 32 hazards its language brings (up to three steps),
+  whether the language is written in the claim or inferred from an
+  annotation. A language whose hazards still outnumber the budget
+  raises `n` to the number of hazards, so each is tried once, and the
+  record's sampling line says it did.
 - **Lower**, down to 32, only when the derive route can *prove* the
   function is affine (a constant slope in every parameter) *and* the
   declared domain doesn't itself need the extra density, a wide or
-  float-precision-risky domain skips the reduction even for a provably
-  affine function.
+  float-precision-risky domain, or a language, skips the reduction even
+  for a provably affine function.
 
 Every verdict reports the exact `n` it used, plus a
 `meta["mathema.confidence"]` score (1-4 stars, capped below the derive

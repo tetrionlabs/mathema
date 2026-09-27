@@ -59,10 +59,58 @@ from ..spec import save_verified_entry as save_verified_entry
 from ..targets import Target as Target
 from ..targets import TargetError as TargetError
 from ..tiers import unparse_normalized as unparse_normalized
+from ..domain import LanguageRef as LanguageRef
+from ..languages import HAZARD_KINDS as HAZARD_KINDS
+from ..languages import KINDS as KINDS
+from ..languages import LEVELS as LEVELS
+from ..languages import STRING_HAZARDS as STRING_HAZARDS
+from ..languages import HazardValue as HazardValue
+from ..languages import Language as Language
+from ..languages import Problem as Problem
+from ..languages import StringLanguage as StringLanguage
+from ..languages import REFINEMENT_GROUP as REFINEMENT_GROUP
+from ..languages import RefinedLanguage as RefinedLanguage
+from ..languages import UnknownLanguage as UnknownLanguage
+from ..languages import UnknownRefinement as UnknownRefinement
+from ..languages import refinement_keys as refinement_keys
+from ..languages import register_refinement as register_refinement
+from ..languages import unregister_refinement as unregister_refinement
+from ..lexicon import LEXICON_GROUP as LEXICON_GROUP
+from ..lexicon import LexiconSource as LexiconSource
+from ..lexicon import lexicon_source as lexicon_source
+from ..lexicon_checks import lexicon_problems as lexicon_problems
+from ..lexicon_checks import write_lexicon_golden as write_lexicon_golden
+from ..languages import describe_language as describe_language
+from ..languages import language_problems as language_problems
+from ..languages import language_adaptors as language_adaptors
+from ..languages import language_vocabulary as language_vocabulary
+from ..languages import register_language as register_language
+from ..languages import resolve_language as resolve_language
+from ..languages import unregister_language as unregister_language
+from ..claim_families import OutputPredicateFamily as OutputPredicateFamily
+from ..claim_families import SafetyFamily as SafetyFamily
+from ..claim_families import (_call_with_target, _pinned_float_env,
+                              _probe_trials, _synth_other_params)
+from ..symbolic import ProofResult as ProofResult
+from ..probing import _fmt
+from ..probing import sample_bound as sample_bound
+from .._shrink import shrink as shrink
+
 from .runtime import POINT_RUNTIME_PROTOCOL as POINT_RUNTIME_PROTOCOL
 from .runtime import PointRuntime as PointRuntime
 from .runtime import RUNTIME_CAPABILITIES as RUNTIME_CAPABILITIES
 from .runtime import runtime_problems as runtime_problems
+from .._signatures import callable_signature
+
+# the family trial helpers under their surface names: the trial loop a
+# probe half reports through, the call that places the target value,
+# the draw for the other arguments, a point's rendering, and the
+# floating-point regime every hazard trial runs under
+probe_trials = _probe_trials
+call_with_target = _call_with_target
+synth_other_params = _synth_other_params
+format_point = _fmt
+pinned_float_env = _pinned_float_env
 
 EXTENSION_API_VERSION = 1
 
@@ -102,6 +150,27 @@ SURFACE: dict[str, tuple[str, ...]] = {
     # how strongly a positive verdict was reached, for capping derived
     # evidence at the strength it rides on
     "evidence": ("evidence_rank", "SUPPORTED_VERDICTS"),
+    # language domains: the protocol a language satisfies, the kit that
+    # builds one, the registry a package serves, and the hazard corpus
+    # a package lexicon: the group it registers under, the shape it is
+    # read into, and the checks mathema's own lexicon is held to
+    "lexicon": ("LEXICON_GROUP", "LexiconSource", "lexicon_source", "lexicon_problems",
+                "write_lexicon_golden"),
+    "languages": ("Language", "LanguageRef", "StringLanguage", "Problem",
+                  "HazardValue", "KINDS", "LEVELS", "HAZARD_KINDS",
+                  "STRING_HAZARDS", "language_problems",
+                  "register_language", "unregister_language",
+                  "resolve_language", "describe_language",
+                  "language_vocabulary", "UnknownLanguage", "language_adaptors",
+                  "RefinedLanguage", "register_refinement", "unregister_refinement",
+                  "refinement_keys", "UnknownRefinement", "REFINEMENT_GROUP"),
+    # assembling a claim family: the two kits, the proof result a derive
+    # half returns, and the trial loop a probe half reports through
+    "families": ("SafetyFamily", "OutputPredicateFamily", "ProofResult",
+                 "probe_trials", "call_with_target", "synth_other_params",
+                 "format_point", "pinned_float_env"),
+    # drawing a member of any declared bound, and shrinking a witness
+    "sampling": ("sample_bound", "shrink"),
 }
 
 # What core calls on a registered capability provider: the attribute it
@@ -146,7 +215,7 @@ def capability_problems(provider, capability: str) -> list[str]:
         if not keywords:
             continue
         try:
-            params = inspect.signature(target).parameters
+            params = callable_signature(target).parameters
         except (TypeError, ValueError):
             continue
         if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):

@@ -15,6 +15,7 @@
 [x] docs/case-studies.md:sigmoid-limit-upper     verdicts
 [x] docs/case-studies.md:sigmoid-limit-lower     verdicts
 [x] docs/case-studies.md:sigmoid-density         verdicts
+[x] docs/case-studies.md:sigmoid-whole-line      run output
 [x] docs/case-studies.md:sigmoid-above-zero      verdicts
 [x] docs/case-studies.md:sigmoid-below-one       verdicts
 [x] docs/case-studies.md:descent                 verdicts
@@ -35,7 +36,7 @@
 [x] docs/derive-route.md:finite-set              run verdicts
 [x] docs/derive-route.md:linspace                run verdicts  (requires)
 [x] docs/evidence-ladder.md:companion            run output
-[ ] docs/extending.md:184
+[ ] docs/extending.md:286
 [x] docs/findings.md:finds                       file run output run run output run output run run output
 [x] docs/findings.md:parity                      file run output
 [x] docs/first-look.md:ema                       run run output run output run output run output run output
@@ -43,6 +44,7 @@
 [x] docs/grammar.md:just-below                   run output
 [x] docs/grammar.md:half-power                   run output
 [x] docs/grammar.md:gauss                        run output
+[x] docs/grammar.md:levels                       file run output
 [x] docs/index.md:midpoint                       file file run output run output file run output
 [x] docs/index.md:audit                          run output
 [x] docs/index.md:lock                           file run output file session
@@ -58,6 +60,7 @@
 [x] docs/modes/audit.md:half                     run repl
 [x] docs/modes/check.md:softmax                  file session file session
 [x] docs/modes/claims.md:adopt                   file session run output
+[x] docs/modes/compendium.md:status              file file run output  (requires)
 [x] docs/modes/describe.md:tutorial              file run output file run session session
 [x] docs/modes/init.md:stubs                     file file session session
 [ ] docs/modes/init.md:119
@@ -66,6 +69,7 @@
 [ ] docs/modes/pin.md:30
 [x] docs/modes/review.md:delta                   file file run output file file run output
 [x] docs/modes/verify.md:sweep                   file run session file session file session file file session session session run file session
+[x] docs/modes/verify.md:eager                   session
 [x] docs/multi-function-claims.md:ratio          run output
 [x] docs/quickstart.md:falsify                   file run output run output run output
 [x] docs/quickstart.md:docstring                 file run output run output
@@ -77,7 +81,7 @@
 [x] README.md:parity                             file run output
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output
-[-] README.md:187
-[-] README.md:285
+[-] README.md:188
+[-] README.md:286
 
-# 67 examples checked, 4 output fences not yet marked
+# 71 examples checked, 4 output fences not yet marked

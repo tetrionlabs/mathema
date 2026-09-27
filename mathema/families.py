@@ -26,6 +26,8 @@ import warnings
 from importlib.metadata import entry_points
 from typing import Callable, Protocol, runtime_checkable
 
+from ._signatures import callable_signature
+
 FAMILY_GROUP = "mathema.claim_families"
 
 
@@ -82,7 +84,7 @@ def call_route(route: Callable, /, *args, **kwargs):
     """
     import inspect
     try:
-        sig = inspect.signature(route)
+        sig = callable_signature(route)
     except (TypeError, ValueError):
         return route(*args, **kwargs)
     params = sig.parameters.values()
@@ -151,6 +153,17 @@ GROUPS: dict[str, tuple[str, ...]] = {
     # or varied on (is_deterministic is one member inside it)
     "stateless": ("is_state_safe", "is_deterministic",
                   "is_reproducible"),
+    # the children of is_computation_safe: the facts about one
+    # implementation that answer "does it run" and "is it right in
+    # float64" (is_memory_safe is reserved and not yet adjudicated;
+    # is_computation_safe itself is the roll-up, declared by name;
+    # repeatability is is_repeatable's, over the stateless cluster)
+    "computation_safe": ("is_overflow_safe", "is_numerically_stable",
+                         "is_representation_safe", "is_extremity_safe",
+                         "is_pole_safe", "is_builtin_safe",
+                         "is_missing_safe", "is_empty_safe",
+                         "is_recursion_safe", "is_arbitrary_input_safe",
+                         "is_compendium_safe"),
 }
 
 # terse spellings (and the spaced forms a claim-text reader would
@@ -161,6 +174,7 @@ KEYWORD_ALIASES: dict[str, str] = {
     "excluding": "excluded_outside_domain",
     "excluded outside domain": "excluded_outside_domain",
     "numerically stable": "stable",
+    "computation safe": "computation_safe",
 }
 
 # one-line meanings, rendered whole in the did-you-mean error so a
@@ -174,12 +188,30 @@ KEYWORD_MEANINGS: dict[str, str] = {
     "stable": "numerical stability across the declared domain",
     "stateless": "no external state written, read, or varied on "
                  "(state safety, determinism, seeded reproducibility)",
+    "computation_safe": "every computation-safety check that applies "
+                        "(overflow, stability, representation, missing, "
+                        "recursion, determinism, state, arbitrary input, "
+                        "covered library calls), each gated on relevance",
 }
 
 
 # the shape a family name must have to contribute a safety predicate;
 # anything else registered is an ordinary (shape- or name-based) family
 _PREDICATE_SHAPE = re.compile(r"is_[a-z0-9][a-z0-9_]*_safe")
+
+
+# the shape a family name must have to contribute an output-contract
+# predicate (`is_sorted_output`, `output_never_none`, `output_in_language`)
+_OUTPUT_SHAPE = re.compile(r"output_[a-z0-9][a-z0-9_]*|is_[a-z0-9][a-z0-9_]*_output")
+
+
+def registered_output_predicates() -> frozenset:
+    """Output-contract predicate names contributed by registered claim
+    families: every family name shaped like `output_<slug>` or
+    `is_<slug>_output`. The registered NAME is the predicate, as for
+    the safety predicates; `routes` unions this with its static table."""
+    return frozenset(name for name in families()
+                     if _OUTPUT_SHAPE.fullmatch(name))
 
 
 def registered_predicates() -> frozenset:
@@ -247,6 +279,15 @@ CLAIM_ASPECTS: dict[str, tuple[str, ...]] = {
 _ASPECT_OF: dict[str, str] = {member: aspect
                               for aspect, members in CLAIM_ASPECTS.items()
                               for member in members}
+
+
+def claim_base_name(claim_name: str) -> str:
+    """Intent:
+        The family part of a claim name: what precedes a pin
+        (`is_defined@axis=0`, a row pinned to a call's arguments) and a
+        bracket (`convex[x]`, `is_defined[2]`, `f_x_ge_0[float]`).
+    """
+    return str(claim_name or "").split("@", 1)[0].split("[", 1)[0]
 
 
 def claim_aspect(claim_name: str) -> tuple[str, str]:

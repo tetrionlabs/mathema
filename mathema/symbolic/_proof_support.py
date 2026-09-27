@@ -1346,7 +1346,7 @@ def _sound_interval_result(result) -> bool:
         Belt and braces beside `_interval_bounds`'s own decline,
         because nothing backstops a wrong PROOF in this class: the
         corroboration gate only re-checks disproofs, and a proof's
-        `[float]` companion tests the implementation rather than the
+        `[float]` companion tests the computation rather than the
         proof, so a wrong proof here reaches the record with nothing to
         catch it.
     """
@@ -1912,6 +1912,12 @@ def _positive_certificate(expr, domain: dict, params: dict,
         if _verified_sign(lo) == 1:
             return (f"{_humanize(expr)} has a strictly positive interval "
                     f"hull over the declared domain")
+
+    if isinstance(expr, sympy.exp) and expr.args[0].is_real is True:
+        # exp of a real number is strictly positive, however far out:
+        # the hull over an unbounded domain reaches 0 only as a limit
+        return (f"{_humanize(expr)} is the exponential of a real "
+                f"argument, strictly positive everywhere")
 
     if isinstance(expr, sympy.Add):
         # note: one strictly positive term plus nonnegative company is

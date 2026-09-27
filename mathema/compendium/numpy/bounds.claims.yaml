@@ -1,0 +1,33 @@
+# Claims about numpy functions with a known, always finite output range.
+# They are bound claims a caller can rest a premise on, and being covered
+# means is_compendium_safe(numpy) sees that a caller uses numpy.
+compendium: numpy
+versions: ">=1.24,<3"
+
+numpy.tanh:
+  claims:
+    - name: tanh_bounded
+      statement: "for x in [-1e6, 1e6], -1 <= f(x) <= 1"
+
+numpy.sin:
+  claims:
+    - name: sin_bounded
+      statement: "for x in [-1e6, 1e6], -1 <= f(x) <= 1"
+
+numpy.cos:
+  claims:
+    - name: cos_bounded
+      statement: "for x in [-1e6, 1e6], -1 <= f(x) <= 1"
+
+numpy.abs:
+  claims:
+    - name: abs_nonneg
+      statement: "for x in [-1e6, 1e6], f(x) >= 0"
+
+numpy.clip:
+  claims:
+    - name: clip_lower
+      statement: "assuming a_min <= a_max, for a in [-1e6, 1e6], a_min <= f(a, a_min, a_max)"
+      note: "Limits a to [a_min, a_max]; reversed bounds (a_min > a_max) are not checked, and the result is a_max."
+    - name: clip_upper
+      statement: "assuming a_min <= a_max, for a in [-1e6, 1e6], f(a, a_min, a_max) <= a_max"

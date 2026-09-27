@@ -39,6 +39,7 @@ from ._proof_support import (
     _prove_relation_case_split, _quantifier_clause,
 )
 from ._sum import try_prove_sum
+from .._signatures import callable_signature
 
 # private aux-dict key carrying {name: Lifted} for a claim's bound
 # auxiliary functions; a dunder so it can never collide with a law's
@@ -984,7 +985,7 @@ def _recurrence_domain_gate(lhs_src: str, rhs_src: str, rec,
         passes to `f` must be provably integer-valued under it, and the
         runtime recursion depth the domain's top demands must fit the
         interpreter's stack: the closed form settles the mathematics,
-        but the implementation still recurses one frame per step, and a
+        but the computation still recurses one frame per step, and a
         call whose depth exceeds `sys.getrecursionlimit()` raises
         RecursionError however true the formula is.
 
@@ -1034,7 +1035,7 @@ def _recurrence_domain_gate(lhs_src: str, rhs_src: str, rec,
             return ProofResult(
                 "undecided",
                 sketch=f"the recurrence closed form settles the mathematics, "
-                       f"but the implementation recurses about one stack "
+                       f"but the computation recurses about one stack "
                        f"frame per index step: at {at} it needs "
                        f"~{'unbounded' if depth is None else int(depth)} "
                        f"frames against an interpreter recursion limit of "
@@ -1385,8 +1386,8 @@ def _witness_candidates(ext_params: dict, domain: dict) -> "tuple | None":
     """Intent:
         Exact candidate witness points over the declared box: the
         midpoint, then the all-low and all-high corners; an unbounded
-        name sits at 1. Returns (points, base) or None when a bound's
-        endpoints can't be read at all.
+        name, or one ranging over C, sits at 1. Returns (points, base)
+        or None when a bound's endpoints can't be read at all.
     """
     from ._proof_support import _exact_endpoint
     from ..domain import bound_to_sympy_set
@@ -1400,6 +1401,10 @@ def _witness_candidates(ext_params: dict, domain: dict) -> "tuple | None":
             continue
         try:
             sset = bound_to_sympy_set(bound)
+            if sset == sympy.S.Complexes:
+                # the plane has no endpoints: like an unbounded name
+                base[sym] = sympy.Integer(1)
+                continue
             lo, hi = _exact_endpoint(sset.inf), _exact_endpoint(sset.sup)
         except TimeoutError:
             raise
@@ -1519,19 +1524,38 @@ def _defined_assumptions(sub_conds: list) -> "tuple[list, list, list]":
     return gaps, nonzero, preds
 
 
+def _returns_no_value(out) -> bool:
+    """Whether a call's result is a nan or an infinity (a scalar, or an
+    array with any non-finite element)."""
+    import math
+    try:
+        return not math.isfinite(complex(out).real) \
+            or not math.isfinite(complex(out).imag)
+    except (TypeError, ValueError, OverflowError):
+        pass
+    try:
+        import numpy as np
+        arr = np.asarray(out, dtype=float)
+        return bool(arr.size) and not bool(np.isfinite(arr).all())
+    except Exception:
+        return False
+
+
 def _witness_corroborated(callable_target, arg_exprs: list,
-                          witness: dict) -> bool:
+                          witness: dict, exc: "str | None" = None) -> bool:
     """Intent:
         True only when the real call, executed at the candidate
         witness point, actually raises, the executed-witness bar a
-        guard disproof must clear. Evaluates each substituted argument
-        expression at the witness numerically; any evaluation failure,
-        or a call that returns a value, refuses corroboration.
+        guard disproof must clear; for a `NO_VALUE` guard, a call that
+        returns a nan or an infinity corroborates too. Evaluates each
+        substituted argument expression at the witness numerically;
+        any evaluation failure, or a call that returns a (finite)
+        value, refuses corroboration.
     """
-    import inspect
+    from ._partiality import NO_VALUE
     try:
         annotations = [prm.annotation for prm in
-                       inspect.signature(callable_target).parameters.values()]
+                       callable_signature(callable_target).parameters.values()]
     except (TypeError, ValueError):
         annotations = []
     vals = []
@@ -1558,13 +1582,16 @@ def _witness_corroborated(callable_target, arg_exprs: list,
             vals.append(float(v.real))
         else:
             vals.append(int(v.real) if float(v.real).is_integer() else v.real)
+    import warnings
     try:
-        callable_target(*vals)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            out = callable_target(*vals)
     except TimeoutError:
         raise
     except Exception:
         return True
-    return False
+    return exc == NO_VALUE and _returns_no_value(out)
 
 
 def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
@@ -1627,6 +1654,10 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
         truth = _relational_truth_over_domain(cond, domain, ext_params)
         if truth is False:
             continue
+        if isinstance(cond, sympy.Eq) and _roots_outside_domain(cond, domain):
+            # every point where the guard holds is excluded from the
+            # domain (`z == 0` over `C \ {0}`)
+            continue
         if assumptions.excludes_guard(cond, domain, ext_params):
             continue
         if isinstance(cond, sympy.Lt):
@@ -1666,7 +1697,7 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             # (the false-falsified family), never a counterexample.
             target = (callables or {}).get(target_name)
             if target is None or not _witness_corroborated(
-                    target, arg_exprs, witness):
+                    target, arg_exprs, witness, exc):
                 uncorroborated = True
                 undecided = True
                 continue
@@ -1676,10 +1707,12 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             where = ", ".join(f"{name} = {_witness_value_text(at_witness[sym])}"
                               for name, sym in ext_params.items()
                               if sym in at_witness)
-            exc_text = exc or "an exception"
+            from ._partiality import NO_VALUE
+            fails = ("has no value" if exc == NO_VALUE
+                     else f"raises {exc or 'an exception'}")
             return ProofResult(
                 "disproven",
-                sketch=f"{call_text} raises {exc_text} inside the declared "
+                sketch=f"{call_text} {fails} inside the declared "
                        f"domain (guard {_cond_text(cond)} holds at {where}), "
                        "so the claim has no value there, narrow the claim's "
                        "domain to where every call returns, or state the "
@@ -2230,8 +2263,8 @@ def _kink_in_domain(loci: list, domain: dict) -> "str | None":
 
 def _roots_outside_domain(locus, domain: dict) -> bool:
     """Whether an equality over a single declared parameter has finitely
-    many real roots, none of them inside that parameter's declared
-    bound."""
+    many roots, none of them inside that parameter's declared bound:
+    its real roots, or over C its complex ones."""
     from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     from ..domain import domain_contains
     if not isinstance(locus, sympy.Eq) or len(locus.free_symbols) != 1:
@@ -2240,10 +2273,13 @@ def _roots_outside_domain(locus, domain: dict) -> bool:
     bound = domain.get(str(sym))
     if bound is None:
         return False
+    from ..probing import _bound_is_complex
+    plane = _bound_is_complex(bound)
     try:
         roots = _with_timeout(
-            lambda: sympy.solveset(locus.lhs - locus.rhs, sym,
-                                   domain=sympy.S.Reals),
+            lambda: sympy.solveset(
+                locus.lhs - locus.rhs, sym,
+                domain=sympy.S.Complexes if plane else sympy.S.Reals),
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
         return False
@@ -2251,8 +2287,15 @@ def _roots_outside_domain(locus, domain: dict) -> bool:
         return False
     if not isinstance(roots, sympy.FiniteSet):
         return False
+
+    def number(r):
+        # a root on the real line as the real number it is, else complex
+        value = complex(r)
+        if value.imag != 0:
+            return value
+        return int(value.real) if value.real.is_integer() else value.real
     try:
-        return not any(domain_contains(float(r), bound) for r in roots)
+        return not any(domain_contains(number(r), bound) for r in roots)
     except Exception:
         return False
 
@@ -2273,13 +2316,15 @@ def _loop_proof_raise_gate(fn, facts, domain, proof: ProofResult) -> ProofResult
         raise
     except Exception:
         return proof
+    from ._partiality import NO_VALUE
     for cond, exc in guards:
         if _cond_truth_over(cond, domain or {}) is True:
             continue
+        fails = ("have no value" if exc == NO_VALUE else f"raise {exc}")
         return ProofResult(
             "undecided",
             sketch=f"{proof.sketch}; not kept as a proof: the code may "
-                   f"raise {exc} inside the declared domain (where "
+                   f"{fails} inside the declared domain (where "
                    f"{_cond_text(cond)}), narrow the domain to where every "
                    f"call returns, or state the raising region as its own "
                    f"raises(...) claim",

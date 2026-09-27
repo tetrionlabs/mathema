@@ -80,7 +80,7 @@ def test_unbounded_direction_without_pseudo_infinity_reaches_a_large_magnitude()
     assert probes["law"].verdict == "proven"
     comp = probes["law[float]"]
     assert comp.verdict == "falsified"
-    assert "1e+308" in comp.note
+    assert "1.79769e+308" in comp.note
 
 
 def test_a_declared_pseudo_infinity_bounds_the_companion():
@@ -249,6 +249,8 @@ def test_the_companion_round_trips_through_the_store_and_retires(
     plan = plan_acceptance(str(tmp_path), "floatfix.plus_one_minus",
                            "one[float]", "discovery", by="turing")
     assert any("float companion of 'one'" in a for a in plan["actions"])
+    assert any("records where the computation fails the proven law" in a
+               for a in plan["actions"])
     apply_acceptance(plan)
     after = verify_project(root=str(tmp_path), all=True)
     assert after.problems == []
@@ -276,11 +278,85 @@ def test_a_family_claim_spawns_no_float_companion():
     rec = mathema.check(ema)
     probes = {p.name: p for p in rec.probes}
     registered = set(families.families())
-    spawned = [n for n in probes if n.endswith("[float]")
-               and n[:-len("[float]")].split("[", 1)[0] in registered]
+    spawned = [n for n, p in probes.items()
+               if (p.meta or {}).get("mathema.companion_of", "")
+               .split("[", 1)[0] in registered]
     assert not spawned, spawned
     assert probes["is_deterministic"].meta["mathema.float_companion"] == \
         "none (a claim family adjudicates this claim)"
     for law in ("scale_equivariant", "translation_equivariant"):
         assert probes[law].verdict == "proven"
         assert probes[f"{law}[float]"].verdict == "falsified", law
+
+
+def squared(x: float) -> float:
+    return x * x
+
+
+def e_to_the(x: float) -> float:
+    import numpy as np
+    return float(np.exp(x))
+
+
+def test_an_inf_the_code_returns_falsifies_the_companion():
+    # x*x overflows to inf past 1.34e154: inf >= 0 is no value, not true
+    probes, _ = _check(squared, "for x in [1e200, 1e300], f(x) >= 0")
+    assert probes["law"].verdict == "proven"
+    comp = probes["law[float]"]
+    assert comp.verdict == "falsified", comp.note
+    assert "f returned inf" in comp.sketch
+
+
+def test_a_numpy_overflow_falsifies_the_companion_at_the_corner(
+        monkeypatch):
+    # with no library claims applied the derive route proves the
+    # mathematics, and the companion alone meets the executed inf
+    import pytest
+    pytest.importorskip("numpy")
+    from mathema import compendium
+    compendium.uninstall()
+    monkeypatch.setattr(compendium, "ensure_bundled", lambda: None)
+    probes, _ = _check(e_to_the, "for x in [700, 1000], f(x) >= 0")
+    assert probes["law"].verdict == "proven", probes["law"].note
+    comp = probes["law[float]"]
+    assert comp.verdict == "falsified", comp.note
+    assert "f returned inf" in comp.sketch
+    assert comp.counterexample and "x=" in comp.counterexample
+
+
+def add(a: float, b: float) -> float:
+    return a + b
+
+
+def midpoint(a: float, b: float) -> float:
+    return (a + b) / 2
+
+
+def test_two_sides_with_no_value_in_the_same_way_agree():
+    # at a = b = -1e308 both sides overflow to -inf: the same no value,
+    # so commutativity still holds there
+    probes, _ = _check(add, "f(a, b) == f(b, a)")
+    assert probes["law"].verdict == "proven"
+    comp = probes["law[float]"]
+    assert comp.verdict == "holds", comp.sketch
+
+
+def test_one_side_overflowing_against_a_value_is_a_float_bug():
+    # (a + a) / 2 overflows where a itself is finite: the finding the
+    # companion exists for
+    probes, _ = _check(midpoint, "for a in R, f(a, a) == a")
+    assert probes["law"].verdict == "proven"
+    comp = probes["law[float]"]
+    assert comp.verdict == "falsified", comp.note
+    assert "f returned -inf" in comp.sketch or "f returned inf" in comp.sketch
+
+
+def test_different_no_values_do_not_agree():
+    from mathema.gates import _same_no_value
+    inf, nan = float("inf"), float("nan")
+    assert _same_no_value(inf, inf) and _same_no_value(-inf, -inf)
+    # a NaN is the absence of a value: no two agree
+    assert not _same_no_value(nan, nan)
+    assert not _same_no_value(inf, -inf)
+    assert not _same_no_value(inf, nan)
+    assert not _same_no_value(inf, 1.0)
