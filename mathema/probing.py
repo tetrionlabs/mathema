@@ -849,7 +849,9 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         bounds = domain.get(p) if k != "sequence" else None
         bound_shape = _classify_bound(bounds)
         if bound_shape == "frozenset":
-            parts.append(f"{p}~U{{{', '.join(str(v) for v in sorted(bounds))}}}")
+            from .domain import _member_sort_key
+            members = sorted(bounds, key=_member_sort_key)
+            parts.append(f"{p}~U{{{', '.join(str(v) for v in members)}}}")
         elif bound_shape == "Z":
             parts.append(f"{p}~{{0,±1,±2}}[p=.3]⊔U{{-1000..1000}}")
         elif bound_shape == "N":

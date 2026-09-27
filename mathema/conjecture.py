@@ -1529,6 +1529,26 @@ def _bound_by_calls(tree) -> set:
     return bound
 
 
+def _names_in_claim(cj) -> set:
+    """Intent:
+        Every bare name the claim's statement reads, across its sides
+        and chain links: the parameters it quantifies. A parameter the
+        claim fills with a literal (`f(values, "nope")`) is not among
+        them.
+    """
+    names: set = set()
+    sides = [cj.lhs, cj.rhs] + [t for link in (cj.links or ()) for t in (link[0], link[2])]
+    for side in sides:
+        if not side:
+            continue
+        try:
+            tree = ast.parse(side, mode="eval")
+        except SyntaxError:
+            continue
+        names |= {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    return names
+
+
 def _declared_names(cj, cj_domain: dict, facts, fn) -> set:
     """Intent:
         Every name a claim may use as a value: the function's
@@ -4455,6 +4475,18 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      note=f"{note}; the registered family for this claim's "
                           "own name couldn't decide it, and the generic "
                           "sampling loop has no meaning for this predicate")
+    # a string parameter with no stated domain has no honest sampling
+    # story, as in the automatic probes: numbers drawn for it would
+    # falsify the claim on inputs the function was never meant to take
+    named = _names_in_claim(cj)
+    for p, k in kinds.items():
+        if k == "string" and p in named and ctx.cj_domain.get(p) is None:
+            return Probe(
+                cj.name, statement, "skipped", route=None,
+                note=(f"{note}; parameter {p!r} is a string with no declared "
+                      f"domain; declare its values, e.g. 'for {p} in "
+                      f'{{"a", "b"}}, ...\', or annotate it Literal[...]'),
+                meta={"mathema.probe_gap": "string-domain-missing"})
     try:
         if cj.relation == "raises":
             code_l, aux_names = _validate(cj.lhs, set(kinds), extra)
