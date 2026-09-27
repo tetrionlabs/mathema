@@ -1120,7 +1120,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             entry_grammar = merged_entry.get("grammar", GRAMMAR)
             out.grammars_seen.update(c.get("grammar", entry_grammar)
                                      for c in current_claims)
-            current_fp = claims_fingerprint(current_claims)
+            current_fp = claims_fingerprint(current_claims, entry_grammar)
         except InvalidConjecture as e:
             if _record_has_unreadable_claim(verified_entry):
                 msg = (f"{key}: a claim in this function's verified "
@@ -1287,7 +1287,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                     "mathema.premise_state": premise_now}
         written = write_record(rec, key=key, root=root,
                                claims=current_claims,
-                               declared_intent=merged_entry.get("intent"))
+                               declared_intent=merged_entry.get("intent"),
+                               grammar=entry_grammar)
         _carry_recorded_verdicts(rec.probes, written, key)
         out.adjudicated += 1
         if key in library:

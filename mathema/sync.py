@@ -118,6 +118,13 @@ def _display_claim(c: dict) -> str:
 
 
 
+def _foreign_skip(row: dict) -> bool:
+    """A verified row that is a claim skipped as written in another
+    grammar, which no route here adjudicated."""
+    return (row.get("verdict") == "skipped"
+            and "mathema.foreign_grammar" in (row.get("meta") or {}))
+
+
 def claim_conflicts(fn, file_entry: dict,
                     verified_entry: "dict | None" = None) -> list:
     """Intent:
@@ -130,7 +137,9 @@ def claim_conflicts(fn, file_entry: dict,
           VERIFIED row. The verified layer is the record and wins
           (materialization adjudicates its version); changing a
           verified claim is a deliberate act, `mathema accept <key>
-          <claim> --as superseded`.
+          <claim> --as superseded`. A verified row skipped as another
+          grammar's claim holds no verdict, so it is never in
+          conflict: the authored claim is adjudicated as written.
     """
     import inspect
 
@@ -156,6 +165,11 @@ def claim_conflicts(fn, file_entry: dict,
             name = c.get("name")
             v = verified_rows.get(name)
             if v is None or (name, "supersession") in seen:
+                continue
+            if _foreign_skip(v):
+                # a claim skipped as another grammar's established
+                # nothing, so there is no verdict for the record to
+                # keep: the authored claim is adjudicated as written
                 continue
             fp_a, fp_v = _claim_identity(c), _row_identity(v)
             if fp_a and fp_v and (fp_a != fp_v

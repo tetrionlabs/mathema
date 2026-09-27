@@ -3132,9 +3132,13 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             cj = _dc_replace(cj, assuming=f"assuming {assumption[1]}")
         validated = _validate_claim(cj, statement, note, facts, domain, fn=fn)
         if isinstance(validated, Probe):
-            # a rejected claim has no canonical form (it was never a
-            # claim), so its record keeps what was written, verbatim
-            out.append(_stamped(validated, cj, canonical=False))
+            # a claim in another grammar is still the claim written,
+            # `let` sections and bound functions included, so its row
+            # keeps the canonical text and re-reads as the same claim;
+            # any other rejected claim has no canonical form (it was
+            # never a claim), so its record keeps what was written
+            foreign = "mathema.foreign_grammar" in (validated.meta or {})
+            out.append(_stamped(validated, cj, canonical=foreign))
             continue
         ctx = validated
         if assumption is not None:

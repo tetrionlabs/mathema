@@ -827,7 +827,8 @@ def authored_route(row: dict) -> str:
 
 
 def record(ex, key: str | None = None, root: str = ".",
-          claims: list | None = None, declared_intent: str | None = None) -> str:
+          claims: list | None = None, declared_intent: str | None = None,
+          grammar: str = "mathema") -> str:
     """Write this explanation into the machine layer of the project store:
     one file per function under .mathema/verified/. `claims` (the declared
     entry's raw claim dicts this record was checked against, if any) gets
@@ -836,7 +837,9 @@ def record(ex, key: str | None = None, root: str = ".",
     edited even when the code itself hasn't changed. Pass the raw declared
     dicts (as loaded from YAML), not Conjecture objects, the fingerprint
     must stay comparable across implementations, and Conjecture is a
-    Python-only parse of that same declared shape.
+    Python-only parse of that same declared shape. `grammar` is the
+    declared entry's grammar (its own, else its file's), the grammar
+    of every claim that names none.
 
     `declared_intent` (an `intent:` field on the declared entry this
     record was checked against, when one exists) fills the record's
@@ -856,7 +859,8 @@ def record(ex, key: str | None = None, root: str = ".",
                 f"and superseded row from both sides of a merge), or "
                 f"restore it from git, and run again")
     spec = to_spec(ex)
-    spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [])
+    spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [],
+                                                                grammar)
     _stamp_authored_routes(spec, claims or [])
     if declared_intent and not spec.get("intent"):
         # the declared layer's intent is the skeleton when the
