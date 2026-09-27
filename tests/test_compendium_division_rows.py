@@ -4,7 +4,6 @@
 value exactly where the divisor is non-zero, and the reciprocal where its
 argument is. `power` and `float_power` have no single-relation region and
 carry no rows."""
-import inspect
 import textwrap
 
 import pytest
@@ -31,7 +30,9 @@ def test_division_rows_state_the_non_zero_divisor(key, statement):
     (row,) = [r for r in _rows(key) if r["name"] == "is_defined"]
     assert row["statement"] == statement
     assert row.get("note"), row
-    params = list(inspect.signature(getattr(np, key.split(".")[1])).parameters)
+    from mathema._signatures import callable_signature
+    fn = getattr(np, key.split(".")[1])
+    params = list(callable_signature(fn).parameters)
     assert statement.split(" ")[0] in params
 
 
