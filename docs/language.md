@@ -35,7 +35,9 @@ for scale in {"info", "linear"}, f(r, scale) >= 0
 The probe draws members of the language and never a value outside it:
 the language's own hazards first (the empty string, whitespace, NUL and
 the other control code points, an alphabet's boundary, a long member, a
-lone surrogate, a byte-order mark), then random members. A function that
+lone surrogate, a byte-order mark), every one of them once before any
+random member is drawn, however small a trial budget the function would
+otherwise get, then random members. A function that
 raises on a member falsifies the claim with that member as the witness,
 the rule a numeric domain follows. The derive route has no reading of a
 string, so it declines with the reason rather than proving real-only
@@ -47,10 +49,15 @@ call time.
 Every record states what a name resolved to, in `meta["mathema.language"]`:
 the name, its source (an in-process registration, a package's entry
 point, a dotted object, an adaptor), its level (finite, alphabet,
-regular, predicate, schema) and its persisted form. A claim over a
+regular, predicate, schema) and its persisted form. A family that
+resolves something of its own writes it beside the parameters, so
+`output_in_language` records the language it held the output to under
+`return`, with where that came from. A claim over a
 language is stamped `grammar: mathema/language`, the dialect of the claim
 grammar that reads language vocabulary; a claim over a finite set stays
-plain `mathema`.
+plain `mathema`. In that dialect a length renders as `len(s)`, while the
+canonical form underneath keeps `dim(s, 0)`, mathema's one spelling of a
+dimension, so the rendered text parses back to the same claim.
 
 ## Length bounds
 
