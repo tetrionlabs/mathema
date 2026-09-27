@@ -938,6 +938,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     key_problems: dict = {}   # key -> failure lines raised outside the gate
     # key -> claim name -> the pending re-authored text, for the rows
     supersessions: dict = {}
+    # key -> {claim name: new grammar} for a claim verified under
+    # mathema that now declares another grammar
+    grammar_changes: dict = {}
     # an orphan record (its key no longer resolves) whose form hash
     # matches a function with no record: old key -> new keys, and the
     # reverse, so both sides of a likely move name the rename remedy
@@ -1288,6 +1291,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.lines.extend(_born_falsified_hint(key, rec.probes,
                                               verified_entry or {}))
         _apply_declared_extras(rec, merged_entry)
+        moved = _grammar_changes(rec.probes, verified_entry or {})
+        if moved:
+            grammar_changes[key] = moved
         rec.probes.append(dependencies_current_probe(rec.dependencies,
                                                      root=root))
         why = ("dependency changed" if dependency_changed
@@ -1422,6 +1428,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 line += "  <- " + "; ".join(report.problems + hints)
         out.problems.extend(f"{key}: {p}" for p in report.problems)
         out.lines.append(line)
+        out.lines.extend(
+            f"     warning: claim {name} of {key} was verified under "
+            f"mathema; its grammar is now {grammar!r}, so mathema no "
+            f"longer adjudicates it"
+            for name, grammar in grammar_changes.get(key, {}).items())
         out.keys.append({
             "key": key,
             "why": why,
@@ -1442,12 +1453,48 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        "foreign_grammar": len(report.foreign)},
             # claim_row reads a live Probe or a stored claim dict alike,
             # so fresh and re-adjudicated keys serialize identically
-            "claims": [_with_supersession(
+            "claims": [_with_grammar_change(_with_supersession(
                            claim_row(c, accepted_risk=accepted), key,
-                           supersessions.get(key, {}))
+                           supersessions.get(key, {})),
+                           grammar_changes.get(key, {}))
                        for c in claims_for_gate],
         })
     return out
+
+
+def _grammar_changes(probes, verified_entry: dict) -> dict:
+    """Intent:
+        The claims skipped this run as another grammar's that carry a
+        real verdict (proven, holds, falsified) recorded under
+        mathema's own grammar, `{claim name: the grammar it declares
+        now}`.
+    """
+    recorded = {c.get("name"): c for c in (verified_entry.get("claims")
+                                          or []) if isinstance(c, dict)}
+    out: dict = {}
+    for p in probes:
+        grammar = (getattr(p, "meta", None) or {}).get(
+            "mathema.foreign_grammar")
+        prior = recorded.get(getattr(p, "name", None))
+        if grammar is None or prior is None:
+            continue
+        if prior.get("verdict") in ("proven", "holds", "falsified") and \
+                prior.get("grammar") in (None, "mathema") and \
+                "mathema.foreign_grammar" not in (prior.get("meta") or {}):
+            out[p.name] = grammar
+    return out
+
+
+def _with_grammar_change(row: dict, changes: dict) -> dict:
+    """Intent:
+        A claim row with `grammar_changed: {from: "mathema", to: ...}`
+        when the claim was verified under mathema and now declares
+        another grammar.
+    """
+    moved = changes.get(row.get("claim"))
+    if moved is not None:
+        row["grammar_changed"] = {"from": "mathema", "to": moved}
+    return row
 
 
 def _with_supersession(row: dict, key: str, pending: dict) -> dict:
