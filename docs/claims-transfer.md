@@ -206,7 +206,8 @@ the guard exists.
 ## Out: exporting your own verified claims
 
 A library author who has run `mathema verify` on their own package can
-publish that evidence as a compendium others consume:
+publish that evidence as a compendium others consume
+([`mathema compendium`](modes/compendium.md)):
 
 ```bash
 mathema compendium export mylib

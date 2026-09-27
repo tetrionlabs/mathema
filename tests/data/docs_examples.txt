@@ -60,6 +60,7 @@
 [x] docs/modes/audit.md:half                     run repl
 [x] docs/modes/check.md:softmax                  file session file session
 [x] docs/modes/claims.md:adopt                   file session run output
+[x] docs/modes/compendium.md:status              file file run output  (requires)
 [x] docs/modes/describe.md:tutorial              file run output file run session session
 [x] docs/modes/init.md:stubs                     file file session session
 [ ] docs/modes/init.md:119
@@ -83,4 +84,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 70 examples checked, 4 output fences not yet marked
+# 71 examples checked, 4 output fences not yet marked
