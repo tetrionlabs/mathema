@@ -30,16 +30,18 @@ def _declared(fn, statement, name=None):
 def test_is_defined_on_mean_holds_with_its_defaults_stated():
     p = _declared(np.mean, "dim(a) >= 1", name="is_defined")
     assert p.verdict == "holds", p.note
-    assert set(p.meta["mathema.defaults"]) == _MEAN_DEFAULTS
-    assert p.meta["mathema.defaults"]["axis"] == "None"
-    assert p.meta["mathema.defaults"]["keepdims"] == "<no value>"
-    assert "passed without sampling: axis=None" in p.note
+    assert set(p.meta["mathema.defaults"]) == {"numpy.mean"}
+    kept = p.meta["mathema.defaults"]["numpy.mean"]
+    assert set(kept) == _MEAN_DEFAULTS
+    assert kept["axis"] == "None"
+    assert kept["keepdims"] == "<no value>"
+    assert "held at their defaults: axis=None" in p.note
 
 
 def test_a_bound_on_mean_samples_only_the_array():
     p = _declared(np.mean, "for a in R^n, min(a) <= f(a) <= max(a)")
     assert p.verdict == "holds", p.note
-    assert set(p.meta["mathema.defaults"]) == _MEAN_DEFAULTS
+    assert set(p.meta["mathema.defaults"]["numpy.mean"]) == _MEAN_DEFAULTS
 
 
 def test_a_pinned_axis_is_passed_and_shown_pinned():
@@ -47,7 +49,8 @@ def test_a_pinned_axis_is_passed_and_shown_pinned():
     law = "for a in R^(n,n), dim(f(a)) == dim(a)"
     pinned = _declared(np.mean, f"let axis be 0, {law}")
     assert pinned.verdict == "holds", pinned.note
-    assert pinned.meta["mathema.defaults"]["axis"] == "0 (pinned)"
+    assert pinned.meta["mathema.defaults"]["numpy.mean"]["axis"] == \
+        "0 (pinned)"
     assert "let axis be" in pinned.statement
     assert _declared(np.mean, law).verdict != "holds"
 
@@ -55,7 +58,8 @@ def test_a_pinned_axis_is_passed_and_shown_pinned():
 def test_a_literal_pin_survives_the_canonical_text():
     p = _declared(np.mean, "let keepdims be True, for a in R^n, dim(f(a)) == 1")
     assert p.verdict == "holds", p.note
-    assert p.meta["mathema.defaults"]["keepdims"] == "True (pinned)"
+    assert p.meta["mathema.defaults"]["numpy.mean"]["keepdims"] == \
+        "True (pinned)"
     again = mathema.claim(p.statement)
     assert again.param_pins == {"keepdims": True}
 
@@ -140,7 +144,7 @@ def test_verify_readjudicates_when_a_library_default_moves(
     rec = proj / ".mathema" / "verified" / "extlib.scaled.yaml"
     (row,) = [c for c in yaml.safe_load(rec.read_text())["extlib.scaled"]
               ["claims"] if c["name"] == "nonneg"]
-    assert row["meta"]["mathema.defaults"] == {"k": "2.0"}
+    assert row["meta"]["mathema.defaults"] == {"extlib.scaled": {"k": "2.0"}}
     # unchanged: fresh
     again = sweep()
     assert any("extlib.scaled: fresh" in line for line in again.lines), \
@@ -152,7 +156,8 @@ def test_verify_readjudicates_when_a_library_default_moves(
     assert "fresh" not in line, moved.lines
     (row,) = [c for c in yaml.safe_load(rec.read_text())["extlib.scaled"]
               ["claims"] if c["name"] == "nonneg"]
-    assert row["meta"]["mathema.defaults"] == {"k": "-2.0"}
+    assert row["meta"]["mathema.defaults"] == \
+        {"extlib.scaled": {"k": "-2.0"}}
     assert "defaults changed" in line, line
     # the claim held at the old default and fails at the new one
     assert row["verdict"] == "invalidated"
@@ -177,7 +182,8 @@ def test_a_literal_pin_on_a_project_function_is_passed(tmp_path, monkeypatch):
     g = importlib.import_module("pinproj").g
     pinned = _declared(g, "let strict be True, for x in [-1, 1], f(x) >= 0")
     assert pinned.verdict == "holds", pinned.note
-    assert pinned.meta["mathema.defaults"] == {"strict": "True (pinned)"}
+    assert pinned.meta["mathema.defaults"] == \
+        {"pinproj.g": {"strict": "True (pinned)"}}
     assert _declared(g, "for x in [-1, 1], f(x) >= 0").verdict == "falsified"
 
 
@@ -196,3 +202,47 @@ def test_a_library_function_is_known_after_its_module_is_imported_again():
     axis = inspect.signature(np.mean).parameters["axis"]
     from mathema.probing import _keeps_default
     assert _keeps_default(np.mean, axis)
+
+
+def test_a_let_bound_library_function_states_the_defaults_it_kept():
+    # one claim can call several library functions: each one's kept
+    # values are stated under its own name
+    p = _declared(np.mean,
+                  "let g = numpy.sqrt, for a in R^n, g(f(a) * f(a)) >= 0")
+    assert p.verdict == "holds", p.note
+    stated = p.meta["mathema.defaults"]
+    assert set(stated) == {"numpy.mean", "numpy.sqrt"}
+    assert set(stated["numpy.mean"]) == _MEAN_DEFAULTS
+    assert stated["numpy.sqrt"]["out"] == "None"
+    assert "numpy.sqrt" in p.note
+
+
+def test_a_project_function_calling_a_let_bound_library_function(
+        tmp_path, monkeypatch):
+    (tmp_path / "letproj.py").write_text(textwrap.dedent('''
+        def sq(x: float) -> float:
+            """x squared."""
+            return x * x
+    '''))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    import importlib
+    sq = importlib.import_module("letproj").sq
+    p = _declared(sq, "let g = np.sqrt, for x in [0, 4], g(f(x)) >= 0")
+    assert p.verdict in ("holds", "proven"), p.note
+    stated = p.meta["mathema.defaults"]
+    assert set(stated) == {"numpy.sqrt"}
+    assert stated["numpy.sqrt"]["out"] == "None"
+
+
+def test_freshness_compares_the_defaults_per_function():
+    from mathema.verify import _defaults_moved
+    entry = {"claims": [{"name": "is_defined", "statement": "dim(a) >= 1"}]}
+    p = _declared(np.mean, "dim(a) >= 1", name="is_defined")
+    recorded = {"claims": [{"name": "is_defined",
+                            "meta": {"mathema.defaults":
+                                     p.meta["mathema.defaults"]}}]}
+    assert not _defaults_moved(np.mean, entry, recorded)
+    flat = {"claims": [{"name": "is_defined",
+                        "meta": {"mathema.defaults":
+                                 p.meta["mathema.defaults"]["numpy.mean"]}}]}
+    assert _defaults_moved(np.mean, entry, flat)
