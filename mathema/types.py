@@ -155,7 +155,7 @@ globals().update(_STRUCTURE_MARKERS)
 STRUCTURE_MARKER_TYPES = tuple(_STRUCTURE_MARKERS.values())
 
 
-def Vec(*items):
+def Vec(*items, runtime: "str | None" = None):
     """Shorthand for a shaped list parameter: `Vec("n")` is exactly
     `Annotated[list, Shape("n")]`, and `Vec("m", "n")` a matrix. A
     structure marker may ride the same call, `Mat("n", "n", Symmetric,
@@ -168,11 +168,21 @@ def Vec(*items):
         def matvec(a: Mat("m", "n"), x: Vec("n")) -> Vec("m"):
             ...
         def solve(a: Mat("n", "n", PositiveDefinite), b: Vec("n")): ...
+
+    `runtime` names the parameter's runtime type, the object the
+    function receives (`Vec("n", runtime="pandas.Series")`,
+    `Mat("n", "n", runtime="numpy.ndarray")`); the value is drawn as
+    always and realised as that runtime type before each call. It
+    adds a `runtime_types.RuntimeType` marker, the strongest evidence
+    of a parameter's runtime type.
     """
     dims = tuple(d for d in items if isinstance(d, (str, int)))
     props = tuple(d for d in items if not isinstance(d, (str, int)))
     markers = (Shape(*dims),) + tuple(
         (m() if isinstance(m, type) else m) for m in props)
+    if runtime is not None:
+        from .runtime_types import RuntimeType
+        markers = markers + (RuntimeType(str(runtime)),)
     return typing.Annotated[(list, *markers)]
 
 

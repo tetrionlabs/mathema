@@ -31,6 +31,18 @@ def _no_installed_providers(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_installed_runtime_type_adapters(monkeypatch):
+    """Runtime type adapters installed in the environment change how a
+    parameter is realised, so every test runs against the built-ins; a
+    test about registered adapters patches its own in."""
+    from mathema import runtime_types
+    monkeypatch.setattr(runtime_types, "entry_points", lambda **_: [])
+    runtime_types._discovered.cache_clear()
+    yield
+    runtime_types._discovered.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_project_pseudo_infinity(monkeypatch):
     """A project-level `MATHEMA_PSEUDO_INFINITY` set on this machine
     moves how far every unbounded direction is exercised, so every
