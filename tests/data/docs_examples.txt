@@ -68,6 +68,7 @@
 [ ] docs/modes/pin.md:30
 [x] docs/modes/review.md:delta                   file file run output file file run output
 [x] docs/modes/verify.md:sweep                   file run session file session file session file file session session session run file session
+[x] docs/modes/verify.md:eager                   session
 [x] docs/multi-function-claims.md:ratio          run output
 [x] docs/quickstart.md:falsify                   file run output run output run output
 [x] docs/quickstart.md:docstring                 file run output run output
@@ -82,4 +83,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 69 examples checked, 4 output fences not yet marked
+# 70 examples checked, 4 output fences not yet marked

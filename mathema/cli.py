@@ -358,10 +358,19 @@ def cmd_verify(args) -> int:
             return 0
         print(text)
         return 0
+    from .verify import resolve_claims_file
+    keys, files = [], []
+    for target in args.target or []:
+        path = resolve_claims_file(target, args.root)
+        if path is None:
+            keys.append(target)
+        else:
+            files.append(path)
     result = verify_project(args.root, all=args.all,
                             strict=args.strict,
                             trials_scale=args.trials_scale,
-                            only=args.target or None)
+                            only=keys or None,
+                            files=files or None)
     as_json = getattr(args, "format", "text") == "json"
     if result.nothing_declared:
         if as_json:
@@ -2676,8 +2685,13 @@ def main(argv: list[str] | None = None) -> int:
                                        "changed (strict by default)")
     pv.add_argument("target", nargs="*",
                     help="dotted key(s) to re-verify and re-stamp on their "
-                         "own (e.g. after a merge); omit to sweep the whole "
-                         "project")
+                         "own (e.g. after a merge), or claims file path(s) "
+                         "whose every entry is adjudicated up front (a "
+                         "library's compendium file included, "
+                         "mathema/compendium/... naming a bundled one); "
+                         "omit to sweep the whole project, where library "
+                         "claims are adjudicated only for the library "
+                         "functions the project calls")
     pv.add_argument("--root", default=None,
                     help="project root holding .mathema/verified and claimspec.yaml")
     pv.add_argument("--all", action="store_true",

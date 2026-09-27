@@ -570,14 +570,18 @@ def _union_verified_membership(current_claims: list,
 def verify_project(root: str = ".", *, all: bool = False,
                    strict: bool = True,
                    trials_scale: float = 1.0,
-                   only: "list | None" = None) -> VerifyResult:
+                   only: "list | None" = None,
+                   files: "list | None" = None) -> VerifyResult:
     """The test-runner sweep as a library call: for every key the
     declared/verified stores know, re-adjudicate if the function's form
     hash, claims fingerprint, or a dependency changed (`all=True`
     forces everything), rewrite the record, and gate each key's
     adjudicated claims through `gate`. `only` restricts the sweep to the
     given dotted keys (the single-key re-verify the reconcile workflow
-    points at); None sweeps the whole population.
+    points at); None sweeps the whole population. `files` names claims
+    files whose every entry is adjudicated up front, whether or not the
+    project calls it (`claims_file_entries`); with `files` the sweep is
+    restricted to their entries plus any `only` keys.
 
     Notes:
         `dependencies_current` claims are settled AFTER the whole sweep
@@ -598,7 +602,88 @@ def verify_project(root: str = ".", *, all: bool = False,
         # silenced, every other warning still surfaces.
         warnings.simplefilter("ignore", StateDependenceWarning)
         return _verify_sweep(root, all=all, strict=strict,
-                             trials_scale=trials_scale, only=only)
+                             trials_scale=trials_scale, only=only,
+                             files=files)
+
+
+def resolve_claims_file(target: str, root: str = ".") -> "str | None":
+    """Intent:
+        The claims file a `mathema verify` target names, or None when
+        the target is not a path to one (a dotted key). A path is read
+        as given, then under `root`; `mathema/compendium/...`, the
+        spelling a record gives a bundled file, names the file mathema
+        ships.
+    """
+    import os
+    if not target.endswith((".yaml", ".yml")):
+        return None
+    from .compendium import _bundled_dir
+    candidates = [target, os.path.join(root, target)]
+    prefix = os.path.join("mathema", "compendium") + os.sep
+    if target.replace("/", os.sep).startswith(prefix):
+        candidates.append(os.path.join(
+            _bundled_dir(), target.replace("/", os.sep)[len(prefix):]))
+    for path in candidates:
+        if os.path.isfile(path):
+            return os.path.abspath(path)
+    return None
+
+
+def claims_file_entries(path: str, root: str,
+                        library_claims: dict) -> "tuple[dict, bool, list]":
+    """Intent:
+        The entries of one claims file as the sweep adjudicates them:
+        `(entries, is_library, lines)`, `entries` mapping each key to
+        `{"entry", "source"}`, `is_library` whether the file declares
+        `compendium:`, and `lines` the one-line notes the sweep prints.
+        A compendium file's key takes the entry that applies to it
+        (`load_library_claims`, where a project file shadows a bundled
+        one), else the file's own, stamped as compendium testimony.
+
+    Notes:
+        A compendium file whose library is not importable, or is
+        installed outside the file's `versions` range, contributes no
+        entries and one line saying which; so does one naming the
+        project's own package.
+    """
+    from .compendium import (_display_path, _installed_version,
+                             applicable_tag, names_own_package)
+    from .spec import read_claims_file, stamp_library_rows
+    where = _display_path(path, root)
+    data = read_claims_file(path, where) or {}
+    file_grammar = data.pop("grammar", None)
+    library = data.pop("compendium", None)
+    versions = str(data.pop("versions", "*"))
+    entries: dict = {}
+    if library is None:
+        for key, entry in data.items():
+            if isinstance(entry, dict):
+                entry = dict(entry)
+                if file_grammar:
+                    entry.setdefault("grammar", file_grammar)
+                entries[key] = {"entry": entry, "source": where}
+        return entries, False, []
+    if names_own_package(library, root) and not where.startswith(
+            os.path.join("mathema", "compendium")):
+        return {}, True, [
+            f"note {where}: `compendium: {library}` names this project's "
+            f"own package; nothing in it was adjudicated"]
+    tag = applicable_tag(library, versions)
+    if tag is None:
+        installed = _installed_version(library)
+        why = (f"{library} is not importable here" if installed is None
+               else f"{library} {installed} is outside the file's range "
+                    f"{versions}")
+        return {}, True, [f"note {where}: {why}; nothing in it was "
+                          f"adjudicated"]
+    stamp_library_rows(data, tag)
+    for key, entry in data.items():
+        if not isinstance(entry, dict):
+            continue
+        info = library_claims.get(key)
+        entries[key] = ({"entry": info["entry"], "source": info["source"]}
+                        if info else {"entry": entry, "source": where})
+    return entries, True, []
 
 
 def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
@@ -743,7 +828,8 @@ def _library_population(root: str, verified: dict, declared: dict,
 def _verify_sweep(root: str = ".", *, all: bool = False,
                   strict: bool = True,
                   trials_scale: float = 1.0,
-                  only: "list | None" = None) -> VerifyResult:
+                  only: "list | None" = None,
+                  files: "list | None" = None) -> VerifyResult:
     """Intent:
         The sweep body of `verify_project`, which shields it from the
         per-key state-dependence warning chatter.
@@ -790,6 +876,24 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             info = library_claims[lkey]
             declared[lkey] = {"entry": copy.deepcopy(info["entry"]),
                               "source": info["source"]}
+    # a claims file named up front: every entry in it is adjudicated,
+    # a library's whether or not the project calls it
+    eager: set = set()
+    for path in files or []:
+        entries, is_library, notes = claims_file_entries(
+            path, root, library_claims)
+        out.lines.extend(notes)
+        for fkey, info in entries.items():
+            eager.add(fkey)
+            if is_library:
+                library.setdefault(fkey, info["source"])
+            if fkey not in declared:
+                declared[fkey] = {"entry": copy.deepcopy(info["entry"]),
+                                  "source": info["source"]}
+    if files is not None:
+        only = list(only or []) + sorted(eager)
+        if not only:
+            return out
     # library keys first, so a premise resting on one sees the verdict
     # this run records for it
     keys = sorted(set(verified) | set(declared) | set(broken),
@@ -886,6 +990,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         declared_info = declared.get(key)
         source = (declared_info or verified_info)["source"]
         fn = _resolve_func_ref(key, root=root)
+        if fn is None and key in eager and key in library:
+            out.lines.append(f"note {key}: not importable from the "
+                             f"installed library; nothing adjudicated")
+            continue
         if fn is None:
             from .compendium import is_library_record
             if is_library_record(verified_entry):

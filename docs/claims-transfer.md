@@ -141,7 +141,20 @@ function your project calls or rests a premise on by executing them
 against the library you have installed, records the local verdict with
 the row's provenance (`compendium:numpy-2.5`), and a premise then
 resolves at that verdict; a project that never calls numpy verifies
-none of its rows. Library rows gate the run exactly like your own
+none of its rows. That default is lazy: only the library functions the
+project uses are adjudicated. To adjudicate a whole file up front,
+name it:
+
+```bash
+mathema verify claims/numpy.claims.yaml
+mathema verify mathema/compendium/numpy/scalars.claims.yaml
+```
+
+The second names a bundled file by the path records give it. Every
+entry in the named file is adjudicated and recorded, whether or not
+your code calls it; a file whose library is not importable, or is
+installed outside the file's `versions`, says so on one line (see
+[`mathema verify`](modes/verify.md#library-claims-lazy-by-default-a-file-up-front)). Library rows gate the run exactly like your own
 claims: a row verify cannot settle here fails it, with a line naming
 both ways to settle it, and the resting claim stays `unknown` with the
 same two paths in its note. One is a fresh local verdict; the other is:
