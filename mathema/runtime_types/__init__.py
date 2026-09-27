@@ -42,6 +42,11 @@ from ._abstract import (AbstractMat, AbstractTable, AbstractVec, NotMine,
 from ._adapters import (BUILTIN_ADAPTERS, KINDS, Detection, ListAdapter,
                         RuntimeTypeAdapter)
 
+#: the parameter kinds (`analysis.Facts.param_kinds`) sampled as a
+#: sequence: a plain sequence, and a vector or matrix whose runtime type
+#: the signature names
+SEQUENCE_KINDS = frozenset({"sequence", "vec", "mat"})
+
 #: the entry-point group third-party runtime type adapters register under
 RUNTIME_TYPES_GROUP = "mathema.runtime_types"
 
@@ -74,7 +79,7 @@ def adapters() -> dict:
     `mathema.runtime_types` whose name no built-in uses, placed before
     the list adapter."""
     builtin = {a.name: a for a in BUILTIN_ADAPTERS}
-    external = {}
+    external: dict = {}
     for a in _discovered():
         name = getattr(a, "name", None)
         if not isinstance(name, str) or not isinstance(a, RuntimeTypeAdapter):
@@ -395,6 +400,38 @@ def observed_plain(obj):
     return plain(observe(obj))
 
 
+class _Realising:
+    """A callable standing in for a function whose parameters have
+    runtime types: each call realises those parameters' drawn values
+    through their adapters, calls the function, and observes the
+    result as a plain value. Every attribute it does not define is the
+    function's own (`__globals__`, `__code__`, `__defaults__`), and
+    `__wrapped__` is the function, so signature and source readers see
+    the function itself."""
+
+    def __init__(self, fn, bindings: dict, sig):
+        functools.update_wrapper(self, fn)
+        self._fn, self._bindings, self._sig = fn, bindings, sig
+
+    def __getattr__(self, name):
+        return getattr(self.__dict__["_fn"], name)
+
+    def __call__(self, *args, **kwargs):
+        fn = self._fn
+        try:
+            bound = self._sig.bind(*args, **kwargs)
+        except TypeError:
+            return fn(*args, **kwargs)
+        for name, detection in self._bindings.items():
+            if name in bound.arguments:
+                bound.arguments[name] = realise(bound.arguments[name],
+                                                detection)
+        return observed_plain(fn(*bound.args, **bound.kwargs))
+
+    def __repr__(self) -> str:
+        return f"<realising {self._fn!r}>"
+
+
 def calling(fn, facts):
     """Intent:
         `fn` itself when no parameter has a runtime type other than a
@@ -404,28 +441,18 @@ def calling(fn, facts):
 
     Notes:
         A call the signature does not bind is passed to `fn` unchanged,
-        so `fn` raises its own TypeError.
+        so `fn` raises its own TypeError. A callable already realising
+        is returned as it is.
     """
+    if isinstance(fn, _Realising):
+        return fn
     bindings = realised_parameters(facts)
     if not bindings:
         return fn
     sig = _signature(fn)
     if sig is None:
         return fn
-
-    @functools.wraps(fn)
-    def call(*args, **kwargs):
-        try:
-            bound = sig.bind(*args, **kwargs)
-        except TypeError:
-            return fn(*args, **kwargs)
-        for name, detection in bindings.items():
-            if name in bound.arguments:
-                bound.arguments[name] = realise(bound.arguments[name],
-                                                detection)
-        return observed_plain(fn(*bound.args, **bound.kwargs))
-    call.__mathema_realising__ = True
-    return call
+    return _Realising(fn, bindings, sig)
 
 
 # --- the hint for an undeclared vector parameter ------------------------
@@ -568,8 +595,9 @@ def strong_hints(facts) -> list:
 
 
 __all__ = [
-    "AbstractMat", "AbstractTable", "AbstractVec", "Detection", "NotMine",
-    "RUNTIME_TYPES_GROUP", "RuntimeType", "RuntimeTypeAdapter",
+    "AbstractMat", "AbstractTable", "AbstractVec", "Detection", "ListAdapter",
+    "NotMine",
+    "RUNTIME_TYPES_GROUP", "RuntimeType", "SEQUENCE_KINDS", "RuntimeTypeAdapter",
     "abstract_of", "adapter", "adapters", "calling", "descriptor_names",
     "detect_annotation", "detect_parameters", "identity_entries",
     "installed", "library_version", "module_imports", "observe",

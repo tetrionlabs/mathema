@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
+from .runtime_types import SEQUENCE_KINDS
 
 
 class DimensionConflict(ValueError):
@@ -235,7 +236,7 @@ def resolve(facts, shapes: "dict | None" = None,
             # the axes even with no type marker on the parameter
             out[p] = ParamShape(axes=tuple(
                 d if isinstance(d, str) else None for d in declared))
-        elif facts.param_kinds.get(p) == "sequence":
+        elif facts.param_kinds.get(p) in SEQUENCE_KINDS:
             out[p] = ParamShape(axes=(None,))
         else:
             out[p] = ParamShape(axes=())

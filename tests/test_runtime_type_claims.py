@@ -81,7 +81,7 @@ def test_a_raise_on_a_declared_runtime_type_falsifies():
 
 
 def test_the_sampling_note_names_the_runtime_type():
-    p = _verdict(series_mean, _BETWEEN)
+    p = _verdict(series_mean, "for xs in R^n, f(xs) <= max(xs)")
     assert "as pandas.Series" in p.meta["mathema.sampling"], p.meta
 
 
@@ -130,16 +130,23 @@ def test_a_list_function_record_states_no_runtime_types():
     assert "runtime_types" not in to_spec(rec)["identity"]
 
 
+def array_total(xs: np.ndarray):
+    total = 0.0
+    for v in xs:
+        total += v * v
+    return total
+
+
 def test_the_companion_descriptor_names_the_runtime_type():
-    def scaled_sum(xs: pd.Series):
-        return float((2 * xs).sum())
     rows = check_conjectures(
-        scaled_sum, [claim("for xs in [-1, 1]^n, f(xs) == 2*sum(xs)",
-                           route="derive")], float_companions=True)
-    companions = [p for p in rows if (p.meta or {}).get(
-        "mathema.companion_of")]
+        array_total, [claim("for xs in [-1, 1]^n, f(xs) >= 0",
+                            name="total", route="derive")],
+        float_companions=True)
+    companions = [p for p in rows if p.name.startswith("total[")]
+    assert companions, [(p.name, p.verdict, p.note) for p in rows]
     for c in companions:
-        assert companion_descriptor(c.name) == ("float", "pandas.Series")
+        assert companion_descriptor(c.name) == ("float", "numpy.ndarray")
+        assert c.verdict == "holds", (c.verdict, c.note)
 
 
 def test_a_claims_file_names_a_runtime_type_for_code_it_cannot_annotate():
@@ -159,3 +166,17 @@ def test_a_claims_file_names_a_runtime_type_for_code_it_cannot_annotate():
     assert row.verdict in ("holds", "proven"), (row.verdict, row.note)
     assert rec.facts.runtime_types["xs"][0].evidence == \
         "claims file: pandas.Series"
+
+
+def test_the_cli_prints_the_hint_under_the_function(tmp_path, capsys):
+    from mathema.cli import main
+    (tmp_path / "quant_hint.py").write_text(
+        "import pandas as pd\n\n\n"
+        "def mean_return(returns):\n"
+        "    return returns.mean()\n")
+    main(["check", str(tmp_path / "quant_hint.py"), "--root", str(tmp_path),
+          "--claim", "for returns in R^n, f(returns) <= max(returns)"])
+    out = capsys.readouterr().out
+    assert ("hint: returns is used as a vector; this module imports "
+            "pandas: annotate `returns: pd.Series` to sample it as one") \
+        in out, out

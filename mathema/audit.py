@@ -29,6 +29,7 @@ from .inventory import (coverage_freshness, derivability_report,
                         is_test_covered, mutated_globals, purity_reason,
                         read_test_coverage, scope_dependencies,
                         structural_complexity, typing_info)
+from .runtime_types import SEQUENCE_KINDS
 
 
 def _source_span(fn) -> str | None:
@@ -224,7 +225,7 @@ def _describe_signature(fn) -> str:
         piece = name
         if p.annotation is not inspect.Parameter.empty:
             piece += f": {inspect.formatannotation(p.annotation)}"
-        elif kinds.get(name) == "sequence":
+        elif kinds.get(name) in SEQUENCE_KINDS:
             piece += ": sequence (inferred)"
         if p.default is not inspect.Parameter.empty:
             piece += f" = {p.default!r}"
@@ -432,7 +433,7 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
     name_map = seq_params = None
     if facts is not None and facts.tree is not None:
         name_map = {n: f"v{i}" for i, n in enumerate(local_names(facts.tree))}
-        seq_params = frozenset(p for p, k in facts.param_kinds.items() if k == "sequence")
+        seq_params = frozenset(p for p, k in facts.param_kinds.items() if k in SEQUENCE_KINDS)
 
     lift_expr = "not-attempted"   # computed lazily, at most once, only if a tier needs it
     for t in tier_names:

@@ -43,6 +43,8 @@ import os
 import sys
 from typing import NamedTuple
 
+from ..runtime_types import SEQUENCE_KINDS
+
 
 def _version_tuple(text: str) -> tuple:
     return tuple(int(p) for p in text.split(".")[:3] if p.isdigit())
@@ -1303,7 +1305,7 @@ def _boundary_generator(library_claims: dict):
                         # outside `dim(a) >= 1` is the empty sequence
                         for param in getattr(facts, "params", ()):
                             if (getattr(facts, "param_kinds", None) or {}
-                                    ).get(param) == "sequence":
+                                    ).get(param) in SEQUENCE_KINDS:
                                 out.append(HazardPoint(
                                     kind="compendium", param=param,
                                     at=f"{key}: empty sequence, outside "

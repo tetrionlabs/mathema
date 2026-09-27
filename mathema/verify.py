@@ -1278,7 +1278,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         rec = check(fn, claims=claims if claims else [],
                     trials_scale=trials_scale,
                     known_premises=stub_premises,
-                    pseudo_infinity=merged_entry.get("pseudo_infinity"))
+                    pseudo_infinity=merged_entry.get("pseudo_infinity"),
+                    runtime_types=merged_entry.get("runtime_types"))
         rec.probes = [p for p in rec.probes
                       if getattr(p, "name", None) not in withheld]
         rec.probes, late_notes = _strip_retired_probes(

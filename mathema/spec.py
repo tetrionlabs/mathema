@@ -209,6 +209,13 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
                     "CDD_spec_version": SPEC_VERSION,
                     "date": datetime.date.today().isoformat()},
     }
+    from .runtime_types import identity_entries
+    runtime = identity_entries(f)
+    if runtime:
+        # each parameter realised as something other than a list: the
+        # runtime type, the evidence it was read from, and the library
+        # version whose semantics the evidence holds under
+        spec["identity"]["runtime_types"] = runtime
     deps = list(getattr(ex, "dependencies", None) or [])
     if deps:
         # one-deep callee records (inventory.function_dependencies):
@@ -1273,7 +1280,7 @@ _CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
                  "grammar", "funcs", "pseudo_infinity", "meta", "authored",
                  "source", "family", "note", "versions")
 _ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references",
-                 "pseudo_infinity")
+                 "pseudo_infinity", "runtime_types")
 
 
 _ENTRY_ANNOTATIONS = ("an entry's annotations go in `meta:` (structured "
@@ -1457,6 +1464,9 @@ def validate_claims_file(data, rel_path: str) -> None:
         problem = _pseudo_infinity_problem(entry.get("pseudo_infinity"))
         if problem:
             fail(key, f"`pseudo_infinity`: {problem}")
+        problem = _runtime_types_problem(entry.get("runtime_types"))
+        if problem:
+            fail(key, f"`runtime_types`: {problem}")
         claims = entry.get("claims")
         if claims is None:
             continue
@@ -1535,6 +1545,32 @@ def validate_claims_file(data, rel_path: str) -> None:
                     problem = _domain_problem(bound)
                     if problem:
                         fail(key, f"{label}: `domain` for {param}: {problem}")
+
+
+def _runtime_types_problem(value) -> "str | None":
+    """Intent:
+        Why a claims-file entry's `runtime_types` value is refused, in
+        the words the refusal prints, or None when it is absent or a
+        mapping of parameter names to runtime type names mathema knows
+        (`{returns: pandas.Series}`).
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return (f"a {type(value).__name__}, not a mapping of parameter "
+                f"names to runtime types (`{{returns: pandas.Series}}`)")
+    from .runtime_types import adapters
+    known = list(adapters())
+    for param, name in value.items():
+        if not isinstance(param, str) or not isinstance(name, str):
+            return (f"{param!r}: {name!r} is not a parameter name mapped "
+                    f"to a runtime type name")
+        if name not in known:
+            near = _misspelling(name, tuple(known))
+            return (f"{param}: unknown runtime type {name!r}"
+                    + (f" (did you mean {near!r}?)" if near else "")
+                    + f"; known: {', '.join(known)}")
+    return None
 
 
 def _pseudo_infinity_problem(value) -> "str | None":

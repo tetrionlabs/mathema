@@ -162,6 +162,13 @@ def _check_rows(args) -> list[dict]:
                  + report.unknown + report.owned)
         verified = proven + holds + report.refuted   # refutation is knowledge
         problems = report.problems
+        # the runtime type to annotate, for each parameter the body
+        # uses as a vector while the signature names none: always when
+        # a list cannot serve that use, else when a claim was skipped
+        # as misspecified over it
+        hints = [h["text"] for h in (rec.facts.runtime_hints or {}).values()
+                 if h.get("strong") or any(h["text"] in (p.note or "")
+                                           for p in rec.probes)]
         rows.append({"name": name, "tier": rec.facts.tier,
                      "identity": {"form": rec.facts.form, "sig": rec.facts.sigh},
                      "proven": proven, "holds": holds, "refuted": report.refuted,
@@ -176,7 +183,8 @@ def _check_rows(args) -> list[dict]:
                      "claims": rec.to_spec()["claims"],
                      "claim_rows": [claim_row(p, accepted_risk=accepted)
                                     for p in rec.probes],
-                     "problems": problems})
+                     "problems": problems,
+                     **({"hints": hints} if hints else {})})
     return rows
 
 
@@ -254,6 +262,7 @@ def _format_check(rows: list[dict], fmt: str) -> str:
         if r["problems"]:
             line += "  <- " + "; ".join(r["problems"])
         lines.append(line)
+        lines.extend(f"     hint: {h}" for h in r.get("hints", ()))
     return "\n".join(lines)
 
 

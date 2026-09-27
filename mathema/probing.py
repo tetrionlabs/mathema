@@ -31,6 +31,7 @@ from ._sampling import (
 )
 from ._sampling import _moderate_bounds, _reach_ends
 from .grammar import MISSING, Domain, domain_contains
+from .runtime_types import SEQUENCE_KINDS
 # Probe's real home is records.py (the stdlib-only leaf every layer can
 # import); re-exported here because probing is where consumers
 # historically found it.
@@ -1043,7 +1044,7 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         # that only iterates its values. The claim path uses
         # `_synth_dict(keys, ...)` with the body's real keys instead.
         return _synth_dict([], rng, specials=specials)
-    if kind == "sequence":
+    if kind in SEQUENCE_KINDS:
         # `length`, when a dimension premise fixed it for this trial,
         # overrides the free 2..8 draw so the premise holds by
         # construction rather than by rejection
@@ -1130,7 +1131,9 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
                         critical_hints: dict[str, list[float]] | None = None,
                         truncated_hints: "set[str] | None" = None,
                         observed_lengths: "dict[str, set] | None" = None,
-                        premise_drawn: "set[str] | None" = None) -> str:
+                        premise_drawn: "set[str] | None" = None,
+                        runtime_names: "dict[str, str] | None" = None,
+                        nested: "set[str] | None" = None) -> str:
     """How a probe actually sampled, in compact mathematical notation: the
     distribution per parameter, the seed, the trial count. Meant to make a
     `holds (n=...)` verdict legible and reproducible from the record alone,
@@ -1152,7 +1155,10 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
     elements were drawn: the declared element domain (`elem~...`, the
     special shapes are not used under one), the free draw with its
     shapes, or `drawn on the premise` for a parameter in
-    `premise_drawn`, which an equality premise draws directly."""
+    `premise_drawn`, which an equality premise draws directly. A
+    parameter in `runtime_names` states the runtime type each draw was
+    realised as (`as pandas.Series`); one in `nested`, drawn as nested
+    lists, states the size cap per axis those are drawn up to."""
     critical_hints = critical_hints or {}
     truncated_hints = truncated_hints or set()
 
@@ -1187,6 +1193,13 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             draw = "elem~" + element_text(p, element_bound)
         else:
             draw = "shape∈{U,const,sorted,rev,+0,extreme}[p=.3]"
+        realised = (runtime_names or {}).get(p)
+        if realised:
+            draw += f"; as {realised}"
+        elif p in (nested or ()):
+            from .runtime_types import ListAdapter
+            draw += (f"; as nested lists, at most {ListAdapter.SIZE_CAP} "
+                     f"per axis")
         return f"Seq({size}; {draw})"
 
     def element_text(p: str, bound) -> str:
@@ -1226,7 +1239,7 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             return "{0,±1,±2}[p=.3]⊔U{-1000..1000}"
         if bound_shape == "N":
             return "{0,1,2}[p=.3]⊔U{0..1000}"
-        if k == "sequence":
+        if k in SEQUENCE_KINDS:
             return sequence_text(p)
         if k == "int" and (bounds is None or isinstance(bounds, tuple)):
             # only a plain (lo, hi) tuple/Interval is subscriptable; a
@@ -1249,7 +1262,7 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             return f"{render_domain_bound(bounds)}{crit_suffix(p)}"
         return f"U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]{crit_suffix(p)}"
 
-    parts = [f"{p}~{one(p, k, domain.get(p) if k != 'sequence' else None)}"
+    parts = [f"{p}~{one(p, k, domain.get(p) if k not in SEQUENCE_KINDS else None)}"
              for p, k in kinds.items()]
     return ", ".join(parts) + f", seed={_RNG_SEED}, n={n}"
 
@@ -1551,7 +1564,7 @@ def probe(fn, facts, domain: dict | None = None,
                 and _keeps_default(fn, param)):
             return param.default
         shape = resolver.shapes.get(p) if resolver is not None else None
-        if shape is not None and k != "sequence" and shape.ndim >= 1:
+        if shape is not None and k not in SEQUENCE_KINDS and shape.ndim >= 1:
             # a space binding (`R^n`, `R^(n,n)`) from the claims shapes
             # a parameter whose kind the signature does not state
             return resolver.synth(
@@ -1572,17 +1585,22 @@ def probe(fn, facts, domain: dict | None = None,
     # signature mismatch (fails identically every time) apart from a
     # one-off arithmetic exception from landing exactly on a pole.
     last_exc: Exception | None = None
+    from .runtime_types import calling
+    call = calling(fn, facts)
     for _ in range(3):
         try:
             call_args, call_kwargs = args_for()
-            fn(*call_args, **call_kwargs)
+            call(*call_args, **call_kwargs)
             break
         except Exception as e:
             last_exc = e
     else:
+        hints = "".join(f"; {h['text']}" for h in
+                        (getattr(facts, "runtime_hints", None) or {}).values())
         return [Probe("callable", callable_statement, "skipped",
                       note="could not synthesize valid inputs from the "
-                           f"signature ({type(last_exc).__name__}: {last_exc})",
+                           f"signature ({type(last_exc).__name__}: {last_exc})"
+                           + hints,
                       meta={"mathema.probe_gap": "input-synthesis"})]
 
     probes: list[Probe] = []

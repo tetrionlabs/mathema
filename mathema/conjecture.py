@@ -59,6 +59,7 @@ from .records import (_EXC_TYPES, Probe, PseudoInfinity, classify_verdict,
                       statement_text)
 from .symbolic import (mentions_matrix_ops, try_prove, try_prove_matrix,
                        try_prove_raises)
+from .runtime_types import SEQUENCE_KINDS
 
 
 def _numeric_literal(node: ast.AST):
@@ -2911,6 +2912,12 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             meta = dict(probe.meta or {})
             meta.setdefault("mathema.surface", cj.source)
             probe.meta = meta
+        from .runtime_types import strong_hints
+        for said in strong_hints(facts):
+            # a parameter used as a vector with no runtime type named:
+            # the row says which runtime type to annotate
+            if said not in (probe.note or ""):
+                probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         _stamp_examine_route(probe, cj, fn, facts)
         return probe
 
@@ -3255,7 +3262,7 @@ def check_conjectures(fn, conjectures: list[Conjecture],
 
 
 # parameter kinds whose values run along a real direction
-_DIRECTION_KINDS = frozenset({"scalar", "unknown", "int", "sequence"})
+_DIRECTION_KINDS = frozenset({"scalar", "unknown", "int", *SEQUENCE_KINDS})
 
 
 def pseudo_infinity_stamp(cj, facts, parent_domain: "dict | None") -> "dict | None":
@@ -3478,7 +3485,7 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         return combined, None
     from .gates import companion_representation
     descriptor, _representation, representation_word = \
-        companion_representation(cj.domain)
+        companion_representation(cj.domain, facts)
     companion = _combine_conjunction(
         companions, companion_name(cj.name, descriptor), _chain_statement(cj),
         labels, what="float companion")
@@ -3558,7 +3565,7 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
     from dataclasses import replace as _replace
 
     numeric = [p for p in facts.params
-               if facts.param_kinds.get(p) != "sequence"]
+               if facts.param_kinds.get(p) not in SEQUENCE_KINDS]
     statement = statement_text(cj.relation, "f", cj.rhs)
     if not numeric:
         return Probe(cj.name, statement, "skipped", route=None,
@@ -4510,8 +4517,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                     meta={"mathema.derive_status":
                           (mproof.status if mproof is not None
                            else "unliftable")})
-            mprobe = matrix_relation_probe(cj, fn, _dims, _structs,
-                                           statement, note)
+            from .runtime_types import calling
+            mprobe = matrix_relation_probe(cj, calling(fn, facts), _dims,
+                                           _structs, statement, note)
             if mprobe is not None:
                 return mprobe
             return Probe(
@@ -4592,9 +4600,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         no reliable verdict, so nothing they decided can move."""
         from ._brute_force import brute_force_proof
         from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+        from .runtime_types import calling
         try:
             return _with_timeout(
-                lambda: brute_force_proof(cj, fn, facts, cj_domain,
+                lambda: brute_force_proof(cj, calling(fn, facts), facts,
+                                          cj_domain,
                                           bound_funcs,
                                           assumption=assumption or []),
                 EXTENSIVE_TIMEOUT_SECONDS)
@@ -5112,7 +5122,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # to the "probe" rung, so this is descriptive, not a strength claim.
         probe_route = getattr(family, "probe_route", "probe:algorithmic")
         setup = sampling()
-        algo_result = algo_route(fn, facts, cj, cj_domain, setup.rng, setup.budget)
+        from .runtime_types import calling
+        algo_result = algo_route(calling(fn, facts), facts, cj, cj_domain,
+                                 setup.rng, setup.budget)
         if algo_result is not None:
             # (verdict, checked, cx), optionally with the established
             # sketch, and then the family's own record meta, whose
@@ -5314,6 +5326,24 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     for _pp, _props in (ctx.premise_structures or {}).items():
         param_structures[_pp] = tuple(sorted(
             set(param_structures.get(_pp, ())) | set(_props)))
+    # the runtime type each sequence parameter is realised as, and the
+    # matrices drawn as nested lists, which stay within the list
+    # adapter's size cap per axis
+    from .runtime_types import ListAdapter, realised_parameters
+    runtime_names = {p: d.adapter
+                     for p, d in realised_parameters(facts).items()}
+    nested = {p for p in kinds if p not in runtime_names and (
+        param_structures.get(p) or (resolver.shapes.get(p) is not None
+                                    and resolver.shapes[p].ndim >= 2))}
+    if shape_lo is not None and shape_hi is not None:
+        for p in nested:
+            for axis in range(resolver.shapes[p].ndim
+                              if p in resolver.shapes else 1):
+                key = resolver.key(p, axis)
+                if key is not None:
+                    shape_hi[key] = min(
+                        shape_hi.get(key, max(8, 4 * shape_lo.get(key, 2))),
+                        ListAdapter.SIZE_CAP)
     setup = sampling()
     rng, specials, risk, budget = setup.rng, setup.specials, setup.risk, setup.budget
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
@@ -5398,11 +5428,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             return value
         return _wrapped
 
-    fn_tagged = _tagged(fn, "f", inject=call_pins)
+    # each call realises the drawn values as the parameters' runtime
+    # types and observes the result as a plain value
+    from .runtime_types import calling
+    fn_tagged = _tagged(calling(fn, facts), "f", inject=call_pins)
     bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
     # the lengths the samples inside the premise region actually had,
     # per sequence parameter, for the sampling note
-    sequence_params = [p for p, k in kinds.items() if k == "sequence"]
+    sequence_params = [p for p, k in kinds.items() if k in SEQUENCE_KINDS]
     observed_lengths: dict = {}
     for trial in range(budget + len(pinned)):
         call_raised[0] = call_nan[0] = call_inf[0] = None
@@ -5462,7 +5495,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     v = _mtx.synth_for(param_structures[p], n, rng)
                 elif shape is not None and (
                         shape.ndim >= 2
-                        or (shape.ndim == 1 and k != "sequence")):
+                        or (shape.ndim == 1 and k not in SEQUENCE_KINDS)):
                     # a matrix-shaped (marker-declared) parameter, or a
                     # space binding (`R^n`, `R^(n,n)`) on a parameter
                     # whose kind the signature does not state: the
@@ -5673,6 +5706,24 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                              f"claim's domain admits non-integers "
                              f"({', '.join(nonint)}); add `subset Z` "
                              f"to the integer variable's domain")
+            # a raise on the list realisation of a parameter the body
+            # uses as a vector, matrix or table while the signature
+            # names no runtime type for it, in a module importing a
+            # library with a runtime type adapter: the list was the
+            # wrong object to hand the function, a misspecification of
+            # the parameter's type, never a counterexample
+            if call_raised[0] == "f" and isinstance(
+                    e, (TypeError, ValueError, AttributeError)):
+                hints = facts.runtime_hints or {}
+                listed = [hints[p2]["text"] for p2, v2 in zip(kinds, args)
+                          if p2 in hints and isinstance(v2, (list, tuple))]
+                if listed:
+                    return Probe(
+                        cj.name, statement, "skipped:misspecified",
+                        route=None,
+                        note=f"{note}; f raised {type(e).__name__} at "
+                             f"{_fmt(tuple(args))}, sampled as a list: "
+                             + "; ".join(listed))
             # a raise is not a value: the claim asserts an equality or
             # ordering AT this in-domain point, and there is nothing on
             # one side to compare, pedantically, that falsifies it.
@@ -5786,7 +5837,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      meta={"mathema.sampling": _sampling_shorthand(
                                kinds, cj_domain, checked, critical_hints,
                                truncated_hints, observed_lengths,
-                               set(premise_draws)),
+                               set(premise_draws), runtime_names, nested),
                           "mathema.confidence": _probe_density(risk, checked),
                           "mathema.counterexample_args": _yaml_safe_args(args)})
     if checked == 0:
@@ -5801,7 +5852,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                  meta={"mathema.sampling": _sampling_shorthand(
                            kinds, cj_domain, checked, critical_hints,
                            truncated_hints, observed_lengths,
-                           set(premise_draws)),
+                           set(premise_draws), runtime_names, nested),
                       "mathema.confidence": _probe_density(risk, checked)})
 
 

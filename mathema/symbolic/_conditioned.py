@@ -26,6 +26,7 @@ from ._base import (
 )
 from ..domain import bound_to_sympy_set
 from ..finite_sets import OpaqueRegistry
+from ..runtime_types import SEQUENCE_KINDS
 
 # --- domain-conditioned branch pruning ------------------------------------
 #
@@ -851,7 +852,7 @@ def lift_piecewise(fn, facts) -> "ConditionedLift | None":
         return None
     if not facts.branch_count:
         return None
-    if not facts.params or any(k == "sequence" for k in facts.param_kinds.values()):
+    if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None
     params, aggregate = _bind_params(fn, facts)
     from ._normalize import normalized_body
@@ -996,7 +997,7 @@ def lift_conditioned(fn, facts, domain: dict, max_callee_depth: int = 3,
         return None
     if not facts.branch_count:
         return None
-    if not facts.params or any(k == "sequence" for k in facts.param_kinds.values()):
+    if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None
 
     unmodified = _unmodified_params(facts.tree, set(facts.params))

@@ -30,6 +30,7 @@ from ._proof_support import ProofResult
 from ._seq_common import (_unliftable_result, SeqLiftView,
                           positional_f_call_subs, subs_eval_f,
                           try_prove_seq)
+from ..runtime_types import SEQUENCE_KINDS
 
 # --- dot products: two sequence parameters reduced to one scalar -----------
 #
@@ -93,7 +94,7 @@ def lift_dot(fn, facts) -> "DotLift | None":
     than two sequence parameters) declines rather than guessing."""
     if facts.tree is None or facts.loops or facts.branch_count or facts.recursion:
         return None
-    seq_params = [p for p in facts.params if facts.param_kinds.get(p) == "sequence"]
+    seq_params = [p for p in facts.params if facts.param_kinds.get(p) in SEQUENCE_KINDS]
     if len(seq_params) != 2:
         return None
     from ._normalize import normalized_body

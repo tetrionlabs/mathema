@@ -28,6 +28,7 @@ from typing import Callable, Iterable
 
 from ._math_vocab import _call_name
 from .probing import _points_for_probe, _poles_by_var
+from .runtime_types import SEQUENCE_KINDS
 
 
 @dataclass(frozen=True)
@@ -164,7 +165,7 @@ def _overflow_targets(fn, facts) -> set:
     if tree is None:
         return out
     scalars = {p for p in facts.params
-               if facts.param_kinds.get(p) not in ("sequence", "string",
+               if facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "string",
                                                     "bool")}
 
     def names_in(node) -> set:
@@ -189,7 +190,7 @@ def _recursion_targets(fn, facts) -> set:
     if not getattr(facts, "recursion", False):
         return set()
     return {p for p in facts.params
-            if facts.param_kinds.get(p) not in ("sequence", "string",
+            if facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "string",
                                                  "bool")}
 
 
@@ -530,7 +531,7 @@ def _emptiness_guard_params(facts) -> set:
     if tree is None:
         return set()
     pset = {p for p in facts.params
-            if facts.param_kinds.get(p) == "sequence"}
+            if facts.param_kinds.get(p) in SEQUENCE_KINDS}
     if not pset:
         return set()
 
@@ -675,7 +676,7 @@ def _type_discipline_params(fn, facts) -> set:
     where the author stated types structurally at all."""
     relevant = _annotated_params(facts) | set(_type_guard_params(facts))
     return {p for p in relevant
-            if facts.param_kinds.get(p) != "sequence"}
+            if facts.param_kinds.get(p) not in SEQUENCE_KINDS}
 
 
 def _string_input_params(facts) -> set:
@@ -720,7 +721,7 @@ def _type_hazard_points(fn, facts, domain: dict) -> list[HazardPoint]:
     float, bool where applicable) the representation trials compare."""
     out: list[HazardPoint] = []
     for p in facts.params:
-        if facts.param_kinds.get(p) == "sequence":
+        if facts.param_kinds.get(p) in SEQUENCE_KINDS:
             continue
         for v in _spelling_values(domain.get(p)):
             out.append(HazardPoint("type", p, str(v), float(v),
@@ -756,7 +757,7 @@ def _magnitude_hazard_points(fn, facts, domain: dict) -> list[HazardPoint]:
     out = []
     kinds = getattr(facts, "param_kinds", {}) or {}
     for param in getattr(facts, "params", ()):
-        if kinds.get(param) == "sequence":
+        if kinds.get(param) in SEQUENCE_KINDS:
             continue
         for magnitude in _MAGNITUDE_DECADES:
             for value in (magnitude, -magnitude):

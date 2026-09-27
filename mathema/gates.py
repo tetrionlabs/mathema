@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from ._math_vocab import MATH_CONSTANTS
 from .records import Probe
+from .runtime_types import SEQUENCE_KINDS
 
 
 def _conjecture_bits():
@@ -104,7 +105,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # non-value relation or a bundled (dataclass/dict) parameter isn't
     # reproducible this way, and a sequence parameter only when the
     # caller asked for list-valued points
-    seq_names = {p for p, k in kinds.items() if k == "sequence"}
+    seq_names = {p for p, k in kinds.items() if k in SEQUENCE_KINDS}
     if seq_names and not sequences:
         return None
     if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">"):
@@ -189,7 +190,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         calls_raised[0] = None
         calls_nonfinite[0] = None
 
-    base_env = {"f": _tag(fn, "f"), **_SAFE_FUNCS, **MATH_CONSTANTS,
+    from .runtime_types import calling
+    base_env = {"f": _tag(calling(fn, facts), "f"), **_SAFE_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
                 **{name: (cj.tolerance if cj.tolerance is not None else 1e-9)
                    for name in eps_names},
@@ -791,7 +793,7 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             f"verdict stays unknown").lstrip("; ")
         return falsified
     seq_names = [n for n in deps["names"]
-                 if facts.param_kinds.get(n) == "sequence"]
+                 if facts.param_kinds.get(n) in SEQUENCE_KINDS]
     result = C.corroborate_disproof(deps["evaluate"], deps["names"],
                                     sample=deps["sample"], admits=deps["admits"],
                                     witness=_sequence_witness(proof.witness,
@@ -860,23 +862,30 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
 
 def companion_name(parent_name: str, descriptor: str = "float") -> str:
     """The name of a claim's computation companion: `<parent
-    name>[float]`, or `<parent name>[complex]` for a claim over C."""
+    name>[float]`, or `<parent name>[complex]` for a claim over C,
+    with any runtime type after it (`<parent name>[float,
+    pandas.Series]`)."""
     return f"{parent_name}[{descriptor}]"
 
 
-def companion_representation(cj_domain: "dict | None") -> tuple:
+def companion_representation(cj_domain: "dict | None",
+                             facts=None) -> tuple:
     """Intent:
         The number representation a claim's companion computes in,
         as `(descriptor, representation, its name)`: complex128
         (`("complex", PY_COMPLEX128, "complex128")`) when the claim's
         domain binds a coordinate in C, else float64 (`("float",
-        PY_FLOAT64, "float64")`).
+        PY_FLOAT64, "float64")`). The descriptor goes on to name each
+        runtime type other than a list that a parameter of `facts` is
+        realised as (`"float, pandas.Series"`).
     """
     from .probing import _bound_is_complex
     from .representations import PY_COMPLEX128, PY_FLOAT64
+    from .runtime_types import descriptor_names
+    runtime = "".join(f", {name}" for name in descriptor_names(facts))
     if any(_bound_is_complex(b) for b in (cj_domain or {}).values()):
-        return "complex", PY_COMPLEX128, "complex128"
-    return "float", PY_FLOAT64, "float64"
+        return "complex" + runtime, PY_COMPLEX128, "complex128"
+    return "float" + runtime, PY_FLOAT64, "float64"
 
 
 def companion_descriptor(name: str) -> tuple[str, ...]:
@@ -971,7 +980,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     resolved = operational_infinity(cj)
     cap = operational_range(cj)
     descriptor, representation, representation_word = \
-        companion_representation(cj_domain)
+        companion_representation(cj_domain, facts)
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
                             cap=cap, reach=representation.max_magnitude,
                             sequences=True)

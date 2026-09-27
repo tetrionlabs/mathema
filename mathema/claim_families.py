@@ -44,6 +44,7 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
                       _restricted_domain_targets as _restricted_domain_targets)
 from .probing import (_fmt, _pinned_float_env, _points_for_probe, _pole_safety,
                       _poles_by_var, _synth, call_arguments)
+from .runtime_types import SEQUENCE_KINDS
 
 # --- probe:algorithmic families: monotonicity, affine-ness, convexity ------
 #
@@ -77,7 +78,8 @@ def _synth_other_params(fn, facts, target: str, domain: dict, rng: random.Random
             args.append(None)
             continue
         k = facts.param_kinds.get(p, "unknown")
-        args.append(_synth(k, rng, domain.get(p) if k != "sequence" else None))
+        args.append(_synth(k, rng, domain.get(p) if k not in SEQUENCE_KINDS
+                           else None))
     return args
 
 
@@ -690,7 +692,7 @@ def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
     target = cj.lhs
     if target not in facts.params:
         return None
-    if facts.param_kinds.get(target) == "sequence":
+    if facts.param_kinds.get(target) in SEQUENCE_KINDS:
         return None
     if not candidates:
         return None
@@ -1039,7 +1041,7 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
     # is_missing_safe's own hazard, not this member's
     if not candidates:
         return None
-    sequence_target = facts.param_kinds.get(target) == "sequence"
+    sequence_target = facts.param_kinds.get(target) in SEQUENCE_KINDS
     state = {"idx": 0}
 
     def trial(args):
@@ -1310,7 +1312,7 @@ def _is_empty_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     from .hazards import _emptiness_guard_params
     from .symbolic import ProofResult
     param = lhs_src
-    if facts.param_kinds.get(param) != "sequence":
+    if facts.param_kinds.get(param) not in SEQUENCE_KINDS:
         return None
     if param in _emptiness_guard_params(facts):
         return ProofResult(
@@ -1333,7 +1335,7 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
     inputs falsifies outright."""
     from .hazards import _emptiness_guard_params
     target = cj.lhs
-    if facts.param_kinds.get(target) != "sequence":
+    if facts.param_kinds.get(target) not in SEQUENCE_KINDS:
         return None
     guarded = target in _emptiness_guard_params(facts)
     shapes = ("empty", "single", "longer")
@@ -1543,7 +1545,7 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
     target = cj.lhs
     if target not in facts.params:
         return None
-    if facts.param_kinds.get(target) == "sequence":
+    if facts.param_kinds.get(target) in SEQUENCE_KINDS:
         return None
     bounds = domain.get(target)
     values = _spelling_values(bounds)
@@ -2745,7 +2747,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         pinf = operational_range(cj)
         for p in params:
             if p in call_pins or shapes.get(p) is not None \
-                    or facts.param_kinds.get(p) in ("sequence", "string"):
+                    or facts.param_kinds.get(p) in (*SEQUENCE_KINDS, "string"):
                 continue
             for v in _extreme_candidates((domain or {}).get(p),
                                          pseudo_infinity=pinf):
@@ -2985,7 +2987,7 @@ def _matrix_guard_probe(prop):
 
 def _first_matrix_param(facts) -> str:
     for p in facts.params:
-        if facts.param_kinds.get(p) == "sequence":
+        if facts.param_kinds.get(p) in SEQUENCE_KINDS:
             return p
     return facts.params[0] if facts.params else ""
 
@@ -3339,7 +3341,7 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
     # sequences, never the empty boundary. One empty trial per sequence
     # parameter catches it.
     empties = [p for p in facts.params
-               if facts.param_kinds.get(p) == "sequence"]
+               if facts.param_kinds.get(p) in SEQUENCE_KINDS]
 
     def _sample(force_empty=None):
         return [[] if p == force_empty
@@ -3423,7 +3425,7 @@ def _recursion_probe(fn, facts, cj, domain: dict, rng: random.Random,
     from .gates import _fmt_point
     target = cj.lhs
     numeric = [p for p in facts.params
-               if facts.param_kinds.get(p) not in ("sequence", "string")]
+               if facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "string")]
     if target in facts.params:
         focus = [target]
     elif target == "f" and numeric:

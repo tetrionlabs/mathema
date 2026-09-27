@@ -100,7 +100,7 @@ class Facts:
     name: str
     signature: str
     params: list[str]
-    param_kinds: dict[str, str]        # "sequence" | "scalar" | "int" | "bool" | "complex" | "string" | "unknown"
+    param_kinds: dict[str, str]        # "sequence" | "vec" | "mat" | "table" | "scalar" | "int" | "bool" | "complex" | "string" | "unknown"
     returns_kind: str                  # "scalar" | "sequence" | "bool" | "none" | "unknown"
     docstring: str | None
     source: str
@@ -142,6 +142,13 @@ class Facts:
                                       # annotation (Literal/Enum/bool) states the whole value set
     doc_concepts: list = field(default_factory=list)          # declared Concepts:/Tags: marker
                                       # tokens (normalized; both spellings are concepts)
+    runtime_types: dict = field(default_factory=dict)         # param -> (Detection, ...): the
+                                      # runtime types the signature names (runtime_types.
+                                      # detect_parameters), the first one sampled; a param
+                                      # whose first is not a list has kind vec/mat/table
+    runtime_hints: dict = field(default_factory=dict)         # param -> {"usage", "strong",
+                                      # "type", "text"}: a body use as a vector, matrix or
+                                      # table with no runtime type named (usage_hints)
 
 
 def _root_name(node: ast.AST) -> str | None:
@@ -979,11 +986,17 @@ def analyze_source(fn) -> Facts:
             continue
         seen.add(key)
         doc_notes = f"{doc_notes} {text}" if doc_notes else text
+    from .runtime_types import detect_parameters, usage_hints
+    param_kinds = _param_kinds(fdef, params)
+    detected = detect_parameters(fn)
+    apply_runtime_kinds(param_kinds, detected)
     return Facts(
         name=fdef.name,
         signature=identity.signature_string(fn),
         params=params,
-        param_kinds=_param_kinds(fdef, params),
+        param_kinds=param_kinds,
+        runtime_types=detected,
+        runtime_hints=usage_hints(fn, fdef, params, param_kinds, detected),
         finite_domains=finite_annotation_domains(fn),
         doc_concepts=doc_concepts,
         returns_kind=_returns_kind(fdef),
@@ -1014,6 +1027,40 @@ def analyze_source(fn) -> Facts:
         unresolved=unresolved,
         mutated_globals=mutated_globals,
     )
+
+
+def apply_runtime_kinds(param_kinds: dict, detected: dict) -> None:
+    """Intent:
+        Set, in place, the kind of each parameter whose first runtime
+        type detection is not a list to that detection's kind (`vec`,
+        `mat` or `table`); every other parameter keeps the kind read
+        off its annotation text and body.
+    """
+    for p, found in detected.items():
+        if found and found[0].adapter != "list" and p in param_kinds:
+            param_kinds[p] = found[0].kind
+
+
+def with_declared_runtime_types(facts, fn, declared: "dict | None"):
+    """Intent:
+        `facts` with a claims-file entry's `runtime_types:` applied:
+        each parameter the signature names no runtime type for takes
+        the declared one (its kind and detection), and loses its hint.
+        The same `facts` when nothing is declared.
+    """
+    if not declared:
+        return facts
+    from dataclasses import replace
+
+    from .runtime_types import detect_parameters
+    detected = detect_parameters(fn, {str(k): str(v)
+                                      for k, v in declared.items()})
+    kinds = dict(facts.param_kinds)
+    apply_runtime_kinds(kinds, detected)
+    hints = {p: h for p, h in (facts.runtime_hints or {}).items()
+             if p not in detected}
+    return replace(facts, param_kinds=kinds, runtime_types=detected,
+                   runtime_hints=hints)
 
 
 def quiet_facts(fn) -> "Facts | None":

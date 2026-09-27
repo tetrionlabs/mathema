@@ -448,7 +448,7 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
          trials_scale: float = 1.0, extensive: bool = False,
          declared: dict | None = None,
          known_premises: dict | None = None,
-         pseudo_infinity=None) -> Record:
+         pseudo_infinity=None, runtime_types: dict | None = None) -> Record:
     """Verify a function's claims, each adjudicated against the real
     function.
 
@@ -501,6 +501,10 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     then includes. Data only; it never satisfies a premise, and
     check() itself stays IO-free.
 
+    `runtime_types` (`{param: "pandas.Series"}`, else a `declared`
+    entry's `runtime_types:`) names the runtime type of a parameter
+    whose signature names none, for code that cannot be annotated.
+
     `pseudo_infinity` is the function level of the operational
     infinity: how far each claim's computation (the probe route and
     the `[float]` companion) runs along an unbounded direction, unless
@@ -549,6 +553,13 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
 
     ensure_bundled()
     facts = analyze(fn)
+    if runtime_types is None and declared is not None:
+        runtime_types = declared.get("runtime_types")
+    if runtime_types:
+        # a claims-file entry names the runtime types of code its
+        # signature cannot state
+        from .analysis import with_declared_runtime_types
+        facts = with_declared_runtime_types(facts, fn, runtime_types)
     # the function-level parent domain: signature markers, then an
     # explicit domain= winning per parameter. Each claim is adjudicated
     # over this parent with its own `for` bindings overriding it per

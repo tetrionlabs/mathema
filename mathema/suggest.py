@@ -19,6 +19,7 @@ from .analysis import analyze_source
 from .conjecture import claim
 from .records import _EXC_TYPES
 from .spec import declare, merge_entries, write_yaml
+from .runtime_types import SEQUENCE_KINDS
 
 
 def _fmt_num(v: float) -> str:
@@ -279,7 +280,7 @@ def _loop_closed_form(fn, facts) -> "tuple[str, str] | None":
     form is suggested; a page of algebra teaches nothing."""
     if not getattr(facts, "loops", None):
         return None
-    if any(k == "sequence" for k in facts.param_kinds.values()):
+    if any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None
     try:
         import sympy
@@ -603,7 +604,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
                 pass
 
     scalar_ish = {"scalar", "int", "unknown"}
-    if (facts.params and facts.param_kinds.get(facts.params[0]) == "sequence"
+    if (facts.params and facts.param_kinds.get(facts.params[0]) in SEQUENCE_KINDS
             and all(facts.param_kinds.get(p) in scalar_ish for p in facts.params[1:])
             and numeric_return):
         xs = facts.params[0]
@@ -666,7 +667,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     # invariants the shape battery never proposes. All three are probe-
     # only (dim/sorted/type have no symbolic form).
     if (facts.params and facts.returns_kind == "sequence"
-            and facts.param_kinds.get(facts.params[0]) == "sequence"):
+            and facts.param_kinds.get(facts.params[0]) in SEQUENCE_KINDS):
         seq = facts.params[0]
         out.append(claim(f"len({call}) == len({seq})",
                          name="preserves_length", source="mathema",

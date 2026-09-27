@@ -67,7 +67,7 @@ def test_a_marker_outranks_the_annotation():
 
 
 def test_annotation_text_is_read_when_the_hints_do_not_resolve():
-    def f(xs: "pd.Series", ys: "Undefined", zs: "np.ndarray"):
+    def f(xs: "pd.Series", ys: "Undefined", zs: "np.ndarray"):  # noqa: F821
         return xs
     f.__globals__.pop("Undefined", None)
     found = _first(f)

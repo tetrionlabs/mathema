@@ -35,6 +35,7 @@ from ._loop_shapes import (
 )
 from ._proof_support import ProofResult
 from ._seq_common import _unliftable_result, SeqLiftView, try_prove_seq
+from ..runtime_types import SEQUENCE_KINDS
 
 # --- linear accumulator folds -----------------------------------------------
 #
@@ -261,7 +262,7 @@ def _lift_fold_impl(fn, facts) -> "FoldLift | dict":
                "hint": "the function also recurses, not derivable regardless "
                       "of the loop shape",
                "derive_unlock": "limitation"}
-    seq_params = [p for p in facts.params if facts.param_kinds.get(p) == "sequence"]
+    seq_params = [p for p in facts.params if facts.param_kinds.get(p) in SEQUENCE_KINDS]
     if len(seq_params) > 1:
         return {"reason": "wrong-sequence-param-count",
                "hint": f"{len(seq_params)} sequence-typed parameters, at most "

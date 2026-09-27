@@ -503,6 +503,12 @@ def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS) -> list[Probe]:
     return_dims = shapes["return"].dims
     if not param_dims:
         return []
+    # each call realises the drawn nested lists as the parameters'
+    # runtime types and observes the result as plain nested lists
+    from types import SimpleNamespace
+
+    from .runtime_types import calling, detect_parameters
+    fn = calling(fn, SimpleNamespace(runtime_types=detect_parameters(fn)))
 
     names = {d for dims in param_dims.values() for d in dims if isinstance(d, str)}
     names |= {d for d in return_dims if isinstance(d, str)}

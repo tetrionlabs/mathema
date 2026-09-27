@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 
 from .analysis import quiet_facts
 from .intent import _sections
+from .runtime_types import SEQUENCE_KINDS
 
 
 def _self_use_blocks(tree, self_name: str) -> bool:
@@ -479,7 +480,7 @@ def purity_reason(fn) -> str | None:
         return f"recursive ({n} call site{'s' if n != 1 else ''})"
     if not facts.params:
         return "no parameters"
-    non_scalar = [p for p, k in facts.param_kinds.items() if k == "sequence"]
+    non_scalar = [p for p, k in facts.param_kinds.items() if k in SEQUENCE_KINDS]
     if non_scalar:
         if lift_dot(fn, facts) is not None:
             return None
@@ -580,7 +581,7 @@ def derivability_report(fn) -> dict | None:
                "line": first_call.lineno}
     if not facts.params:
         return {"liftable": False, "blocker": "no-parameters", "line": facts.tree.lineno}
-    non_scalar = [p for p, k in facts.param_kinds.items() if k == "sequence"]
+    non_scalar = [p for p, k in facts.param_kinds.items() if k in SEQUENCE_KINDS]
     if non_scalar:
         if lift_dot(fn, facts) is not None:
             return {"liftable": True}
