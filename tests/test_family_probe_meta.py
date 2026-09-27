@@ -4,8 +4,10 @@
 the last element of its result, after `(verdict, checked, cx)` or the
 four-element form with an established sketch, is merged into the
 resulting `Probe.meta`. The three- and four-element forms without one
-keep working unchanged. The mapping travels with the probe's own
-report, so it is on the record whenever that report stands. A mapping under `mathema.language` merges per
+keep working unchanged. The mapping reaches the record whichever
+report stands: when derive's `unknown` is kept over a probe that
+skipped, the probe's meta is merged in under its own keys, derive's
+keys winning on a clash. A mapping under `mathema.language` merges per
 key with the language description core writes for every `L[...]`
 binding, so a family's `return` entry sits beside the parameters."""
 import pytest
@@ -134,3 +136,29 @@ def test_any_other_shape_is_refused(result):
     from mathema.claim_families import split_probe_result
     with pytest.raises(ValueError):
         split_probe_result(result)
+
+
+def test_a_skipped_probe_still_puts_its_mapping_on_the_record(scripted):
+    p = _check(scripted(("skipped", 0, "nothing to call",
+                         {"acme.target": "slug",
+                          "mathema.probe_gap": "string-domain-missing"})))
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert p.meta["acme.target"] == "slug"
+    assert p.meta["mathema.probe_gap"] == "string-domain-missing"
+    assert p.meta["mathema.derive_status"]
+
+
+def test_derive_keys_win_over_a_skipped_probe(scripted):
+    p = _check(scripted(("skipped", 0, "nothing to call",
+                         {"mathema.derive_status": "from the probe"})))
+    assert p.verdict == "unknown"
+    assert p.meta["mathema.derive_status"] != "from the probe"
+
+
+def test_a_skipped_probe_language_entry_merges_per_key(letters, scripted):
+    returned = {"mathema.language": {"return": [{"name": "letters", "from": "s"}]}}
+    p = _check(scripted(("skipped", 0, "nothing to call", returned)), domain="L[letters]")
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    described = p.meta["mathema.language"]
+    assert described["return"] == [{"name": "letters", "from": "s"}]
+    assert described["s"][0]["name"] == "letters"

@@ -3320,6 +3320,23 @@ def _probe_attempt_label(probed: "Probe") -> str:
     return f"probe: {probed.verdict}" + (f" ({reason})" if reason else "")
 
 
+def _merge_under(meta: dict, extra: dict) -> dict:
+    """Intent:
+        `meta` with `extra`'s keys added beneath it: a key already in
+        `meta` keeps its value, except `mathema.language`, whose
+        entries merge per key (an entry already present wins).
+    """
+    import copy
+    out = dict(meta)
+    for key, value in extra.items():
+        if key == "mathema.language" and isinstance(value, dict) \
+                and isinstance(out.get(key), dict):
+            out[key] = {**copy.deepcopy(value), **out[key]}
+        elif key not in out:
+            out[key] = copy.deepcopy(value)
+    return out
+
+
 def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Probe":
     """Intent:
         Decide which report stands when a route="best"/"derive" claim
@@ -3334,7 +3351,9 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
     Notes:
         The structured mathema.derive_status / mathema.timeout meta is
         carried onto the winning Probe regardless of who adjudicated,
-        so a coverage measurement keeps the derive-route signal.
+        so a coverage measurement keeps the derive-route signal. When
+        derive's report stands, the probe's own meta (a family's
+        resolved target, a probe gap) is merged beneath derive's.
     """
     fallback = ctx.derive_undecided
     if fallback is None:
@@ -3361,6 +3380,8 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
                or k.startswith("mathema.corroboration")}
     if carried:
         winner.meta = {**(winner.meta or {}), **carried}
+    if winner is fallback and probed.meta:
+        winner.meta = _merge_under(winner.meta or {}, probed.meta)
     if (fallback.meta or {}).get("mathema.corroboration") == "uncorroborated":
         # the engine-bug signal must survive whichever route wins: a
         # symbolic disproof nothing reproduced was claimed here, and a

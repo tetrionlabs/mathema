@@ -99,9 +99,11 @@ The trailing mapping is how a probe states what it resolved while it
 ran, the target language it held the output to, say, so that a `holds`
 record is not silent about what held. Use namespaced keys
 (`"my_package.target"`), since the record is shared with everything
-else that writes to it. The mapping travels with the probe's own
-report, so it is on the record whenever that report is the one that
-stands, and it is copied, never shared. One key merges rather than
+else that writes to it. The mapping reaches the record whichever
+report stands: when the probe's verdict stands it is the probe's meta,
+and when the probe skipped and derive's `unknown` stands instead, it
+is merged in beneath derive's own keys, which win on a clash. It is
+copied, never shared. One key merges rather than
 replaces: under `"mathema.language"` core already writes a description
 of every `L[...]` binding, one entry per parameter, and a family's
 entries sit beside those, so `{"mathema.language": {"return": [...]}}`
