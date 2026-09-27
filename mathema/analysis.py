@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from . import identity
 from . import types as _types
 from .intent import parse_doc
+from ._signatures import callable_signature
 
 _IO_FUNCS = {"print", "input", "open", "exec", "eval", "__import__"}
 _IO_MODULES = {"os", "sys", "subprocess", "socket", "requests", "urllib",
@@ -441,7 +442,7 @@ def finite_annotation_domains(fn) -> dict:
     import typing as t
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return {}
     out = {}

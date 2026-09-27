@@ -31,7 +31,11 @@ function that makes it):
   locally** (proven or holds in this project's store), **trusted**
   (accepted with `mathema accept ... --as trusted`, at the level
   accepted), **falsified**, and **unsettled** (not yet adjudicated
-  here, or adjudicated without a verdict);
+  here, or adjudicated without a verdict), and under it a `not
+  registered:` line for each row whose region cannot be stated over
+  the call's arguments, with the reason. Such a row adds no guard. A
+  row of your own claims file is also reported by a warning when it is
+  loaded; a row mathema ships is reported here only;
 - the called functions no claims file states anything about.
 
 Two functions calling numpy, verified:

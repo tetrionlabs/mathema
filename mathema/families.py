@@ -26,6 +26,8 @@ import warnings
 from importlib.metadata import entry_points
 from typing import Callable, Protocol, runtime_checkable
 
+from ._signatures import callable_signature
+
 FAMILY_GROUP = "mathema.claim_families"
 
 
@@ -82,7 +84,7 @@ def call_route(route: Callable, /, *args, **kwargs):
     """
     import inspect
     try:
-        sig = inspect.signature(route)
+        sig = callable_signature(route)
     except (TypeError, ValueError):
         return route(*args, **kwargs)
     params = sig.parameters.values()

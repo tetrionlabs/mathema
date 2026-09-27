@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+"""The signature of a callable, numpy ufuncs included.
+
+numpy releases before 2.3 give a ufunc no `inspect.signature`; the
+signature numpy documents for every ufunc (and reports from 2.3 on) is
+fixed by the ufunc's `nin` and `nout`, and is built from them here.
+"""
+from __future__ import annotations
+
+import inspect
+
+_P = inspect.Parameter
+
+
+def _is_ufunc(fn) -> bool:
+    """Whether `fn` is a numpy ufunc, read without importing numpy."""
+    kind = type(fn)
+    return kind.__name__ == "ufunc" and kind.__module__ == "numpy"
+
+
+def _no_value():
+    """numpy's no-value sentinel, the default of a keyword a gufunc
+    accepts but does not pass on unless given."""
+    import numpy as np
+    try:
+        return np._globals._NoValue
+    except AttributeError:
+        return getattr(np, "_NoValue", None)
+
+
+def ufunc_signature(fn) -> inspect.Signature:
+    """Intent:
+        The signature numpy documents for the ufunc `fn`: its inputs as
+        positional-only `x` (one input) or `x1, x2, ...`, then `out`
+        (`None`, or a tuple of `None` per output when there are
+        several), then the keyword-only ufunc arguments. A generalized
+        ufunc (one with a core `signature`, such as `matmul`) takes
+        `axes`, `axis` and `keepdims` in place of `where`.
+    """
+    nin, nout = int(fn.nin), int(fn.nout)
+    names = ["x"] if nin == 1 else [f"x{i}" for i in range(1, nin + 1)]
+    params = [_P(n, _P.POSITIONAL_ONLY) for n in names]
+    out = None if nout == 1 else (None,) * nout
+    params.append(_P("out", _P.POSITIONAL_OR_KEYWORD, default=out))
+    if getattr(fn, "signature", None):
+        missing = _no_value()
+        extra = [("axes", missing), ("axis", missing), ("keepdims", False)]
+    else:
+        extra = [("where", True)]
+    extra += [("casting", "same_kind"), ("order", "K"), ("dtype", None),
+              ("subok", True), ("signature", None)]
+    params += [_P(n, _P.KEYWORD_ONLY, default=d) for n, d in extra]
+    return inspect.Signature(params)
+
+
+def callable_signature(fn) -> inspect.Signature:
+    """Intent:
+        `inspect.signature(fn)`, with a numpy ufunc that has none read
+        as `ufunc_signature(fn)`, so a ufunc has the same parameters on
+        every numpy.
+
+    Raises:
+        ValueError, TypeError: as `inspect.signature` does, for any
+            other callable without a readable signature.
+    """
+    try:
+        return inspect.signature(fn)
+    except ValueError:
+        if _is_ufunc(fn):
+            return ufunc_signature(fn)
+        raise

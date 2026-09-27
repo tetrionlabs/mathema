@@ -125,9 +125,11 @@ def library_version(found) -> "str | None":
 
 
 def _signature(fn) -> "inspect.Signature | None":
-    """`fn`'s signature, or None when it has none to read."""
+    """`fn`'s signature (a numpy ufunc's documented one where
+    `inspect.signature` cannot read it), or None when it has none."""
+    from .._signatures import callable_signature
     try:
-        return inspect.signature(fn)
+        return callable_signature(fn)
     except (TypeError, ValueError):
         return None
 

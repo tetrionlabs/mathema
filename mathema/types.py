@@ -37,13 +37,13 @@ module; type inference is folded in one level further out, in
 type_probes(), so it never competes with an ordinary claim name)."""
 from __future__ import annotations
 
-import inspect
 import random
 import typing
 from dataclasses import dataclass, field
 
 from .grammar import Interval
 from .probing import Probe, _RNG_SEED
+from ._signatures import callable_signature
 
 
 @dataclass(frozen=True)
@@ -496,7 +496,7 @@ def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS) -> list[Probe]:
     if "return" not in shapes:
         return []
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return []
     param_dims = {p: shapes[p].dims for p in sig.parameters if p in shapes}

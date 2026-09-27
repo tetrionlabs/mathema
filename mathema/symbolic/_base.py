@@ -22,6 +22,7 @@ from .._math_vocab import (_BINOPS, _MATH_ATTRS, _SYMPY_FUNCS,
                            _call_name, _root_name)
 from ..finite_sets import OpaqueRegistry, is_opaque_eligible
 from ..runtime_types import SEQUENCE_KINDS
+from .._signatures import callable_signature
 
 
 # One canonical pair of tables for negating/rendering sympy
@@ -376,10 +377,9 @@ def _dataclass_fields(fn, param: str) -> list[str] | None:
     dataclass-typed, or any of its own fields isn't itself scalar (a
     nested dataclass or a sequence-typed field stays out of scope)."""
     import dataclasses
-    import inspect
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return None
     p = sig.parameters.get(param)

@@ -45,6 +45,7 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
 from .probing import (_fmt, _pinned_float_env, _points_for_probe, _pole_safety,
                       _poles_by_var, _synth, call_arguments)
 from .runtime_types import SEQUENCE_KINDS
+from ._signatures import callable_signature
 
 # --- probe:algorithmic families: monotonicity, affine-ness, convexity ------
 #
@@ -1162,7 +1163,7 @@ def seed_parameter(fn, facts) -> "str | None":
     """
     import inspect
     try:
-        signature = inspect.signature(fn)
+        signature = callable_signature(fn)
     except (TypeError, ValueError):
         signature = None
     for p in facts.params:
@@ -1185,7 +1186,7 @@ def _seed_factory(fn, param: str):
     """
     import inspect
     try:
-        annotation = inspect.signature(fn).parameters[param].annotation
+        annotation = callable_signature(fn).parameters[param].annotation
     except (TypeError, ValueError, KeyError):
         annotation = None
     kind = (None if annotation is inspect.Parameter.empty
@@ -1986,7 +1987,6 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         function whose signature binds them. The whole search runs
         under the fast wall-clock cap; a cap that fires ends it.
     """
-    import inspect
     import itertools
 
     import sympy as _sympy
@@ -2000,7 +2000,7 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
     if not params or any(k not in _WITNESS_SCALAR_KINDS for k in kinds.values()):
         return None, 0
     try:
-        signature = inspect.signature(fn)
+        signature = callable_signature(fn)
         signature.bind(**{p: 0 for p in params})
     except (TypeError, ValueError):
         return None, 0

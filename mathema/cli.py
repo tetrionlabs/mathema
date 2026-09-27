@@ -42,6 +42,7 @@ import sys
 from typing import NoReturn
 
 from .targets import TargetError, resolve, resolve_function
+from ._signatures import callable_signature
 
 
 def _bad_argument(message: str) -> NoReturn:
@@ -124,11 +125,10 @@ def _check_rows(args) -> list[dict]:
         raise TargetError(f"no functions found in {args.target}")
     domain = _parse_domain(args.domain)
     if domain:
-        import inspect
         params: set = set()
         for fn in target.functions.values():
             try:
-                params |= set(inspect.signature(fn).parameters)
+                params |= set(callable_signature(fn).parameters)
             except (TypeError, ValueError):
                 continue
         unknown = sorted(set(domain) - params)

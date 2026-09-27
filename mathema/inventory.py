@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from .analysis import quiet_facts
 from .intent import _sections
 from .runtime_types import SEQUENCE_KINDS
+from ._signatures import callable_signature
 
 
 def _self_use_blocks(tree, self_name: str) -> bool:
@@ -110,7 +111,7 @@ def typing_info(fn) -> dict:
     from .analysis import finite_annotation_domains
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return {"params_typed": 0, "params_total": 0, "return_typed": None,
                 "finite_domains": {}}
@@ -999,7 +1000,7 @@ def function_dependencies(fn, facts=None) -> list[dict]:
         if kind == "module":
             out.extend(_module_attribute_callees(fn, name, obj))
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return out
     import collections.abc

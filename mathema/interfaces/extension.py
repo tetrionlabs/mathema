@@ -63,6 +63,7 @@ from .runtime import POINT_RUNTIME_PROTOCOL as POINT_RUNTIME_PROTOCOL
 from .runtime import PointRuntime as PointRuntime
 from .runtime import RUNTIME_CAPABILITIES as RUNTIME_CAPABILITIES
 from .runtime import runtime_problems as runtime_problems
+from .._signatures import callable_signature
 
 EXTENSION_API_VERSION = 1
 
@@ -146,7 +147,7 @@ def capability_problems(provider, capability: str) -> list[str]:
         if not keywords:
             continue
         try:
-            params = inspect.signature(target).parameters
+            params = callable_signature(target).parameters
         except (TypeError, ValueError):
             continue
         if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
