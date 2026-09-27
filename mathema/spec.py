@@ -1677,6 +1677,64 @@ def load_declared(root: str = ".") -> dict:
     return merged
 
 
+def foreign_grammar_files(root: str = ".") -> list:
+    """Intent:
+        The claims files under `root` whose every claim is written in a
+        grammar this checker does not adjudicate, as
+        `(relative path, grammars, claim count)`, each claim's grammar
+        being its own, else its entry's, else its file's.
+
+    Notes:
+        A `mathema/<dialect>` grammar is adjudicated here; a file that
+        cannot be read, or holds no claims, is not listed.
+    """
+    from .conjecture import GRAMMAR
+
+    def adjudicated(grammar: str) -> bool:
+        return grammar == GRAMMAR or grammar.startswith(GRAMMAR + "/")
+
+    out = []
+    for path in claims_file_paths(root, exclude=(_bundled_compendium_dir(),)):
+        rel_path = os.path.relpath(path, root)
+        try:
+            data = read_claims_file(path, rel_path)
+        except Exception:
+            continue
+        if not data:
+            continue
+        file_grammar = data.get("grammar") or GRAMMAR
+        grammars: list = []
+        for key, entry in data.items():
+            if key in _FILE_FIELDS or not isinstance(entry, dict):
+                continue
+            entry_grammar = entry.get("grammar") or file_grammar
+            grammars += [str(c.get("grammar") or entry_grammar)
+                         for c in entry.get("claims") or []
+                         if isinstance(c, dict)]
+        if grammars and not any(adjudicated(g) for g in grammars):
+            out.append((rel_path, sorted(set(grammars)), len(grammars)))
+    return out
+
+
+def foreign_grammar_warnings(root: str = ".") -> list:
+    """Intent:
+        One warning line per claims file written wholly in a grammar
+        this checker does not adjudicate (`foreign_grammar_files`),
+        naming the file and the grammar and saying that mathema's claim
+        language is the default when `grammar:` is omitted.
+    """
+    lines = []
+    for rel_path, grammars, count in foreign_grammar_files(root):
+        named = ", ".join(repr(g) for g in grammars)
+        noun = "grammar" if len(grammars) == 1 else "grammars"
+        lines.append(
+            f"warning: all {count} claim(s) in {rel_path} use {noun} "
+            f"{named}, which this checker does not adjudicate; mathema's "
+            f"claim language is the default, so omit `grammar:` to have "
+            f"them checked here")
+    return lines
+
+
 def load_specs(root: str = ".") -> dict:
     """A combined, display-only view of the whole store, for `mathema
     status` and human introspection: {key: {"entry", "source", "layer"}},

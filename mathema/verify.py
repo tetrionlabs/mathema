@@ -852,6 +852,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        write_yaml)
 
     out = VerifyResult()
+    from .spec import foreign_grammar_warnings
+    out.lines.extend(foreign_grammar_warnings(root))
     from .compendium import own_package_compendium_files
     for where, library in own_package_compendium_files(root):
         out.lines.append(

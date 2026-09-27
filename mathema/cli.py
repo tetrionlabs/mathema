@@ -293,6 +293,9 @@ def cmd_check(args) -> int:
     `--strict`), 0 otherwise, suitable for a pre-commit check on a
     single target."""
     _warn_small_pseudo_infinity()
+    from .spec import foreign_grammar_warnings
+    for line in foreign_grammar_warnings(getattr(args, "root", ".")):
+        print(line, file=sys.stderr)
     rows = _check_rows(args)
     out = _format_check(rows, args.format)
     if args.output:
