@@ -6,9 +6,9 @@
 # computation stays inside float range, a fact about numpy on float64
 # (outside it numpy returns an infinity with a RuntimeWarning): it feeds
 # the hazard points and the computation-safety checks, never a proof.
-# A row's note says what the library does outside the region. Functions
-# without a single-relation region state no rows yet; what is known
-# about them is the comment above each key.
+# A row's note says what the library does outside the region. power and
+# float_power have no single-relation region and state no rows yet; what
+# is known about them is the comment above each key.
 compendium: numpy
 versions: ">=1.24,<3"
 
@@ -114,14 +114,26 @@ numpy.power:
 numpy.float_power:
   claims: []
 
-# Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises.
 numpy.divide:
-  claims: []
+  claims:
+    - name: is_defined
+      statement: "x2 != 0"
+      note: "Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises."
+    - name: is_overflow_safe
+      statement: "abs(x1) <= 1.79769313486231e308 * abs(x2)"
+      note: "The quotient stays inside float64 range; a larger quotient returns an infinity with a RuntimeWarning."
 
-# Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises.
 numpy.true_divide:
-  claims: []
+  claims:
+    - name: is_defined
+      statement: "x2 != 0"
+      note: "Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises."
+    - name: is_overflow_safe
+      statement: "abs(x1) <= 1.79769313486231e308 * abs(x2)"
+      note: "The quotient stays inside float64 range; a larger quotient returns an infinity with a RuntimeWarning."
 
-# 1 / x; the reciprocal of 0 returns inf, never raises, and an integer input's reciprocal truncates.
 numpy.reciprocal:
-  claims: []
+  claims:
+    - name: is_defined
+      statement: "x != 0"
+      note: "1 / x; the reciprocal of 0 returns inf, never raises, and an integer input's reciprocal truncates."

@@ -2364,6 +2364,38 @@ def _library_reach(fn, cj, params: list, domain: dict, shapes: dict):
     return reach, note
 
 
+def _overflow_safe_relations(fn, params: list) -> list:
+    """Intent:
+        The recorded `is_overflow_safe` region of `fn` as compiled
+        `(lhs, relation, rhs)` triples over its parameters, for the
+        `is_defined` probe to keep its points inside: the region the
+        function's computation stays inside float range, where
+        definedness is the only question left. Read from the library
+        key's compendium rows; [] when none is recorded or a row reads
+        a name outside `params`.
+    """
+    from .compendium import computation_region, library_key_of
+    from .conjecture import _validate, claim
+    key = library_key_of(fn)
+    if key is None:
+        return []
+    out: list = []
+    for row in computation_region(key, "is_overflow_safe"):
+        for text in row["texts"]:
+            try:
+                cj = claim(text, name="is_overflow_safe")
+                for lhs, rel, rhs in (list(cj.links)
+                                      or [(cj.lhs, cj.relation, cj.rhs)]):
+                    if rel not in _COMPARISONS or not rhs:
+                        return []
+                    out.append((
+                        _validate(lhs, set(params), frozenset())[0], rel,
+                        _validate(rhs, set(params), frozenset())[0]))
+            except Exception:
+                return []
+    return out
+
+
 def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                   trials: int, kind: str):
     """Intent:
@@ -2395,6 +2427,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         meta)` shape, with the counts inside and outside the region in
         `meta`, or None when a link is not a comparison.
     """
+    import math as _math
+
     from .conjecture import _SAFE_FUNCS, MATH_CONSTANTS, _validate, call_defaults
     from .domain import domain_contains, is_missing
     from .gates import _fmt_point
@@ -2458,12 +2492,21 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     shapes = _region_shapes(links, params, domain)
     reach, reach_note = ({}, None)
+    overflow_safe: list = []
     if kind == "is_defined":
         reach, reach_note = _library_reach(fn, cj, params, domain, shapes)
+        overflow_safe = _overflow_safe_relations(fn, params)
 
     def admitted(point: dict) -> bool:
+        if overflow_safe and satisfies(overflow_safe, point) is False:
+            return False
         for p, v in point.items():
             if is_missing(v):
+                return False
+            if kind == "is_overflow_safe" and isinstance(v, float) \
+                    and _math.isinf(v):
+                # overflow is an infinity from finite inputs; an
+                # infinite input is not a trial
                 return False
             bound = (domain or {}).get(p)
             span = reach.get(p)
