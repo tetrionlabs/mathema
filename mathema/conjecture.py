@@ -797,6 +797,11 @@ class Conjecture:
     # with its source; set only on check_conjectures' working copy and
     # read through records.operational_range. Output, never identity
     # (P7): no renderer or fingerprint reads it.
+    overflow_safe: tuple = field(default=(), compare=False)
+    # the `(lhs, relation, rhs)` links of the function's own recorded
+    # `is_overflow_safe` region, from the claims adjudicated beside
+    # this one; set only on check_conjectures' working copy, read by
+    # the `is_defined` probe to keep its points inside that region
     links: list = field(default_factory=list)
     # a chained comparison's pairwise links, each an (lhs, rel, rhs)
     # triple (grammar.split_relation_chain); empty for an ordinary
@@ -2847,7 +2852,12 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     duplicate_names = {name for name in
                        (cj.name for cj in conjectures)
                        if [c.name for c in conjectures].count(name) > 1}
+    overflow_links = overflow_safe_links(conjectures)
     for cj in ordered:
+        if overflow_links and not cj.overflow_safe \
+                and "is_defined" in (region_row_kind(cj.name),
+                                     cj.relation):
+            cj = _dc_replace(cj, overflow_safe=overflow_links)
         if cj.resolved_pseudo_infinity is None:
             # the working copy carries the operational infinity that
             # applies to this claim's computation; a claim synthesized
@@ -3192,6 +3202,22 @@ def pseudo_infinity_stamp(cj, facts, parent_domain: "dict | None") -> "dict | No
     if not unbounded_directions(names, effective):
         return None
     return found.meta()
+
+
+def overflow_safe_links(conjectures: list) -> tuple:
+    """Intent:
+        The `(lhs, relation, rhs)` links of every `is_overflow_safe`
+        claim in restriction form among `conjectures` (the function's
+        own recorded region where its computation stays in float
+        range); () when none states one.
+    """
+    out: list = []
+    for c in conjectures:
+        if region_row_kind(c.name) != "is_overflow_safe" \
+                or c.relation == "is_overflow_safe" or not c.rhs:
+            continue
+        out.extend(c.links or [(c.lhs, c.relation, c.rhs)])
+    return tuple(out)
 
 
 def pseudo_infinity_condition(cj, facts, parent_domain: "dict | None",

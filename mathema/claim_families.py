@@ -2296,44 +2296,80 @@ def _region_interval(region, symbol):
         return None
 
 
-def _library_reach(fn, cj, params: list, domain: dict, shapes: dict):
+def _overflow_safe_rows(fn, cj) -> "tuple[list, list, str]":
     """Intent:
-        How far an `is_defined` probe on a LIBRARY key (a key of a
-        registered compendium file) runs each scalar parameter: the
-        key's own `is_overflow_safe` region when the compendium states
-        one (the function is mathematically total where it does not
-        overflow, and overflow is the `is_overflow_safe` row's fact,
-        not this claim's), else the claim's pseudo-infinity, else the
-        carrier's maximum, each intersected with the parameter's own
+        The recorded `is_overflow_safe` region of the function a claim
+        is about, as `(links, texts, owner)`: its `(lhs, relation, rhs)`
+        links, the texts the record quotes, and the name the note
+        gives the function. Read from a library key's compendium rows
+        and from the project's own `is_overflow_safe` claims adjudicated
+        beside this one (`Conjecture.overflow_safe`); empty lists when
+        neither records one.
+    """
+    from .compendium import computation_region, library_key_of
+    from .conjecture import claim
+    key = library_key_of(fn)
+    links: list = []
+    texts: list = []
+    if key is not None:
+        for row in computation_region(key, "is_overflow_safe"):
+            for text in row["texts"]:
+                try:
+                    parsed = claim(text, name="is_overflow_safe")
+                except Exception:
+                    continue
+                links.extend(parsed.links
+                             or [(parsed.lhs, parsed.relation, parsed.rhs)])
+                texts.append(text)
+    own = list(getattr(cj, "overflow_safe", ()) or ())
+    if own:
+        links.extend(own)
+        texts.extend(f"{lhs} {rel} {rhs}" for lhs, rel, rhs in own)
+    owner = key or getattr(fn, "__name__", "f")
+    return links, texts, owner
+
+
+def _is_defined_reach(fn, cj, params: list, domain: dict, shapes: dict,
+                      links: list, texts: list, owner: str):
+    """Intent:
+        How far an `is_defined` probe runs each scalar parameter, for
+        any function: inside its recorded `is_overflow_safe` region
+        (`links`, see `_overflow_safe_rows`) when one is recorded, since
+        where the computation overflows is that claim's fact and not
+        this one's; else to the claim's pseudo-infinity, else to the
+        carrier's maximum; each intersected with the parameter's own
         declared bound. Returns `(reach, note)`: the per-parameter
         `(lo, hi)` the corners are taken from and outside which a draw
-        is not a trial, and the text the record carries, or `({},
-        None)` for any other function.
+        is not a trial, and the text the record carries.
     """
     import math as _math
 
     import sympy
 
-    from .compendium import computation_region, library_key_of
-    from .records import operational_range
-    key = library_key_of(fn)
-    if key is None:
-        return {}, None
-    pinf = operational_range(cj)
     from ._sampling import carrier_reach
+    from .compendium import _relation
+    from .records import operational_range
+    pinf = operational_range(cj)
     default_lo, default_hi = (pinf if pinf is not None
                               else (-carrier_reach(), carrier_reach()))
-    regions = {}
-    texts = []
-    for row in computation_region(key, "is_overflow_safe"):
-        for p in row["params"]:
-            if p not in params:
+    env = {p: sympy.Symbol(p, real=True) for p in params}
+    regions: dict = {}
+    for lhs, rel, rhs in links:
+        try:
+            region = _relation(lhs, rel, rhs, env)
+        except Exception:
+            continue
+        for p in params:
+            found = _region_interval(region, env[p])
+            if found is None:
                 continue
-            found = _region_interval(row["region"],
-                                     sympy.Symbol(p, real=True))
-            if found is not None:
-                regions[p] = found
-                texts.extend(row["texts"])
+            lo, hi, c_lo, c_hi = regions.get(
+                p, (-_math.inf, _math.inf, True, True))
+            if found[0] > lo or (found[0] == lo and not found[2]):
+                lo, c_lo = found[0], found[2]
+            if found[1] < hi or (found[1] == hi and not found[3]):
+                hi, c_hi = found[1], found[3]
+            regions[p] = (lo, hi, c_lo, c_hi)
     reach: dict = {}
     for p in params:
         if shapes.get(p) is not None:
@@ -2353,10 +2389,8 @@ def _library_reach(fn, cj, params: list, domain: dict, shapes: dict):
             hi = default_hi
         if lo <= hi:
             reach[p] = (lo, hi)
-    if not reach:
-        return {}, None
     if texts:
-        note = (f"sampled inside the overflow-safe region of {key} "
+        note = (f"sampled inside the overflow-safe region of {owner} "
                 f"({' and '.join(texts)})")
     elif pinf is not None:
         from .records import operational_infinity
@@ -2366,35 +2400,22 @@ def _library_reach(fn, cj, params: list, domain: dict, shapes: dict):
     return reach, note
 
 
-def _overflow_safe_relations(fn, params: list) -> list:
+def _compiled_links(links: list, params: list) -> list:
     """Intent:
-        The recorded `is_overflow_safe` region of `fn` as compiled
-        `(lhs, relation, rhs)` triples over its parameters, for the
-        `is_defined` probe to keep its points inside: the region the
-        function's computation stays inside float range, where
-        definedness is the only question left. Read from the library
-        key's compendium rows; [] when none is recorded or a row reads
-        a name outside `params`.
+        `(lhs, relation, rhs)` links compiled for evaluation at a point
+        over `params`; [] when a link is not a comparison or reads a
+        name outside `params`.
     """
-    from .compendium import computation_region, library_key_of
-    from .conjecture import _validate, claim
-    key = library_key_of(fn)
-    if key is None:
-        return []
+    from .conjecture import _validate
     out: list = []
-    for row in computation_region(key, "is_overflow_safe"):
-        for text in row["texts"]:
-            try:
-                cj = claim(text, name="is_overflow_safe")
-                for lhs, rel, rhs in (list(cj.links)
-                                      or [(cj.lhs, cj.relation, cj.rhs)]):
-                    if rel not in _COMPARISONS or not rhs:
-                        return []
-                    out.append((
-                        _validate(lhs, set(params), frozenset())[0], rel,
+    for lhs, rel, rhs in links:
+        if rel not in _COMPARISONS or not rhs:
+            return []
+        try:
+            out.append((_validate(lhs, set(params), frozenset())[0], rel,
                         _validate(rhs, set(params), frozenset())[0]))
-            except Exception:
-                return []
+        except Exception:
+            return []
     return out
 
 
@@ -2422,8 +2443,9 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         tries the representation extremes the domain admits (the float
         corner, the exp threshold, the denormal band, or the claim's
         pseudo-infinity), since overflow lives there. An `is_defined`
-        probe on a library key takes its corners from `_library_reach`
-        and treats a draw outside that reach as no trial. A point with
+        probe takes its corners from `_is_defined_reach` and treats a
+        draw outside that reach, or outside the function's recorded
+        `is_overflow_safe` region, as no trial. A point with
         a missing argument, or outside the domain, is not a trial.
         Returns the `(verdict, checked, counterexample, established,
         meta)` shape, with the counts inside and outside the region in
@@ -2495,9 +2517,13 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     shapes = _region_shapes(links, params, domain)
     reach, reach_note = ({}, None)
     overflow_safe: list = []
+    overflow_texts: list = []
     if kind == "is_defined":
-        reach, reach_note = _library_reach(fn, cj, params, domain, shapes)
-        overflow_safe = _overflow_safe_relations(fn, params)
+        links_o, overflow_texts, owner = _overflow_safe_rows(fn, cj)
+        reach, reach_note = _is_defined_reach(fn, cj, params, domain,
+                                              shapes, links_o,
+                                              overflow_texts, owner)
+        overflow_safe = _compiled_links(links_o, params)
 
     def admitted(point: dict) -> bool:
         if overflow_safe and satisfies(overflow_safe, point) is False:
@@ -2656,8 +2682,15 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             cx = f"{at}: inside the stated region, f {what}"
         else:
             cx = f"{at}: f {what}, {words['outside']}"
-        return ("falsified", checked, cx, None,
-                {"mathema.witness_executed": True})
+        found = {"mathema.witness_executed": True}
+        if kind == "is_defined" and not overflow_texts \
+                and not _no_overflow(out, raised):
+            # the missing value is an overflow of the computation
+            found["mathema.sampled"] = (
+                "the computation overflows there; state the region where "
+                "it stays in float range as an is_overflow_safe claim "
+                "and is_defined is sampled inside it")
+        return ("falsified", checked, cx, None, found)
     if checked == 0:
         return "skipped", 0, None
     sampled = (words["sampled_bare"] if bare else

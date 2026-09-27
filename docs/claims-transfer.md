@@ -148,6 +148,10 @@ Consumption paths:
 - A library key's own bare `is_defined` row is adjudicated inside its
   `is_overflow_safe` region (the function is total; where it overflows
   is the other row's fact), and inside the carrier's range otherwise.
+  The same rule holds for every function checked by execution, your own
+  included: an `is_overflow_safe` claim in its claims file keeps the
+  `is_defined` sampling inside that region, and without one an overflow
+  at the reach is no value, with a note pointing at `is_overflow_safe`.
 - Claims may be named as premises: `assuming clip_lower holds`, or
   qualified, `assuming numpy.clip.clip_lower holds`.
 
