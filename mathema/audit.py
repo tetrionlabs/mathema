@@ -29,6 +29,7 @@ from .inventory import (coverage_freshness, derivability_report,
                         is_test_covered, mutated_globals, purity_reason,
                         read_test_coverage, scope_dependencies,
                         structural_complexity, typing_info)
+from ._signatures import callable_signature
 
 
 def _source_span(fn) -> str | None:
@@ -202,7 +203,7 @@ def _describe_signature(fn) -> str:
     import warnings
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return "(...)"
     try:

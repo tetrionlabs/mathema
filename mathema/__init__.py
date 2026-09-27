@@ -241,13 +241,14 @@ def _doc_only_facts(fn) -> Facts:
     import hashlib
     import inspect
 
+    from ._signatures import callable_signature
     from .intent import parse_doc
 
     doc = inspect.getdoc(fn) or ""
     parsed = parse_doc(doc)
     name = getattr(fn, "__name__", "callable")
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
         params = [n for n, p in sig.parameters.items()
                   if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
                   and p.default is p.empty]

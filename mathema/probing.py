@@ -34,6 +34,7 @@ from .grammar import MISSING, Domain, domain_contains
 # import); re-exported here because probing is where consumers
 # historically found it.
 from .records import Probe as Probe
+from ._signatures import callable_signature
 
 
 # Adaptive trial budget. A flat n for every law spends the same effort on a
@@ -511,9 +512,8 @@ def call_arguments(fn, params, values: dict) -> "tuple[list, dict]":
         callable whose signature cannot be read takes every value
         positionally.
     """
-    import inspect
     try:
-        spec = inspect.signature(fn).parameters
+        spec = callable_signature(fn).parameters
     except (TypeError, ValueError):
         spec = {}
     args: list = []
@@ -757,7 +757,7 @@ def complex_is_a_raise(callee, cj_domain: dict | None) -> bool:
     if any(_bound_is_complex(b) for b in (cj_domain or {}).values()):
         return False
     try:
-        sig = inspect.signature(callee)
+        sig = callable_signature(callee)
     except (TypeError, ValueError):
         return True
     annotations = [sig.return_annotation,
@@ -1422,9 +1422,8 @@ def probe(fn, facts, domain: dict | None = None,
     rng, specials = setup.rng, setup.specials
     critical_hints, extra_cycles = setup.critical_hints, setup.extra_cycles
 
-    import inspect
     try:
-        signature = inspect.signature(fn).parameters
+        signature = callable_signature(fn).parameters
     except (TypeError, ValueError):
         signature = {}
 

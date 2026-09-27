@@ -25,6 +25,8 @@ from __future__ import annotations
 import os
 from typing import NamedTuple
 
+from .._signatures import callable_signature
+
 _PINNABLE = (bool, int, float, type(None))
 
 
@@ -162,7 +164,7 @@ def call_sites(root: str, library_claims: dict) -> list:
                 continue
             target = _resolve_func_ref(key)
             try:
-                signature = inspect.signature(target)
+                signature = callable_signature(target)
             except (TypeError, ValueError):
                 continue
             found = _call_arguments(node, signature)

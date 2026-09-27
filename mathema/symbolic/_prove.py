@@ -39,6 +39,7 @@ from ._proof_support import (
     _prove_relation_case_split, _quantifier_clause,
 )
 from ._sum import try_prove_sum
+from .._signatures import callable_signature
 
 # private aux-dict key carrying {name: Lifted} for a claim's bound
 # auxiliary functions; a dunder so it can never collide with a law's
@@ -1552,10 +1553,9 @@ def _witness_corroborated(callable_target, arg_exprs: list,
         value, refuses corroboration.
     """
     from ._partiality import NO_VALUE
-    import inspect
     try:
         annotations = [prm.annotation for prm in
-                       inspect.signature(callable_target).parameters.values()]
+                       callable_signature(callable_target).parameters.values()]
     except (TypeError, ValueError):
         annotations = []
     vals = []

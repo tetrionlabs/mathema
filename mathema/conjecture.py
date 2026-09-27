@@ -58,6 +58,7 @@ from .records import (_EXC_TYPES, Probe, PseudoInfinity, classify_verdict,
                       statement_text)
 from .symbolic import (mentions_matrix_ops, try_prove, try_prove_matrix,
                        try_prove_raises)
+from ._signatures import callable_signature
 
 
 def _numeric_literal(node: ast.AST):
@@ -2119,7 +2120,6 @@ def _instance_bundles(fn, facts) -> dict:
         scalar parameter's declared domain already is.
     """
     import dataclasses as _dc
-    import inspect as _inspect
 
     from .symbolic._base import (_attr_keys_used, _dataclass_field_names,
                                  _enclosing_class)
@@ -2127,7 +2127,7 @@ def _instance_bundles(fn, facts) -> dict:
     if facts.tree is None:
         return out
     try:
-        sig = _inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         sig = None
     for p in facts.params:
@@ -2265,7 +2265,6 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
         no longer exists when the claim's text never reads `p`; an
         integral point is passed as an int.
     """
-    import inspect
     import re
 
     from .compendium import library_key_of
@@ -2274,7 +2273,7 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
     if key is None and not pins:
         return {}, {}, None
     try:
-        sig = inspect.signature(fn).parameters
+        sig = callable_signature(fn).parameters
     except (TypeError, ValueError):
         return {}, {}, None
     if key is None:
@@ -2333,9 +2332,8 @@ def _kept_in_calls(target, name: str, texts) -> dict:
         `name(...)` in `texts` leaves unpassed, mapped to that default.
     """
     import ast as _ast
-    import inspect
     try:
-        sig = inspect.signature(target).parameters
+        sig = callable_signature(target).parameters
     except (TypeError, ValueError):
         return {}
     kept: dict = {}
@@ -4892,11 +4890,10 @@ def _call_arity_mismatch(src: str, fn, param_set: set) -> str | None:
         for that call. A parameter literally named `f` makes `f(...)`
         ambiguous, so the check declines entirely.
     """
-    import inspect as _inspect
     if "f" in param_set:
         return None
     try:
-        sig = _inspect.signature(fn)
+        sig = callable_signature(fn)
         tree = ast.parse(src, mode="eval")
     except (TypeError, ValueError, SyntaxError):
         return None
@@ -4927,9 +4924,8 @@ def _int_annotated_params(callee) -> list:
         TypeError-misspecification check above. Empty for anything
         unreadable.
     """
-    import inspect as _inspect
     try:
-        sig = _inspect.signature(callee)
+        sig = callable_signature(callee)
     except (TypeError, ValueError):
         return []
     out = []
@@ -5300,7 +5296,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # broken sample, not a counterexample; attribution is the
         # difference
         try:
-            sig = inspect.signature(callee)
+            sig = callable_signature(callee)
         except (TypeError, ValueError):
             sig = None
         # a complex result under a real claim is no value at all, the

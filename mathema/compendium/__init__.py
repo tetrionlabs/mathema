@@ -43,6 +43,8 @@ import os
 import sys
 from typing import NamedTuple
 
+from .._signatures import callable_signature
+
 
 def _version_tuple(text: str) -> tuple:
     return tuple(int(p) for p in text.split(".")[:3] if p.isdigit())
@@ -726,12 +728,10 @@ def _signature_params(key: str, used: list) -> list:
     Raises:
         _Unbuildable: no signature and not exactly one name in use.
     """
-    import inspect
-
     from ..conjecture import _resolve_func_ref
     fn = _resolve_func_ref(key)
     try:
-        sig = inspect.signature(fn) if fn is not None else None
+        sig = callable_signature(fn) if fn is not None else None
     except (TypeError, ValueError):
         sig = None
     if sig is not None:
