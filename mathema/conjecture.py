@@ -2266,7 +2266,7 @@ def _shape_constraints(assumption, resolver):
             if acj.relation in ("<=", "<", "=="):
                 lo[rk] = max(lo.get(rk, 1), lc + (1 if acj.relation == "<" else 0))
             if acj.relation in (">=", ">", "=="):
-                hi[rk] = min(hi.get(rk, 64), lc - (1 if acj.relation == "<" else 0))
+                hi[rk] = min(hi.get(rk, 64), lc - (1 if acj.relation == ">" else 0))
     if not saw:
         return None, None, None
 
@@ -2533,7 +2533,8 @@ def _draw_trial_sizes(resolver, lo, hi, groups, rng):
     sizes = resolver.draw_sizes(rng, lo, hi)
     for group in (groups or []):
         g_lo = max((lo.get(k, 1) for k in group), default=1)
-        g_hi = min((hi.get(k, 6) for k in group), default=6)
+        g_hi = min((hi.get(k, max(6, 4 * g_lo)) for k in group),
+                   default=max(6, 4 * g_lo))
         n = rng.randint(max(1, g_lo), max(g_lo, g_hi))
         for k in group:
             sizes[k] = n

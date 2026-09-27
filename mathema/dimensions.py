@@ -153,9 +153,10 @@ class DimResolver:
                 continue
             # the default range matches the free sequence draw (2..8);
             # a premise bound narrows or lowers it (a `>= 1` floor lets
-            # a length-1 vector through, the default never does)
+            # a length-1 vector through, the default never does), and a
+            # floor with no ceiling draws up to four times the floor
             k_lo = lo.get(k, 2)
-            k_hi = hi.get(k, 8)
+            k_hi = hi.get(k, max(8, 4 * k_lo))
             out[k] = rng.randint(max(1, k_lo), max(k_lo, k_hi))
         return out
 
