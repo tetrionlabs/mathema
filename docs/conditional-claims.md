@@ -260,7 +260,7 @@ executing them against the installed library, and the premise resolves
 at the verdict recorded there. Those rows gate the run like the
 project's own claims. A row verify cannot settle fails it and leaves
 the resting claim `unknown`, both naming `mathema accept <key> <claim>
---as trusted`, which takes the row at the level its curator claims (the
+--as trusted`, which takes the row at the level it claims (the
 conclusion caps there, provenance named). A file whose `versions`
 range does not match the installed library contributes nothing. The
 wider story, including transfer between implementations, is

@@ -9,8 +9,9 @@ a claims file in the compendium shape (`compendium: <library>`,
 `versions: ">=<installed major.minor>"`, one key per function), which a
 downstream project drops into its own claims directory. Each row
 carries the verdict it reached here as its claimed level
-(`meta: {mathema.compendium_claimed: holds}`); a consumer still verifies
-or accepts it, since a compendium row is testimony until then.
+(`meta: {mathema.compendium_claimed: holds}`) and the `note:` its
+claims file states; a consumer still verifies or accepts it, since a
+compendium row is testimony until then.
 """
 from __future__ import annotations
 
@@ -26,13 +27,39 @@ def _installed(library: str) -> "str | None":
     return _installed_version(library)
 
 
+def _stated_notes(library: str, root: str) -> dict:
+    """Intent:
+        `{(key, claim name): note}` for every `<library>.*` row a claims
+        file states a `note:` on: the library claims files that apply
+        (bundled, then the project's), overridden by the project's own
+        claims files.
+    """
+    from . import load_library_claims
+    from ..spec import load_declared
+
+    out: dict = {}
+    entries = [(k, info["entry"])
+               for k, info in load_library_claims(root).items()]
+    entries += [(k, info.get("entry") or {})
+                for k, info in load_declared(root).items()
+                if isinstance(info, dict)]
+    for key, entry in entries:
+        if key.split(".")[0] != library:
+            continue
+        for c in (entry or {}).get("claims") or []:
+            if isinstance(c, dict) and c.get("name") and c.get("note"):
+                out[(key, c["name"])] = str(c["note"])
+    return out
+
+
 def export_compendium(library: str, root: str = ".") -> dict:
     """Intent:
         The compendium claims file for `library`, as the mapping
         `spec.write_yaml` writes: `compendium`, `versions`, then one
         entry per verified `<library>.*` key holding its proven and
         held rows, each stamped with the verdict it reached as
-        `mathema.compendium_claimed`.
+        `mathema.compendium_claimed`, and the `note:` the claims file
+        that states the row gives it.
 
     Notes:
         `versions` is `">=<major.minor>"` of the installed library, or
@@ -41,10 +68,11 @@ def export_compendium(library: str, root: str = ".") -> dict:
         whose statement is its own name, `dependencies_current`) are
         left out: they are regenerated for every function, never
         claimed about it. A key with no row to transfer is left out.
-        The record's intent travels with the rows when a compendium
-        file's curator stated it, or when the function has Python
-        source; a source-less function's other recorded intent is only
-        its docstring's first line.
+        The record's intent travels with the rows, except for a function
+        with no Python source, whose recorded intent is only its
+        docstring's first line. A row's note is the one its claims file
+        states (the project's own claims files first, then the library
+        claims files that apply), never the note the adjudication wrote.
     """
     from ..spec import load_verified
 
@@ -54,6 +82,7 @@ def export_compendium(library: str, root: str = ".") -> dict:
     else:
         versions = "*"
     out: dict = {"compendium": library, "versions": versions}
+    notes = _stated_notes(library, root)
     for key, info in sorted(load_verified(root).items()):
         if key.split(".")[0] != library:
             continue
@@ -71,15 +100,15 @@ def export_compendium(library: str, root: str = ".") -> dict:
             row = {"name": c.get("name"), "statement": statement}
             if c.get("route") and c.get("route") != "best":
                 row["route"] = c["route"]
+            if notes.get((key, c.get("name"))):
+                row["note"] = notes[(key, c.get("name"))]
             row["meta"] = {"mathema.compendium_claimed": c["verdict"]}
             rows.append(row)
         if rows:
             body: dict = {}
             source_less = (entry.get("identity") or {}).get(
                 "source_available") is False
-            curated = (entry.get("meta") or {}).get(
-                "mathema.intent_provenance") == "compendium"
-            if entry.get("intent") and (curated or not source_less):
+            if entry.get("intent") and not source_less:
                 body["intent"] = entry["intent"]
             body["claims"] = rows
             out[key] = body

@@ -20,10 +20,10 @@ compendium: numpy
 versions: ">=1.24,<3"
 
 numpy.sqrt:
-  intent: "Principal square root; a negative input returns nan, never raises."
   claims:
     - name: is_defined
       statement: "x >= 0"
+      note: "Principal square root; a negative input returns nan with a RuntimeWarning, never raises."
 
 numpy.clip:
   claims:
@@ -33,8 +33,10 @@ numpy.clip:
 
 The parameter names are the library's own (`inspect.signature`, so
 numpy's `clip` takes `a`, `a_min` and `a_max`), and every row is a
-claim like any other, with an `intent:` where the library's behaviour
-needs saying in prose. mathema bundles such files for `math` and
+claim like any other, with a `note:` on the row where the library's
+behaviour needs saying in prose. A library function's intent is its
+own, read from its docstring like any function's, so a compendium file
+states none. mathema bundles such files for `math` and
 `numpy` (numpy's 28 covered functions split into scalars, reductions
 and bounds), and a project states its own anywhere its claims files
 already live, `claims/numpy.claims.yaml` for instance, where a key
@@ -100,12 +102,12 @@ points, `is_compendium_safe`'s diagnosis, the reach of the key's own
 
 ```yaml
 numpy.exp:
-  intent: "Exponential; overflows to inf above roughly x = 709.78, with a RuntimeWarning."
   claims:
     - name: is_defined
       statement: "is_defined(f)"
     - name: is_overflow_safe
       statement: "x <= 709.782712893384"
+      note: "Exponential; overflows to inf above roughly x = 709.78, with a RuntimeWarning."
 ```
 
 Consumption paths:
@@ -143,7 +145,7 @@ same two paths in its note. One is a fresh local verdict; the other is:
 mathema accept numpy.clip clip_lower --as trusted
 ```
 
-takes the row at the level its curator claims (the row's `meta:
+takes the row at the level it claims (the row's `meta:
 {mathema.compendium_claimed: proven}`, `holds` when it states none),
 and every conclusion resting on it caps there, with the provenance
 (`compendium:numpy-2.5/clip_lower`) named in the record. Accepting is
@@ -195,9 +197,9 @@ the shape above, `compendium: mylib` and `versions: ">=<installed
 major.minor>"`, by default to `claims/mylib.claims.yaml` under the
 project root (`--out PATH` puts it elsewhere). Each row carries the
 verdict it reached as its claimed level, `meta:
-{mathema.compendium_claimed: holds}`, so the file a downstream project
-drops into its own `claims/` directory is read exactly like a bundled
-one.
+{mathema.compendium_claimed: holds}`, and the `note:` your claims file
+states on it, so the file a downstream project drops into its own
+`claims/` directory is read exactly like a bundled one.
 
 This is the consumption side run in reverse: the export moves rows from
 one project's verified layer into another's declared layer, and the

@@ -1172,10 +1172,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                     "mathema.premise_state": premise_now}
         written = write_record(rec, key=key, root=root,
                                claims=current_claims,
-                               declared_intent=merged_entry.get("intent"),
-                               curated_intent=(
-                                   (library_claims.get(key) or {})
-                                   .get("entry", {}).get("intent")))
+                               declared_intent=merged_entry.get("intent"))
         _carry_recorded_verdicts(rec.probes, written, key)
         out.adjudicated += 1
         if key in library:

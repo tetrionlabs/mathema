@@ -355,7 +355,7 @@ acceptance.
 A compendium row (a claim about a library's function, from a claims
 file that declares `compendium:`) that `mathema verify` could not
 settle against the installed library, recorded `unknown` or `skipped`,
-accepted at the level its curator claims (its `meta:
+accepted at the level the row claims (its `meta:
 {mathema.compendium_claimed: ...}`, `holds` when it states none). The
 row's verdict becomes that level, the acceptance records the source
 (`compendium:numpy-2.5`), and every conclusion resting on the row

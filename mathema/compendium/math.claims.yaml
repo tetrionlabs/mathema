@@ -9,23 +9,23 @@ compendium: math
 versions: "*"
 
 math.sqrt:
-  intent: "Square root; raises ValueError for x < 0 and never returns a complex result."
   claims:
     - name: sqrt_nonneg
       statement: "for x in [0, inf], f(x) >= 0"
+      note: "Square root; raises ValueError for x < 0 and never returns a complex result."
 
 math.exp:
-  intent: "Exponential; raises OverflowError above roughly x = 709.78."
   claims:
     - name: exp_positive
       statement: "for x in [-700, 700], f(x) > 0"
     - name: is_overflow_safe
       statement: "x <= 709.782712893384"
+      note: "Exponential; raises OverflowError above roughly x = 709.78."
     - name: exp_overflow_raises
       statement: "for x in (709.782712893384, oo), raises(f(x), OverflowError)"
 
 math.log:
-  intent: "Natural logarithm; raises ValueError at x <= 0 (math.log(0) does not return -inf)."
   claims:
     - name: log_monotone
       statement: "for x in (0, inf], d(f(x), x) > 0"
+      note: "Natural logarithm; raises ValueError at x <= 0 (math.log(0) does not return -inf)."

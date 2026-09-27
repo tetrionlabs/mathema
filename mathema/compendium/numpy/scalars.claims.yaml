@@ -6,116 +6,122 @@
 # computation stays inside float range, a fact about numpy on float64
 # (outside it numpy returns an infinity with a RuntimeWarning): it feeds
 # the hazard points and the computation-safety checks, never a proof.
-# Functions without a single-relation region carry what is known about
-# them as intent.
+# A row's note says what the library does outside the region. Functions
+# without a single-relation region state no rows yet; what is known
+# about them is the comment above each key.
 compendium: numpy
 versions: ">=1.24,<3"
 
 numpy.sqrt:
-  intent: "Principal square root; a negative input returns nan with a RuntimeWarning, never raises."
   claims:
     - name: is_defined
       statement: "x >= 0"
+      note: "Principal square root; a negative input returns nan with a RuntimeWarning, never raises."
 
 numpy.log:
-  intent: "Natural logarithm; x = 0 returns -inf and x < 0 returns nan, never raises."
   claims:
     - name: is_defined
       statement: "x > 0"
+      note: "Natural logarithm; x = 0 returns -inf and x < 0 returns nan, never raises."
 
 numpy.log2:
-  intent: "Base-2 logarithm; x = 0 returns -inf and x < 0 returns nan."
   claims:
     - name: is_defined
       statement: "x > 0"
+      note: "Base-2 logarithm; x = 0 returns -inf and x < 0 returns nan."
 
 numpy.log10:
-  intent: "Base-10 logarithm; x = 0 returns -inf and x < 0 returns nan."
   claims:
     - name: is_defined
       statement: "x > 0"
+      note: "Base-10 logarithm; x = 0 returns -inf and x < 0 returns nan."
 
 numpy.log1p:
-  intent: "log(1 + x); x = -1 returns -inf and x < -1 returns nan."
   claims:
     - name: is_defined
       statement: "x > -1"
+      note: "log(1 + x); x = -1 returns -inf and x < -1 returns nan."
 
 numpy.arcsin:
-  intent: "Inverse sine; input outside [-1, 1] returns nan with a RuntimeWarning."
   claims:
     - name: is_defined
       statement: "-1 <= x <= 1"
+      note: "Inverse sine; input outside [-1, 1] returns nan with a RuntimeWarning."
 
 numpy.arccos:
-  intent: "Inverse cosine; input outside [-1, 1] returns nan with a RuntimeWarning."
   claims:
     - name: is_defined
       statement: "-1 <= x <= 1"
+      note: "Inverse cosine; input outside [-1, 1] returns nan with a RuntimeWarning."
 
 numpy.arccosh:
-  intent: "Inverse hyperbolic cosine; x < 1 returns nan with a RuntimeWarning."
   claims:
     - name: is_defined
       statement: "x >= 1"
+      note: "Inverse hyperbolic cosine; x < 1 returns nan with a RuntimeWarning."
 
 numpy.arctanh:
-  intent: "Inverse hyperbolic tangent; abs(x) = 1 returns an infinity and abs(x) > 1 returns nan."
   claims:
     - name: is_defined
       statement: "-1 < x < 1"
+      note: "Inverse hyperbolic tangent; abs(x) = 1 returns an infinity and abs(x) > 1 returns nan."
 
 numpy.exp:
-  intent: "Exponential; overflows to inf above roughly x = 709.78, with a RuntimeWarning."
   claims:
     - name: is_defined
       statement: "is_defined(f)"
     - name: is_overflow_safe
       statement: "x <= 709.782712893384"
+      note: "Exponential; overflows to inf above roughly x = 709.78, with a RuntimeWarning."
 
 numpy.exp2:
-  intent: "2 to the power x; overflows to inf above roughly x = 1024."
   claims:
     - name: is_defined
       statement: "is_defined(f)"
     - name: is_overflow_safe
       statement: "x < 1024"
+      note: "2 to the power x; overflows to inf above roughly x = 1024."
 
 numpy.expm1:
-  intent: "exp(x) - 1; overflows to inf for large x."
   claims:
     - name: is_defined
       statement: "is_defined(f)"
     - name: is_overflow_safe
       statement: "x <= 709.782712893384"
+      note: "exp(x) - 1; overflows to inf for large x."
 
 numpy.cosh:
-  intent: "Hyperbolic cosine; overflows to inf for abs(x) above roughly 710."
   claims:
     - name: is_defined
       statement: "is_defined(f)"
     - name: is_overflow_safe
       statement: "-710.475860073944 < x < 710.475860073944"
+      note: "Hyperbolic cosine; overflows to inf for abs(x) above roughly 710."
 
 numpy.sinh:
-  intent: "Hyperbolic sine; overflows to an infinity for large abs(x)."
   claims:
     - name: is_defined
       statement: "is_defined(f)"
     - name: is_overflow_safe
       statement: "-710.475860073944 < x < 710.475860073944"
+      note: "Hyperbolic sine; overflows to an infinity for large abs(x)."
 
+# x1 to the power x2; a negative base with a non-integer exponent returns nan, and large results overflow to an infinity.
 numpy.power:
-  intent: "x1 to the power x2; a negative base with a non-integer exponent returns nan, and large results overflow to an infinity."
+  claims: []
 
+# power computed in floating point; the same nan and overflow behaviour as power.
 numpy.float_power:
-  intent: "power computed in floating point; the same nan and overflow behaviour as power."
+  claims: []
 
+# Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises.
 numpy.divide:
-  intent: "Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises."
+  claims: []
 
+# Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises.
 numpy.true_divide:
-  intent: "Division; x1 / 0 returns an infinity and 0 / 0 returns nan, with a RuntimeWarning, never raises."
+  claims: []
 
+# 1 / x; the reciprocal of 0 returns inf, never raises, and an integer input's reciprocal truncates.
 numpy.reciprocal:
-  intent: "1 / x; the reciprocal of 0 returns inf, never raises, and an integer input's reciprocal truncates."
+  claims: []

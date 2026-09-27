@@ -10,10 +10,10 @@ range its claims apply to with two file-level fields:
     versions: ">=1.24,<3"
 
     numpy.sqrt:
-      intent: "Principal square root; nan for a negative input."
       claims:
         - name: is_defined
           statement: "x >= 0"
+          note: "Principal square root; nan for a negative input."
 
 mathema bundles such files for `math` and `numpy` beside this module;
 a project states its own wherever its ordinary claims files live
