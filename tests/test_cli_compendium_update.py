@@ -181,3 +181,16 @@ def test_row_versions_are_validated():
         {"name": "c", "statement": "f(x) >= 0", "versions": ">=1"}]}}
     with pytest.raises(ClaimsFileError, match="versions"):
         validate_claims_file(orphan, "m.claims.yaml")
+
+
+def test_a_pinned_row_leaves_the_smoke_call_at_the_defaults():
+    import mathema
+    from mathema.conjecture import claim
+    from mathema.compendium import ensure_bundled
+    ensure_bundled()
+    rec = mathema.check(np.mean, claims=[
+        claim("let axis be 0, dim(a) >= 1", name="is_defined[axis=0]")])
+    rows = {p.name: p for p in rec.probes}
+    assert "callable" not in rows, rows["callable"].note
+    assert rows["is_defined[axis=0]"].verdict == "holds", \
+        rows["is_defined[axis=0]"].note
