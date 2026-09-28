@@ -135,12 +135,9 @@ survives outside any forge.
 
 ## Planned enhancement: authenticator-app codes
 
-`mathema pin set --totp` (experimental) enrols a standard RFC 6238
-TOTP secret into any authenticator app, the same 6-digit
-rotate-every-30-seconds codes used for GitHub or Google 2FA. One QR
-scan at setup; afterwards the prompt accepts the app's current code,
-and a code an agent observes in a transcript is dead half a minute
-later. The mechanism is built and tested; the static PIN is the
-promoted path for now. The `verified_by: {method, key}` stamp is an
-open seam: a stronger backend verifies its own way and records its own
-method and key.
+Authenticator-app codes (RFC 6238 TOTP, the 6-digit codes that change
+every 30 seconds) are planned but not offered in this release; the
+static PIN is the method. A code an agent observes in a transcript would
+be dead half a minute later, which is why the method is on the roadmap.
+The `verified_by: {method, key}` stamp is an open seam: a stronger
+backend verifies its own way and records its own method and key.

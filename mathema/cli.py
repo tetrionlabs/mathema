@@ -2208,18 +2208,10 @@ def cmd_pin(args) -> int:
               "without human verification")
         return 0
     # set / rotate
-    if args.totp:
-        info = auth.set_totp()
-        print("TOTP credential set (experimental). Enrol it ONCE into "
-              "any authenticator app;\nthis secret is not shown again:")
-        print(f"  secret: {info['secret']}")
-        print(f"  {info['uri']}")
-        print(f"key {info['key']}")
-    else:
-        pin = auth.prompt_new_pin()
-        info = auth.set_pin(pin)
-        print(f"PIN set (key {info['key']}). Acceptance and unlock now "
-              f"prompt for it.")
+    pin = auth.prompt_new_pin()
+    info = auth.set_pin(pin)
+    print(f"PIN set (key {info['key']}). Acceptance and unlock now "
+          f"prompt for it.")
     return 0
 
 
@@ -3089,9 +3081,6 @@ def main(argv: list[str] | None = None) -> int:
                       help="set a credential, rotate it (verifies the "
                            "current one first), remove it (also verifies), "
                            "or show method and key id")
-    ppin.add_argument("--totp", action="store_true",
-                      help="experimental: use authenticator-app codes "
-                           "(RFC 6238) instead of a static PIN")
     ppin.set_defaults(fn=cmd_pin)
 
     plk = sub.add_parser("lock", help="pin a function's form hash: verify "
