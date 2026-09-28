@@ -523,3 +523,87 @@ def current() -> "PremiseGuard | None":
     """The premise guard of the claim whose family trials are running,
     or None."""
     return _ACTIVE.get()
+
+
+# --- a premise read as a narrower domain -------------------------------
+
+
+def _bound_ends(bound) -> "tuple[float, float, bool, bool] | None":
+    """`(lo, hi, closed_lo, closed_hi)` of a scalar interval bound (None
+    reads as the whole real line), None for any other bound shape."""
+    import math
+
+    from .domain import Domain
+    if bound is None:
+        return -math.inf, math.inf, False, False
+    if isinstance(bound, Domain) and bound.base_type == "R" \
+            and not bound.pieces and not bound.excluded and not bound.dims:
+        return -math.inf, math.inf, False, False
+    if isinstance(bound, tuple) and len(bound) == 2 \
+            and all(isinstance(e, (int, float)) and not isinstance(e, bool)
+                    for e in bound):
+        return (float(bound[0]), float(bound[1]),
+                getattr(bound, "closed_lo", True),
+                getattr(bound, "closed_hi", True))
+    return None
+
+
+def narrowed_domain(domain: dict, assumption, kinds,
+                    keep: frozenset = frozenset()) -> "tuple[dict, bool]":
+    """Intent:
+        The declared `domain` with each premise conjunct that bounds one
+        scalar parameter by a number (`x > 0.5`, `2 >= y`, `x == 0`)
+        folded into that parameter's interval, parameters in `keep`
+        left as declared. Returns `(domain, complete)`: `complete` is
+        True when every conjunct was folded, so the returned domain is
+        exactly the premise region; otherwise the returned domain
+        contains it.
+
+    Notes:
+        A conjunct is `(lhs, relation, rhs)` source text. Only an
+        interval bound (or none) narrows; a union, an exclusion, a
+        discrete set or a vector space stays as declared and leaves the
+        result incomplete, as does an empty intersection.
+    """
+    import math
+
+    from .domain import Interval
+    out = dict(domain or {})
+    complete = True
+    flip = {"<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "=="}
+    for lhs, rel, rhs in assumption or ():
+        try:
+            left = ast.parse(lhs, mode="eval").body
+            right = ast.parse(rhs, mode="eval").body
+        except (SyntaxError, TypeError):
+            complete = False
+            continue
+        if isinstance(left, ast.Name) and _constant(right) is not None:
+            name, value, op = left.id, _constant(right), rel
+        elif isinstance(right, ast.Name) and _constant(left) is not None \
+                and rel in flip:
+            name, value, op = right.id, _constant(left), flip[rel]
+        else:
+            complete = False
+            continue
+        if name not in kinds or name in keep or op not in flip \
+                or kinds.get(name) not in ("scalar", "unknown", "int",
+                                            "float"):
+            complete = False
+            continue
+        ends = _bound_ends(out.get(name))
+        if ends is None:
+            complete = False
+            continue
+        lo, hi, c_lo, c_hi = ends
+        v = float(value)
+        if op in (">", ">=", "==") and (v > lo or (v == lo and op == ">")):
+            lo, c_lo = v, op != ">"
+        if op in ("<", "<=", "==") and (v < hi or (v == hi and op == "<")):
+            hi, c_hi = v, op != "<"
+        if lo > hi or (lo == hi and not (c_lo and c_hi)):
+            complete = False
+            continue
+        out[name] = Interval(lo, hi, closed_lo=c_lo and math.isfinite(lo),
+                             closed_hi=c_hi and math.isfinite(hi))
+    return out, complete

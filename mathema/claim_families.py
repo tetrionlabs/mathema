@@ -1972,18 +1972,44 @@ class _NamedClaimFamily:
         return self._routes
 
 
-def _guarded_safety_derive(derive):
+def _guarded_safety_derive(derive, outside_domain: bool = False):
     """Wrap a safety member's derive half in the family verdict
     contract: a disproof must carry a concrete counterexample (a
     safety falsification without a witness is not evidence), and the
     status vocabulary is closed. A violation raises; it is a family
-    implementation bug, never a claim outcome."""
+    implementation bug, never a claim outcome.
+
+    The claim's premises (`assumption`) reach the derive half as a
+    narrower domain (`_premises.narrowed_domain`): each conjunct that
+    bounds one scalar parameter by a number narrows that parameter's
+    interval, so a proof covers the premise region and a disproof's
+    witness lies inside it. When some conjunct cannot be folded in, a
+    proof over the wider domain still covers the premise region, but a
+    disproof's witness may lie outside it, so the disproof becomes
+    undecided and the probe route decides over admitted points. A
+    member whose trials set its own parameter outside the domain
+    (`outside_domain`) keeps that parameter's declared bound."""
     def run(fn, facts, lhs_src, rhs_src, relation, domain=None,
-            tolerance=None):
+            tolerance=None, assumption=None):
+        complete = True
+        if assumption:
+            from ._premises import narrowed_domain
+            keep = frozenset({lhs_src.strip()}) if outside_domain \
+                else frozenset()
+            domain, complete = narrowed_domain(
+                domain or {}, assumption, facts.param_kinds, keep=keep)
         proof = derive(fn, facts, lhs_src, rhs_src, relation,
                        domain=domain, tolerance=tolerance)
         if proof is None:
             return None
+        if proof.status == "disproven" and not complete:
+            from .symbolic import ProofResult
+            return ProofResult(
+                "undecided",
+                sketch=f"{proof.sketch}; the witness "
+                       f"({proof.counterexample}) is not known to satisfy "
+                       f"the claim's premises, so a falsification is left "
+                       f"to execution at admitted points")
         if proof.status not in ("proven", "disproven", "undecided"):
             raise ValueError(f"safety derive returned status "
                              f"{proof.status!r}, not in the closed "
@@ -2062,6 +2088,15 @@ def _guarded_safety_probe(probe):
     return run
 
 
+#: the safety families whose trials set their own parameter outside the
+#: domain on purpose (a missing value, the empty sequence, a value past
+#: the domain's edge, a string off the corpus): the premises hold every
+#: other parameter, never the target itself
+_OUTSIDE_DOMAIN_FAMILIES = frozenset({
+    "is_missing_safe", "is_empty_safe", "excluded_outside_domain",
+    "is_arbitrary_input_safe"})
+
+
 class SafetyFamily(_NamedClaimFamily):
     """One computation-safety member: a claim family whose evidence
     concerns a hazard class (where the CODE's runtime behaviour can
@@ -2080,7 +2115,8 @@ class SafetyFamily(_NamedClaimFamily):
                  probe_route="probe:algorithmic",
                  whole_function: bool = False,
                  reserved: "str | None" = None):
-        family_routes = {"derive": _guarded_safety_derive(derive)}
+        family_routes = {"derive": _guarded_safety_derive(
+            derive, outside_domain=base_name in _OUTSIDE_DOMAIN_FAMILIES)}
         if probe is not None:
             family_routes["probe:algorithmic"] = _guarded_safety_probe(probe)
         super().__init__(base_name, family_routes)
@@ -3735,6 +3771,8 @@ def _computation_probe(fn, facts, cj, domain: dict, rng: random.Random,
                        trials: int):
     """Empirical half of is_computation_safe(f): the roll-up
     (`_roll_up`) of every relevant child (`_computation_children`)."""
+    from ._premises import unguarded
+    fn = unguarded(fn)
     return _roll_up(fn, facts, _computation_children(fn, facts, cj, domain),
                     trials)
 
@@ -3766,6 +3804,8 @@ def _repeatable_probe(fn, facts, cj, domain: dict, rng: random.Random,
                       trials: int):
     """Empirical half of is_repeatable(f): the roll-up (`_roll_up`) of
     `_repeatable_children`."""
+    from ._premises import unguarded
+    fn = unguarded(fn)
     return _roll_up(fn, facts, _repeatable_children(fn, facts, cj, domain),
                     trials)
 

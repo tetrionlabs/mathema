@@ -45,6 +45,10 @@ def inverse_gap(x: float, y: float) -> float:
     return 1.0 / (y - 2 * x)
 
 
+def pure_recip(x: float) -> float:
+    return 1.0 / x
+
+
 def shifted_gap(x: float, y: float) -> float:
     SEEN.append((x, y))
     return 1.0 / (y - 2 * x + 1.0)
@@ -198,12 +202,45 @@ def test_a_raise_inside_the_domain_falsifies_is_finite():
     assert "ZeroDivisionError" in p.counterexample
 
 
-# --- the roll-up passes its premise to its children -------------------------
+# --- the structural (examine) halves never witness outside the premise ------
 
 
-def test_the_computation_roll_up_reads_the_premise():
-    held = _one(recip, "for x in [0.5, 1], is_computation_safe(f)")
-    narrowed = _one(recip, "for x in [-1, 1], assuming x >= 0.5, "
-                           "is_computation_safe(f)")
-    assert narrowed.verdict == held.verdict, (narrowed.verdict, narrowed.note)
+def test_a_premise_excluding_the_pole_makes_is_pole_safe_hold():
+    p = _one(pure_recip, "for x in [-1, 1], assuming x > 0.5, is_pole_safe(f)")
+    assert p.verdict in ("holds", "proven"), (p.verdict, p.counterexample)
+
+
+def test_a_premise_admitting_the_pole_keeps_is_pole_safe_falsified_there():
+    p = _one(pure_recip, "for x in [-1, 1], assuming x > -0.5, "
+                         "is_pole_safe(f)")
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "x = 0" in p.counterexample
+    assert "ZeroDivisionError" in p.counterexample
+
+
+def test_a_premise_that_is_not_a_bound_leaves_the_disproof_to_execution():
+    # x * x > 0.25 is not an interval on x, so the structural disproof at
+    # x = 0 is not reported; the probe finds no admitted pole point
+    p = _one(pure_recip, "for x in [-1, 1], assuming x * x > 0.25, "
+                         "is_pole_safe(f)")
+    assert p.verdict != "falsified", (p.verdict, p.counterexample)
+
+
+def test_a_premise_that_is_not_a_bound_but_admits_the_pole_still_falsifies():
+    p = _one(pure_recip, "for x in [-1, 1], assuming x * x < 0.25, "
+                         "is_pole_safe(f)")
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "ZeroDivisionError" in p.counterexample
+
+
+@pytest.mark.parametrize("premise", ["x > 0.5", "x >= 0.5"])
+def test_the_computation_roll_up_with_a_premise_matches_the_narrow_domain(
+        premise):
+    narrow = _one(pure_recip, "for x in [0.5, 1], is_computation_safe(f)")
+    narrowed = _one(pure_recip, f"for x in [-1, 1], assuming {premise}, "
+                                "is_computation_safe(f)")
+    assert narrowed.verdict == narrow.verdict, (narrowed.verdict,
+                                                narrowed.counterexample)
     assert narrowed.verdict != "falsified"
+    assert (narrowed.meta or {}).get("mathema.children") == \
+        (narrow.meta or {}).get("mathema.children")

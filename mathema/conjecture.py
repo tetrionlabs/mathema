@@ -5988,15 +5988,6 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return _probe_stage(ctx, fn, facts, kinds, sampling)
 
 
-#: the claim families whose trials set their own parameter outside the
-#: domain on purpose (a missing value, the empty sequence, a value past
-#: the domain's edge, a string off the corpus): the premises hold every
-#: other parameter, and the target's own conjuncts are not applied
-_OUTSIDE_DOMAIN_FAMILIES = frozenset({
-    "is_missing_safe", "is_empty_safe", "excluded_outside_domain",
-    "is_arbitrary_input_safe"})
-
-
 def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           cj_domain: dict):
     """Intent:
@@ -6044,6 +6035,7 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
         inner = _linalg_eval.law_callable(inner)
     base = {"f": inner, **_SAFE_FUNCS, **_linalg_eval.FUNCTIONS,
             **MATH_CONSTANTS, **bound}
+    from .claim_families import _OUTSIDE_DOMAIN_FAMILIES
     ignore = (frozenset({cj.lhs.strip()})
               if families.claim_base_name(cj.name) in _OUTSIDE_DOMAIN_FAMILIES
               else frozenset())
