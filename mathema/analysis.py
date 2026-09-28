@@ -299,11 +299,44 @@ def _annotation_base(text: str) -> str:
         the shorthand as producing the identical markers the long form
         does, so it has to classify identically too.
     """
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        # a quoted annotation, as every annotation is under
+        # `from __future__ import annotations`: the type is the text inside
+        return _annotation_base(text[1:-1])
+    if text.startswith("typing."):
+        return _annotation_base(text[len("typing."):])
+    if text.startswith("optional[") and text.endswith("]"):
+        return _annotation_base(text[len("optional["):-1])
+    members = (_top_level_split(text[len("union["):-1], ",")
+               if text.startswith("union[") and text.endswith("]")
+               else _top_level_split(text, "|"))
+    if len(members) > 1:
+        # an optional type, `X | None` or `Union[X, None]`, has the kind
+        # of X; a union of two real types has none of its own
+        present = [m for m in members if m not in ("none", "nonetype")]
+        return _annotation_base(present[0]) if len(present) == 1 else text
     if text.startswith("annotated["):
-        return text[len("annotated["):].split(",", 1)[0].strip()
+        return _annotation_base(text[len("annotated["):].split(",", 1)[0].strip())
     if text.split("(", 1)[0].strip() in _SHAPED_LIST_FACTORY_NAMES:
         return "list"
     return text
+
+
+def _top_level_split(text: str, sep: str) -> list[str]:
+    """The parts of `text` between top-level occurrences of `sep`,
+    brackets respected, each stripped."""
+    parts, depth, start = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch in "[(":
+            depth += 1
+        elif ch in "])":
+            depth -= 1
+        elif ch == sep and depth == 0:
+            parts.append(text[start:i].strip())
+            start = i + 1
+    parts.append(text[start:].strip())
+    return parts
 
 
 def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:

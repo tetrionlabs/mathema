@@ -57,3 +57,8 @@ def test_synth_still_samples_correctly_from_a_domain_bound():
     for _ in range(50):
         v = _synth("scalar", rng, dom)
         assert 0.0 <= v <= 1.0
+
+
+def test_classifies_a_language_domain():
+    from mathema.domain import parse_binding
+    assert _classify_bound(parse_binding("s in L[ascii]")[1]) == "language"

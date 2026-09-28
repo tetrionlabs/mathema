@@ -1403,7 +1403,13 @@ def _interval_bounds(expr, domain: dict, params: dict):
                 raise
             except Exception:
                 lo, hi = -sympy.oo, sympy.oo
-        box[sym] = sympy.AccumBounds(lo, hi) if lo != hi else lo
+        try:
+            box[sym] = sympy.AccumBounds(lo, hi) if lo != hi else lo
+        except ValueError:
+            # an endpoint that is not real (a hull taken over a region
+            # where the domain's own bound turns complex) has no real
+            # interval, so the whole evaluation declines
+            return None
     if _has_sequence_structure(expr):
         # interval evaluation is a SCALAR technique: it bounds an
         # expression by substituting a real interval for each real

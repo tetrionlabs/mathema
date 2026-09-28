@@ -508,8 +508,13 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     # first (proving pole-avoidance when a domain is declared, via
     # domain_hazards()), falling back to this funcs-bound probe check
     # when no domain is declared or the family can't decide.
-    out.append(claim(f"g(f, {', '.join(facts.params)}) == 1", name="is_numerically_stable",
-                     source="mathema", route="best", funcs={"g": "mathema.f.finite_no_error"}))
+    # numeric stability reads a finite number out of the call, which a
+    # function over strings that returns no number does not have
+    all_text = bool(facts.params) and all(
+        facts.param_kinds.get(p) == "string" for p in facts.params)
+    if not (all_text and facts.returns_kind != "scalar"):
+        out.append(claim(f"g(f, {', '.join(facts.params)}) == 1", name="is_numerically_stable",
+                         source="mathema", route="best", funcs={"g": "mathema.f.finite_no_error"}))
 
     # the definedness region as its own named claim: adjudicated by
     # region equivalence against the current body (the is_defined

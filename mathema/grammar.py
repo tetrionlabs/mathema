@@ -118,6 +118,7 @@ from ._scan import (_split_commas, mask_strings, outside_strings,
 # working. New code should import from mathema.domain directly.
 from .domain import (MISSING as MISSING, Domain as Domain,
                      Interval as Interval, InvalidDomain as InvalidDomain,
+                     LanguageRef as LanguageRef,
                      _MEMBERSHIP_OPS as _MEMBERSHIP_OPS,
                      desuperscript_spaces as _desuperscript_spaces,
                      _as_domain as _as_domain,
@@ -132,10 +133,16 @@ from .domain import (MISSING as MISSING, Domain as Domain,
                      split_quantifier as split_quantifier)
 from .domain import bound_to_sympy_set
 from .routes import MATRIX_PREDICATES as _MATRIX_PREDICATES
-from .routes import OUTPUT_PREDICATES as _OUTPUT_PREDICATES
 from .linalg import (RENDER_CALLS as _MATRIX_RENDER_CALLS,
                      RENDER_DIM as _MATRIX_RENDER_DIM,
                      operand_matrix_names as _matrix_names)
+
+
+def _output_predicates() -> frozenset:
+    # the LIVE output-contract vocabulary (the static table plus the
+    # predicates registered claim families own), read per parse
+    from .routes import output_predicates
+    return output_predicates()
 
 
 def _domain_safety_predicates() -> frozenset:
@@ -355,7 +362,11 @@ _SUPERSCRIPT_RUN = re.compile(f"⁻?[{_SUPERSCRIPT_DIGITS}]+")
 
 _UNICODE = {
     "≤": "<=", "≥": ">=", "≠": "!=", "−": "-", "·": "*", "×": "*",
-    "π": "pi", "√": "sqrt", "∀": "for ", "∈": " in ", "∞": "oo",
+    "π": "pi", "√": "sqrt", "∀": "for ", "∈": " in ", "∉": " not in ", "∞": "oo",
+    # the double-struck L (U+1D543) spells a language domain on input,
+    # `𝕃[ascii]`; the rendered form is always the plain `L[...]`, so a
+    # record displays the same everywhere
+    "\U0001d543": "L",
     **_GREEK_LETTERS,
     **_PSEUDO_GREEK_LETTERS,
     # ⩽/⩾ ("less/greater-than-or-slanted-equal", U+2A7D/2A7E): an
@@ -1855,6 +1866,27 @@ def _fold_dim_sugar(text: str) -> str:
     return text
 
 
+_DIM_CALL = re.compile(r"\bdim\(")
+
+
+def display_len(text: str) -> str:
+    """Intent:
+        `dim(X, 0)` -> `len(X)` in rendered claim text, nested calls
+        included; every other axis keeps `dim`, and a quoted literal is
+        left untouched. The inverse of the `len` half of
+        `_fold_dim_sugar`, so the displayed text parses back to the same
+        canonical form.
+    """
+    def rewrite(m, args, call_end):
+        parts = _split_commas(args)
+        if len(parts) == 2 and parts[1].strip() == "0":
+            return f"len({display_len(parts[0].strip())})"
+        return f"dim({display_len(args)})"
+
+    return outside_strings(
+        lambda masked: _rewrite_balanced_calls(masked, _DIM_CALL, rewrite), text)
+
+
 def _replace_pv_call(text: str) -> str:
     """`P.V.(` -> `cauchy_pv(`: the principal-value operator renders
     and reads as the traditional `P.V.` spelling, but that text isn't
@@ -2332,6 +2364,37 @@ def split_relation(law: str) -> tuple[str, str, str]:
     raise NoRelation(f"no relation (==, !=, <=, >=, <, >) in {law!r}")
 
 
+_MEMBERSHIP = re.compile(r"\s+(not\s+in|in)\s+")
+
+
+def split_membership(law: str) -> "tuple[str, str, str] | None":
+    """`(lhs, relation, rhs)` at the first top-level `in` or `not in`
+    of a law that carries no ordinary relation at the top level, the
+    relation `"in"` or `"not in"`; None otherwise. The keyword is
+    word-bounded, so `sin(x)` never splits, and string literals are
+    masked, so an `in` inside one is data. The right-hand side is
+    either a domain (`L[slug]`, `[0, 1]`, `{"a", "b"}`), read by the
+    domain grammar, or a value the left-hand side is looked up in."""
+    text = law.strip()
+    if _split_top_level(text, RELATIONS) is not None \
+            or _split_top_level(text, ("=",)) is not None:
+        return None
+    masked, literals = mask_strings(text)
+    depth = 0
+    for i, ch in enumerate(masked):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif depth == 0 and ch.isspace():
+            m = _MEMBERSHIP.match(masked, i)
+            if m is not None and masked[:i].strip():
+                rel = "not in" if m.group(1).startswith("not") else "in"
+                return (unmask_strings(masked[:i], literals).strip(), rel,
+                        unmask_strings(masked[m.end():], literals).strip())
+    return None
+
+
 _AST_REL = {ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">=",
             ast.Eq: "==", ast.NotEq: "!="}
 
@@ -2392,6 +2455,16 @@ def _verbatim_atom(node: ast.AST):
     if isinstance(node, (ast.Compare, ast.BoolOp)):
         text = f"({text})"
     return sympy.Symbol(text, real=True)
+
+
+def _string_literals(node: ast.AST) -> list:
+    """Every string literal in a subtree that is a value, in source
+    order: a subscript's key (`df["returns"]`, a column) names a part
+    of its container and is not one."""
+    keys = {id(n.slice) for n in ast.walk(node) if isinstance(n, ast.Subscript)}
+    return [n.value for n in ast.walk(node)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and id(n) not in keys]
 
 
 def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
@@ -2469,6 +2542,12 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         v = _node_to_sympy(node.operand, funcs, matrix_names)
         return -v if isinstance(node.op, ast.USub) else v
+    if isinstance(node, ast.BinOp) and _string_literals(node):
+        # an operator over a string literal is concatenation or
+        # repetition, which does not commute: sympy's sum would reorder
+        # `s + "0"` into `"0" + s`, a different claim, so the whole
+        # operation is one verbatim atom, rendered as written
+        return _verbatim_atom(node)
     if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
         return _BINOPS[type(node.op)](
             _node_to_sympy(node.left, funcs, matrix_names),
@@ -2672,7 +2751,7 @@ def parse_domain_safety(law: str) -> tuple[str, str] | None:
         # is a matrix predicate examining a VALUE; a safety predicate is
         # a fact about the code for one bare argument, never an
         # expression.
-        if predicate in _MATRIX_PREDICATES | _OUTPUT_PREDICATES:
+        if predicate in _MATRIX_PREDICATES | _output_predicates():
             try:
                 ast.parse(subject, mode="eval")
             except SyntaxError:
@@ -2702,7 +2781,7 @@ def parse_domain_safety(law: str) -> tuple[str, str] | None:
     # symmetric, `is_symmetric(A @ B)` the product is. A safety
     # predicate stays bare-parameter-only (it is a fact about the code
     # for one argument, with nothing to compute).
-    if node.func.id in _MATRIX_PREDICATES | _OUTPUT_PREDICATES:
+    if node.func.id in _MATRIX_PREDICATES | _output_predicates():
         return negated + node.func.id, ast.unparse(arg)
     return None
 

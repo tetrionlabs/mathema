@@ -12,6 +12,8 @@ __init__.py` for the package's own overview and public surface.
 from __future__ import annotations
 
 import ast
+import contextlib
+import contextvars
 import inspect
 import dataclasses
 from dataclasses import dataclass, field
@@ -458,6 +460,132 @@ def _dict_key_tree(tree: ast.FunctionDef, param: str) -> dict:
     return root
 
 
+def _chain(node: ast.AST) -> "tuple[str, str] | None":
+    """`(root, path)` for a read through fields and literal indices off
+    a name, `o.address.zip` -> `("o", "address.zip")`,
+    `o["lines"][0].qty` -> `("o", "lines[0].qty")`, else None."""
+    steps: list = []
+    cur = node
+    while isinstance(cur, (ast.Attribute, ast.Subscript)):
+        if isinstance(cur, ast.Attribute):
+            steps.append(f".{cur.attr}")
+        elif isinstance(cur.slice, ast.Constant) and isinstance(cur.slice.value, str):
+            steps.append(f".{cur.slice.value}")
+        elif isinstance(cur.slice, ast.Constant) and isinstance(cur.slice.value, int) \
+                and not isinstance(cur.slice.value, bool) and cur.slice.value >= 0:
+            steps.append(f"[{cur.slice.value}]")
+        else:
+            return None
+        cur = cur.value
+    if not steps or not isinstance(cur, ast.Name):
+        return None
+    path = "".join(reversed(steps))
+    if not path.startswith("."):
+        return None
+    return cur.id, path[1:]
+
+
+def _field_of(node: ast.AST, param: str) -> "str | None":
+    """The field path a node reads off `param`: `param.qty`,
+    `param["qty"]`, `param.address.zip`, `param.lines[0].qty`, else
+    None."""
+    found = _chain(node)
+    return found[1] if found is not None and found[0] == param else None
+
+
+def field_reads(tree: ast.FunctionDef, param: str) -> "tuple[list[str], list[str]]":
+    """Intent:
+        `(plain, length_only)`: the fields `param` is read through
+        (`param.qty` or `param["qty"]`) anywhere in the body, and the
+        fields read only as `len(param.sku)` or `len(param["sku"])`,
+        each in first-occurrence order. A field read both ways is
+        plain. An attribute in call position (`param.method(...)`) is
+        not a field read.
+    """
+    call_funcs = {id(node.func) for node in ast.walk(tree)
+                  if isinstance(node, ast.Call)}
+    in_len: set = set()
+    length_fields: list[str] = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "len" and len(node.args) == 1
+                and not node.keywords):
+            name = _field_of(node.args[0], param)
+            if name is not None:
+                in_len.add(id(node.args[0]))
+                if name not in length_fields:
+                    length_fields.append(name)
+    inner = {id(node.value) for node in ast.walk(tree)
+             if isinstance(node, (ast.Attribute, ast.Subscript))
+             and id(node) not in call_funcs and _field_of(node, param) is not None}
+    plain: list[str] = []
+    for node in ast.walk(tree):
+        name = _field_of(node, param)
+        if (name is not None and id(node) not in in_len and id(node) not in inner
+                and id(node) not in call_funcs and name not in plain):
+            plain.append(name)
+    return plain, [f for f in length_fields if f not in plain]
+
+
+#: `{param: [composite keys]}` for the row-bound parameters of the
+#: claim being lifted: each expands into exactly these keys (`p.qty`,
+#: `p.sku.len`), whatever its class
+ROW_FIELDS: "contextvars.ContextVar[dict]" = contextvars.ContextVar("row_fields", default={})
+
+
+@contextlib.contextmanager
+def row_fields(fields: dict):
+    """Intent:
+        Bind `ROW_FIELDS` for the lifts made inside the block.
+    """
+    token = ROW_FIELDS.set(dict(fields))
+    try:
+        yield
+    finally:
+        ROW_FIELDS.reset(token)
+
+
+def _numeric_annotation(t) -> bool:
+    """Whether a field annotation reads as a number: `int`, `float`,
+    either under `Annotated[...]`, or their names as strings."""
+    import typing
+    if typing.get_origin(t) is typing.Annotated:
+        t = typing.get_args(t)[0]
+    if isinstance(t, str):
+        return t.strip().lower() in ("int", "float")
+    return t in (int, float)
+
+
+def _read_field_keys(fn, param: str, tree) -> "list[str] | None":
+    """Intent:
+        The composite keys a dataclass parameter lifts into when its
+        declared fields are not all numeric: one per field the body
+        reads, each of which must be a numeric field, plus
+        `<param>.<field>.len` for a field read only as
+        `len(param.field)`. None when the body reads a non-numeric
+        field any other way, or the parameter is not a dataclass.
+    """
+    import dataclasses
+    import typing
+    try:
+        annotation = callable_signature(fn).parameters[param].annotation
+    except (TypeError, ValueError, KeyError):
+        return None
+    if not dataclasses.is_dataclass(annotation):
+        return None
+    try:
+        hints = typing.get_type_hints(annotation, include_extras=True)
+    except Exception:
+        hints = {f.name: f.type for f in dataclasses.fields(annotation)}
+    declared = {f.name for f in dataclasses.fields(annotation)}
+    plain, length_only = field_reads(tree, param)
+    if not (plain or length_only) or not set(plain + length_only) <= declared:
+        return None
+    if any(not _numeric_annotation(hints.get(f)) for f in plain):
+        return None
+    return [f"{param}.{f}" for f in plain] + [f"{param}.{f}.len" for f in length_only]
+
+
 def _attr_keys_used(tree: ast.FunctionDef, param: str) -> list[str]:
     """Attribute fields `param` is READ through anywhere in the body
     (`param.rate`), the attribute counterpart of `_dict_keys_used`,
@@ -519,7 +647,15 @@ def _bind_params(fn, facts) -> tuple[dict, dict]:
     parameter, see Lifted's docstring for why callers need both."""
     params: dict = {}
     aggregate: dict = {}
+    rows = ROW_FIELDS.get()
     for p in facts.params:
+        if rows.get(p):
+            for k in rows[p]:
+                # a `len(p.field)` key is a length: a whole number, never negative
+                params[k] = (sympy.Symbol(k, integer=True, nonnegative=True)
+                             if k.endswith(".len") else sympy.Symbol(k, real=True))
+            aggregate[p] = list(rows[p])
+            continue
         fields = _dataclass_fields(fn, p)
         if fields is None and facts.tree is not None \
                 and p == facts.params[0] and p in ("self", "cls"):
@@ -540,9 +676,17 @@ def _bind_params(fn, facts) -> tuple[dict, dict]:
         keys = ([f"{p}.{fld}" for fld in fields] if fields
                else [f"{p}.{k}" for k in _dict_keys_used(facts.tree, p)]
                if facts.tree is not None else [])
+        if not keys and facts.tree is not None:
+            keys = _read_field_keys(fn, p, facts.tree) or []
+        elif fields and facts.tree is not None:
+            # a declared field read only as `len(p.field)` is its length
+            _, length_only = field_reads(facts.tree, p)
+            keys += [f"{p}.{f}.len" for f in length_only if f in fields]
         if keys:
             for k in keys:
-                params[k] = sympy.Symbol(k, real=True)
+                # a `len(p.field)` key is a length: a whole number, never negative
+                params[k] = (sympy.Symbol(k, integer=True, nonnegative=True)
+                             if k.endswith(".len") else sympy.Symbol(k, real=True))
             aggregate[p] = keys
         else:
             # a complex-annotated parameter genuinely receives complex
@@ -816,6 +960,12 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
         if node.id in env:
             return env[node.id]
         raise NotSymbolic(f"unbound name {node.id!r}", category="unbound-name")
+    if isinstance(node, (ast.Attribute, ast.Subscript)):
+        # a read through fields and literal indices bound as one
+        # composite key (`o.address.zip`, `o.lines[0].qty`)
+        chained = _chain(node)
+        if chained is not None and f"{chained[0]}.{chained[1]}" in env:
+            return env[f"{chained[0]}.{chained[1]}"]
     if isinstance(node, ast.Attribute):
         if isinstance(node.value, ast.Name):
             composite = f"{node.value.id}.{node.attr}"
@@ -929,6 +1079,13 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
             return _array_elementwise_binop(op, left, right)
         return op(left, right)
     if isinstance(node, ast.Call):
+        if (isinstance(node.func, ast.Name) and node.func.id == "len"
+                and len(node.args) == 1 and not node.keywords
+                and isinstance(node.args[0], (ast.Attribute, ast.Subscript))):
+            chained = _chain(node.args[0])
+            composite = f"{chained[0]}.{chained[1]}.len" if chained is not None else None
+            if composite is not None and composite in env:
+                return env[composite]
         if (isinstance(node.func, ast.Name)
                 and isinstance(env.get(node.func.id), _LocalLambda)
                 and not node.keywords):

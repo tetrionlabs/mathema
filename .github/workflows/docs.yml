@@ -43,6 +43,43 @@ jobs:
 
       - uses: astral-sh/setup-uv@v4
 
+      # The mathema-language reference, imported under /language/reference/
+      # by docs_hooks/language_reference.py. A deploy always carries it,
+      # at the package's latest release tag (the highest v* tag), or at
+      # the MATHEMA_LANGUAGE_DOCS_REF repository variable when that is
+      # set; with no release tag and no variable the deploy stops. The
+      # MATHEMA_LANGUAGE_DOCS_TOKEN secret (a fine-grained token with
+      # read access to tetrionlabs/mathema-language contents) is needed
+      # while that repository is private.
+      - name: Resolve the language reference's release
+        id: langref
+        env:
+          GH_TOKEN: ${{ secrets.MATHEMA_LANGUAGE_DOCS_TOKEN }}
+          PINNED: ${{ vars.MATHEMA_LANGUAGE_DOCS_REF }}
+        run: |
+          ref="$PINNED"
+          if [ -z "$ref" ]; then
+            ref=$(gh api repos/tetrionlabs/mathema-language/tags --paginate --jq '.[].name' \
+                  | grep -E '^v[0-9]' | sort -V | tail -n 1)
+          fi
+          if [ -z "$ref" ]; then
+            echo "no release tag of mathema-language to publish the reference from"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch the language reference
+        uses: actions/checkout@v4
+        with:
+          repository: tetrionlabs/mathema-language
+          ref: ${{ steps.langref.outputs.ref }}
+          path: _external/mathema-language
+          token: ${{ secrets.MATHEMA_LANGUAGE_DOCS_TOKEN }}
+          sparse-checkout: docs
+
+      - name: The language reference is present
+        run: test -f _external/mathema-language/docs/reference.yml
+
       - name: Build the site (strict)
         env:
           LEGAL_FOOTER: ${{ vars.DOCS_LEGAL_FOOTER }}

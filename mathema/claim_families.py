@@ -1033,18 +1033,33 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
     bounds = domain.get(target)
     if bounds is None:
         return None   # an unstated domain admits everything: no outside
-    candidates = [c for c in _out_of_domain_candidates(bounds)
-                  if not is_missing(c)]   # missing spellings are
-    # is_missing_safe's own hazard, not this member's
-    if not candidates:
-        return None
-    sequence_target = facts.param_kinds.get(target) in SEQUENCE_KINDS
+    language_bound = getattr(bounds, "base_type", None) == "L"
+    if language_bound:
+        # a language's own near non-members, each named for the language
+        # it lies outside; a language admitting every value of its kind
+        # has no outside to draw, which is a skip with the reason
+        names, candidates = _outside_language(bounds, rng)
+        if not candidates:
+            return ("skipped", 0,
+                    f"L[{names}] has no outside this route can draw: "
+                    f"every value of its kind is a member")
+    else:
+        candidates = [c for c in _out_of_domain_candidates(bounds)
+                      if not is_missing(c)]   # missing spellings are
+        # is_missing_safe's own hazard, not this member's
+        if not candidates:
+            return None
+    sequence_target = (facts.param_kinds.get(target) in SEQUENCE_KINDS
+                       and not language_bound)
     state = {"idx": 0}
 
     def trial(args):
         bad = candidates[state["idx"] % len(candidates)]
         state["idx"] += 1
-        if sequence_target:
+        if language_bound:
+            value = bad
+            spelled = f"{target} = {bad!r} (outside L[{names}])"
+        elif sequence_target:
             # a sequence parameter is violated one ELEMENT at a time:
             # a fresh in-domain sequence with one out-of-domain entry
             seq = [rng.uniform(-10, 10) for _ in range(4)]
@@ -1064,6 +1079,83 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     rounds = max(len(candidates), min(trials, len(candidates) * 4))
     return _probe_trials(fn, facts, target, domain, rng, rounds, trial)
+
+
+def _language_pieces(bounds) -> list:
+    """Intent:
+        `[(name, language)]` for every language piece of a language
+        bound, resolved through the registry.
+    """
+    from .domain import LanguageRef
+    from .languages import resolve_language
+    return [(piece.text, resolve_language(piece)) for piece in bounds.pieces
+            if isinstance(piece, LanguageRef)]
+
+
+def _language_names(bounds) -> str:
+    return " | ".join(name for name, _ in _language_pieces(bounds))
+
+
+def _outside_language(bounds, rng: random.Random) -> "tuple[str, list]":
+    """Intent:
+        `(names, values)`: up to eight distinct near non-members per
+        language piece, each checked against the WHOLE bound (a value
+        outside one language of a union may lie inside another), and
+        the joined language names for the witness. Missing values are
+        `is_missing_safe`'s hazard and are left out.
+    """
+    from .domain import domain_contains, is_missing
+    pieces = _language_pieces(bounds)
+    out: list = []
+    for _, language in pieces:
+        for _ in range(8):
+            value = language.outside(rng)
+            if value is None or is_missing(value):
+                continue
+            if domain_contains(value, bounds):
+                continue
+            if not any(value == seen for seen in out):
+                out.append(value)
+    return " | ".join(name for name, _ in pieces), out
+
+
+def _language_corpus(bounds, rng: random.Random) -> "tuple[str, list]":
+    """Intent:
+        The fuzz corpus for a parameter bound to a language:
+        `(names, [(value, side)])` with the language's own hazards and
+        four draws inside, then its near non-members outside, so a
+        crash is reported for the side it happened on.
+    """
+    names, outsides = _outside_language(bounds, rng)
+    inside: list = []
+    for _, language in _language_pieces(bounds):
+        inside.extend(h.value for h in language.hazards())
+        inside.extend(language.sample(rng) for _ in range(4))
+    return names, ([(v, "inside") for v in inside]
+                   + [(v, "outside") for v in outsides])
+
+
+def _shrink_in_language(value, still_fails, bounds):
+    """Intent:
+        A smaller witness that `still_fails`, tried first through each
+        language's own `shrink` candidates (which stay members) and
+        then through the generic deletion shrinker; `still_fails`
+        carries the side condition, so the witness never crosses the
+        language boundary.
+    """
+    from ._shrink import shrink
+    best = value
+    changed = True
+    while changed:
+        changed = False
+        for _, language in _language_pieces(bounds):
+            for candidate in language.shrink(best):
+                if len(str(candidate)) < len(str(best)) and still_fails(candidate):
+                    best, changed = candidate, True
+                    break
+            if changed:
+                break
+    return shrink(best, still_fails)
 
 
 def _is_deterministic_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -1415,9 +1507,12 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
     from ._sampling import _STRING_SPECIALS, _synth_string
     from ._shrink import shrink
     from .analysis import _guards
+    from .domain import domain_contains
 
     target = cj.lhs
-    if facts.param_kinds.get(target) != "string":
+    bound = domain.get(target)
+    language_bound = getattr(bound, "base_type", None) == "L"
+    if facts.param_kinds.get(target) != "string" and not language_bound:
         return None
     guarded = _guards(facts.tree, facts.params).get(target) in ("raise", "assert")
 
@@ -1431,20 +1526,39 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return None       # a deliberate/other exception is not a crash
         return None
 
-    corpus = list(_STRING_SPECIALS) + [_synth_string(rng) for _ in range(8)]
+    if language_bound:
+        # the declared language's own hazards and members, then its
+        # near non-members: a crash is reported for the side it happened
+        # on, and the witness shrinks without crossing the boundary
+        names, corpus = _language_corpus(bound, rng)
+    else:
+        names = ""
+        corpus = [(v, None) for v in
+                  list(_STRING_SPECIALS) + [_synth_string(rng) for _ in range(8)]]
     state = {"i": 0}
 
     def trial(args):
         if state["i"] >= len(corpus):
             return True
-        value = corpus[state["i"]]
+        value, side = corpus[state["i"]]
         state["i"] += 1
         exc = crash_on(args, value)
         if exc is None:
             return True
-        minimal = shrink(value, lambda s: crash_on(args, s) is not None)
-        return (f"{target} = {minimal!r} raised {exc} on arbitrary input, "
-                f"an unguarded crash, not a declared rejection")
+        if side is None:
+            minimal = shrink(value, lambda s: crash_on(args, s) is not None)
+            return (f"{target} = {minimal!r} raised {exc} on arbitrary input, "
+                    f"an unguarded crash, not a declared rejection")
+        inside = side == "inside"
+
+        def still_fails(s):
+            return (crash_on(args, s) is not None
+                    and bool(domain_contains(s, bound)) == inside)
+
+        minimal = _shrink_in_language(value, still_fails, bound)
+        return (f"{target} = {minimal!r} ({side} L[{names}]) raised {exc} on "
+                f"arbitrary input, an unguarded crash, not a declared "
+                f"rejection")
 
     return _probe_trials(fn, facts, target, domain, rng,
                          max(trials, len(corpus)), trial)
@@ -1833,6 +1947,35 @@ def _guarded_safety_derive(derive):
     return run
 
 
+def split_probe_result(result) -> tuple:
+    """Intent:
+        A family probe's result as `(verdict, checked, cx, established,
+        meta)`. The accepted forms are `(verdict, checked, cx)` and
+        `(verdict, checked, cx, established)`, either one optionally
+        followed by a mapping merged into the record's `meta`; a missing
+        sketch or mapping comes back as `None`.
+    Raises:
+        ValueError: the result has neither three nor four elements
+        before the optional mapping.
+    """
+    from collections.abc import Mapping
+    items = tuple(result)
+    meta = None
+    if len(items) in (4, 5) and isinstance(items[-1], Mapping):
+        meta, items = dict(items[-1]), items[:-1]
+    if len(items) == 3:
+        verdict, checked, cx = items
+        established = None
+    elif len(items) == 4:
+        verdict, checked, cx, established = items
+    else:
+        raise ValueError(f"a family probe returned {len(tuple(result))} "
+                         f"elements; expected (verdict, checked, cx), "
+                         f"optionally with an established sketch, then "
+                         f"optionally a meta mapping")
+    return verdict, checked, cx, established, meta
+
+
 def _guarded_safety_probe(probe):
     """Wrap a safety member's empirical half in the family verdict
     contract. Trials may falsify (with a witness), hold, decline, or
@@ -1843,16 +1986,14 @@ def _guarded_safety_probe(probe):
     coverage was EXHAUSTIVE, the hazard class fully enumerated and
     every case observed. The verdict carries surety, so an established
     empirical examination proves; anything short of exhaustive
-    coverage holds at best. A fifth element, the member's own record
-    meta, passes through untouched. A contract violation raises, same
+    coverage holds at best. A trailing meta mapping (see `split_probe_result`)
+    passes through untouched. A contract violation raises, same
     as the derive guard."""
     def run(fn, facts, cj, domain, rng, trials):
         result = probe(fn, facts, cj, domain, rng, trials)
         if result is None:
             return None
-        verdict, checked, cx = result[:3]
-        established = result[3] if len(result) > 3 else None
-        meta = result[4] if len(result) > 4 else None
+        verdict, checked, cx, established, meta = split_probe_result(result)
         if verdict == "proven" and not established:
             raise ValueError("safety trials claimed proven without an "
                              "established-coverage sketch, sampling "

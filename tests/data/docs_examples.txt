@@ -36,7 +36,7 @@
 [x] docs/derive-route.md:finite-set              run verdicts
 [x] docs/derive-route.md:linspace                run verdicts  (requires)
 [x] docs/evidence-ladder.md:companion            run output
-[ ] docs/extending.md:185
+[ ] docs/extending.md:287
 [x] docs/findings.md:finds                       file run output run run output run output run run output
 [x] docs/findings.md:parity                      file run output
 [x] docs/first-look.md:ema                       run run output run output run output run output run output

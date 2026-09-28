@@ -2064,7 +2064,10 @@ def _ordered_real_param_names(cj, excluded: set) -> list:
                 if name not in excluded and name not in seen:
                     seen.append(name)
     for name in cj.domain:
-        if name not in cj.free_vars and name not in excluded and name not in seen:
+        # a path binding (`o.lines[*].qty`) names a parameter's field,
+        # not a parameter, and keeps its own spelling
+        if name.isidentifier() and name not in cj.free_vars and name not in excluded \
+                and name not in seen:
             seen.append(name)
     return seen
 
@@ -2405,7 +2408,8 @@ def _render_claim_text(cj, *, unicode: bool | None,
         `render_claim_text`'s rendering, under whatever bar reading
         `grammar.bars_over_matrices` has set.
     """
-    from .grammar import get_unicode_output, render_domain, render_law_expr
+    from .conjecture import GRAMMAR
+    from .grammar import display_len, get_unicode_output, render_domain, render_law_expr
     from ._providers import get_provider, report_provider_failure
     from ._scan import sub_outside_strings
 
@@ -2491,7 +2495,9 @@ def _render_claim_text(cj, *, unicode: bool | None,
     _REL_GLYPH = {"==": "=", "<=": "≤" if unicode else "<=",
                   ">=": "≥" if unicode else ">=", "!=": "≠" if unicode else "!=",
                   "~=": "≈" if unicode else "~=", "<": "<", ">": ">",
-                  "=:=": "≡" if unicode else "=:="}
+                  "=:=": "≡" if unicode else "=:=",
+                  "in": "∈" if unicode else "in",
+                  "not in": "∉" if unicode else "not in"}
     lhs_text, rhs_text = apply_safe_renames(cj.lhs), apply_safe_renames(cj.rhs)
     if cj.links:
         # a chained comparison: render the full chain (first link's lhs,
@@ -2527,6 +2533,11 @@ def _render_claim_text(cj, *, unicode: bool | None,
             statement = f"{lhs_display} {cj.relation.replace('_', ' ')}"
         else:
             statement = f"{cj.relation}({lhs_display})"
+    elif getattr(cj, "rhs_bound", None) is not None:
+        # a membership in a domain: the rhs is domain text, rendered
+        # as written, never through the expression renderer
+        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs))
+        statement = f"{lhs} {_REL_GLYPH[cj.relation]} {cj.rhs}"
     else:
         lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs))
         rhs = apply_unsafe_backticks(render_law_expr(rhs_text, renamed_funcs, unicode, suppress_glyphs))
@@ -2535,6 +2546,12 @@ def _render_claim_text(cj, *, unicode: bool | None,
         # the negation is part of the claim, whatever shape the
         # statement took above
         statement = f"not {statement}"
+    # over a language, the length of a value reads as `len(...)`;
+    # `len` is sugar for `dim(..., 0)`, so the text reparses to the
+    # same canonical form
+    language_len = getattr(cj, "grammar", "") == f"{GRAMMAR}/language"
+    if language_len:
+        statement = display_len(statement)
 
     # let/for's own displayed symbol never reaches ast.parse individually
     # (both are plain f-string text, joined into the final claim string
@@ -2602,7 +2619,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
         # predicate statements themselves.
         # already canonical (grammar._canonical_assuming spells the
         # definedness premise `f is defined`), so nothing to rewrite
-        assuming_text = cj.assuming
+        assuming_text = display_len(cj.assuming) if language_len else cj.assuming
         if unicode:
             for joined in sorted(examine_predicates()):
                 assuming_text = assuming_text.replace(
