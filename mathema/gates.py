@@ -196,7 +196,21 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
     from .runtime_types import calling
     from ._linalg_eval import FUNCTIONS as _VECTOR_FUNCS
-    base_env = {"f": _tag(calling(fn, facts), "f"), **_SAFE_FUNCS,
+    from ._exact_premises import premise_functions
+    from ._linalg_eval import as_array, law_callable, scalar
+    from .conjecture import _bound_for_arrays
+    from .matrices import _numpy
+    # a claim over vectors or matrices evaluates them as arrays, so
+    # `2 * xs` scales and `xs + ys` adds elementwise, never a list
+    # repeated or concatenated; the function still receives its own
+    # runtime type and its result is read back as an array
+    as_arrays = bool(seq_names) and _numpy() is not None
+    fn_call = calling(fn, facts)
+    if as_arrays:
+        fn_call = law_callable(fn_call)
+        bound_funcs = {name: _bound_for_arrays(v)
+                       for name, v in bound_funcs.items()}
+    base_env = {"f": _tag(fn_call, "f"), **_SAFE_FUNCS,
                 **_VECTOR_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
                 **{name: (cj.tolerance if cj.tolerance is not None else 1e-9)
@@ -224,7 +238,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # a whole-number coordinate of an integer domain is passed as an
         # int, the value the probe route draws there; a float would make
         # `range(n)` raise where the claim is about integers
-        return {n: (_as_int_if_whole(v) if n in int_names else v)
+        return {n: (_as_int_if_whole(v) if n in int_names else
+                    as_array(v) if as_arrays and n in seq_names
+                    and isinstance(v, (list, tuple)) else v)
                 for n, v in point.items()}
 
     def _values(point):
@@ -233,6 +249,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         env = {"__builtins__": {}, **base_env, **_typed(point)}
         lv = eval(code_l, env)
         rv = eval(code_r, env) if code_r is not None else 0
+        if as_arrays:
+            # a 1-by-1 result (`x.T @ A @ x` over a column) is the number it holds
+            lv, rv = scalar(lv), scalar(rv)
         return plain_value(lv), plain_value(rv)
 
     def _relation_holds(lv, rv, tol):
@@ -513,6 +532,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             b = (cap_lo, cap_hi)
         return _synth(kinds.get(name, "float"), rng, b)
 
+    # a premise is a question about the domain, so its reductions are
+    # computed exactly; the law itself stays in float
+    premise_words = premise_functions(_VECTOR_FUNCS)
+
     def admits(point):
         for n in seq_names:
             # a sequence coordinate is a list, each element inside the
@@ -545,7 +568,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return False
         for a_l, a_rel, a_r in assum:
             try:
-                env = {**base_env, **_typed(point)}
+                env = {**base_env, **premise_words, **_typed(point)}
                 al = eval(compile(a_l, "<a>", "eval"), {"__builtins__": {}}, env)
                 ar = eval(compile(a_r, "<a>", "eval"), {"__builtins__": {}}, env)
             except Exception:
