@@ -199,6 +199,10 @@ Notable changes to mathema are recorded here from its first public release onwar
   schema whose checks reject every record drawn) is skipped with the
   `input-synthesis` gap and the language's reason, instead of raising
   out of `check_conjectures`.
+- An `is_arbitrary_input_safe` witness over a language says whether it lies
+  inside the claim's domain, exclusions included: over `L[unicode] \ {""}`
+  a crash on `''` is labelled outside `L[unicode] \ {""}`, not inside
+  `L[unicode]`.
 
 ## 0.6.0
 

@@ -1122,17 +1122,26 @@ def _outside_language(bounds, rng: random.Random) -> "tuple[str, list]":
 def _language_corpus(bounds, rng: random.Random) -> "tuple[str, list]":
     """Intent:
         The fuzz corpus for a parameter bound to a language:
-        `(names, [(value, side)])` with the language's own hazards and
-        four draws inside, then its near non-members outside, so a
-        crash is reported for the side it happened on.
+        `(label, [(value, side)])` with the language's own hazards and
+        four draws, each on the side of the claim's domain it falls (a
+        value the claim excludes is outside), then its near non-members
+        outside, so a crash is reported for the side it happened on;
+        `label` names the domain as the claim writes it.
     """
+    from .domain import domain_contains, is_missing, render_domain
     names, outsides = _outside_language(bounds, rng)
-    inside: list = []
+    drawn: list = []
     for _, language in _language_pieces(bounds):
-        inside.extend(h.value for h in language.hazards())
-        inside.extend(language.sample(rng) for _ in range(4))
-    return names, ([(v, "inside") for v in inside]
-                   + [(v, "outside") for v in outsides])
+        drawn.extend(h.value for h in language.hazards())
+        drawn.extend(language.sample(rng) for _ in range(4))
+    if any(not is_missing(v) for v in getattr(bounds, "excluded", ()) or ()):
+        # a value the claim excludes is outside its domain, and the label
+        # is the domain as written, exclusion included
+        label = render_domain(bounds, show_missing=False, ascii_mode=True)
+    else:
+        label = f"L[{names}]"
+    sides = [(v, "inside" if domain_contains(v, bounds) else "outside") for v in drawn]
+    return label, sides + [(v, "outside") for v in outsides]
 
 
 def _shrink_in_language(value, still_fails, bounds):
@@ -1556,7 +1565,7 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     and bool(domain_contains(s, bound)) == inside)
 
         minimal = _shrink_in_language(value, still_fails, bound)
-        return (f"{target} = {minimal!r} ({side} L[{names}]) raised {exc} on "
+        return (f"{target} = {minimal!r} ({side} {names}) raised {exc} on "
                 f"arbitrary input, an unguarded crash, not a declared "
                 f"rejection")
 
