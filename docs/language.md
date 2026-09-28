@@ -51,10 +51,9 @@ call time.
 Every record states what a name resolved to, in `meta["mathema.language"]`:
 the name, its source (an in-process registration, a package's entry
 point, a dotted object, an adaptor), its level (finite, alphabet,
-regular, predicate, schema) and its persisted form. A family that
-resolves something of its own writes it beside the parameters, so
-`output_in_language` records the language it held the output to under
-`return`, with where that came from. A claim over a
+regular, predicate, schema) and its persisted form. A built-in claim
+that resolves something of its own writes it beside the parameters,
+with where that came from. A claim over a
 language is stamped `grammar: mathema/language`, the dialect of the claim
 grammar that reads language vocabulary; a claim over a finite set stays
 plain `mathema`. In that dialect a length renders as `len(s)`, while the
@@ -147,21 +146,22 @@ pip install "mathema[language]"
 ```
 
 It provides the alphabets (`ascii`, `latin-1`, `unicode`, `printable`,
-`digit`, `alpha`, `alnum`), the predicate languages with an exact
+the ASCII `digit`, `alpha` and `alnum`, and `unicode_alpha` and
+`unicode_alnum` for any script), the predicate languages with an exact
 standard-library test behind each (`identifier`, `json`, `uuid`,
 `iso_date`, `iso_datetime`, `ipv4`, `ipv6`, `base64`, `hex`, `slug`,
-`shell_safe`), the hazard sub-alphabets a probe mixes in (control and
-format characters, combining marks, surrogates, the characters whose
-NFKC form differs, the astral planes), the hazard families
-`is_length_safe` and `is_encoding_safe`, and the schema adaptors that
-turn a dataclass, a `TypedDict`, a pydantic model or a JSON Schema into
-the language of its rows (a SQLAlchemy table and a Django model too).
+`shell_safe`), the hazard alphabets a probe mixes in (`control`,
+`invisible`, `combining`, `surrogate`, `compatibility` and `astral`),
+the built-in claims `is_length_safe` and `is_encoding_safe`, and the
+schema adaptors that turn a dataclass, a `TypedDict`, a pydantic model
+or a JSON Schema into the language of its records (a SQLAlchemy table
+and a Django model too).
 Without it, a claim over `L[unicode]` reports `skipped` with the message
 naming the package.
 
 The package keeps its own reference, published on this site as
 [the language reference](/language/reference/): every language and its
-membership test, the hazards, a page for each row adaptor with what it
+membership test, the hazards, a page for each record adaptor with what it
 reads and which validator decides membership, how to write an adaptor
 of your own, and a catalogue of claims worth writing about a function
 over text, each one run by the package's tests and held to the verdict
@@ -196,5 +196,5 @@ and runs under the wall-clock cap. A proof it returns is the claim's
 derive verdict, on the route `derive:<mechanism>` named by the result's
 `mathema.derive_route`; anything else leaves the claim to the probe,
 and a disproof it claims is read as undecided, since only an executed
-witness falsifies. mathema-language's recursive row languages prove
+witness falsifies. mathema-language's recursive record languages prove
 fold claims this way, on `derive:induction`.

@@ -87,7 +87,7 @@ that order, for a package that builds on the adaptors itself. A language is any 
 the `Language` protocol; `language_problems(obj)` lists what one is
 missing, and a registered or loaded object that fails it is skipped
 with a warning, never served. Core ships no language: the alphabets,
-predicate languages, hazard families and schema adaptors are the
+predicate languages, built-in claims and schema adaptors are the
 `mathema-language` package's, and an unknown name is refused with the
 vocabulary and the group to register under. An output-contract
 predicate registered under a name shaped `output_<slug>` or
@@ -116,8 +116,9 @@ is merged in beneath derive's own keys, which win on a clash. It is
 copied, never shared. One key merges rather than
 replaces: under `"mathema.language"` core already writes a description
 of every `L[...]` binding, one entry per parameter, and a family's
-entries sit beside those, so `{"mathema.language": {"return": [...]}}`
-from `output_in_language` lands next to the parameter's own entry.
+entries sit beside those, so a family returning
+`{"mathema.language": {"return": [...]}}` lands next to the parameter's
+own entry.
 The mapping is an addition to the return shape, so a probe written
 against the three- or four-element forms keeps working unchanged and
 the extension API version stays where it is.
