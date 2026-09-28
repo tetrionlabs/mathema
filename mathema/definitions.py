@@ -1,0 +1,1253 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+"""Proofs through definition rows.
+
+A definition row is an ordinary library claim, named `definition`
+(or `definition@p=v` for a call pinning a parameter), that states
+what a library function computes in the claim grammar's own words:
+
+    pandas.Series.std:
+      claims:
+        - name: definition
+          statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+
+The derive route reads a function body such as `returns.mean() /
+returns.std(ddof=1) * np.sqrt(252)` by resolving each library call to
+its key (through the parameter's runtime type for a method, through
+the module's import aliases for a function), binding the call's
+arguments against the row, and rewriting the call with the row's
+right-hand side. The body then reads in grammar words only, and a
+claim about it is decided as mathematics: a vector claim by lowering
+to sums over a sequence of symbolic length (`symbolic._seqir`), a
+matrix claim by the matrix algebra (`symbolic._matrix`).
+
+Which rows may feed a proof depends on where they come from: a row
+bundled with mathema is used at once (mathema's own test suite
+verifies each against the installed library); a row from a project's
+claims file or a third party is used only once `mathema verify` has
+recorded it `holds` or `proven` locally, or it was accepted with
+`mathema accept <key> <row> --as trusted`, and feeds sampling only
+until then. A row verify recorded `falsified` is never used. A proof
+through definition rows stays `proven`, and its record lists each row
+used (`meta["mathema.definitions"]`) with its source and local status.
+"""
+from __future__ import annotations
+
+import ast
+import copy
+import os
+from dataclasses import dataclass, field
+
+#: the claim name a definition row carries, alone or before `@`
+DEFINITION = "definition"
+
+#: the law transforms a claim can bind that the sequence lowering reads
+_TRANSFORMS = {"mathema.f.scale_seq": "scale",
+               "mathema.f.shift_seq": "shift",
+               "mathema.f.reverse_seq": "reverse"}
+
+#: builtins a body may call, read as the grammar word of the same name
+_BUILTIN_WORDS = frozenset({"abs", "sum", "len", "min", "max", "float"})
+
+
+class Decline(Exception):
+    """The body or the claim is outside what definition rows rewrite;
+    the message says which construct, and names a library key with no
+    usable definition row."""
+
+
+@dataclass
+class Row:
+    """Intent:
+        One usable definition row: its key and name, the statement as
+        written, where it came from, its local status (`bundled`, or
+        the verdict `mathema verify` recorded, or `trusted`), the
+        installed library version, and its parsed parts: the names
+        `f(...)` takes, the right-hand side, the pins, and the
+        premises as `(lhs, relation, rhs)` source triples.
+    """
+    key: str
+    name: str
+    statement: str
+    source: str
+    status: str
+    library: str
+    params: list
+    rhs: ast.expr
+    pins: dict
+    premises: list
+    ranks: dict = field(default_factory=dict)
+
+    def use(self) -> dict:
+        return {"key": self.key, "row": self.name,
+                "statement": self.statement, "source": self.source,
+                "status": self.status, "library": self.library}
+
+
+@dataclass
+class Inlined:
+    """A function body read in grammar words over its parameters, and
+    the definition rows used (with any premise each carries, as
+    `(row, premises)` with the premises in terms of the body)."""
+    expr: ast.expr
+    uses: list = field(default_factory=list)
+    premises: list = field(default_factory=list)
+
+
+def is_definition_name(name: "str | None") -> bool:
+    """Whether a claim name names a definition row."""
+    return bool(name) and (name == DEFINITION
+                           or str(name).startswith(DEFINITION + "@"))
+
+
+# which rows may be used
+
+def _canonical(statement: str) -> "str | None":
+    try:
+        from .conjecture import claim
+        from .spec import render_claim_text
+        return render_claim_text(claim(statement), unicode=False)
+    except Exception:
+        return None
+
+
+def _local_row(root: "str | None", key: str, name: str) -> "dict | None":
+    """The row `mathema verify` recorded for `key` under `name` in the
+    project at `root`, or None."""
+    if root is None:
+        return None
+    from .spec import read_verified_file, verified_dir
+    path = os.path.join(verified_dir(root), f"{key}.yaml")
+    if not os.path.exists(path):
+        return None
+    data, _ = read_verified_file(path)
+    entry = (data or {}).get(key) or {}
+    return next((c for c in entry.get("claims") or []
+                 if isinstance(c, dict) and c.get("name") == name), None)
+
+
+def _local_status(local: "dict | None", statement: str) -> "str | None":
+    """The local verdict of a recorded row stating `statement`
+    (`trusted` for an accepted testimony), or None when nothing was
+    recorded for this statement."""
+    if local is None:
+        return None
+    if _canonical(str(local.get("statement") or "")) != _canonical(statement):
+        return None
+    verdict = str(local.get("verdict") or "").split(":", 1)[0]
+    accepted = local.get("accepted") or {}
+    if accepted.get("as") == "trusted" and not accepted.get("stale") \
+            and verdict in ("holds", "proven"):
+        return "trusted"
+    return verdict or None
+
+
+def _installed_root() -> "str | None":
+    from .compendium import _INSTALLED
+    return _INSTALLED.get("root")
+
+
+def row_standing(root: "str | None", key: str, row: dict,
+                 bundled: bool) -> "tuple[str | None, str]":
+    """Intent:
+        `(status, reason)` for one definition row: `status` is the
+        local status a usable row carries (`bundled`, `holds`,
+        `proven`, `trusted`), None when the row may not feed a proof,
+        and `reason` then says why.
+    """
+    from .compendium import OUTSIDE_VERSIONS
+    meta = row.get("meta") or {}
+    if meta.get(OUTSIDE_VERSIONS):
+        return None, (f"its versions ({meta[OUTSIDE_VERSIONS]}) exclude "
+                      f"the installed library")
+    statement = str(row.get("statement") or "")
+    local = _local_status(_local_row(root, key, str(row.get("name"))),
+                          statement)
+    if local == "falsified":
+        return None, "mathema verify recorded it falsified"
+    if bundled:
+        return (local if local in ("holds", "proven", "trusted")
+                else "bundled"), ""
+    if local in ("holds", "proven", "trusted"):
+        return local, ""
+    return None, ("it is not bundled with mathema and mathema verify has "
+                  "not recorded it holds here (run mathema verify, or "
+                  "accept it with --as trusted), so until then it feeds "
+                  "sampling only")
+
+
+def _parse_premises(text: str) -> "list | None":
+    """`assuming a and b` as `(lhs, relation, rhs)` source triples, or
+    None when a part is not one comparison."""
+    import re
+    body = re.sub(r"^\s*assuming\s+", "", text or "").strip()
+    if not body:
+        return []
+    out = []
+    for part in re.split(r"\s+and\s+", body):
+        try:
+            node = ast.parse(part.strip(), mode="eval").body
+        except SyntaxError:
+            return None
+        if not (isinstance(node, ast.Compare) and len(node.ops) == 1):
+            return None
+        rel = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<", ast.LtE: "<=",
+               ast.Gt: ">", ast.GtE: ">="}.get(type(node.ops[0]))
+        if rel is None:
+            return None
+        out.append((node.left, rel, node.comparators[0]))
+    return out
+
+
+def _parse_row(key: str, row: dict) -> "tuple | None":
+    """`(params, rhs, pins, premises)` of a definition row, or None
+    when its statement is not `f(p, ...) == <expression>` (or `~=`)."""
+    from .conjecture import _single_point, claim
+    try:
+        cj = claim(str(row.get("statement") or ""), name=row.get("name"))
+    except Exception:
+        return None
+    if cj.relation not in ("==", "~=") or cj.negated or cj.links:
+        return None
+    try:
+        lhs = ast.parse(cj.lhs, mode="eval").body
+        rhs = ast.parse(cj.rhs, mode="eval").body
+    except SyntaxError:
+        return None
+
+    def f_params(node):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "f" and not node.keywords \
+                and all(isinstance(a, ast.Name) for a in node.args):
+            return [a.id for a in node.args]
+        return None
+    params = f_params(lhs)
+    if params is None:
+        params, rhs = f_params(rhs), lhs
+    if params is None:
+        return None
+    pins = dict(cj.param_pins or {})
+    for name in cj.free_vars or ():
+        point = _single_point((cj.domain or {}).get(name))
+        if point is not None:
+            pins[name] = (int(point) if isinstance(point, float)
+                          and point.is_integer() else point)
+    premises = _parse_premises(cj.assuming or "")
+    if premises is None:
+        return None
+    ranks = {p: len(getattr((cj.domain or {}).get(p), "dims", ()) or ())
+             for p in params}
+    return params, rhs, pins, premises, ranks
+
+
+class RowBook:
+    """Intent:
+        The definition rows of the project at `root` (the project
+        `compendium.install` registered when None, or the bundled files
+        alone when none is), read per key on demand: `rows(key)` the
+        usable ones (`Row`), `withheld(key)` why a key's rows may not
+        be used, `states(key)` whether the key has any definition row.
+    """
+
+    def __init__(self, root: "str | None" = None):
+        from .compendium import load_library_claims
+        self.root = root if root is not None else _installed_root()
+        self._library = _library_claims(self.root, load_library_claims)
+        self._rows: dict = {}
+        self._withheld: dict = {}
+
+    def states(self, key: str) -> bool:
+        info = self._library.get(key)
+        return info is not None and any(
+            isinstance(r, dict) and is_definition_name(r.get("name"))
+            for r in info["entry"].get("claims") or [])
+
+    def rows(self, key: str) -> list:
+        if key not in self._rows:
+            self._read(key)
+        return self._rows[key]
+
+    def withheld(self, key: str) -> "str | None":
+        if key not in self._rows:
+            self._read(key)
+        return self._withheld.get(key)
+
+    def _read(self, key: str) -> None:
+        from .compendium import _installed_version
+        out: list = []
+        why = None
+        info = self._library.get(key)
+        for row in (info or {}).get("entry", {}).get("claims") or []:
+            if not isinstance(row, dict) \
+                    or not is_definition_name(row.get("name")):
+                continue
+            status, reason = row_standing(self.root, key, row,
+                                          info["bundled"])
+            if status is None:
+                why = why or f"{row.get('name')}: {reason}"
+                continue
+            parsed = _parse_row(key, row)
+            if parsed is None:
+                why = why or (f"{row.get('name')}: its statement is not "
+                              f"f(...) == <expression>")
+                continue
+            params, rhs, pins, premises, ranks = parsed
+            version = _installed_version(info["compendium"]) or "*"
+            out.append(Row(
+                key=key, name=str(row["name"]),
+                statement=str(row.get("statement")), source=info["source"],
+                status=status, library=f"{info['compendium']} {version}",
+                params=params, rhs=rhs, pins=pins, premises=premises,
+                ranks=ranks))
+        self._rows[key] = out
+        if why and not out:
+            self._withheld[key] = why
+
+
+_LIBRARY_CACHE: dict = {}
+
+
+def _library_claims(root: "str | None", load) -> dict:
+    """`load(root)`, read again only when a claims file under `root`
+    (or a bundled one) has changed since the last read."""
+    from .compendium import _bundled_dir
+    from .spec import claims_file_paths
+    paths = claims_file_paths(_bundled_dir())
+    if root is not None:
+        paths += claims_file_paths(root, exclude=(_bundled_dir(),))
+    stamp = []
+    for path in paths:
+        try:
+            stamp.append((path, os.path.getmtime(path)))
+        except OSError:
+            continue
+    cached = _LIBRARY_CACHE.get(root)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    loaded = load(root)
+    _LIBRARY_CACHE[root] = (stamp, loaded)
+    return loaded
+
+
+# reading a body through the rows
+
+def _substitute(node: ast.expr, names: dict) -> ast.expr:
+    """A copy of `node` with each bare name in `names` replaced by a
+    copy of its expression."""
+    class _Sub(ast.NodeTransformer):
+        def visit_Name(self, n):
+            if n.id in names:
+                return copy.deepcopy(names[n.id])
+            return n
+    out = _Sub().visit(copy.deepcopy(node))
+    return ast.fix_missing_locations(out)
+
+
+def _literal(node):
+    """The literal value of an argument, or a unique marker when it is
+    not a literal."""
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, SyntaxError, TypeError):
+        return _NOT_LITERAL
+
+
+_NOT_LITERAL = object()
+
+
+def _match_row(key: str, rows: list, positional: list, keywords: dict):
+    """Intent:
+        The first row of `rows` that states the call `key(*positional,
+        **keywords)` (argument source nodes), with the row's names
+        bound: `(row, rhs, premises)`, the right-hand side and premises
+        with each name the row's `f(...)` takes replaced by the call's
+        argument. None when no row covers the call.
+
+    Notes:
+        A row covers a call when every parameter the row's `f(...)`
+        takes is passed, and every other parameter is passed a literal
+        equal to the row's pin for it, or else to its default; a
+        parameter the call leaves out must be at the row's pin too.
+    """
+    import inspect
+
+    from ._signatures import callable_signature
+    from .conjecture import _resolve_func_ref
+    target = _resolve_func_ref(key)
+    if target is None:
+        return None
+    try:
+        sig = callable_signature(target)
+        bound = sig.bind(*positional, **keywords)
+    except (TypeError, ValueError):
+        return None
+    passed = dict(bound.arguments)
+    extra: dict = {}
+    for name, param in sig.parameters.items():
+        if param.kind is param.VAR_KEYWORD:
+            extra = dict(passed.pop(name, None) or {})
+        if param.kind is param.VAR_POSITIONAL and passed.get(name):
+            return None
+    for row in sorted(rows, key=lambda r: (r.name != DEFINITION, r.name)):
+        if any(p not in passed for p in row.params):
+            continue
+        ok = True
+        for name, param in sig.parameters.items():
+            if name in row.params or param.kind in (param.VAR_KEYWORD,
+                                                    param.VAR_POSITIONAL):
+                continue
+            want = row.pins.get(name, param.default)
+            if want is inspect.Parameter.empty:
+                ok = False
+                break
+            got = _literal(passed[name]) if name in passed else \
+                param.default
+            if got is _NOT_LITERAL or not _same_value(got, want):
+                ok = False
+                break
+        # a keyword only **kwargs takes must be the row's pin, and a pin
+        # on no named parameter must be passed
+        if ok and any(p not in sig.parameters and p not in extra
+                      for p in row.pins):
+            ok = False
+        if ok and any(name not in row.pins
+                      or _literal(node) is _NOT_LITERAL
+                      or not _same_value(_literal(node), row.pins[name])
+                      for name, node in extra.items()):
+            ok = False
+        accepts = set(sig.parameters) | (set(extra) | set(row.pins)
+                                         if any(p.kind is p.VAR_KEYWORD for p
+                                                in sig.parameters.values())
+                                         else set())
+        if not ok or any(p not in accepts for p in row.pins):
+            continue
+        names = {p: passed[p] for p in row.params}
+        premises = [(_substitute(lhs, names), rel, _substitute(rhs, names))
+                    for lhs, rel, rhs in row.premises]
+        return row, _substitute(row.rhs, names), premises
+    return None
+
+
+def _same_value(a, b) -> bool:
+    if a is b:
+        return True
+    if isinstance(a, bool) or isinstance(b, bool) or a is None or b is None:
+        return a is b or a == b and type(a) is type(b)
+    try:
+        return a == b
+    except Exception:
+        return False
+
+
+def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
+    """Intent:
+        `fn`'s body read in grammar words: its straight-line
+        assignments substituted into its one `return`, each library
+        call it makes rewritten with a definition row, the scalar
+        functions of the lift table (`np.sqrt`) and the builtins `abs`,
+        `sum`, `len`, `min`, `max` read as the grammar words of the same
+        name, and `float(x)` as `x`. None when the body uses no
+        definition row at all.
+
+    Raises:
+        Decline: a construct outside the rewrite, or a library call
+            with no usable definition row (naming its key, and why a
+            row it has is withheld).
+    """
+    from .analysis import _MATH_MODULES
+    from ._math_vocab import _SYMPY_FUNCS
+    from .compendium import _alias_origins
+    fdef = getattr(facts, "tree", None)
+    if fdef is None:
+        raise Decline("the function has no source")
+    origins = _alias_origins(fn, facts)
+    scope = getattr(fn, "__globals__", {}) or {}
+    params = set(facts.params)
+    runtime = {p: found[0].adapter
+               for p, found in (getattr(facts, "runtime_types", None)
+                                or {}).items()
+               if found and found[0].kind in ("vec", "mat")}
+    local: dict = {}
+    local_runtime: dict = {}
+    inlined = Inlined(expr=ast.Constant(value=0))
+
+    def no_row(key: str) -> Decline:
+        why = book.withheld(key)
+        return Decline(f"{key} has no definition row"
+                       + (f" usable here ({why})" if why else ""))
+
+    def receiver_type(node) -> "str | None":
+        if isinstance(node, ast.Name):
+            return runtime.get(node.id) or local_runtime.get(node.id)
+        return None
+
+    def through_row(key: str, positional: list, keywords: dict):
+        rows = book.rows(key)
+        found = _match_row(key, rows, positional, keywords)
+        if found is None:
+            if rows:
+                raise Decline(f"{key}: no definition row states this call "
+                              f"({', '.join(r.name for r in rows)} "
+                              f"take other arguments)")
+            raise no_row(key)
+        row, rhs, premises = found
+        inlined.uses.append(row)
+        inlined.premises.extend((row, p) for p in premises)
+        return rhs
+
+    def dotted(node) -> "str | None":
+        parts = []
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if not isinstance(node, ast.Name):
+            return None
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+
+    def rewrite(node):
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)) \
+                    and not isinstance(node.value, bool):
+                return ast.Constant(value=node.value)
+            raise Decline(f"the constant {node.value!r} is not a number")
+        if isinstance(node, ast.Name):
+            if node.id in local:
+                return copy.deepcopy(local[node.id])
+            if node.id in params:
+                return ast.Name(id=node.id, ctx=ast.Load())
+            value = scope.get(node.id)
+            if isinstance(value, (int, float)) and not isinstance(value,
+                                                                  bool):
+                return ast.Constant(value=value)
+            raise Decline(f"the name {node.id!r} is not a parameter, a "
+                          f"local or a numeric module constant")
+        if isinstance(node, ast.BinOp) and isinstance(
+                node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow,
+                          ast.MatMult)):
+            return ast.BinOp(left=rewrite(node.left), op=node.op,
+                             right=rewrite(node.right))
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub,
+                                                                  ast.UAdd)):
+            return ast.UnaryOp(op=node.op, operand=rewrite(node.operand))
+        if isinstance(node, ast.Attribute):
+            rt = receiver_type(node.value)
+            if rt is None:
+                raise Decline(f"{ast.unparse(node)!r}: the attribute's "
+                              f"receiver has no runtime type")
+            return through_row(f"{rt}.{node.attr}", [rewrite(node.value)],
+                               {})
+        if isinstance(node, ast.Call):
+            if any(k.arg is None for k in node.keywords) or any(
+                    isinstance(a, ast.Starred) for a in node.args):
+                raise Decline(f"{ast.unparse(node)!r}: argument unpacking "
+                              f"is outside the rewrite")
+            args = [rewrite(a) for a in node.args]
+            keywords = {k.arg: rewrite(k.value) if not isinstance(
+                            k.value, ast.Constant) else k.value
+                        for k in node.keywords}
+            func = node.func
+            if isinstance(func, ast.Attribute):
+                rt = receiver_type(func.value)
+                if rt is not None:
+                    return through_row(f"{rt}.{func.attr}",
+                                       [rewrite(func.value), *args],
+                                       keywords)
+                name = dotted(func)
+                if name is None:
+                    raise Decline(f"{ast.unparse(node)!r}: the call's "
+                                  f"receiver has no runtime type")
+                head, _, rest = name.partition(".")
+                base = origins.get(head)
+                if base is None:
+                    raise Decline(f"{ast.unparse(node)!r}: {head!r} is not "
+                                  f"an imported module")
+                key = f"{base}.{rest}"
+                if book.states(key):
+                    return through_row(key, args, keywords)
+                if head in _MATH_MODULES and rest in _SYMPY_FUNCS \
+                        and not keywords:
+                    return ast.Call(func=ast.Name(id=rest, ctx=ast.Load()),
+                                    args=args, keywords=[])
+                raise no_row(key)
+            if isinstance(func, ast.Name):
+                key = origins.get(func.id)
+                if key is not None and "." in key:
+                    if book.states(key):
+                        return through_row(key, args, keywords)
+                    raise no_row(key)
+                if func.id in _BUILTIN_WORDS and func.id not in scope \
+                        and not keywords:
+                    if func.id == "float" and len(args) == 1:
+                        return args[0]
+                    return ast.Call(func=ast.Name(id=func.id, ctx=ast.Load()),
+                                    args=args, keywords=[])
+            raise Decline(f"{ast.unparse(node)!r} is outside the "
+                          f"definition rewrite")
+        raise Decline(f"{ast.unparse(node)!r} is outside the definition "
+                      f"rewrite")
+
+    for node in ast.walk(fdef):
+        # a method or attribute of a parameter with a runtime type names
+        # its library key; one with no definition row is reported by
+        # that key, wherever in the body it sits
+        if isinstance(node, ast.Attribute) \
+                and isinstance(node.value, ast.Name) \
+                and receiver_type(node.value) is not None:
+            key = f"{receiver_type(node.value)}.{node.attr}"
+            if not book.states(key):
+                raise no_row(key)
+    body = list(fdef.body)
+    if body and isinstance(body[0], ast.Expr) \
+            and isinstance(getattr(body[0], "value", None), ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        body = body[1:]
+    result = None
+    for stmt in body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 \
+                and isinstance(stmt.targets[0], ast.Name):
+            target, value = stmt.targets[0].id, stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None \
+                and isinstance(stmt.target, ast.Name):
+            target, value = stmt.target.id, stmt.value
+        elif isinstance(stmt, ast.Return) and stmt.value is not None:
+            result = rewrite(stmt.value)
+            break
+        else:
+            raise Decline(f"line {getattr(stmt, 'lineno', '?')}: "
+                          f"{type(stmt).__name__} is outside the "
+                          f"definition rewrite (straight-line assignments "
+                          f"and one return)")
+        if isinstance(value, ast.Name) and receiver_type(value) is not None:
+            local_runtime[target] = receiver_type(value)
+        local[target] = rewrite(value)
+    if result is None:
+        raise Decline("the body has no return")
+    if not inlined.uses:
+        return None
+    inlined.expr = ast.fix_missing_locations(result)
+    return inlined
+
+
+def inline_claim(side: str, fn, facts, inlined: Inlined,
+                 premises: "list | None" = None) -> ast.expr:
+    """Intent:
+        One side of a claim with each call `f(...)` replaced by the
+        inlined body, the call's arguments substituted for the
+        parameters (positionally, then by keyword, then each unpassed
+        parameter at a literal default). Each premise a used row
+        carries is appended to `premises`, instantiated at that call,
+        as `(row, (lhs, relation, rhs))`.
+
+    Raises:
+        Decline: a call of `f` whose arguments do not bind.
+    """
+    import inspect
+
+    from ._signatures import callable_signature
+    try:
+        sig = callable_signature(fn)
+    except (TypeError, ValueError):
+        sig = None
+    tree = ast.parse(side, mode="eval").body
+
+    class _Inline(ast.NodeTransformer):
+        def visit_Call(self, node):
+            self.generic_visit(node)
+            if not (isinstance(node.func, ast.Name) and node.func.id == "f"):
+                return node
+            names = list(facts.params)
+            if len(node.args) > len(names):
+                raise Decline(f"{ast.unparse(node)!r} passes more arguments "
+                              f"than f takes")
+            bound = dict(zip(names, node.args))
+            for k in node.keywords:
+                if k.arg not in names or k.arg in bound:
+                    raise Decline(f"{ast.unparse(node)!r}: {k.arg!r} does "
+                                  f"not bind")
+                bound[k.arg] = k.value
+            for p in names:
+                if p in bound:
+                    continue
+                param = sig.parameters.get(p) if sig is not None else None
+                if param is None or param.default is inspect.Parameter.empty \
+                        or not isinstance(param.default, (int, float)) \
+                        or isinstance(param.default, bool):
+                    raise Decline(f"{ast.unparse(node)!r} leaves {p!r} "
+                                  f"unbound")
+                bound[p] = ast.Constant(value=param.default)
+            if premises is not None:
+                for row, (lhs, rel, rhs) in inlined.premises:
+                    premises.append((row, (_substitute(lhs, bound), rel,
+                                           _substitute(rhs, bound))))
+            return _substitute(inlined.expr, bound)
+
+    return ast.fix_missing_locations(_Inline().visit(tree))
+
+
+def called_keys(fn, facts) -> set:
+    """Intent:
+        Every library key `fn`'s body reaches: a method or attribute
+        of a parameter with a runtime type (`returns.std(...)` on a
+        `pandas.Series` is `pandas.Series.std`, `A.T` on an array is
+        `numpy.ndarray.T`), and a function called through an import
+        alias (`np.mean` is `numpy.mean`).
+    """
+    from .compendium import _resolve_called_keys
+    tree = getattr(facts, "tree", None)
+    out = set(_resolve_called_keys(fn, facts))
+    if tree is None:
+        return out
+    runtime = {p: found[0].adapter
+               for p, found in (getattr(facts, "runtime_types", None)
+                                or {}).items()
+               if found and found[0].kind in ("vec", "mat")}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.value,
+                                                          ast.Name) \
+                and node.value.id in runtime:
+            out.add(f"{runtime[node.value.id]}.{node.attr}")
+    return out
+
+
+def definition_state(fn, facts, root: "str | None" = None) -> dict:
+    """Intent:
+        The definition rows `fn`'s body could be read through, as a
+        record stamps them for freshness: `{key: [text, ...]}` for each
+        library key the body reaches that has definition rows, each
+        usable row as `<name>: <status> (<library> <version>)`, or
+        `withheld: <reason>` when none may be used. A row verified,
+        falsified, re-stated or moved out of its library's version since
+        the stamp changes it, and the record is re-adjudicated.
+    """
+    book = RowBook(root)
+    out: dict = {}
+    for key in sorted(called_keys(fn, facts)):
+        if not book.states(key):
+            continue
+        rows = book.rows(key)
+        out[key] = ([f"{r.name}: {r.status} ({r.library})" for r in rows]
+                    or [f"withheld: {book.withheld(key)}"])
+    return out
+
+
+# deciding the rewritten claim
+
+def _transform_kinds(funcs: dict) -> dict:
+    """The claim's bound functions that are law transforms the
+    sequence lowering reads, `{name: "scale" | "shift" | "reverse"}`."""
+    out = {}
+    for name, ref in (funcs or {}).items():
+        dotted = ref if isinstance(ref, str) else (
+            f"{getattr(ref, '__module__', '')}."
+            f"{getattr(ref, '__qualname__', '')}")
+        kind = _TRANSFORMS.get(dotted)
+        if kind is not None:
+            out[name] = kind
+    return out
+
+
+def _premise_text(lhs, rel, rhs) -> str:
+    return f"{ast.unparse(lhs)} {rel} {ast.unparse(rhs)}"
+
+
+def _stated(premise: tuple, assumption) -> bool:
+    """Whether a premise `(lhs, relation, rhs)` of source nodes is one
+    the claim states, compared as normalised source."""
+    want = _premise_text(*premise)
+    for lhs, rel, rhs in assumption or ():
+        try:
+            text = _premise_text(ast.parse(str(lhs), mode="eval").body, rel,
+                                 ast.parse(str(rhs), mode="eval").body)
+        except SyntaxError:
+            continue
+        if text == want:
+            return True
+    return False
+
+
+def _uses_meta(uses: list) -> list:
+    out: list = []
+    for row in uses:
+        entry = row.use()
+        if entry not in out:
+            out.append(entry)
+    return out
+
+
+def _rows_text(uses: list) -> str:
+    return ", ".join(dict.fromkeys(f"{r.key} {r.name}" for r in uses))
+
+
+def prove_through_definitions(cj, fn, facts, cj_domain: dict, assumption,
+                              structures: "dict | None" = None,
+                              extensive: bool = False):
+    """Intent:
+        Decide a claim about `fn` by rewriting its body through
+        definition rows (see the module docstring). Returns a
+        `ProofResult`: `proven`, `disproven` with an executed witness
+        (a point where `fn` has no value inside the claim's domain), or
+        `undecided`/`unliftable` with the reason; None when the route
+        does not apply (a scalar function, a body using no definition
+        row).
+    """
+    from .symbolic._proof_support import ProofResult
+    if cj.relation not in ("==", "~=", "<", "<=", ">", ">=") \
+            or cj.negated or cj.links or not cj.rhs:
+        return None
+    if getattr(facts, "tree", None) is None or facts.loops \
+            or facts.branch_count or facts.recursion:
+        return None
+    if not any("f(" in (s or "") for s in (cj.lhs, cj.rhs)):
+        return None
+    arrays = any(k in ("vec", "mat") for k in facts.param_kinds.values()) \
+        or any(getattr(b, "dims", ()) for b in (cj_domain or {}).values())
+    if not arrays:
+        return None
+    try:
+        book = RowBook()
+        inlined = inline_body(fn, facts, book)
+    except TimeoutError:
+        raise
+    except Decline as e:
+        return ProofResult("unliftable", sketch=str(e))
+    if inlined is None:
+        return None
+    row_premises: list = []
+    try:
+        lhs = inline_claim(cj.lhs, fn, facts, inlined, row_premises)
+        rhs = inline_claim(cj.rhs, fn, facts, inlined, row_premises)
+    except Decline as e:
+        return ProofResult("unliftable", sketch=str(e))
+    meta = {"mathema.derive_route": "definitions",
+            "mathema.definitions": _uses_meta(inlined.uses)}
+    from .symbolic import matrix_param_dims
+    from .types import shapes_from_signature
+    shapes = shapes_from_signature(fn)
+    if matrix_param_dims(cj_domain, shapes):
+        return _matrix_route(cj, facts, cj_domain, shapes, assumption,
+                             structures, fn, lhs, rhs, row_premises,
+                             inlined, meta)
+    return _sequence_route(cj, fn, facts, cj_domain, shapes, assumption,
+                           extensive, lhs, rhs, row_premises, inlined, meta)
+
+
+def _matrix_route(cj, facts, cj_domain, shapes, assumption, structures, fn,
+                  lhs, rhs, row_premises, inlined, meta):
+    """The rewritten claim decided by the matrix algebra."""
+    from .symbolic import try_prove_matrix
+    from .symbolic._proof_support import ProofResult
+    from .types import structures_from_signature
+    vector_rows = [r for r in inlined.uses
+                   if any(k == 1 for k in r.ranks.values())]
+    if vector_rows:
+        row = vector_rows[0]
+        return ProofResult(
+            "undecided", meta=dict(meta),
+            sketch=f"the definition row {row.key} {row.name} is stated over "
+                   f"vectors, and this claim is about matrices")
+    for row, premise in row_premises:
+        if not _stated(premise, assumption):
+            text = _premise_text(*premise)
+            return ProofResult(
+                "undecided",
+                sketch=f"the definition row {row.key} {row.name} holds "
+                       f"where {text}, which the claim does not state "
+                       f"(assuming {text})", meta=dict(meta))
+    lhs_text, rhs_text = ast.unparse(lhs), ast.unparse(rhs)
+    structs = dict(structures_from_signature(fn))
+    for p, props in (structures or {}).items():
+        structs[p] = tuple(sorted(set(structs.get(p, ())) | set(props)))
+    through = (f"through the definition rows {_rows_text(inlined.uses)} the "
+               f"claim reads {lhs_text} {cj.relation} {rhs_text}")
+    mproof = try_prove_matrix(lhs_text, rhs_text, cj.relation, facts,
+                              cj_domain, shapes, structs,
+                              premises=assumption)
+    if mproof is not None and mproof.status == "proven":
+        return ProofResult("proven", sketch=f"{through}: {mproof.sketch}",
+                           meta=dict(meta))
+    why = (mproof.sketch if mproof is not None and mproof.sketch
+           else "the matrix algebra did not close it")
+    return ProofResult("undecided", sketch=f"{through}, and {why}",
+                       meta=dict(meta))
+
+
+def _names_in(trees) -> set:
+    """Every bare name the trees read as a value (not in call
+    position)."""
+    out: set = set()
+    for tree in trees:
+        calls = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        out |= {n.id for n in ast.walk(tree)
+                if isinstance(n, ast.Name) and id(n) not in calls}
+    return out
+
+
+def _called_names(trees) -> set:
+    return {n.func.id for tree in trees for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+
+
+def _length_premise(a, b, rel: str, lengths: set):
+    """`(L, least)` when `a rel b` states that the length `L` is at
+    least `least` (`dim(x) >= 2`, `len(x) > 1`, `dim(x) == 3`), else
+    None."""
+    import math
+    if rel in ("<", "<="):
+        a, b = b, a
+        rel = ">" if rel == "<" else ">="
+    if rel not in (">", ">=", "=="):
+        return None
+    if a in lengths and getattr(b, "is_number", False) and b.is_real:
+        least = float(b)
+        least = math.floor(least) + 1 if rel == ">" else math.ceil(least)
+        return a, max(int(least), 1)
+    return None
+
+
+def _implied_nonzero(expr, provided: list, min_length: dict,
+                     bases: "dict | None" = None) -> bool:
+    """Intent:
+        Whether `expr != 0` follows from the lengths being at least
+        `min_length` and each quantity in `provided` being nonzero:
+        `expr` is nonzero by its own assumptions (a positive symbol, a
+        length at least one more than the offset it is taken from), or
+        its ratio to a provided quantity is.
+    """
+    import sympy
+
+    from .symbolic._seqir import normalised
+    shift = {L: sympy.Symbol(f"_M_{L}", integer=True, positive=True) + (k - 1)
+             for L, k in min_length.items() if k > 1}
+
+    def at_lengths(e):
+        return e.xreplace(shift) if shift else e
+    lengths = {ib: at_lengths(L) for ib, L in (bases or {}).items()}
+
+    def nonzero(e) -> bool:
+        if e.is_nonzero:
+            return True
+        return all(f.is_nonzero or (isinstance(f, sympy.Pow)
+                                    and f.base.is_nonzero)
+                   for f in sympy.Mul.make_args(sympy.factor_terms(e)))
+    target = at_lengths(expr)
+    if nonzero(normalised(target, lengths)):
+        return True
+    for p in provided:
+        p = at_lengths(p)
+        for ratio in (target / p, target ** 2 / p ** 2):
+            if nonzero(normalised(ratio, lengths)):
+                return True
+    return False
+
+
+def lengths_of(seqs: dict) -> list:
+    """The distinct length symbols of the lowered sequences, in the
+    order first met."""
+    return list(dict.fromkeys(length for _ib, length in seqs.values()))
+
+
+def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
+                    lhs, rhs, row_premises, inlined, meta):
+    """The rewritten claim decided over sequences of symbolic length:
+    lowered by `symbolic._seqir`, its definedness obligations checked
+    against the claim's premises, and the relation decided on the
+    normalised sums."""
+    import sympy
+
+    from . import linalg
+    from ._timeout import (EXTENSIVE_TIMEOUT_SECONDS, FAST_TIMEOUT_SECONDS,
+                           _with_timeout)
+    from .domain import InvalidDomain
+    from .symbolic._base import NotSymbolic
+    from .symbolic._proof_support import (ProofResult, _domain_assumptions,
+                                          _prove_relation)
+    from .symbolic._seqir import Lowering, Obligations, Vec, normalised
+    claim_premises = []
+    for a_lhs, rel, a_rhs in assumption or ():
+        try:
+            claim_premises.append((ast.parse(str(a_lhs), mode="eval").body,
+                                   rel,
+                                   ast.parse(str(a_rhs), mode="eval").body))
+        except SyntaxError:
+            return ProofResult("unliftable", sketch=f"the premise {a_lhs} "
+                               f"{rel} {a_rhs} does not parse", meta=meta)
+    trees = [lhs, rhs] + [t for p in claim_premises for t in (p[0], p[2])] \
+        + [t for _row, p in row_premises for t in (p[0], p[2])]
+    transforms = _transform_kinds(cj.funcs)
+    other = sorted((set(cj.funcs or ()) - set(transforms))
+                   & _called_names(trees))
+    if other:
+        return ProofResult(
+            "unliftable", meta=meta,
+            sketch=f"the bound function(s) {', '.join(other)} are not law "
+                   f"transforms the sequence lowering reads (scale_seq, "
+                   f"shift_seq, reverse_seq)")
+    matrix_rows = [r for r in inlined.uses
+                   if any(k == 2 for k in r.ranks.values())]
+    if matrix_rows:
+        row = matrix_rows[0]
+        return ProofResult(
+            "unliftable", meta=meta,
+            sketch=f"the definition row {row.key} {row.name} is stated over "
+                   f"matrices, outside the sequence lowering")
+    ranks = linalg.array_ranks(cj_domain, shapes, facts.param_kinds)
+    names = _names_in(trees)
+    seqs: dict = {}
+    lengths: dict = {}
+    for n in sorted(names):
+        r = ranks.get(n)
+        if r in (2, "table"):
+            return ProofResult("unliftable", meta=meta,
+                               sketch=f"{n} is a matrix or a table, outside "
+                                      f"the sequence lowering")
+        if r == 1:
+            dims = getattr(cj_domain.get(n), "dims", ()) or ()
+            dim = str(dims[0]) if dims else n
+            length = lengths.setdefault(dim, sympy.Symbol(
+                f"L_{dim}", integer=True, positive=True))
+            seqs[n] = (sympy.IndexedBase(n, real=True), length)
+    scalars = {n: sympy.Symbol(n, real=True)
+               for n in names - set(seqs) - set(transforms) - {"pi"}}
+    try:
+        _subs, context, assumed, pins = _domain_assumptions(scalars,
+                                                            cj_domain)
+    except InvalidDomain as e:
+        return ProofResult("unliftable", meta=meta,
+                           sketch=f"declared domain is not projectable: {e}")
+    length_symbols = set(lengths.values())
+    by_length = {}
+    for n, (_ib, length) in seqs.items():
+        by_length.setdefault(length, n)
+
+    def lower(node, into: Obligations):
+        low = Lowering(seqs, dict(assumed), transforms)
+        value = low.lower(node)
+        into.merge(low.obligations)
+        if pins:
+            value = (Vec(value.elem.subs(pins), value.length)
+                     if isinstance(value, Vec) else value.subs(pins))
+        return value
+
+    def decide():
+        required, provided = Obligations(), Obligations()
+        lv = lower(lhs, required)
+        rv = lower(rhs, required)
+        provided_nonzero: list = []
+        facts_q = [] if context is None else [context]
+        for p_lhs, rel, p_rhs in claim_premises:
+            own = Obligations()
+            try:
+                a, b = lower(p_lhs, own), lower(p_rhs, own)
+            except NotSymbolic:
+                continue
+            provided.merge(own)
+            provided_nonzero.extend(e for e, _t in own.nonzero)
+            if isinstance(a, Vec) or isinstance(b, Vec):
+                continue
+            as_length = _length_premise(a, b, rel, length_symbols)
+            if as_length is not None:
+                provided.need_length(*as_length)
+                continue
+            gap = a - b
+            if rel in (">", "<", "!="):
+                provided_nonzero.append(gap)
+            for side, other, above in ((a, b, rel in (">", ">=")),
+                                       (b, a, rel in ("<", "<="))):
+                # a quantity above a nonnegative bound, strictly above
+                # zero, is nonzero (and below a nonpositive one)
+                if above and other.is_number and (
+                        other.is_positive or (other.is_zero
+                                              and rel in (">", "<"))):
+                    provided_nonzero.append(side)
+            for side, other, below in ((a, b, rel in ("<", "<=")),
+                                       (b, a, rel in (">", ">="))):
+                if below and other.is_number and (
+                        other.is_negative or (other.is_zero
+                                              and rel in (">", "<"))):
+                    provided_nonzero.append(side)
+            if rel in ("<", "<="):
+                gap = -gap
+            facts_q.append(sympy.Q.positive(gap) if rel in (">", "<")
+                           else sympy.Q.nonnegative(gap) if rel in (">=",
+                                                                    "<=")
+                           else sympy.Q.nonzero(gap) if rel == "!="
+                           else sympy.Q.zero(gap))
+        unstated: list = []
+        for row, (p_lhs, rel, p_rhs) in row_premises:
+            own = Obligations()
+            a, b = lower(p_lhs, own), lower(p_rhs, own)
+            as_length = None
+            if not (isinstance(a, Vec) or isinstance(b, Vec)):
+                as_length = _length_premise(a, b, rel, length_symbols)
+            if as_length is not None:
+                required.need_length(*as_length)
+            elif not _stated((p_lhs, rel, p_rhs), assumption):
+                unstated.append((row, _premise_text(p_lhs, rel, p_rhs)))
+        unmet: list = []
+        for length, least in sorted(required.min_length.items(), key=str):
+            have = provided.min_length.get(length, 1)
+            if have < least:
+                unmet.append(("length", length, least, have))
+        for expr, text in required.nonzero:
+            if not _implied_nonzero(expr, provided_nonzero,
+                                    {L: max(provided.min_length.get(L, 1), k)
+                                     for L, k in required.min_length.items()},
+                                    {ib: L for ib, L in seqs.values()}):
+                unmet.append(("nonzero", expr, text,
+                              max(provided.min_length.values() or [1])))
+        if unstated or unmet:
+            return {"unmet": unmet, "unstated": unstated}
+        shortest.update(required.min_length)
+        rel = cj.relation
+        if isinstance(lv, Vec) or isinstance(rv, Vec):
+            if not (isinstance(lv, Vec) and isinstance(rv, Vec)) \
+                    or rel not in ("==", "~=") or lv.length != rv.length:
+                return {"undecided": "a vector compared with a number, or "
+                                     "ordered, has no reading here"}
+            diff = normalised(lv.elem - rv.elem, {ib: L for ib, L
+                                                  in seqs.values()})
+            return {"proven": diff == 0, "diff": diff}
+        if rel in ("==", "~="):
+            diff = normalised(lv - rv, {ib: L for ib, L in seqs.values()})
+            return {"proven": diff == 0, "diff": diff}
+        bases = {ib: L for ib, L in seqs.values()}
+        q = sympy.And(*facts_q) if len(facts_q) > 1 else (
+            facts_q[0] if facts_q else None)
+        scalar_domain = {n: cj_domain[n] for n in assumed if n in cj_domain}
+        result = _prove_relation(normalised(lv, bases), normalised(rv, bases),
+                                 rel, scalar_domain, q, assumed,
+                                 extensive=extensive)
+        return {"proven": result.status == "proven", "result": result}
+
+    shortest: dict = {}
+    cap = EXTENSIVE_TIMEOUT_SECONDS if extensive else FAST_TIMEOUT_SECONDS
+    through = f"through the definition rows {_rows_text(inlined.uses)}"
+    try:
+        outcome = _with_timeout(decide, cap)
+    except TimeoutError:
+        return ProofResult(
+            "undecided", sketch=f"{through}, the sequence lowering "
+                                f"exceeded the wall-clock cap",
+            meta={**meta, "mathema.timeout":
+                  "extensive" if extensive else "fast"})
+    except NotSymbolic as e:
+        return ProofResult("unliftable", sketch=f"{through}: {e}", meta=meta)
+    except Exception as e:
+        return ProofResult("undecided", meta=meta,
+                           sketch=f"{through}: {type(e).__name__} during "
+                                  f"the lowering: {e}")
+    if "unstated" in outcome:
+        if outcome["unstated"]:
+            row, text = outcome["unstated"][0]
+            return ProofResult(
+                "undecided", meta=meta,
+                sketch=f"the definition row {row.key} {row.name} holds where "
+                       f"{text}, which the claim does not state (assuming "
+                       f"{text})")
+        return _no_value(cj, fn, facts, cj_domain, assumption, outcome["unmet"],
+                         by_length, through, meta)
+    if "undecided" in outcome:
+        return ProofResult("undecided", sketch=f"{through}: "
+                           f"{outcome['undecided']}", meta=meta)
+    vectors = ", ".join(sorted(seqs))
+    if outcome.get("proven"):
+        spans = ", ".join(
+            f"{by_length.get(L, L)} of every length"
+            + (f" from {shortest[L]}" if shortest.get(L, 1) > 1 else "")
+            for L in sorted(set(lengths_of(seqs)), key=str))
+        return ProofResult(
+            "proven", meta=meta,
+            sketch=f"{through}, lowered to sums over {vectors} at a symbolic "
+                   f"length: the relation holds for every length",
+            quantifier=(f"∀ {vectors} over ℝ with nothing missing, "
+                        f"{spans}" if seqs else None))
+    detail = outcome.get("result")
+    why = (detail.sketch if detail is not None and detail.sketch else
+           "the difference of the two sides does not simplify to 0")
+    return ProofResult("undecided", sketch=f"{through}, lowered to sums over "
+                                           f"{vectors}: {why}", meta=meta)
+
+
+def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
+              by_length: dict, through: str, meta: dict):
+    """Intent:
+        The verdict where a rewritten claim has no value somewhere in
+        its domain: a lowered denominator the premises do not keep
+        nonzero, or a length the premises do not keep long enough. The
+        function is executed at simple points of that region (constant
+        vectors of zeros, then ones, at each short length); the first
+        where the claim fails is an executed witness and the claim is
+        `disproven`, otherwise it is `undecided` naming the region and
+        the premise that excludes it.
+    """
+    import random
+
+    from .conjecture import _resolve_func_ref
+    from .gates import _fmt_point, _point_evaluator
+    from .symbolic._proof_support import ProofResult
+    wheres: list = []
+    remedies: list = []
+    lengths_to_try: set = set()
+    for item in unmet:
+        if item[0] == "length":
+            _k, length, least, have = item
+            name = by_length.get(length, str(length))
+            wheres.append(f"dim({name}) < {least}")
+            remedies.append(f"dim({name}) >= {least}")
+            lengths_to_try.update(range(have, least))
+        else:
+            _k, _expr, text, have = item
+            wheres.append(f"{text} == 0")
+            remedies.append(f"{text} != 0")
+            lengths_to_try.update({have, have + 1})
+    region = " or ".join(dict.fromkeys(wheres))
+    remedy = " and ".join(dict.fromkeys(remedies))
+    bound_funcs = {}
+    for name, ref in (cj.funcs or {}).items():
+        bound_funcs[name] = ref if callable(ref) else _resolve_func_ref(ref)
+    deps = None
+    if all(v is not None for v in bound_funcs.values()):
+        try:
+            deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs,
+                                    assumption or [], sequences=True)
+        except TimeoutError:
+            raise
+        except Exception:
+            deps = None
+    if deps is not None:
+        rng = random.Random(0)
+        vectors = [n for n in deps["names"] if n in by_length.values()
+                   or facts.param_kinds.get(n) in ("vec", "mat", "sequence")]
+        scalars = [n for n in deps["names"] if n not in vectors]
+        for n in sorted(lengths_to_try):
+            for value in (0.0, 1.0):
+                for _attempt in range(4):
+                    try:
+                        point = {v: [value] * n for v in vectors}
+                        point.update({s: deps["sample"](s, rng)
+                                      for s in scalars})
+                        if not deps["admits"](point):
+                            continue
+                        held = deps["evaluate"](point)
+                    except TimeoutError:
+                        raise
+                    except Exception:
+                        continue
+                    if held is False:
+                        detail = deps["probe_finite"](point)
+                        shown = _fmt_point(point, deps["names"])
+                        return ProofResult(
+                            "disproven", meta={**meta,
+                                               "mathema.witness_executed":
+                                               True},
+                            counterexample=(f"{shown}: {detail}" if detail
+                                            else shown),
+                            sketch=f"{through}, f has no value where "
+                                   f"{region}, inside the claim's domain, "
+                                   f"and executed there the claim fails")
+                    break
+    return ProofResult(
+        "undecided", meta=meta,
+        sketch=f"{through}, f has no value where {region}, which the claim's "
+               f"domain does not exclude (state it: assuming {remedy})")

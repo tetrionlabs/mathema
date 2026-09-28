@@ -212,8 +212,116 @@ f(df)["a"] == df["a"] + 1   # holds
 f(df) == df   # falsified
 ```
 
-The derive route does not yet read a column or a Series method; such a
-claim is adjudicated by sampling.
+The derive route reads a Series or array method through its
+definition row (next section); a column of a DataFrame is still
+adjudicated by sampling.
+
+## Proofs on pandas and numpy code
+
+A body such as `returns.mean() / returns.std(ddof=1) * np.sqrt(252)`
+is proven on the derive route, for every length of `returns`, by
+reading each library call through its **definition row**: a library
+claim that states what the function computes in the grammar's own
+words (`pandas.Series.std` is `std(a, ddof=1)`, see
+[claims transfer](claims-transfer.md#definition-rows)). The call
+`returns.std(ddof=1)` resolves through the parameter's runtime type to
+the key `pandas.Series.std`, `np.mean(returns)` through the module's
+imports to `numpy.mean`, and `A.T` on an array to `numpy.ndarray.T`;
+the call's arguments are bound against the row, and the body then
+reads `mean(returns) / std(returns, ddof=1) * sqrt(252)`. A claim about
+it is decided as mathematics: over a vector, as sums over a sequence
+of symbolic length (see [the derive route](derive-route.md#vectors-through-definition-rows));
+over a matrix, in the matrix algebra.
+
+<!-- example: rt-proofs run requires=pandas -->
+```python
+import numpy as np
+import pandas as pd
+
+
+def sharpe(returns: pd.Series):
+    return returns.mean() / returns.std(ddof=1) * np.sqrt(252)
+
+
+def volatility(returns: pd.Series):
+    return returns.std() * np.sqrt(252)
+
+
+def transpose(A: np.ndarray):
+    return A.T
+```
+
+A Sharpe ratio is unchanged by leverage (scaling every return by the
+same `c > 0`), and is not unchanged by adding a constant to every
+return:
+
+<!-- example: rt-proofs verdicts fn=sharpe requires=pandas -->
+```
+for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], assuming std(returns, ddof=1) > 1e-6, f(s(returns, c)) ~= f(returns)   # proven
+for returns in [-0.1, 0.1]^n, let s = mathema.f.shift_seq, let c be [0.1, 10], assuming std(returns, ddof=1) > 1e-6, f(s(returns, c)) ~= f(returns)   # falsified
+for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], f(s(returns, c)) ~= f(returns)   # falsified
+```
+
+The third claim drops the premise, and is false: where the returns do
+not vary (every return equal, or a single return) the standard
+deviation is 0 or undefined, `sharpe` returns NaN, and the claim has no
+value there. The derive route finds the region from the rewritten
+body, executes `sharpe` at a point of it (`returns=[0.0]`), and
+falsifies the claim with that witness. The premise names the returns
+the ratio is about. It is stated as `> 1e-6` rather than `> 0` because
+the premise is also checked in float64, where the computed standard
+deviation of equal returns can come out a rounding error above 0 while
+pandas returns exactly 0.
+
+Volatility is unchanged by a shift and scales with leverage; being
+unchanged by leverage is the false sibling:
+
+<!-- example: rt-proofs verdicts fn=volatility requires=pandas -->
+```
+for returns in [-0.1, 0.1]^n, let s = mathema.f.shift_seq, let c be [0.1, 10], assuming dim(returns) >= 2, f(s(returns, c)) ~= f(returns)   # proven
+for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], assuming dim(returns) >= 2, f(s(returns, c)) ~= c * f(returns)   # proven
+for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], assuming dim(returns) >= 2, f(s(returns, c)) ~= f(returns)   # falsified
+```
+
+<!-- example: rt-proofs verdicts fn=transpose requires=pandas -->
+```
+for A in R^(n,n), f(f(A)) == A   # proven
+for A in R^(n,n), f(A) == A   # falsified
+```
+
+The record names each row a proof read through, with where it came
+from and its standing here:
+
+<!-- example: rt-proofs run requires=pandas -->
+```python
+import mathema
+
+record = mathema.check(sharpe, claims=[
+    "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "
+    "let c be [0.1, 10], assuming std(returns, ddof=1) > 1e-6, "
+    "f(s(returns, c)) ~= f(returns)"])
+print(record)
+proof = record.probes[0]
+print(proof.sketch)
+for row in proof.meta["mathema.definitions"]:
+    print(row["key"], row["row"], row["status"], row["source"])
+```
+
+<!-- example: rt-proofs output -->
+```text
+mathema.Record(sharpe) · source, no side effects · form ef276c12c167
+  proven  f_s_returns_c_approx_f_returns: assuming std(returns, ddof=1) > 1e-6, let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns)
+           ∀ returns over ℝ with nothing missing, returns of every length from 2
+  holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 1e-6, let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns) (n=39)
+through the definition rows pandas.Series.mean definition, pandas.Series.std definition, lowered to sums over returns at a symbolic length: the relation holds for every length
+pandas.Series.mean definition bundled mathema/compendium/pandas/series.claims.yaml
+pandas.Series.std definition bundled mathema/compendium/pandas/series.claims.yaml
+```
+
+A proof through definition rows is `proven` like any other, and its
+`[float, pandas.Series]` companion runs the real code in float64. A call
+no row covers is named in the derive note (`pandas.Series.ewm has no
+definition row`), and such a claim is adjudicated by sampling.
 
 ## Adding a runtime type
 

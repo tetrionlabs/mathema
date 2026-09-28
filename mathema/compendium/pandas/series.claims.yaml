@@ -1,0 +1,56 @@
+# Definition rows for pandas.Series methods, stated over Series with
+# nothing missing; the receiver of `returns.std()` is `a`. pandas
+# skips a missing element (nan, None, pd.NA) in each of these
+# reductions, and cumsum and cumprod keep it missing at its own
+# position while the running total skips it. The derive route reads a
+# caller's `returns.std(ddof=1)` through these rows, and mathema's own
+# test suite verifies each against the installed pandas.
+compendium: pandas
+versions: ">=2,<4"
+
+pandas.Series.mean:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= mean(a)"
+
+pandas.Series.std:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      note: "The sample standard deviation: ddof defaults to 1, unlike numpy; one element gives nan."
+    - name: definition@ddof=0
+      statement: "let ddof be 0, for a in R^n \\ {∅}, f(a) ~= std(a, ddof=0)"
+
+pandas.Series.var:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
+      note: "The sample variance: ddof defaults to 1, unlike numpy; one element gives nan."
+    - name: definition@ddof=0
+      statement: "let ddof be 0, for a in R^n \\ {∅}, f(a) ~= var(a, ddof=0)"
+
+pandas.Series.sum:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= sum(a)"
+
+pandas.Series.prod:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= prod(a)"
+
+pandas.Series.cumsum:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= cumsum(a)"
+
+pandas.Series.cumprod:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= cumprod(a)"
+
+pandas.Series.count:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) == count(a)"
+      note: "The number of elements that are not missing, so every position of a Series with nothing missing."

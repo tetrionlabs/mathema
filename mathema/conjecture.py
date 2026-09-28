@@ -523,7 +523,10 @@ def _resolve_func_ref(ref: str, *, root: str = "."):
     key (`ts:src/ema.ts#ema`) resolves through its registered target
     resolver instead, so a store sweep reaches foreign implementations
     the same way it reaches Python ones. `None` if nothing importable
-    or the name isn't found there."""
+    or the name isn't found there. A method or attribute of a runtime
+    type's class (`pandas.Series.std`, `numpy.ndarray.T`) resolves to
+    its receiver form, a function of the receiver `a`
+    (`runtime_types._receivers.receiver_form`)."""
     from .targets import _prefix_walk
 
     if ":" in ref:
@@ -539,6 +542,10 @@ def _resolve_func_ref(ref: str, *, root: str = "."):
         return None
     if "." not in ref:
         return None
+    from .runtime_types._receivers import receiver_form
+    receiver = receiver_form(ref)
+    if receiver is not None:
+        return receiver
     walked = _prefix_walk(ref, root)
     if walked is None:
         return None
@@ -1634,12 +1641,15 @@ def _unreadable_side(side: str) -> str | None:
         if isinstance(node, ast.Call) and node.keywords:
             if any(k.arg is None for k in node.keywords):
                 return "argument unpacking (`**`) is not claim syntax"
-            if not (isinstance(node.func, ast.Name)
-                    and node.func.id in linalg.REDUCTION_CALLS
-                    and [k.arg for k in node.keywords] == ["axis"]):
+            allowed = linalg.CALL_KEYWORDS.get(
+                node.func.id if isinstance(node.func, ast.Name) else "", ())
+            words = [k.arg for k in node.keywords]
+            if not words or any(w not in allowed for w in words) \
+                    or len(set(words)) != len(words):
                 return ("keyword arguments are not claim syntax: pass each "
-                        "argument by position (the one keyword is `axis=` "
-                        "on sum, mean, prod, min and max)")
+                        "argument by position (the keywords are `axis=` "
+                        "on sum, mean, prod, min, max, std, var, count, "
+                        "cumsum and cumprod, and `ddof=` on std and var)")
         if isinstance(node, ast.Constant) and (
                 isinstance(node.value, bytes) or node.value is Ellipsis):
             return f"the literal {ast.unparse(node)} is not claim syntax"
@@ -2744,13 +2754,19 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
             if missing else None)
     text = " ".join(str(t) for t in (cj.lhs, cj.rhs, cj.assuming) if t)
     named = set(re.findall(r"\b[A-Za-z_]\w*\b", text))
+    # a method whose library states no signature takes a pin of any
+    # name, passed on as a keyword
+    any_keyword = bool(getattr(fn, "__mathema_unstated_signature__", False))
+
+    def takes(p) -> bool:
+        return p in sig or any_keyword
     for name in sorted(cj.free_vars or ()):
         point = _single_point((cj.domain or {}).get(name))
-        if point is None or (name not in sig and name in named):
+        if point is None or (not takes(name) and name in named):
             continue
         pins[name] = (int(point) if isinstance(point, float)
                       and point.is_integer() else point)
-    missing = sorted(p for p in pins if p not in sig)
+    missing = sorted(p for p in pins if not takes(p))
     problem = (f"{', '.join(missing)} {'is not a parameter' if len(missing) == 1 else 'are not parameters'} "
                f"of {key}, so the pin names nothing to pass"
                if missing else None)
@@ -2759,7 +2775,7 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
             and param.kind not in (param.VAR_POSITIONAL, param.VAR_KEYWORD)
             and p not in (cj.domain or {}) and p not in pins
             and p not in named}
-    return kept, {p: v for p, v in pins.items() if p in sig}, problem
+    return kept, {p: v for p, v in pins.items() if takes(p)}, problem
 
 
 def defaults_meta(kept: dict, pins: dict) -> dict:
@@ -4945,7 +4961,7 @@ def _provenance_meta(proof) -> dict:
     for key in ("mathema.derive_route", "mathema.engine_disagreement",
                 "mathema.matrix_lemmas",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
-                "mathema.corroboration_reason"):
+                "mathema.corroboration_reason", "mathema.definitions"):
         if key in proof.meta:
             meta[key] = proof.meta[key]
     return meta
@@ -5257,6 +5273,18 @@ def _chained_definedness_proof(family_derive, fn, facts, cj, cj_domain,
                "conjunct for conjunct")
 
 
+def _bound_callables(cj) -> dict:
+    """A claim's bound functions as callables, each reference resolved
+    (None for one that does not resolve)."""
+    out = {}
+    for name, v in (cj.funcs or {}).items():
+        try:
+            out[name] = v if callable(v) else _resolve_func_ref(v)
+        except AttributeError:
+            out[name] = None
+    return out
+
+
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        extensive: bool) -> "Probe | None":
     """Intent:
@@ -5391,6 +5419,36 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             meta={"mathema.derive_status": "undecided",
                   **_provenance_meta(family_proof)})
         return None
+    # a body that calls library functions reads, through their
+    # definition rows, in the grammar's own words; a claim about it is
+    # then decided as mathematics (sums over a symbolic length, or the
+    # matrix algebra). A route that does not apply returns None; one
+    # that applies but does not decide leaves its reason as the derive
+    # note should nothing below decide the claim either.
+    definitions_hint = None
+    if not ctx.assume_defined:
+        from .definitions import prove_through_definitions
+        dproof = prove_through_definitions(
+            cj, fn, facts, cj_domain, assumption,
+            ctx.premise_structures, extensive)
+        if dproof is not None and dproof.status == "proven":
+            proven = Probe(cj.name, statement, "proven",
+                           sketch=dproof.sketch, note=note,
+                           condition=dproof.quantifier, route="derive",
+                           meta=_provenance_meta(dproof))
+            _spawn_float_companion(ctx, proven, fn, facts,
+                                   _bound_callables(cj), assumption or [])
+            return proven
+        if dproof is not None and dproof.status == "disproven":
+            falsified = Probe(cj.name, statement, "falsified",
+                              route="derive", sketch=dproof.sketch,
+                              counterexample=dproof.counterexample,
+                              note=note, meta=_provenance_meta(dproof))
+            return _corroboration_gate(falsified, dproof, cj, fn, facts,
+                                       cj_domain, _bound_callables(cj),
+                                       assum=assumption or [])
+        if dproof is not None and dproof.sketch:
+            definitions_hint = dproof.sketch
     # a claim over vectors or matrices (an `R^n`/`R^(m,n)` domain, a
     # Vec/Mat or structure marker, a vector, matrix or table runtime
     # type) that uses one as a value is an identity of linear algebra,
@@ -5433,6 +5491,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                     f"{'is a vector or matrix' if len(array_uses) == 1 else 'are vectors or matrices'}"
                     f", which the scalar derive route does not read, and "
                     f"the matrix algebra did not close the claim")
+        if definitions_hint is not None:
+            why = definitions_hint
         unknown = Probe(
             cj.name, statement, "unknown", route="derive",
             sketch=(mproof.sketch if mproof is not None else None),
@@ -5558,6 +5618,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                           extensive=extensive, funcs=bound_funcs or None,
                           assumption=assumption,
                           assume_defined=ctx.assume_defined)
+        if definitions_hint is not None \
+                and proof.status in ("undecided", "unliftable"):
+            from .symbolic._proof_support import ProofResult
+            proof = ProofResult(proof.status, sketch=definitions_hint,
+                                meta=dict(proof.meta))
     def _brute_force_fallback():
         """A claim quantified over a FINITE declared domain needs no
         symbolic argument: visiting every point the domain admits

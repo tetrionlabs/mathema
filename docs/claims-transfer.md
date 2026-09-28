@@ -58,9 +58,11 @@ numpy's `clip` takes `a`, `a_min` and `a_max`), and every row is a
 claim like any other, with a `note:` on the row where the library's
 behaviour needs saying in prose. A library function's intent is its
 own, read from its docstring like any function's, so a compendium file
-states none. mathema bundles such files for `math` and
-`numpy` (numpy's 28 covered functions split into scalars, reductions
-and bounds), and a project states its own anywhere its claims files
+states none. mathema bundles such files for `math`, `numpy`
+(numpy's 41 covered functions split into scalars, reductions, bounds
+and definitions), `pandas.Series` and `polars.Series` (their
+[definition rows](#definition-rows)), and a project states its own
+anywhere its claims files
 already live, `claims/numpy.claims.yaml` for instance, where a key
 shadows the bundled entry for that function. A file applies only when
 the library is importable at a version inside its range; otherwise it
@@ -221,6 +223,67 @@ verdict that contradicts it (`falsified`) or is at least as strong (a
 `holds`). A weaker local verdict that agrees leaves the trust standing
 at its level, and the row says what was seen: `trusted as: proven,
 strongest evidence seen: holds`.
+
+### Definition rows
+
+A **definition row** is a row named `definition` that states what a
+library function computes, in the grammar's own words, over inputs
+with nothing missing:
+
+```yaml
+compendium: pandas
+versions: ">=2,<4"
+
+pandas.Series.std:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+    - name: definition@ddof=0
+      statement: "let ddof be 0, for a in R^n \\ {∅}, f(a) ~= std(a, ddof=0)"
+```
+
+A method's key names its class (`pandas.Series.std`,
+`numpy.ndarray.T`), and its receiver is the row's first parameter `a`,
+sampled as that class; the method's other parameters keep their names
+and defaults. A row for a call that pins a parameter away from its
+default is named `definition@<parameter>=<value>` and pins it with
+`let`, so `np.std(x, ddof=1)` reads through `numpy.std`'s
+`definition@ddof=1`. Each row is an ordinary claim: `mathema verify`
+executes it against the installed library, so a wrong row
+(`std(a, ddof=0)` for pandas) is falsified like any other claim.
+
+How the library treats a missing value is a separate matter from what
+it computes, and the rows leave it out. As installed today: numpy
+propagates a missing element (nan) to the result; pandas skips nan,
+None and `pd.NA` in its reductions and keeps a missing position
+missing in `cumsum` and `cumprod`; polars skips a null but carries a
+NaN through as a float (a Series holding NaN has mean NaN, and `count`
+counts it).
+
+The derive route reads a function's library calls through these rows
+(see [runtime types](runtime-types.md#proofs-on-pandas-and-numpy-code)),
+so a row is part of a proof, and which rows may be used depends on
+where they come from:
+
+- a row **bundled with mathema** is used at once: mathema's own test
+  suite verifies every bundled row against the libraries it installs;
+- a row from **your project's claims files**, or from a third party,
+  is used only once `mathema verify` has recorded it `holds` or
+  `proven` in this project, or it was accepted with `mathema accept
+  <key> definition --as trusted`; until then it guides sampling only,
+  and a claim resting on it stays `holds`, its note naming the row and
+  the two ways to settle it;
+- a row `mathema verify` recorded `falsified` is never used, bundled
+  or not.
+
+A proof through definition rows stays `proven`. Its record lists each
+row it read through in `meta["mathema.definitions"]`: the key, the
+row, its statement, the file it came from, its status here (`bundled`,
+`holds`, `proven` or `trusted`) and the library version. The function's
+record also stamps the rows its body could read through
+(`mathema.definition_rows`), so a row verified, falsified, re-stated or
+moved out of its library's `versions` since makes the record stale, and
+`mathema verify` adjudicates it again.
 
 ### Guarding a numpy hazard, and superseding the finding
 

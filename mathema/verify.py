@@ -813,6 +813,8 @@ def _library_population(root: str, verified: dict, declared: dict,
                 facts = analyze(fn)
                 wanted |= library_keys_called(fn, facts,
                                               library_claims=library_claims)
+                from .definitions import called_keys
+                wanted |= called_keys(fn, facts) & set(library_claims)
                 from .authoring import resolve_declared
                 rows += list(resolve_declared(fn, file_entry={})
                              .get("claims") or [])
@@ -1202,11 +1204,21 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         recorded_premises = (verified_entry.get("meta") or {}).get(
             "mathema.premise_state")
         defaults_moved = _defaults_moved(fn, merged_entry, verified_entry)
+        from .definitions import definition_state
+        try:
+            definitions_now = definition_state(fn, facts_now, root)
+        except TimeoutError:
+            raise
+        except Exception:
+            definitions_now = {}
+        definitions_moved = definitions_now != ((verified_entry.get("meta")
+                                                 or {}).get(
+            "mathema.definition_rows") or {})
         pinf_moved = _pseudo_infinity_moved(fn, facts_now, merged_entry,
                                             verified_entry)
         is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
                     and recorded_fp == current_fp and not defaults_moved
-                    and not pinf_moved
+                    and not pinf_moved and not definitions_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
         deps_now = function_dependencies(fn, facts_now) if is_fresh else None
@@ -1303,6 +1315,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "pseudo-infinity changed" if pinf_moved
                and facts_now.form == recorded_form
                and recorded_fp == current_fp
+               else "definition rows changed" if definitions_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh
                else "targeted re-verify" if only and is_fresh
                else "no baseline record" if not recorded_form
@@ -1310,6 +1325,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "form changed")
         rec.meta = {**(getattr(rec, "meta", None) or {}),
                     "mathema.premise_state": premise_now}
+        if definitions_now:
+            rec.meta["mathema.definition_rows"] = definitions_now
         written = write_record(rec, key=key, root=root,
                                claims=current_claims,
                                declared_intent=merged_entry.get("intent"),
