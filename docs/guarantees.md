@@ -100,7 +100,12 @@ The computation-safety families each answer one of three questions
 about a function: does it run on my domain, is the answer right in
 float64, and is it repeatable. [The claim
 grammar](grammar.md#which-question-each-one-answers) lists every family
-under its question, with what it tells you and the usual fix.
+under its question, with what it tells you and the usual fix. A safety
+predicate reads the claim's `assuming` clause like every other claim
+(its trials run only at points inside the premise, an equality premise
+drawn on its surface), and a raise from the function at such a point is
+no value, so it falsifies the predicate with that point and the
+exception as the witness.
 
 ## Corroboration: why every falsification has a witness
 

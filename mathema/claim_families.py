@@ -87,13 +87,43 @@ def _call_with_target(fn, facts, target: str, args: list, value):
     return fn(*call_args, **call_kwargs)
 
 
+def _placed(values: dict, rng: random.Random, keep=(),
+            solve: bool = True) -> "dict | None":
+    """Intent:
+        `values` (parameter to drawn value) on the surface of the
+        running claim's equality premises (`_premises.current()`),
+        leaving the parameters in `keep` as drawn: a premise-drawn
+        parameter is redrawn on its surface and, when `solve`, the
+        solved equality's variable is computed from the others. None
+        when the solved value falls outside its declared bound (the
+        point is not a trial); `values` unchanged when the claim has
+        no premise.
+    """
+    from . import _premises
+    guard = _premises.current()
+    if guard is None:
+        return values
+    only = frozenset(values) - frozenset(keep)
+    return guard.place(values, rng, only=only, solve=solve)
+
+
+def _admitted(values: dict) -> bool:
+    """Whether `values` is inside the running claim's premises; True
+    when the claim has none."""
+    from . import _premises
+    guard = _premises.current()
+    return guard is None or guard.admits_point(values)
+
+
 def _probe_trials(fn, facts, target: str, domain: dict, rng: random.Random,
                   trials: int, trial):
     """Intent:
         The one trial loop every probe:algorithmic technique runs:
-        synthesize the non-target arguments, hand them to `trial`,
+        synthesize the non-target arguments (a parameter an equality
+        premise fixes is drawn on its surface), hand them to `trial`,
         count only the evaluable rounds, stop at the first
-        counterexample.
+        counterexample. A round whose call lies outside the claim's
+        premises (`_premises.PremiseRejected`) is not a trial.
 
     Notes:
         `trial(args)` returns None (nothing evaluable this round,
@@ -105,10 +135,20 @@ def _probe_trials(fn, facts, target: str, domain: dict, rng: random.Random,
         is "holds", never "proven", because a sampling loop can
         witness violation but not absence.
     """
+    from ._premises import PremiseRejected
     checked = 0
     for _ in range(trials):
         args = _synth_other_params(fn, facts, target, domain, rng)
-        outcome = trial(args)
+        placed = _placed(dict(zip(facts.params, args)), rng, keep=(target,),
+                         solve=False)
+        if placed is None:
+            continue
+        args = [placed[p] for p in facts.params]
+        try:
+            outcome = trial(args)
+        except PremiseRejected:
+            # a call outside the claim's premises is not a trial
+            continue
         if outcome is None:
             continue
         checked += 1
@@ -923,6 +963,10 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
         call_args[facts.params.index(target)] = _synth(
             facts.param_kinds.get(target, "unknown"), rng,
             domain.get(target))
+        placed = _placed(dict(zip(facts.params, call_args)), rng)
+        if placed is None:
+            return None
+        call_args = [placed[p] for p in facts.params]
         try:
             originals = copy.deepcopy(call_args)
         except Exception:
@@ -1390,6 +1434,11 @@ def _reproducible_probe(fn, facts, cj, domain: dict, rng: random.Random,
             call_args[index] = _synth(
                 facts.param_kinds.get(target, "unknown"), rng,
                 domain.get(target))
+        placed = _placed(dict(zip(facts.params, call_args)), rng,
+                         keep=(target,) if build is not None else ())
+        if placed is None:
+            return None
+        call_args = [placed[p] for p in facts.params]
         captured = [(setter, getter()) for _, getter, setter in rng_states()]
         try:
             with _pinned_float_env():
@@ -1962,18 +2011,44 @@ class _NamedClaimFamily:
         return self._routes
 
 
-def _guarded_safety_derive(derive):
+def _guarded_safety_derive(derive, outside_domain: bool = False):
     """Wrap a safety member's derive half in the family verdict
     contract: a disproof must carry a concrete counterexample (a
     safety falsification without a witness is not evidence), and the
     status vocabulary is closed. A violation raises; it is a family
-    implementation bug, never a claim outcome."""
+    implementation bug, never a claim outcome.
+
+    The claim's premises (`assumption`) reach the derive half as a
+    narrower domain (`_premises.narrowed_domain`): each conjunct that
+    bounds one scalar parameter by a number narrows that parameter's
+    interval, so a proof covers the premise region and a disproof's
+    witness lies inside it. When some conjunct cannot be folded in, a
+    proof over the wider domain still covers the premise region, but a
+    disproof's witness may lie outside it, so the disproof becomes
+    undecided and the probe route decides over admitted points. A
+    member whose trials set its own parameter outside the domain
+    (`outside_domain`) keeps that parameter's declared bound."""
     def run(fn, facts, lhs_src, rhs_src, relation, domain=None,
-            tolerance=None):
+            tolerance=None, assumption=None):
+        complete = True
+        if assumption:
+            from ._premises import narrowed_domain
+            keep = frozenset({lhs_src.strip()}) if outside_domain \
+                else frozenset()
+            domain, complete = narrowed_domain(
+                domain or {}, assumption, facts.param_kinds, keep=keep)
         proof = derive(fn, facts, lhs_src, rhs_src, relation,
                        domain=domain, tolerance=tolerance)
         if proof is None:
             return None
+        if proof.status == "disproven" and not complete:
+            from .symbolic import ProofResult
+            return ProofResult(
+                "undecided",
+                sketch=f"{proof.sketch}; the witness "
+                       f"({proof.counterexample}) is not known to satisfy "
+                       f"the claim's premises, so a falsification is left "
+                       f"to execution at admitted points")
         if proof.status not in ("proven", "disproven", "undecided"):
             raise ValueError(f"safety derive returned status "
                              f"{proof.status!r}, not in the closed "
@@ -2052,6 +2127,15 @@ def _guarded_safety_probe(probe):
     return run
 
 
+#: the safety families whose trials set their own parameter outside the
+#: domain on purpose (a missing value, the empty sequence, a value past
+#: the domain's edge, a string off the corpus): the premises hold every
+#: other parameter, never the target itself
+_OUTSIDE_DOMAIN_FAMILIES = frozenset({
+    "is_missing_safe", "is_empty_safe", "excluded_outside_domain",
+    "is_arbitrary_input_safe"})
+
+
 class SafetyFamily(_NamedClaimFamily):
     """One computation-safety member: a claim family whose evidence
     concerns a hazard class (where the CODE's runtime behaviour can
@@ -2070,7 +2154,8 @@ class SafetyFamily(_NamedClaimFamily):
                  probe_route="probe:algorithmic",
                  whole_function: bool = False,
                  reserved: "str | None" = None):
-        family_routes = {"derive": _guarded_safety_derive(derive)}
+        family_routes = {"derive": _guarded_safety_derive(
+            derive, outside_domain=base_name in _OUTSIDE_DOMAIN_FAMILIES)}
         if probe is not None:
             family_routes["probe:algorithmic"] = _guarded_safety_probe(probe)
         super().__init__(base_name, family_routes)
@@ -2790,13 +2875,18 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except Exception:
             return None
         compiled.append((code_l, rel, code_r))
-    # the claim's own premise: a point outside it is not a trial
+    # the claim's own premise: a point outside it is not a trial. The
+    # running claim's premise guard decides when there is one; a claim
+    # adjudicated without one (a pinned definedness premise) reads its
+    # comparisons here
+    from . import _premises
     from .conjecture import _parse_assuming_links, _split_top_and
-    premise = (cj.assuming or "").strip()
+    guard = _premises.current()
+    premise = "" if guard is not None else (cj.assuming or "").strip()
     if premise.startswith("assuming"):
         premise = premise[len("assuming"):].strip()
     assumed = []
-    for part in _split_top_and(premise):
+    for part in (_split_top_and(premise) if premise else ()):
         premise_links = _parse_assuming_links(part)
         if premise_links is None:
             return None
@@ -2882,7 +2972,9 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                       (domain or {}).get(p))
 
     def draw() -> dict:
-        return {p: draw_one(p) for p in params}
+        point = {p: draw_one(p) for p in params}
+        placed = _placed(point, rng, keep=tuple(call_pins))
+        return point if placed is None else placed
 
     def shape_boundaries():
         # the edge of a shape region: a singular matrix sits on
@@ -2978,7 +3070,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     for point in candidates():
         key = tuple(repr(point[p]) for p in params)
         if key in seen or not admitted(point) \
-                or (assumed and not satisfies(assumed, point)):
+                or (assumed and not satisfies(assumed, point)) \
+                or (guard is not None and not guard.admits_point(point)):
             continue
         seen.add(key)
         where = True if bare else inside(point)
@@ -2988,6 +3081,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             call_args, call_kwargs = call_arguments(fn, params, point)
             with _pinned_float_env():
                 out = fn(*call_args, **call_kwargs)
+        except _premises.PremiseRejected:
+            continue
         except Exception as exc:
             out, raised = None, exc
             what = f"raised {type(exc).__name__}"
@@ -3169,7 +3264,14 @@ def _structured_draws(fn, facts, cj, domain: dict):
                          for _ in range(rows)], drawn[0] - 1))
             elif ndim == 1:
                 n = sizes.get(resolver.key(p, 0)) or 3
-                out.append([rng.uniform(-5, 5) for _ in range(n)])
+                bound = (domain or {}).get(p)
+                if getattr(bound, "pieces", None):
+                    # a declared element bound (`[a, b]^n`) holds every
+                    # element of the draw
+                    out.append([_synth("float", rng, bound)
+                                for _ in range(n)])
+                else:
+                    out.append([rng.uniform(-5, 5) for _ in range(n)])
             else:
                 out.append(_synth("float", rng, (domain or {}).get(p)))
         return out
@@ -3179,15 +3281,22 @@ def _structured_draws(fn, facts, cj, domain: dict):
 def _matrix_output_probe(prop):
     """The output/expression check: per trial synthesize every
     parameter (with its shape, structure markers and structure
-    premises), evaluate the predicate's argument expression (which
-    calls `f` and may combine matrices) in the claim namespace every
-    probe shares, and test the resulting value for the property. Holds
-    when every evaluable value has it, falsifies with the witnessing
+    premises) and place it on the claim's equality premises, keep
+    only points inside every premise, evaluate the predicate's
+    argument expression (which calls `f` and may combine matrices) in
+    the claim namespace every probe shares, and test the resulting
+    value for the property. A raise from `f` at such a point is no
+    value and falsifies, the exception named; a raise from the
+    expression around it is a broken sample. Holds when every
+    evaluable value has the property, falsifies with the witnessing
     arguments when one does not, skips when the property could not be
-    decided on any value (a spectral check with no numpy)."""
+    decided on any value (a spectral check with no numpy, or no point
+    inside the premises)."""
     def probe(fn, facts, cj, domain, rng, trials):
         import ast as _ast
 
+        from .domain import is_missing
+        from ._premises import PremiseRejected
         try:
             code = compile(_ast.parse(cj.lhs, mode="eval"), "<claim>", "eval")
         except SyntaxError:
@@ -3195,11 +3304,21 @@ def _matrix_output_probe(prop):
         draw = _structured_draws(fn, facts, cj, domain)
         checked = 0
         for _ in range(trials):
-            filled = draw(rng)
+            point = _placed(dict(zip(facts.params, draw(rng))), rng)
+            if point is None or not _admitted(point):
+                continue
+            filled = [point[p] for p in facts.params]
+            raised: list = []
             try:
-                value = _eval_matrix_expr(code, dict(zip(facts.params,
-                                                         filled)), fn)
+                value = _eval_matrix_expr(code, point, fn, raised=raised)
+            except PremiseRejected:
+                continue
             except Exception:
+                if raised and not any(is_missing(v) for v in filled):
+                    checked += 1
+                    return ("falsified", checked,
+                            f"{_fmt(tuple(filled))}: f raised "
+                            f"{type(raised[0]).__name__}, no value", None)
                 continue
             got = prop.check(value)
             if got is None:
@@ -3222,6 +3341,7 @@ def _matrix_guard_probe(prop):
     Holds when a synthesized violating input raises or returns None;
     falsifies with that input when the function silently accepts it."""
     def probe(fn, facts, cj, domain, rng, trials):
+        from ._premises import PremiseRejected
         target = cj.lhs.strip()
         if target not in facts.params:
             return None
@@ -3234,6 +3354,9 @@ def _matrix_guard_probe(prop):
             args = _synth_other_params(fn, facts, target, domain, rng)
             try:
                 out = _call_with_target(fn, facts, target, args, bad)
+            except PremiseRejected:
+                checked -= 1  # outside the claim's premises, not a trial
+                continue
             except Exception:
                 continue     # rejected: the guard fired
             if out is None:
@@ -3247,15 +3370,26 @@ def _matrix_guard_probe(prop):
     return probe
 
 
-def _eval_matrix_expr(code, env: dict, fn):
+def _eval_matrix_expr(code, env: dict, fn, raised: "list | None" = None):
     """Evaluate a claim expression (compiled) over drawn values in the
     one namespace every probe of a claim shares
     (`_linalg_eval.FUNCTIONS`): vectors and matrices are numpy arrays,
     `f(...)` calls the real function with its own runtime types, and
     the value comes back as plain lists, the form the matrix property
-    checks read."""
+    checks read. Each exception `f` itself raises is appended to
+    `raised` when given."""
     from . import _linalg_eval as lae
-    names = {"f": lae.law_callable(fn), **lae.FUNCTIONS,
+    call = lae.law_callable(fn)
+    if raised is not None:
+        inner = call
+
+        def call(*args, **kwargs):
+            try:
+                return inner(*args, **kwargs)
+            except Exception as exc:
+                raised.append(exc)
+                raise
+    names = {"f": call, **lae.FUNCTIONS,
              **{k: lae.as_array(v) for k, v in env.items()}}
     with _pinned_float_env():
         value = eval(code, {"__builtins__": {}}, names)
@@ -3313,18 +3447,28 @@ _OUTPUT_CHECKS = {
 
 def _output_predicate_probe(check):
     """A probe over a function's OUTPUT value: per trial synthesize every
-    argument by its kind, call f, and test the returned value with
-    `check` (True has the property, False does not with a witness, None
-    undecided/uncallable this round)."""
+    argument by its kind (on the claim's equality premises), call f, and
+    test the returned value with `check` (True has the property, False
+    does not with a witness, None undecided this round). A raise at a
+    point without a missing argument is no output and falsifies."""
     def probe(fn, facts, cj, domain, rng, trials):
+        from .domain import is_missing
+
         def trial(_args):
-            filled = [_synth(facts.param_kinds.get(p, "scalar"), rng,
-                             (domain or {}).get(p)) for p in facts.params]
+            point = _placed({p: _synth(facts.param_kinds.get(p, "scalar"),
+                                       rng, (domain or {}).get(p))
+                             for p in facts.params}, rng)
+            if point is None:
+                return None
+            filled = [point[p] for p in facts.params]
             try:
                 with _pinned_float_env():
                     out = fn(*filled)
-            except Exception:
-                return None
+            except Exception as exc:
+                if any(is_missing(v) for v in filled):
+                    return None
+                return (f"{_fmt(tuple(filled))}: f raised "
+                        f"{type(exc).__name__}, no output")
             got = check(out)
             if got is None:
                 return None
@@ -3416,10 +3560,12 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
                if facts.param_kinds.get(p) in SEQUENCE_KINDS]
 
     def _sample(force_empty=None):
-        return [[] if p == force_empty
-                else _synth(facts.param_kinds.get(p, "scalar"), rng,
-                            (domain or {}).get(p))
-                for p in facts.params]
+        point = {p: ([] if p == force_empty
+                     else _synth(facts.param_kinds.get(p, "scalar"), rng,
+                                 (domain or {}).get(p)))
+                 for p in facts.params}
+        placed = _placed(point, rng, keep=(force_empty,))
+        return [(placed or point)[p] for p in facts.params]
 
     def diagnosed(cx: str, filled: list) -> str:
         # the covered call's computation region, when the compendium
@@ -3517,10 +3663,14 @@ def _recursion_probe(fn, facts, cj, domain: dict, rng: random.Random,
         values = dict(zip(facts.params, args))
         values[anchor] = _synth(facts.param_kinds.get(anchor, "unknown"),
                                 rng, (domain or {}).get(anchor))
+        corner = None
         if state["i"] < len(corners):
-            p, v = corners[state["i"]]
+            corner, v = corners[state["i"]]
             state["i"] += 1
-            values[p] = v
+            values[corner] = v
+        values = _placed(values, rng, keep=(corner,))
+        if values is None:
+            return None
         try:
             call_args, call_kwargs = call_arguments(fn, facts.params, values)
             with _pinned_float_env():
@@ -3645,10 +3795,11 @@ def _computation_children(fn, facts, cj, domain: dict) -> list:
 
 
 def _over_parent(children: list, cj, domain: dict) -> list:
-    """A roll-up's child claims over the roll-up's own domain and
-    pseudo-infinity."""
+    """A roll-up's child claims over the roll-up's own domain, premise
+    and pseudo-infinity."""
     from dataclasses import replace as _replace
     return [_replace(c, domain=dict(domain or {}),
+                     assuming=getattr(cj, "assuming", "") or "",
                      pseudo_infinity=getattr(cj, "pseudo_infinity", None),
                      resolved_pseudo_infinity=getattr(
                          cj, "resolved_pseudo_infinity", None))
@@ -3659,6 +3810,8 @@ def _computation_probe(fn, facts, cj, domain: dict, rng: random.Random,
                        trials: int):
     """Empirical half of is_computation_safe(f): the roll-up
     (`_roll_up`) of every relevant child (`_computation_children`)."""
+    from ._premises import unguarded
+    fn = unguarded(fn)
     return _roll_up(fn, facts, _computation_children(fn, facts, cj, domain),
                     trials)
 
@@ -3690,6 +3843,8 @@ def _repeatable_probe(fn, facts, cj, domain: dict, rng: random.Random,
                       trials: int):
     """Empirical half of is_repeatable(f): the roll-up (`_roll_up`) of
     `_repeatable_children`."""
+    from ._premises import unguarded
+    fn = unguarded(fn)
     return _roll_up(fn, facts, _repeatable_children(fn, facts, cj, domain),
                     trials)
 
@@ -3705,10 +3860,12 @@ def _roll_up(fn, facts, children: list, trials: int):
         child's verdict and `meta["mathema.children"]` carries them as
         a mapping. None when there are no children.
     """
+    from ._premises import unguarded
     from .conjecture import check_conjectures
     if not children:
         return None
-    probes = check_conjectures(fn, children, facts=facts, trials=trials)
+    probes = check_conjectures(unguarded(fn), children, facts=facts,
+                               trials=trials)
     verdicts = {p.name: p.verdict for p in probes}
     checked = sum(p.n or 0 for p in probes)
     meta = {"mathema.children": verdicts,
