@@ -192,7 +192,7 @@ def test_the_record_states_what_the_language_resolved_to(tmp_path):
                               "excluded": [],
                               "pieces": [{"language": "letters"},
                                          {"language": "colours"}]}}
-    assert p.condition == "for s in L[letters] ∪ L[colours]|missing"
+    assert p.condition == "for s in L[letters] | L[colours]"
 
 
 def test_every_sample_is_a_member_of_the_declared_language(tmp_path):

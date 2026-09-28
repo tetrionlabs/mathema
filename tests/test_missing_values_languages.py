@@ -70,7 +70,6 @@ def test_g2_a_listed_absence_is_called_with_none():
 
 
 @needs_language
-@stage(1)
 def test_g3_a_str_annotation_infers_the_bare_language():
     probe, _ = run(shout, "f(f(s)) == f(s)")
     assert probe.verdict == "holds"

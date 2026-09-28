@@ -420,8 +420,15 @@ def _quantifier_clause(names: set, order: list, domain: dict,
         bounds = domain.get(n)
         if bounds is None:
             return "ℝ"
-        from ..domain import RECORD_DOMAIN
-        return render_domain(RECORD_DOMAIN.get().get(n, bounds), ascii_mode=False)
+        from ..domain import RECORD_DOMAIN, MissingDefaults, admitted
+        record = RECORD_DOMAIN.get().get(n)
+        if record is None:
+            return render_domain(bounds, ascii_mode=False)
+        # the region the proof covers, with the missing values its
+        # record completed the binding to
+        absent, holes = admitted(record)
+        return render_domain(bounds, ascii_mode=False, defaults=MissingDefaults(
+            absent, ("nan",) if holes else (), "record"))
 
     groups: dict = {}
     for n in free:
