@@ -230,16 +230,17 @@ def apply_matrix_sugar(src: str, matrix_names: frozenset) -> str:
 
 #: calls whose result is a number whatever the rank of their argument
 SCALAR_CALLS = frozenset({"det", "trace", "norm", "dot", "rank", "cond",
-                          "len", "dim"})
+                          "len", "dim", "quantile"})
 #: calls whose result is a matrix
 MATRIX_CALLS = frozenset({"inv", "transpose", "matrix_power", "pinv",
                           "kron", "outer", "I"})
 #: reductions: a number without `axis=`, one rank lower with it
 REDUCTION_CALLS = frozenset({"sum", "mean", "prod", "min", "max", "std",
-                             "var", "count"})
-#: running reductions: a vector without `axis=` (a matrix is read in
-#: row order, as numpy does), the argument's own rank with it
-CUMULATIVE_CALLS = frozenset({"cumsum", "cumprod"})
+                             "var", "count", "median"})
+#: running reductions (sums, products, maxima, minima): a vector
+#: without `axis=` (a matrix is read in row order, as numpy does), the
+#: argument's own rank with it
+CUMULATIVE_CALLS = frozenset({"cumsum", "cumprod", "cummax", "cummin"})
 #: calls that act element by element, keeping their argument's rank
 ELEMENTWISE_CALLS = frozenset({"abs", "Abs"})
 #: the keywords each call of the vocabulary accepts; every other call

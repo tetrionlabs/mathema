@@ -364,6 +364,26 @@
   "unicode": "∀ c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {None, ∅}, f(df, c) = c*df['returns']",
   "ascii": "for c in [-2.0, 2.0] : float|None|missing, f(df, c) = c*df['returns']"
  },
+ "vector_running_maximum": {
+  "input": "for a in R^n, f(a) == cummax(a)",
+  "unicode": "∀ a ∈ ℝⁿ, f(a) = cummax(a)",
+  "ascii": "for a in R^n, f(a) = cummax(a)"
+ },
+ "vector_between_least_and_greatest": {
+  "input": "for xs in R^n, min(xs) <= f(xs) <= max(xs)",
+  "unicode": "∀ xs ∈ ℝⁿ, min(xs) ≤ f(xs) ≤ max(xs)",
+  "ascii": "for xs in R^n, min(xs) <= f(xs) <= max(xs)"
+ },
+ "vector_drawdown_bounds": {
+  "input": "for prices in [1, 100]^n, -1 <= f(prices) <= 0",
+  "unicode": "∀ prices ∈ ([1.0, 100.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {None}, -1 ≤ f(prices) ≤ 0",
+  "ascii": "for prices in ([1.0, 100.0] | {missing})^n : float|None, -1 <= f(prices) <= 0"
+ },
+ "table_columns_dot": {
+  "input": "for df in [0, 1]^n, f(df) ~= dot(df.w, df.r)",
+  "unicode": "∀ df ∈ ([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {None}, f(df) ≈ dot(df.w, df.r)",
+  "ascii": "for df in ([0.0, 1.0] | {missing})^n : float|None, f(df) ~= dot(df.w, df.r)"
+ },
  "inferred_literal_domain": {
   "input": "raises(f(50, 0), ValueError)",
   "unicode": "raises(f(50, 0), ValueError)",

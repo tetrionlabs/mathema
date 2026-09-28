@@ -213,8 +213,8 @@ f(df) == df   # falsified
 ```
 
 The derive route reads a Series or array method through its
-definition row (next section); a column of a DataFrame is still
-adjudicated by sampling.
+definition row (next section), and a column of a DataFrame as a vector
+of its own, whose methods read through the Series rows.
 
 ## Proofs on pandas and numpy code
 
@@ -311,7 +311,7 @@ for row in proof.meta["mathema.definitions"]:
 ```text
 mathema.Record(sharpe) · source, no side effects · form ef276c12c167
   proven  f_s_returns_c_approx_f_returns: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0] : float|None|missing, for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)
-           ∀ returns over ℝ with nothing missing, returns of every length from 2
+           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every length from 2
   holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0] : float|None|missing, for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns) (n=39)
 through the definition rows pandas.Series.mean definition, pandas.Series.std definition, lowered to sums over returns at a symbolic length: the relation holds for every length
 pandas.Series.mean definition bundled mathema/compendium/pandas/series.claims.yaml
@@ -322,6 +322,72 @@ A proof through definition rows is `proven` like any other, and its
 `[float, pandas.Series]` companion runs the real code in float64. A call
 no row covers is named in the derive note (`pandas.Series.ewm has no
 definition row`), and such a claim is adjudicated by sampling.
+
+### Running extrema, least and greatest elements, and columns
+
+A running maximum (`prices.cummax()`), a least element (`.min()`) and
+a greatest (`.max()`) have no closed form as a sum, so the derive
+route knows each through its bounds: `cummax(a)[i]` is at least
+`a[i]` and is one of `a[0..i]`, so for positive prices `0 <
+a[i] / cummax(a)[i] <= 1`; `min(v)` is at most every element of `v`
+and at most its mean, `max(v)` at least them. The maximum drawdown of
+a price path, the largest fall from its running peak as a fraction of
+that peak, lies between -1 and 0:
+
+<!-- example: rt-drawdown run requires=pandas -->
+```python
+import pandas as pd
+
+
+def max_drawdown(prices: pd.Series) -> float:
+    return float((prices / prices.cummax() - 1.0).min())
+
+
+def weighted_return(df: pd.DataFrame) -> float:
+    return float((df.w * df.r).sum())
+```
+
+<!-- example: rt-drawdown verdicts fn=max_drawdown requires=pandas -->
+```
+for prices in [1, 100]^n, f(prices) <= 0   # proven
+for prices in [1, 100]^n, f(prices) >= -1   # proven
+for prices in [1, 100]^n, f(prices) < 0   # falsified
+for prices in [1, 100]^n, f(prices) >= -0.5   # falsified
+```
+
+A drawdown is not always negative: a path that never falls has
+drawdown 0, and sampling finds one. The proof names the bound it used:
+
+<!-- example: rt-drawdown run requires=pandas -->
+```python
+import mathema
+
+record = mathema.check(max_drawdown, claims=[
+    "for prices in [1, 100]^n, f(prices) <= 0"])
+proof = record.probes[0]
+print(proof.verdict, proof.route)
+print(proof.condition)
+print(proof.sketch)
+```
+
+<!-- example: rt-drawdown output -->
+```text
+proven derive
+∀ prices over [1.0, 100.0] with nothing missing, prices of every length
+through the definition rows pandas.Series.cummax definition, pandas.Series.min definition, lowered to sums over prices at a symbolic length: the relation holds for every length (every element of prices / cummax(prices) - 1.0 is <= 0 (0 < prices[i] / cummax(prices)[i] <= 1), so min(prices / cummax(prices) - 1.0) is too)
+```
+
+A DataFrame's columns are vectors on the derive route too, read by
+attribute or by item, and a Series method called on an expression of
+them reads through the Series rows: a weighted return is the dot
+product of its weight and return columns.
+
+<!-- example: rt-drawdown verdicts fn=weighted_return requires=pandas -->
+```
+for df in [0, 1]^n, f(df) ~= dot(df.w, df.r)   # proven
+for df in [0, 1]^n, f(df) ~= dot(df["r"], df["w"])   # proven
+for df in [0, 1]^n, f(df) ~= dot(df.w, df.w)   # falsified
+```
 
 ## Adding a runtime type
 

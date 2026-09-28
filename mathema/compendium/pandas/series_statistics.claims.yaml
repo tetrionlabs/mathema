@@ -1,0 +1,24 @@
+# Definition rows for the order statistics of a pandas.Series, stated
+# over Series with nothing missing; the receiver of `returns.median()`
+# is `a`. The mean, variance, standard deviation, sum and product are
+# stated in series.claims.yaml. pandas skips a missing element in each.
+# mathema's own test suite verifies each row against the installed
+# pandas.
+compendium: pandas
+versions: ">=2,<4"
+
+pandas.Series.median:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) ~= median(a)"
+      note: "The mean of the two middle elements for an even length."
+
+pandas.Series.quantile:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) ~= quantile(a, 0.5)"
+      note: "q defaults to 0.5, and interpolation to linear, the reading quantile(a, q) takes."
+    - name: definition@q=0.25
+      statement: "let q be 0.25, for a in R^n, f(a) ~= quantile(a, 0.25)"
+    - name: definition@q=0.75
+      statement: "let q be 0.75, for a in R^n, f(a) ~= quantile(a, 0.75)"

@@ -1,0 +1,54 @@
+# Definition rows for the arithmetic methods of a pandas.Series,
+# stated over Series with nothing missing; the receiver of
+# `returns.add(c)` is `a` and the operand is `other`, a number or a
+# Series of the same length (the `elementwise` row). Each acts element
+# by element, as the operators `+ - * / **` do in a claim. pandas
+# aligns two Series on their index first; the Series here share one.
+# mathema's own test suite verifies each row against the installed
+# pandas.
+compendium: pandas
+versions: ">=2,<4"
+
+pandas.Series.add:
+  claims:
+    - name: definition
+      statement: "for a in R^n, other in R, f(a, other) ~= a + other"
+    - name: elementwise
+      statement: "for a in R^n, other in R^n, f(a, other) ~= a + other"
+
+pandas.Series.sub:
+  claims:
+    - name: definition
+      statement: "for a in R^n, other in R, f(a, other) ~= a - other"
+    - name: elementwise
+      statement: "for a in R^n, other in R^n, f(a, other) ~= a - other"
+
+pandas.Series.mul:
+  claims:
+    - name: definition
+      statement: "for a in R^n, other in [-1e6, 1e6], f(a, other) ~= a * other"
+      note: "Stated for a factor whose product with every element stays finite in float64."
+    - name: elementwise
+      statement: "for a in R^n, other in R^n, f(a, other) ~= a * other"
+
+pandas.Series.div:
+  claims:
+    - name: definition
+      statement: "for a in R^n, other in R, assuming other != 0, f(a, other) ~= a / other"
+      note: "Division by zero gives an infinite or missing element rather than raising."
+    - name: elementwise
+      statement: "for a in R^n, other in R^n, assuming min(abs(other)) > 0, f(a, other) ~= a / other"
+
+pandas.Series.truediv:
+  claims:
+    - name: definition
+      statement: "for a in R^n, other in R, assuming other != 0, f(a, other) ~= a / other"
+      note: "Division by zero gives an infinite or missing element rather than raising."
+    - name: elementwise
+      statement: "for a in R^n, other in R^n, assuming min(abs(other)) > 0, f(a, other) ~= a / other"
+
+pandas.Series.pow:
+  claims:
+    - name: definition
+      statement: "for a in R^n, other in {0, 1, 2, 3}, f(a, other) ~= a ** other"
+      note: "Stated for whole powers; a fractional power of a negative element is missing."

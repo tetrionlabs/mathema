@@ -1,0 +1,20 @@
+# Definition rows for the running extrema of a pandas.Series, stated
+# over Series with nothing missing; the receiver of `prices.cummax()`
+# is `a`. The running sum and product are stated in series.claims.yaml.
+# pandas skips a missing element in each running extremum and keeps it
+# missing at its own position. mathema's own test suite verifies each
+# row against the installed pandas.
+compendium: pandas
+versions: ">=2,<4"
+
+pandas.Series.cummax:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == cummax(a)"
+      note: "Element i is the greatest of elements 0 to i, the same value numpy.maximum.accumulate gives."
+
+pandas.Series.cummin:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == cummin(a)"
+      note: "Element i is the least of elements 0 to i, the same value numpy.minimum.accumulate gives."

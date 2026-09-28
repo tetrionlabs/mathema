@@ -196,6 +196,13 @@ LEXICON: dict[str, str] = {
     # a DataFrame's column, as an attribute or an item, is a vector
     "table_column_attribute": "for c in [-2, 2], f(df, c) == c * df.returns",
     "table_column_item": 'for c in [-2, 2], f(df, c) == c * df["returns"]',
+    # a running maximum, the least and greatest elements, and a table's
+    # columns read as vectors on the derive route
+    "vector_running_maximum": "for a in R^n, f(a) == cummax(a)",
+    "vector_between_least_and_greatest":
+        "for xs in R^n, min(xs) <= f(xs) <= max(xs)",
+    "vector_drawdown_bounds": "for prices in [1, 100]^n, -1 <= f(prices) <= 0",
+    "table_columns_dot": "for df in [0, 1]^n, f(df) ~= dot(df.w, df.r)",
     "inferred_literal_domain": "raises(f(50, 0), ValueError)",
     # let: alias, function binding, free variable -----------------
     "let_alias": ("let m = m1, for m1 in [0.1,1000], x1 in [-100,100], "
@@ -498,7 +505,9 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "matrix_solve", "matrix_pinv", "matrix_quadratic_form",
         "matrix_structure_and_relation_premise", "matrix_row_and_column",
         "matrix_axis_sum", "matrix_axis_mean", "matrix_qr_factors",
-        "table_column_attribute", "table_column_item"),
+        "table_column_attribute", "table_column_item",
+        "vector_running_maximum", "vector_between_least_and_greatest",
+        "vector_drawdown_bounds", "table_columns_dot"),
     "lets": (
         "let_alias", "let_function_dotted", "let_free_var_closed",
         "named_under_test", "let_alias_for_under_test",
@@ -574,6 +583,10 @@ SECTIONS: dict[str, tuple[str, ...]] = {
 # find `%`, and someone looking for "for all" should find `∀`. Keep it
 # to vocabulary a newcomer would actually type.
 TAGS: dict[str, tuple[str, ...]] = {
+    "vector_running_maximum": ("cummax", "running maximum", "peak"),
+    "vector_drawdown_bounds": ("drawdown", "cummax"),
+    "vector_between_least_and_greatest": ("min", "max", "mean bounds"),
+    "table_columns_dot": ("dataframe", "weighted return", "column"),
     "relation_le_unicode": ("unicode", "symbols", "less than or equal"),
     "equivalence_canonical": ("equivalence", "two implementations",
                               "same mathematics", "refactor"),
@@ -905,6 +918,31 @@ def matmul(A, B):
 def scale_column(df: "pandas.DataFrame", c: float):
     """The `returns` column of a pandas DataFrame, scaled by `c`."""
     return df["returns"] * c
+
+
+def running_peak(a: "pandas.Series"):
+    """The running maximum of a Series: element `i` is the greatest of
+    elements `0..i`."""
+    return a.cummax()
+
+
+def series_mean(xs: "pandas.Series") -> float:
+    """The mean of a Series, which lies between its least and greatest
+    element ("vector_between_least_and_greatest")."""
+    return float(xs.mean())
+
+
+def max_drawdown(prices: "pandas.Series") -> float:
+    """The largest fall of a price path from its running peak, as a
+    fraction of that peak: between -1 and 0 for positive prices
+    ("vector_drawdown_bounds")."""
+    return float((prices / prices.cummax() - 1.0).min())
+
+
+def weighted_return(df: "pandas.DataFrame") -> float:
+    """The return of a portfolio with weights `w` and returns `r`, the
+    dot product of the two columns ("table_columns_dot")."""
+    return float((df.w * df.r).sum())
 
 
 def cosine_phase(φ: float) -> float:
@@ -1240,6 +1278,10 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
     "scale_column": (scale_column, ["table_column_attribute",
                                     "table_column_item"]),
+    "running_peak": (running_peak, ["vector_running_maximum"]),
+    "series_mean": (series_mean, ["vector_between_least_and_greatest"]),
+    "max_drawdown": (max_drawdown, ["vector_drawdown_bounds"]),
+    "weighted_return": (weighted_return, ["table_columns_dot"]),
     "nearly_identity": (nearly_identity, [
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex", "latex_varepsilon",
