@@ -552,7 +552,7 @@ is not.
 Where the rewritten body has no value (a division by a quantity that
 can be zero, a sample statistic of fewer than `ddof + 1` elements), a
 proof stands only when the claim's premises exclude the region:
-`assuming std(returns, ddof=1) > 0` does, since a positive standard
+the premise `std(returns, ddof=1) > 0` does, since a positive standard
 deviation is nonzero and needs two elements. When they do not, the
 function is executed at simple points of the region (vectors of zeros,
 then ones, at each short length); a point where the claim fails is an
