@@ -93,4 +93,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 77 examples checked, 4 output fences not yet marked
+# 78 examples checked, 4 output fences not yet marked
