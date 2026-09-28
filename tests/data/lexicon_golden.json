@@ -519,6 +519,11 @@
   "unicode": "let compute_square_root = numpy.sqrt, ∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, compute_square_root(x) ≥ 0",
   "ascii": "let compute_square_root = numpy.sqrt, for x in [0.0, 100.0]:float|missing, compute_square_root(x) >= 0"
  },
+ "let_function_keyword": {
+  "input": "let g = numpy.round, for x in [0, 1], g(x, decimals=1) <= 1",
+  "unicode": "let g = numpy.round, ∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, g(x, decimals=1) ≤ 1",
+  "ascii": "let g = numpy.round, for x in [0.0, 1.0]:float|missing, g(x, decimals=1) <= 1"
+ },
  "mixed_membership_and_relation": {
   "input": "for x ∈ [0, 1], f(x) <= 1",
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≤ 1",

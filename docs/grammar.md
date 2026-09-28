@@ -457,6 +457,14 @@ readable and lets you talk about things that are not parameters:
 | `let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0` | a typed free variable |
 | `let compute_square_root = numpy.sqrt, for x in [0, 100], compute_square_root(x) >= 0` | a long name, kept readable |
 
+A function the claim names takes keyword arguments the way its own
+callers pass them, each a literal or a name, and the record keeps them
+as written: `let g = numpy.round, for x in [0, 1], g(x, decimals=1) <= 1`.
+The grammar's own functions keep their fixed keywords (`axis=` and
+`ddof=`). The probe route also reads `str`, a value's text, for a round
+trip through a parser that returns an object; the derive route declines
+a claim that uses it.
+
 A free variable is the difference between "this holds for the inputs"
 and "this holds for the inputs and any constant you care to add", which
 is often the claim you actually meant.

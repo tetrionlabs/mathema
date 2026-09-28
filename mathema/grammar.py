@@ -2524,6 +2524,13 @@ def _string_literals(node: ast.AST) -> list:
             and id(n) not in keys]
 
 
+class ClaimKeyword(sympy.Function):
+    """A keyword argument of a call to a function the claim names,
+    `k=2`, held as the last arguments of that call so the claim prints
+    and fingerprints with it."""
+    nargs = 2
+
+
 def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
                    matrix_names: frozenset = frozenset()):
     """Convert a law-expression AST node to sympy with every bound function
@@ -2637,7 +2644,10 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
             # the ordinary bound-function/vocabulary lookups below, the
             # same as any other unrecognized call.
         if fname in funcs:
-            return sympy.Function(fname)(*args)
+            keywords = [ClaimKeyword(sympy.Symbol(k.arg),
+                                     _node_to_sympy(k.value, funcs, matrix_names))
+                        for k in node.keywords if k.arg is not None]
+            return sympy.Function(fname)(*args, *keywords)
         name = _call_name(node)
         if name in ("min", "max") and len(args) == 1:
             # `min(xs)` over a SEQUENCE is an aggregation, a fold over
@@ -3034,6 +3044,10 @@ class _CanonicalPrinter(StrPrinter):
         # render even though self._unicode is True, see _print_Pi's
         # own note on why this exists.
         self._suppress_glyphs = suppress_glyphs
+
+    def _print_ClaimKeyword(self, expr):
+        name, value = expr.args
+        return f"{name}={self._print(value)}"
 
     def _print_Float(self, expr):
         # a float from a claim literal carries float64 precision, which

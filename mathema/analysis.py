@@ -7,6 +7,7 @@ record produced here. No LLM, no guessing; only what the tree shows.
 """
 from __future__ import annotations
 
+from ._signatures import module_scope
 import ast
 import inspect
 import re
@@ -813,7 +814,7 @@ def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
             elif isinstance(node, ast.ImportFrom):
                 bound |= {(a.asname or a.name) for a in node.names}
     known = _MATH_MODULES | _IO_MODULES | _CLOCK_MODULES | _RANDOM_MODULES
-    g = getattr(fn, "__globals__", {})
+    g = module_scope(fn)
     global_vars: list[str] = []
     global_funcs: list[str] = []
     unresolved: list[str] = []
