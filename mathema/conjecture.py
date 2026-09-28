@@ -1648,7 +1648,8 @@ def _unreadable_side(side: str) -> str | None:
                 return ("keyword arguments are not claim syntax: pass each "
                         "argument by position (the keywords are `axis=` "
                         "on sum, mean, prod, min, max, std, var, count, "
-                        "cumsum and cumprod, and `ddof=` on std and var)")
+                        "cumsum, cumprod, cummax and cummin, and `ddof=` "
+                        "on std and var)")
         if isinstance(node, ast.Constant) and (
                 isinstance(node.value, bytes) or node.value is Ellipsis):
             return f"the literal {ast.unparse(node)} is not claim syntax"
@@ -6534,10 +6535,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                             None) != "L":
                     # a table: one equal-length column per name the
                     # claim or the body reads (a table language draws
-                    # its own members below)
+                    # its own members below); a vector domain on the
+                    # table (`for df in [0, 1]^n`) bounds every column
                     length = rng.randint(2, 8)
-                    v = {c: _synth("sequence", rng, None, specials=specials,
-                                   length=length)
+                    bound = cj_domain.get(p)
+                    column = bound if len(getattr(bound, "dims", ())
+                                          or ()) == 1 else None
+                    v = {c: _synth("sequence", rng, column,
+                                   specials=specials, length=length)
                          for c in table_columns[p]}
                     env[p] = v
                     args.append(v)

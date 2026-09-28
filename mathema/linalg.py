@@ -237,9 +237,10 @@ MATRIX_CALLS = frozenset({"inv", "transpose", "matrix_power", "pinv",
 #: reductions: a number without `axis=`, one rank lower with it
 REDUCTION_CALLS = frozenset({"sum", "mean", "prod", "min", "max", "std",
                              "var", "count"})
-#: running reductions: a vector without `axis=` (a matrix is read in
-#: row order, as numpy does), the argument's own rank with it
-CUMULATIVE_CALLS = frozenset({"cumsum", "cumprod"})
+#: running reductions (sums, products, maxima, minima): a vector
+#: without `axis=` (a matrix is read in row order, as numpy does), the
+#: argument's own rank with it
+CUMULATIVE_CALLS = frozenset({"cumsum", "cumprod", "cummax", "cummin"})
 #: calls that act element by element, keeping their argument's rank
 ELEMENTWISE_CALLS = frozenset({"abs", "Abs"})
 #: the keywords each call of the vocabulary accepts; every other call
