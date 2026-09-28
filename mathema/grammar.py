@@ -2082,6 +2082,60 @@ def bars_over_matrices(names):
         _BAR_MATRICES.reset(token)
 
 
+#: the names read as matrices while a claim is rendered: each is a
+#: noncommuting symbol, so a product over them keeps its written order
+_ORDERED_MATRICES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "ordered_matrices", default=frozenset())
+
+#: calls whose value is a matrix when their argument is one
+_MATRIX_VALUED_CALLS = frozenset({"inv", "transpose", "matrix_power", "pinv",
+                                  "kron", "outer", "I", "abs", "Abs"})
+
+
+#: the matrix names a caller holding the function's signature supplies
+#: to rendering
+_RENDER_MATRICES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "render_matrices", default=frozenset())
+
+
+@contextlib.contextmanager
+def matrices_in_view(names):
+    """Within the block, `render_claim_text` reads `names` as matrices
+    as well as the claim's own declared ones (a function's signature
+    markers and matrix runtime types), so a product over them renders
+    in its written order."""
+    token = _RENDER_MATRICES.set(_RENDER_MATRICES.get() | frozenset(names))
+    try:
+        yield
+    finally:
+        _RENDER_MATRICES.reset(token)
+
+
+def _matrix_valued(node: ast.AST, names: frozenset) -> bool:
+    """Whether a claim subexpression denotes a matrix or vector value,
+    given the names that are matrices: a `@` product, a transpose, an
+    elementwise operation with a matrix operand, or a matrix-valued
+    call over one."""
+    if isinstance(node, ast.Name):
+        return node.id in names
+    if isinstance(node, ast.Attribute):
+        return node.attr == "T" or _matrix_valued(node.value, names)
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.MatMult):
+            return True
+        if isinstance(node.op, ast.Pow):
+            return _matrix_valued(node.left, names)
+        return (_matrix_valued(node.left, names)
+                or _matrix_valued(node.right, names))
+    if isinstance(node, ast.UnaryOp):
+        return _matrix_valued(node.operand, names)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id in _MATRIX_VALUED_CALLS:
+        return node.func.id == "I" or any(
+            _matrix_valued(a, names) for a in node.args)
+    return False
+
+
 def _bars_hold_matrix(content: str, names: frozenset) -> bool:
     from .linalg import is_matrix_expr
     try:
@@ -2454,6 +2508,9 @@ def _verbatim_atom(node: ast.AST):
     text = ast.unparse(node)
     if isinstance(node, (ast.Compare, ast.BoolOp)):
         text = f"({text})"
+    ordered = _ORDERED_MATRICES.get()
+    if ordered and _matrix_valued(node, ordered):
+        return sympy.Symbol(text, commutative=False)
     return sympy.Symbol(text, real=True)
 
 
@@ -2538,6 +2595,9 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         if node.id in matrix_names:
             return sympy.MatrixSymbol(node.id, _MATRIX_RENDER_DIM,
                                       _MATRIX_RENDER_DIM)
+        if node.id in _ORDERED_MATRICES.get():
+            # a matrix: its products keep their written order
+            return sympy.Symbol(node.id, commutative=False)
         return sympy.Symbol(node.id, real=True)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         v = _node_to_sympy(node.operand, funcs, matrix_names)
@@ -2550,8 +2610,8 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         return _verbatim_atom(node)
     if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
         return _BINOPS[type(node.op)](
-            _node_to_sympy(node.left, funcs, matrix_names),
-            _node_to_sympy(node.right, funcs, matrix_names))
+            _operand(node.left, node, funcs, matrix_names),
+            _operand(node.right, node, funcs, matrix_names))
     if isinstance(node, ast.Call):
         fname = node.func.id if isinstance(node.func, ast.Name) else None
         arg_nodes = node.args
@@ -2596,6 +2656,24 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         if name in _SYMPY_FUNCS:
             return _SYMPY_FUNCS[name](*args)
     return _verbatim_atom(node)
+
+
+def _operand(child: ast.AST, parent: ast.BinOp, funcs: frozenset,
+             matrix_names: frozenset):
+    """One operand of an arithmetic operator, as `_node_to_sympy` reads
+    it. While matrices are rendered in order, a `@` product that is the
+    right operand of `*` or `/`, or the base of `**`, is one atom
+    spelled with its parentheses: printed bare, `C * (A @ B)` would
+    read back as `(C * A) @ B`."""
+    ordered = _ORDERED_MATRICES.get()
+    if ordered and not matrix_names \
+            and isinstance(child, ast.BinOp) \
+            and isinstance(child.op, ast.MatMult) \
+            and ((child is parent.right
+                  and isinstance(parent.op, (ast.Mult, ast.Div)))
+                 or (child is parent.left and isinstance(parent.op, ast.Pow))):
+        return sympy.Symbol(f"({ast.unparse(child)})", commutative=False)
+    return _node_to_sympy(child, funcs, matrix_names)
 
 
 def _render_d_call(node, args):
@@ -2787,7 +2865,8 @@ def parse_domain_safety(law: str) -> tuple[str, str] | None:
 
 
 
-def to_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
+def to_latex(law: str, funcs: frozenset = frozenset({"f"}),
+             matrix_names: frozenset = frozenset()) -> str:
     """Intent:
         Render a whole claim as LaTeX: a `\\forall` over each quantified
         name's domain, the `assuming` premise, the relation (or a chained
@@ -2798,13 +2877,18 @@ def to_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
         the same parse adjudication uses, so every spelling the grammar
         accepts renders the same way. A fragment `claim()` does not
         accept as a whole claim (a bare premise such as `n >= 2`) renders
-        as a single relation.
+        as a single relation. `matrix_names` are names the caller knows
+        to be matrices (a signature's markers or runtime types); with
+        the claim's own `R^(m,n)` names they render as matrices, so
+        `A * B` is the elementwise `A \\circ B`, never the product `A B`.
     """
     try:
         from .conjecture import claim
         parsed = claim(law)
     except Exception:
-        return _relation_latex(law, funcs)
+        return _relation_latex(law, funcs, frozenset(matrix_names))
+    from .linalg import declared_matrix_names
+    mats = frozenset(matrix_names) | declared_matrix_names(parsed.domain)
     names = frozenset(funcs) | frozenset(parsed.funcs)
 
     prefix = []
@@ -2818,19 +2902,19 @@ def to_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
 
     if parsed.links:
         body = _relation_latex(f"{parsed.links[0][0]} {parsed.links[0][1]} "
-                               f"{parsed.links[0][2]}", names)
+                               f"{parsed.links[0][2]}", names, mats)
         for _lhs, rel, rhs in parsed.links[1:]:
             body += f" {_REL_LATEX[rel]} " + _relation_latex(
-                f"0 == {rhs}", names).split(" = ", 1)[1]
+                f"0 == {rhs}", names, mats).split(" = ", 1)[1]
     elif parsed.relation in _REL_LATEX:
         body = _relation_latex(
-            f"{parsed.lhs} {parsed.relation} {parsed.rhs}", names)
+            f"{parsed.lhs} {parsed.relation} {parsed.rhs}", names, mats)
     elif parsed.relation == "raises":
         body = _relation_latex(
             f"raises({parsed.lhs}, {parsed.rhs})" if parsed.rhs
-            else f"raises({parsed.lhs})", names)
+            else f"raises({parsed.lhs})", names, mats)
     else:
-        subject = (_relation_latex(f"0 == {parsed.lhs}", names).split(" = ", 1)[1]
+        subject = (_relation_latex(f"0 == {parsed.lhs}", names, mats).split(" = ", 1)[1]
                    if parsed.lhs else "")
         body = (rf"\mathrm{{{_latex_text(parsed.relation)}}}"
                 rf"\left({subject}\right)")
@@ -2881,7 +2965,8 @@ def _domain_latex(bound) -> str:
     return text
 
 
-def _relation_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
+def _relation_latex(law: str, funcs: frozenset = frozenset({"f"}),
+                    matrix_names: frozenset = frozenset()) -> str:
     """Render one relation as LaTeX: `lhs rel rhs`, or the partiality
     notation f(x)↑ for a raises predicate. The matrix vocabulary
     (`A.T`, `A @ B`, `det`/`inv`/`trace`, `I(n)`) renders through sympy's
@@ -2909,7 +2994,8 @@ def _relation_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
         return rf"\mathrm{{{predicate}}}({param})"
     lhs, rel, rhs = split_relation(normalize(law))
     mats = (_matrix_names(ast.parse(lhs, mode="eval"))
-            | _matrix_names(ast.parse(rhs, mode="eval")))
+            | _matrix_names(ast.parse(rhs, mode="eval"))
+            | frozenset(matrix_names))
     return f"{side(lhs, mats)} {_REL_LATEX[rel]} {side(rhs, mats)}"
 
 
@@ -3200,7 +3286,8 @@ def _abs_calls_to_bars(text: str) -> str:
 
 
 def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = True,
-                    suppress_glyphs: frozenset = frozenset()) -> str:
+                    suppress_glyphs: frozenset = frozenset(),
+                    matrix_names: frozenset = frozenset()) -> str:
     """One side of a claim (`cj.lhs`/`cj.rhs`) -> preferred-spelling claim
     text: parsed and re-emitted through the same sympy round trip
     identity/fingerprinting already uses (`_node_to_sympy`/
@@ -3234,9 +3321,19 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
 
     `suppress_glyphs` forwards to `to_canonical`; see
     `_CanonicalPrinter._print_Pi`'s own note on why a caller (spec.
-    render_claim_text) would ever pass `{"pi"}`/`{"oo"}` here."""
+    render_claim_text) would ever pass `{"pi"}`/`{"oo"}` here.
+
+    `matrix_names` are the names that denote matrices. Each reads as a
+    noncommuting symbol, and so does every matrix-valued term, so a
+    product keeps its written order: `A * B == B * A` (the elementwise
+    product, commutative only as a stated identity) renders as
+    written, never as `A*B = A*B`."""
     funcs = funcs | {"f"}
-    expr = _node_to_sympy(ast.parse(text, mode="eval"), funcs)
+    token = _ORDERED_MATRICES.set(frozenset(matrix_names))
+    try:
+        expr = _node_to_sympy(ast.parse(text, mode="eval"), funcs)
+    finally:
+        _ORDERED_MATRICES.reset(token)
     def respell(s: str) -> str:
         s = _abs_calls_to_bars(s.replace("**", "^"))
         if not unicode:

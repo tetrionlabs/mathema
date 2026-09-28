@@ -30,6 +30,8 @@ import sympy
 
 from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
 from ..linalg import MATRIX_TOKENS, mentions_matrix_ops
+from ._matrix_lemmas import (LemmaTable, lift_lemma_call, normalise,
+                             prove_structure, structure_properties)
 from ._proof_support import ProofResult
 
 __all__ = ["MATRIX_TOKENS", "matrix_param_dims", "mentions_matrix_ops",
@@ -231,6 +233,9 @@ def _lift(node, env: dict, vectors: frozenset = frozenset()):
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
             and not node.keywords:
         name = node.func.id
+        read = lift_lemma_call(node, lift)
+        if read is not None:
+            return read
         args = [lift(a) for a in node.args]
         one = len(args) == 1
         if name == "det" and one:
@@ -444,7 +449,9 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
     rhs) conjuncts), or the claim stays undecided. sympy reads an
     orthogonal matrix's determinant as 1, which only rotations have,
     so a claim involving one is decided for both signs, +1 and -1."""
-    if relation not in ("==", "~=") and relation not in _ASK_FOR_RELATION:
+    structure = relation in structure_properties()
+    if relation not in ("==", "~=") and relation not in _ASK_FOR_RELATION \
+            and not structure:
         return None
     params, dim_syms = _matrix_params(facts, domain, shapes)
     mat_syms = {p: sympy.MatrixSymbol(p, r, c) for p, (r, c) in params.items()}
@@ -464,16 +471,25 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
         # it reports.
         return ProofResult("undecided",
                            sketch=undeclared_operand_reason(undeclared))
+    if structure and lhs_src.strip() in mat_syms:
+        # a predicate over a bare parameter asks whether the function
+        # rejects a matrix that lacks the property: a question about
+        # the function, adjudicated by execution
+        return None
     try:
         lhs_tree = ast.parse(lhs_src, mode="eval")
-        rhs_tree = ast.parse(rhs_src, mode="eval")
+        rhs_tree = ast.parse("0" if structure else rhs_src, mode="eval")
         lhs = _lift(lhs_tree, env, vectors)
         rhs = _lift(rhs_tree, env, vectors)
     except (ValueError, SyntaxError, TypeError, sympy.ShapeError):
         return None
-    if _is_matrix(lhs) != _is_matrix(rhs):
+    if structure:
+        if not _is_matrix(lhs):
+            return None
+    elif _is_matrix(lhs) != _is_matrix(rhs):
         return None
-    lhs, rhs = (lhs, rhs) if _is_matrix(lhs) else (_scalar(lhs), _scalar(rhs))
+    elif not _is_matrix(lhs):
+        lhs, rhs = _scalar(lhs), _scalar(rhs)
     nonsingular = _nonsingular_premises(premises)
     invertible = {mat_syms[p] for p in mat_syms
                   if p in nonsingular
@@ -489,6 +505,9 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
             sketch=f"the claim inverts {names}, which may be singular (inv "
                    f"raises there); state it: assuming det({singular[0]}) "
                    f"!= 0")
+    table = _lemma_table(mat_syms, structures, invertible)
+    if structure:
+        return _structure_verdict(relation, lhs_src, lhs, table, structures)
     subs = _structure_substitutions(mat_syms, structures)
     context = _assumptions(mat_syms, structures)
     extra = [sympy.Q.invertible(mat_syms[p]) for p in sorted(nonsingular)
@@ -509,13 +528,16 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
         # a scalar comparison: only a scalar difference has an ordering.
         if isinstance(diff, sympy.MatrixExpr):
             return None
-        return sympy.ask(_ASK_FOR_RELATION[relation](diff), context)
+        return sympy.ask(_ASK_FOR_RELATION[relation](diff),
+                         context if context is not None else True)
 
     scalar_names: dict = {}
 
     def _decide():
-        lhs_d = _opaque_scalars(_substituted(lhs, subs), scalar_names).doit()
-        rhs_d = _opaque_scalars(_substituted(rhs, subs), scalar_names).doit()
+        lhs_d = _opaque_scalars(normalise(_substituted(lhs, subs), relation,
+                                          table), scalar_names).doit()
+        rhs_d = _opaque_scalars(normalise(_substituted(rhs, subs), relation,
+                                          table), scalar_names).doit()
         if not orthogonal:
             return _decide_one(lhs_d, rhs_d)
         import itertools
@@ -555,10 +577,57 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
         return ProofResult(
             "proven",
             sketch=f"matrix relation: {lhs_src.strip()} {relation} "
-                   f"{rhs_src.strip()} holds in sympy's matrix algebra{prem}")
+                   f"{rhs_src.strip()} holds in sympy's matrix algebra{prem}"
+                   f"{_lemmas_text(table)}",
+            meta=_lemmas_meta(table))
     # a definite non-relation (a false identity or inequality): a matrix
     # disproof needs a witness (a concrete counterexample matrix), which
     # the empirical route supplies; stay undecided here
     return ProofResult("undecided",
                        sketch="matrix relation did not hold symbolically; "
                               "left to empirical checking")
+
+
+def _lemma_table(mat_syms: dict, structures: dict, invertible) -> LemmaTable:
+    """The lemma layer's view of the claim: each matrix symbol's
+    structure (entailment-closed) and the symbols known invertible."""
+    from ..matrices import entailed
+    known = {mat_syms[p]: frozenset(entailed(props))
+             for p, props in (structures or {}).items() if p in mat_syms}
+    return LemmaTable(known, frozenset(invertible))
+
+
+def _lemmas_text(table: LemmaTable) -> str:
+    return f", using {', '.join(table.used)}" if table.used else ""
+
+
+def _lemmas_meta(table: LemmaTable) -> dict:
+    return {"mathema.matrix_lemmas": list(table.used)} if table.used else {}
+
+
+def _structure_verdict(prop: str, lhs_src: str, term, table: LemmaTable,
+                       structures: dict) -> "ProofResult | None":
+    """A structure claim over a matrix expression (`is_symmetric(A @
+    A.T)`): proven when the lemma layer's structure rules establish the
+    property from the operands' own structure, else None (the caller
+    falls back to sampling)."""
+    try:
+        holds = _with_timeout(lambda: prove_structure(prop, term, table),
+                              FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return ProofResult("undecided",
+                           sketch="matrix structure reasoning exceeded the "
+                                  "wall-clock cap; left to empirical "
+                                  "checking")
+    except Exception:
+        return None
+    if not holds:
+        return None
+    given = sorted({p for ps in (structures or {}).values() for p in ps})
+    prem = f" given {', '.join(given)}" if given else ""
+    word = prop[3:].replace("_", " ")
+    return ProofResult(
+        "proven",
+        sketch=f"matrix structure: {lhs_src.strip()} is {word} for every "
+               f"size, by the structure of its operands{prem}",
+        meta={"mathema.matrix_lemmas": [f"structure of {word} matrices"]})

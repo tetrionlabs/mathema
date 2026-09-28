@@ -97,9 +97,11 @@ def test_an_ordering_on_a_matrix_is_refused(law, route):
 
 
 def test_a_scalar_ordering_on_a_matrix_claim_still_adjudicates():
-    # det and trace are numbers, so their ordering is an ordinary claim
+    # det and trace are numbers, so their ordering is an ordinary claim,
+    # decided here by the lemma that a Gram product is semidefinite
     p = _one(ident, "for A in R^(n,n), det(A @ A.T) >= 0", "best")
-    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert p.verdict == "proven", (p.verdict, p.note, p.counterexample)
+    assert p.route == "derive"
 
 
 def test_a_vector_passed_only_to_f_keeps_the_sequence_proof():

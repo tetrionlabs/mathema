@@ -127,9 +127,9 @@ def test_true_identity_best_prefers_proof(mats):
 
 
 def test_unprovable_true_identity_best_holds_by_sampling(mats):
-    # the cyclic-trace law is true but sympy does not close it here; the
-    # matrix-value probe samples it and reports the holds ceiling.
-    pr = _one(mats.f, "trace(A @ B) == trace(B @ A)", route="best")
+    # the Frobenius norm is submultiplicative, but no lemma closes it;
+    # the matrix-value probe samples it and reports the holds ceiling.
+    pr = _one(mats.f, "norm(A @ B) <= norm(A) * norm(B)", route="best")
     assert pr.verdict == "holds"
     assert pr.route == "probe"
     assert pr.n > 0

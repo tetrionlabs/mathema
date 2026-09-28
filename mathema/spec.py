@@ -2499,6 +2499,15 @@ def _render_claim_text(cj, *, unicode: bool | None,
                   "in": "∈" if unicode else "in",
                   "not in": "∉" if unicode else "not in"}
     lhs_text, rhs_text = apply_safe_renames(cj.lhs), apply_safe_renames(cj.rhs)
+    # the names that are matrices: the bars' reading, the claim's own
+    # R^(m,n) names, and those a caller holding the signature supplies,
+    # each under its displayed spelling
+    from .grammar import _BAR_MATRICES, _RENDER_MATRICES
+    from .linalg import declared_matrix_names
+    mats = frozenset(
+        safe_param_renames.get(m, m) for m in
+        declared_matrix_names(cj.domain) | _BAR_MATRICES.get()
+        | _RENDER_MATRICES.get())
     if cj.links:
         # a chained comparison: render the full chain (first link's lhs,
         # then each link's relation and rhs), which reparses compactly
@@ -2506,7 +2515,8 @@ def _render_claim_text(cj, *, unicode: bool | None,
         # first link cj.lhs/cj.rhs happen to hold
         def _term(t):
             return apply_unsafe_backticks(render_law_expr(
-                apply_safe_renames(t), renamed_funcs, unicode, suppress_glyphs))
+                apply_safe_renames(t), renamed_funcs, unicode, suppress_glyphs,
+                mats))
         pieces = [_term(cj.links[0][0])]
         for link_lhs, link_rel, link_rhs in cj.links:
             pieces.append(_REL_GLYPH[link_rel])
@@ -2516,7 +2526,8 @@ def _render_claim_text(cj, *, unicode: bool | None,
         # no ast.parse round trip on cj.rhs (the exception name) at
         # all, and lhs here is render_law_expr's own safe output,
         # backtick substitution applies post-render either way.
-        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs))
+        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs,
+                mats))
         statement = f"raises({lhs}, {cj.rhs})" if cj.rhs else f"raises({lhs})"
     elif cj.relation in examine_predicates():
         # never reaches render_law_expr/ast.parse at all, a plain
@@ -2536,11 +2547,14 @@ def _render_claim_text(cj, *, unicode: bool | None,
     elif getattr(cj, "rhs_bound", None) is not None:
         # a membership in a domain: the rhs is domain text, rendered
         # as written, never through the expression renderer
-        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs))
+        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs,
+                mats))
         statement = f"{lhs} {_REL_GLYPH[cj.relation]} {cj.rhs}"
     else:
-        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs))
-        rhs = apply_unsafe_backticks(render_law_expr(rhs_text, renamed_funcs, unicode, suppress_glyphs))
+        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs,
+                mats))
+        rhs = apply_unsafe_backticks(render_law_expr(rhs_text, renamed_funcs, unicode, suppress_glyphs,
+                mats))
         statement = f"{lhs} {_REL_GLYPH[cj.relation]} {rhs}"
     if getattr(cj, "negated", False):
         # the negation is part of the claim, whatever shape the

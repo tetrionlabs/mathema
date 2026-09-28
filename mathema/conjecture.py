@@ -3251,13 +3251,23 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         InvalidDomain: a function-level or `MATHEMA_PSEUDO_INFINITY`
             value that `let |inf| be` would refuse.
     """
-    from .grammar import _BAR_MATRICES, bars_over_matrices
+    from .grammar import _BAR_MATRICES, bars_over_matrices, matrices_in_view
     from .types import matrix_param_names
     try:
         fn_mats = matrix_param_names(fn)
     except Exception:
         fn_mats = frozenset()
-    with bars_over_matrices(fn_mats | _BAR_MATRICES.get()):
+    try:
+        facts = _effective_facts(fn, facts)
+        runtime_mats = frozenset(p for p, k in facts.param_kinds.items()
+                                 if k == "mat")
+    except Exception:
+        runtime_mats = frozenset()
+    # the signature's matrices read the bars as determinants; those and
+    # the matrix runtime types also render as matrices, their products
+    # in written order
+    with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
+            matrices_in_view(fn_mats | runtime_mats):
         return _check_conjectures(
             fn, conjectures, domain=domain, trials=trials,
             trials_scale=trials_scale, facts=facts, extensive=extensive,
@@ -3999,6 +4009,12 @@ def _stamp_examine_route(probe, cj, fn, facts) -> None:
         through untouched.
     """
     if probe.route is None:
+        return
+    from .symbolic._matrix_lemmas import structure_properties
+    if cj.relation in structure_properties():
+        # a matrix structure predicate is a fact of matrix algebra about
+        # a value, decided on derive by the matrix route or sampled on
+        # the probe, never a computation fact
         return
     is_safety = cj.relation in routes.examine_predicates()
     if not is_safety:
@@ -4927,6 +4943,7 @@ def _provenance_meta(proof) -> dict:
     """
     meta = {}
     for key in ("mathema.derive_route", "mathema.engine_disagreement",
+                "mathema.matrix_lemmas",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
                 "mathema.corroboration_reason"):
         if key in proof.meta:
@@ -5396,8 +5413,10 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         and mentions_matrix_ops(*_claim_sides(cj))
     if array_uses or matrix_claim:
         mproof = None
+        from .symbolic._matrix_lemmas import structure_properties
         if (not cj.negated and not cj.links
-                and cj.relation in ("==", "~=", ">", ">=", "<", "<=", "!=")):
+                and (cj.relation in ("==", "~=", ">", ">=", "<", "<=", "!=")
+                     or cj.relation in structure_properties())):
             _structs = dict(structures_from_signature(fn))
             for _pp, _props in (ctx.premise_structures or {}).items():
                 _structs[_pp] = tuple(sorted(
@@ -6552,6 +6571,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         p, trial_sizes,
                         lambda: _synth("float", rng, cj_domain.get(p),
                                        specials=specials), rng)
+                    if shape.ndim == 2:
+                        from .matrices import rank_edge
+                        v = rank_edge(v, trial)
                 else:
                     # a scalar or 1-D sequence: _synth owns the element
                     # domain and the special-value shapes; the plan

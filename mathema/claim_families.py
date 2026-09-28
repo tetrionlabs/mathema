@@ -3101,7 +3101,11 @@ def _structured_draws(fn, facts, cj, domain: dict):
     except dimensions.DimensionConflict:
         resolver = dimensions.resolve(facts, shapes)
 
+    from .matrices import rank_edge
+    drawn = [0]
+
     def draw(rng: random.Random) -> list:
+        drawn[0] += 1
         sizes = resolver.draw_sizes(rng, hi={k: 5 for k in
                                              resolver.distinct_keys()})
         out = []
@@ -3121,8 +3125,9 @@ def _structured_draws(fn, facts, cj, domain: dict):
                 if props and rows == cols:
                     out.append(synth_for(props, rows, rng))
                 else:
-                    out.append([[rng.uniform(-5, 5) for _ in range(cols)]
-                                for _ in range(rows)])
+                    out.append(rank_edge(
+                        [[rng.uniform(-5, 5) for _ in range(cols)]
+                         for _ in range(rows)], drawn[0] - 1))
             elif ndim == 1:
                 n = sizes.get(resolver.key(p, 0)) or 3
                 out.append([rng.uniform(-5, 5) for _ in range(n)])
