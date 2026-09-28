@@ -60,7 +60,7 @@ behaviour needs saying in prose. A library function's intent is its
 own, read from its docstring like any function's, so a compendium file
 states none. mathema bundles such files for `math`, `numpy`
 (numpy's 41 covered functions split into scalars, reductions, bounds
-and definitions), `pandas.Series` and `polars.Series` (their
+and definitions), `pandas` and `polars.Series` (their
 [definition rows](#definition-rows)), and a project states its own
 anywhere its claims files
 already live, `claims/numpy.claims.yaml` for instance, where a key
@@ -251,6 +251,21 @@ default is named `definition@<parameter>=<value>` and pins it with
 `definition@ddof=1`. Each row is an ordinary claim: `mathema verify`
 executes it against the installed library, so a wrong row
 (`std(a, ddof=0)` for pandas) is falsified like any other claim.
+
+The bundled pandas rows cover, for `pandas.Series`: `mean`, `std`,
+`var`, `sum`, `prod`, `cumsum`, `cumprod` and `count`; the running
+extrema `cummax` and `cummin`; `min`, `max` and `abs`; `median` and
+`quantile` (at `q` 0.5, 0.25 and 0.75); the arithmetic methods `add`,
+`sub`, `mul`, `div`, `truediv` and `pow`, with a number or a Series of
+the same length; `size`; and `shift`, `diff` and `pct_change`, which
+leave their first positions missing and so are stated over the
+positions that carry a value (`f(a)[1:] == a[:-1]`). For
+`pandas.DataFrame` they cover `sum` and `mean` per column; a column
+read (`df.w`, `df["w"]`) is grammar, and a Series method called on a
+column reads through the Series rows. A bundled compendium ships its
+rows, not verified records: mathema's own test suite verifies every
+row against the installed library, and a project's run takes each row
+at the evidence that run gives it.
 
 How the library treats a missing value is a separate matter from what
 it computes, and the rows leave it out. As installed today: numpy
