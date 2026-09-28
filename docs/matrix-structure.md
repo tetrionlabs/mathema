@@ -406,9 +406,9 @@ sum and product, `solve`, `pinv` and the decompositions.
 ### Through numpy's own functions
 
 A function that calls numpy is read through numpy's
-[definition rows](claims-transfer.md#definition-rows): `np.matmul(A,
-A.T)` becomes `A @ transpose(A)`, and the claim is decided by the
-matrix algebra above. `numpy.linalg.solve`'s definition row,
+[definition rows](claims-transfer.md#definition-rows): on an array
+`A`, `A @ A.T` reads `A.T` through `numpy.ndarray.T` as
+`transpose(A)`, and the claim is decided by the matrix algebra above. `numpy.linalg.solve`'s definition row,
 `f(a, b) ~= solve(a, b)` where `det(a) != 0`, is stated over a matrix
 and a vector together, which a proof through definition rows does not
 read, so a claim about a function calling it is decided by sampling.
@@ -420,7 +420,7 @@ is proven (see the vocabulary above).
 import numpy as np
 
 def gram(A: np.ndarray):
-    return np.matmul(A, A.T)
+    return A @ A.T
 
 def solve_for(A: np.ndarray, b: np.ndarray):
     return np.linalg.solve(A, b)

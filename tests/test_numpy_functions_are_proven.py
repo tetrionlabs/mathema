@@ -22,6 +22,12 @@ import pytest
 
 from mathema.claims import check_conjectures, claim
 
+#: numpy's ufuncs, `matmul` and `sum` state signatures a row binds to
+#: from numpy 2.4 on, and the rows for them apply from there
+_FROM_2_4 = pytest.mark.skipif(
+    tuple(int(p) for p in np.__version__.split(".")[:2]) < (2, 4),
+    reason="the rows for this function apply from numpy 2.4")
+
 
 def solve_for(A: np.ndarray, b: np.ndarray):
     return np.linalg.solve(A, b)
@@ -110,15 +116,19 @@ def _rows_used(p) -> list:
      ["numpy.linalg.norm definition"]),
     (l1_norm, "for x in R^n, f(-x) == f(x)",
      ["numpy.linalg.norm definition@ord=1"]),
-    (absolutes, "for x in R^n, f(-x) == f(x)",
-     ["numpy.absolute definition"]),
-    (negated, "for x in R^n, f(f(x)) == x", ["numpy.negative definition"]),
-    (squared, "for x in R^n, f(-x) == f(x)", ["numpy.square definition"]),
-    (larger, "for x in R^n, y in R^n, f(x, y) ~= f(y, x)",
-     ["numpy.maximum definition"]),
-    (spread, "for x in R^n, y in R^n, f(x, y) ~= abs(x - y)",
-     ["numpy.maximum definition", "numpy.minimum definition"]),
-    (total_np, "for x in R^n, f(x) == sum(x)", ["numpy.sum definition"]),
+    pytest.param(absolutes, "for x in R^n, f(-x) == f(x)",
+                 ["numpy.absolute definition"], marks=_FROM_2_4),
+    pytest.param(negated, "for x in R^n, f(f(x)) == x",
+                 ["numpy.negative definition"], marks=_FROM_2_4),
+    pytest.param(squared, "for x in R^n, f(-x) == f(x)",
+                 ["numpy.square definition"], marks=_FROM_2_4),
+    pytest.param(larger, "for x in R^n, y in R^n, f(x, y) ~= f(y, x)",
+                 ["numpy.maximum definition"], marks=_FROM_2_4),
+    pytest.param(spread, "for x in R^n, y in R^n, f(x, y) ~= abs(x - y)",
+                 ["numpy.maximum definition", "numpy.minimum definition"],
+                 marks=_FROM_2_4),
+    pytest.param(total_np, "for x in R^n, f(x) == sum(x)",
+                 ["numpy.sum definition"], marks=_FROM_2_4),
     (nan_total, "for x in R^n, f(x) == sum(x)", ["numpy.nansum definition"]),
     (nan_volatility, "for x in R^n, let s = mathema.f.shift_seq, "
                      "let c be [0.1, 10], assuming dim(x) >= 2, "
@@ -127,8 +137,9 @@ def _rows_used(p) -> list:
     (spread_of_prices, "for x in R^n, let s = mathema.f.shift_seq, "
                        "let c be [0.1, 10], f(s(x, c)) ~= f(x)",
      ["numpy.ndarray.var definition"]),
-    (gram, "for A in R^(n,n), f(A).T == f(A)",
-     ["numpy.ndarray.T definition", "numpy.matmul definition"]),
+    pytest.param(gram, "for A in R^(n,n), f(A).T == f(A)",
+                 ["numpy.ndarray.T definition", "numpy.matmul definition"],
+                 marks=_FROM_2_4),
 ])
 def test_proven_through_numpy_rows(fn, law, rows):
     p = _one(fn, law)

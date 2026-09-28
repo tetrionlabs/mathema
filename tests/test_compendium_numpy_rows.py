@@ -24,6 +24,11 @@ from mathema.compendium import _bundled_dir
 from tests.test_definition_rows import (_applies, _definition_rows,
                                         _record_rows)
 
+#: a row about a numpy ufunc binds its parameters from numpy 2.4 on
+_FROM_2_4 = pytest.mark.skipif(
+    tuple(int(p) for p in __import__("numpy").__version__.split(".")[:2])
+    < (2, 4), reason="a ufunc row binds its parameters from numpy 2.4")
+
 _FILES = ["numpy/linalg.claims.yaml", "numpy/linalg_2_4.claims.yaml",
           "numpy/elementwise.claims.yaml", "numpy/statistics.claims.yaml"]
 
@@ -103,9 +108,10 @@ def test_the_ufunc_rows_apply_from_numpy_2_4():
 @pytest.mark.parametrize("key, name, statement", [
     ("numpy.linalg.norm", "definition",
      "for x in R^n \\\\ {∅}, f(x) ~= sum(abs(x))"),
-    ("numpy.maximum", "definition",
-     "for x1 in R^n \\\\ {∅}, x2 in R^n \\\\ {∅}, "
-     "f(x1, x2) ~= (x1 + x2 - abs(x1 - x2)) / 2"),
+    pytest.param("numpy.maximum", "definition",
+                 "for x1 in R^n \\\\ {∅}, x2 in R^n \\\\ {∅}, "
+                 "f(x1, x2) ~= (x1 + x2 - abs(x1 - x2)) / 2",
+                 marks=_FROM_2_4),
     ("numpy.nanstd", "definition",
      "for a in R^n \\\\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"),
     ("numpy.linalg.solve", "definition",
