@@ -22,6 +22,7 @@ _spec.loader.exec_module(hook)
 
 @pytest.fixture
 def package_docs(tmp_path, monkeypatch):
+    monkeypatch.setenv(hook.FLAG, "1")
     (tmp_path / "reference.yml").write_text(
         "nav:\n  - Languages: index.md\n  - Adaptors:\n      - Writing one: adaptors.md\n")
     (tmp_path / "index.md").write_text("# Languages\n")
@@ -38,6 +39,7 @@ def _nav():
 
 
 def test_absent_docs_leave_the_site_alone(tmp_path, monkeypatch):
+    monkeypatch.setenv(hook.FLAG, "1")
     monkeypatch.setenv(hook.ENV, str(tmp_path / "nowhere"))
     assert hook.source() is None
     config = {"nav": _nav()}
@@ -97,3 +99,35 @@ def test_a_named_section_is_its_own_top_level_section(sectioned_docs):
         {"Quick start": "language/reference/index.md"},
         {"Adaptors": [{"Writing one": "language/reference/adaptors.md"}]},
     ]
+
+
+@pytest.mark.parametrize("flag", [None, "0"])
+def test_the_language_docs_stay_hidden_until_the_flag_is_on(package_docs, monkeypatch, flag):
+    if flag is None:
+        monkeypatch.delenv(hook.FLAG)
+    else:
+        monkeypatch.setenv(hook.FLAG, flag)
+    config = hook.on_config({"nav": _nav(), "extra": {}})
+    (section,) = [s for s in config["nav"] if "Writing claims" in s]
+    assert section["Writing claims"] == [{"The claim grammar": "grammar.md"},
+                                         {"Lemmas": "lemmas.md"}]
+    assert hook.on_files([], config) == []
+
+
+def test_the_site_config_turns_the_flag_on(package_docs, monkeypatch):
+    monkeypatch.delenv(hook.FLAG)
+    config = hook.on_config({"nav": _nav(), "extra": {"language_docs": True}})
+    (section,) = [s for s in config["nav"] if "Writing claims" in s]
+    assert {"Language domains": "language.md"} in section["Writing claims"]
+
+
+def test_the_flag_is_off_in_the_site_config():
+    import yaml
+
+    class _Loader(yaml.SafeLoader):
+        """Reads the site config, leaving mkdocs' own tags unresolved."""
+
+    _Loader.add_multi_constructor("!", lambda loader, suffix, node: None)
+    _Loader.add_multi_constructor("tag:yaml.org,2002:python/", lambda loader, suffix, node: None)
+    site = yaml.load((_PATH.parents[1] / "mkdocs.yml").read_text(), Loader=_Loader)  # noqa: S506
+    assert site.get("extra", {}).get("language_docs") is False

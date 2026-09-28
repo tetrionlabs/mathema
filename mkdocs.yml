@@ -43,6 +43,12 @@ extra_css:
   - stylesheets/tokens.css
   - stylesheets/extra.css
 
+# the language docs (the "Language domains" page and the mathema-language
+# reference) stay out of the site until the package is published; set
+# MATHEMA_LANGUAGE_DOCS_ENABLED=1 to preview them
+extra:
+  language_docs: false
+
 # the mathema-language package's reference, under /language/reference/,
 # when its docs are present at build time (see the hook's docstring)
 hooks:
