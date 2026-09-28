@@ -15,16 +15,17 @@ theme:
   font: false
   icon:
     repo: octicons/mark-github-24
+  # Ink is the ground whatever the reader's system preference: with no
+  # media query on either entry, the first palette is the default and
+  # the toggle switches to the second.
   palette:
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+    - scheme: slate
       primary: custom
       accent: custom
       toggle:
         icon: octicons/sun-24
         name: Switch to light mode
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
+    - scheme: default
       primary: custom
       accent: custom
       toggle:
@@ -34,14 +35,9 @@ theme:
     - navigation.tabs
     - navigation.sections
     - navigation.top
+    - navigation.footer
     - content.code.copy
     - content.code.annotate
-
-extra:
-  social:
-    - icon: octicons/globe-24
-      link: https://tetrionlabs.com
-      name: Tetrion Labs
 
 extra_css:
   - stylesheets/tokens.css
