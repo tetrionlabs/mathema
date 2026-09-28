@@ -1411,7 +1411,15 @@ def _fmt_value_of(v) -> str:
         return "(" + ", ".join(_fmt_value_of(x) for x in v) + ")"
     if isinstance(v, str):
         return spell_text(v)
-    return repr(v)
+    shown = repr(v)
+    if shown.startswith("<") and " object" in shown and hasattr(v, "__dict__"):
+        # a record whose repr is only its class (an ORM row): its public
+        # fields say which record it is
+        fields = {k: x for k, x in vars(v).items() if not k.startswith("_")}
+        if fields:
+            return (f"{type(v).__name__}("
+                    + ", ".join(f"{k}={_fmt_value_of(x)}" for k, x in fields.items()) + ")")
+    return shown
 
 
 def _fmt(args: tuple, names: tuple[str, ...] | None = None) -> str:
