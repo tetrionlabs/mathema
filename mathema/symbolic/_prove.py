@@ -297,6 +297,32 @@ def _derivative_at(inner, var_syms, subs, node):
     return values[0]
 
 
+def _call_arguments(node: ast.Call, name: str, sig_params) -> list:
+    """Intent:
+        `(parameter, argument node)` for each parameter of a lifted
+        function the claim calls, positional arguments in order and
+        keyword arguments by the parameter they name.
+
+    Raises:
+        NotSymbolic: an argument is missing, extra, passed twice, or
+            names a parameter the lift does not have.
+    """
+    params = list(sig_params)
+    if len(node.args) > len(params):
+        raise NotSymbolic(f"{name}() called with {len(node.args)} positional "
+                          f"args, expected at most {len(params)}")
+    given = dict(zip(params, node.args))
+    for k in node.keywords:
+        if k.arg is None or k.arg not in params or k.arg in given:
+            raise NotSymbolic(f"{name}() keyword {k.arg}= does not name a "
+                              f"parameter left to fill: {ast.unparse(node)!r}")
+        given[k.arg] = k.value
+    if len(given) != len(params):
+        raise NotSymbolic(f"{name}() called with {len(given)} args, expected "
+                          f"{len(params)}")
+    return [(p, given[p]) for p in params]
+
+
 def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
     """Convert one claim-law expression node to sympy. `f(...)` calls
     substitute into the lifted body at the given (positional) arguments;
@@ -432,7 +458,11 @@ def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
                               f"operation: {ast.unparse(node)!r}")
         return op(left, right)
     if isinstance(node, ast.Call):
-        if node.keywords:
+        if node.keywords and not (
+                _call_name(node) == "f"
+                or _call_name(node) in (aux.get(_AUX_FUNCS_KEY) or {})):
+            # only a function the claim names takes keywords, bound to
+            # its parameters by `_call_arguments`
             raise NotSymbolic(f"keyword arguments not supported: {ast.unparse(node)!r}")
         if isinstance(node.func, ast.Name) and node.func.id == "d":
             if len(node.args) < 2:
@@ -709,12 +739,8 @@ def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
             # named-dict, see _bind_params) expands into several entries
             # in lifted.params for one actual positional slot, so arg
             # count/order must track sig_params, never len(lifted.params).
-            if len(node.args) != len(lifted.sig_params):
-                raise NotSymbolic(
-                    f"f() called with {len(node.args)} args, expected "
-                    f"{len(lifted.sig_params)}")
             subs = {}
-            for sig_p, arg_node in zip(lifted.sig_params, node.args):
+            for sig_p, arg_node in _call_arguments(node, "f", lifted.sig_params):
                 keys = lifted.aggregate.get(sig_p)
                 if keys:
                     # cannot substitute a *different* value for a bundled
@@ -758,12 +784,8 @@ def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
                 raise NotSymbolic(
                     f"{name!r} has a dataclass/dict-bundled parameter, "
                     f"not supported for a bound function in claim text")
-            if len(node.args) != len(bound.sig_params):
-                raise NotSymbolic(
-                    f"{name}() called with {len(node.args)} args, expected "
-                    f"{len(bound.sig_params)}")
             subs = {}
-            for sig_p, arg_node in zip(bound.sig_params, node.args):
+            for sig_p, arg_node in _call_arguments(node, name, bound.sig_params):
                 val = _law_to_sympy(arg_node, lifted, param_names, aux)
                 if isinstance(val, (tuple, _SymbolicArray)):
                     raise NotSymbolic(

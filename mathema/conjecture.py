@@ -1606,6 +1606,22 @@ def _special_call_problem(node: ast.Call) -> str | None:
     return None if ok else f"{shape}, the variable a plain name"
 
 
+def _is_grammar_function(name: str) -> bool:
+    """Whether `name` is one of the claim grammar's own functions (a
+    reserved call form, a probe-route builtin, or a linalg reduction)
+    rather than a function the claim names."""
+    return (is_reserved(name) or name in _SAFE_FUNCS
+            or name in linalg.CALL_KEYWORDS)
+
+
+def _is_keyword_value(node: ast.AST) -> bool:
+    """Whether `node` can be a keyword argument's value in a claim: a
+    literal (a negative number included) or a bare name."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        node = node.operand
+    return isinstance(node, (ast.Constant, ast.Name))
+
+
 def _unreadable_side(side: str) -> str | None:
     """Intent:
         Why one side of a relation is not claim syntax, or None when it
@@ -1642,15 +1658,26 @@ def _unreadable_side(side: str) -> str | None:
         if isinstance(node, ast.Call) and node.keywords:
             if any(k.arg is None for k in node.keywords):
                 return "argument unpacking (`**`) is not claim syntax"
-            allowed = linalg.CALL_KEYWORDS.get(
-                node.func.id if isinstance(node.func, ast.Name) else "", ())
+            called = node.func.id if isinstance(node.func, ast.Name) else ""
             words = [k.arg for k in node.keywords]
-            if not words or any(w not in allowed for w in words) \
-                    or len(set(words)) != len(words):
-                return ("keyword arguments are not claim syntax: pass each "
-                        "argument by position (the keywords are `axis=` "
+            if len(set(words)) != len(words):
+                return "a keyword argument passed twice is not claim syntax"
+            if called and not _is_grammar_function(called):
+                # a function the claim names takes keywords as its own
+                # callers pass them, each a literal or a name
+                for k in node.keywords:
+                    if not _is_keyword_value(k.value):
+                        return (f"{k.arg}={ast.unparse(k.value)} is not "
+                                "claim syntax: a keyword argument takes a "
+                                "literal or a name")
+                continue
+            allowed = linalg.CALL_KEYWORDS.get(called, ())
+            if any(w not in allowed for w in words):
+                return ("keyword arguments are not claim syntax on the "
+                        "grammar's own functions: the keywords are `axis=` "
                         "on sum, mean, prod, min, max, std, var, count, "
-                        "cumsum and cumprod, and `ddof=` on std and var)")
+                        "cumsum and cumprod, and `ddof=` on std and var; a "
+                        "function the claim names takes its own")
         if isinstance(node, ast.Constant) and (
                 isinstance(node.value, bytes) or node.value is Ellipsis):
             return f"the literal {ast.unparse(node)} is not claim syntax"
