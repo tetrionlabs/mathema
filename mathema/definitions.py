@@ -1013,6 +1013,48 @@ def _implied_nonzero(expr, provided: list, min_length: dict,
     return False
 
 
+def _columns_as_names(tree, tables: set):
+    """A copy of `tree` with each column read of a table in `tables`
+    (`df.w`, `df["w"]`) replaced by the name `df.w`, which the
+    sequence lowering reads as a vector of its own."""
+    class _Columns(ast.NodeTransformer):
+        def visit_Attribute(self, node):
+            name = column_read(node, tables)
+            if name is not None:
+                return ast.Name(id=f"{node.value.id}.{name}", ctx=ast.Load())
+            return self.generic_visit(node)
+
+        def visit_Subscript(self, node):
+            name = column_read(node, tables)
+            if name is not None:
+                return ast.Name(id=f"{node.value.id}.{name}", ctx=ast.Load())
+            return self.generic_visit(node)
+    return ast.fix_missing_locations(_Columns().visit(copy.deepcopy(tree)))
+
+
+def _element_bound(bound):
+    """The domain one element of a vector (or one column of a table)
+    is drawn from: the claim's bound on it without its axes, or None
+    when the claim states none."""
+    import dataclasses
+
+    from .domain import Domain
+    if isinstance(bound, Domain) and bound.dims:
+        return dataclasses.replace(bound, dims=())
+    return None
+
+
+def _element_sign(element) -> dict:
+    """The sign assumptions an element bound entails, for the
+    sequence's `IndexedBase`."""
+    from .domain import bound_assumptions
+    if element is None:
+        return {}
+    kwargs = dict(bound_assumptions(element) or {})
+    return {k: v for k, v in kwargs.items()
+            if k in ("positive", "negative", "nonnegative", "nonpositive")}
+
+
 def lengths_of(seqs: dict) -> list:
     """The distinct length symbols of the lowered sequences, in the
     order first met."""
@@ -1034,7 +1076,8 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     from .symbolic._base import NotSymbolic
     from .symbolic._proof_support import (ProofResult, _domain_assumptions,
                                           _prove_relation)
-    from .symbolic._seqir import Lowering, Obligations, Vec, normalised
+    from .symbolic._seqir import (Bounds, Lowering, Obligations, Vec,
+                                  normalised, order_by_bounds)
     claim_premises = []
     for a_lhs, rel, a_rhs in assumption or ():
         try:
@@ -1044,6 +1087,17 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
         except SyntaxError:
             return ProofResult("unliftable", sketch=f"the premise {a_lhs} "
                                f"{rel} {a_rhs} does not parse", meta=meta)
+    ranks = linalg.array_ranks(cj_domain, shapes, facts.param_kinds)
+    tables = {n for n, r in ranks.items() if r == "table"}
+    if tables:
+        lhs, rhs = _columns_as_names(lhs, tables), _columns_as_names(rhs,
+                                                                     tables)
+        claim_premises = [(_columns_as_names(a, tables), rel,
+                           _columns_as_names(b, tables))
+                          for a, rel, b in claim_premises]
+        row_premises = [(row, (_columns_as_names(a, tables), rel,
+                               _columns_as_names(b, tables)))
+                        for row, (a, rel, b) in row_premises]
     trees = [lhs, rhs] + [t for p in claim_premises for t in (p[0], p[2])] \
         + [t for _row, p in row_premises for t in (p[0], p[2])]
     transforms = _transform_kinds(cj.funcs)
@@ -1063,22 +1117,28 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             "unliftable", meta=meta,
             sketch=f"the definition row {row.key} {row.name} is stated over "
                    f"matrices, outside the sequence lowering")
-    ranks = linalg.array_ranks(cj_domain, shapes, facts.param_kinds)
     names = _names_in(trees)
     seqs: dict = {}
     lengths: dict = {}
+    elements: dict = {}
     for n in sorted(names):
-        r = ranks.get(n)
+        table = n.split(".", 1)[0] if "." in n else None
+        r = 1 if table in tables else ranks.get(n)
         if r in (2, "table"):
             return ProofResult("unliftable", meta=meta,
                                sketch=f"{n} is a matrix or a table, outside "
                                       f"the sequence lowering")
         if r == 1:
-            dims = getattr(cj_domain.get(n), "dims", ()) or ()
-            dim = str(dims[0]) if dims else n
+            bound = cj_domain.get(table or n)
+            dims = getattr(bound, "dims", ()) or ()
+            dim = str(dims[0]) if dims else (table or n)
             length = lengths.setdefault(dim, sympy.Symbol(
                 f"L_{dim}", integer=True, positive=True))
-            seqs[n] = (sympy.IndexedBase(n, real=True), length)
+            element = _element_bound(bound)
+            base = sympy.IndexedBase(n, real=True,
+                                     **_element_sign(element))
+            seqs[n] = (base, length)
+            elements[base] = element
     scalars = {n: sympy.Symbol(n, real=True)
                for n in names - set(seqs) - set(transforms) - {"pi"}}
     try:
@@ -1092,8 +1152,10 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     for n, (_ib, length) in seqs.items():
         by_length.setdefault(length, n)
 
+    bounds = Bounds(elements)
+
     def lower(node, into: Obligations):
-        low = Lowering(seqs, dict(assumed), transforms)
+        low = Lowering(seqs, dict(assumed), transforms, bounds)
         value = low.lower(node)
         into.merge(low.obligations)
         if pins:
@@ -1187,6 +1249,15 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
         q = sympy.And(*facts_q) if len(facts_q) > 1 else (
             facts_q[0] if facts_q else None)
         scalar_domain = {n: cj_domain[n] for n in assumed if n in cj_domain}
+        by_bounds = order_by_bounds(
+            lv, rv, rel, bounds, bases,
+            {"params": assumed, "domain": scalar_domain, "q": q},
+            extensive=extensive)
+        if by_bounds is not None:
+            status, why = by_bounds
+            return {"proven": status == "proven", "result": ProofResult(
+                "proven" if status == "proven" else "undecided",
+                sketch=why)}
         result = _prove_relation(normalised(lv, bases), normalised(rv, bases),
                                  rel, scalar_domain, q, assumed,
                                  extensive=extensive)
