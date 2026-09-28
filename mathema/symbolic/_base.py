@@ -11,6 +11,7 @@ __init__.py` for the package's own overview and public surface.
 """
 from __future__ import annotations
 
+from .._signatures import module_scope
 import ast
 import contextlib
 import contextvars
@@ -281,7 +282,7 @@ def _try_inline_callee(node: ast.Call, env: dict, ctx: "_LiftCtx",
     # sees a domain to condition against at all).
     callee_domain = _derive_passthrough_domain(node, callee_facts.params, ctx) if ctx.domain else {}
     callee_sp, callee_sc = _method_ctx_fields(callee, callee_facts)
-    callee_ctx = _LiftCtx(globals_ns=getattr(callee, "__globals__", {}),
+    callee_ctx = _LiftCtx(globals_ns=module_scope(callee),
                           depth=ctx.depth - 1, seen=ctx.seen | {id(callee)},
                           domain=callee_domain, unmodified=callee_unmodified,
                           self_param=callee_sp, self_class=callee_sc)
@@ -629,7 +630,7 @@ def _enclosing_class(fn):
     parts = qual.split(".")[:-1]
     if "<locals>" in parts:
         return None
-    obj = (getattr(fn, "__globals__", None) or {}).get(parts[0])
+    obj = (module_scope(fn)).get(parts[0])
     for part in parts[1:]:
         obj = getattr(obj, part, None)
     return obj if inspect.isclass(obj) else None
@@ -1267,7 +1268,7 @@ def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
         return None
 
     _sp, _sc = _method_ctx_fields(fn, facts)
-    ctx = _ctx or _LiftCtx(globals_ns=getattr(fn, "__globals__", {}),
+    ctx = _ctx or _LiftCtx(globals_ns=module_scope(fn),
                            depth=max_callee_depth, seen=frozenset({id(fn)}),
                            domain=domain or {},
                            unmodified=frozenset(_unmodified_params(facts.tree, set(facts.params))),

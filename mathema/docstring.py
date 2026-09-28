@@ -35,6 +35,7 @@ proof are required.
 """
 from __future__ import annotations
 
+from ._signatures import module_scope
 import ast
 import inspect
 import os
@@ -409,7 +410,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     callees: list = []
     if facts is not None:
         seen_ids = {id(fn)}
-        g = getattr(fn, "__globals__", {})
+        g = module_scope(fn)
         for name in facts.global_funcs:
             obj = g.get(name)
             if obj is None or not inspect.isfunction(obj) \

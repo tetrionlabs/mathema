@@ -1416,11 +1416,14 @@ def _nesting(v) -> tuple:
 
 
 def _deep_summary(v) -> str:
-    """A value too deep to print, by its type and how deep it nests."""
+    """A value too deep to print, by its type and how deep it nests: a
+    tree of records by the records along its deepest path, the depth a
+    record tree is measured in, anything else by its container levels."""
     levels, records = _nesting(v)
     name = type(v).__name__
-    tail = f" ({records} {name} records)" if records else ""
-    return f"<{name} nested {levels} levels deep{tail}>"
+    if records:
+        return f"<{name} tree {records} records deep>"
+    return f"<{name} nested {levels} levels deep>"
 
 
 def _fmt_value(v) -> str:
@@ -1459,14 +1462,19 @@ def _fmt_value_of(v) -> str:
     return shown
 
 
-def _fmt(args: tuple, names: tuple[str, ...] | None = None) -> str:
+def _fmt(args: tuple, names: tuple[str, ...] | None = None,
+         shown: "set[str] | None" = None) -> str:
     """A counterexample's argument tuple, legible on its own: labeled
     `name=value` pairs when the caller's own parameter names are known,
     a bare positional tuple otherwise. Unlabeled, a two-element
     counterexample like `([...], -5.54)` reads as (input, output);
-    it's actually (x, alpha), both inputs."""
+    it's actually (x, alpha), both inputs. With `shown`, only the named
+    arguments in it appear (all of them when none is)."""
     if names is not None and len(names) == len(args):
-        return ", ".join(f"{n}={_fmt_value(a)}" for n, a in zip(names, args))
+        pairs = list(zip(names, args))
+        if shown is not None and any(n in shown for n, _ in pairs):
+            pairs = [(n, a) for n, a in pairs if n in shown]
+        return ", ".join(f"{n}={_fmt_value(a)}" for n, a in pairs)
     return "(" + ", ".join(_fmt_value(a) for a in args) + ")"
 
 
@@ -1863,6 +1871,19 @@ def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict) -> "tu
     return risk, _scaled_budget(_starting_budget(risk, setup.affine), setup.scale)
 
 
+def string_domain_hint(p: str) -> str:
+    """Intent:
+        Why a string parameter `p` with no domain is not sampled, and
+        the spelling that declares one: `L[unicode]` when that string
+        language is installed, a finite set of strings otherwise.
+    """
+    from .languages import resolves
+    example = (f"'for {p} in L[unicode], ...'" if resolves("unicode")
+               else f"'for {p} in {{\"a\", \"b\"}}, ...'")
+    return (f"parameter {p!r} is a string with no declared domain; "
+            f"declare its values, e.g. {example}")
+
+
 def probe(fn, facts, domain: dict | None = None,
           trials: int | None = None, trials_scale: float = 1.0,
           extensive: bool = False) -> list[Probe]:
@@ -1928,10 +1949,8 @@ def probe(fn, facts, domain: dict | None = None,
                 "frozenset", "domain", "language"):
             return [Probe(
                 "callable", callable_statement, "skipped",
-                note=f"parameter {p!r} is a string with no declared "
-                     f"domain; declare its values, e.g. 'for {p} in "
-                     f'{{"a", "b"}}, ...\' in a claim, or annotate it '
-                     f"Literal[...]",
+                note=string_domain_hint(p) + " in a claim, or annotate it "
+                     "Literal[...]",
                 meta={"mathema.probe_gap": "string-domain-missing"})]
     # budget/risk/route_value aren't needed here, domain_enforced below
     # is the only law left in this function (everything else migrated to

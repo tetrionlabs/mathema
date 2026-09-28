@@ -39,6 +39,7 @@ Three consumption paths:
 """
 from __future__ import annotations
 
+from .._signatures import module_scope
 import os
 import sys
 from typing import NamedTuple
@@ -404,7 +405,7 @@ def _alias_origins(fn, facts) -> dict:
     import types
     import inspect
     origin: dict = {}
-    scope = dict(getattr(fn, "__globals__", {}) or {})
+    scope = dict(module_scope(fn))
     try:
         scope.update(inspect.getclosurevars(fn).nonlocals)
     except (TypeError, ValueError):
@@ -444,7 +445,7 @@ def _alias_origins(fn, facts) -> dict:
 def _relative_base(fn, level: int) -> "str | None":
     """The package a relative import `level` dots deep resolves against
     inside `fn`'s module, or None when it cannot be told."""
-    package = (getattr(fn, "__globals__", {}) or {}).get("__package__")
+    package = module_scope(fn).get("__package__")
     if not isinstance(package, str) or not package:
         return None
     parts = package.split(".")

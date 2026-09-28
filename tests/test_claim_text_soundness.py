@@ -255,7 +255,7 @@ def test_a_reserved_form_with_its_shape_still_reads(law):
 
 
 @pytest.mark.parametrize("law", [
-    "f(x) >= f(x=1)",
+    "f(x) >= f(x=x + 1)",
     "f(x) >= f(**x)",
     "f(x) =~ 1",
     "f(x) >= ~x",
