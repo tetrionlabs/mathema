@@ -1831,6 +1831,19 @@ def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict) -> "tu
     return risk, _scaled_budget(_starting_budget(risk, setup.affine), setup.scale)
 
 
+def string_domain_hint(p: str) -> str:
+    """Intent:
+        Why a string parameter `p` with no domain is not sampled, and
+        the spelling that declares one: `L[unicode]` when that string
+        language is installed, a finite set of strings otherwise.
+    """
+    from .languages import resolves
+    example = (f"'for {p} in L[unicode], ...'" if resolves("unicode")
+               else f"'for {p} in {{\"a\", \"b\"}}, ...'")
+    return (f"parameter {p!r} is a string with no declared domain; "
+            f"declare its values, e.g. {example}")
+
+
 def probe(fn, facts, domain: dict | None = None,
           trials: int | None = None, trials_scale: float = 1.0,
           extensive: bool = False) -> list[Probe]:
@@ -1896,10 +1909,8 @@ def probe(fn, facts, domain: dict | None = None,
                 "frozenset", "domain", "language"):
             return [Probe(
                 "callable", callable_statement, "skipped",
-                note=f"parameter {p!r} is a string with no declared "
-                     f"domain; declare its values, e.g. 'for {p} in "
-                     f'{{"a", "b"}}, ...\' in a claim, or annotate it '
-                     f"Literal[...]",
+                note=string_domain_hint(p) + " in a claim, or annotate it "
+                     "Literal[...]",
                 meta={"mathema.probe_gap": "string-domain-missing"})]
     # budget/risk/route_value aren't needed here, domain_enforced below
     # is the only law left in this function (everything else migrated to

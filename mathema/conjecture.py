@@ -50,7 +50,7 @@ from . import linalg
 from ._scan import _split_commas, blank_strings
 from .domain import DuplicateBinding
 from .domain import operational_domain as _operational_domain
-from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
+from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
                       holds_nan, same_infinity,
@@ -6285,9 +6285,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if k == "string" and p in named and ctx.cj_domain.get(p) is None:
             return Probe(
                 cj.name, statement, "skipped", route=None,
-                note=(f"{note}; parameter {p!r} is a string with no declared "
-                      f"domain; declare its values, e.g. 'for {p} in "
-                      f'{{"a", "b"}}, ...\', or annotate it Literal[...]'),
+                note=(f"{note}; {string_domain_hint(p)}, or annotate it "
+                      "Literal[...]"),
                 meta={"mathema.probe_gap": "string-domain-missing"})
     # the generic loop's reading of the domain: every unbounded direction,
     # declared or bare, runs with finite values out to the resolved
