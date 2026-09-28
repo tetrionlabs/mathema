@@ -306,6 +306,24 @@ def _synth_singular(n, rng):
     return m
 
 
+#: one draw in this many of an unstructured matrix is rank-deficient
+RANK_EDGE_EVERY = 8
+
+
+def rank_edge(m, draw: int):
+    """The matrix `m` with one row zeroed when `draw` is one of the
+    rank-deficient draws (every `RANK_EDGE_EVERY`-th, the row chosen by
+    the draw's own index), else `m` unchanged. A random matrix is full
+    rank with probability one, so a claim false only where the rank
+    drops (`det(A @ A.T) > 0`) needs its edge drawn on purpose, the way
+    the scalar probe draws its boundary values."""
+    if draw % RANK_EDGE_EVERY != RANK_EDGE_EVERY - 1 or not m \
+            or not isinstance(m, list) or not isinstance(m[0], list):
+        return m
+    k = (draw // RANK_EDGE_EVERY) % len(m)
+    return [[0.0] * len(row) if i == k else row for i, row in enumerate(m)]
+
+
 # --- the registry ----------------------------------------------------
 
 @dataclass(frozen=True)
