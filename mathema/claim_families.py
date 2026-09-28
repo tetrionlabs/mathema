@@ -1058,7 +1058,7 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
         state["idx"] += 1
         if language_bound:
             value = bad
-            spelled = f"{target} = {bad!r} (outside L[{names}])"
+            spelled = f"{target} = {bad!r} (outside L[{names}]{_why_outside(bad, bounds)})"
         elif sequence_target:
             # a sequence parameter is violated one ELEMENT at a time:
             # a fresh in-domain sequence with one out-of-domain entry
@@ -1117,6 +1117,25 @@ def _outside_language(bounds, rng: random.Random) -> "tuple[str, list]":
             if not any(value == seen for seen in out):
                 out.append(value)
     return " | ".join(name for name, _ in pieces), out
+
+
+def _why_outside(value, bounds) -> str:
+    """Intent:
+        Why `value` is not a member, as the witness states it: the first
+        problem the bound's first language explains, ` at <path>: <why>`,
+        or `: <why>` for the value as a whole; empty when no language
+        explains it.
+    """
+    for _, language in _language_pieces(bounds):
+        try:
+            problems = language.explain(value) or []
+        except Exception:
+            continue
+        if problems:
+            first = problems[0]
+            where = f" at {first.path}" if first.path else ""
+            return f"{where}: {first.predicate}"
+    return ""
 
 
 def _language_corpus(bounds, rng: random.Random) -> "tuple[str, list]":
