@@ -57,8 +57,10 @@ _CLAMP_CALL_NAMES = ("min", "max", "clip", "minimum", "maximum")
 
 
 def _source_file(fn) -> str:
+    """The file `fn` is defined in, read through any wrapper that names
+    it as `__wrapped__`."""
     import inspect
-    return inspect.getsourcefile(fn) or "<unknown>"
+    return inspect.getsourcefile(inspect.unwrap(fn)) or "<unknown>"
 
 
 def has_clamp(fn, facts) -> list[dict]:

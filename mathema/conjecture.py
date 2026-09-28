@@ -26,7 +26,6 @@ import ast
 import cmath as _cmath
 import inspect
 import math
-import operator as _operator
 import os
 import re
 import sys
@@ -2878,78 +2877,6 @@ def _value_text(value) -> str:
     return "<no value>" if text in ("<no value>", "<NoValue>") else text
 
 
-def _premise_draws(assumption, kinds: dict) -> dict:
-    """Intent:
-        Draws that satisfy an equality premise by construction, for the
-        premises random sampling essentially never lands on, keyed by
-        parameter: `dim(a) == 0` (or `dim(a, 0) == 0`) draws the empty
-        sequence, `det(a) == 0` a singular square matrix, and `x == c`
-        the constant itself. Each draw is `draw(rng, size)`, `size` the
-        trial's planned first-axis size for the parameter, or None.
-
-    Notes:
-        A length premise `dim(a) == k` for k > 0 is not here: the
-        shape plan (`_shape_constraints`) already sizes the draw. The
-        rejection filter still checks every conjunct, so a draw that
-        misses another conjunct is a wasted trial, never a wrong
-        verdict.
-    """
-    import ast as _ast
-
-    def constant(node):
-        if isinstance(node, _ast.UnaryOp) and isinstance(node.op, _ast.USub):
-            inner = constant(node.operand)
-            return None if inner is None else -inner
-        if isinstance(node, _ast.Constant) \
-                and isinstance(node.value, (int, float)) \
-                and not isinstance(node.value, bool):
-            return node.value
-        return None
-
-    def param_of(call, name):
-        if (isinstance(call, _ast.Call) and isinstance(call.func, _ast.Name)
-                and call.func.id == name and call.args
-                and isinstance(call.args[0], _ast.Name)
-                and call.args[0].id in kinds):
-            rest = call.args[1:]
-            if name == "dim" and rest and constant(rest[0]) != 0:
-                return None
-            return call.args[0].id if len(rest) <= (name == "dim") else None
-        return None
-
-    def draw_for(node, c):
-        if isinstance(node, _ast.Name) and node.id in kinds:
-            value = int(c) if kinds[node.id] == "int" \
-                and float(c).is_integer() else c
-            return node.id, lambda rng, size, v=value: v
-        seq = param_of(node, "dim")
-        if seq is not None and c == 0:
-            return seq, lambda rng, size: []
-        mat = param_of(node, "det")
-        if mat is not None and c == 0:
-            from .matrices import _synth_singular
-            return mat, (lambda rng, size:
-                         _synth_singular(size or rng.randint(2, 5), rng))
-        return None
-
-    out: dict = {}
-    for acj in assumption or ():
-        if acj.relation != "==" or not acj.rhs:
-            continue
-        try:
-            left = _ast.parse(acj.lhs, mode="eval").body
-            right = _ast.parse(acj.rhs, mode="eval").body
-        except SyntaxError:
-            continue
-        for side, other in ((left, right), (right, left)):
-            c = constant(other)
-            found = draw_for(side, c) if c is not None else None
-            if found is not None:
-                out.setdefault(*found)
-                break
-    return out
-
-
 def _draw_trial_sizes(resolver, lo, hi, groups, rng):
     """Sizes for one trial: the resolver draws one per distinct key
     (shared dims agree structurally), then premise equality groups
@@ -4483,26 +4410,6 @@ def _free_array(bound, resolver, trial_sizes: dict, env: dict, rng,
             return _synth("float", rng, bound, specials=specials)
         return [build(axis + 1) for _ in range(sizes[axis])]
     return build(0)
-
-
-def _premise_op(scalar_op, relation: str, tolerance: float, rel_tol: float):
-    """Intent:
-        A premise relation as the probe filters with it: `scalar_op`
-        between two numbers, and between a vector or matrix and
-        anything the relation element by element, a number
-        broadcasting (`x != 0` holds when some element of `x` is not
-        0, the vector is not the zero vector).
-    """
-    from ._linalg_eval import is_array
-
-    def op(a, b):
-        if not (is_array(a) or is_array(b)):
-            return scalar_op(a, b)
-        return bool(relation_holds_elementwise(
-            a, b, relation,
-            tolerance if relation in ("==", "!=") else 0.0,
-            rel_tol=rel_tol))
-    return op
 
 
 def _claim_sides(cj) -> list:
@@ -6081,6 +5988,65 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return _probe_stage(ctx, fn, facts, kinds, sampling)
 
 
+def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
+                          cj_domain: dict):
+    """Intent:
+        The claim's premises as a claim family's own trials apply them
+        (`_premises.PremiseGuard`), evaluated in the namespace the
+        generic sampling loop uses: the claim vocabulary, the bound
+        functions, the parameters (as arrays where the claim reads them
+        as vectors or matrices) and the marker dimensions. None when
+        the claim has no premise.
+
+    Raises:
+        InvalidConjecture: a premise conjunct is not an expression the
+            probe evaluates.
+        KeyError: a premise conjunct is not a comparison.
+    """
+    if ctx.assumption is None:
+        return None
+    from . import _linalg_eval
+    from . import _premises
+    from . import dimensions as _dims
+    from .matrices import _numpy
+    from .types import shapes_from_signature
+    cj = ctx.cj
+    compiled = _premises.compile_premises(cj, ctx.assumption, kinds, ctx.extra)
+    try:
+        bound = {name: (v if callable(v) else _resolve_func_ref(v))
+                 for name, v in cj.funcs.items()}
+    except AttributeError:
+        bound = {}
+    bound = {name: v for name, v in bound.items() if v is not None}
+    array_params = frozenset(
+        p for p in _claim_array_ranks(cj_domain, fn, facts)
+        if p in kinds) if _numpy() is not None else frozenset()
+    if array_params:
+        bound = {name: _bound_for_arrays(v) for name, v in bound.items()}
+    try:
+        resolver = _dims.resolve(facts, shapes_from_signature(fn),
+                                 claim_domain=cj_domain)
+        bind_env = resolver.bind_env
+    except _dims.DimensionConflict:
+        bind_env = None
+    from .runtime_types import calling
+    inner = calling(fn, facts)
+    if array_params:
+        inner = _linalg_eval.law_callable(inner)
+    base = {"f": inner, **_SAFE_FUNCS, **_linalg_eval.FUNCTIONS,
+            **MATH_CONSTANTS, **bound}
+    from .claim_families import _OUTSIDE_DOMAIN_FAMILIES
+    ignore = (frozenset({cj.lhs.strip()})
+              if families.claim_base_name(cj.name) in _OUTSIDE_DOMAIN_FAMILIES
+              else frozenset())
+    return _premises.PremiseGuard(
+        compiled=compiled, params=tuple(facts.params), domain=cj_domain,
+        draws=_premises.premise_draws(ctx.assumption, kinds, cj_domain),
+        solved=_premises.solve_equality(ctx.assumption, kinds),
+        base_env=base, array_params=array_params, bind_env=bind_env,
+        ignore=ignore)
+
+
 def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                  sampling) -> "Probe":
     """Intent:
@@ -6154,9 +6120,21 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # to the "probe" rung, so this is descriptive, not a strength claim.
         probe_route = getattr(family, "probe_route", "probe:algorithmic")
         setup = sampling()
+        from . import _premises
         from .runtime_types import calling
-        algo_result = algo_route(calling(fn, facts), facts, cj, cj_domain,
-                                 setup.rng, setup.budget)
+        try:
+            guard = _family_premise_guard(ctx, fn, facts, kinds, cj_domain)
+        except (InvalidConjecture, KeyError) as e:
+            return Probe(cj.name, statement, "skipped", route=None,
+                         note=f"{note}; assuming clause isn't evaluable "
+                              f"on the probe route: {e}")
+        family_fn = calling(fn, facts)
+        with _premises.active(guard):
+            algo_result = algo_route(
+                guard.wrap(family_fn) if guard is not None else family_fn,
+                facts, cj, cj_domain, setup.rng, setup.budget)
+        premise_unmet = (guard is not None and guard.admitted == 0
+                         and guard.rejected > 0)
         if algo_result is not None:
             # (verdict, checked, cx), optionally with the established
             # sketch, and then the family's own record meta, copied onto
@@ -6211,9 +6189,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                              route=probe_route,
                              note=note + (f"; {cx}" if cx else ""),
                              meta=algo_meta)
+            why = cx or ("no sampled point satisfied the assuming clause"
+                         if premise_unmet else "no evaluable inputs")
             return Probe(cj.name, statement, "skipped", route=probe_route,
-                         note=note + f"; {cx or 'no evaluable inputs'}",
-                         meta=algo_meta)
+                         note=note + f"; {why}", meta=algo_meta)
     if region_claim:
         # the executed reading above is the last one, and it could
         # not sample a point of this claim
@@ -6284,27 +6263,13 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                  f"{unresolved}, define it in f's module or "
                                  f"the calling scope, or bind it explicitly "
                                  f"with funcs=")
+    from . import _premises
+    premise_words = _premises.premise_words()
     assum_eval = None
     if ctx.assumption is not None:
-        compiled: list = []
-        aux_all: set = set()
         try:
-            for acj in ctx.assumption:
-                a_code_l, a_aux_l = _validate(acj.lhs, set(kinds), extra)
-                a_code_r, a_aux_r = _validate(acj.rhs, set(kinds), extra)
-                a_tol = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
-                a_rel = _declared_rel_tol(cj)
-                a_op = {"<=": _operator.le, ">=": _operator.ge,
-                        "<": _operator.lt, ">": _operator.gt,
-                        "==": lambda a, b, t=a_tol, r=a_rel:
-                            _close(a, b, tolerance=t, rel_tol=r),
-                        "!=": lambda a, b, t=a_tol, r=a_rel:
-                            values_differ(a, b, tolerance=t, rel_tol=r)
-                        }[acj.relation]
-                a_op = _premise_op(a_op, acj.relation, a_tol, a_rel)
-                compiled.append((a_code_l, a_code_r, a_op))
-                aux_all |= a_aux_l | a_aux_r
-            assum_eval = (compiled, aux_all)
+            assum_eval = _premises.compile_premises(
+                cj, ctx.assumption, kinds, extra)
         except (InvalidConjecture, KeyError) as e:
             return Probe(cj.name, statement, "skipped", route=None,
                          note=f"{note}; assuming clause isn't evaluable "
@@ -6314,44 +6279,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # equality for one variable symbolically, so every trial computes
     # that coordinate from the others and sits exactly on the surface
     # (the rejection filter below still checks every other conjunct)
-    assum_solved = None
-    if assum_eval is not None and ctx.assumption is not None:
-        import ast as _ast
-
-        import sympy as _sp
-
-        from . import _timeout as _timeout_mod
-        from ._timeout import _with_timeout
-        from .grammar import _node_to_sympy
-        for acj in ctx.assumption:
-            if acj.relation != "==" or not acj.rhs:
-                continue
-            try:
-                l_expr = _node_to_sympy(_ast.parse(acj.lhs, mode="eval").body, {})
-                r_expr = _node_to_sympy(_ast.parse(acj.rhs, mode="eval").body, {})
-            except Exception:
-                continue
-            surface = l_expr - r_expr
-            syms = {str(s): s for s in surface.free_symbols}
-            for p_name in [p for p in kinds if p in syms] + \
-                          [a for a in sorted(syms) if a not in kinds]:
-                try:
-                    sols = _with_timeout(
-                        lambda: _sp.solve(_sp.Eq(surface, 0), syms[p_name]),
-                        _timeout_mod.FAST_TIMEOUT_SECONDS)
-                except Exception:
-                    continue
-                if len(sols) == 1:
-                    others = sorted(set(syms) - {p_name})
-                    try:
-                        compute = _sp.lambdify(
-                            [syms[o] for o in others], sols[0], "math")
-                    except Exception:
-                        continue
-                    assum_solved = (p_name, others, compute)
-                    break
-            if assum_solved is not None:
-                break
+    assum_solved = (_premises.solve_equality(ctx.assumption, kinds)
+                    if assum_eval is not None else None)
     from . import dimensions as _dims
     from .types import shapes_from_signature
     try:
@@ -6367,7 +6296,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     shape_lo, shape_hi, shape_groups = _shape_constraints(
         ctx.assumption, resolver)
     plan_dims = bool(resolver.distinct_keys())
-    premise_draws = _premise_draws(ctx.assumption, kinds)
+    premise_draws = _premises.premise_draws(ctx.assumption, kinds,
+                                            cj_domain)
     from .types import structures_from_signature
     # a parameter's structure comes from its signature marker and from
     # an `assuming A is symmetric` premise; both narrow synthesis the
@@ -6701,20 +6631,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # place the sample exactly on the assumed equality surface:
             # the solved-out coordinate is computed from the others,
             # then held to its own declared bound like any draw
-            from .domain import domain_contains
-            p_name, others, compute = assum_solved
-            try:
-                sv = compute(*[env[o] for o in others if o in env])
-            except Exception:
-                sv = None
-            if isinstance(sv, (int, float)) and not isinstance(sv, bool) \
-                    and sv == sv:
-                p_bound = cj_domain.get(p_name)
-                if p_bound is not None and not domain_contains(sv, p_bound):
-                    continue
-                env[p_name] = sv
-                if p_name in kinds:
-                    args[list(kinds).index(p_name)] = sv
+            if not _premises.place_solved(assum_solved, env, cj_domain):
+                continue
+            p_name = assum_solved[0]
+            if p_name in kinds and p_name in env:
+                args[list(kinds).index(p_name)] = env[p_name]
         if as_arrays:
             for p in array_names:
                 if p in env:
@@ -6728,16 +6649,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # the claim only quantifies over the region the assuming
             # clause carves out: a sample violating ANY conjunct
             # neither confirms nor denies anything (rejection sampling)
-            compiled, a_aux = assum_eval
-            for a_name in a_aux:
+            for a_name in sorted(assum_eval.aux):
                 if a_name not in env:
                     env[a_name] = rng.uniform(-5, 5)
-            try:
-                if not all(a_op(eval(a_l, {"__builtins__": {}}, env),
-                                eval(a_r, {"__builtins__": {}}, env))
-                           for a_l, a_r, a_op in compiled):
-                    continue
-            except Exception:
+            if not _premises.admits(assum_eval, {**env, **premise_words}):
                 continue
         for p in sequence_params:
             if isinstance(env.get(p), (list, tuple)) or (
