@@ -89,6 +89,20 @@ def test_a_non_member_returning_cleanly_falsifies_with_the_outside_witness(tmp_p
     assert "accepted" in p.counterexample
 
 
+def test_the_witness_says_why_the_value_is_outside(tmp_path):
+    import re
+    mod = _load(tmp_path, '''
+        def shout(s: str) -> str:
+            """Upper case, whatever comes in."""
+            return s.upper()
+    ''')
+    p = _one(mod.shout, "for s in L[letters], excluded_outside_domain(s)")
+    m = re.search(r"= ('.*?') \(outside L\[letters\] at (\[\d+\]): (.+?)\)", p.counterexample)
+    assert m, p.counterexample
+    (problem, *_) = LETTERS.explain(eval(m.group(1)))
+    assert (m.group(2), m.group(3)) == (problem.path, problem.predicate)
+
+
 def test_a_function_rejecting_every_non_member_holds(tmp_path):
     mod = _load(tmp_path, '''
         def shout(s: str) -> str:
@@ -124,3 +138,48 @@ def test_enforce_domain_still_proves_rejection_by_construction():
     p = _one(shout, "for s in L[letters], excluded_outside_domain(s)")
     assert p.verdict == "proven", (p.verdict, p.note)
     assert "rejection by construction" in (p.sketch or "")
+
+
+class _Row:
+    """A record whose repr is Python's default."""
+
+    def __init__(self, name):
+        self.name = name
+
+
+class _Rows(_Everything):
+    """Records whose name is letters; any other record is outside."""
+
+    name = "rows"
+    kind = "row"
+
+    def contains(self, value):
+        return isinstance(value, _Row) and value.name.isalpha()
+
+    def explain(self, value):
+        return None if self.contains(value) else [Problem(".name", "letters", value)]
+
+    def sample(self, rng):
+        return _Row("abc")
+
+    def outside(self, rng):
+        return _Row("1")
+
+    def render(self, ascii_mode=True):
+        return "L[rows]"
+
+
+def greet(row) -> str:
+    """A greeting for the record."""
+    return "hello " + row.name
+
+
+def test_a_record_witness_is_shown_by_its_fields():
+    register_language("rows", _Rows())
+    try:
+        p = _one(greet, "for row in L[rows], excluded_outside_domain(row)")
+    finally:
+        unregister_language("rows")
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "row = _Row(name='1') (outside L[rows] at .name: letters)" in p.counterexample, \
+        p.counterexample
