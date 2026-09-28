@@ -60,6 +60,23 @@ def test_the_shrunk_witness_states_whether_it_is_inside_the_declared_language(tm
         unregister_language("letters")
 
 
+def test_a_value_the_claim_excludes_is_labelled_outside(tmp_path):
+    from mathema.languages import register_language, unregister_language
+    register_language("letters", _letters())
+    try:
+        mod = _load(tmp_path, '''
+            def first_char(s: str) -> str:
+                """First character."""
+                return s[0]
+        ''')
+        pr = _one(mod.first_char, 'for s in L[letters] \\ {""}, is_arbitrary_input_safe(s)')
+        assert pr.verdict == "falsified"
+        assert '(outside L[letters] \\ {""})' in pr.counterexample, pr.counterexample
+        assert "''" in pr.counterexample and "(inside" not in pr.counterexample
+    finally:
+        unregister_language("letters")
+
+
 def test_shrinking_never_crosses_the_language_boundary(tmp_path):
     from mathema.languages import register_language, unregister_language
     register_language("letters", _letters())
