@@ -1379,11 +1379,14 @@ def _nesting(v) -> tuple:
 
 
 def _deep_summary(v) -> str:
-    """A value too deep to print, by its type and how deep it nests."""
+    """A value too deep to print, by its type and how deep it nests: a
+    tree of records by the records along its deepest path, the depth a
+    record tree is measured in, anything else by its container levels."""
     levels, records = _nesting(v)
     name = type(v).__name__
-    tail = f" ({records} {name} records)" if records else ""
-    return f"<{name} nested {levels} levels deep{tail}>"
+    if records:
+        return f"<{name} tree {records} records deep>"
+    return f"<{name} nested {levels} levels deep>"
 
 
 def _fmt_value(v) -> str:

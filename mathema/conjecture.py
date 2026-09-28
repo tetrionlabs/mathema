@@ -859,6 +859,9 @@ _SAFE_FUNCS = {
     # not sympy functions (the derive route reports them unsupported and
     # the probe evaluates them).
     "sorted": sorted, "type": type,
+    # a value's text, for a round trip through a parser that returns an
+    # object: probe-only, the derive route has no reading of it
+    "str": str,
     # sympy's own capitalization, mirroring _math_vocab._SYMPY_FUNCS's
     # Abs/Min/Max synonyms so a claim written that way adjudicates on
     # either route

@@ -461,7 +461,9 @@ A function the claim names takes keyword arguments the way its own
 callers pass them, each a literal or a name, and the record keeps them
 as written: `let g = numpy.round, for x in [0, 1], g(x, decimals=1) <= 1`.
 The grammar's own functions keep their fixed keywords (`axis=` and
-`ddof=`).
+`ddof=`). The probe route also reads `str`, a value's text, for a round
+trip through a parser that returns an object; the derive route declines
+a claim that uses it.
 
 A free variable is the difference between "this holds for the inputs"
 and "this holds for the inputs and any constant you care to add", which
