@@ -4899,12 +4899,32 @@ def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict) -> dict:
     return out
 
 
-def _path_defaults():
-    """The missing-value defaults of a path binding (`o.qty`): what a
-    field may hold is its language's business, so a binding that does
-    not state it admits neither kind."""
-    from .domain import MissingDefaults
-    return MissingDefaults(False, (), "field")
+def _in_field_type(path: str, bound, cj_domain: dict):
+    """Intent:
+        A path binding's bound in the type of the field it reaches, when
+        the root's language states that field as whole numbers (`o.qty
+        in [1, 3]` over an int field reads `[1, 3] : int`); the bound
+        unchanged otherwise, or when the bound states its own type.
+    """
+    from .domain import Domain, _as_domain
+    if getattr(bound, "explicit_type", False) or not isinstance(bound, tuple):
+        return bound
+    root, _, rest = path.partition(".")
+    if "[" in root:
+        root, _, rest = path.partition("[")
+        rest = "[" + rest
+    fields = _language_field_bounds({root: cj_domain.get(root)}).get(root)
+    if not fields:
+        return bound
+    try:
+        field_bound = _path_bound(root, rest.lstrip("."), fields, {})
+    except Exception:
+        return bound
+    base = getattr(_as_domain(field_bound), "base_type", None) \
+        if field_bound is not None else None
+    if base in ("Z", "N"):
+        return Domain(base_type="Z", pieces=(bound,), explicit_type=True)
+    return bound
 
 
 def _complete_missing(cj, fn) -> tuple:
@@ -4919,8 +4939,8 @@ def _complete_missing(cj, fn) -> tuple:
         adjudicated (the hole class listed on a string slot, which has
         no hole) or None, and `resolution` is `{param: MissingDefaults}`.
     """
-    from .domain import (MISSING, NO_ANNOTATION, admitted, complete,
-                         is_sentinel, stated)
+    from .domain import (MISSING, NO_ANNOTATION, PATH_DEFAULTS, admitted,
+                         complete, is_sentinel)
     from .types import missing_policy_from_signature
     policy = missing_policy_from_signature(fn) if fn is not None else {}
     completed: dict = {}
@@ -4928,7 +4948,8 @@ def _complete_missing(cj, fn) -> tuple:
     resolution: dict = {}
     for p, bound in (cj.domain or {}).items():
         if "." in p or "[" in p:
-            completed[p] = complete(bound, _path_defaults())
+            completed[p] = complete(_in_field_type(p, bound, cj.domain),
+                                    PATH_DEFAULTS)
             continue
         defaults = NO_ANNOTATION if p in cj.free_vars else policy.get(p, NO_ANNOTATION)
         done = complete(bound, defaults)

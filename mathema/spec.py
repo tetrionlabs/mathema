@@ -2095,7 +2095,12 @@ def _ordered_real_param_names(cj, excluded: set) -> list:
     from ._scan import blank_strings
 
     seen: list = []
-    for text in (cj.lhs, cj.rhs):
+    # the right-hand side of `raises(...)` names an exception, and a
+    # membership's names a domain: neither holds a parameter
+    sides = (cj.lhs,) if (cj.relation == "raises"
+                          or getattr(cj, "rhs_bound", None) is not None) \
+        else (cj.lhs, cj.rhs)
+    for text in sides:
         if isinstance(text, str):
             for name in _IDENTIFIER.findall(blank_strings(text)):
                 if name not in excluded and name not in seen:
@@ -2365,7 +2370,8 @@ def fingerprint_text(cj) -> str:
 
 def render_claim_text(cj, *, unicode: bool | None = None,
                       long_param_threshold: int = 8,
-                      canonical: bool = False) -> str:
+                      canonical: bool = False,
+                      show_missing: bool = True) -> str:
     """The alternative to declare()'s structured-dict shape: one
     parseable string a person can copy straight back into `claim(...)`
     and get an equivalent Conjecture, domain/funcs/free_vars
@@ -2435,12 +2441,26 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     with bars_over_matrices(mats):
         return _render_claim_text(cj, unicode=unicode,
                                   long_param_threshold=long_param_threshold,
-                                  canonical=canonical)
+                                  canonical=canonical,
+                                  show_missing=show_missing)
+
+
+def _render_binding(name: str, bound, unicode: bool, show_missing: bool) -> str:
+    """Intent:
+        One `for` binding's domain as the claim text states it: a path
+        into a language's member (`o.lines[*].qty`) spells the hole
+        class as the word in both modes and admits neither kind unless
+        it says so.
+    """
+    from .domain import PATH_DEFAULTS, render_domain
+    path = not name.isidentifier()
+    return render_domain(bound, ascii_mode=not unicode, show_missing=show_missing,
+                         words=path, defaults=PATH_DEFAULTS if path else None)
 
 
 def _render_claim_text(cj, *, unicode: bool | None,
                        long_param_threshold: int,
-                       canonical: bool) -> str:
+                       canonical: bool, show_missing: bool = True) -> str:
     """Intent:
         `render_claim_text`'s rendering, under whatever bar reading
         `grammar.bars_over_matrices` has set.
@@ -2466,7 +2486,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
     # crashes a render.
     provider = None if canonical else get_provider("symbology")
     sep = ", "
-    domain_show_missing = True
+    domain_show_missing = show_missing
     if provider is not None:
         show_missing = getattr(provider, "show_missing", None)
         if show_missing is not None:
@@ -2658,7 +2678,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
     for_segments = [
         f"{_display_symbol(param_renames[name]) if name in param_renames else name} "
         f"{membership} "
-        f"{render_domain(bound, ascii_mode=not unicode, show_missing=domain_show_missing)}"
+        f"{_render_binding(name, bound, unicode, domain_show_missing)}"
         for name, bound in cj.domain.items() if name not in cj.free_vars]
 
     parts = []

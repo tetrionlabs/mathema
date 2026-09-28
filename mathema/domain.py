@@ -894,6 +894,10 @@ class MissingDefaults:
 #: without its function: the object may be absent and a slot may hold
 #: the scalar runtime's own hole
 NO_ANNOTATION = MissingDefaults(True, ("nan",), "unannotated", annotated=False)
+#: the defaults of a path binding (`o.qty`): what a field may hold is its
+#: language's business, so a binding that does not state it admits
+#: neither kind
+PATH_DEFAULTS = MissingDefaults(False, (), "field", annotated=False)
 
 
 def _is_enumerated(dom: Domain) -> bool:
@@ -1532,7 +1536,8 @@ def _render_dims(dims: tuple, ascii_mode: bool) -> str:
 
 
 def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None = None,
-                  always_show_type: bool = True) -> str:
+                  always_show_type: bool = True, words: bool = False,
+                  defaults: "MissingDefaults | None" = None) -> str:
     """A domain -> the canonical set-notation text a person would type
     for it, always in the same glyph vocabulary the input grammar
     itself accepts, never a natural-language paraphrase of it. Input
@@ -1559,7 +1564,10 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     absence of the whole value after the type (`... : float|None`). A
     language domain spells the words in both modes, since `∅` is the
     empty language to a reader of formal languages. `show_missing=False`
-    leaves the policy unstated (a hand-editable bound).
+    leaves the policy unstated (a hand-editable bound); `words` spells
+    the hole class as the word in unicode too, as a path into a
+    language's member does. `defaults` fills a kind the domain does not
+    state (`NO_ANNOTATION` when not given).
 
     `ascii_mode` renders `R`/`Z`/`N` plain rather than as `ℝ`/`ℤ`/`ℕ`
     and prefers a Python-style annotation for the type clause (`[1,
@@ -1591,7 +1599,7 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         if dom.explicit_type and not language:
             text += _type_annotation_suffix(dom.base_type, ascii_mode)
         return text
-    absent, holes = admitted(dom)
+    absent, holes = admitted(dom, defaults)
     if not show_missing:
         absent, holes = False, ()
     ordered = _ordered_sentinels(absent, holes)
@@ -1617,7 +1625,7 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     if dom.dims:
         # the element clause carries the holes of a slot, the tail the
         # absence of the whole value
-        hole_words = [_sentinel_word(h, ascii_mode=ascii_mode)
+        hole_words = [_sentinel_word(h, ascii_mode=ascii_mode, words=words)
                       for h in ordered if h.kind == "missing"]
         if hole_words:
             body = f"({body}{union_op}{{{', '.join(hole_words)}}})"
@@ -1632,7 +1640,8 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         if ascii_mode:
             text += "".join("|" + _sentinel_word(s, ascii_mode=True) for s in tail)
         else:
-            text += " ∪ {" + ", ".join(_sentinel_word(s, ascii_mode=False)
+            text += " ∪ {" + ", ".join(_sentinel_word(s, ascii_mode=False,
+                                                      words=words)
                                        for s in tail) + "}"
     return text
 
