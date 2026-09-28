@@ -199,6 +199,10 @@ Notable changes to mathema are recorded here from its first public release onwar
   schema whose checks reject every record drawn) is skipped with the
   `input-synthesis` gap and the language's reason, instead of raising
   out of `check_conjectures`.
+- A language's shrink candidates come one at a time, largest deletions
+  first, and the witness shrinker takes them as they come, so a long
+  failing string shrinks in a few hundred membership checks instead of
+  tens of thousands (a 20,000-character witness took 42 seconds).
 - An `is_arbitrary_input_safe` witness over a language says whether it lies
   inside the claim's domain, exclusions included: over `L[unicode] \ {""}`
   a crash on `''` is labelled outside `L[unicode] \ {""}`, not inside

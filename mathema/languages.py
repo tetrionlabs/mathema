@@ -302,27 +302,30 @@ class StringLanguage:
         return rng.choice(candidates) if candidates else None
 
     def shrink(self, value) -> Iterable:
+        """Smaller members, one at a time and the largest deletions
+        first (the whole value, then halves, quarters and so on down to
+        single characters), then each character replaced by a simpler
+        one; a caller that stops at the first useful candidate checks
+        only the candidates before it."""
         if not isinstance(value, str):
-            return ()
-        out: list[str] = []
+            return
         seen = {value}
-
-        def offer(s):
-            if s not in seen and self.contains(s):
-                seen.add(s)
-                out.append(s)
-
         n = len(value)
         size = max(1, n)
         while size >= 1:
             for i in range(0, n, size):
-                offer(value[:i] + value[i + size:])
+                s = value[:i] + value[i + size:]
+                if s not in seen and self.contains(s):
+                    seen.add(s)
+                    yield s
             size //= 2
         for i in range(n):
             for simpler in ("a", " ", "0"):
                 if value[i] != simpler:
-                    offer(value[:i] + simpler + value[i + 1:])
-        return tuple(out)
+                    s = value[:i] + simpler + value[i + 1:]
+                    if s not in seen and self.contains(s):
+                        seen.add(s)
+                        yield s
 
     def fields(self) -> "dict | None":
         return None
@@ -581,7 +584,7 @@ class RefinedLanguage:
         return None if value is None or self.contains(value) else value
 
     def shrink(self, value) -> Iterable:
-        return [s for s in self.base.shrink(value) if self.contains(s)]
+        return (s for s in self.base.shrink(value) if self.contains(s))
 
     def fields(self):
         return self.base.fields()
