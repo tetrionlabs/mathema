@@ -414,13 +414,18 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
     merged_entry = resolve_declared(fn, file_entry=file_entry)
     verified_claims = (verified.get(key, {}).get("entry", {}) or {}).get("claims") or []
     verified_by_name = {c.get("name"): c for c in verified_claims}
+    from .types import matrix_param_names
+    try:
+        matrix_names = matrix_param_names(fn)
+    except Exception:
+        matrix_names = frozenset()
     claims = []
     for c in merged_entry.get("claims") or []:
         statement = c.get("statement") or c.get("law")
         if not statement:
             continue
         try:
-            latex = to_latex(statement)
+            latex = to_latex(statement, matrix_names=matrix_names)
         except Exception as e:
             latex = f"(not available: {e})"
         v = verified_by_name.get(c.get("name"))
