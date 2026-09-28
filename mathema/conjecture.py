@@ -4145,11 +4145,17 @@ def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
                 try:
                     if not language.contains(args[i]):
                         continue
-                    candidates = list(language.shrink(args[i]))
+                    candidates = iter(language.shrink(args[i]))
                 except Exception:
                     continue
-                for candidate in candidates:
-                    if budget <= 0:
+                while budget > 0:
+                    # candidates are taken as they come, so a long value
+                    # is not expanded into every candidate up front
+                    try:
+                        candidate = next(candidates)
+                    except StopIteration:
+                        break
+                    except Exception:
                         break
                     try:
                         inside = (domain_contains(candidate, bound)
