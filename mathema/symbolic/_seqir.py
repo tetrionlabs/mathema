@@ -634,6 +634,8 @@ def _elementwise(e, strict: bool, bounds: Bounds, lengths, context: dict,
     e = e.xreplace(subs)
     if pins:
         e = e.subs(pins)
+    if (e.is_positive if strict else e.is_nonnegative):
+        return True, ", ".join(used)
     extra = context.get("q")
     q = sympy.And(*[c for c in (ctx, extra) if c is not None]) \
         if (ctx is not None or extra is not None) else None

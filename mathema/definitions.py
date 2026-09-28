@@ -1089,7 +1089,8 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             return ProofResult("unliftable", sketch=f"the premise {a_lhs} "
                                f"{rel} {a_rhs} does not parse", meta=meta)
     ranks = linalg.array_ranks(cj_domain, shapes, facts.param_kinds)
-    tables = {n for n, r in ranks.items() if r == "table"}
+    tables = {n for n, r in ranks.items() if r == "table"} \
+        | {n for n, k in facts.param_kinds.items() if k == "table"}
     if tables:
         lhs, rhs = _columns_as_names(lhs, tables), _columns_as_names(rhs,
                                                                      tables)

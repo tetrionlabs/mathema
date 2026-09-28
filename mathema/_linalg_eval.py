@@ -386,6 +386,22 @@ def _running_extremum(ufunc_name, word):
     return running
 
 
+def _median(*args, axis=None):
+    """The median: the middle element of the sorted vector, or the
+    mean of the middle two for an even length; along `axis` for a
+    matrix."""
+    out = _np().median(_values(args), axis=axis)
+    return out.item() if getattr(out, "ndim", 1) == 0 else out
+
+
+def _quantile(a, q):
+    """The `q`-quantile of a vector (`0 <= q <= 1`), interpolated
+    linearly between the two sorted elements it falls between, as
+    numpy and pandas compute it by default."""
+    out = _np().quantile(_values((a,)), q)
+    return out.item() if getattr(out, "ndim", 1) == 0 else out
+
+
 def _matrix(x):
     a = as_array(x) if not is_array(x) else x
     if not is_array(a):
@@ -485,6 +501,7 @@ FUNCTIONS = {
     "mean": _mean, "prod": _prod,
     "std": _moment("std"), "var": _moment("var"), "count": _count,
     "cumsum": _cumulative("cumsum"), "cumprod": _cumulative("cumprod"),
+    "median": _median, "quantile": _quantile,
     "cummax": _running_extremum("maximum", "cummax"),
     "cummin": _running_extremum("minimum", "cummin"),
     "det": _det, "inv": _inv, "trace": _trace, "transpose": _transpose,

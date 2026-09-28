@@ -979,6 +979,9 @@ def analyze_source(fn) -> Facts:
 
     src, fdef = get_tree(fn)
     params = [a.arg for a in [*fdef.args.posonlyargs, *fdef.args.args, *fdef.args.kwonlyargs]]
+    # a library method read as a function of its receiver takes its
+    # other arguments through `*args`; its required ones are parameters
+    params = list(getattr(fn, "__mathema_receiver_params__", None) or params)
     effects = _effects(fdef, params)
     groups, recursion = _call_groups(fdef, fdef.name)
     docstring_text = ast.get_docstring(fdef)

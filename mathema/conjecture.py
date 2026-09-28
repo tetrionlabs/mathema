@@ -1678,9 +1678,9 @@ def _unreadable_side(side: str) -> str | None:
                 return ("keyword arguments are not claim syntax on the "
                         "grammar's own functions: the keywords are `axis=` "
                         "on sum, mean, prod, min, max, std, var, count, "
-                        "cumsum, cumprod, cummax and cummin, and `ddof=` "
-                        "on std and var; a function the claim names takes "
-                        "its own")
+                        "median, cumsum, cumprod, cummax and cummin, and "
+                        "`ddof=` on std and var; a function the claim "
+                        "names takes its own")
         if isinstance(node, ast.Constant) and (
                 isinstance(node.value, bytes) or node.value is Ellipsis):
             return f"the literal {ast.unparse(node)} is not claim syntax"
@@ -3868,10 +3868,20 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                          meta=corroboration(probe))
     verdicts = [p.verdict for p in probes]
     if all(v == "proven" for v in verdicts):
+        # the definition rows each part's proof read through, in order
+        rows: list = []
+        for probe in probes:
+            for row in (probe.meta or {}).get("mathema.definitions") or ():
+                if row not in rows:
+                    rows.append(row)
+        sketches = [f"{label}: {p.sketch}" for p, label in zip(probes, labels)
+                    if p.sketch]
         return Probe(name, statement, "proven",
                      route=_conjunction_route(
                          [p.route for p in probes], "derive"),
-                     note=f"every {unit} of the {what} proven")
+                     sketch="; ".join(sketches) or None,
+                     note=f"every {unit} of the {what} proven",
+                     meta={"mathema.definitions": rows} if rows else None)
     if all(v in ("proven", "holds") for v in verdicts):
         n = min((p.n for p in probes if p.n), default=0)
         # an engine-bug flag on any part (a derive disproof nothing
