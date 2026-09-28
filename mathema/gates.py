@@ -500,6 +500,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     sample_domain = (operational_domain(cj_domain, (cap_lo, cap_hi))[0]
                      if cap is not None else cj_domain)
 
+    from .probing import _synth_dict
+    from .symbolic._base import _dict_key_tree
+    dict_keys = {name: (_dict_key_tree(facts.tree, name) if facts.tree is not None else {})
+                 for name in names if kinds.get(name) == "dict"}
+
     def sample(name, rng):
         # an unbounded parameter samples within the pseudo-infinity
         # range (or the reach), so a declared range bounds the draws
@@ -528,6 +533,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             ends = (-math.inf, math.inf) if b is None else _ends(b)
             if ends is not None and (math.isinf(ends[0]) or math.isinf(ends[1])):
                 return _wide_draw(name, rng, *ends)
+        if kinds.get(name) == "dict":
+            # a mapping parameter carries the keys the body reads, as
+            # the probe draws it, so a missing key is never the failure
+            return _synth_dict(dict_keys.get(name, {}), rng)
         if b is None:
             b = (cap_lo, cap_hi)
         return _synth(kinds.get(name, "float"), rng, b)

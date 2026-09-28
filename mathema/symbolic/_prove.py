@@ -2617,6 +2617,39 @@ def _derivative_kink(fn, facts, lhs_src: str, rhs_src: str,
     return _kink_in_domain(loci, domain or {})
 
 
+def _names_of_function_under_test(funcs: "dict | None", fn) -> set:
+    """Intent:
+        The names in `funcs` bound to `fn` itself (by identity, or to
+        the function a wrapper of it wraps).
+    """
+    import inspect
+
+    def inner(g):
+        try:
+            return inspect.unwrap(g)
+        except ValueError:
+            return g
+    target = inner(fn)
+    return {g for g, v in (funcs or {}).items() if v is fn or inner(v) is target}
+
+
+def _calls_as_f(src: str, names: set) -> str:
+    """Intent:
+        `src` with every call to one of `names` spelled as a call to
+        `f`, the rest of the text as written.
+    """
+    if not src:
+        return src
+    tree = ast.parse(src, mode="eval")
+    changed = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id in names:
+            node.func.id = "f"
+            changed = True
+    return ast.unparse(tree) if changed else src
+
+
 def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                domain: dict | None = None, tolerance: float | None = None,
                max_callee_depth: int = 3, extensive: bool = False,
@@ -2666,6 +2699,17 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     context and lets a raise guard be excluded when the assumed region
     provably avoids it, the claim then quantifies only where every
     conjunct holds."""
+    aliases = _names_of_function_under_test(funcs, fn)
+    if aliases:
+        # the function under test called by its own name is `f`: one
+        # lift, one set of raise guards, and a bundled parameter
+        # substitutes the same way
+        funcs = {g: v for g, v in (funcs or {}).items() if g not in aliases}
+        lhs_src = _calls_as_f(lhs_src, aliases)
+        rhs_src = _calls_as_f(rhs_src, aliases)
+        if assumption:
+            assumption = [(_calls_as_f(a, aliases), rel, _calls_as_f(b, aliases))
+                          for a, rel, b in assumption]
     lifted = lift(fn, facts, max_callee_depth=max_callee_depth, domain=domain)
     piecewise_hint = None
     piecewise_guards: list = []
