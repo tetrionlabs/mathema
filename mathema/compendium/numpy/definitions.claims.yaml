@@ -6,11 +6,6 @@
 compendium: numpy
 versions: ">=1.24,<3"
 
-numpy.sum:
-  claims:
-    - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= sum(a)"
-
 numpy.prod:
   claims:
     - name: definition
@@ -27,12 +22,6 @@ numpy.cumprod:
     - name: definition
       statement: "for a in R^n \\ {∅}, f(a) ~= cumprod(a)"
       note: "The running products: element i is the product of the first i + 1 elements."
-
-numpy.dot:
-  claims:
-    - name: definition
-      statement: "for a in R^n \\ {∅}, b in R^n \\ {∅}, f(a, b) ~= dot(a, b)"
-      note: "Stated for two vectors of one length: their inner product."
 
 numpy.trace:
   claims:

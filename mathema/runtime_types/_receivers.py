@@ -46,12 +46,17 @@ def _runtime_class(dotted: str):
 
 def _renamed_signature(member, cls) -> "inspect.Signature | None":
     """The method's signature with its receiver parameter named `a`
-    and annotated with the class; None when the signature cannot be
-    read or another parameter is already named `a`."""
+    and annotated with the class, `(a, /, **kwargs)` when the library
+    states none; None when another parameter is already named `a`."""
     try:
         sig = inspect.signature(member)
     except (TypeError, ValueError):
-        return None
+        # a compiled method whose signature the library does not state
+        # takes its receiver and any keyword arguments
+        return inspect.Signature([
+            inspect.Parameter(RECEIVER, inspect.Parameter.POSITIONAL_ONLY,
+                              annotation=cls),
+            inspect.Parameter("kwargs", inspect.Parameter.VAR_KEYWORD)])
     params = list(sig.parameters.values())
     if not params or any(p.name == RECEIVER for p in params[1:]):
         return None
@@ -104,6 +109,8 @@ def receiver_form(key: str):
         sig = _renamed_signature(getattr(cls, name), cls)
         if sig is None:
             return None
+        if list(sig.parameters) == [RECEIVER, "kwargs"]:
+            fn.__mathema_unstated_signature__ = True  # type: ignore[attr-defined]
     else:
         return None
     fn.__name__ = name

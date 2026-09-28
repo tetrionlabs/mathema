@@ -2754,13 +2754,19 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
             if missing else None)
     text = " ".join(str(t) for t in (cj.lhs, cj.rhs, cj.assuming) if t)
     named = set(re.findall(r"\b[A-Za-z_]\w*\b", text))
+    # a method whose library states no signature takes a pin of any
+    # name, passed on as a keyword
+    any_keyword = bool(getattr(fn, "__mathema_unstated_signature__", False))
+
+    def takes(p) -> bool:
+        return p in sig or any_keyword
     for name in sorted(cj.free_vars or ()):
         point = _single_point((cj.domain or {}).get(name))
-        if point is None or (name not in sig and name in named):
+        if point is None or (not takes(name) and name in named):
             continue
         pins[name] = (int(point) if isinstance(point, float)
                       and point.is_integer() else point)
-    missing = sorted(p for p in pins if p not in sig)
+    missing = sorted(p for p in pins if not takes(p))
     problem = (f"{', '.join(missing)} {'is not a parameter' if len(missing) == 1 else 'are not parameters'} "
                f"of {key}, so the pin names nothing to pass"
                if missing else None)
@@ -2769,7 +2775,7 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
             and param.kind not in (param.VAR_POSITIONAL, param.VAR_KEYWORD)
             and p not in (cj.domain or {}) and p not in pins
             and p not in named}
-    return kept, {p: v for p, v in pins.items() if p in sig}, problem
+    return kept, {p: v for p, v in pins.items() if takes(p)}, problem
 
 
 def defaults_meta(kept: dict, pins: dict) -> dict:

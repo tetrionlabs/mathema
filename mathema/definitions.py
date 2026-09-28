@@ -382,9 +382,10 @@ def _match_row(key: str, rows: list, positional: list, keywords: dict):
     except (TypeError, ValueError):
         return None
     passed = dict(bound.arguments)
+    extra: dict = {}
     for name, param in sig.parameters.items():
-        if param.kind is param.VAR_KEYWORD and passed.get(name):
-            return None
+        if param.kind is param.VAR_KEYWORD:
+            extra = dict(passed.pop(name, None) or {})
         if param.kind is param.VAR_POSITIONAL and passed.get(name):
             return None
     for row in sorted(rows, key=lambda r: (r.name != DEFINITION, r.name)):
@@ -404,7 +405,21 @@ def _match_row(key: str, rows: list, positional: list, keywords: dict):
             if got is _NOT_LITERAL or not _same_value(got, want):
                 ok = False
                 break
-        if not ok or any(p not in sig.parameters for p in row.pins):
+        # a keyword only **kwargs takes must be the row's pin, and a pin
+        # on no named parameter must be passed
+        if ok and any(p not in sig.parameters and p not in extra
+                      for p in row.pins):
+            ok = False
+        if ok and any(name not in row.pins
+                      or _literal(node) is _NOT_LITERAL
+                      or not _same_value(_literal(node), row.pins[name])
+                      for name, node in extra.items()):
+            ok = False
+        accepts = set(sig.parameters) | (set(extra) | set(row.pins)
+                                         if any(p.kind is p.VAR_KEYWORD for p
+                                                in sig.parameters.values())
+                                         else set())
+        if not ok or any(p not in accepts for p in row.pins):
             continue
         names = {p: passed[p] for p in row.params}
         premises = [(_substitute(lhs, names), rel, _substitute(rhs, names))

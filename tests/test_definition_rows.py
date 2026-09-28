@@ -25,7 +25,17 @@ from mathema.compendium import _bundled_dir
 from mathema.conjecture import _resolve_func_ref
 
 _FILES = ["numpy/reductions.claims.yaml", "numpy/definitions.claims.yaml",
-          "pandas/series.claims.yaml", "polars/series.claims.yaml"]
+          "numpy/definitions_2_4.claims.yaml", "pandas/series.claims.yaml",
+          "polars/series.claims.yaml"]
+
+
+def _applies(relative: str) -> bool:
+    from mathema.compendium import _installed_version, _version_in_range
+    with open(os.path.join(_bundled_dir(), relative)) as fh:
+        data = yaml.safe_load(fh)
+    installed = _installed_version(data["compendium"])
+    return installed is not None and _version_in_range(
+        installed, str(data["versions"]))
 
 
 def _definition_rows(relative: str) -> list:
@@ -51,6 +61,8 @@ def test_every_bundled_definition_row_holds_against_the_installed_library(
     from mathema.verify import verify_project
     rows = _definition_rows(relative)
     assert rows, relative
+    if not _applies(relative):
+        pytest.skip(f"the installed library is outside {relative}'s versions")
     try:
         result = verify_project(str(tmp_path), files=[
             os.path.join(_bundled_dir(), relative)])
@@ -66,7 +78,8 @@ def test_the_numbers_of_bundled_definition_rows():
     counted = {relative: len(_definition_rows(relative))
                for relative in _FILES}
     assert counted == {"numpy/reductions.claims.yaml": 5,
-                       "numpy/definitions.claims.yaml": 14,
+                       "numpy/definitions.claims.yaml": 12,
+                       "numpy/definitions_2_4.claims.yaml": 2,
                        "pandas/series.claims.yaml": 10,
                        "polars/series.claims.yaml": 11}
 
