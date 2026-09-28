@@ -88,6 +88,7 @@ def _not_proven_and_false(fn, law):
     assert p.verdict == "falsified", (law, p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("fn, true, false", [
     # a running maximum is at least the element it runs to
     (running_peak, "for a in R^n, min(f(a) - a) >= 0",
@@ -120,6 +121,7 @@ def test_the_ratio_bound_needs_a_positive_vector():
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("fn, true, false", [
     (least, "for xs in [0, 1]^n, f(xs) >= 0",
      "for xs in [0, 1]^n, f(xs) > 0"),
@@ -138,6 +140,7 @@ def test_least_and_greatest_elements_lower_through_their_bounds(fn, true,
     _not_proven_and_false(fn, false)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_table_column_reads_as_a_vector_on_derive():
     p = _proven(column_total, "for df in R^n, f(df) ~= sum(df.w)")
     assert [u["key"] for u in p.meta["mathema.definitions"]] == \
@@ -145,6 +148,7 @@ def test_a_table_column_reads_as_a_vector_on_derive():
     _not_proven_and_false(column_total, "for df in R^n, f(df) ~= sum(df.r)")
 
 
+@pytest.mark.needs_full_proof_budget
 def test_elementwise_division_of_two_columns():
     _proven(ratio_total, "for df in [1, 2]^n, f(df) ~= sum(df.w / df.r)")
     _not_proven_and_false(ratio_total,

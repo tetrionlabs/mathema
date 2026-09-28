@@ -141,6 +141,7 @@ class Bounds:
     def __init__(self, elements: "dict | None" = None):
         self.elements = dict(elements or {})
         self.extrema: dict = {}
+        self.texts: dict = {}
         self.running_bases: dict = {}
         self._extremum_keys: dict = {}
         self._running_keys: dict = {}
@@ -152,6 +153,7 @@ class Bounds:
                                **_sign_kwargs(v.elem))
             self._extremum_keys[key] = sym
             self.extrema[sym] = (kind, v)
+            self.texts[sym] = text
         return self._extremum_keys[key]
 
     def running(self, kind: str, v: "Vec", text: str):
@@ -685,13 +687,14 @@ def order_by_bounds(lhs, rhs, relation: str, bounds: Bounds,
         ok, used = _elementwise(diff, strict, bounds, lengths, context,
                                 extensive)
         if ok:
-            return "proven", f"element by element from {used}"
+            return "proven", f"element by element, since {used}"
         return "undecided", "the element bounds do not settle it"
     if len(present) > 1:
         return "undecided", ("an ordering between two extrema is outside "
                              "the bound lemmas")
     s = present[0]
     kind, v = bounds.extrema[s]
+    text = bounds.texts.get(s, str(s))
     a = diff.coeff(s)
     rest = sympy.expand(diff - a * s)
     if s in rest.free_symbols or not a.is_number or a == 0:
@@ -700,31 +703,26 @@ def order_by_bounds(lhs, rhs, relation: str, bounds: Bounds,
     # a < 0, with R = -rest/a
     bound = -rest / a
     above = bool(a > 0)
-    word = "least" if kind == "min" else "greatest"
-    if (kind == "min") == above:
-        # min(v) >= R or max(v) <= R: every element is on that side
-        e = (v.elem - bound) if kind == "min" else (bound - v.elem)
+    op = (">" if strict else ">=") if above else ("<" if strict else "<=")
+
+    def by_elements(e):
         ok, used = _elementwise(e, strict, bounds, lengths, context,
                                 extensive)
-        if ok:
-            return "proven", (f"every element of {s.name[4:-1]} is "
-                              f"{'at least' if kind == 'min' else 'at most'}"
-                              f" {bound}, so its {word} element is"
-                              + (f" ({used})" if used else ""))
-        return "undecided", (f"the element bounds do not show every element "
-                             f"{'>=' if kind == 'min' else '<='} {bound}")
-    if not strict:
-        gap = normalised(bound - _mean_of(v), lengths)
-        if gap == 0:
-            return "proven", (f"the {word} element of a vector is "
-                              f"{'at most' if kind == 'min' else 'at least'}"
-                              f" its mean")
-    e = (bound - v.elem) if kind == "min" else (v.elem - bound)
-    ok, used = _elementwise(e, strict, bounds, lengths, context, extensive)
-    if ok:
-        return "proven", (f"every element is "
+        if not ok:
+            return None
+        return ("proven", f"every element of {text} is {op} {bound}"
+                          + (f" ({used})" if used else "")
+                          + f", so {kind}({text}) is too")
+    if (kind == "min") == above:
+        # min(v) >= R or max(v) <= R: every element is on that side
+        found = by_elements((v.elem - bound) if above else (bound - v.elem))
+        return found or ("undecided", f"the element bounds do not show every "
+                                      f"element of {text} {op} {bound}")
+    if not strict and normalised(bound - _mean_of(v), lengths) == 0:
+        return "proven", (f"{kind}({text}) is "
                           f"{'at most' if kind == 'min' else 'at least'} "
-                          f"{bound}, so its {word} element is"
-                          + (f" ({used})" if used else ""))
-    return "undecided", (f"neither the mean nor the element bounds place "
-                         f"the {word} element")
+                          f"mean({text})")
+    # min(v) <= R or max(v) >= R: shown when every element is
+    found = by_elements((bound - v.elem) if not above else (v.elem - bound))
+    return found or ("undecided", f"neither mean({text}) nor the element "
+                                  f"bounds place {kind}({text}) {op} {bound}")

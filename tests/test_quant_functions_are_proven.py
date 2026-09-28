@@ -39,6 +39,7 @@ def _is_false(fn, law):
     assert p.counterexample, (law, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("fn, rows", [
     (q.mean_pd, ["pandas.Series.mean definition"]),
     (q.mean_np, ["numpy.mean definition"]),
@@ -51,6 +52,7 @@ def test_a_mean_lies_between_the_least_and_the_greatest_element(fn, rows):
     _is_false(fn, "for xs in R^n, f(xs) > max(xs)")
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("law", [
     "for prices in [1, 100]^n, f(prices) <= 0",
     "for prices in [1, 100]^n, f(prices) >= -1",
@@ -72,6 +74,7 @@ def test_a_maximum_drawdown_is_not_always_negative_nor_above_a_half(law):
     _is_false(q.max_drawdown, law)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_weighted_return_is_the_dot_product_of_its_columns():
     p = _one(q.weighted_return, "for df in [0, 1]^n, f(df) ~= dot(df.w, df.r)")
     assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
@@ -80,6 +83,7 @@ def test_a_weighted_return_is_the_dot_product_of_its_columns():
               "for df in [0, 1]^n, f(df) ~= dot(df.w, df.w)")
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_weighted_return_reads_a_column_by_item_as_by_attribute():
     p = _one(q.weighted_return,
              'for df in [0, 1]^n, f(df) ~= dot(df["r"], df["w"])')
@@ -91,6 +95,7 @@ _LEVERAGE = ("for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "
              "f(s(returns, c)) ~= f(returns)")
 
 
+@pytest.mark.needs_full_proof_budget
 def test_sharpe_and_volatility_stay_proven():
     p = _one(q.sharpe, _LEVERAGE)
     assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)

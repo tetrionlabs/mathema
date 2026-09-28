@@ -3876,10 +3876,14 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                     rows.append(row)
         sketches = [f"{label}: {p.sketch}" for p, label in zip(probes, labels)
                     if p.sketch]
+        # a proof's quantifier every part states alike is the whole's
+        quantifiers = {p.condition for p in probes}
         return Probe(name, statement, "proven",
                      route=_conjunction_route(
                          [p.route for p in probes], "derive"),
                      sketch="; ".join(sketches) or None,
+                     condition=(quantifiers.pop() if len(quantifiers) == 1
+                                else None),
                      note=f"every {unit} of the {what} proven",
                      meta={"mathema.definitions": rows} if rows else None)
     if all(v in ("proven", "holds") for v in verdicts):

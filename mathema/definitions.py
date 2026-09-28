@@ -1056,6 +1056,31 @@ def _element_sign(element) -> dict:
             if k in ("positive", "negative", "nonnegative", "nonpositive")}
 
 
+def _element_text(element) -> str:
+    """An element bound as a proof's quantifier shows it: `ℝ`, or the
+    one interval every element lies in."""
+    pieces = getattr(element, "pieces", ()) or ()
+    if not pieces:
+        return "ℝ"
+    if len(pieces) == 1 and isinstance(pieces[0], (tuple, list)) \
+            and not isinstance(pieces[0], frozenset):
+        lo, hi = pieces[0]
+        return (f"{'[' if getattr(pieces[0], 'closed_lo', True) else '('}"
+                f"{lo}, {hi}"
+                f"{']' if getattr(pieces[0], 'closed_hi', True) else ')'}")
+    return "their declared domain"
+
+
+def _over(seqs: dict, elements: dict) -> str:
+    """The vectors a proof covers, grouped by the bound on their
+    elements: `returns over [-0.1, 0.1]`, `w, r over [0.0, 1.0]`."""
+    groups: dict = {}
+    for name, (base, _length) in sorted(seqs.items()):
+        groups.setdefault(_element_text(elements.get(base)), []).append(name)
+    return ", ".join(f"{', '.join(names)} over {text}"
+                     for text, names in groups.items())
+
+
 def lengths_of(seqs: dict) -> list:
     """The distinct length symbols of the lowered sequences, in the
     order first met."""
@@ -1257,9 +1282,10 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             extensive=extensive)
         if by_bounds is not None:
             status, why = by_bounds
-            return {"proven": status == "proven", "result": ProofResult(
-                "proven" if status == "proven" else "undecided",
-                sketch=why)}
+            return {"proven": status == "proven", "bounds": True,
+                    "result": ProofResult(
+                        "proven" if status == "proven" else "undecided",
+                        sketch=why)}
         result = _prove_relation(normalised(lv, bases), normalised(rv, bases),
                                  rel, scalar_domain, q, assumed,
                                  extensive=extensive)
@@ -1301,12 +1327,16 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             f"{by_length.get(L, L)} of every length"
             + (f" from {shortest[L]}" if shortest.get(L, 1) > 1 else "")
             for L in sorted(set(lengths_of(seqs)), key=str))
+        detail = outcome.get("result")
+        lemma = (f" ({detail.sketch})" if detail is not None
+                 and getattr(detail, "status", None) == "proven"
+                 and detail.sketch and outcome.get("bounds") else "")
         return ProofResult(
             "proven", meta=meta,
             sketch=f"{through}, lowered to sums over {vectors} at a symbolic "
-                   f"length: the relation holds for every length",
-            quantifier=(f"∀ {vectors} over ℝ with nothing missing, "
-                        f"{spans}" if seqs else None))
+                   f"length: the relation holds for every length{lemma}",
+            quantifier=(f"∀ {_over(seqs, elements)} with nothing "
+                        f"missing, {spans}" if seqs else None))
     detail = outcome.get("result")
     why = (detail.sketch if detail is not None and detail.sketch else
            "the difference of the two sides does not simplify to 0")
