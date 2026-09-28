@@ -56,3 +56,9 @@ def test_a_decorated_function_s_module_names_are_resolved():
 def test_a_claim_on_an_enforced_function_binds_names_from_its_module():
     (p,) = check_conjectures(twice, [claim("for x in [0, 1], twice(x) == double(x)")])
     assert p.verdict in ("proven", "holds"), p.note
+
+
+def test_a_callable_with_no_globals_of_its_own_has_an_empty_scope():
+    import pytest
+    np = pytest.importorskip("numpy")
+    assert module_scope(np.mean) == {}

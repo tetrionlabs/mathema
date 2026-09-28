@@ -4143,7 +4143,18 @@ def _merge_under(meta: dict, extra: dict) -> dict:
 _WITNESS_SHRINK_EVALUATIONS = 400
 
 
-def _failure_at(cj, kinds, env, args, code_l, code_r) -> "str | None":
+def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set | None]":
+    """Intent:
+        `(names, shown)` for `_fmt` on a witness: over a language, every
+        parameter by name with only the ones the claim reads shown;
+        `(None, None)` otherwise, the positional tuple.
+    """
+    if any(getattr(cj_domain.get(p), "base_type", None) == "L" for p in kinds):
+        return tuple(kinds), _names_in_claim(cj)
+    return None, None
+
+
+def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "str | None":
     """Intent:
         The counterexample text the claim fails with at `args` (a raise,
         a membership, or a comparison, in the claim loop's own words),
@@ -4157,7 +4168,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r) -> "str | None":
         lv = eval(code_l, {"__builtins__": {}}, trial_env)
         rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
     except Exception as e:
-        return (f"{_fmt(tuple(args))}: raised {type(e).__name__}, narrow "
+        return (f"{_fmt(tuple(args), *labels)}: raised {type(e).__name__}, narrow "
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
     if cj.relation in ("in", "not in"):
@@ -4169,7 +4180,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r) -> "str | None":
             except TypeError:
                 return None
         if member != (cj.relation == "in"):
-            return (f"{_fmt(tuple(args))}: {lv!r} is "
+            return (f"{_fmt(tuple(args), *labels)}: {lv!r} is "
                     f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
         return None
     if is_missing(lv) or is_missing(rv):
@@ -4179,7 +4190,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r) -> "str | None":
                                     exact_inequality=cj.tolerance is None,
                                     rel_tol=_declared_rel_tol(cj))
     if ok is False:
-        return f"{_fmt(tuple(args))}: {lv!r} vs {rv!r}"
+        return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
     return None
 
 
@@ -4195,7 +4206,8 @@ def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
     from .domain import LanguageRef, domain_contains, path_bindings_hold
     from .languages import resolve_language
     args = list(args)
-    current = _failure_at(cj, kinds, env, args, code_l, code_r)
+    labels = _witness_labels(cj, kinds, cj_domain)
+    current = _failure_at(cj, kinds, env, args, code_l, code_r, labels)
     if current is None:
         return None
     budget, steps = _WITNESS_SHRINK_EVALUATIONS, 0
@@ -4239,7 +4251,7 @@ def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
                         continue
                     budget -= 1
                     trial = [*args[:i], candidate, *args[i + 1:]]
-                    failure = _failure_at(cj, kinds, env, trial, code_l, code_r)
+                    failure = _failure_at(cj, kinds, env, trial, code_l, code_r, labels)
                     if failure is not None:
                         args, current, steps, improved = trial, failure, steps + 1, True
                         break
@@ -6516,7 +6528,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                    if p in kinds or p in (cj.free_vars or ())]
     as_arrays = bool(array_names) and _numpy() is not None
     # a witness over vectors or matrices names each argument
-    arg_names = tuple(kinds) if as_arrays else None
+    arg_names, shown_names = _witness_labels(cj, kinds, cj_domain)
+    if as_arrays:
+        arg_names, shown_names = tuple(kinds), None
     table_columns = {p: _table_columns(p, cj, facts)
                      for p, k in kinds.items() if k == "table"}
     fn_call = calling(fn, facts)
@@ -6759,12 +6773,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             except Exception as e:
                 checked += 1
                 if raised_type is not None and not isinstance(e, raised_type):
-                    cx = (f"{_fmt(tuple(args), arg_names)}: raised "
+                    cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: raised "
                           f"{type(e).__name__}, claimed {cj.rhs}")
                     break
                 continue
             checked += 1
-            cx = f"{_fmt(tuple(args), arg_names)}: returned {v!r} instead of raising"
+            cx = f"{_fmt(tuple(args), arg_names, shown_names)}: returned {v!r} instead of raising"
             break
         try:
             lv = eval(code_l, {"__builtins__": {}}, env)
@@ -6825,7 +6839,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     break
             if boundary:
                 checked += 1
-                cx = (f"{_fmt(tuple(args), arg_names)}: raised {type(e).__name__} at a "
+                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: raised {type(e).__name__} at a "
                       f"floating-point boundary (the same inputs nudged "
                       f"within ε evaluate cleanly), a clamp at the raising "
                       f"operation's argument would remove the instability")
@@ -6836,7 +6850,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               "blame": "implementation",
                               "cause": "implementation:sub-epsilon-boundary",
                               "representation": "f64",
-                              "witness": _fmt(tuple(args), arg_names)}
+                              "witness": _fmt(tuple(args), arg_names, shown_names)}
                 break
             # a TypeError under a NON-INTEGER sample against a callable
             # with an int-typed parameter is a claim-domain
@@ -6863,7 +6877,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         cj.name, statement, "skipped:misspecified",
                         route=None,
                         note=f"{note}; {call_raised[0]} raised TypeError at "
-                             f"{_fmt(tuple(args), arg_names)}: parameter(s) "
+                             f"{_fmt(tuple(args), arg_names, shown_names)}: parameter(s) "
                              f"{', '.join(int_params)} of "
                              f"{call_raised[0]} are int-typed but the "
                              f"claim's domain admits non-integers "
@@ -6885,21 +6899,21 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         cj.name, statement, "skipped:misspecified",
                         route=None,
                         note=f"{note}; f raised {type(e).__name__} at "
-                             f"{_fmt(tuple(args), arg_names)}, sampled as a list: "
+                             f"{_fmt(tuple(args), arg_names, shown_names)}, sampled as a list: "
                              + "; ".join(listed))
             # a raise is not a value: the claim asserts an equality or
             # ordering AT this in-domain point, and there is nothing on
             # one side to compare, pedantically, that falsifies it.
             checked += 1
             if isinstance(e, ComplexResult):
-                cx = (f"{_fmt(tuple(args), arg_names)}: {e}, which a real claim reads "
+                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {e}, which a real claim reads "
                       f"as a raise; narrow the claim's domain to where every "
                       f"call is real, or annotate the function complex")
                 break
-            cx = (f"{_fmt(tuple(args), arg_names)}: raised {type(e).__name__}, narrow "
+            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: raised {type(e).__name__}, narrow "
                   "the claim's domain to where every call returns, or state "
                   "the raising region as its own raises(...) claim")
-            cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args), arg_names))
+            cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args), arg_names, shown_names))
             break
         if cj.relation in ("in", "not in"):
             # membership is exact: a value is in the language or the
@@ -6920,7 +6934,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if member != (cj.relation == "in"):
                 if as_arrays:
                     lv = _linalg_eval.shown(lv)
-                cx = (f"{_fmt(tuple(args), arg_names)}: {lv!r} is "
+                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {lv!r} is "
                       f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
                 break
             continue
@@ -6931,9 +6945,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # in-domain point, `!=` included, and the witness names
             # the callee that returned it
             checked += 1
-            cx = (f"{_fmt(tuple(args), arg_names)}: {call_nan[0]} returned nan"
+            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {call_nan[0]} returned nan"
                   if call_nan[0] is not None else
-                  f"{_fmt(tuple(args), arg_names)}: "
+                  f"{_fmt(tuple(args), arg_names, shown_names)}: "
                   f"{_linalg_eval.shown(lv)!r} vs "
                   f"{_linalg_eval.shown(rv)!r}, and a nan is no value")
             break
@@ -6944,7 +6958,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             checked += 1
             if cj.relation in ("==", "~=", "<=", ">="):
                 continue
-            cx = (f"{_fmt(tuple(args), arg_names)}: both sides are "
+            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: both sides are "
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, the same point, "
                   f"which {cj.relation} does not admit")
             break
@@ -6954,7 +6968,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # (the case where `math` raises): against a value, or the
             # opposite infinity, every value relation fails
             checked += 1
-            cx = (f"{_fmt(tuple(args), arg_names)}: {call_inf[0]} returned "
+            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {call_inf[0]} returned "
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "
                   f"infinity for a finite input is no value")
             break
@@ -7011,7 +7025,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 ok = True
                 gap = _linalg_eval.largest_gap(lv, rv)
                 if gap > roundoff_absorbed:
-                    roundoff_absorbed, roundoff_at = gap, _fmt(tuple(args), arg_names)
+                    roundoff_absorbed, roundoff_at = gap, _fmt(tuple(args), arg_names, shown_names)
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex value), or two
@@ -7033,14 +7047,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if ok and cj.tolerance is None:
             gap = ordering_shortfall(lv, rv, cj.relation)
             if gap > absorbed:
-                absorbed, absorbed_at = gap, _fmt(tuple(args), arg_names)
+                absorbed, absorbed_at = gap, _fmt(tuple(args), arg_names, shown_names)
         if not ok:
             aux_part = ("; " + ", ".join(
                 f"{a}={env[a]:.3g}" if isinstance(env[a], (int, float))
                 else f"{a}={env[a]!r}" for a in aux) if aux else "")
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
-            cx = f"{_fmt(tuple(args), arg_names)}{aux_part}: {_sides(lv, rv)}"
+            cx = f"{_fmt(tuple(args), arg_names, shown_names)}{aux_part}: {_sides(lv, rv)}"
             break
     shrunk_meta: dict = {}
     if cx is not None and cx_stratum is None and assum_eval is None and not aux \

@@ -1422,14 +1422,19 @@ def _fmt_value_of(v) -> str:
     return shown
 
 
-def _fmt(args: tuple, names: tuple[str, ...] | None = None) -> str:
+def _fmt(args: tuple, names: tuple[str, ...] | None = None,
+         shown: "set[str] | None" = None) -> str:
     """A counterexample's argument tuple, legible on its own: labeled
     `name=value` pairs when the caller's own parameter names are known,
     a bare positional tuple otherwise. Unlabeled, a two-element
     counterexample like `([...], -5.54)` reads as (input, output);
-    it's actually (x, alpha), both inputs."""
+    it's actually (x, alpha), both inputs. With `shown`, only the named
+    arguments in it appear (all of them when none is)."""
     if names is not None and len(names) == len(args):
-        return ", ".join(f"{n}={_fmt_value(a)}" for n, a in zip(names, args))
+        pairs = list(zip(names, args))
+        if shown is not None and any(n in shown for n, _ in pairs):
+            pairs = [(n, a) for n, a in pairs if n in shown]
+        return ", ".join(f"{n}={_fmt_value(a)}" for n, a in pairs)
     return "(" + ", ".join(_fmt_value(a) for a in args) + ")"
 
 
