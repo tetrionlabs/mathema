@@ -403,6 +403,41 @@ own matrix algebra, not the function's body. What stays sampled for
 every claim: norms, the condition number, eigenvalues other than their
 sum and product, `solve`, `pinv` and the decompositions.
 
+### Through numpy's own functions
+
+A function that calls numpy is read through numpy's
+[definition rows](claims-transfer.md#definition-rows): `np.matmul(A,
+A.T)` becomes `A @ transpose(A)`, and the claim is decided by the
+matrix algebra above. `numpy.linalg.solve`'s definition row,
+`f(a, b) ~= solve(a, b)` where `det(a) != 0`, is stated over a matrix
+and a vector together, which a proof through definition rows does not
+read, so a claim about a function calling it is decided by sampling.
+The same identity in the grammar's own words, `A @ solve(A, b) ~= b`,
+is proven (see the vocabulary above).
+
+<!-- example: numpy-functions run requires=numpy -->
+```python
+import numpy as np
+
+def gram(A: np.ndarray):
+    return np.matmul(A, A.T)
+
+def solve_for(A: np.ndarray, b: np.ndarray):
+    return np.linalg.solve(A, b)
+```
+
+<!-- example: numpy-functions verdicts fn=gram -->
+```
+for A in R^(n,n), f(A).T == f(A)   # proven
+for A in R^(n,n), f(A) == A   # falsified
+```
+
+<!-- example: numpy-functions verdicts fn=solve_for -->
+```
+for A in R^(n,n), b in R^n, assuming det(A) != 0, A @ f(A, b) == b   # holds
+for A in R^(n,n), b in R^n, assuming det(A) != 0, f(A, b) == b   # falsified
+```
+
 ## Runtime enforcement
 
 `@enforce_structure` is the structure analogue of `@enforce_domain` and

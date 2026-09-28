@@ -59,8 +59,8 @@ claim like any other, with a `note:` on the row where the library's
 behaviour needs saying in prose. A library function's intent is its
 own, read from its docstring like any function's, so a compendium file
 states none. mathema bundles such files for `math`, `numpy`
-(numpy's 41 covered functions split into scalars, reductions, bounds
-and definitions), `pandas.Series` and `polars.Series` (their
+(numpy's 81 covered functions split into scalars, reductions, bounds,
+definitions, linear algebra, elementwise functions and statistics), `pandas.Series` and `polars.Series` (their
 [definition rows](#definition-rows)), and a project states its own
 anywhere its claims files
 already live, `claims/numpy.claims.yaml` for instance, where a key
@@ -259,6 +259,27 @@ None and `pd.NA` in its reductions and keeps a missing position
 missing in `cumsum` and `cumprod`; polars skips a null but carries a
 NaN through as a float (a Series holding NaN has mean NaN, and `count`
 counts it).
+
+#### numpy's rows
+
+numpy's definition rows live in `mathema/compendium/numpy/`, one file
+per area, each row stated over inputs with nothing missing:
+
+| file | functions |
+|---|---|
+| `definitions.claims.yaml`, `reductions.claims.yaml`, `definitions_2_4.claims.yaml` | `mean`, `std`, `var`, `sum`, `prod`, `cumsum`, `cumprod`, `trace`, `transpose`, `dot`, `linalg.inv`, `linalg.det`, and the ndarray's `mean`, `std`, `sum` and `T` |
+| `linalg.claims.yaml` | `linalg.norm` (`sqrt(sum(x ** 2))` for a vector, `ord=1` and `ord=2`, and the Frobenius norm of a matrix), `linalg.solve`, `linalg.pinv`, `linalg.eigvalsh` (symmetric), `linalg.matrix_rank`, `linalg.cond`, `outer`, `kron`, `diag`, `identity`, `eye` |
+| `linalg_2_4.claims.yaml` (numpy 2.4 on) | `matmul` |
+| `elementwise.claims.yaml` (numpy 2.4 on) | `absolute`, `fabs`, `square`, `negative`, `maximum` (`(x1 + x2 + abs(x1 - x2)) / 2`) and `minimum` (the same with `-`), `sign` |
+| `statistics.claims.yaml` | `max`, `min`, `amax`, `amin`, `diff`, `nansum`, `nanprod`, `nanmean`, `nanstd`, `nanvar`, `nanmax`, `nanmin`, the ndarray's `min`, `max`, `prod`, `cumsum`, `cumprod` and `var`; `median`, `percentile` and `quantile` state the range their value lies in |
+
+A function whose calls all read through rows is decided as
+mathematics: `np.linalg.norm(x) >= 0` and `np.linalg.norm(c * x) == c *
+np.linalg.norm(x)` are proven for every length, as are
+`np.maximum(x, y) - np.minimum(x, y) ~= abs(x - y)` and
+`np.matmul(A, A.T)` being symmetric. numpy states its ufuncs' and
+`matmul`'s signatures from 2.4 on, so the files holding them apply
+from there.
 
 The derive route reads a function's library calls through these rows
 (see [runtime types](runtime-types.md#proofs-on-pandas-and-numpy-code)),
