@@ -66,6 +66,37 @@ def _root_module(obj) -> str:
     return (getattr(obj, "__module__", "") or "").split(".", 1)[0]
 
 
+def _is_nan(v) -> bool:
+    return isinstance(v, float) and v != v
+
+
+def _pandas_value(name: str):
+    def value():
+        import pandas as pd
+        return getattr(pd, name)
+    return value
+
+
+def _is_pandas(name: str):
+    def detect(v) -> bool:
+        return type(v).__name__ == {"NA": "NAType", "NaT": "NaTType"}[name]
+    return detect
+
+
+#: the spellings a pandas column can hold a hole as: `nan` in a float
+#: column, `null` (`None`) in an object column, `NA` in a nullable
+#: column, and `NaT` in a datetime column, which is detected but drawn
+#: only when a definition row names it
+PANDAS_SPELLINGS = {"nan": (lambda: math.nan, _is_nan),
+                    "null": (lambda: None, lambda v: v is None),
+                    "NA": (_pandas_value("NA"), _is_pandas("NA")),
+                    "NaT": (_pandas_value("NaT"), _is_pandas("NaT"))}
+#: the spellings a polars column can hold a hole as: `null`, and `nan`,
+#: a float to polars and a hole to mathema
+POLARS_SPELLINGS = {"null": (lambda: None, lambda v: v is None),
+                    "nan": (lambda: math.nan, _is_nan)}
+
+
 def _missing_to(values, missing, fill) -> list:
     return [fill if k in missing else v for k, v in enumerate(values)]
 
@@ -109,6 +140,13 @@ class ListAdapter:
 
     #: how a list can hold a missing position
     MISSING = {"none": lambda: None, "nan": lambda: math.nan}
+    #: the spellings a list element can hold a hole as, each with its
+    #: realiser and detector, and the ones the class stands for
+    SPELLINGS = {"null": (lambda: None, lambda v: v is None),
+                 "nan": (lambda: math.nan, _is_nan)}
+    MISSING_MEMBERS = ("null", "nan")
+    #: the spellings of the list itself being absent
+    ABSENCE = ("None",)
 
     def realise(self, abstract, options):
         if isinstance(abstract, AbstractMat):
@@ -160,6 +198,9 @@ class NumpyAdapter:
     name = "numpy.ndarray"
     kinds = frozenset({"vec", "mat"})
     requires = ("numpy",)
+    SPELLINGS = {"nan": (lambda: math.nan, _is_nan)}
+    MISSING_MEMBERS = ("nan",)
+    ABSENCE = ("None",)
 
     def detect(self, annotation):
         text = _annotation_text(annotation)
@@ -224,6 +265,9 @@ class PandasSeriesAdapter:
     name = "pandas.Series"
     kinds = frozenset({"vec"})
     requires = ("pandas",)
+    SPELLINGS = PANDAS_SPELLINGS
+    MISSING_MEMBERS = ("nan", "null", "NA")
+    ABSENCE = ("None",)
 
     def detect(self, annotation):
         return _pandas_detect(self, annotation, "Series", "vec")
@@ -249,6 +293,9 @@ class PandasDataFrameAdapter:
     name = "pandas.DataFrame"
     kinds = frozenset({"table"})
     requires = ("pandas",)
+    SPELLINGS = PANDAS_SPELLINGS
+    MISSING_MEMBERS = ("nan", "null", "NA")
+    ABSENCE = ("None",)
 
     def detect(self, annotation):
         return _pandas_detect(self, annotation, "DataFrame", "table")
@@ -320,6 +367,9 @@ class PolarsSeriesAdapter:
     name = "polars.Series"
     kinds = frozenset({"vec"})
     requires = ("polars",)
+    SPELLINGS = POLARS_SPELLINGS
+    MISSING_MEMBERS = ("null", "nan")
+    ABSENCE = ("None",)
 
     def detect(self, annotation):
         return _polars_detect(self, annotation, "Series", "vec")
@@ -344,6 +394,9 @@ class PolarsDataFrameAdapter:
     name = "polars.DataFrame"
     kinds = frozenset({"table"})
     requires = ("polars",)
+    SPELLINGS = POLARS_SPELLINGS
+    MISSING_MEMBERS = ("null", "nan")
+    ABSENCE = ("None",)
 
     def detect(self, annotation):
         return _polars_detect(self, annotation, "DataFrame", "table")

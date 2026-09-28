@@ -166,6 +166,10 @@ class _SpecialCycle:
         self._dispensed += 1
         return self._pool.pop()
 
+    def first_values(self) -> list:
+        """The values dispensed first, in order."""
+        return list(self._first)
+
     def guaranteed_remaining(self) -> bool:
         return self._dispensed < len(self._values)
 

@@ -41,6 +41,9 @@ from ._abstract import (AbstractMat, AbstractTable, AbstractVec, NotMine,
                         abstract_of, plain)
 from ._adapters import (BUILTIN_ADAPTERS, KINDS, Detection, ListAdapter,
                         RuntimeTypeAdapter)
+from ._missing import (Definition, absence_defined, definitions, members,
+                       resolve_absence, resolve_missing, set_definitions,
+                       spellings)
 
 #: the parameter kinds (`analysis.Facts.param_kinds`) sampled as a
 #: sequence: a plain sequence, and a vector or matrix whose runtime type
@@ -597,8 +600,9 @@ def strong_hints(facts) -> list:
 
 
 __all__ = [
-    "AbstractMat", "AbstractTable", "AbstractVec", "Detection", "ListAdapter",
-    "NotMine",
+    "AbstractMat", "AbstractTable", "AbstractVec", "Definition", "Detection",
+    "ListAdapter", "NotMine", "absence_defined", "definitions", "members",
+    "resolve_absence", "resolve_missing", "set_definitions", "spellings",
     "RUNTIME_TYPES_GROUP", "RuntimeType", "SEQUENCE_KINDS", "RuntimeTypeAdapter",
     "abstract_of", "adapter", "adapters", "calling", "descriptor_names",
     "detect_annotation", "detect_parameters", "identity_entries",

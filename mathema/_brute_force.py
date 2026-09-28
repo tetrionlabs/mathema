@@ -39,12 +39,16 @@ __all__ = ["BRUTE_FORCE_POINT_BUDGET", "brute_force_proof"]
 BRUTE_FORCE_POINT_BUDGET = 100_000
 
 
-def _sweep_grid(params: list, cj_domain: dict, budget: int):
+def _sweep_grid(params: list, cj_domain: dict, budget: int,
+                resolution: "dict | None" = None):
     """Intent:
         `{param: (value, ...)}` for every parameter, when each one's
         declared domain is finite and their product is within `budget`.
         `None` when any parameter is unbounded, real-typed, or the grid
-        is too large.
+        is too large. A finite set's listed sentinels are visited as the
+        real values they stand for, read from `resolution` (`{param:
+        domain.MissingDefaults}`): `None` for absence, one value per
+        member of the hole class.
 
     Notes:
         The product is checked as it grows rather than after, so a
@@ -57,7 +61,10 @@ def _sweep_grid(params: list, cj_domain: dict, budget: int):
         bound = cj_domain.get(p)
         if bound is None:
             return None            # undeclared, so unbounded
-        members = finite_members(bound, budget)
+        policy = (resolution or {}).get(p)
+        members = finite_members(bound, budget,
+                                 members=policy.members if policy else None,
+                                 absence=policy.absence if policy else ())
         if members is None:
             return None
         total *= len(members)
@@ -67,8 +74,97 @@ def _sweep_grid(params: list, cj_domain: dict, budget: int):
     return grid
 
 
+def _raised_at(fn, facts, point: dict) -> "str | None":
+    """The exception type the function raises when called with `point`
+    as its arguments, or None when it returns (or the point does not
+    name every parameter)."""
+    if any(p not in point for p in facts.params):
+        return None
+    try:
+        fn(*[point[p] for p in facts.params])
+    except Exception as e:
+        return type(e).__name__
+    return None
+
+
+def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
+                  resolution: "dict | None"):
+    """Intent:
+        The sweep of a `raises(...)` claim over a finite domain: every
+        point must make the function raise (the stated exception, when
+        one is named). `proven` when each does, `disproven` at the first
+        point where the call returns or raises another exception, None
+        when the domain is not finite or a point's call fails before
+        reaching the function.
+    """
+    from .conjecture import _SAFE_FUNCS, _resolve_exception_type
+    from ._math_vocab import MATH_CONSTANTS
+    from .gates import _fmt_point
+    names = [p for p in facts.params if p in cj_domain]
+    if not names or any(p not in cj_domain for p in facts.params):
+        return None
+    grid = _sweep_grid(names, cj_domain, budget, resolution)
+    if grid is None:
+        return None
+    wanted = _resolve_exception_type(cj.rhs, fn) if cj.rhs else None
+    if cj.rhs and wanted is None:
+        return None
+    try:
+        code = compile(cj.lhs, "<raises>", "eval")
+    except SyntaxError:
+        return None
+    checked = 0
+    for combo in itertools.product(*(grid[n] for n in names)):
+        point = dict(zip(names, combo))
+        raised: list = []
+
+        def tagged(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                raised.append(e)
+                raise
+
+        env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **(bound_funcs or {}),
+               "f": tagged, **point}
+        where = _fmt_point(point, names)
+        try:
+            value = eval(code, {"__builtins__": {}}, env)
+        except Exception:
+            if not raised:
+                return None
+            if wanted is not None and not isinstance(raised[0], wanted):
+                return ProofResult(
+                    "disproven",
+                    sketch=f"at {where} the call raised "
+                           f"{type(raised[0]).__name__}, not {cj.rhs}",
+                    counterexample=f"{where}: raised "
+                                   f"{type(raised[0]).__name__}, claimed {cj.rhs}",
+                    witness=dict(point),
+                    meta={"mathema.derive_route": "brute_force"})
+            checked += 1
+            continue
+        return ProofResult(
+            "disproven",
+            sketch=f"at {where} the call returned {value!r} instead of raising",
+            counterexample=f"{where}: returned {value!r} instead of raising",
+            witness=dict(point),
+            meta={"mathema.derive_route": "brute_force"})
+    if checked == 0:
+        return None
+    plural = "point" if checked == 1 else "points"
+    return ProofResult(
+        "proven",
+        sketch=f"the declared domain admits {checked} {plural}, and the "
+               f"call raises at every one",
+        quantifier=f"∀ {', '.join(names)} in the declared finite domain "
+                   f"({checked} {plural})",
+        meta={"mathema.derive_route": "brute_force"})
+
+
 def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
-                      budget: int | None = None):
+                      budget: int | None = None,
+                      resolution: "dict | None" = None):
     """Intent:
         A `ProofResult` for a claim whose declared domain is finite and
         small enough to visit entirely, or `None` when the claim is not
@@ -108,12 +204,15 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     # read at call time, not bound as a default, so the budget stays one
     # knob rather than a value frozen when this module was imported
     budget = BRUTE_FORCE_POINT_BUDGET if budget is None else budget
+    if cj.relation == "raises":
+        return None if assumption else _raises_proof(
+            cj, fn, facts, cj_domain, bound_funcs, budget, resolution)
     from .gates import _fmt_point, _point_evaluator
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assumption)
     if deps is None:
         return None
     names = list(deps["names"])
-    grid = _sweep_grid(names, cj_domain, budget)
+    grid = _sweep_grid(names, cj_domain, budget, resolution)
     if grid is None:
         return None
     evaluate, admits = deps["evaluate"], deps["admits"]
@@ -129,10 +228,12 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         if verdict is None:
             return None
         if verdict is False:
+            raised = _raised_at(fn, facts, point)
             return ProofResult(
                 "disproven",
-                sketch=f"the claim fails at {_fmt_point(point, names)}, "
-                       f"found by checking every point of a finite domain",
+                sketch=f"the claim fails at {_fmt_point(point, names)}"
+                       + (f", where the function raised {raised}" if raised else "")
+                       + ", found by checking every point of a finite domain",
                 counterexample=_fmt_point(point, names),
                 witness=dict(point),
                 meta={"mathema.derive_route": "brute_force"})

@@ -399,11 +399,13 @@ def cmd_verify(args) -> int:
         print("mathema: nothing declared yet (no .mathema/verified or claim "
               f"files under {args.root})")
         return 0
+    definitions = _project_definitions()
     if as_json:
         _emit_json({
             "passed": not result.problems,
             "nothing_declared": False,
             "keys": result.keys,
+            "definitions": definitions,
             "problems": result.problems,
             "grammars_seen": sorted(result.grammars_seen),
             "grammar_verified_here": GRAMMAR,
@@ -414,6 +416,13 @@ def cmd_verify(args) -> int:
         }, getattr(args, "output", None))
         return _verify_exit(args, result)
     lines = list(result.lines)
+    if definitions:
+        # definitions are axioms, taken at face value: listed apart
+        # from the verdicts and outside their counts
+        lines.append("definitions (trusted):")
+        lines.extend(f"  {d['key']}: {d['definition']} ({d['source']}; "
+                     f"members: {', '.join(d['members']) or 'none'})"
+                     for d in definitions)
     lines.append(f"{result.fresh} fresh (form unchanged, skipped), "
                  f"{result.adjudicated} adjudicated, "
                  f"{len(result.problems)} problem(s)")
@@ -426,6 +435,14 @@ def cmd_verify(args) -> int:
            f"{', '.join(other_grammars)}" if other_grammars else ""))
     print("\n".join(lines))
     return _verify_exit(args, result)
+
+
+def _project_definitions() -> list:
+    """The records of the definition rows a project's own files state
+    (its compendium and claims files), in the order they apply."""
+    from .compendium import definition_records
+    from .runtime_types import definitions
+    return definition_records(definitions(("compendium", "claims")))
 
 
 def _skip_reasons(keys: list) -> dict:

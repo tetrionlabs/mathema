@@ -8,49 +8,56 @@
 compendium: pandas
 versions: ">=2,<4"
 
+# The members a hole in a Series stands for: the built-in nan, null
+# (None in an object column) and NA (a nullable column), with NaT (a
+# datetime column) added. Taken at face value, never adjudicated.
+pandas.Series:
+  defines:
+    - "missing := {missing, NaT}"
+
 pandas.Series.mean:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= mean(a)"
+      statement: "for a in R^n, f(a) ~= mean(a)"
 
 pandas.Series.std:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
       note: "The sample standard deviation: ddof defaults to 1, unlike numpy; one element gives nan."
     - name: definition@ddof=0
-      statement: "let ddof be 0, for a in R^n \\ {∅}, f(a) ~= std(a, ddof=0)"
+      statement: "let ddof be 0, for a in R^n, f(a) ~= std(a, ddof=0)"
 
 pandas.Series.var:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
       note: "The sample variance: ddof defaults to 1, unlike numpy; one element gives nan."
     - name: definition@ddof=0
-      statement: "let ddof be 0, for a in R^n \\ {∅}, f(a) ~= var(a, ddof=0)"
+      statement: "let ddof be 0, for a in R^n, f(a) ~= var(a, ddof=0)"
 
 pandas.Series.sum:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= sum(a)"
+      statement: "for a in R^n, f(a) ~= sum(a)"
 
 pandas.Series.prod:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= prod(a)"
+      statement: "for a in R^n, f(a) ~= prod(a)"
 
 pandas.Series.cumsum:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= cumsum(a)"
+      statement: "for a in R^n, f(a) ~= cumsum(a)"
 
 pandas.Series.cumprod:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= cumprod(a)"
+      statement: "for a in R^n, f(a) ~= cumprod(a)"
 
 pandas.Series.count:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == count(a)"
+      statement: "for a in R^n, f(a) == count(a)"
       note: "The number of elements that are not missing, so every position of a Series with nothing missing."

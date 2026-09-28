@@ -995,6 +995,27 @@ def _synth_int_in(rng: random.Random, piece, base_type: str) -> int:
     return rng.randint(first, last)
 
 
+def _draw_member(rng: random.Random, values: list, lap=None):
+    """Intent:
+        One member of a finite set, a sentinel among them drawn as a
+        real value it stands for (`None` for absence, a member's value
+        for a hole), never the sentinel itself; with a lap given, a
+        sentinel draw takes the lap's next value, so the members the
+        claim resolved are the ones used.
+    """
+    from .domain import is_sentinel, realise_sentinel
+    choice = rng.choice(values)
+    if not is_sentinel(choice):
+        return choice
+    if lap is not None:
+        return lap.next()
+    realised = realise_sentinel(choice)
+    if realised:
+        return rng.choice(realised)
+    concrete = [v for v in values if not is_sentinel(v)]
+    return rng.choice(concrete) if concrete else None
+
+
 def _sample_domain(rng: random.Random, dom: Domain,
                    specials: "_SpecialCycle | None" = None):
     """Sample one value from a `Domain` (grammar.py's exclusion/union/
@@ -1009,7 +1030,14 @@ def _sample_domain(rng: random.Random, dom: Domain,
         return (isinstance(p, tuple) and not isinstance(p, frozenset)
                 and any(isinstance(v, complex) for v in p))
 
-    pieces = dom.pieces or (dom.base_type,)
+    from .domain import is_sentinel
+    # a sentinel piece beside an interval is not drawn at random; a
+    # finite set's own sentinels are its members
+    enumerated = bool(dom.pieces) and all(isinstance(p, frozenset) for p in dom.pieces)
+    pieces = tuple(p for p in dom.pieces
+                   if enumerated or not (isinstance(p, frozenset) and p
+                                         and all(is_sentinel(v) for v in p))) \
+        or (dom.base_type,)
     weights = []
     for p in pieces:
         if _rectangle(p):
@@ -1022,7 +1050,7 @@ def _sample_domain(rng: random.Random, dom: Domain,
     for _ in range(20):
         piece = rng.choices(pieces, weights=weights, k=1)[0]
         if isinstance(piece, frozenset):
-            value = rng.choice(list(piece))
+            value = _draw_member(rng, list(piece))
         elif _rectangle(piece):
             c1, c2 = complex(piece[0]), complex(piece[1])
             value = complex(
@@ -1041,7 +1069,11 @@ def _sample_domain(rng: random.Random, dom: Domain,
                 value = min(max(int(round(value)), first), max(first, last))
         else:
             value = _sample_bare_named_set(rng, piece)
-        if value not in dom.excluded:
+        try:
+            kept = value not in dom.excluded
+        except TypeError:
+            kept = True
+        if kept:
             return value
     return value
 
@@ -1165,13 +1197,13 @@ def _sample_language(rng: random.Random, dom: Domain):
         `_language_lap`, the per-parameter cycle the claim loop threads
         in through `_synth`'s `lap`.
     """
-    from .domain import LanguageRef, MISSING as _MISSING
+    from .domain import LanguageRef, is_sentinel
     pieces = dom.pieces or ()
     value = None
     for _ in range(20):
         piece = rng.choice(pieces)
         if isinstance(piece, frozenset):
-            members = [v for v in piece if v is not _MISSING]
+            members = [v for v in piece if not is_sentinel(v)]
             if not members:
                 continue
             value = rng.choice(members)
@@ -1292,10 +1324,15 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     # exclusion/explicit type refinement) is handled the same way, by
     # its own dedicated sampler, also regardless of kind.
     bound_shape = _classify_bound(bounds)
+    if bound_shape in ("domain", "frozenset") and lap is not None \
+            and lap.guaranteed_remaining():
+        # a finite set's listed sentinels, each realised member drawn
+        # once before any random draw
+        return lap.next()
     if bound_shape == "domain":
         return _sample_domain(rng, bounds, specials=specials)
     if bound_shape == "frozenset":
-        return rng.choice(list(bounds))
+        return _draw_member(rng, list(bounds), lap)
     if bound_shape in ("Z", "N", "C"):
         return _sample_bare_named_set(rng, bound_shape)
     if kind == "bool":

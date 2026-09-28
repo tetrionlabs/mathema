@@ -77,7 +77,8 @@ def assert_row(fn, text, verdicts, *, member=None, raised=None,
         assert f"={member}" in witness(probe) or f"({member}" in witness(probe), \
             witness(probe)
     if raised is not None:
-        assert raised in witness(probe) + (probe.note or ""), (witness(probe), probe.note)
+        said = f"{witness(probe)} {probe.note or ''} {probe.sketch or ''}"
+        assert raised in said, said
     if companion is not None:
         assert any(c.verdict == companion for c in companions), \
             [(c.name, c.verdict, witness(c)) for c in companions]
@@ -117,7 +118,6 @@ def test_s5_a_guarded_float_companion_raises_at_nan():
                companion="falsified", companion_member="nan")
 
 
-@stage(1)
 def test_s6_a_listed_none_raising_valueerror_is_the_witness():
     assert_row(sqrt_guarded, "for x in {0.25, None}, f(x) >= 0", FALSIFIED,
                member="None", raised="ValueError")
@@ -143,7 +143,6 @@ def test_s9_a_replaced_hole_holds_on_both_halves():
     assert companions and all(c.verdict in PROVEN_OR_HOLDS for c in companions)
 
 
-@stage(1)
 def test_s10_a_replaced_absence_is_proven():
     assert_row(zero_if_missing, "for x in {0.25, None}, f(x) >= 0", PROVEN)
 
@@ -167,18 +166,15 @@ def test_s16_absence_at_the_second_parameter_raises():
                member="None", raised="TypeError")
 
 
-@stage(2)
 def test_p1_a_policy_that_does_not_raise_at_nan_is_falsified():
     assert_row(sqrt_plain, "for x in {missing}, raises(f(x))", FALSIFIED,
                member="nan")
 
 
-@stage(1)
 def test_p2_every_member_raises_the_stated_exception():
     assert_row(sqrt_guarded, "for x in {missing}, raises(f(x), ValueError)", PROVEN)
 
 
-@stage(1)
 def test_p3_a_replacement_policy_is_proven():
     assert_row(zero_if_missing, "for x in {missing}, f(x) == 0", PROVEN)
 

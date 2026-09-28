@@ -1279,7 +1279,7 @@ class ClaimsFileError(ValueError):
 _CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
                  "grammar", "funcs", "pseudo_infinity", "meta", "authored",
                  "source", "family", "note", "versions")
-_ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references",
+_ENTRY_FIELDS = ("claims", "defines", "intent", "grammar", "meta", "references",
                  "pseudo_infinity", "runtime_types")
 
 
@@ -1467,6 +1467,9 @@ def validate_claims_file(data, rel_path: str) -> None:
         problem = _runtime_types_problem(entry.get("runtime_types"))
         if problem:
             fail(key, f"`runtime_types`: {problem}")
+        problem = _defines_problem(key, entry.get("defines"))
+        if problem:
+            fail(key, f"`defines`: {problem}")
         claims = entry.get("claims")
         if claims is None:
             continue
@@ -1545,6 +1548,40 @@ def validate_claims_file(data, rel_path: str) -> None:
                     problem = _domain_problem(bound)
                     if problem:
                         fail(key, f"{label}: `domain` for {param}: {problem}")
+
+
+def _defines_problem(key: str, value) -> "str | None":
+    """Intent:
+        Why a claims-file entry's `defines:` is refused, in the words the
+        refusal prints, or None when it is absent or a list of
+        definition rows (`missing := {null, nan}`, or a record of one
+        under `definition:`) whose spellings the key's runtime type can
+        realise.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return (f"a {type(value).__name__}, not a list of definition rows "
+                f"(`- \"missing := {{null, nan}}\"`)")
+    from .grammar import InvalidDefinition, parse_definition
+    from .runtime_types import adapter, spellings
+    found = adapter(str(key))
+    for row in value:
+        text = row.get("definition") if isinstance(row, dict) else row
+        if not isinstance(text, str):
+            return (f"{row!r} is not a definition row; write it as text, "
+                    f"`- \"missing := {{null, nan}}\"`")
+        try:
+            _word, members, _extends = parse_definition(text)
+        except InvalidDefinition as e:
+            return str(e)
+        if found is not None:
+            known = spellings(found)
+            for spelling in members:
+                if spelling not in known:
+                    return (f"{found.name} has no spelling {spelling!r}; its "
+                            f"spellings are {', '.join(sorted(known)) or 'none'}")
+    return None
 
 
 def _runtime_types_problem(value) -> "str | None":
