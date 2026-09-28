@@ -102,6 +102,7 @@ def _rows_used(p) -> list:
             for u in (p.meta or {}).get("mathema.definitions", [])]
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("fn, law, rows", [
     (norm_of, "for x in R^n, f(x) >= 0",
      ["numpy.linalg.norm definition"]),
@@ -139,6 +140,7 @@ def test_proven_through_numpy_rows(fn, law, rows):
                for u in used), used
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("fn, law", [
     (absolutes, "for x in R^n, f(x) == x"),
     (magnitudes, "for x in R^n, f(x) == x"),
@@ -156,6 +158,7 @@ def test_a_false_sibling_is_falsified(fn, law):
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_solve_holds_and_its_row_is_stated_over_a_matrix_and_a_vector():
     law = ("for A in R^(n,n), b in R^n, assuming det(A) != 0, "
            "A @ f(A, b) == b")
@@ -168,6 +171,7 @@ def test_solve_holds_and_its_row_is_stated_over_a_matrix_and_a_vector():
     assert "numpy.linalg.solve definition is stated over vectors" in p.note
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_norm_is_not_positive_at_the_zero_vector():
     law = "for x in R^n, f(x) > 0"
     p = _one(norm_of, law, route="derive")
@@ -177,6 +181,7 @@ def test_a_norm_is_not_positive_at_the_zero_vector():
     assert p.verdict == "holds", (p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("fn, law, why", [
     # numpy.clip states no definition row
     (clipped, "for x in R^n, 0 <= f(x) <= 1", "every link"),
