@@ -196,8 +196,8 @@ def form(A: Mat("n", "n"), x: Vec("n")):
 
 <!-- example: vocabulary verdicts fn=one -->
 ```
-trace(A) ~= sum(eigvals(A))   # holds
-det(A) ~= prod(eigvals(A))   # holds
+trace(A) ~= sum(eigvals(A))   # proven
+det(A) ~= prod(eigvals(A))   # proven
 trace(A) ~= prod(eigvals(A))   # falsified
 let b be R^n, assuming det(A) != 0, A @ solve(A, b) ~= b   # proven
 A @ pinv(A) @ A ~= A   # holds
@@ -296,6 +296,110 @@ evaluated, and the claim either holds across the draws or is falsified
 with the witnessing matrices. A strict `derive` route reports the
 honest `unknown` instead of sampling.
 
+### Facts proven for every size
+
+sympy's matrix algebra does not apply every fact of real matrices on
+its own, so mathema adds a layer of lemmas, each true of real square
+matrices of any size, before the two sides are compared:
+
+| lemma | example |
+|---|---|
+| trace cyclicity (cyclic rotations of a product only) | `trace(A @ B @ C) == trace(C @ A @ B)` |
+| trace of a transpose | `trace(A @ B.T) == trace(B @ A.T)` |
+| linearity of trace | `trace(c*A + B) == c*trace(A) + trace(B)` |
+| `@` distributes over `+`, on both sides | `(A + B) @ C == A @ C + B @ C` |
+| scaling through a product | `(c*A) @ B == c*(A @ B)` |
+| transpose of a sum and of a product | `(A @ B).T == B.T @ A.T` |
+| a Gram product `A @ A.T` or `A.T @ A` is positive semidefinite | `det(A @ A.T) >= 0` |
+| the trace is the sum of the eigenvalues, the determinant their product | `det(A) == prod(eigvals(A))` |
+| the determinant of a scaled matrix | `det(c*A) == c**n * det(A)` |
+| the rank of a Gram product is the rank of its factor | `rank(A @ A.T) == rank(A)` |
+
+A proof that used one names it in its sketch and in the record's
+`mathema.matrix_lemmas` meta. Each lemma is exact, so a relation it
+does not close is not thereby false: the claim is sampled as before.
+
+<!-- example: lemmas run -->
+```python
+from mathema.types import Mat, Vec
+
+def f(A: Mat("n", "n"), B: Mat("n", "n"), C: Mat("n", "n"), c: float):
+    return A
+
+def form(A: Mat("n", "n"), x: Vec("n")):
+    return A
+```
+
+<!-- example: lemmas verdicts fn=f route=derive -->
+```
+trace(A @ B) == trace(B @ A)   # proven
+trace(A @ B @ C) == trace(C @ A @ B)   # proven
+A @ (B + C) == A @ B + A @ C   # proven
+(A + B) @ (A + B) == A @ A + A @ B + B @ A + B @ B   # proven
+trace(A @ A.T) >= 0   # proven
+det(A @ A.T) >= 0   # proven
+trace(A) == sum(eigvals(A))   # proven
+det(A) == prod(eigvals(A))   # proven
+det(c*A) == c**n * det(A)   # proven
+rank(A @ A.T) == rank(A)   # proven
+```
+
+<!-- example: lemmas verdicts fn=form route=derive -->
+```
+x.T @ (A @ A.T) @ x >= 0   # proven
+```
+
+What looks like a sibling of a lemma but is false is never proven, and
+on the default route its sampling finds the witness:
+
+<!-- example: lemmas verdicts fn=f -->
+```
+trace(A @ B @ C) == trace(B @ A @ C)   # falsified
+trace(A @ B) == trace(A) * trace(B)   # falsified
+det(A + B) == det(A) + det(B)   # falsified
+A @ B == B @ A   # falsified
+(A + B) @ (A + B) == A @ A + 2*(A @ B) + B @ B   # falsified
+det(A @ A.T) > 0   # falsified
+A * B == A @ B   # falsified
+```
+
+`det(A @ A.T) > 0` fails exactly where `A` is singular. A random matrix
+is almost never singular, so one draw in eight of a matrix with no
+declared structure has a zeroed row, the matrix analogue of the
+boundary values a scalar draw includes.
+
+Structure predicates are proven the same way when the structure
+follows from the operands', by rules of their own (a product of two
+symmetric matrices is not symmetric in general, and is never proven
+so): a Gram product is symmetric and positive semidefinite, and
+positive definite when its factor is invertible; `Y @ M @ Y.T` has the
+symmetry and semidefiniteness of `M`; a transpose, inverse or power
+keeps symmetry, orthogonality and definiteness, and swaps upper and
+lower triangularity; products keep orthogonality, diagonality and
+triangularity their factors share.
+
+<!-- example: lemmas verdicts fn=f route=derive -->
+```
+is_symmetric(A @ A.T)   # proven
+is_positive_semidefinite(A.T @ A)   # proven
+assuming det(A) != 0, is_positive_definite(A.T @ A)   # proven
+assuming A is orthogonal, is_orthogonal(A.T)   # proven
+assuming A is positive definite, is_positive_definite(inv(A))   # proven
+assuming A is upper triangular and B is upper triangular, is_upper_triangular(A @ B)   # proven
+```
+
+<!-- example: lemmas verdicts fn=f -->
+```
+is_symmetric(A @ B)   # falsified
+assuming A is symmetric and B is symmetric, is_symmetric(A @ B)   # falsified
+is_positive_definite(A.T @ A)   # falsified
+```
+
+A claim about `f(A)` stays sampled: the derive route reads the claim's
+own matrix algebra, not the function's body. What stays sampled for
+every claim: norms, the condition number, eigenvalues other than their
+sum and product, `solve`, `pinv` and the decompositions.
+
 ## Runtime enforcement
 
 `@enforce_structure` is the structure analogue of `@enforce_domain` and
@@ -327,8 +431,16 @@ is skipped, never a false rejection.
 The matrix vocabulary renders through sympy's matrix printing, produced
 on demand from the canonical claim rather than stored: `A.T` as `A^{T}`,
 `det(A)` as `|A|`, a product as juxtaposition, `x.T @ A @ x` as
-`x^{T} A x`. Nothing per-claim is kept in the record; the canonical
-statement is the source, and `grammar.to_latex` renders it.
+`x^{T} A x`, and the elementwise product `A * B` as `A \circ B`.
+Nothing per-claim is kept in the record; the canonical statement is
+the source, and `grammar.to_latex` renders it.
+
+A matrix never reads as a commuting number in any rendering: a
+product over the names a claim's domain, a signature marker or a
+runtime type makes matrices keeps its written order, so
+`A * B == B * A` (true, since `*` is elementwise) is recorded as
+`A*B = B*A` and never as the tautology `A*B = A*B`, and
+`C * (A @ B)` keeps its parentheses.
 
 ## Limits
 
@@ -343,6 +455,8 @@ A probe draw whose two sides differ by no more than the round-off its
 own magnitudes produce (entries near `1e6` and `1e-9` cancelling in a
 determinant) is not a counterexample, and the note says so; a loss of
 precision that matters is the float companion's claim. Numerical rank
-is `numpy.linalg.matrix_rank` with its default tolerance, so
-`rank(A @ A.T) == rank(A)`, true of real matrices, can fail at a draw
-whose condition number the product squares past that tolerance.
+is `numpy.linalg.matrix_rank` with its default tolerance, so a rank
+identity the derive route cannot close can fail at a draw whose
+condition number a product squares past that tolerance;
+`rank(A @ A.T) == rank(A)` itself is proven, and the proof is the
+verdict.
