@@ -32,9 +32,9 @@ print(mathema.check(midpoint, claims=[
 <!-- example: finds output -->
 ```text
 mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
-  proven  between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) ≤ f(a, b) ≤ max(a, b)
-           for a in [0, 100] : int, b in [0, 100] : int
-  holds   between_integers[float]: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b) (n=44)
+  proven  between_integers: for a in [0, 100] \ {missing} : int, b in [0, 100] \ {missing} : int, min(a, b) ≤ f(a, b) ≤ max(a, b)
+           for a in [0, 100] \ {missing} : int, b in [0, 100] \ {missing} : int
+  holds   between_integers[float]: for a in [0, 100] \ {missing} : int, b in [0, 100] \ {missing} : int, min(a, b) <= f(a, b) <= max(a, b) (n=44)
   FALSIFY between_reals: for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)
            counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
 ```

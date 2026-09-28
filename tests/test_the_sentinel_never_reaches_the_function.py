@@ -116,3 +116,16 @@ def test_g8_a_string_has_no_hole():
     probe = run(label, 'for s in {missing}, f(s) == "-"')
     assert probe.verdict == "skipped:misspecified"
     assert "a string has no hole" in probe.note
+
+
+def test_every_row_admitting_a_sentinel_records_what_it_admits_and_tried():
+    probe = run(recording, "for x in {0.25, None, missing}, f(x) == 0")
+    record = probe.meta["mathema.missing"]
+    assert record["admitted"]["x"] == {"None": True, "holes": ["nan"]}
+    assert record["tried"]["x"] == ["None", "nan"]
+
+
+def test_a_float_row_records_its_resolved_hole_and_no_note_when_nothing_is_admitted():
+    probe = run(sqrt_guarded, "for x in [0, 1] : float \\ {missing}, f(x) >= 0")
+    assert "missing for" not in (probe.note or "")
+    assert "mathema.missing" not in (probe.meta or {})

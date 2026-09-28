@@ -1,46 +1,56 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Every spelling an earlier release wrote or accepted still parses, and
-comes back as the canonical claim: the fused `:float|missing`, the
+comes back as the canonical claim (here for a `float` parameter, the
+annotation an earlier record's statement was written for): the fused `:float|missing`, the
 unicode `∪ {∅}`, the exclusion `\\ {∅}`, a set unioned with `{∅}`, a
 space followed by `| {missing}`. A written `:=` is refused, in a binding
 and in a statement, and a member cannot be excluded from a class the
 domain admits."""
 import pytest
 
+import mathema
 from mathema.conjecture import InvalidConjecture, claim
-from mathema.domain import InvalidDomain, _parse_binding, parse_binding, render_domain
-from mathema.spec import canonical_claim_text
+from mathema.domain import (InvalidDomain, MissingDefaults, _parse_binding, complete,
+                            parse_binding, render_domain)
 
 
 @pytest.mark.parametrize("old, canonical", [
     ("[0.0, 1.0]:float|missing", "[0.0, 1.0] : float|missing"),
     ("[0, 1] ⊂ ℝ ∪ {∅}", "[0.0, 1.0] : float|missing"),
     ("[0, 1] | {missing} ⊂ R", "[0.0, 1.0] : float|missing"),
-    ("[0.0, 1.0] \\ {missing}:float", "[0.0, 1.0] : float"),
-    ("[0, 1] \\ {∅}", "[0.0, 1.0] : float|None"),
+    ("[0.0, 1.0] \\ {missing}:float", "[0.0, 1.0] \\ {missing} : float"),
+    ("[0, 1] \\ {∅}", "[0.0, 1.0] \\ {missing} : float"),
     ('{"a"} ∪ {∅}', '{"a", missing}'),
     ("{0.25}|missing", "{0.25, missing}"),
     ("R|missing", "R|missing"),
     ("ℝ ∪ {∅}", "R|missing"),
     ("[0,10] ⊂ Z ∪ {∅}", "[0, 10] : int|missing"),
     ("[0.0, 1.0]^n:float|missing", "([0.0, 1.0] | {missing})^n : float"),
-    ("[0, 1]^n | {missing}", "([0.0, 1.0] | {missing})^n : float|None"),
+    ("[0, 1]^n | {missing}", "([0.0, 1.0] | {missing})^n : float"),
     ("R^(n,n)|missing", "(R | {missing})^(n,n)"),
     ("ℝⁿˣⁿ ∪ {∅}", "(R | {missing})^(n,n)"),
     ("N|missing", "N|missing"),
     ("L[unicode]|missing", "L[unicode]|missing"),
     ('L[unicode] \\ {""}|missing', 'L[unicode] \\ {""}|missing'),
-    ("L[unicode] \\ {∅}", "L[unicode]"),
+    ("L[unicode] \\ {∅}", "L[unicode] \\ {missing}"),
 ])
 def test_an_old_spelling_parses_to_the_canonical_domain(old, canonical):
-    b = parse_binding(f"x in {old}")[1]
+    b = complete(parse_binding(f"x in {old}")[1], FLOAT)
     assert render_domain(b, ascii_mode=True) == canonical
+
+
+FLOAT = MissingDefaults(False, ("nan",), "float")
+
+
+def double(x: float) -> float:
+    return 2 * x
 
 
 def test_an_old_record_statement_reads_back_as_the_canonical_claim():
     old = "for x in [0.0, 1.0]:float|missing, f(x) >= 0"
-    assert canonical_claim_text(claim(old)) == \
+    report = mathema.check(double, claims=[claim(old, name="c")])
+    assert next(p for p in report.probes if p.name == "c").statement == \
         "for x in [0.0, 1.0] : float|missing, f(x) >= 0"
 
 

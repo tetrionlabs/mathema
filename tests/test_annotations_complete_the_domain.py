@@ -144,11 +144,14 @@ def run(fn, text: str):
      "missing for xs (numpy.ndarray): nan"),
     (series_mean, "for xs in [0, 1]^n, f(xs) >= 0",
      "for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0",
-     "missing for xs (pandas.Series): nan, null, NA, NaT"),
+     "missing for xs (pandas.Series): nan, null, NA"),
     (polars_mean, "for xs in [0, 1]^n, f(xs) >= 0",
      "for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0",
      "missing for xs (polars.Series): null, nan"),
-    (array_mean, "for xs in R^n, f(xs) >= 0", "for xs in R^n, f(xs) >= 0", None),
+    (array_mean, "for xs in R^n, f(xs) >= 0", "for xs in (R | {missing})^n, f(xs) >= 0",
+     "missing for xs (numpy.ndarray): nan"),
+    (array_mean, "for xs in R^n \\ {missing}, f(xs) >= 0",
+     "for xs in R^n \\ {missing}, f(xs) >= 0", None),
 ])
 def test_the_record_renders_the_completed_domain(fn, text, statement, note):
     probe = run(fn, text)
@@ -159,9 +162,9 @@ def test_the_record_renders_the_completed_domain(fn, text, statement, note):
         assert note in (probe.note or "")
 
 
-def test_a_stated_type_clause_with_no_suffix_excludes():
+def test_a_stated_type_clause_with_no_suffix_excludes_and_says_so_where_it_narrows():
     assert run(bare, "for x in [0, 100] subset Z, f(x) >= 0").statement == \
-        "for x in [0, 100] : int, f(x) >= 0"
+        "for x in [0, 100] \\ {None, missing} : int, f(x) >= 0"
 
 
 def test_a_written_clause_that_admits_more_widens_the_type():
@@ -172,7 +175,7 @@ def test_a_written_clause_that_admits_more_widens_the_type():
 
 def test_a_written_clause_that_admits_less_narrows_the_type():
     probe = run(optional, "for x in [0, 1] : float, f(x) >= 0")
-    assert probe.statement == "for x in [0.0, 1.0] : float, f(x) >= 0"
+    assert probe.statement == "for x in [0.0, 1.0] \\ {None, missing} : float, f(x) >= 0"
     assert "x: the claim narrows the type float" in probe.note
 
 
@@ -184,3 +187,52 @@ def test_a_listed_absence_on_a_float_widens_the_type():
 def test_a_datetime_slot_holds_nat():
     policy = missing_policy_from_signature(signature)["i"]
     assert policy.slot_type == "datetime" and policy.members == ("NaT",)
+
+
+def counted(n: int) -> int:
+    return n
+
+
+def flagged(b: bool) -> bool:
+    return b
+
+
+def named(s: str) -> str:
+    return s
+
+
+@pytest.mark.parametrize("fn, text, what", [
+    (counted, "for n in [0, 5] subset Z|missing, f(n) >= 0", "a int has no hole"),
+    (flagged, "for b in {True, missing}, f(b) == f(b)", "a bool has no hole"),
+    (named, "for s in {missing}, f(s) == s", "a string has no hole"),
+])
+def test_the_class_on_a_type_with_no_hole_is_refused(fn, text, what):
+    probe = run(fn, text)
+    assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
+    assert what in probe.note and "write `|None`" in probe.note
+
+
+def test_a_datetime_member_on_a_real_series_is_refused():
+    probe = run(series_mean, "for xs in ([0, 1] | {NaT})^n, f(xs) >= 0")
+    assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
+    assert "holds no NaT" in probe.note
+
+
+@pytest.mark.parametrize("text", ['for s in {"a", nan}, f(s) == s',
+                                  'for s in {"a", null}, f(s) == s',
+                                  'for s in {"a", None} \\ {missing}, f(s) == s'])
+def test_any_hole_written_on_a_string_is_refused(text):
+    probe = run(named, text)
+    assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
+    assert "s: a string has no hole; write `|None`" in probe.note
+
+
+@pytest.mark.xfail(strict=True, reason="missing values stage 2")
+def test_a_claim_may_widen_a_float_with_absence_and_the_none_is_executed():
+    probe = run(plain_raising, "for x in {0.25, None}, f(x) >= 0")
+    assert "x: the claim widens the type float" in probe.note
+    assert probe.verdict == "falsified" and probe.counterexample == "x=None"
+
+
+def plain_raising(x: float) -> float:
+    return x + 1.0

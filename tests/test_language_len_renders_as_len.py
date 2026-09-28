@@ -59,7 +59,7 @@ def test_len_nested_inside_a_call_argument_renders_as_len():
 def test_a_string_literal_spelling_dim_is_left_alone():
     cj = claim("for s in L[ascii], f(s + 'dim(s, 0)') == len(s)")
     shown = render_claim_text(cj, unicode=False)
-    assert "'dim(s, 0)'" in shown and "= len(s)" in shown
+    assert '"dim(s, 0)"' in shown and "= len(s)" in shown
 
 
 def test_a_second_axis_keeps_dim():

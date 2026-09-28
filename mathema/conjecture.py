@@ -3314,6 +3314,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             completed = _complete_missing(cj, fn)[0]
             if completed:
                 cj = _dc_replace(cj, domain=completed)
+            admitted_now = _missing_record(cj.domain)
+            if admitted_now:
+                earlier = (probe.meta or {}).get("mathema.missing") or {}
+                merged = {**admitted_now, **earlier,
+                          "tried": {**admitted_now.get("tried", {}),
+                                    **earlier.get("tried", {})}}
+                if not merged["tried"]:
+                    merged.pop("tried")
+                probe.meta = {**(probe.meta or {}), "mathema.missing": merged}
         if canonical:
             # the renderer is total over everything claim() accepts, so
             # a failure here is a renderer bug worth a loud crash, never
@@ -3620,8 +3629,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # keeps the canonical text and re-reads as the same claim;
             # any other rejected claim has no canonical form (it was
             # never a claim), so its record keeps what was written
-            foreign = "mathema.foreign_grammar" in (validated.meta or {})
-            out.append(_stamped(validated, cj, canonical=foreign))
+            # a skipped claim's record states it whole, quantifier
+            # included, so it reads back as the claim that was written;
+            # text that was never a claim (an unknown relation) keeps
+            # what was written
+            out.append(_stamped(validated, cj, canonical=_renders(cj)))
             continue
         ctx = validated
         cj_record = (_dc_replace(cj, domain=ctx.record_domain)
@@ -5003,6 +5015,75 @@ def _in_field_type(path: str, bound, cj_domain: dict):
     return bound
 
 
+#: how a refusal names a slot type that holds no hole
+_NO_HOLE_NAMES = {"str": "string"}
+
+
+def _missing_record(domain: dict) -> dict:
+    """Intent:
+        What a record states about the missing values its bindings
+        admit: `{"admitted": {param: {"None": bool, "holes": [member,
+        ...]}}}`; the route that executes a sentinel adds what it tried.
+        Empty when no binding admits one.
+    """
+    from .domain import _as_domain, admitted
+    out: dict = {}
+    tried: dict = {}
+    for p, bound in (domain or {}).items():
+        if not p.isidentifier():
+            continue
+        dom = _as_domain(bound)
+        absent, holes = admitted(dom, dom.policy)
+        if not absent and not holes:
+            continue
+        words = []
+        for h in holes:
+            words += list(dom.members) if h.member is None else [h.member]
+        out[p] = {"None": absent, "holes": list(dict.fromkeys(words))}
+    if not out:
+        return {}
+    return {"admitted": out, **({"tried": tried} if tried else {})}
+
+
+def _renders(cj) -> bool:
+    """Whether a conjecture has a canonical text."""
+    from .spec import canonical_claim_text
+    try:
+        canonical_claim_text(cj)
+    except Exception:
+        return False
+    return True
+
+
+def _written_sentinels(bound) -> list:
+    """Every sentinel a binding's own text wrote: admitted in a piece or
+    a set, or excluded."""
+    from .domain import is_sentinel
+    found = [v for v in getattr(bound, "excluded", ()) if is_sentinel(v)]
+    pieces = (bound,) if isinstance(bound, frozenset) else getattr(bound, "pieces", ())
+    found += [v for piece in pieces if isinstance(piece, frozenset)
+              for v in piece if is_sentinel(v)]
+    return found
+
+
+def _for_element_domain(defaults, bound):
+    """Intent:
+        The defaults with the hole members an element domain of that
+        number type can hold: a real, integer or complex domain holds no
+        `NaT`, which only a datetime slot holds, whatever the container.
+    """
+    from dataclasses import replace
+    base = getattr(bound, "base_type", None) or (
+        "R" if isinstance(bound, tuple) else None)
+    if isinstance(bound, str):
+        base = bound
+    if base in ("R", "Z", "N", "C") and "NaT" in defaults.members \
+            and defaults.slot_type != "datetime":
+        return replace(defaults, members=tuple(m for m in defaults.members
+                                               if m != "NaT"))
+    return defaults
+
+
 def _complete_missing(cj, fn) -> tuple:
     """Intent:
         Each of the claim's own bindings completed from its parameter's
@@ -5019,7 +5100,7 @@ def _complete_missing(cj, fn) -> tuple:
                          complete, is_sentinel)
     from .types import missing_policy_from_signature
     policy = missing_policy_from_signature(fn) if fn is not None else {}
-    completed: dict = {}
+    completed: dict = dict(cj.domain or {})
     notes: list = []
     resolution: dict = {}
     for p, bound in (cj.domain or {}).items():
@@ -5028,21 +5109,29 @@ def _complete_missing(cj, fn) -> tuple:
                                     PATH_DEFAULTS)
             continue
         defaults = NO_ANNOTATION if p in cj.free_vars else policy.get(p, NO_ANNOTATION)
+        defaults = _for_element_domain(defaults, bound)
+        # a domain already completed carries the exclusions completion
+        # added; only a binding's own text is checked for holes
+        written_holes = [] if getattr(bound, "policy", None) is not None else [
+            v for v in _written_sentinels(bound) if v.kind == "missing"]
+        if written_holes and not defaults.members:
+            # a hole written on a slot type that holds none
+            what = _NO_HOLE_NAMES.get(defaults.slot_type, defaults.slot_type)
+            return completed, notes, (f"{p}: a {what} has no hole; write `|None`"), \
+                resolution
+        foreign = sorted({v.member for v in written_holes
+                          if v.member is not None and v.member not in defaults.members})
+        if foreign:
+            return completed, notes, (
+                f"{p}: a {defaults.slot_type} slot holds no {', '.join(foreign)}; "
+                f"its holes are {', '.join(defaults.members)}"), resolution
         done = complete(bound, defaults)
         completed[p] = done
         resolution[p] = defaults
         absent, holes = admitted(done)
         if MISSING in holes:
-            if defaults.members:
-                notes.append(f"missing for {p} ({defaults.slot_type}): "
-                             f"{', '.join(defaults.members)}")
-            elif defaults.slot_type == "str":
-                return completed, notes, (
-                    f"{p} is a string, and a string has no hole: `missing` "
-                    f"names no value it can hold; write `|None` for its "
-                    f"absence"), resolution
-            else:
-                notes.append(f"missing for {p} ({defaults.slot_type}): none")
+            notes.append(f"missing for {p} ({defaults.slot_type}): "
+                         f"{', '.join(defaults.members)}")
         written = (getattr(bound, "explicit_type", False)
                    or getattr(bound, "absent", False)
                    or any(is_sentinel(v) for v in getattr(bound, "excluded", ()))
@@ -5094,6 +5183,7 @@ def _provenance_meta(proof) -> dict:
     """
     meta = {}
     for key in ("mathema.derive_route", "mathema.engine_disagreement",
+                "mathema.missing",
                 "mathema.matrix_lemmas",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
                 "mathema.corroboration_reason", "mathema.definitions"):

@@ -46,8 +46,8 @@
  },
  "factorial_postfix": {
   "input": "for n in [1, 5] subset Z, f(n) <= n!",
-  "unicode": "∀ n ∈ [1, 5] ⊂ ℤ, f(n) ≤ factorial(n)",
-  "ascii": "for n in [1, 5] : int, f(n) <= factorial(n)"
+  "unicode": "∀ n ∈ [1, 5] \\ {None, ∅} ⊂ ℤ, f(n) ≤ factorial(n)",
+  "ascii": "for n in [1, 5] \\ {None, missing} : int, f(n) <= factorial(n)"
  },
  "dim_length_premise": {
   "input": "assuming len(x) == len(y), f(x, y) == f(y, x)",
@@ -66,8 +66,8 @@
  },
  "space_vector_real": {
   "input": "for v in R^n, f(v) >= 0",
-  "unicode": "∀ v ∈ ℝⁿ, f(v) ≥ 0",
-  "ascii": "for v in R^n, f(v) >= 0"
+  "unicode": "∀ v ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, f(v) ≥ 0",
+  "ascii": "for v in (R | {missing})^n|None, f(v) >= 0"
  },
  "space_vector_bounded": {
   "input": "for xs in [0, 1]^n, f(xs) <= 1",
@@ -76,13 +76,13 @@
  },
  "space_matrix": {
   "input": "for A in R^(m,n), f(A) == f(A)",
-  "unicode": "∀ A ∈ ℝᵐˣⁿ, f(A) = f(A)",
-  "ascii": "for A in R^(m,n), f(A) = f(A)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {None}, f(A) = f(A)",
+  "ascii": "for A in (R | {missing})^(m,n)|None, f(A) = f(A)"
  },
  "space_shared_dim": {
   "input": "for x in R^n, y in R^n, f(x, y) == f(y, x)",
-  "unicode": "∀ x ∈ ℝⁿ, y ∈ ℝⁿ, f(x, y) = f(y, x)",
-  "ascii": "for x in R^n, y in R^n, f(x, y) = f(y, x)"
+  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, y ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, f(x, y) = f(y, x)",
+  "ascii": "for x in (R | {missing})^n|None, y in (R | {missing})^n|None, f(x, y) = f(y, x)"
  },
  "domain_closed_interval": {
   "input": "for x in [0, 1], f(x) >= 0",
@@ -96,8 +96,8 @@
  },
  "domain_subset_integer": {
   "input": "for n in [0, 100] subset Z, f(n) >= 0",
-  "unicode": "∀ n ∈ [0, 100] ⊂ ℤ, f(n) ≥ 0",
-  "ascii": "for n in [0, 100] : int, f(n) >= 0"
+  "unicode": "∀ n ∈ [0, 100] \\ {None, ∅} ⊂ ℤ, f(n) ≥ 0",
+  "ascii": "for n in [0, 100] \\ {None, missing} : int, f(n) >= 0"
  },
  "relation_indexing": {
   "input": "f(x, 1.0) == x[-1]",
@@ -206,153 +206,153 @@
  },
  "matrix_determinant_product": {
   "input": "for A in R^(n,n), B in R^(n,n), det(A @ B) == det(A) * det(B)",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, B ∈ ℝⁿˣⁿ, det(A @ B) = det(A)*det(B)",
-  "ascii": "for A in R^(n,n), B in R^(n,n), det(A @ B) = det(A)*det(B)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, B ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, det(A @ B) = det(A)*det(B)",
+  "ascii": "for A in (R | {missing})^(n,n)|None, B in (R | {missing})^(n,n)|None, det(A @ B) = det(A)*det(B)"
  },
  "matrix_transpose_product": {
   "input": "for A in R^(n,n), B in R^(n,n), (A @ B).T == B.T @ A.T",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, B ∈ ℝⁿˣⁿ, (A @ B).T = B.T @ A.T",
-  "ascii": "for A in R^(n,n), B in R^(n,n), (A @ B).T = B.T @ A.T"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, B ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, (A @ B).T = B.T @ A.T",
+  "ascii": "for A in (R | {missing})^(n,n)|None, B in (R | {missing})^(n,n)|None, (A @ B).T = B.T @ A.T"
  },
  "matrix_trace_additive": {
   "input": "for A in R^(n,n), B in R^(n,n), trace(A + B) == trace(A) + trace(B)",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, B ∈ ℝⁿˣⁿ, trace(A + B) = trace(A) + trace(B)",
-  "ascii": "for A in R^(n,n), B in R^(n,n), trace(A + B) = trace(A) + trace(B)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, B ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, trace(A + B) = trace(A) + trace(B)",
+  "ascii": "for A in (R | {missing})^(n,n)|None, B in (R | {missing})^(n,n)|None, trace(A + B) = trace(A) + trace(B)"
  },
  "matrix_inverse_identity": {
   "input": "assuming det(A) != 0, for A in R^(n,n), inv(A) @ A == I(n)",
-  "unicode": "assuming det(A) != 0, ∀ A ∈ ℝⁿˣⁿ, inv(A) @ A = I(n)",
-  "ascii": "assuming det(A) != 0, for A in R^(n,n), inv(A) @ A = I(n)"
+  "unicode": "assuming det(A) != 0, ∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, inv(A) @ A = I(n)",
+  "ascii": "assuming det(A) != 0, for A in (R | {missing})^(n,n)|None, inv(A) @ A = I(n)"
  },
  "matrix_output_symmetric_postfix": {
   "input": "for A in R^(n,n), f(A) is symmetric",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, is_symmetric(f(A))",
-  "ascii": "for A in R^(n,n), is_symmetric(f(A))"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, is_symmetric(f(A))",
+  "ascii": "for A in (R | {missing})^(n,n)|None, is_symmetric(f(A))"
  },
  "matrix_transpose_sugar": {
   "input": "let A be R^(n,n), A^T == A",
-  "unicode": "let A be ℝⁿˣⁿ, A.T = A",
-  "ascii": "let A be R^(n,n), A.T = A"
+  "unicode": "let A be (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, A.T = A",
+  "ascii": "let A be (R | {missing})^(n,n)|None, A.T = A"
  },
  "matrix_determinant_sugar": {
   "input": "for A in R^(n,n), |A| >= 0",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, det(A) ≥ 0",
-  "ascii": "for A in R^(n,n), det(A) >= 0"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, det(A) ≥ 0",
+  "ascii": "for A in (R | {missing})^(n,n)|None, det(A) >= 0"
  },
  "matrix_determinant_bars_compound": {
   "input": "for A in R^(n,n), B in R^(n,n), |A @ B| == |A| * |B|",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, B ∈ ℝⁿˣⁿ, det(A @ B) = det(A)*det(B)",
-  "ascii": "for A in R^(n,n), B in R^(n,n), det(A @ B) = det(A)*det(B)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, B ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, det(A @ B) = det(A)*det(B)",
+  "ascii": "for A in (R | {missing})^(n,n)|None, B in (R | {missing})^(n,n)|None, det(A @ B) = det(A)*det(B)"
  },
  "matrix_hadamard_trace": {
   "input": "for A in R^(n,n), B in R^(n,n), trace(A * B) == trace(A.T @ B)",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, B ∈ ℝⁿˣⁿ, trace(A * B) = trace(A.T @ B)",
-  "ascii": "for A in R^(n,n), B in R^(n,n), trace(A * B) = trace(A.T @ B)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, B ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, trace(A * B) = trace(A.T @ B)",
+  "ascii": "for A in (R | {missing})^(n,n)|None, B in (R | {missing})^(n,n)|None, trace(A * B) = trace(A.T @ B)"
  },
  "matrix_power_word": {
   "input": "for A in R^(n,n), matrix_power(A, 2) == A @ A",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, matrix_power(A, 2) = A @ A",
-  "ascii": "for A in R^(n,n), matrix_power(A, 2) = A @ A"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, matrix_power(A, 2) = A @ A",
+  "ascii": "for A in (R | {missing})^(n,n)|None, matrix_power(A, 2) = A @ A"
  },
  "matrix_elementwise_abs": {
   "input": "for A in R^(n,n), trace(abs(A)) >= abs(trace(A))",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, trace(abs(A)) ≥ |trace(A)|",
-  "ascii": "for A in R^(n,n), trace(abs(A)) >= |trace(A)|"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, trace(abs(A)) ≥ |trace(A)|",
+  "ascii": "for A in (R | {missing})^(n,n)|None, trace(abs(A)) >= |trace(A)|"
  },
  "vector_triangle_inequality": {
   "input": "for x in R^n, y in R^n, norm(x + y) <= norm(x) + norm(y)",
-  "unicode": "∀ x ∈ ℝⁿ, y ∈ ℝⁿ, norm(x + y) ≤ norm(x) + norm(y)",
-  "ascii": "for x in R^n, y in R^n, norm(x + y) <= norm(x) + norm(y)"
+  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, y ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, norm(x + y) ≤ norm(x) + norm(y)",
+  "ascii": "for x in (R | {missing})^n|None, y in (R | {missing})^n|None, norm(x + y) <= norm(x) + norm(y)"
  },
  "matrix_frobenius_norm": {
   "input": "for A in R^(n,n), norm(A) ~= sqrt(trace(A.T @ A))",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, norm(A) ≈ sqrt(trace(A.T @ A))",
-  "ascii": "for A in R^(n,n), norm(A) ~= sqrt(trace(A.T @ A))"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, norm(A) ≈ sqrt(trace(A.T @ A))",
+  "ascii": "for A in (R | {missing})^(n,n)|None, norm(A) ~= sqrt(trace(A.T @ A))"
  },
  "matrix_spectral_norm": {
   "input": "for A in R^(n,n), norm(A, 2) <= norm(A)",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, norm(A, 2) ≤ norm(A)",
-  "ascii": "for A in R^(n,n), norm(A, 2) <= norm(A)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, norm(A, 2) ≤ norm(A)",
+  "ascii": "for A in (R | {missing})^(n,n)|None, norm(A, 2) <= norm(A)"
  },
  "vector_dot": {
   "input": "for x in R^n, y in R^n, dot(x, y) == dot(y, x)",
-  "unicode": "∀ x ∈ ℝⁿ, y ∈ ℝⁿ, dot(x, y) = dot(y, x)",
-  "ascii": "for x in R^n, y in R^n, dot(x, y) = dot(y, x)"
+  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, y ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, dot(x, y) = dot(y, x)",
+  "ascii": "for x in (R | {missing})^n|None, y in (R | {missing})^n|None, dot(x, y) = dot(y, x)"
  },
  "vector_outer": {
   "input": "for x in R^n, y in R^n, outer(x, y).T == outer(y, x)",
-  "unicode": "∀ x ∈ ℝⁿ, y ∈ ℝⁿ, outer(x, y).T = outer(y, x)",
-  "ascii": "for x in R^n, y in R^n, outer(x, y).T = outer(y, x)"
+  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, y ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, outer(x, y).T = outer(y, x)",
+  "ascii": "for x in (R | {missing})^n|None, y in (R | {missing})^n|None, outer(x, y).T = outer(y, x)"
  },
  "matrix_kron_transpose": {
   "input": "for A in R^(n,n), B in R^(n,n), kron(A, B).T == kron(A.T, B.T)",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, B ∈ ℝⁿˣⁿ, kron(A, B).T = kron(A.T, B.T)",
-  "ascii": "for A in R^(n,n), B in R^(n,n), kron(A, B).T = kron(A.T, B.T)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, B ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, kron(A, B).T = kron(A.T, B.T)",
+  "ascii": "for A in (R | {missing})^(n,n)|None, B in (R | {missing})^(n,n)|None, kron(A, B).T = kron(A.T, B.T)"
  },
  "matrix_diag_trace": {
   "input": "for A in R^(n,n), sum(diag(A)) ~= trace(A)",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, sum(diag(A)) ≈ trace(A)",
-  "ascii": "for A in R^(n,n), sum(diag(A)) ~= trace(A)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, sum(diag(A)) ≈ trace(A)",
+  "ascii": "for A in (R | {missing})^(n,n)|None, sum(diag(A)) ~= trace(A)"
  },
  "matrix_rank_transpose": {
   "input": "for A in R^(n,n), rank(A.T) == rank(A)",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, rank(A.T) = rank(A)",
-  "ascii": "for A in R^(n,n), rank(A.T) = rank(A)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, rank(A.T) = rank(A)",
+  "ascii": "for A in (R | {missing})^(n,n)|None, rank(A.T) = rank(A)"
  },
  "matrix_eigvals_trace": {
   "input": "for A in R^(n,n), sum(eigvals(A)) ~= trace(A)",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, sum(eigvals(A)) ≈ trace(A)",
-  "ascii": "for A in R^(n,n), sum(eigvals(A)) ~= trace(A)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, sum(eigvals(A)) ≈ trace(A)",
+  "ascii": "for A in (R | {missing})^(n,n)|None, sum(eigvals(A)) ~= trace(A)"
  },
  "matrix_eigvalsh_positive": {
   "input": "assuming A is positive definite, for A in R^(n,n), min(eigvalsh(A)) > 0",
-  "unicode": "assuming A is positive definite, ∀ A ∈ ℝⁿˣⁿ, min(eigvalsh(A)) > 0",
-  "ascii": "assuming A is positive definite, for A in R^(n,n), min(eigvalsh(A)) > 0"
+  "unicode": "assuming A is positive definite, ∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, min(eigvalsh(A)) > 0",
+  "ascii": "assuming A is positive definite, for A in (R | {missing})^(n,n)|None, min(eigvalsh(A)) > 0"
  },
  "matrix_cond_at_least_one": {
   "input": "for A in R^(n,n), cond(A) >= 1",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, cond(A) ≥ 1",
-  "ascii": "for A in R^(n,n), cond(A) >= 1"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, cond(A) ≥ 1",
+  "ascii": "for A in (R | {missing})^(n,n)|None, cond(A) >= 1"
  },
  "matrix_solve": {
   "input": "let b be R^n, assuming det(A) != 0, for A in R^(n,n), A @ solve(A, b) ~= b",
-  "unicode": "assuming det(A) != 0, let b be ℝⁿ, ∀ A ∈ ℝⁿˣⁿ, A @ solve(A, b) ≈ b",
-  "ascii": "assuming det(A) != 0, let b be R^n, for A in R^(n,n), A @ solve(A, b) ~= b"
+  "unicode": "assuming det(A) != 0, let b be (ℝ ∪ {∅})ⁿ ∪ {None}, ∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, A @ solve(A, b) ≈ b",
+  "ascii": "assuming det(A) != 0, let b be (R | {missing})^n|None, for A in (R | {missing})^(n,n)|None, A @ solve(A, b) ~= b"
  },
  "matrix_pinv": {
   "input": "for A in R^(m,n), A @ pinv(A) @ A ~= A",
-  "unicode": "∀ A ∈ ℝᵐˣⁿ, A @ pinv(A) @ A ≈ A",
-  "ascii": "for A in R^(m,n), A @ pinv(A) @ A ~= A"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {None}, A @ pinv(A) @ A ≈ A",
+  "ascii": "for A in (R | {missing})^(m,n)|None, A @ pinv(A) @ A ~= A"
  },
  "matrix_quadratic_form": {
   "input": "assuming A is positive definite and x != 0, for A in R^(n,n), x in R^n, x.T @ A @ x > 0",
-  "unicode": "assuming A is positive definite and x != 0, ∀ A ∈ ℝⁿˣⁿ, x ∈ ℝⁿ, x.T @ A @ x > 0",
-  "ascii": "assuming A is positive definite and x != 0, for A in R^(n,n), x in R^n, x.T @ A @ x > 0"
+  "unicode": "assuming A is positive definite and x != 0, ∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, x ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, x.T @ A @ x > 0",
+  "ascii": "assuming A is positive definite and x != 0, for A in (R | {missing})^(n,n)|None, x in (R | {missing})^n|None, x.T @ A @ x > 0"
  },
  "matrix_structure_and_relation_premise": {
   "input": "assuming A is symmetric and det(A) != 0, for A in R^(n,n), inv(A) ~= inv(A).T",
-  "unicode": "assuming A is symmetric and det(A) != 0, ∀ A ∈ ℝⁿˣⁿ, inv(A) ≈ inv(A).T",
-  "ascii": "assuming A is symmetric and det(A) != 0, for A in R^(n,n), inv(A) ~= inv(A).T"
+  "unicode": "assuming A is symmetric and det(A) != 0, ∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, inv(A) ≈ inv(A).T",
+  "ascii": "assuming A is symmetric and det(A) != 0, for A in (R | {missing})^(n,n)|None, inv(A) ~= inv(A).T"
  },
  "matrix_row_and_column": {
   "input": "for A in R^(n,n), A[0, :] == A.T[:, 0]",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, A[0, :] = A.T[:, 0]",
-  "ascii": "for A in R^(n,n), A[0, :] = A.T[:, 0]"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, A[0, :] = A.T[:, 0]",
+  "ascii": "for A in (R | {missing})^(n,n)|None, A[0, :] = A.T[:, 0]"
  },
  "matrix_axis_sum": {
   "input": "for A in R^(n,n), sum(A, axis=0) ~= sum(A.T, axis=1)",
-  "unicode": "∀ A ∈ ℝⁿˣⁿ, sum(A, axis=0) ≈ sum(A.T, axis=1)",
-  "ascii": "for A in R^(n,n), sum(A, axis=0) ~= sum(A.T, axis=1)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, sum(A, axis=0) ≈ sum(A.T, axis=1)",
+  "ascii": "for A in (R | {missing})^(n,n)|None, sum(A, axis=0) ~= sum(A.T, axis=1)"
  },
  "matrix_axis_mean": {
   "input": "for A in R^(m,n), mean(A, axis=1) ~= sum(A, axis=1) / n",
-  "unicode": "∀ A ∈ ℝᵐˣⁿ, mean(A, axis=1) ≈ sum(A, axis=1)/n",
-  "ascii": "for A in R^(m,n), mean(A, axis=1) ~= sum(A, axis=1)/n"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {None}, mean(A, axis=1) ≈ sum(A, axis=1)/n",
+  "ascii": "for A in (R | {missing})^(m,n)|None, mean(A, axis=1) ~= sum(A, axis=1)/n"
  },
  "matrix_qr_factors": {
   "input": "let q = numpy.linalg.qr, for A in R^(n,n), q(A)[0] @ q(A)[1] ~= A",
-  "unicode": "let q = numpy.linalg.qr, ∀ A ∈ ℝⁿˣⁿ, q(A)[0] @ q(A)[1] ≈ A",
-  "ascii": "let q = numpy.linalg.qr, for A in R^(n,n), q(A)[0] @ q(A)[1] ~= A"
+  "unicode": "let q = numpy.linalg.qr, ∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, q(A)[0] @ q(A)[1] ≈ A",
+  "ascii": "let q = numpy.linalg.qr, for A in (R | {missing})^(n,n)|None, q(A)[0] @ q(A)[1] ~= A"
  },
  "table_column_attribute": {
   "input": "for c in [-2, 2], f(df, c) == c * df.returns",
@@ -361,18 +361,18 @@
  },
  "table_column_item": {
   "input": "for c in [-2, 2], f(df, c) == c * df[\"returns\"]",
-  "unicode": "∀ c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {None, ∅}, f(df, c) = c*df['returns']",
-  "ascii": "for c in [-2.0, 2.0] : float|None|missing, f(df, c) = c*df['returns']"
+  "unicode": "∀ c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {None, ∅}, f(df, c) = c*df[\"returns\"]",
+  "ascii": "for c in [-2.0, 2.0] : float|None|missing, f(df, c) = c*df[\"returns\"]"
  },
  "vector_running_maximum": {
   "input": "for a in R^n, f(a) == cummax(a)",
-  "unicode": "∀ a ∈ ℝⁿ, f(a) = cummax(a)",
-  "ascii": "for a in R^n, f(a) = cummax(a)"
+  "unicode": "∀ a ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, f(a) = cummax(a)",
+  "ascii": "for a in (R | {missing})^n|None, f(a) = cummax(a)"
  },
  "vector_between_least_and_greatest": {
   "input": "for xs in R^n, min(xs) <= f(xs) <= max(xs)",
-  "unicode": "∀ xs ∈ ℝⁿ, min(xs) ≤ f(xs) ≤ max(xs)",
-  "ascii": "for xs in R^n, min(xs) <= f(xs) <= max(xs)"
+  "unicode": "∀ xs ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, min(xs) ≤ f(xs) ≤ max(xs)",
+  "ascii": "for xs in (R | {missing})^n|None, min(xs) <= f(xs) <= max(xs)"
  },
  "vector_drawdown_bounds": {
   "input": "for prices in [1, 100]^n, -1 <= f(prices) <= 0",
@@ -406,13 +406,13 @@
  },
  "domain_subset_symbol": {
   "input": "∀ n ∈ [0, 100] ⊂ ℤ, f(n) ≥ 0",
-  "unicode": "∀ n ∈ [0, 100] ⊂ ℤ, f(n) ≥ 0",
-  "ascii": "for n in [0, 100] : int, f(n) >= 0"
+  "unicode": "∀ n ∈ [0, 100] \\ {None, ∅} ⊂ ℤ, f(n) ≥ 0",
+  "ascii": "for n in [0, 100] \\ {None, missing} : int, f(n) >= 0"
  },
  "domain_blackboard_reals": {
   "input": "∀ x ∈ ℝ, f(x) == 2*x",
-  "unicode": "∀ x ∈ ℝ, f(x) = 2*x",
-  "ascii": "for x in R, f(x) = 2*x"
+  "unicode": "∀ x ∈ ℝ ∪ {None, ∅}, f(x) = 2*x",
+  "ascii": "for x in R|None|missing, f(x) = 2*x"
  },
  "relation_approx_unicode": {
   "input": "f(x) ≈ 2*x",
@@ -506,8 +506,8 @@
  },
  "let_free_var_typed": {
   "input": "let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0",
-  "unicode": "let c be [1, 100] ⊂ ℤ, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {None, ∅}, c + f(x) ≥ 0",
-  "ascii": "let c be [1, 100] : int, for x in [0.0, 10.0] : float|None|missing, c + f(x) >= 0"
+  "unicode": "let c be [1, 100] \\ {None, ∅} ⊂ ℤ, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {None, ∅}, c + f(x) ≥ 0",
+  "ascii": "let c be [1, 100] \\ {None, missing} : int, for x in [0.0, 10.0] : float|None|missing, c + f(x) >= 0"
  },
  "let_pseudo_infinity": {
   "input": "let |inf| be 1e12, for x in [0, oo], f(x) >= 0",
@@ -521,8 +521,8 @@
  },
  "stress_mixed_let_and_types": {
   "input": "let g = math.sqrt, let c be [1,100] subset integer, for x in (0, 100], g(x) + c >= 0",
-  "unicode": "let g = math.sqrt, let c be [1, 100] ⊂ ℤ, ∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {None, ∅}, c + g(x) ≥ 0",
-  "ascii": "let g = math.sqrt, let c be [1, 100] : int, for x in (0.0, 100.0] : float|None|missing, c + g(x) >= 0"
+  "unicode": "let g = math.sqrt, let c be [1, 100] \\ {None, ∅} ⊂ ℤ, ∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {None, ∅}, c + g(x) ≥ 0",
+  "ascii": "let g = math.sqrt, let c be [1, 100] \\ {None, missing} : int, for x in (0.0, 100.0] : float|None|missing, c + g(x) >= 0"
  },
  "auto_let_greek_param": {
   "input": "for theta in [0, 1], f(theta) >= 0",
@@ -571,13 +571,13 @@
  },
  "domain_natural_numbers": {
   "input": "for n in N, f(n) >= 0",
-  "unicode": "∀ n ∈ ℕ, f(n) ≥ 0",
-  "ascii": "for n in N, f(n) >= 0"
+  "unicode": "∀ n ∈ ℕ ∪ {None, ∅}, f(n) ≥ 0",
+  "ascii": "for n in N|None|missing, f(n) >= 0"
  },
  "domain_complex": {
   "input": "for z in C, f(z) == z",
-  "unicode": "∀ z ∈ ℂ, f(z) = z",
-  "ascii": "for z in C, f(z) = z"
+  "unicode": "∀ z ∈ ℂ ∪ {None, ∅}, f(z) = z",
+  "ascii": "for z in C|None|missing, f(z) = z"
  },
  "relation_approx": {
   "input": "f(x) ~= x",
@@ -661,13 +661,13 @@
  },
  "sum_subscript": {
   "input": "let n be [1, 20] subset Z, Sum(f(i))_{i=1}^n == n*(n+1)",
-  "unicode": "let n be [1, 20] ⊂ ℤ, Sum(f(i), i, 1, n) = n*(n + 1)",
-  "ascii": "let n be [1, 20] : int, Sum(f(i), i, 1, n) = n*(n + 1)"
+  "unicode": "let n be [1, 20] \\ {None, ∅} ⊂ ℤ, Sum(f(i), i, 1, n) = n*(n + 1)",
+  "ascii": "let n be [1, 20] \\ {None, missing} : int, Sum(f(i), i, 1, n) = n*(n + 1)"
  },
  "prod_call": {
   "input": "let n be [1, 20] subset Z, Prod(f(i), i, 1, n) >= 0",
-  "unicode": "let n be [1, 20] ⊂ ℤ, Prod(f(i), i, 1, n) ≥ 0",
-  "ascii": "let n be [1, 20] : int, Prod(f(i), i, 1, n) >= 0"
+  "unicode": "let n be [1, 20] \\ {None, ∅} ⊂ ℤ, Prod(f(i), i, 1, n) ≥ 0",
+  "ascii": "let n be [1, 20] \\ {None, missing} : int, Prod(f(i), i, 1, n) >= 0"
  },
  "principal_value": {
   "input": "P.V.(integrate(1/(x - c), x, -1, 1)) == f(c)",
@@ -701,8 +701,8 @@
  },
  "assuming_prerequisite_proven": {
   "input": "assuming base_case is proven, for n in [2, 30] subset Z, f(n) == f(n-1) + f(n-2)",
-  "unicode": "assuming base_case is proven, ∀ n ∈ [2, 30] ⊂ ℤ, f(n) = f(n - 2) + f(n - 1)",
-  "ascii": "assuming base_case is proven, for n in [2, 30] : int, f(n) = f(n - 2) + f(n - 1)"
+  "unicode": "assuming base_case is proven, ∀ n ∈ [2, 30] \\ {None, ∅} ⊂ ℤ, f(n) = f(n - 2) + f(n - 1)",
+  "ascii": "assuming base_case is proven, for n in [2, 30] \\ {None, missing} : int, f(n) = f(n - 2) + f(n - 1)"
  },
  "assuming_is_defined": {
   "input": "assuming is_defined(f), for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)",
@@ -811,8 +811,8 @@
  },
  "recurrence_identity": {
   "input": "for n in [2, 30] subset Z, f(n) == f(n-1) + f(n-2)",
-  "unicode": "∀ n ∈ [2, 30] ⊂ ℤ, f(n) = f(n - 2) + f(n - 1)",
-  "ascii": "for n in [2, 30] : int, f(n) = f(n - 2) + f(n - 1)"
+  "unicode": "∀ n ∈ [2, 30] \\ {None, ∅} ⊂ ℤ, f(n) = f(n - 2) + f(n - 1)",
+  "ascii": "for n in [2, 30] \\ {None, missing} : int, f(n) = f(n - 2) + f(n - 1)"
  },
  "chained_comparison": {
   "input": "for a in [0.1,10], b in [0.1,10], 2/(1/a+1/b) <= f(a,b) <= (a+b)/2",
@@ -826,13 +826,13 @@
  },
  "finite_domain_pinned": {
   "input": "for n in [30,30] subset Z, f(n) == 8",
-  "unicode": "∀ n ∈ [30, 30] ⊂ ℤ, f(n) = 8",
-  "ascii": "for n in [30, 30] : int, f(n) = 8"
+  "unicode": "∀ n ∈ [30, 30] \\ {None, ∅} ⊂ ℤ, f(n) = 8",
+  "ascii": "for n in [30, 30] \\ {None, missing} : int, f(n) = 8"
  },
  "finite_domain_small_range": {
   "input": "for n in [2,30] subset Z, f(n) >= 2",
-  "unicode": "∀ n ∈ [2, 30] ⊂ ℤ, f(n) ≥ 2",
-  "ascii": "for n in [2, 30] : int, f(n) >= 2"
+  "unicode": "∀ n ∈ [2, 30] \\ {None, ∅} ⊂ ℤ, f(n) ≥ 2",
+  "ascii": "for n in [2, 30] \\ {None, missing} : int, f(n) >= 2"
  },
  "finite_domain_discrete_set": {
   "input": "for n in {6, 28, 496}, f(n) >= 4",
@@ -856,23 +856,23 @@
  },
  "floor_div_sugar": {
   "input": "for n in [1,100] subset Z, f(n) == n // 2",
-  "unicode": "∀ n ∈ [1, 100] ⊂ ℤ, f(n) = floor(n/2)",
-  "ascii": "for n in [1, 100] : int, f(n) = floor(n/2)"
+  "unicode": "∀ n ∈ [1, 100] \\ {None, ∅} ⊂ ℤ, f(n) = floor(n/2)",
+  "ascii": "for n in [1, 100] \\ {None, missing} : int, f(n) = floor(n/2)"
  },
  "floor_div_evaluable": {
   "input": "for n in [1,100] subset Z, f(n) == floor(n/2)",
-  "unicode": "∀ n ∈ [1, 100] ⊂ ℤ, f(n) = floor(n/2)",
-  "ascii": "for n in [1, 100] : int, f(n) = floor(n/2)"
+  "unicode": "∀ n ∈ [1, 100] \\ {None, ∅} ⊂ ℤ, f(n) = floor(n/2)",
+  "ascii": "for n in [1, 100] \\ {None, missing} : int, f(n) = floor(n/2)"
  },
  "remainder_below_modulus": {
   "input": "for n in [0,1000] subset Z, n % 24 <= 23",
-  "unicode": "∀ n ∈ [0, 1000] ⊂ ℤ, Mod(n, 24) ≤ 23",
-  "ascii": "for n in [0, 1000] : int, Mod(n, 24) <= 23"
+  "unicode": "∀ n ∈ [0, 1000] \\ {None, ∅} ⊂ ℤ, Mod(n, 24) ≤ 23",
+  "ascii": "for n in [0, 1000] \\ {None, missing} : int, Mod(n, 24) <= 23"
  },
  "ceil_div_lower_bound": {
   "input": "for a in [1,500] subset Z, b in [1,30] subset Z, f(a,b) >= a/b",
-  "unicode": "∀ a ∈ [1, 500] ⊂ ℤ, b ∈ [1, 30] ⊂ ℤ, f(a, b) ≥ a/b",
-  "ascii": "for a in [1, 500] : int, b in [1, 30] : int, f(a, b) >= a/b"
+  "unicode": "∀ a ∈ [1, 500] \\ {None, ∅} ⊂ ℤ, b ∈ [1, 30] \\ {None, ∅} ⊂ ℤ, f(a, b) ≥ a/b",
+  "ascii": "for a in [1, 500] \\ {None, missing} : int, b in [1, 30] \\ {None, missing} : int, f(a, b) >= a/b"
  },
  "dim_premise_pins_length": {
   "input": "assuming len(x) == 2, f(x) == x[0]^2 + x[1]^2",
@@ -891,18 +891,18 @@
  },
  "dim_premise_vector_bound": {
   "input": "assuming n >= 5, for xs in R^n, f(xs) == xs[4]",
-  "unicode": "assuming n >= 5, ∀ xs ∈ ℝⁿ, f(xs) = xs[4]",
-  "ascii": "assuming n >= 5, for xs in R^n, f(xs) = xs[4]"
+  "unicode": "assuming n >= 5, ∀ xs ∈ (ℝ ∪ {∅})ⁿ ∪ {None}, f(xs) = xs[4]",
+  "ascii": "assuming n >= 5, for xs in (R | {missing})^n|None, f(xs) = xs[4]"
  },
  "dim_premise_square_matrix": {
   "input": "assuming n >= 3, for a in R^(n,n), f(a) == a[2][2]",
-  "unicode": "assuming n >= 3, ∀ a ∈ ℝⁿˣⁿ, f(a) = a[2][2]",
-  "ascii": "assuming n >= 3, for a in R^(n,n), f(a) = a[2][2]"
+  "unicode": "assuming n >= 3, ∀ a ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {None}, f(a) = a[2][2]",
+  "ascii": "assuming n >= 3, for a in (R | {missing})^(n,n)|None, f(a) = a[2][2]"
  },
  "dim_premise_rectangular_matrix": {
   "input": "assuming min(m, n) >= 3, for a in R^(m,n), f(a) == a[2][2]",
-  "unicode": "assuming min(m, n) >= 3, ∀ a ∈ ℝᵐˣⁿ, f(a) = a[2][2]",
-  "ascii": "assuming min(m, n) >= 3, for a in R^(m,n), f(a) = a[2][2]"
+  "unicode": "assuming min(m, n) >= 3, ∀ a ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {None}, f(a) = a[2][2]",
+  "ascii": "assuming min(m, n) >= 3, for a in (R | {missing})^(m,n)|None, f(a) = a[2][2]"
  },
  "language_alphabet": {
   "input": "for s in L[unicode], f(f(s)) == f(s)",
@@ -931,8 +931,8 @@
  },
  "language_missing_excluded": {
   "input": "for s in L[unicode] \\ {∅}, len(f(s)) <= len(s)",
-  "unicode": "∀ s ∈ L[unicode], len(f(s)) ≤ len(s)",
-  "ascii": "for s in L[unicode], len(f(s)) <= len(s)"
+  "unicode": "∀ s ∈ L[unicode] \\ {missing}, len(f(s)) ≤ len(s)",
+  "ascii": "for s in L[unicode] \\ {missing}, len(f(s)) <= len(s)"
  },
  "language_closure": {
   "input": "for s in L[unicode], f(s) in L[unicode]",
@@ -946,8 +946,8 @@
  },
  "containment_absent": {
   "input": "for s in L[unicode], \"<\" not in f(s)",
-  "unicode": "∀ s ∈ L[unicode], '<' ∉ f(s)",
-  "ascii": "for s in L[unicode], '<' not in f(s)"
+  "unicode": "∀ s ∈ L[unicode], \"<\" ∉ f(s)",
+  "ascii": "for s in L[unicode], \"<\" not in f(s)"
  },
  "membership_interval_reduces_to_chain": {
   "input": "for x in [0, 1], f(x) in [0, 1]",

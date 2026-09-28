@@ -32,6 +32,7 @@ from ._sampling import (
 )
 from ._sampling import _moderate_bounds, _reach_ends
 from .grammar import MISSING, Domain, domain_contains
+from .domain import _sentinel_piece, numeric_excluded
 from .runtime_types import SEQUENCE_KINDS
 # Probe's real home is records.py (the stdlib-only leaf every layer can
 # import); re-exported here because probing is where consumers
@@ -1030,10 +1031,10 @@ def _sample_domain(rng: random.Random, dom: Domain,
         return (isinstance(p, tuple) and not isinstance(p, frozenset)
                 and any(isinstance(v, complex) for v in p))
 
-    from .domain import is_sentinel
-    # a sentinel piece beside an interval is not drawn at random; a
-    # finite set's own sentinels are its members
-    enumerated = bool(dom.pieces) and all(isinstance(p, frozenset) for p in dom.pieces)
+    from .domain import _is_enumerated, is_sentinel
+    # a sentinel piece beside an interval or a named type is not drawn
+    # at random; a finite set's own sentinels are its members
+    enumerated = _is_enumerated(dom)
     pieces = tuple(p for p in dom.pieces
                    if enumerated or not (isinstance(p, frozenset) and p
                                          and all(is_sentinel(v) for v in p))) \
@@ -1561,12 +1562,12 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         # each element drawn from the Domain without them
         if isinstance(bound, Domain) and bound.dims:
             element = dataclasses.replace(bound, dims=())
-            if not element.excluded and element.base_type == "R":
-                if not element.pieces:
+            values = [pc for pc in element.pieces if not _sentinel_piece(pc)]
+            if not numeric_excluded(element) and element.base_type == "R":
+                if not values:
                     return "U(-10,10)"
-                if len(element.pieces) == 1 and isinstance(
-                        element.pieces[0], (tuple, list)):
-                    lo, hi = element.pieces[0]
+                if len(values) == 1 and isinstance(values[0], (tuple, list)):
+                    lo, hi = values[0]
                     return f"U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]"
             return one(p, "float", element)
         return one(p, "float", bound)
@@ -1577,7 +1578,7 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
                     "as a free Seq)")
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
-                and not bounds.excluded):
+                and not numeric_excluded(bounds)):
             # a bare real line given the reach samples as a bare parameter
             bounds = bounds.pieces[0]
         if getattr(bounds, "bare", False):

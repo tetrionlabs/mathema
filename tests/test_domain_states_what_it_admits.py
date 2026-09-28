@@ -11,67 +11,112 @@ import os
 
 import pytest
 
+np = pytest.importorskip("numpy")
+
+import mathema
 from mathema.conjecture import claim
-from mathema.domain import parse_binding, render_domain
+from mathema.domain import MissingDefaults, complete, parse_binding, render_domain
 from mathema.lexicon import LEXICON, get
 from mathema.spec import read_claims_file, render_claim_text
 
 
-def both(text: str) -> tuple:
+def both(text: str, defaults=None) -> tuple:
+    """The ASCII and unicode renderings of a written domain, completed
+    from `defaults` (a parameter's annotation) when given."""
     bound = parse_binding(f"x in {text}")[1]
-    return render_domain(bound, ascii_mode=True), render_domain(bound, ascii_mode=False)
+    if defaults is not None:
+        bound = complete(bound, defaults)
+    return (render_domain(bound, ascii_mode=True, defaults=defaults),
+            render_domain(bound, ascii_mode=False, defaults=defaults))
 
 
-#: written, ASCII canonical, unicode (section 2 of the model)
-SCALAR_TABLE = [
-    ("[0, 1] : float", "[0.0, 1.0] : float", "[0.0, 1.0] ⊂ ℝ"),
-    ("[0, 1] : float|None", "[0.0, 1.0] : float|None", "[0.0, 1.0] ⊂ ℝ ∪ {None}"),
-    ("[0, 1] : float|missing", "[0.0, 1.0] : float|missing", "[0.0, 1.0] ⊂ ℝ ∪ {∅}"),
-    ("[0, 1] : float|nan", "[0.0, 1.0] : float|nan", "[0.0, 1.0] ⊂ ℝ ∪ {nan}"),
-    ("[0, 1] : float|None|missing", "[0.0, 1.0] : float|None|missing",
-     "[0.0, 1.0] ⊂ ℝ ∪ {None, ∅}"),
-    ("[0, 1] | {5} : float|missing", "[0.0, 1.0] | {5} : float|missing",
-     "[0.0, 1.0] ∪ {5} ⊂ ℝ ∪ {∅}"),
-    ("R", "R", "ℝ"),
-    ("R|None|missing", "R|None|missing", "ℝ ∪ {None, ∅}"),
-    ("N|None", "N|None", "ℕ ∪ {None}"),
-    ("{0.25, None}", "{0.25, None}", "{0.25, None}"),
-    ("{0.25, nan}", "{0.25, nan}", "{0.25, nan}"),
-    ("{missing}", "{missing}", "{∅}"),
-    ("{None}", "{None}", "{None}"),
-]
+FLOAT = MissingDefaults(False, ("nan",), "float")
+OPTIONAL = MissingDefaults(True, ("nan",), "float")
+INT = MissingDefaults(False, (), "int")
+ARRAY = MissingDefaults(False, ("nan",), "numpy.ndarray")
+OPTIONAL_ARRAY = MissingDefaults(True, ("nan",), "numpy.ndarray")
 
-#: written, ASCII canonical, unicode (section 3 of the model)
-SPACE_TABLE = [
-    ("([0, 1] | {missing})^n : float", "([0.0, 1.0] | {missing})^n : float",
-     "([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ"),
-    ("[0, 1]^n : float", "[0.0, 1.0]^n : float", "[0.0, 1.0]ⁿ ⊂ ℝ"),
-    ("([0, 1] | {nan})^n : float", "([0.0, 1.0] | {nan})^n : float",
-     "([0.0, 1.0] ∪ {nan})ⁿ ⊂ ℝ"),
-    ("([0, 1] | {None})^n : float", "([0.0, 1.0] | {null})^n : float",
+#: annotation, written, ASCII canonical, unicode (sections 2 and 3 of the
+#: model, with D4: an exclusion renders where it narrows the annotation)
+TABLE = [
+    (FLOAT, "[0, 1]", "[0.0, 1.0] : float|missing", "[0.0, 1.0] ⊂ ℝ ∪ {∅}"),
+    (FLOAT, "[0, 1] : float", "[0.0, 1.0] \\ {missing} : float", "[0.0, 1.0] \\ {∅} ⊂ ℝ"),
+    (OPTIONAL, "[0, 1]", "[0.0, 1.0] : float|None|missing", "[0.0, 1.0] ⊂ ℝ ∪ {None, ∅}"),
+    (OPTIONAL, "[0, 1] : float|None", "[0.0, 1.0] \\ {missing} : float|None",
+     "[0.0, 1.0] \\ {∅} ⊂ ℝ ∪ {None}"),
+    (FLOAT, "[0, 1] : float|nan", "[0.0, 1.0] : float|nan", "[0.0, 1.0] ⊂ ℝ ∪ {nan}"),
+    (OPTIONAL, "[0, 1] : float", "[0.0, 1.0] \\ {None, missing} : float",
+     "[0.0, 1.0] \\ {None, ∅} ⊂ ℝ"),
+    (FLOAT, "[0, 1] | {5}", "[0.0, 1.0] | {5} : float|missing", "[0.0, 1.0] ∪ {5} ⊂ ℝ ∪ {∅}"),
+    (FLOAT, "R", "R|missing", "ℝ ∪ {∅}"),
+    (OPTIONAL, "R", "R|None|missing", "ℝ ∪ {None, ∅}"),
+    (INT, "[0, 1] subset Z", "[0, 1] : int", "[0, 1] ⊂ ℤ"),
+    (INT, "N|None", "N|None", "ℕ ∪ {None}"),
+    (INT, "Z", "Z", "ℤ"),
+    (FLOAT, "{0.25, None}", "{0.25, None}", "{0.25, None}"),
+    (FLOAT, "{0.25, nan}", "{0.25, nan}", "{0.25, nan}"),
+    (FLOAT, "{missing}", "{missing}", "{∅}"),
+    (FLOAT, "{None}", "{None}", "{None}"),
+    (ARRAY, "[0, 1]^n", "([0.0, 1.0] | {missing})^n : float", "([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ"),
+    (ARRAY, "[0, 1]^n \\ {missing}", "[0.0, 1.0]^n \\ {missing} : float",
+     "[0.0, 1.0]ⁿ \\ {∅} ⊂ ℝ"),
+    (ARRAY, "([0, 1] | {nan})^n", "([0.0, 1.0] | {nan})^n : float", "([0.0, 1.0] ∪ {nan})ⁿ ⊂ ℝ"),
+    (ARRAY, "([0, 1] | {None})^n", "([0.0, 1.0] | {null})^n : float",
      "([0.0, 1.0] ∪ {null})ⁿ ⊂ ℝ"),
-    ("([0, 1] | {missing})^n : float|None", "([0.0, 1.0] | {missing})^n : float|None",
+    (OPTIONAL_ARRAY, "[0, 1]^n", "([0.0, 1.0] | {missing})^n : float|None",
      "([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {None}"),
-    ("(R | {missing})^(n,n)", "(R | {missing})^(n,n)", "(ℝ ∪ {∅})ⁿˣⁿ"),
-    ("R^(n,n)", "R^(n,n)", "ℝⁿˣⁿ"),
-    ("R^n \\ {missing}", "R^n", "ℝⁿ"),
+    (ARRAY, "R^(n,n)", "(R | {missing})^(n,n)", "(ℝ ∪ {∅})ⁿˣⁿ"),
+    (ARRAY, "R^(n,n) \\ {missing}", "R^(n,n) \\ {missing}", "ℝⁿˣⁿ \\ {∅}"),
+]
+
+#: written, ASCII, unicode with no function: the default of no annotation
+UNANNOTATED = [
+    ("[0, 1]", "[0.0, 1.0] : float|None|missing", "[0.0, 1.0] ⊂ ℝ ∪ {None, ∅}"),
+    ("[0, 1] : float", "[0.0, 1.0] \\ {None, missing} : float", "[0.0, 1.0] \\ {None, ∅} ⊂ ℝ"),
+    ("R", "R|None|missing", "ℝ ∪ {None, ∅}"),
+    ("R^n", "(R | {missing})^n|None", "(ℝ ∪ {∅})ⁿ ∪ {None}"),
+    ("[1, 5] subset Z", "[1, 5] \\ {None, missing} : int", "[1, 5] \\ {None, ∅} ⊂ ℤ"),
 ]
 
 
-@pytest.mark.parametrize("written, ascii_text, unicode_text", SCALAR_TABLE + SPACE_TABLE)
-def test_the_rendering_states_what_the_domain_admits(written, ascii_text, unicode_text):
+@pytest.mark.parametrize("defaults, written, ascii_text, unicode_text", TABLE)
+def test_the_rendering_states_what_the_domain_admits(defaults, written, ascii_text,
+                                                    unicode_text):
+    assert both(written, defaults) == (ascii_text, unicode_text)
+
+
+@pytest.mark.parametrize("defaults, written, ascii_text, unicode_text", TABLE)
+def test_each_rendering_parses_back_to_itself_given_the_same_function(
+        defaults, written, ascii_text, unicode_text):
+    assert both(ascii_text, defaults) == (ascii_text, unicode_text)
+    assert both(unicode_text, defaults) == (ascii_text, unicode_text)
+
+
+@pytest.mark.parametrize("written, ascii_text, unicode_text", UNANNOTATED)
+def test_without_a_function_the_default_of_no_annotation_applies(
+        written, ascii_text, unicode_text):
     assert both(written) == (ascii_text, unicode_text)
-
-
-@pytest.mark.parametrize("written, ascii_text, unicode_text", SCALAR_TABLE + SPACE_TABLE)
-def test_each_rendering_parses_back_to_itself(written, ascii_text, unicode_text):
     assert both(ascii_text) == (ascii_text, unicode_text)
     assert both(unicode_text) == (ascii_text, unicode_text)
 
 
-def test_an_unstated_binding_renders_the_default_of_no_annotation():
-    assert both("[0, 1]") == ("[0.0, 1.0] : float|None|missing",
-                              "[0.0, 1.0] ⊂ ℝ ∪ {None, ∅}")
+def gram_trace(A: "np.ndarray") -> float:
+    return float(np.trace(A @ A.T))
+
+
+@pytest.mark.parametrize("written, statement", [
+    ("R^(n,n)", "for A in (R | {missing})^(n,n), f(A) >= 0"),
+    ("R^(n,n) \\ {missing}", "for A in R^(n,n) \\ {missing}, f(A) >= 0"),
+])
+def test_a_named_space_on_an_ndarray_is_completed_and_reads_back(written, statement):
+    first = _record(gram_trace, f"for A in {written}, f(A) >= 0")
+    assert first == statement
+    assert _record(gram_trace, first) == statement
+
+
+def _record(fn, text: str) -> str:
+    report = mathema.check(fn, claims=[claim(text, name="c", route="derive:math_only")])
+    return next(p for p in report.probes if p.name == "c").statement
 
 
 def test_a_language_spells_the_words_in_both_modes():
@@ -79,9 +124,15 @@ def test_a_language_spells_the_words_in_both_modes():
     assert both("L[unicode]") == ("L[unicode]", "L[unicode]")
 
 
-def test_an_excluded_value_renders_and_an_excluded_sentinel_does_not():
-    assert both("[-1, 1] \\ {1, missing} : float|None") == (
+def test_an_excluded_sentinel_renders_only_where_it_narrows_the_annotation():
+    assert both("[-1, 1] \\ {1, missing} : float|None", OPTIONAL) == (
+        "[-1.0, 1.0] \\ {1, missing} : float|None",
+        "[-1.0, 1.0] \\ {1, ∅} ⊂ ℝ ∪ {None}")
+    assert both("[-1, 1] \\ {1, missing} : float|None", OptionalInt) == (
         "[-1.0, 1.0] \\ {1} : float|None", "[-1.0, 1.0] \\ {1} ⊂ ℝ ∪ {None}")
+
+
+OptionalInt = MissingDefaults(True, (), "int")
 
 
 def test_the_raises_exception_is_never_read_as_a_parameter():
@@ -122,8 +173,9 @@ def test_every_bundled_row_is_a_fixed_point(key, statement):
     _fixed_point(statement)
 
 
-@pytest.mark.parametrize("written, ascii_text, unicode_text", SCALAR_TABLE + SPACE_TABLE)
-def test_every_table_row_is_a_fixed_point_as_a_claim(written, ascii_text, unicode_text):
+@pytest.mark.parametrize("defaults, written, ascii_text, unicode_text", TABLE)
+def test_every_table_row_is_a_fixed_point_as_a_claim(defaults, written, ascii_text,
+                                                    unicode_text):
     _fixed_point(f"for x in {written}, f(x) >= 0")
 
 

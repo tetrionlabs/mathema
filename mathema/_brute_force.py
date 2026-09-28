@@ -74,6 +74,16 @@ def _sweep_grid(params: list, cj_domain: dict, budget: int,
     return grid
 
 
+def _tried(grid: dict) -> dict:
+    """`{"mathema.missing": {"tried": {param: [value, ...]}}}` for the
+    missing values a sweep executes, empty when it executes none."""
+    from .domain import is_missing
+    tried = {p: [repr(v) for v in values if is_missing(v)]
+             for p, values in grid.items()}
+    tried = {p: v for p, v in tried.items() if v}
+    return {"mathema.missing": {"tried": tried}} if tried else {}
+
+
 def _lists_a_sentinel(cj_domain: dict, names: list) -> bool:
     """Whether any swept parameter's finite set lists a sentinel."""
     return any(cj_domain.get(n) is not None
@@ -147,7 +157,7 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                     counterexample=f"{where}: raised "
                                    f"{type(raised[0]).__name__}, claimed {cj.rhs}",
                     witness=dict(point),
-                    meta={"mathema.derive_route": "brute_force"})
+                    meta={"mathema.derive_route": "brute_force", **_tried(grid)})
             checked += 1
             continue
         return ProofResult(
@@ -155,7 +165,7 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
             sketch=f"at {where} the call returned {value!r} instead of raising",
             counterexample=f"{where}: returned {value!r} instead of raising",
             witness=dict(point),
-            meta={"mathema.derive_route": "brute_force"})
+            meta={"mathema.derive_route": "brute_force", **_tried(grid)})
     if checked == 0:
         return None
     plural = "point" if checked == 1 else "points"
@@ -165,7 +175,7 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                f"call raises at every one",
         quantifier=f"∀ {', '.join(names)} in the declared finite domain "
                    f"({checked} {plural})",
-        meta={"mathema.derive_route": "brute_force"})
+        meta={"mathema.derive_route": "brute_force", **_tried(grid)})
 
 
 def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
@@ -242,7 +252,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                        + ", found by checking every point of a finite domain",
                 counterexample=_fmt_point(point, names),
                 witness=dict(point),
-                meta={"mathema.derive_route": "brute_force",
+                meta={"mathema.derive_route": "brute_force", **_tried(grid),
                       # a value a listed sentinel stands for is only
                       # reproduced by calling with that same value
                       **({"mathema.witness_executed": True}
@@ -262,4 +272,4 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                 f"holds at every one"),
         quantifier=f"∀ {', '.join(names)} in the declared finite domain "
                    f"({checked} {plural})",
-        meta={"mathema.derive_route": "brute_force"})
+        meta={"mathema.derive_route": "brute_force", **_tried(grid)})

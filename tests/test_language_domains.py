@@ -135,7 +135,7 @@ def test_rendering_states_what_the_language_domain_admits():
     assert render_domain(absent, ascii_mode=True) == "L[letters]|None"
     assert render_domain(absent, ascii_mode=False) == "L[letters]|None"
     excluded = _bound("s in L[letters] \\ {∅}")
-    assert render_domain(excluded, ascii_mode=True) == "L[letters]"
+    assert render_domain(excluded, ascii_mode=True) == "L[letters] \\ {missing}"
 
 
 def test_a_union_with_a_finite_set_and_an_exclusion_render_as_written():

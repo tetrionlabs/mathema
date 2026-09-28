@@ -13,6 +13,7 @@ real source file behind them to read back.
 from __future__ import annotations
 
 import importlib.util
+import math
 import sys
 from typing import Annotated
 
@@ -315,16 +316,15 @@ def test_enforce_domain_raises_on_a_non_integer_for_z():
     assert f(3) == 3
 
 
-def test_enforce_domain_rejects_missing_for_a_bare_named_type():
-    # a bare "Z"/"N" string bypasses grammar parsing entirely, but is
-    # just as much a stated type as an explicit ⊂ Z clause, and a stated
-    # type admits only the missing values it lists
+def test_enforce_domain_allows_missing_for_a_bare_named_type_by_default():
+    # a bare "Z"/"N" string bypasses grammar parsing entirely, and like a
+    # bare named space in claim text it states no missing-value policy:
+    # with no annotation to complete from, missing values are admitted
     @mathema.enforce_domain({"n": "Z"})
     def f(n):
         return n
 
-    with pytest.raises(ValueError, match="n=nan"):
-        f(float("nan"))
+    assert math.isnan(f(float("nan")))   # passes through, not rejected
 
 
 def test_enforce_domain_raises_on_a_negative_for_n():

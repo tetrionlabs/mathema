@@ -59,10 +59,14 @@ Unicode form writes `[0.0, 1.0] ⊂ ℝ ∪ {None, ∅}`. Both say the same
 three things: the interval, that the object may be absent (`None`), and
 that its slot may hold a hole (`missing`, `∅`). A domain renders what it
 admits and never what it excludes, in the order `None`, `missing`, then
-member words (`nan`, `NA`, `null`, `NaT`), so `[0, 100] ⊂ Z` renders
-`[0, 100] ⊂ ℤ` and admits neither. A space puts its slot's holes inside
-the power, `([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ`, and the whole value's absence after
-the type. The rendering always shows which of these you got, because a
+member words (`nan`, `NA`, `null`, `NaT`). A type clause admits what
+it lists and nothing else, and an exclusion renders where it narrows
+what the parameter's annotation would admit: `[0, 100] ⊂ Z` renders
+`[0, 100] ⊂ ℤ` for an `int` parameter and `[0, 100] \ {∅} ⊂ ℤ` for a
+`float` one. A bare interval or a bare named space (`[0, 1]`, `ℝⁿ`)
+states nothing and takes what the annotation admits. A space puts its
+slot's holes inside the power, `([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ`, and the whole
+value's absence after the type. The rendering always shows which of these you got, because a
 silently different input space is the kind of thing that makes a proof
 mean less than a reader assumes.
 

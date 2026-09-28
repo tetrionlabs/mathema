@@ -212,7 +212,8 @@ each name one member of the hole class, and a runtime's definition rows
 A domain says which kinds it admits. A type clause states the whole
 policy, so `[0, 1] : float` admits neither, `[0, 1] : float|None` admits
 absence, `[0, 1] : float|missing` a hole, and `[0, 1] : float|nan` only
-the NaN member; `\ {missing}` and `\ {None}` exclude a kind. A finite set
+the NaN member; `\ {missing}` and `\ {None}` exclude a kind. A bare
+interval and a bare named space (`R`, `R^n`, `Z`) state nothing. A finite set
 is exactly its members: `{6, 28, 496}` admits nothing missing and
 `{0.25, None}` admits 0.25 and absence. Inside a space the slot's holes
 sit in brackets before the power, `([0, 1] | {missing})^n`.
@@ -243,9 +244,11 @@ for x in [0.0, 1.0] : float|missing, f(x) >= 0
 missing for x (float): nan
 ```
 
-The canonical text renders what a domain admits and never what it
-excludes, in the order `None`, `missing`, then members, fused onto the
-type in ASCII and written as a union in unicode; every spelling an
+The canonical text renders what a domain admits, in the order `None`,
+`missing`, then members, fused onto the type in ASCII and written as a
+union in unicode, and an exclusion only where it narrows what the
+annotation would admit (read without a function, what no annotation
+would); every spelling an
 earlier release wrote (`[0.0, 1.0]:float|missing`, `∪ {∅}`, `\ {∅}`)
 still reads, and comes back in this form:
 
@@ -255,8 +258,8 @@ from mathema import claim
 from mathema.spec import render_claim_text
 
 render_claim_text(claim("for x in [0, 1] ⊂ ℝ ∪ {None, ∅}, f(x) >= 0"), unicode=False)  # 'for x in [0.0, 1.0] : float|None|missing, f(x) >= 0'
-render_claim_text(claim("for x in [0, 1] : float|None, f(x) >= 0"), unicode=True)  # '∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {None}, f(x) ≥ 0'
-render_claim_text(claim("for xs in [0, 1]^n : float|missing, f(xs) >= 0"), unicode=False)  # 'for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0'
+render_claim_text(claim("for x in [0, 1] : float|None, f(x) >= 0"), unicode=True)  # '∀ x ∈ [0.0, 1.0] \\ {∅} ⊂ ℝ ∪ {None}, f(x) ≥ 0'
+render_claim_text(claim("for xs in [0, 1]^n : float|missing, f(xs) >= 0"), unicode=False)  # 'for xs in ([0.0, 1.0] | {missing})^n \\ {None} : float, f(xs) >= 0'
 ```
 
 ### Language domains

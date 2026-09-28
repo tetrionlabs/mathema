@@ -168,8 +168,8 @@ def test_rendering_distinguishes_all_four_corners_via_glyph_notation():
     d = _dom("for x in [0, 100] \\subset Z \\ {missing}, True")
     ra, rb, rc, rd = (render_domain(x, show_missing=True) for x in (a, b, c, d))
     assert ra.endswith("⊂ ℝ ∪ {None, ∅}")
-    assert rb == rd == "[0, 100] ⊂ ℤ"   # a stated type admits nothing unlisted
-    assert rc.endswith("⊂ ℝ ∪ {None}")  # the exclusion never renders
+    assert rb == rd == "[0, 100] \\ {None, ∅} ⊂ ℤ"   # stated, narrowing the default
+    assert rc == "[0.0, 100.0] \\ {∅} ⊂ ℝ ∪ {None}"
     for r in (ra, rc):
         assert "None" in r   # glyph notation, never an English phrase
 

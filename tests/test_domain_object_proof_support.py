@@ -95,18 +95,18 @@ def test_proof_sketch_domain_rendering_states_missing_policy_explicitly():
     # what it excludes is never rendered
     typed_but_included = _dom("for x in [0, 100] \\subset Z ∪ {∅}, True")
     strict = _dom("for x in [0, 100] \\subset Z \\ {missing}, True")
-    assert render_domain(strict, ascii_mode=False) == "[0, 100] ⊂ ℤ"
+    assert render_domain(strict, ascii_mode=False) == "[0, 100] \\ {None, ∅} ⊂ ℤ"
     assert render_domain(typed_but_included, ascii_mode=False).endswith("⊂ ℤ ∪ {∅}")
     assert render_domain(lenient, ascii_mode=False).endswith("⊂ ℝ ∪ {None, ∅}")
     assert lenient != strict
 
 
-def test_quantifier_clause_states_a_bare_named_type_as_admitting_nothing_missing():
+def test_quantifier_clause_states_missing_included_for_a_bare_named_type():
     # a hand-built domain dict may pass "Z"/"N" directly (not through a
-    # Domain object); a named type states the whole policy, so this
-    # bare-string shape renders the type alone, as the Domain path does.
-    assert _quantifier_clause({"x"}, ["x"], {"x": "Z"}, set()) == "∀ x ∈ ℤ"
-    assert _quantifier_clause({"x"}, ["x"], {"x": "N"}, set()) == "∀ x ∈ ℕ"
+    # Domain object); a bare named type states no missing-value policy,
+    # so with no annotation it admits both kinds, as the Domain path does.
+    assert _quantifier_clause({"x"}, ["x"], {"x": "Z"}, set()) == "∀ x ∈ ℤ ∪ {None, ∅}"
+    assert _quantifier_clause({"x"}, ["x"], {"x": "N"}, set()) == "∀ x ∈ ℕ ∪ {None, ∅}"
 
 
 # --- end-to-end: the derive route accepts an excluded/union domain

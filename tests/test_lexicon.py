@@ -116,8 +116,8 @@ def test_a_rendered_domain_always_states_what_it_admits():
     assert "|None|missing" in render_claim_text(allowed, unicode=False)
 
     excluded = claim("for x in [0,10] \\ {missing}, f(x) >= 0")
-    assert "∪ {None}" in render_claim_text(excluded, unicode=True)
-    assert "missing" not in render_claim_text(excluded, unicode=False)
+    assert "\\ {∅}" in render_claim_text(excluded, unicode=True)
+    assert "\\ {missing}" in render_claim_text(excluded, unicode=False)
     assert "|None" in render_claim_text(excluded, unicode=False)
 
     from mathema.spec import canonical_claim_text

@@ -3355,8 +3355,18 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
                 s = s.replace(symbol, backslash_name)
         return s
 
-    return outside_strings(
-        respell, to_canonical(expr, funcs, unicode, suppress_glyphs))
+    return _double_quoted(outside_strings(
+        respell, to_canonical(expr, funcs, unicode, suppress_glyphs)))
+
+
+_SINGLE_QUOTED = re.compile(r"(?<![\w)\]'])'((?:[^'\\\"]|\\.)*)'(?!')")
+
+
+def _double_quoted(text: str) -> str:
+    """`text` with each single-quoted string literal written in double
+    quotes, the one quote style a statement uses (a set member renders
+    `{"a"}`); a literal holding a double quote keeps its own."""
+    return _SINGLE_QUOTED.sub(lambda m: f'"{m.group(1)}"', text)
 
 
 class InvalidDefinition(ValueError):

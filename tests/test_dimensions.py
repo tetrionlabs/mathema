@@ -229,18 +229,18 @@ def test_space_forms_are_fixed_points_in_both_modes(spelling):
 
 def test_the_missing_clause_sits_in_the_element_clause():
     from mathema.domain import parse_binding, render_domain
-    _, bound = parse_binding("A in R^(m*n)")
-    assert render_domain(bound, ascii_mode=False) == "ℝᵐˣⁿ"
-    _, bound = parse_binding("A in (R | {missing})^(m*n)")
-    assert render_domain(bound, ascii_mode=False) == "(ℝ ∪ {∅})ᵐˣⁿ"
+    _, bound = parse_binding("A in R^(m*n) \\ {None, missing}")
+    assert render_domain(bound, ascii_mode=False) == "ℝᵐˣⁿ \\ {None, ∅}"
+    _, bound = parse_binding("A in (R | {missing})^(m*n) \\ {None}")
+    assert render_domain(bound, ascii_mode=False) == "(ℝ ∪ {∅})ᵐˣⁿ \\ {None}"
 
 
 def test_unicode_renders_the_exponent_as_a_superscript():
     from mathema.domain import parse_binding, render_domain
     _, v = parse_binding("v in R^n")
-    assert render_domain(v, ascii_mode=False) == "ℝⁿ"
+    assert render_domain(v, ascii_mode=False) == "(ℝ ∪ {∅})ⁿ ∪ {None}"
     _, a = parse_binding("A in R^(m*n)")
-    assert render_domain(a, ascii_mode=False) == "ℝᵐˣⁿ"
+    assert render_domain(a, ascii_mode=False) == "(ℝ ∪ {∅})ᵐˣⁿ ∪ {None}"
 
 
 def test_a_shared_space_dimension_draws_equal_lengths(strict_dot):

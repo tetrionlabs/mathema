@@ -63,16 +63,28 @@ def witness(probe) -> str:
     return probe.counterexample or ""
 
 
+def tried(probe) -> dict:
+    """The values each parameter's admitted sentinels were executed as."""
+    return ((probe.meta or {}).get("mathema.missing") or {}).get("tried") or {}
+
+
 def assert_row(fn, text, verdicts, *, member=None, raised=None,
-               companion=None, companion_member=None):
+               companion=None, companion_member=None, executed=None,
+               companions_none=False):
     """Intent:
         Adjudicate `text` over `fn` and check the row: the verdict is
         one of `verdicts`, the witness names `member` and the exception
-        `raised` when given, and a companion comes to `companion` with
-        its witness naming `companion_member` when given.
+        `raised` when given, a companion comes to `companion` with its
+        witness naming `companion_member` when given, the main claim
+        executed each value in `executed` (`{param: [value, ...]}`), and
+        with `companions_none` no companion was spawned.
     """
     probe, companions = run(fn, text)
     assert probe.verdict in verdicts, (probe.verdict, probe.note, witness(probe))
+    for p, values in (executed or {}).items():
+        assert set(values) <= set(tried(probe).get(p, [])), (p, tried(probe))
+    if companions_none:
+        assert not companions, [(c.name, c.verdict) for c in companions]
     if member is not None:
         assert f"={member}" in witness(probe) or f"({member}" in witness(probe), \
             witness(probe)
@@ -94,25 +106,25 @@ PROVEN_OR_HOLDS = ("proven", "holds")
 FALSIFIED = ("falsified",)
 
 
-@stage(3)
+@stage(2)
 def test_s1_a_float_proof_carries_a_companion_falsified_at_nan():
     assert_row(sqrt_plain, "for x in [0, 1], f(x) >= 0", PROVEN,
                companion="falsified", companion_member="nan")
 
 
 @stage(2)
-def test_s3_a_listed_none_is_executed_and_raises():
+def test_s3_a_listed_none_is_executed_by_the_claim_and_raises():
     assert_row(sqrt_plain, "for x in {0.25, None}, f(x) >= 0", FALSIFIED,
-               member="None", raised="TypeError")
+               member="None", raised="TypeError", executed={"x": ["None"]})
 
 
 @stage(2)
 def test_s4_a_listed_nan_is_a_hole_against_an_ordering():
     assert_row(sqrt_plain, "for x in {0.25, nan}, f(x) >= 0", FALSIFIED,
-               member="nan")
+               member="nan", executed={"x": ["nan"]})
 
 
-@stage(3)
+@stage(2)
 def test_s5_a_guarded_float_companion_raises_at_nan():
     assert_row(sqrt_guarded, "for x in [0, 1], f(x) >= 0", PROVEN,
                companion="falsified", companion_member="nan")
@@ -133,37 +145,46 @@ def test_s7_an_optional_float_companion_fails_at_a_missing_point():
 @stage(2)
 def test_s8_absence_against_a_number_is_not_true():
     assert_row(double_or_missing, "for x in {0.25, None}, f(x) >= 0", FALSIFIED,
-               member="None")
+               member="None", executed={"x": ["None"]})
 
 
-@stage(3)
+@stage(2)
 def test_s9_a_replaced_hole_holds_on_both_halves():
     probe, companions = assert_row(zero_if_missing, "for x in [0, 1], f(x) >= 0",
                                    PROVEN)
     assert companions and all(c.verdict in PROVEN_OR_HOLDS for c in companions)
+    assert any(set(tried(c).get("x", [])) >= {"None", "nan"} for c in companions)
 
 
-def test_s10_a_replaced_absence_is_proven():
-    assert_row(zero_if_missing, "for x in {0.25, None}, f(x) >= 0", PROVEN)
+@stage(2)
+def test_s10_a_replaced_absence_is_proven_by_execution_alone():
+    assert_row(zero_if_missing, "for x in {0.25, None}, f(x) >= 0", PROVEN,
+               executed={"x": ["None"]}, companions_none=True)
 
 
+@stage(2)
 def test_s11_propagation_agrees_with_itself():
     probe, companions = assert_row(ident, "for x in [0, 1], f(x) == x", PROVEN)
-    assert all(c.verdict in PROVEN_OR_HOLDS for c in companions)
+    assert companions and all(c.verdict in PROVEN_OR_HOLDS for c in companions)
+    assert any("nan" in tried(c).get("x", []) for c in companions)
 
 
+@stage(2)
 def test_s12_absence_agrees_with_itself():
-    assert_row(ident, "for x in {0.25, None}, f(x) == x", PROVEN)
+    assert_row(ident, "for x in {0.25, None}, f(x) == x", PROVEN,
+               executed={"x": ["None"]})
 
 
+@stage(2)
 def test_s13_a_hole_agrees_with_itself():
-    assert_row(ident, "for x in {0.25, nan}, f(x) == x", PROVEN)
+    assert_row(ident, "for x in {0.25, nan}, f(x) == x", PROVEN,
+               executed={"x": ["nan"]})
 
 
 @stage(2)
 def test_s16_absence_at_the_second_parameter_raises():
     assert_row(add, "for x in [0, 1], y in {0.5, None}, f(x, y) >= 0", FALSIFIED,
-               member="None", raised="TypeError")
+               member="None", raised="TypeError", executed={"y": ["None"]})
 
 
 def test_p1_a_policy_that_does_not_raise_at_nan_is_falsified():
@@ -171,17 +192,20 @@ def test_p1_a_policy_that_does_not_raise_at_nan_is_falsified():
                member="nan")
 
 
-def test_p2_every_member_raises_the_stated_exception():
-    assert_row(sqrt_guarded, "for x in {missing}, raises(f(x), ValueError)", PROVEN)
+def test_p2_the_one_member_raises_the_stated_exception():
+    assert_row(sqrt_guarded, "for x in {missing}, raises(f(x), ValueError)", PROVEN,
+               executed={"x": ["nan"]})
 
 
 def test_p3_a_replacement_policy_is_proven():
-    assert_row(zero_if_missing, "for x in {missing}, f(x) == 0", PROVEN)
+    assert_row(zero_if_missing, "for x in {missing}, f(x) == 0", PROVEN,
+               executed={"x": ["nan"]})
 
 
 @stage(2)
 def test_p4_membership_by_class_is_proven():
-    assert_row(double_or_missing, "for x in {missing}, f(x) in {missing}", PROVEN)
+    assert_row(double_or_missing, "for x in {missing}, f(x) in {missing}", PROVEN,
+               executed={"x": ["nan"]})
 
 
 @stage(5)

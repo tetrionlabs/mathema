@@ -533,11 +533,12 @@ def _bound_ends(bound) -> "tuple[float, float, bool, bool] | None":
     reads as the whole real line), None for any other bound shape."""
     import math
 
-    from .domain import Domain
+    from .domain import Domain, _sentinel_piece, numeric_excluded
     if bound is None:
         return -math.inf, math.inf, False, False
     if isinstance(bound, Domain) and bound.base_type == "R" \
-            and not bound.pieces and not bound.excluded and not bound.dims:
+            and not [p for p in bound.pieces if not _sentinel_piece(p)] \
+            and not numeric_excluded(bound) and not bound.dims:
         return -math.inf, math.inf, False, False
     if isinstance(bound, tuple) and len(bound) == 2 \
             and all(isinstance(e, (int, float)) and not isinstance(e, bool)

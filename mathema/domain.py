@@ -795,6 +795,13 @@ class Domain:
     # definition rows (`("nan",)` for a float slot); never rendered, the
     # class renders as its word
     members: tuple = field(default=(), compare=False)
+    # the defaults `complete()` filled the domain from, which the
+    # rendering reads to state an exclusion that narrows them
+    policy: "MissingDefaults | None" = field(default=None, compare=False,
+                                             repr=False)
+    # a `⊂ T` / `: T` clause stated the whole missing-value policy: what
+    # it does not admit it excludes
+    clause: bool = False
 
 
 # the closed vocabulary of base types a Domain may carry. Every
@@ -921,11 +928,26 @@ def _sentinel_piece(piece) -> bool:
             and all(isinstance(v, _Sentinel) for v in piece))
 
 
+def _absence_decided(dom: "Domain") -> bool:
+    return (dom.clause or dom.absent or ABSENT in dom.excluded
+            or ABSENT in _set_sentinels(dom))
+
+
+def _holes_decided(dom: "Domain") -> bool:
+    return (dom.clause or any(s.kind == "missing" for s in _set_sentinels(dom))
+            or any(is_hole_sentinel(v) for v in dom.excluded))
+
+
 def stated(bound) -> bool:
-    """Whether a domain states its whole missing-value policy: a type
-    clause or named type, a language, or an enumerated set."""
+    """Whether a domain states its whole missing-value policy: a
+    language, an enumerated set, or a domain that decides both kinds (a
+    `⊂ T` / `: T` clause does, admitting what it lists and excluding the
+    rest). A bare interval or a bare named space (`[0, 1]`, `R^n`, `Z`)
+    states nothing, and each kind it leaves open is completed from the
+    annotation."""
     dom = _as_domain(bound)
-    return dom.explicit_type or dom.base_type == "L" or _is_enumerated(dom)
+    return (dom.base_type == "L" or _is_enumerated(dom)
+            or (_absence_decided(dom) and _holes_decided(dom)))
 
 
 def _set_sentinels(dom: Domain) -> list:
@@ -938,24 +960,19 @@ def admitted(bound, defaults: "MissingDefaults | None" = None) -> tuple:
         `(absent, holes)`: whether the domain admits the absence of the
         object, and the hole sentinels it admits (the class, members),
         each kind the domain does not state read from `defaults`
-        (`NO_ANNOTATION` when not given).
+        (`NO_ANNOTATION` when not given). A language states both kinds.
     """
     dom = _as_domain(bound)
     defaults = defaults or NO_ANNOTATION
     listed = _set_sentinels(dom)
-    if _is_enumerated(dom):
-        return (ABSENT in listed,
-                tuple(s for s in listed if s.kind == "missing"))
     holes = tuple(s for s in listed if s.kind == "missing")
-    is_stated = stated(dom)
-    if dom.absent or ABSENT in listed:
-        absent = True
-    elif is_stated or ABSENT in dom.excluded:
-        absent = False
+    if _is_enumerated(dom) or dom.base_type == "L":
+        return dom.absent or ABSENT in listed, holes
+    if _absence_decided(dom):
+        absent = dom.absent or ABSENT in listed
     else:
         absent = defaults.absent
-    if not holes and not is_stated \
-            and not any(is_hole_sentinel(v) for v in dom.excluded):
+    if not _holes_decided(dom):
         holes = (MISSING,) if defaults.members else ()
     return absent, holes
 
@@ -986,30 +1003,27 @@ def complete(bound, defaults: MissingDefaults):
         The domain with every kind it does not state filled from
         `defaults`: absence admitted (`absent`) or excluded (the absence
         sentinel in `excluded`), the hole class admitted (a `{missing}`
-        piece) or excluded, and the class's resolved members recorded
-        on `members`. A stated domain keeps its own policy and gains the
-        resolution; an enumerated set is exactly its members and gains
-        only the resolution of a listed class. `None` stays `None`.
+        piece) or excluded, the class's resolved members recorded on
+        `members`, and `defaults` itself on `policy`, which the rendering
+        reads to state an exclusion that narrows them. A stated domain
+        keeps its own policy; an enumerated set is exactly its members.
+        `None` stays `None`.
     """
+    from dataclasses import replace
     if bound is None:
         return None
     dom = _as_domain(bound)
-    if _is_enumerated(dom):
-        if MISSING not in _set_sentinels(dom):
-            return bound
-        return Domain(base_type=dom.base_type, pieces=dom.pieces,
-                      excluded=dom.excluded, explicit_type=dom.explicit_type,
-                      dims=dom.dims, absent=dom.absent,
-                      members=tuple(defaults.members))
+    if _is_enumerated(dom) or dom.base_type == "L":
+        members = tuple(defaults.members) if MISSING in _set_sentinels(dom) else ()
+        return replace(dom, members=members, policy=defaults)
     absent, holes = admitted(dom, defaults)
     pieces = [p for p in dom.pieces if not _sentinel_piece(p)]
     excluded = set(dom.excluded)
-    implied = stated(dom)   # a stated domain already excludes the rest
     if holes:
         pieces.append(frozenset(holes))
-    elif not implied and not any(is_hole_sentinel(v) for v in excluded):
+    elif not _holes_decided(dom):
         excluded.add(MISSING)
-    if not absent and not implied:
+    if not absent:
         excluded.add(ABSENT)
     members: tuple = ()
     if MISSING in holes:
@@ -1018,7 +1032,8 @@ def complete(bound, defaults: MissingDefaults):
         members = tuple(s.member for s in holes if s.member is not None)
     return Domain(base_type=dom.base_type, pieces=tuple(pieces),
                   excluded=frozenset(excluded), explicit_type=dom.explicit_type,
-                  dims=dom.dims, absent=absent, members=members)
+                  dims=dom.dims, absent=absent, members=members, policy=defaults,
+                  clause=dom.clause)
 
 
 def _piece_contains(value, piece) -> bool:
@@ -1590,12 +1605,19 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     num_excl = numeric_excluded(dom)
     language = dom.base_type == "L"
 
+    narrowed: list = []
+
     def excluded_text() -> str:
-        if not num_excl:
+        if not num_excl and not narrowed:
             return ""
-        return " \\ " + _render_piece(frozenset(num_excl),
-                                        ascii_mode=ascii_mode or language,
-                                        as_int=as_int)
+        values = sorted(num_excl, key=_member_sort_key)
+        if as_int:
+            values = [_as_int_if_whole(v) for v in values]
+        return " \\ {" + ", ".join(
+            [_render_set_member(v, ascii_mode=ascii_mode or language)
+             for v in values]
+            + [_sentinel_word(v, ascii_mode=ascii_mode, words=words or language)
+               for v in narrowed]) + "}"
 
     if _is_enumerated(dom) and not dom.dims:
         values = sorted({v for p in dom.pieces for v in p}, key=_member_sort_key)
@@ -1611,6 +1633,20 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         absent, holes = False, ()
     ordered = _ordered_sentinels(absent, holes)
     value_pieces = [p for p in dom.pieces if not _sentinel_piece(p)]
+    policy = dom.policy or defaults or NO_ANNOTATION
+    if show_missing and language:
+        # a language states its exclusions as written, words in both
+        # modes
+        narrowed.extend(sorted((v for v in dom.excluded if isinstance(v, _Sentinel)),
+                               key=_member_sort_key))
+    elif show_missing:
+        # an exclusion is stated where it narrows what the parameter's
+        # annotation would admit, so the text reads back to the same
+        # domain given the same function
+        if not absent and policy.absent:
+            narrowed.append(ABSENT)
+        if not holes and policy.members:
+            narrowed.append(MISSING)
     if language:
         text = union_op.join(_render_piece(p, ascii_mode=ascii_mode)
                              for p in value_pieces)
@@ -1730,6 +1766,8 @@ def domain_bound_to_json(b) -> str | dict:
             out["absent"] = True
         if b.members:
             out["members"] = list(b.members)
+        if b.clause:
+            out["clause"] = True
         return out
     if isinstance(b, LanguageRef):
         return {"language": b.name,
@@ -1776,6 +1814,7 @@ def domain_bound_from_json(v):
                       explicit_type=v.get("explicit_type", False),
                       dims=tuple(str(d) for d in v.get("dims", ())),
                       absent=bool(v.get("absent", False)),
+                      clause=bool(v.get("clause", False)),
                       members=tuple(str(m) for m in v.get("members", ())))
     if "set" in v:
         return frozenset(_value_from_json(x) for x in v["set"])
@@ -2020,6 +2059,7 @@ def _parse_binding(part: str):
     text, tail_words = _peel_trailing_sentinels(text)
 
     m = _SUBSET_ANYWHERE.search(text)
+    clause_stated = m is not None
     if m is not None:
         type_explicit = _SUBSET_ASCII.get(m.group("type"), m.group("type"))
         text = (text[:m.start()] + " " + text[m.end():]).strip()
@@ -2177,21 +2217,18 @@ def _parse_binding(part: str):
 
     absent = ABSENT in unique
     holes = [s for s in unique if s.kind == "missing"]
-    if type_explicit is not None:
-        # a stated type excludes whatever it does not admit, so an
-        # excluded sentinel says nothing more and is not kept
-        excluded = {v for v in excluded if not isinstance(v, _Sentinel)}
+    clause = clause_stated and type_explicit != "L"
     # collapse to the OLD raw shape only when nothing but a plain piece
     # was stated: a stated type, an exclusion, a sentinel or a space
     # power needs the Domain shape to carry it
     if (type_explicit is None and not excluded and len(value_pieces) == 1
-            and not space_dims and not unique):
+            and not space_dims and not unique and not clause_stated):
         return name, value_pieces[0]
     all_pieces = tuple(value_pieces) + ((frozenset(holes),) if holes else ())
     return name, Domain(base_type=base_type, pieces=all_pieces,
                         excluded=frozenset(excluded),
                         explicit_type=type_explicit is not None,
-                        dims=space_dims, absent=absent)
+                        dims=space_dims, absent=absent, clause=clause)
 
 
 _NE_EXCLUSION = re.compile(r"^\s*([A-Za-z_]\w*)\s*!=\s*([^,]+?)\s*$")
@@ -2204,7 +2241,8 @@ def _exclude_point(bound, value: float):
     if isinstance(bound, Domain):
         return Domain(base_type=bound.base_type, pieces=bound.pieces,
                       excluded=bound.excluded | {value},
-                      explicit_type=bound.explicit_type)
+                      explicit_type=bound.explicit_type, dims=bound.dims,
+                      absent=bound.absent, clause=bound.clause)
     if isinstance(bound, tuple) and not isinstance(bound, frozenset):
         return Domain(base_type="R", pieces=(bound,),
                       excluded=frozenset({value}), explicit_type=False)
@@ -2387,7 +2425,8 @@ def canonical_bound(bound) -> tuple:
     return Domain(base_type="N",
                   pieces=tuple(p for p in bound.pieces if _sentinel_piece(p)),
                   excluded=bound.excluded, explicit_type=True,
-                  absent=bound.absent, members=bound.members), declared
+                  absent=bound.absent, members=bound.members,
+                  clause=bound.clause), declared
 
 
 def missing_included(bound) -> bool:
@@ -2689,10 +2728,10 @@ def operational_domain(cj_domain: dict, reach: "tuple[float, float]",
         if isinstance(bound, Domain):
             if bound.base_type != "R" or bound.dims:
                 rewritten[p] = bound
-            elif not bound.pieces:
+            elif all(_sentinel_piece(piece) for piece in bound.pieces):
                 rewritten[p] = _replace(bound, pieces=(ReachInterval(
                     lo_reach, hi_reach, reach_lo=True, reach_hi=True,
-                    bare=True),))
+                    bare=True),) + tuple(bound.pieces))
             else:
                 rewritten[p] = _replace(bound, pieces=tuple(
                     _reach_piece(piece, lo_reach, hi_reach)
@@ -2797,8 +2836,9 @@ def bound_to_sympy_set(bound):
             return sympy.S.Complexes
         base = {"R": sympy.S.Reals, "Z": sympy.S.Integers,
                 "N": sympy.S.Naturals0}[bound.base_type]
-        if bound.pieces:
-            covered = sympy.Union(*[piece_set(p) for p in bound.pieces])
+        value_pieces = [p for p in bound.pieces if not _sentinel_piece(p)]
+        if value_pieces:
+            covered = sympy.Union(*[piece_set(p) for p in value_pieces])
             result = sympy.Intersection(covered, base)
         else:
             result = base

@@ -103,7 +103,8 @@ def test_g7_the_empty_string_is_a_value():
 def test_g8_a_string_has_no_hole():
     probe, _ = run(label, 'for s in {missing}, f(s) == "-"')
     assert probe.verdict.startswith("skipped"), (probe.verdict, probe.note)
-    assert "a string has no hole" in (probe.note or "")
+    assert "s: a string has no hole; write `|None`" in (probe.note or "")
+    assert probe.statement == 'for s in {missing}, f(s) = "-"'   # the whole claim
 
 
 @stage(5)
@@ -146,8 +147,9 @@ def test_o4_an_absent_field_raises_typeerror():
 @needs_language
 @needs_pydantic
 @stage(5)
-def test_o5_an_object_parameter_rejecting_absence_is_missing_safe():
-    assert_row(note_len, "is_missing_safe(f)", PROVEN)
+def test_o5_an_absent_optional_field_is_not_missing_safe():
+    probe, _ = assert_row(note_len, "is_missing_safe(f)", FALSIFIED)
+    assert "None" in witness(probe)
 
 
 @needs_language
@@ -155,3 +157,13 @@ def test_o5_an_object_parameter_rejecting_absence_is_missing_safe():
 def test_o6_an_admitted_absent_field_falsifies():
     assert_row(note_len, f"for o in {ORDER}, o.note in L[unicode] | {{None}}, f(o) >= 0",
                FALSIFIED)
+
+
+@needs_language
+@needs_pydantic
+@stage(3)
+def test_a_path_bound_states_absence_where_it_narrows_an_optional_field():
+    probe, _ = run(note_len, f"for o in {ORDER}, o.note in L[unicode] \\ {{None}}, f(o) >= 0")
+    assert "o.note in L[unicode] \\ {None}" in probe.statement
+    probe, _ = run(note_len, f"for o in {ORDER}, o.sku in L[unicode] \\ {{None}}, f(o) >= 0")
+    assert "o.sku in L[unicode]," in probe.statement
