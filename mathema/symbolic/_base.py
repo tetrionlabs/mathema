@@ -23,6 +23,7 @@ import sympy
 from .._math_vocab import (_BINOPS, _MATH_ATTRS, _SYMPY_FUNCS,
                            _call_name, _root_name)
 from ..finite_sets import OpaqueRegistry, is_opaque_eligible
+from ..runtime_types import SEQUENCE_KINDS
 from .._signatures import callable_signature
 
 
@@ -1262,7 +1263,7 @@ def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
     registry is built automatically)."""
     if facts.tree is None or facts.loops or facts.branch_count or facts.recursion:
         return None
-    if not facts.params or any(k == "sequence" for k in facts.param_kinds.values()):
+    if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None
 
     _sp, _sc = _method_ctx_fields(fn, facts)

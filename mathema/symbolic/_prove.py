@@ -39,6 +39,7 @@ from ._proof_support import (
     _prove_relation_case_split, _quantifier_clause,
 )
 from ._sum import try_prove_sum
+from ..runtime_types import SEQUENCE_KINDS
 from .._signatures import callable_signature
 
 # private aux-dict key carrying {name: Lifted} for a claim's bound
@@ -2486,7 +2487,7 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
 
     from ..probing import _synth
     seqs = [p for p in facts.params
-            if facts.param_kinds.get(p) == "sequence"]
+            if facts.param_kinds.get(p) in SEQUENCE_KINDS]
     targets = [p for p in seqs if _premises_admit_empty(p, assumption)]
     if not targets:
         return None
@@ -2694,7 +2695,7 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                     glift = _adopt_piecewise(g_pw)
                     conditioned_guards = list(g_pw.raise_guards or [])
             if glift is None and gfacts.loops and not gfacts.recursion \
-                    and not any(k == "sequence"
+                    and not any(k in SEQUENCE_KINDS
                                 for k in gfacts.param_kinds.values()):
                 # a branch-free scalar loop body closes through the sum
                 # machinery to a plain expression; what lets a
@@ -2915,7 +2916,7 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             piecewise_guards = pw.raise_guards
             lifted = _adopt_piecewise(pw)
     if lifted is None and not facts.loops and sum(
-            1 for k in facts.param_kinds.values() if k == "sequence") == 2:
+            1 for k in facts.param_kinds.values() if k in SEQUENCE_KINDS) == 2:
         # no loop at all, but exactly two sequence-typed parameters,
         # see if the whole body is the one recognized dot-product shape.
         # Independent of the loop-fold fallback above (this function has

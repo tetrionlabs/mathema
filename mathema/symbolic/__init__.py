@@ -33,7 +33,7 @@ from ._dot import lift_dot
 from ._sum import lift_sum
 from ._prove import try_prove, try_prove_raises
 from ._matrix import (matrix_param_dims, mentions_matrix_ops,
-                      try_prove_matrix)
+                      try_prove_matrix, vector_param_dims)
 
 __all__ = [
     "NotSymbolic", "_LiftCtx", "_affine_locals", "bare_seq_name",
@@ -43,5 +43,6 @@ __all__ = [
     "diagnose_fold", "lift", "lift_conditioned", "lift_dot", "lift_fold",
     "lift_sum", "sympy", "try_prove", "try_prove_raises",
     "matrix_param_dims", "mentions_matrix_ops", "try_prove_matrix",
+    "vector_param_dims",
     "Lifted", "DerivedClaim", "ProofResult", "ConditionedLift",
 ]

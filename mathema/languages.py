@@ -51,8 +51,9 @@ ADAPTOR_GROUP = "mathema.language_adaptors"
 #: what a member of a language IS, in the parameter-kind vocabulary
 #: `analysis.param_kinds` uses, so a claim quantifying an `int`
 #: parameter over a string language can be flagged. A `row` is one
-#: record of a schema, a `frame` a table of them.
-KINDS = ("string", "mapping", "sequence", "object", "row", "frame")
+#: record of a schema, a `table` a frame of named, equal-length
+#: columns whose rows are such records.
+KINDS = ("string", "mapping", "sequence", "object", "row", "table")
 
 #: how much a language can be decided: a `finite` language is swept
 #: point by point and can be proven; an `alphabet`, `regular` or

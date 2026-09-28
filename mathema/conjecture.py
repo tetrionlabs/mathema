@@ -54,11 +54,13 @@ from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
                       _synth_dict, complex_is_a_raise, holds_inf,
                       holds_nan, same_infinity,
                       is_complex_value, ordering_shortfall,
-                      quiet_while_probing, relation_holds_elementwise)
+                      quiet_while_probing, relation_holds_elementwise,
+                      values_differ)
 from .records import (_EXC_TYPES, Probe, PseudoInfinity, classify_verdict,
                       statement_text)
 from .symbolic import (mentions_matrix_ops, try_prove, try_prove_matrix,
                        try_prove_raises)
+from .runtime_types import SEQUENCE_KINDS
 from ._signatures import callable_signature
 
 
@@ -383,7 +385,8 @@ def _pinned_arg_sets(cj, arity: int, kinds: "list | None" = None) -> list:
                 restored.append(complex(v["complex"]))
                 continue
             if (isinstance(v, str) and ("j" in v or "J" in v)
-                    and kind not in ("string", "dict", "sequence", "bool")):
+                    and kind not in ("string", "dict", "bool", "table")
+                    and kind not in SEQUENCE_KINDS):
                 try:
                     restored.append(complex(v))
                     continue
@@ -550,15 +553,17 @@ _BASE_TYPE_KIND = {"Z": "int", "N": "int", "R": "scalar", "C": "complex"}
 
 # which real parameter kinds (analysis.param_kinds' vocabulary) a
 # language's member kind is compatible with: a row is a mapping the body
-# reads as a dict, a frame is iterated or subscripted, an object is
-# anything the body does not pin down
+# reads as a dict, a table is a table parameter or one iterated or
+# subscripted, an object is anything the body does not pin down; a
+# sequence is any of the runtime types' sequence kinds (a list, a
+# vector, a matrix)
 _KIND_COMPATIBLE = {
     "string": {"string"},
     "mapping": {"dict"},
-    "sequence": {"sequence"},
-    "object": {"dict", "sequence", "unknown"},
+    "sequence": set(SEQUENCE_KINDS),
+    "object": {"dict", "unknown"} | SEQUENCE_KINDS,
     "row": {"dict"},
-    "frame": {"sequence", "dict"},
+    "table": {"table", "dict"} | SEQUENCE_KINDS,
 }
 
 
@@ -893,6 +898,9 @@ _ALLOWED_NODES = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Call, ast.Name,
                   ast.Constant, ast.Load, ast.Add, ast.Sub, ast.Mult, ast.Div,
                   ast.Pow, ast.Mod, ast.FloorDiv, ast.USub, ast.UAdd, ast.List, ast.Tuple,
                   ast.Subscript, ast.Index, ast.Slice,
+                  # the matrix product, and a keyword argument
+                  # (`sum(A, axis=0)`)
+                  ast.MatMult, ast.keyword,
                   # truth-valued law expressions (`f(a, b) == (a <= b)`):
                   # comparisons and boolean connectives evaluate to
                   # Python bools, which are ints, so both routes treat
@@ -1177,6 +1185,31 @@ def claim(law: str, name: str | None = None, source: str = "user",
     `for ... in ...` in one claim, though, raises `ConflictingDomainBinding`
     immediately; two different bounds for one name has no principled
     default to pick silently."""
+    first = _claim(law, name, source, route, grammar, funcs, tolerance,
+                   pseudo_infinity, meta, matrix_names)
+    if "|" not in blank_strings(law):
+        return first
+    # bars around a matrix are its determinant: once the claim's own
+    # domain has said which names are matrices, the text is read again
+    # with that known, keeping the first reading's name
+    mats = frozenset(matrix_names) | linalg.declared_matrix_names(first.domain)
+    if not mats:
+        return first
+    from .grammar import bars_over_matrices
+    with bars_over_matrices(mats):
+        return _claim(law, name if name is not None else first.name, source,
+                      route, grammar, funcs, tolerance, pseudo_infinity,
+                      meta, matrix_names)
+
+
+def _claim(law: str, name: str | None, source: str, route: str,
+           grammar: str, funcs: dict | None, tolerance: float | None,
+           pseudo_infinity: float | None, meta: dict | None,
+           matrix_names: frozenset) -> Conjecture:
+    """Intent:
+        `claim`'s parse of one law text, under whatever bar reading
+        `grammar.bars_over_matrices` has set.
+    """
     # "auto" is fully retired (the word stays free for automatic
     # differentiation): it is NOT a legacy alias, an "auto" route
     # reaches adjudication as an unknown route and skips loudly.
@@ -1601,8 +1634,12 @@ def _unreadable_side(side: str) -> str | None:
         if isinstance(node, ast.Call) and node.keywords:
             if any(k.arg is None for k in node.keywords):
                 return "argument unpacking (`**`) is not claim syntax"
-            return ("keyword arguments are not claim syntax: pass each "
-                    "argument by position")
+            if not (isinstance(node.func, ast.Name)
+                    and node.func.id in linalg.REDUCTION_CALLS
+                    and [k.arg for k in node.keywords] == ["axis"]):
+                return ("keyword arguments are not claim syntax: pass each "
+                        "argument by position (the one keyword is `axis=` "
+                        "on sum, mean, prod, min and max)")
         if isinstance(node, ast.Constant) and (
                 isinstance(node.value, bytes) or node.value is Ellipsis):
             return f"the literal {ast.unparse(node)} is not claim syntax"
@@ -1690,6 +1727,51 @@ def _parse_assuming_relation(part: str):
     return None
 
 
+def _parse_assuming_links(part: str):
+    """Intent:
+        One assuming conjunct as its list of plain relations: a single
+        relation gives one link, a chained comparison one link per
+        adjacent pair, conjoined (`a < 0 < b` is `a < 0` and `0 < b`,
+        through `grammar.split_relation_chain`, as a chained statement
+        is read).
+
+    Notes:
+        `None` when the conjunct does not read as plain relations: no
+        top-level relation, a chain `split_relation_chain` refuses (an
+        equality inside a chain), or a side that is itself a
+        comparison (`a < (0 < b)`).
+    """
+    from types import SimpleNamespace
+
+    from .grammar import normalize as _normalize
+    text = _normalize(part.strip())
+    try:
+        node = ast.parse(text, mode="eval").body
+    except SyntaxError:
+        node = None
+    if isinstance(node, ast.Compare) and len(node.ops) > 1:
+        try:
+            chain = split_relation_chain(text)
+        except NoRelation:
+            return None
+        links = [SimpleNamespace(lhs=lhs, relation=rel, rhs=rhs)
+                 for lhs, rel, rhs in chain]
+    else:
+        single = _parse_assuming_relation(part)
+        if single is None:
+            return None
+        links = [single]
+    for link in links:
+        for side in (link.lhs, link.rhs):
+            try:
+                side_node = ast.parse(side, mode="eval").body
+            except SyntaxError:
+                continue
+            if isinstance(side_node, ast.Compare):
+                return None
+    return links
+
+
 #: the word an auto-generated claim name spells each relation with
 _RELATION_WORDS = {"=:=": "equiv", "==": "eq", "~=": "approx", "!=": "ne",
                    "<=": "le", ">=": "ge", "<": "lt", ">": "gt", "=": "eq"}
@@ -1720,18 +1802,27 @@ def _conjoin_assuming(first: str, second: str, law: str) -> str:
         `assuming m >= 3`, `assuming n >= 3` -> `assuming m >= 3 and n >= 3`.
 
     Raises:
-        InvalidConjecture: when either clause is not a relation (or an
-            `and` of relations), since a definedness, lemma or structure
-            premise has its own clause shape and joining it to another
-            with `and` would change what it says.
+        InvalidConjecture: when either clause is not a relation or a
+            matrix structure premise (or an `and` of them), since a
+            definedness or lemma premise has its own clause shape and
+            joining it to another with `and` would change what it says.
     """
+    from . import matrices as _mtx
+    from .grammar import parse_domain_safety
+
+    def joinable(part: str) -> bool:
+        if _parse_assuming_links(part) is not None:
+            return True
+        parsed = parse_domain_safety(part.strip())
+        return (parsed is not None and parsed[0] in _mtx.PROPERTIES
+                and parsed[1].isidentifier())
     bodies = [re.sub(r"^assuming\s+", "", c.strip()) for c in (first, second)]
     for body in bodies:
-        if "-->" in body or any(_parse_assuming_relation(part) is None
-                                for part in _split_top_and(body)):
+        if "-->" in body or not all(joinable(part)
+                                    for part in _split_top_and(body)):
             raise InvalidConjecture(
                 f"two `assuming` clauses are joined only when both are "
-                f"relations; state the premises in one `assuming` clause, "
+                f"relations or structure premises; state the premises in one `assuming` clause, "
                 f"joined with `and` (a bound on two dimensions can be "
                 f"`assuming min(m, n) >= 3`): {law.strip()!r}")
     return "assuming " + " and ".join(bodies)
@@ -1794,17 +1885,17 @@ def _interpret_assumption(cj, conjectures):
     text = re.sub(r"^assuming\s+", "", raw).strip()
 
     # a matrix STRUCTURE premise (`assuming A is symmetric`,
-    # `assuming is_positive_definite(A)`): every conjunct names a
-    # matrix predicate over a bare parameter. It narrows synthesis to
+    # `assuming is_positive_definite(A)`): a conjunct naming a matrix
+    # predicate over a bare parameter. It narrows synthesis to
     # matrices with the structure (entailment-closed) and, on the
-    # derive route, becomes a sympy assumption. Recognised only when
-    # EVERY conjunct is a structure predicate; a clause mixing a
-    # structure premise with a relation falls through to the relation
-    # path (which reports the structure conjunct it cannot read).
+    # derive route, becomes a sympy assumption. A clause of structure
+    # conjuncts alone is a structure premise; one that also states
+    # relations (`assuming A is symmetric and det(A) > 0`) is a
+    # relation premise over the rest, carrying the structures too.
     from . import matrices as _mtx
     from .grammar import parse_domain_safety
     struct_map: dict = {}
-    all_structure = True
+    others: list = []
     for part in _split_top_and(text):
         parsed = parse_domain_safety(part.strip())
         if (parsed is not None and not parsed[0].startswith("not ")
@@ -1812,11 +1903,10 @@ def _interpret_assumption(cj, conjectures):
                 and parsed[1].isidentifier()):
             struct_map.setdefault(parsed[1], set()).add(parsed[0])
         else:
-            all_structure = False
-            break
-    if all_structure and struct_map:
-        closed = {param: tuple(sorted(_mtx.entailed(props)))
-                  for param, props in struct_map.items()}
+            others.append(part.strip())
+    closed = {param: tuple(sorted(_mtx.entailed(props)))
+              for param, props in struct_map.items()}
+    if struct_map and not others:
         return ("structure", text, closed)
 
     def skip(reason: str):
@@ -1826,7 +1916,7 @@ def _interpret_assumption(cj, conjectures):
     def conjuncts_of(region_text: str, display: str):
         parsed_list = []
         for part in _split_top_and(region_text):
-            parsed = _parse_assuming_relation(part)
+            parsed = _parse_assuming_links(part)
             inner = part.strip()[1:-1].strip()
             if (parsed is None and part.strip().startswith("(")
                     and part.strip().endswith(")")
@@ -1836,8 +1926,9 @@ def _interpret_assumption(cj, conjectures):
                             f"the parentheses, `assuming {inner}`")
             if parsed is None:
                 return skip(f"assuming clause must be a plain relation "
-                            f"(==, !=, >=, <=, >, <): {part!r}")
-            parsed_list.append(parsed)
+                            f"(==, !=, >=, <=, >, <), or a chain of "
+                            f"ordering relations (a < 0 < b): {part!r}")
+            parsed_list.extend(parsed)
         if not parsed_list:
             return skip(f"empty assuming region in {text!r}")
         return ("relation", display, parsed_list)
@@ -1898,6 +1989,11 @@ def _interpret_assumption(cj, conjectures):
                         f"claim in this batch with a plain relation statement")
         region = f"{ref.lhs} {ref.relation} {ref.rhs}"
         return conjuncts_of(region, f"{ref.name} --> {region}")
+    if struct_map:
+        relations = conjuncts_of(" and ".join(others), text)
+        if isinstance(relations, Probe):
+            return relations
+        return (*relations, closed)
     return conjuncts_of(text, text)
 
 
@@ -2058,9 +2154,10 @@ def _undeclared_names(cj, declared: set) -> list[str]:
         sides += [link[0], link[2]]
     premise = re.sub(r"^assuming\s+", "", (cj.assuming or "").strip())
     if premise and "-->" not in premise:
-        parts = [_parse_assuming_relation(p) for p in _split_top_and(premise)]
+        parts = [_parse_assuming_links(p) for p in _split_top_and(premise)]
         if all(p is not None for p in parts):
-            sides += [s for p in parts for s in (p.lhs, p.rhs)]
+            sides += [s for links in parts for p in links
+                      for s in (p.lhs, p.rhs)]
     trees = []
     for src in sides:
         if not src:
@@ -2095,7 +2192,7 @@ def _unbound_call_names(lhs: str, rhs: str, existing: set) -> list[str]:
     """
     from .grammar import reserved_names
     known = ({"f"} | existing | set(_SAFE_FUNCS) | reserved_names()
-             | {"sum", "prod", "raises"})
+             | {"sum", "prod", "raises"} | set(linalg.VOCABULARY))
     found: list[str] = []
     for src in (lhs, rhs):
         if not src:
@@ -2401,7 +2498,7 @@ def _validate(src: str, param_names: set[str],
         tree = ast.parse(src, mode="eval")
     except SyntaxError as e:
         raise InvalidConjecture(f"unparseable law {src!r}") from e
-    callable_names = {"f"} | funcs | set(_SAFE_FUNCS)
+    callable_names = {"f"} | funcs | set(_SAFE_FUNCS) | set(linalg.VOCABULARY)
     # a call's own function-position Name (`sin` in `sin(x)`) is a
     # legitimate reference to a recognized function; a bare Name with
     # the same text (`sin` on its own) is the mistake the reserved-name
@@ -2419,8 +2516,12 @@ def _validate(src: str, param_names: set[str],
             raise InvalidConjecture(
                 f"disallowed attribute {node.attr!r} in {src!r}")
         if isinstance(node, ast.Attribute):
-            # a bundled parameter's field read (`self.rate`, `cfg.a`):
+            # the transpose of any vector or matrix expression (`A.T`,
+            # `f(A).T`), or a bundled parameter's field read
+            # (`self.rate`, `cfg.a`, a table's column `df.returns`):
             # one level deep, rooted at a plain name, never a dunder
+            if node.attr == "T":
+                continue
             if not (isinstance(node.value, ast.Name)
                     and not node.value.id.startswith("__")
                     and not node.attr.startswith("__")):
@@ -2575,7 +2676,7 @@ def _shape_constraints(assumption, resolver):
             if acj.relation in ("<=", "<", "=="):
                 lo[rk] = max(lo.get(rk, 1), lc + (1 if acj.relation == "<" else 0))
             if acj.relation in (">=", ">", "=="):
-                hi[rk] = min(hi.get(rk, 64), lc - (1 if acj.relation == "<" else 0))
+                hi[rk] = min(hi.get(rk, 64), lc - (1 if acj.relation == ">" else 0))
     if not saw:
         return None, None, None
 
@@ -2840,7 +2941,8 @@ def _draw_trial_sizes(resolver, lo, hi, groups, rng):
     sizes = resolver.draw_sizes(rng, lo, hi)
     for group in (groups or []):
         g_lo = max((lo.get(k, 1) for k in group), default=1)
-        g_hi = min((hi.get(k, 6) for k in group), default=6)
+        g_hi = min((hi.get(k, max(6, 4 * g_lo)) for k in group),
+                   default=max(6, 4 * g_lo))
         n = rng.randint(max(1, g_lo), max(g_lo, g_hi))
         for k in group:
             sizes[k] = n
@@ -2930,10 +3032,12 @@ def _lemma_conjuncts(lemmas: list, cj, cj_domain: dict) -> list:
         if any(cj_domain.get(name) != bound
                for name, bound in (lemma.domain or {}).items()):
             continue
-        parsed = _parse_assuming_relation(
-            f"{lemma.lhs} {lemma.relation} {lemma.rhs}")
-        if parsed is not None:
-            contributed.append(parsed)
+        for lhs, relation, rhs in (list(lemma.links or ())
+                                   or [(lemma.lhs, lemma.relation,
+                                        lemma.rhs)]):
+            parsed = _parse_assuming_relation(f"{lhs} {relation} {rhs}")
+            if parsed is not None:
+                contributed.append(parsed)
     return contributed
 
 
@@ -3021,14 +3125,28 @@ def _resolve_matrix_sugar(cj: "Conjecture", fn_matrix_names: frozenset) -> "Conj
     mats = frozenset(fn_matrix_names) | linalg.declared_matrix_names(cj.domain)
     if not mats:
         return cj
-    lhs = linalg.apply_matrix_sugar(cj.lhs, mats)
-    rhs = linalg.apply_matrix_sugar(cj.rhs, mats) if cj.rhs else cj.rhs
+    links = cj.links
+    if cj.raw and "|" in blank_strings(cj.raw) \
+            and cj.relation not in ("raises",):
+        # bars around a matrix fold to its determinant as the text is
+        # read, so the text is read again knowing the signature's
+        # matrices
+        try:
+            again = claim(cj.raw, name=cj.name, route=cj.route,
+                          grammar=cj.grammar, matrix_names=mats)
+        except InvalidConjecture:
+            again = cj
+        lhs, rhs, links = again.lhs, again.rhs, again.links
+    else:
+        lhs = linalg.apply_matrix_sugar(cj.lhs, mats)
+        rhs = linalg.apply_matrix_sugar(cj.rhs, mats) if cj.rhs else cj.rhs
     if lhs == cj.lhs and rhs == cj.rhs:
         return cj
     grammar = cj.grammar
     if grammar == GRAMMAR and linalg.mentions_matrix_ops(lhs, rhs):
         grammar = f"{GRAMMAR}/linalg"
-    return dataclasses.replace(cj, lhs=lhs, rhs=rhs, grammar=grammar)
+    return dataclasses.replace(cj, lhs=lhs, rhs=rhs, links=links,
+                               grammar=grammar)
 
 
 def _effective_facts(fn, facts=None):
@@ -3062,6 +3180,10 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                       float_companions: bool = False,
                       pseudo_infinity=None) -> list[Probe]:
     """Adjudicate proposed claims against the live function.
+
+    Throughout, bars around one of the matrices `fn`'s signature
+    declares read as its determinant, and the `abs` of such a matrix
+    renders with its call spelling (`grammar.bars_over_matrices`).
 
     `trials` omitted (`None`) uses the same structural-risk-based
     adaptive budget `probe()`'s own laws always have
@@ -3114,9 +3236,9 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     infinity (a claims-file entry's `pseudo_infinity:`, or
     `check(fn, pseudo_infinity=)`). Each claim's computation runs to
     the value resolved claim > function > `MATHEMA_PSEUDO_INFINITY`
-    (`records.resolve_pseudo_infinity`, read once per call), else to
-    the carrier's maximum; the derive route never reads it. Where the
-    resolved value bounds an unbounded direction of a claim's
+    (`records.resolve_pseudo_infinity`, read once per call), else to the
+    number representation's maximum; the derive route never reads it.
+    Where the resolved value bounds an unbounded direction of a claim's
     effective domain, the claim's rows carry it with its level in
     `meta["mathema.pseudo_infinity"]`, and its computation rows show it
     as a `let` in front of their `condition` (P8).
@@ -3128,6 +3250,32 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     Raises:
         InvalidDomain: a function-level or `MATHEMA_PSEUDO_INFINITY`
             value that `let |inf| be` would refuse.
+    """
+    from .grammar import _BAR_MATRICES, bars_over_matrices
+    from .types import matrix_param_names
+    try:
+        fn_mats = matrix_param_names(fn)
+    except Exception:
+        fn_mats = frozenset()
+    with bars_over_matrices(fn_mats | _BAR_MATRICES.get()):
+        return _check_conjectures(
+            fn, conjectures, domain=domain, trials=trials,
+            trials_scale=trials_scale, facts=facts, extensive=extensive,
+            known_premises=known_premises,
+            float_companions=float_companions,
+            pseudo_infinity=pseudo_infinity)
+
+
+def _check_conjectures(fn, conjectures: list[Conjecture],
+                       domain: dict | None = None, trials: int | None = None,
+                       trials_scale: float = 1.0, facts=None,
+                       extensive: bool = False,
+                       known_premises: dict | None = None,
+                       float_companions: bool = False,
+                       pseudo_infinity=None) -> list[Probe]:
+    """Intent:
+        `check_conjectures`' adjudication, under the bar reading it
+        sets.
     """
     from .compendium import ensure_bundled
     from .records import resolve_pseudo_infinity
@@ -3234,6 +3382,12 @@ def check_conjectures(fn, conjectures: list[Conjecture],
             meta = dict(probe.meta or {})
             meta.setdefault("mathema.surface", cj.source)
             probe.meta = meta
+        from .runtime_types import strong_hints
+        for said in strong_hints(facts):
+            # a parameter used as a vector with no runtime type named:
+            # the row says which runtime type to annotate
+            if said not in (probe.note or ""):
+                probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         _stamp_examine_route(probe, cj, fn, facts)
         return probe
 
@@ -3455,11 +3609,18 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         elif assumption is not None:
             statement = f"assuming {assumption[1]}, {statement}"
             cj = _dc_replace(cj, assuming=f"assuming {assumption[1]}")
+            if len(assumption) > 3:
+                # structure conjuncts beside the relations
+                premise_structures = assumption[3]
         validated = _validate_claim(cj, statement, note, facts, domain, fn=fn)
         if isinstance(validated, Probe):
-            # a rejected claim has no canonical form (it was never a
-            # claim), so its record keeps what was written, verbatim
-            out.append(_stamped(validated, cj, canonical=False))
+            # a claim in another grammar is still the claim written,
+            # `let` sections and bound functions included, so its row
+            # keeps the canonical text and re-reads as the same claim;
+            # any other rejected claim has no canonical form (it was
+            # never a claim), so its record keeps what was written
+            foreign = "mathema.foreign_grammar" in (validated.meta or {})
+            out.append(_stamped(validated, cj, canonical=foreign))
             continue
         ctx = validated
         if assumption is not None:
@@ -3574,7 +3735,7 @@ def check_conjectures(fn, conjectures: list[Conjecture],
 
 
 # parameter kinds whose values run along a real direction
-_DIRECTION_KINDS = frozenset({"scalar", "unknown", "int", "sequence"})
+_DIRECTION_KINDS = frozenset({"scalar", "unknown", "int", *SEQUENCE_KINDS})
 
 
 def pseudo_infinity_stamp(cj, facts, parent_domain: "dict | None") -> "dict | None":
@@ -3795,12 +3956,13 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     companions = [p for p in probes if p.name not in link_names]
     if combined.verdict != "proven" or len(companions) != len(links):
         return combined, None
-    from .gates import companion_carrier
-    descriptor, _carrier, carrier_word = companion_carrier(cj.domain)
+    from .gates import companion_representation
+    descriptor, _representation, representation_word = \
+        companion_representation(cj.domain, facts)
     companion = _combine_conjunction(
         companions, companion_name(cj.name, descriptor), _chain_statement(cj),
         labels, what="float companion")
-    companion.note = (f"the computation of {cj.name} in {carrier_word}, "
+    companion.note = (f"the computation of {cj.name} in {representation_word}, "
                       f"executed link by link; {companion.note}")
     broken = next((p for p in companions if p.verdict == "falsified"), None)
     if broken is not None:
@@ -3876,7 +4038,7 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
     from dataclasses import replace as _replace
 
     numeric = [p for p in facts.params
-               if facts.param_kinds.get(p) != "sequence"]
+               if facts.param_kinds.get(p) not in SEQUENCE_KINDS]
     statement = statement_text(cj.relation, "f", cj.rhs)
     if not numeric:
         return Probe(cj.name, statement, "skipped", route=None,
@@ -4159,6 +4321,157 @@ class _ClaimContext:
     companion: "Probe | None" = None
     # the caller's explicit trials, which bound the companion's points too
     companion_budget: "int | None" = None
+
+
+def _claim_array_ranks(cj_domain: dict, fn, facts) -> dict:
+    """Intent:
+        The names a claim reads as vectors, matrices or tables,
+        `{name: rank}` (`linalg.array_ranks`), from its merged domain,
+        the function's signature markers and the parameters' runtime
+        kinds.
+    """
+    shapes: dict = {}
+    structures: dict = {}
+    if fn is not None:
+        from .types import shapes_from_signature, structures_from_signature
+        try:
+            shapes = shapes_from_signature(fn)
+            structures = structures_from_signature(fn)
+        except Exception:
+            shapes, structures = {}, {}
+    return linalg.array_ranks(cj_domain, shapes,
+                              getattr(facts, "param_kinds", None),
+                              structures)
+
+
+#: attributes of a DataFrame that are not columns
+_TABLE_ATTRIBUTES = frozenset({"T", "shape", "columns", "index", "values",
+                               "iloc", "loc", "dtypes", "empty", "size",
+                               "ndim", "schema", "height", "width"})
+
+
+def _table_columns(param: str, cj, facts) -> list:
+    """Intent:
+        The column names a table parameter is drawn with: every column
+        the claim (statement and premises) or the function body reads
+        as `param.name` or `param["name"]`, in the order first met, or
+        `["a", "b"]` when nothing names one.
+    """
+    trees = []
+    for src in _claim_sides(cj) + [a for a in (cj.assuming or "",) if a]:
+        text = re.sub(r"^\s*assuming\s+", "", str(src))
+        try:
+            trees.append(ast.parse(text, mode="eval"))
+        except SyntaxError:
+            continue
+    if getattr(facts, "tree", None) is not None:
+        trees.append(facts.tree)
+    found: list = []
+    for tree in trees:
+        called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        for node in ast.walk(tree):
+            name = None
+            if isinstance(node, ast.Attribute) and id(node) not in called \
+                    and isinstance(node.value, ast.Name) \
+                    and node.value.id == param \
+                    and not node.attr.startswith("_") \
+                    and node.attr not in _TABLE_ATTRIBUTES:
+                name = node.attr
+            elif isinstance(node, ast.Subscript) \
+                    and isinstance(node.value, ast.Name) \
+                    and node.value.id == param \
+                    and isinstance(node.slice, ast.Constant) \
+                    and isinstance(node.slice.value, str):
+                name = node.slice.value
+            if name is not None and name not in found:
+                found.append(name)
+    return found or ["a", "b"]
+
+
+def _bound_for_arrays(callee):
+    """Intent:
+        A bound function as a vector or matrix claim calls it: a
+        library function (numpy, scipy, pandas, polars) receives the
+        claim's arrays as they are; any other Python function receives
+        plain lists, realised through the runtime types its own
+        signature names. The result is read back as an array.
+    """
+    from . import _linalg_eval
+    module = (getattr(callee, "__module__", "") or "").split(".", 1)[0]
+    if module in ("numpy", "scipy", "pandas", "polars") \
+            or not inspect.isfunction(callee):
+        return _linalg_eval.law_callable(callee, plain_args=False)
+    from types import SimpleNamespace
+
+    from .runtime_types import calling, detect_parameters
+    try:
+        detected = detect_parameters(callee)
+    except Exception:
+        detected = {}
+    return _linalg_eval.law_callable(
+        calling(callee, SimpleNamespace(runtime_types=detected)))
+
+
+def _free_array(bound, resolver, trial_sizes: dict, env: dict, rng,
+                specials) -> list:
+    """Intent:
+        A draw of a claim's own vector or matrix variable (`let b be
+        R^n`): nested lists with one axis per dimension of its space,
+        each element drawn from the space's element domain. A fixed
+        size is that size; a dimension name the parameters carry takes
+        this trial's size for it (drawn, or measured off an argument);
+        any other name is a small random size.
+    """
+    sizes = []
+    for d in bound.dims:
+        if isinstance(d, int) or (isinstance(d, str) and d.isdigit()):
+            sizes.append(int(d))
+            continue
+        name = resolver.canonical(d)
+        size = trial_sizes.get(name)
+        if size is None:
+            anchor = resolver.anchor(name)
+            if anchor is not None and anchor[0] in env:
+                try:
+                    size = resolver.measure(env[anchor[0]], anchor[1])
+                except (IndexError, TypeError):
+                    size = None
+        sizes.append(size if size is not None else rng.randint(2, 5))
+
+    def build(axis):
+        if axis == len(sizes):
+            return _synth("float", rng, bound, specials=specials)
+        return [build(axis + 1) for _ in range(sizes[axis])]
+    return build(0)
+
+
+def _premise_op(scalar_op, relation: str, tolerance: float, rel_tol: float):
+    """Intent:
+        A premise relation as the probe filters with it: `scalar_op`
+        between two numbers, and between a vector or matrix and
+        anything the relation element by element, a number
+        broadcasting (`x != 0` holds when some element of `x` is not
+        0, the vector is not the zero vector).
+    """
+    from ._linalg_eval import is_array
+
+    def op(a, b):
+        if not (is_array(a) or is_array(b)):
+            return scalar_op(a, b)
+        return bool(relation_holds_elementwise(
+            a, b, relation,
+            tolerance if relation in ("==", "!=") else 0.0,
+            rel_tol=rel_tol))
+    return op
+
+
+def _claim_sides(cj) -> list:
+    """Every expression a claim's relation compares: both sides, and
+    each link of a chained comparison."""
+    sides = [cj.lhs, cj.rhs]
+    for link in cj.links or ():
+        sides += [link[0], link[2]]
+    return [s for s in sides if s]
 
 
 def _validate_claim(cj, statement: str, note: str, facts,
@@ -4453,6 +4766,28 @@ def _validate_claim(cj, statement: str, note: str, facts,
             note = (f"{note}; let-declared free variable(s) {resolved} "
                    f"match real parameter(s) of this function, deferred "
                    f"to the real parameter's own kind")
+    ranks = _claim_array_ranks(cj_domain, fn, facts)
+    complex_arrays = sorted(
+        p for p, bound in cj_domain.items()
+        if getattr(bound, "base_type", None) == "C"
+        and getattr(bound, "dims", ()))
+    if complex_arrays:
+        return Probe(cj.name, statement, "skipped:misspecified", route=None,
+                     note=f"{note}; {', '.join(complex_arrays)} "
+                          f"{'is' if len(complex_arrays) == 1 else 'are'} "
+                          f"declared complex: matrices and vectors are "
+                          f"real-only in this release")
+    compared = list(cj.links or [(cj.lhs, cj.relation, cj.rhs)])
+    premise = re.sub(r"^assuming\s+", "", (cj.assuming or "").strip())
+    if premise and "-->" not in premise:
+        for part in _split_top_and(premise):
+            compared += [(a.lhs, a.relation, a.rhs)
+                         for a in (_parse_assuming_links(part) or ())]
+    for _lhs, _rel, _rhs in compared:
+        refusal = linalg.matrix_ordering_reason(_rel, (_lhs, _rhs), ranks)
+        if refusal is not None:
+            return Probe(cj.name, statement, "skipped:misspecified",
+                         route=None, note=f"{note}; {refusal}")
     if cj.relation in ("<=", ">=", "<", ">"):
         complex_typed = sorted(
             p for p, bound in cj_domain.items()
@@ -5031,24 +5366,30 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             meta={"mathema.derive_status": "undecided",
                   **_provenance_meta(family_proof)})
         return None
-    # a matrix-algebra relation claim (det / transpose / matmul / trace
-    # / inverse over declared matrix parameters) is decided by sympy's
-    # matrix algebra, not by lifting f's body, so it is attempted before
-    # the ordinary derive-eligibility gate (which would treat `det` as
-    # an unresolved bound function). A structure marker or an
-    # `assuming A is symmetric` premise becomes a sympy assumption. A
-    # proof stands as the verdict; an undecided identity falls to the
-    # matrix-value probe (sampled concrete matrices, a witness on
-    # disagreement), a route="derive" claim to the honest unknown.
-    if (not cj.negated
-            and cj.relation in ("==", "~=", ">", ">=", "<", "<=", "!=")
-            and mentions_matrix_ops(cj.lhs, cj.rhs)):
-        from .claim_families import matrix_relation_probe
-        from .symbolic import matrix_param_dims
-        from .types import shapes_from_signature, structures_from_signature
-        _shapes = shapes_from_signature(fn)
-        _dims = matrix_param_dims(cj_domain, _shapes)
-        if _dims:
+    # a claim over vectors or matrices (an `R^n`/`R^(m,n)` domain, a
+    # Vec/Mat or structure marker, a vector, matrix or table runtime
+    # type) that uses one as a value is an identity of linear algebra,
+    # decided by sympy's matrix algebra and never by the scalar route,
+    # which would read each vector or matrix as one number. A structure
+    # marker or an `assuming A is symmetric` premise becomes a sympy
+    # assumption. A proof stands as the verdict; anything else is the
+    # honest unknown on route="derive" and, on route="best", falls to
+    # the probe stage, which evaluates vectors and matrices as arrays.
+    ranks = _claim_array_ranks(cj_domain, fn, facts)
+    premise_sides = [s for a in (ctx.assumption or ())
+                     for s in (a.lhs, a.rhs) if s]
+    callables = frozenset({"f"}) | frozenset(cj.funcs or ())
+    array_uses = linalg.array_value_uses(
+        _claim_sides(cj) + premise_sides, ranks, callables)
+    from .symbolic import matrix_param_dims
+    from .types import shapes_from_signature, structures_from_signature
+    _shapes = shapes_from_signature(fn)
+    matrix_claim = bool(matrix_param_dims(cj_domain, _shapes)) \
+        and mentions_matrix_ops(*_claim_sides(cj))
+    if array_uses or matrix_claim:
+        mproof = None
+        if (not cj.negated and not cj.links
+                and cj.relation in ("==", "~=", ">", ">=", "<", "<=", "!=")):
             _structs = dict(structures_from_signature(fn))
             for _pp, _props in (ctx.premise_structures or {}).items():
                 _structs[_pp] = tuple(sorted(
@@ -5060,27 +5401,24 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                 return Probe(cj.name, statement, "proven",
                              sketch=mproof.sketch, note=note, route="derive",
                              meta=_provenance_meta(mproof))
-            if cj.route == "derive":
-                # strict: this route promises proof-strength evidence, so
-                # an undecided identity is the honest unknown, never a
-                # silent fall to sampling.
-                return Probe(
-                    cj.name, statement, "unknown", route="derive",
-                    sketch=(mproof.sketch if mproof is not None else None),
-                    note=f"{note}; matrix identity not closed symbolically",
-                    meta={"mathema.derive_status":
-                          (mproof.status if mproof is not None
-                           else "unliftable")})
-            mprobe = matrix_relation_probe(cj, fn, _dims, _structs,
-                                           statement, note)
-            if mprobe is not None:
-                return mprobe
-            return Probe(
-                cj.name, statement, "unknown", route="derive",
-                sketch=(mproof.sketch if mproof is not None else None),
-                note=f"{note}; matrix identity not closed symbolically and "
-                     f"not sampleable here",
-                meta={"mathema.derive_status": "undecided"})
+        why = ("matrix identity not closed symbolically" if matrix_claim
+               else f"{', '.join(array_uses)} "
+                    f"{'is a vector or matrix' if len(array_uses) == 1 else 'are vectors or matrices'}"
+                    f", which the scalar derive route does not read, and "
+                    f"the matrix algebra did not close the claim")
+        unknown = Probe(
+            cj.name, statement, "unknown", route="derive",
+            sketch=(mproof.sketch if mproof is not None else None),
+            note=f"{note}; {why}",
+            meta={"mathema.derive_status":
+                  (mproof.status if mproof is not None else "unliftable")})
+        if cj.route == "derive":
+            # strict: this route promises proof-strength evidence, so
+            # an undecided identity is the honest unknown, never a
+            # silent fall to sampling.
+            return unknown
+        ctx.derive_undecided = unknown
+        return None
     no_ordinary_derive = cj.relation in routes.examine_predicates()
     # a multi-function claim now derives: each bound function lifts to
     # its own closed form inside try_prove (funcs= below). Only the
@@ -5200,9 +5538,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         no reliable verdict, so nothing they decided can move."""
         from ._brute_force import brute_force_proof
         from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+        from .runtime_types import calling
         try:
             return _with_timeout(
-                lambda: brute_force_proof(cj, fn, facts, cj_domain,
+                lambda: brute_force_proof(cj, calling(fn, facts), facts,
+                                          cj_domain,
                                           bound_funcs,
                                           assumption=assumption or []),
                 EXTENSIVE_TIMEOUT_SECONDS)
@@ -5625,8 +5965,9 @@ def _machine_failure_stratum(exc, witness: str) -> dict | None:
     Notes:
         `mathematics` is deliberately absent: a machine failure alone
         says nothing about whether the mathematical claim holds, only
-        that the carrier gave out before the value existed. The
-        verdict stays falsified either way; this only classifies.
+        that the number representation gave out before the value
+        existed. The verdict stays falsified either way; this only
+        classifies.
     """
     for exc_type, cause in _MACHINE_FAILURE_CAUSES.items():
         if isinstance(exc, exc_type):
@@ -5721,7 +6062,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # to the "probe" rung, so this is descriptive, not a strength claim.
         probe_route = getattr(family, "probe_route", "probe:algorithmic")
         setup = sampling()
-        algo_result = algo_route(fn, facts, cj, cj_domain, setup.rng, setup.budget)
+        from .runtime_types import calling
+        algo_result = algo_route(calling(fn, facts), facts, cj, cj_domain,
+                                 setup.rng, setup.budget)
         if algo_result is not None:
             # (verdict, checked, cx), optionally with the established
             # sketch, and then the family's own record meta, copied onto
@@ -5808,14 +6151,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                       f"domain; declare its values, e.g. 'for {p} in "
                       f'{{"a", "b"}}, ...\', or annotate it Literal[...]'),
                 meta={"mathema.probe_gap": "string-domain-missing"})
-    # the generic loop's reading of the domain: every unbounded
-    # direction, declared or bare, runs with finite values out to the
-    # resolved pseudo-infinity, else the carrier's maximum (P1: a real
-    # domain contains no infinity)
-    from ._sampling import carrier_reach
+    # the generic loop's reading of the domain: every unbounded direction,
+    # declared or bare, runs with finite values out to the resolved
+    # pseudo-infinity, else the number representation's maximum (P1: a
+    # real domain contains no infinity)
+    from ._sampling import representation_reach
+    reach_max = representation_reach()
     cj_domain, _approximated = _operational_domain(
-        cj_domain, pinf if pinf is not None
-        else (-carrier_reach(), carrier_reach()), bare=bare)
+        cj_domain, pinf if pinf is not None else (-reach_max, reach_max),
+        bare=bare)
     try:
         if cj.relation == "raises" or cj.rhs_bound is not None:
             code_l, aux_names = _validate(cj.lhs, set(kinds), extra)
@@ -5863,8 +6207,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         "==": lambda a, b, t=a_tol, r=a_rel:
                             _close(a, b, tolerance=t, rel_tol=r),
                         "!=": lambda a, b, t=a_tol, r=a_rel:
-                            not _close(a, b, tolerance=t, rel_tol=r)
+                            values_differ(a, b, tolerance=t, rel_tol=r)
                         }[acj.relation]
+                a_op = _premise_op(a_op, acj.relation, a_tol, a_rel)
                 compiled.append((a_code_l, a_code_r, a_op))
                 aux_all |= a_aux_l | a_aux_r
             assum_eval = (compiled, aux_all)
@@ -5939,6 +6284,24 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     for _pp, _props in (ctx.premise_structures or {}).items():
         param_structures[_pp] = tuple(sorted(
             set(param_structures.get(_pp, ())) | set(_props)))
+    # the runtime type each sequence parameter is realised as, and the
+    # matrices drawn as nested lists, which stay within the list
+    # adapter's size cap per axis
+    from .runtime_types import ListAdapter, realised_parameters
+    runtime_names = {p: d.adapter
+                     for p, d in realised_parameters(facts).items()}
+    nested = {p for p in kinds if p not in runtime_names and (
+        param_structures.get(p) or (resolver.shapes.get(p) is not None
+                                    and resolver.shapes[p].ndim >= 2))}
+    if shape_lo is not None and shape_hi is not None:
+        for p in nested:
+            for axis in range(resolver.shapes[p].ndim
+                              if p in resolver.shapes else 1):
+                key = resolver.key(p, axis)
+                if key is not None:
+                    shape_hi[key] = min(
+                        shape_hi.get(key, max(8, 4 * shape_lo.get(key, 2))),
+                        ListAdapter.SIZE_CAP)
     setup = sampling()
     rng, specials = setup.rng, setup.specials
     from .probing import claim_sampling_budget
@@ -5962,6 +6325,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the largest exact ordering violation the default allowance
     # absorbed, and the arguments it happened at
     absorbed, absorbed_at = 0.0, None
+    # the largest disagreement a draw's own round-off accounted for
+    roundoff_absorbed, roundoff_at = 0.0, None
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # a literal argument in the claim's own call (`f(values, "nope",
     # 0.35)`) fixes that parameter to the literal; the call passes it
@@ -6038,6 +6403,28 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             return value
         return _wrapped
 
+    # each call realises the drawn values as the parameters' runtime
+    # types and observes the result as a plain value
+    from .runtime_types import calling
+    # a claim over vectors, matrices or tables evaluates them as numpy
+    # arrays (so `x + y` is elementwise, never a list concatenation):
+    # each function still receives its arguments as its own runtime
+    # type, and what it returns is read back as an array
+    from . import _linalg_eval
+    from .matrices import _numpy
+    array_ranks = _claim_array_ranks(cj_domain, fn, facts)
+    array_names = [p for p in array_ranks
+                   if p in kinds or p in (cj.free_vars or ())]
+    as_arrays = bool(array_names) and _numpy() is not None
+    # a witness over vectors or matrices names each argument
+    arg_names = tuple(kinds) if as_arrays else None
+    table_columns = {p: _table_columns(p, cj, facts)
+                     for p, k in kinds.items() if k == "table"}
+    fn_call = calling(fn, facts)
+    if as_arrays:
+        fn_call = _linalg_eval.law_callable(fn_call)
+        bound_funcs = {name: _bound_for_arrays(v)
+                       for name, v in bound_funcs.items()}
     from .domain import path_bindings_hold
     path_bound = {p for p in kinds
                   if any(key.startswith(p + ".") or key.startswith(p + "[")
@@ -6059,8 +6446,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             outside_draw[0] = True
         return v
 
-    fn_tagged = _tagged(fn, "f", inject=call_pins)
+    fn_tagged = _tagged(fn_call, "f", inject=call_pins)
     bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
+    # the lengths the samples inside the premise region actually had,
+    # per sequence parameter, for the sampling note
+    sequence_params = [p for p, k in kinds.items() if k in SEQUENCE_KINDS]
+    observed_lengths: dict = {}
     for trial in range(budget + len(pinned)):
         call_raised[0] = call_nan[0] = call_inf[0] = None
         outside_draw[0] = False
@@ -6070,7 +6461,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # MATH_CONSTANTS before the per-trial parameter assignment
         # below, so a parameter named `e`/`pi` overrides the constant
         # (precedence identical to the derive route)
-        env = {"f": fn_tagged, **_SAFE_FUNCS, **MATH_CONSTANTS, **bound_tagged}
+        env = {"f": fn_tagged, **_SAFE_FUNCS, **_linalg_eval.FUNCTIONS,
+               **MATH_CONSTANTS, **bound_tagged}
         args = []
         if trial < len(pinned):
             # a counterexample already on record replays before any
@@ -6116,6 +6508,18 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     env[p] = v
                     args.append(v)
                     continue
+                if k == "table" and getattr(cj_domain.get(p), "base_type",
+                                            None) != "L":
+                    # a table: one equal-length column per name the
+                    # claim or the body reads (a table language draws
+                    # its own members below)
+                    length = rng.randint(2, 8)
+                    v = {c: _synth("sequence", rng, None, specials=specials,
+                                   length=length)
+                         for c in table_columns[p]}
+                    env[p] = v
+                    args.append(v)
+                    continue
                 shape = resolver.shapes.get(p)
                 if param_structures.get(p):
                     # a structure-marked matrix: synthesised WITH the
@@ -6129,7 +6533,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     v = _mtx.synth_for(param_structures[p], n, rng)
                 elif shape is not None and (
                         shape.ndim >= 2
-                        or (shape.ndim == 1 and k != "sequence")):
+                        or (shape.ndim == 1 and k not in SEQUENCE_KINDS)):
                     # a matrix-shaped (marker-declared) parameter, or a
                     # space binding (`R^n`, `R^(n,n)`) on a parameter
                     # whose kind the signature does not state: the
@@ -6181,6 +6585,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if a_name in ("eps", "epsilon", "ε"):
                 env[a_name] = (cj.tolerance if cj.tolerance is not None
                                else DEFAULT_TOLERANCE)
+            elif getattr(cj_domain.get(a_name), "dims", ()):
+                # a declared vector or matrix (`let b be R^n`): each
+                # axis named by a dimension the parameters carry takes
+                # that dimension's size in this trial
+                env[a_name] = _free_array(cj_domain[a_name], resolver,
+                                          trial_sizes, env, rng, specials)
             elif a_name in cj_domain:
                 env[a_name] = _synth("float", rng, cj_domain[a_name], specials=specials)
             else:
@@ -6210,6 +6620,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 env[p_name] = sv
                 if p_name in kinds:
                     args[list(kinds).index(p_name)] = sv
+        if as_arrays:
+            for p in array_names:
+                if p in env:
+                    env[p] = _linalg_eval.as_array(env[p])
+            if "inf" in aux:
+                env["inf"] = math.inf
         # marker dim names (Shape("m","n")) become real quantities the
         # premise and law can reference, read off this trial's shapes
         resolver.bind_env(env, {p: env[p] for p in kinds if p in env})
@@ -6228,6 +6644,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     continue
             except Exception:
                 continue
+        for p in sequence_params:
+            if isinstance(env.get(p), (list, tuple)) or (
+                    _linalg_eval.is_array(env.get(p)) and env[p].ndim >= 1):
+                observed_lengths.setdefault(p, set()).add(len(env[p]))
         if cj.relation == "raises":
             # the claim is that the call raises: returning any value is
             # the counterexample, raising the wrong type falsifies a
@@ -6237,16 +6657,21 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             except Exception as e:
                 checked += 1
                 if raised_type is not None and not isinstance(e, raised_type):
-                    cx = (f"{_fmt(tuple(args))}: raised "
+                    cx = (f"{_fmt(tuple(args), arg_names)}: raised "
                           f"{type(e).__name__}, claimed {cj.rhs}")
                     break
                 continue
             checked += 1
-            cx = f"{_fmt(tuple(args))}: returned {v!r} instead of raising"
+            cx = f"{_fmt(tuple(args), arg_names)}: returned {v!r} instead of raising"
             break
         try:
             lv = eval(code_l, {"__builtins__": {}}, env)
             rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
+            if as_arrays:
+                # a 1-by-1 result (`x.T @ A @ x` over a column) is the
+                # number it holds
+                lv = _linalg_eval.scalar(lv)
+                rv = _linalg_eval.scalar(rv) if code_r is not None else None
         except Exception as e:
             if any(is_missing(v) for v in args):
                 # missing-value behavior is its own axis
@@ -6286,8 +6711,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     jok = (_close(jl, jr, tolerance=slack,
                                   rel_tol=_declared_rel_tol(cj))
                            if cj.relation in ("==", "~=") else
-                           not _close(jl, jr, tolerance=slack,
-                                      rel_tol=_declared_rel_tol(cj))
+                           values_differ(jl, jr, tolerance=slack,
+                                         rel_tol=_declared_rel_tol(cj))
                            if cj.relation == "!=" else
                            jl <= jr + slack if cj.relation == "<=" else
                            jl >= jr - slack)
@@ -6298,17 +6723,18 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     break
             if boundary:
                 checked += 1
-                cx = (f"{_fmt(tuple(args))}: raised {type(e).__name__} at a "
+                cx = (f"{_fmt(tuple(args), arg_names)}: raised {type(e).__name__} at a "
                       f"floating-point boundary (the same inputs nudged "
                       f"within ε evaluate cleanly), a clamp at the raising "
                       f"operation's argument would remove the instability")
                 # nudged inputs evaluating cleanly IS the maths-sound
-                # evidence: the failure lives in the carrier's last ulp
+                # evidence: the failure lives in the number
+                # representation's last ulp
                 cx_stratum = {"mathematics": "sound",
                               "blame": "implementation",
                               "cause": "implementation:sub-epsilon-boundary",
                               "representation": "f64",
-                              "witness": _fmt(tuple(args))}
+                              "witness": _fmt(tuple(args), arg_names)}
                 break
             # a TypeError under a NON-INTEGER sample against a callable
             # with an int-typed parameter is a claim-domain
@@ -6335,25 +6761,43 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         cj.name, statement, "skipped:misspecified",
                         route=None,
                         note=f"{note}; {call_raised[0]} raised TypeError at "
-                             f"{_fmt(tuple(args))}: parameter(s) "
+                             f"{_fmt(tuple(args), arg_names)}: parameter(s) "
                              f"{', '.join(int_params)} of "
                              f"{call_raised[0]} are int-typed but the "
                              f"claim's domain admits non-integers "
                              f"({', '.join(nonint)}); add `subset Z` "
                              f"to the integer variable's domain")
+            # a raise on the list realisation of a parameter the body
+            # uses as a vector, matrix or table while the signature
+            # names no runtime type for it, in a module importing a
+            # library with a runtime type adapter: the list was the
+            # wrong object to hand the function, a misspecification of
+            # the parameter's type, never a counterexample
+            if call_raised[0] == "f" and isinstance(
+                    e, (TypeError, ValueError, AttributeError)):
+                hints = facts.runtime_hints or {}
+                listed = [hints[p2]["text"] for p2, v2 in zip(kinds, args)
+                          if p2 in hints and isinstance(v2, (list, tuple))]
+                if listed:
+                    return Probe(
+                        cj.name, statement, "skipped:misspecified",
+                        route=None,
+                        note=f"{note}; f raised {type(e).__name__} at "
+                             f"{_fmt(tuple(args), arg_names)}, sampled as a list: "
+                             + "; ".join(listed))
             # a raise is not a value: the claim asserts an equality or
             # ordering AT this in-domain point, and there is nothing on
             # one side to compare, pedantically, that falsifies it.
             checked += 1
             if isinstance(e, ComplexResult):
-                cx = (f"{_fmt(tuple(args))}: {e}, which a real claim reads "
+                cx = (f"{_fmt(tuple(args), arg_names)}: {e}, which a real claim reads "
                       f"as a raise; narrow the claim's domain to where every "
                       f"call is real, or annotate the function complex")
                 break
-            cx = (f"{_fmt(tuple(args))}: raised {type(e).__name__}, narrow "
+            cx = (f"{_fmt(tuple(args), arg_names)}: raised {type(e).__name__}, narrow "
                   "the claim's domain to where every call returns, or state "
                   "the raising region as its own raises(...) claim")
-            cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args)))
+            cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args), arg_names))
             break
         if cj.relation in ("in", "not in"):
             # membership is exact: a value is in the language or the
@@ -6364,14 +6808,17 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 member = (not is_missing(lv)) and domain_contains(lv, cj.rhs_bound)
             else:
                 try:
-                    member = lv in rv  # type: ignore[operator]
-                except TypeError:
-                    # a value that cannot be looked up in this rhs:
+                    member = bool(lv in rv)  # type: ignore[operator]
+                except (TypeError, ValueError):
+                    # a value that cannot be looked up in this rhs (an
+                    # array's membership has no single truth value):
                     # unanswerable at this point, not a counterexample
                     continue
             checked += 1
             if member != (cj.relation == "in"):
-                cx = (f"{_fmt(tuple(args))}: {lv!r} is "
+                if as_arrays:
+                    lv = _linalg_eval.shown(lv)
+                cx = (f"{_fmt(tuple(args), arg_names)}: {lv!r} is "
                       f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
                 break
             continue
@@ -6382,10 +6829,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # in-domain point, `!=` included, and the witness names
             # the callee that returned it
             checked += 1
-            cx = (f"{_fmt(tuple(args))}: {call_nan[0]} returned nan"
+            cx = (f"{_fmt(tuple(args), arg_names)}: {call_nan[0]} returned nan"
                   if call_nan[0] is not None else
-                  f"{_fmt(tuple(args))}: {lv!r} vs {rv!r}, and a nan is "
-                  f"no value")
+                  f"{_fmt(tuple(args), arg_names)}: "
+                  f"{_linalg_eval.shown(lv)!r} vs "
+                  f"{_linalg_eval.shown(rv)!r}, and a nan is no value")
             break
         if call_inf[0] is not None and same_infinity(lv, rv):
             # both sides overflow toward the same infinity: one
@@ -6394,7 +6842,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             checked += 1
             if cj.relation in ("==", "~=", "<=", ">="):
                 continue
-            cx = (f"{_fmt(tuple(args))}: both sides are "
+            cx = (f"{_fmt(tuple(args), arg_names)}: both sides are "
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, the same point, "
                   f"which {cj.relation} does not admit")
             break
@@ -6404,7 +6852,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # (the case where `math` raises): against a value, or the
             # opposite infinity, every value relation fails
             checked += 1
-            cx = (f"{_fmt(tuple(args))}: {call_inf[0]} returned "
+            cx = (f"{_fmt(tuple(args), arg_names)}: {call_inf[0]} returned "
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "
                   f"infinity for a finite input is no value")
             break
@@ -6436,10 +6884,32 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # function returning a matrix, `0 <= f(X) <= 1`) is compared
         # ELEMENTWISE: the relation holds iff it holds at every element,
         # a scalar broadcasting across the matrix.
+        if as_arrays:
+            lv, rv = _linalg_eval.comparable(lv, rv)
         ok = relation_holds_elementwise(
             lv, rv, cj.relation, slack,
             exact_inequality=cj.tolerance is None,
             rel_tol=_declared_rel_tol(cj))
+        if ok is False and as_arrays \
+                and cj.relation in ("==", "~=", "<=", ">="):
+            # the draw disagrees by no more than the round-off its own
+            # magnitudes produce (inputs moved by a few units in the
+            # last place move the sides by as much): no counterexample
+            allowance = _linalg_eval.roundoff_allowance(
+                lambda jenv: (eval(code_l, {"__builtins__": {}}, jenv),
+                              eval(code_r, {"__builtins__": {}}, jenv)),
+                env, [*array_names, *(p for p in kinds
+                                      if isinstance(env.get(p), float))],
+                (lv, rv))
+            call_raised[0] = call_nan[0] = call_inf[0] = None
+            if allowance > 0 and relation_holds_elementwise(
+                    lv, rv, cj.relation, slack + allowance,
+                    exact_inequality=cj.tolerance is None,
+                    rel_tol=_declared_rel_tol(cj)):
+                ok = True
+                gap = _linalg_eval.largest_gap(lv, rv)
+                if gap > roundoff_absorbed:
+                    roundoff_absorbed, roundoff_at = gap, _fmt(tuple(args), arg_names)
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex value), or two
@@ -6461,12 +6931,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if ok and cj.tolerance is None:
             gap = ordering_shortfall(lv, rv, cj.relation)
             if gap > absorbed:
-                absorbed, absorbed_at = gap, _fmt(tuple(args))
+                absorbed, absorbed_at = gap, _fmt(tuple(args), arg_names)
         if not ok:
             aux_part = ("; " + ", ".join(
                 f"{a}={env[a]:.3g}" if isinstance(env[a], (int, float))
                 else f"{a}={env[a]!r}" for a in aux) if aux else "")
-            cx = f"{_fmt(tuple(args))}{aux_part}: {_sides(lv, rv)}"
+            if as_arrays:
+                lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
+            cx = f"{_fmt(tuple(args), arg_names)}{aux_part}: {_sides(lv, rv)}"
             break
     shrunk_meta: dict = {}
     if cx is not None and cx_stratum is None and assum_eval is None and not aux \
@@ -6485,7 +6957,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,
                      counterexample=cx, note=note, stratum=cx_stratum,
                      meta={"mathema.sampling": _sampling_shorthand(
-                               kinds, cj_domain, checked, critical_hints, truncated_hints,
+                               kinds, cj_domain, checked, critical_hints,
+                               truncated_hints, observed_lengths,
+                               set(premise_draws), runtime_names, nested,
                                lap_floor),
                           "mathema.confidence": _probe_density(risk, checked),
                           "mathema.counterexample_args": _yaml_safe_args(args),
@@ -6498,10 +6972,16 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     if absorbed > 0:
         note = (f"{note}; fails by {absorbed:.3g} at {absorbed_at}, within "
                 f"the default tolerance ({DEFAULT_TOLERANCE:g})").lstrip("; ")
+    if roundoff_absorbed > 0:
+        note = (f"{note}; differs by {roundoff_absorbed:.3g} at "
+                f"{roundoff_at}, within the round-off of that draw's "
+                f"magnitudes").lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
-                           kinds, cj_domain, checked, critical_hints, truncated_hints,
-                               lap_floor),
+                           kinds, cj_domain, checked, critical_hints,
+                           truncated_hints, observed_lengths,
+                           set(premise_draws), runtime_names, nested,
+                           lap_floor),
                       "mathema.confidence": _probe_density(risk, checked)})
 
 

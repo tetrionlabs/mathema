@@ -26,10 +26,6 @@ from __future__ import annotations
 
 import math
 import random
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .records import Probe
 
 from ._sampling import _finite_bounds as _finite_bounds, _synth_scalar as _synth_scalar
 from .f import _is_nonfinite as _is_nonfinite
@@ -44,6 +40,7 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
                       _restricted_domain_targets as _restricted_domain_targets)
 from .probing import (_fmt, _pinned_float_env, _points_for_probe, _pole_safety,
                       _poles_by_var, _synth, call_arguments)
+from .runtime_types import SEQUENCE_KINDS
 from ._signatures import callable_signature
 
 # --- probe:algorithmic families: monotonicity, affine-ness, convexity ------
@@ -78,7 +75,8 @@ def _synth_other_params(fn, facts, target: str, domain: dict, rng: random.Random
             args.append(None)
             continue
         k = facts.param_kinds.get(p, "unknown")
-        args.append(_synth(k, rng, domain.get(p) if k != "sequence" else None))
+        args.append(_synth(k, rng, domain.get(p) if k not in SEQUENCE_KINDS
+                           else None))
     return args
 
 
@@ -691,7 +689,7 @@ def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
     target = cj.lhs
     if target not in facts.params:
         return None
-    if facts.param_kinds.get(target) == "sequence":
+    if facts.param_kinds.get(target) in SEQUENCE_KINDS:
         return None
     if not candidates:
         return None
@@ -1051,7 +1049,7 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
         # is_missing_safe's own hazard, not this member's
         if not candidates:
             return None
-    sequence_target = (facts.param_kinds.get(target) == "sequence"
+    sequence_target = (facts.param_kinds.get(target) in SEQUENCE_KINDS
                        and not language_bound)
     state = {"idx": 0}
 
@@ -1403,7 +1401,7 @@ def _is_empty_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     from .hazards import _emptiness_guard_params
     from .symbolic import ProofResult
     param = lhs_src
-    if facts.param_kinds.get(param) != "sequence":
+    if facts.param_kinds.get(param) not in SEQUENCE_KINDS:
         return None
     if param in _emptiness_guard_params(facts):
         return ProofResult(
@@ -1426,7 +1424,7 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
     inputs falsifies outright."""
     from .hazards import _emptiness_guard_params
     target = cj.lhs
-    if facts.param_kinds.get(target) != "sequence":
+    if facts.param_kinds.get(target) not in SEQUENCE_KINDS:
         return None
     guarded = target in _emptiness_guard_params(facts)
     shapes = ("empty", "single", "longer")
@@ -1658,7 +1656,7 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
     target = cj.lhs
     if target not in facts.params:
         return None
-    if facts.param_kinds.get(target) == "sequence":
+    if facts.param_kinds.get(target) in SEQUENCE_KINDS:
         return None
     bounds = domain.get(target)
     values = _spelling_values(bounds)
@@ -2597,13 +2595,13 @@ def _overflow_safe_rows(fn, cj) -> "tuple[list, list, str]":
 def _is_defined_reach(fn, cj, params: list, domain: dict, shapes: dict,
                       links: list, texts: list, owner: str):
     """Intent:
-        How far an `is_defined` probe runs each scalar parameter, for
-        any function: inside its recorded `is_overflow_safe` region
-        (`links`, see `_overflow_safe_rows`) when one is recorded, since
-        where the computation overflows is that claim's fact and not
-        this one's; else to the claim's pseudo-infinity, else to the
-        carrier's maximum; each intersected with the parameter's own
-        declared bound. Returns `(reach, note)`: the per-parameter
+        How far an `is_defined` probe runs each scalar parameter, for any
+        function: inside its recorded `is_overflow_safe` region (`links`,
+        see `_overflow_safe_rows`) when one is recorded, since where the
+        computation overflows is that claim's fact and not this one's;
+        else to the claim's pseudo-infinity, else to the number
+        representation's maximum; each intersected with the parameter's
+        own declared bound. Returns `(reach, note)`: the per-parameter
         `(lo, hi)` the corners are taken from and outside which a draw
         is not a trial, and the text the record carries.
     """
@@ -2611,12 +2609,13 @@ def _is_defined_reach(fn, cj, params: list, domain: dict, shapes: dict,
 
     import sympy
 
-    from ._sampling import carrier_reach
+    from ._sampling import representation_reach
     from .compendium import _relation
     from .records import operational_range
     pinf = operational_range(cj)
+    reach_max = representation_reach()
     default_lo, default_hi = (pinf if pinf is not None
-                              else (-carrier_reach(), carrier_reach()))
+                              else (-reach_max, reach_max))
     env = {p: sympy.Symbol(p, real=True) for p in params}
     regions: dict = {}
     for lhs, rel, rhs in links:
@@ -2661,7 +2660,8 @@ def _is_defined_reach(fn, cj, params: list, domain: dict, shapes: dict,
         from .records import operational_infinity
         note = f"unbounded directions run to {operational_infinity(cj).render()}"
     else:
-        note = f"unbounded directions run to magnitude {carrier_reach():g}"
+        note = (f"unbounded directions run to magnitude "
+                f"{representation_reach():g}")
     return reach, note
 
 
@@ -2752,22 +2752,25 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return None
         compiled.append((code_l, rel, code_r))
     # the claim's own premise: a point outside it is not a trial
-    from .conjecture import _parse_assuming_relation
+    from .conjecture import _parse_assuming_links, _split_top_and
     premise = (cj.assuming or "").strip()
     if premise.startswith("assuming"):
         premise = premise[len("assuming"):].strip()
     assumed = []
-    for part in filter(None, (c.strip() for c in premise.split(" and "))):
-        rel_parts = _parse_assuming_relation(part)
-        if rel_parts is None or rel_parts.relation not in _COMPARISONS:
+    for part in _split_top_and(premise):
+        premise_links = _parse_assuming_links(part)
+        if premise_links is None:
             return None
-        try:
-            assumed.append((
-                _validate(rel_parts.lhs, set(params), frozenset())[0],
-                rel_parts.relation,
-                _validate(rel_parts.rhs, set(params), frozenset())[0]))
-        except Exception:
-            return None
+        for rel_parts in premise_links:
+            if rel_parts.relation not in _COMPARISONS:
+                return None
+            try:
+                assumed.append((
+                    _validate(rel_parts.lhs, set(params), frozenset())[0],
+                    rel_parts.relation,
+                    _validate(rel_parts.rhs, set(params), frozenset())[0]))
+            except Exception:
+                return None
     compare = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
                "<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
                ">": lambda a, b: a > b, ">=": lambda a, b: a >= b}
@@ -2881,7 +2884,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         pinf = operational_range(cj)
         for p in params:
             if p in call_pins or shapes.get(p) is not None \
-                    or facts.param_kinds.get(p) in ("sequence", "string"):
+                    or facts.param_kinds.get(p) in (*SEQUENCE_KINDS, "string"):
                 continue
             for v in _extreme_candidates((domain or {}).get(p),
                                          pseudo_infinity=pinf):
@@ -3033,11 +3036,23 @@ def _synth_matrix(n: int, rng: random.Random) -> list:
     return [[rng.uniform(-5, 5) for _ in range(n)] for _ in range(n)]
 
 
+def _non_finite_matrix(n: int, rng: random.Random) -> list:
+    """A random n-by-n matrix with one entry a NaN or an infinity."""
+    m = _synth_matrix(n, rng)
+    m[rng.randrange(n)][rng.randrange(n)] = rng.choice(
+        (float("nan"), float("inf"), float("-inf")))
+    return m
+
+
 def _violating_matrix(prop, n: int, rng: random.Random,
                       tries: int = 20) -> "list | None":
     """A random n-by-n matrix that does NOT have `prop`, for the guard
     check; None when none turned up (a property almost every random
-    matrix satisfies, so the guard question is not meaningful)."""
+    matrix satisfies, so the guard question is not meaningful). A
+    finiteness guard is tried against a matrix holding a NaN or an
+    infinity."""
+    if prop.name == "is_finite":
+        return _non_finite_matrix(n, rng)
     for _ in range(tries):
         m = _synth_matrix(n, rng)
         if prop.check(m) is False:
@@ -3045,45 +3060,114 @@ def _violating_matrix(prop, n: int, rng: random.Random,
     return None
 
 
+def _premise_structures(cj) -> dict:
+    """The structure premises of a claim's `assuming` clause,
+    `{param: (prop, ...)}` entailment-closed (`assuming A is
+    symmetric` gives `{"A": ("is_symmetric",)}`)."""
+    import re
+
+    from .conjecture import _split_top_and
+    from .grammar import parse_domain_safety
+    from .matrices import PROPERTIES, entailed
+    text = re.sub(r"^\s*assuming\s+", "", (cj.assuming or "").strip())
+    found: dict = {}
+    for part in _split_top_and(text) if text else ():
+        parsed = parse_domain_safety(part.strip())
+        if (parsed is not None and not parsed[0].startswith("not ")
+                and parsed[0] in PROPERTIES and parsed[1].isidentifier()):
+            found.setdefault(parsed[1], set()).add(parsed[0])
+    return {p: tuple(sorted(entailed(props))) for p, props in found.items()}
+
+
+def _structured_draws(fn, facts, cj, domain: dict):
+    """Intent:
+        A per-trial drawer of every parameter for a matrix property
+        claim: a matrix sized by its `Shape` marker or `R^(m,n)` domain
+        (shared dimension names share one size, a fixed size stays
+        fixed) and synthesised with its structure markers and
+        structure premises; a vector sized the same way; a number
+        from its domain. A parameter with no shape and no domain is a
+        square matrix of a random size, as before any shape was known.
+    """
+    from . import dimensions
+    from .matrices import synth_for
+    from .types import shapes_from_signature, structures_from_signature
+    shapes = shapes_from_signature(fn)
+    structures = dict(structures_from_signature(fn))
+    for p, props in _premise_structures(cj).items():
+        structures[p] = tuple(sorted(set(structures.get(p, ())) | set(props)))
+    try:
+        resolver = dimensions.resolve(facts, shapes, claim_domain=domain)
+    except dimensions.DimensionConflict:
+        resolver = dimensions.resolve(facts, shapes)
+
+    def draw(rng: random.Random) -> list:
+        sizes = resolver.draw_sizes(rng, hi={k: 5 for k in
+                                             resolver.distinct_keys()})
+        out = []
+        for p in facts.params:
+            shape = resolver.shapes.get(p)
+            declared = p in shapes or getattr((domain or {}).get(p),
+                                              "dims", ())
+            ndim = shape.ndim if shape is not None and declared else 0
+            props = structures.get(p, ())
+            kind = facts.param_kinds.get(p, "scalar")
+            if ndim == 2 or (ndim == 0 and (props or kind in SEQUENCE_KINDS)):
+                if ndim == 2:
+                    rows = sizes.get(resolver.key(p, 0)) or 3
+                    cols = sizes.get(resolver.key(p, 1)) or 3
+                else:
+                    rows = cols = rng.randint(1, 5)
+                if props and rows == cols:
+                    out.append(synth_for(props, rows, rng))
+                else:
+                    out.append([[rng.uniform(-5, 5) for _ in range(cols)]
+                                for _ in range(rows)])
+            elif ndim == 1:
+                n = sizes.get(resolver.key(p, 0)) or 3
+                out.append([rng.uniform(-5, 5) for _ in range(n)])
+            else:
+                out.append(_synth("float", rng, (domain or {}).get(p)))
+        return out
+    return draw
+
+
 def _matrix_output_probe(prop):
     """The output/expression check: per trial synthesize every
-    parameter, evaluate the predicate's argument expression (which
-    calls `f` and may combine matrices), and test the resulting value
-    for the property. Holds when every evaluable value has it,
-    falsifies with the witnessing arguments when one does not, skips
-    when the property could not be decided on any value (a spectral
-    check with no numpy)."""
+    parameter (with its shape, structure markers and structure
+    premises), evaluate the predicate's argument expression (which
+    calls `f` and may combine matrices) in the claim namespace every
+    probe shares, and test the resulting value for the property. Holds
+    when every evaluable value has it, falsifies with the witnessing
+    arguments when one does not, skips when the property could not be
+    decided on any value (a spectral check with no numpy)."""
     def probe(fn, facts, cj, domain, rng, trials):
         import ast as _ast
 
         try:
-            arg_ast = _ast.parse(cj.lhs, mode="eval").body
+            code = compile(_ast.parse(cj.lhs, mode="eval"), "<claim>", "eval")
         except SyntaxError:
             return None
-        undecided = [0]
-
-        def trial(args):
-            filled = [_synth_matrix(rng.randint(1, 5), rng)
-                      if a is None else a for a in args]
-            env = dict(zip(facts.params, filled))
+        draw = _structured_draws(fn, facts, cj, domain)
+        checked = 0
+        for _ in range(trials):
+            filled = draw(rng)
             try:
-                value = _eval_matrix_expr(arg_ast, env, fn)
+                value = _eval_matrix_expr(code, dict(zip(facts.params,
+                                                         filled)), fn)
             except Exception:
-                return None
+                continue
             got = prop.check(value)
             if got is None:
-                undecided[0] += 1
-                return None
-            if got is True:
-                return True
-            return f"{_fmt(tuple(filled))}: result is not {prop.name[3:]}"
-
-        verdict, checked, cx = _probe_trials(
-            fn, facts, _first_matrix_param(facts), domain, rng, trials, trial)
-        if checked == 0 and undecided[0]:
-            return ("skipped", 0, None,
-                    None)
-        return (verdict, checked, cx, None)
+                continue
+            checked += 1
+            if got is not True:
+                return ("falsified", checked,
+                        f"{_fmt(tuple(filled))}: result is not "
+                        f"{prop.name[3:]}", None)
+        if checked == 0:
+            return ("skipped", 0, None, None)
+        return ("holds", checked, None, None)
     return probe
 
 
@@ -3119,217 +3203,19 @@ def _matrix_guard_probe(prop):
     return probe
 
 
-def _first_matrix_param(facts) -> str:
-    for p in facts.params:
-        if facts.param_kinds.get(p) == "sequence":
-            return p
-    return facts.params[0] if facts.params else ""
-
-
-def _eval_matrix_expr(node, env: dict, fn):
-    """Evaluate a matrix predicate's argument expression over `env`:
-    `f(...)` calls the real function, `A @ B`/`A.T`/`det`/`inv`/
-    `trace` and elementwise `+`/`-`/scalar-`*` are computed on concrete
-    values. numpy when present (fast, full operator set); a small
-    pure-Python core otherwise for the common shapes."""
-    import ast as _ast
-
-    def ev(n):
-        if isinstance(n, _ast.Name):
-            return env[n.id]
-        if isinstance(n, _ast.Constant):
-            return n.value
-        if isinstance(n, _ast.Call) and isinstance(n.func, _ast.Name):
-            args = [ev(a) for a in n.args]
-            if n.func.id == "f":
-                return fn(*args)
-            return _matrix_call(n.func.id, args)
-        if isinstance(n, _ast.Attribute) and n.attr == "T":
-            return _transpose(ev(n.value))
-        if isinstance(n, _ast.BinOp):
-            return _matrix_binop(n.op, ev(n.left), ev(n.right))
-        raise ValueError(f"unsupported matrix expression {_ast.unparse(n)!r}")
-
-    return ev(node)
-
-
-def _to_np(value):
-    from .matrices import _numpy
-    np = _numpy()
-    return (np, np.asarray(value, dtype=float)) if np is not None else (None, value)
-
-
-def _transpose(m):
-    np, a = _to_np(m)
-    if np is not None:
-        return a.T
-    return [list(row) for row in zip(*m)]
-
-
-def _matrix_call(name: str, args: list):
-    np, _ = _to_np(args[0]) if args else (None, None)
-    if name == "det":
-        if np is None:
-            raise ValueError("det needs numpy")
-        return float(np.linalg.det(np.asarray(args[0], dtype=float)))
-    if name == "inv":
-        if np is None:
-            raise ValueError("inv needs numpy")
-        return np.linalg.inv(np.asarray(args[0], dtype=float))
-    if name == "trace":
-        a = args[0]
-        return sum(a[i][i] for i in range(len(a))) if np is None             else float(np.trace(np.asarray(a, dtype=float)))
-    if name == "transpose":
-        return _transpose(args[0])
-    raise ValueError(f"unsupported matrix function {name!r}")
-
-
-def _matrix_binop(op, left, right):
-    import ast as _ast
-
-    from .matrices import _numpy
-    np = _numpy()
-    if isinstance(op, _ast.MatMult):
-        if np is not None:
-            return np.asarray(left, dtype=float) @ np.asarray(right, dtype=float)
-        n, m, p = len(left), len(right), len(right[0])
-        return [[sum(left[i][k] * right[k][j] for k in range(m))
-                 for j in range(p)] for i in range(n)]
-    if isinstance(op, (_ast.Add, _ast.Sub)):
-        sign = 1 if isinstance(op, _ast.Add) else -1
-        if np is not None:
-            return np.asarray(left, dtype=float) + sign * np.asarray(right, dtype=float)
-        return [[left[i][j] + sign * right[i][j] for j in range(len(left[0]))]
-                for i in range(len(left))]
-    if isinstance(op, _ast.Mult):
-        scalar, mat = (left, right) if not isinstance(left, list) else (right, left)
-        if np is not None:
-            return float(scalar) * np.asarray(mat, dtype=float)
-        return [[scalar * v for v in row] for row in mat]
-    raise ValueError("unsupported matrix operator")
-
-
-_MATRIX_PROBE_SEED = 0x9E3779B9
-
-
-def _random_matrix(rows: int, cols: int, rng: random.Random) -> list:
-    """A plain rows-by-cols matrix of reals, for a matrix parameter that
-    carries a shape but no structure to synthesise from."""
-    return [[rng.uniform(-5, 5) for _ in range(cols)] for _ in range(rows)]
-
-
-def _as_list(value):
-    """A sampled matrix as nested Python lists, whether it came back a
-    numpy array or already a list, so a counterexample renders plainly."""
-    return value.tolist() if hasattr(value, "tolist") else value
-
-
-def _matrix_close(a, b, tol: float) -> bool:
-    """Whether two evaluated results (each a scalar or a matrix) agree to
-    `tol`. numpy when present, an elementwise walk otherwise."""
-    from .matrices import _numpy
-    np = _numpy()
-    if np is not None:
-        aa, bb = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
-        return aa.shape == bb.shape and bool(
-            np.allclose(aa, bb, rtol=0, atol=tol))
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        return abs(a - b) <= tol
-    try:
-        return (len(a) == len(b)
-                and all(_matrix_close(x, y, tol) for x, y in zip(a, b)))
-    except TypeError:
-        return False
-
-
-def _relation_holds(lv, rv, relation: str, tol: float) -> bool:
-    """Whether a sampled draw satisfies the claim's relation: `==`/`~=`
-    by closeness, `!=` by its negation, and the orderings on the scalar
-    results (a determinant, a trace). A strict `<`/`>` gets no tolerance
-    credit (`0 > 0` must fail); a closed `<=`/`>=` gets the slack a float
-    wobble can need, mirroring the ordinary probe's own rule. Raises
-    TypeError when an ordering is asked of matrix-valued sides (an
-    undefined matrix ordering), which the caller treats as unsampleable."""
-    if relation in ("==", "~="):
-        return _matrix_close(lv, rv, tol)
-    if relation == "!=":
-        return not _matrix_close(lv, rv, tol)
-    a, b = float(lv), float(rv)
-    if relation == "<=":
-        return a <= b + tol
-    if relation == ">=":
-        return a >= b - tol
-    if relation == "<":
-        return a < b
-    return a > b
-
-
-def matrix_relation_probe(cj, fn, dims: dict, structures: dict,
-                          statement: str, note: str,
-                          rounds: int = 40) -> "Probe | None":
-    """Sample concrete matrices for a matrix-algebra relation claim the
-    symbolic backend could not close, and decide it by evaluation:
-    `holds` when both sides agree on every draw, `falsified` with the
-    witnessing matrices when a draw disagrees. Structure markers and
-    premises (`structures`) narrow each draw to a matrix that has the
-    property. Returns None when the claim is not sampleable here (an
-    operation such as `det`/`inv` that needs numpy while numpy is
-    absent, or an expression outside the evaluation core); the caller
-    then reports the honest derive `unknown`."""
-    import ast as _ast
-
-    from .linalg import undeclared_matrix_operands
-    from .matrices import synth_for
-    from .records import Probe
-    try:
-        lhs_ast = _ast.parse(cj.lhs, mode="eval").body
-        rhs_ast = _ast.parse(cj.rhs or "", mode="eval").body
-    except SyntaxError:
-        return None
-    if undeclared_matrix_operands((cj.lhs, cj.rhs), dims):
-        # a name used as a matrix that `dims` never sized cannot be put
-        # in `env`, so every draw below would fail inside the per-round
-        # `except Exception` and the loop would spend its whole budget
-        # to arrive at the same decline. The symbolic route carries the
-        # reason on the result the caller reports.
-        return None
-    tol = cj.tolerance if cj.tolerance is not None else 1e-6
-    rng = random.Random(_MATRIX_PROBE_SEED)
-    checked = 0
-    for _ in range(rounds):
-        sizes: dict = {}
-        env: dict = {}
-        for p, (rd, cd) in dims.items():
-            r = rd if isinstance(rd, int) else sizes.setdefault(
-                rd, rng.randint(2, 4))
-            c = cd if isinstance(cd, int) else sizes.setdefault(
-                cd, rng.randint(2, 4))
-            props = structures.get(p, ())
-            env[p] = (synth_for(props, r, rng) if props and r == c
-                      else _random_matrix(r, c, rng))
-        try:
-            lv = _eval_matrix_expr(lhs_ast, env, fn)
-            rv = _eval_matrix_expr(rhs_ast, env, fn)
-        except ValueError:
-            return None       # needs numpy (det/inv), or outside the core
-        except Exception:
-            continue          # a degenerate draw (e.g. a singular inv)
-        try:
-            holds = _relation_holds(lv, rv, cj.relation, tol)
-        except TypeError:
-            return None       # an ordering over matrix-valued sides: undefined
-        checked += 1
-        if not holds:
-            witness = _fmt(tuple(_as_list(env[p]) for p in dims),
-                           names=tuple(dims))
-            return Probe(cj.name, statement, "falsified", n=checked,
-                         counterexample=witness, note=note, route="probe",
-                         sketch="a sampled matrix violates the relation")
-    if checked == 0:
-        return None
-    return Probe(cj.name, statement, "holds", n=checked, note=note,
-                 route="probe",
-                 sketch=f"relation held on {checked} sampled matrix draws")
+def _eval_matrix_expr(code, env: dict, fn):
+    """Evaluate a claim expression (compiled) over drawn values in the
+    one namespace every probe of a claim shares
+    (`_linalg_eval.FUNCTIONS`): vectors and matrices are numpy arrays,
+    `f(...)` calls the real function with its own runtime types, and
+    the value comes back as plain lists, the form the matrix property
+    checks read."""
+    from . import _linalg_eval as lae
+    names = {"f": lae.law_callable(fn), **lae.FUNCTIONS,
+             **{k: lae.as_array(v) for k, v in env.items()}}
+    with _pinned_float_env():
+        value = eval(code, {"__builtins__": {}}, names)
+    return lae.to_plain(value)
 
 
 class MatrixPropertyFamily:
@@ -3483,7 +3369,7 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
     # sequences, never the empty boundary. One empty trial per sequence
     # parameter catches it.
     empties = [p for p in facts.params
-               if facts.param_kinds.get(p) == "sequence"]
+               if facts.param_kinds.get(p) in SEQUENCE_KINDS]
 
     def _sample(force_empty=None):
         return [[] if p == force_empty
@@ -3531,9 +3417,9 @@ def _is_overflow_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                              relation: str, domain: dict | None = None,
                              tolerance: float | None = None):
     """Structural half of is_overflow_safe: decline. Whether a
-    computation overflows is a fact about one carrier, established
-    by executing it (P3, P13); a derive proof over the reals says
-    nothing about it."""
+    computation overflows is a fact about one number representation,
+    established by executing it (P3, P13); a derive proof over the
+    reals says nothing about it."""
     return None
 
 
@@ -3567,7 +3453,7 @@ def _recursion_probe(fn, facts, cj, domain: dict, rng: random.Random,
     from .gates import _fmt_point
     target = cj.lhs
     numeric = [p for p in facts.params
-               if facts.param_kinds.get(p) not in ("sequence", "string")]
+               if facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "string")]
     if target in facts.params:
         focus = [target]
     elif target == "f" and numeric:
@@ -3621,11 +3507,11 @@ _MEMORY_SAFETY_NOTE = ("memory safety needs a resource cap and is not "
 #: computation-safety families named now and adjudicated in a later
 #: release, with the question each answers
 RESERVED_FAMILIES = {
-    "is_precision_safe": "right in a narrower carrier",
+    "is_precision_safe": "right in a narrower number representation",
     "is_order_invariant": "the same answer whatever the reduction order",
     "is_concurrency_safe": "runs correctly under concurrent calls",
-    "is_carrier_consistent": "the same answer across the computations "
-                             "the descriptor names",
+    "is_representation_consistent": "the same answer across the "
+                                    "computations the descriptor names",
 }
 
 

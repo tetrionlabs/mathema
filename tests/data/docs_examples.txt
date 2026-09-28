@@ -36,7 +36,7 @@
 [x] docs/derive-route.md:finite-set              run verdicts
 [x] docs/derive-route.md:linspace                run verdicts  (requires)
 [x] docs/evidence-ladder.md:companion            run output
-[ ] docs/extending.md:286
+[ ] docs/extending.md:287
 [x] docs/findings.md:finds                       file run output run run output run output run run output
 [x] docs/findings.md:parity                      file run output
 [x] docs/first-look.md:ema                       run run output run output run output run output run output
@@ -53,6 +53,8 @@
 [x] docs/lemmas.md:weakest                       run output  (after)
 [x] docs/lemmas.md:orphan                        run output  (after)
 [x] docs/mathema-docstring.md:ema                file run output repl repl run output run output
+[x] docs/matrix-structure.md:semantics           run verdicts verdicts
+[x] docs/matrix-structure.md:vocabulary          run verdicts verdicts
 [x] docs/matrix-structure.md:identities          run verdicts
 [x] docs/matrix-structure.md:enforce-structure   run  (requires)
 [x] docs/modes/accept.md:balance                 file file session session run file session session
@@ -70,9 +72,14 @@
 [x] docs/modes/review.md:delta                   file file run output file file run output
 [x] docs/modes/verify.md:sweep                   file run session file session file session file file session session session run file session
 [x] docs/modes/verify.md:eager                   session
+[-] docs/modes/verify.md:398
 [x] docs/multi-function-claims.md:ratio          run output
 [x] docs/quickstart.md:falsify                   file run output run output run output
 [x] docs/quickstart.md:docstring                 file run output run output
+[x] docs/runtime-types.md:rt-mean                run verdicts verdicts  (requires)
+[x] docs/runtime-types.md:rt-series              run verdicts verdicts  (requires)
+[x] docs/runtime-types.md:rt-frame               run verdicts verdicts  (requires)
+[-] docs/runtime-types.md:105
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
 [ ] docs/symbology.md:127
@@ -84,4 +91,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 71 examples checked, 4 output fences not yet marked
+# 76 examples checked, 4 output fences not yet marked

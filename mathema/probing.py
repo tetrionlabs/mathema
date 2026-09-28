@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import cmath
 import collections
+import dataclasses
 import math
 import random
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from ._sampling import (
 )
 from ._sampling import _moderate_bounds, _reach_ends
 from .grammar import MISSING, Domain, domain_contains
+from .runtime_types import SEQUENCE_KINDS
 # Probe's real home is records.py (the stdlib-only leaf every layer can
 # import); re-exported here because probing is where consumers
 # historically found it.
@@ -385,26 +387,114 @@ def _probe_density(risk: dict, n_trials: int, policy: _RiskPolicy = _RISK) -> di
 DEFAULT_RELATIVE_TOLERANCE = 1e-6
 
 
+def plain_value(v):
+    """Intent:
+        An executed value in the plain Python form the comparisons
+        read: a numpy scalar or a 0-d array becomes its Python number,
+        an array becomes nested lists, anything else is returned as it
+        is.
+    """
+    if type(v) in (bool, int, float, complex, str, type(None)):
+        return v
+    if hasattr(v, "shape") and hasattr(v, "tolist"):
+        try:
+            return v.tolist()
+        except Exception:
+            return v
+    if hasattr(v, "dtype") and hasattr(v, "item"):
+        try:
+            return v.item()
+        except Exception:
+            return v
+    return v
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float, complex)) and not isinstance(v, bool)
+
+
+def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
+    # a NaN agrees with nothing; the same infinity is one point; a
+    # finite value is close within the tolerances, complex values by
+    # abs(u - v)
+    if holds_nan(u) or holds_nan(v):
+        return False
+    if holds_inf(u) or holds_inf(v):
+        return u == v
+    if isinstance(u, complex) or isinstance(v, complex):
+        return cmath.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
+    return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
+
+
+def values_agree(u, v, tolerance: float | None = None,
+                 rel_tol: float = DEFAULT_RELATIVE_TOLERANCE,
+                 broadcast: bool = False) -> "bool | None":
+    """Intent:
+        Whether two executed values are equal, the one reading every
+        comparison shares: Python numbers, numpy scalars, 0-d arrays,
+        arrays and nested lists alike, arrays and lists compared
+        element by element. A NaN agrees with nothing, another NaN
+        included; two sides at the same infinity agree; complex values
+        compare by `abs(u - v)`; finite values agree within `tolerance`
+        (absolute, 1e-9 when None) or `rel_tol` (relative), whichever
+        is larger.
+
+    Notes:
+        `None` when the two sides have different shapes. With
+        `broadcast`, a number against an array or list is compared
+        with every element. A bool, and a value that is not a number,
+        agrees only by exact equality.
+    """
+    abs_tol = tolerance if tolerance is not None else 1e-9
+    u, v = plain_value(u), plain_value(v)
+
+    def walk(x, y):
+        xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
+        if xs and ys:
+            if len(x) != len(y):
+                return None
+            parts = [walk(a, b) for a, b in zip(x, y)]
+        elif xs or ys:
+            if not broadcast:
+                return None
+            parts = ([walk(a, y) for a in x] if xs
+                     else [walk(x, b) for b in y])
+        elif _is_number(x) and _is_number(y):
+            return _numbers_agree(x, y, abs_tol, rel_tol)
+        else:
+            try:
+                return bool(x == y)
+            except Exception:
+                return False
+        if any(pt is None for pt in parts):
+            return None
+        return all(parts)
+
+    return walk(u, v)
+
+
 def _close(u, v, tolerance: float | None = None,
            rel_tol: float = DEFAULT_RELATIVE_TOLERANCE) -> bool:
     """`tolerance` overrides the default abs_tol, a claim's own declared
     tolerance (declared-schema.md) governs its own comparison outright;
     the 1e-9 default is only a floating-point-representation fudge factor
     for claims that never declared one. `rel_tol` is the relative
-    allowance on top of it, 0 for a claim that declared its tolerance."""
-    if isinstance(u, bool) or isinstance(v, bool):
-        return u == v
-    abs_tol = tolerance if tolerance is not None else 1e-9
-    if isinstance(u, (int, float)) and isinstance(v, (int, float)):
-        if math.isnan(u) and math.isnan(v):
-            return True
-        return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
-    if isinstance(u, (int, float, complex)) and isinstance(v, (int, float, complex)):
-        return cmath.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
-    if isinstance(u, (list, tuple)) and isinstance(v, (list, tuple)):
-        return len(u) == len(v) and all(_close(a, b, tolerance, rel_tol)
-                                        for a, b in zip(u, v))
-    return u == v
+    allowance on top of it, 0 for a claim that declared its tolerance.
+    The reading is `values_agree`'s: a NaN is close to nothing, and two
+    values of different shapes are not close."""
+    return bool(values_agree(u, v, tolerance, rel_tol))
+
+
+def values_differ(u, v, tolerance: float | None = None,
+                  rel_tol: float = DEFAULT_RELATIVE_TOLERANCE) -> bool:
+    """Intent:
+        Whether `u != v` holds between two executed values: they do not
+        agree (`values_agree`), and neither holds a NaN, since a NaN is
+        no value and fails every relation, `!=` included.
+    """
+    if holds_nan(plain_value(u)) or holds_nan(plain_value(v)):
+        return False
+    return not values_agree(u, v, tolerance, rel_tol)
 
 
 def _synth_dict(key_tree, rng: random.Random, specials=None) -> dict:
@@ -436,11 +526,13 @@ def _scalar_relation(a, b, relation: str, slack: float,
     do not order (a complex vs a real), which the caller reads as
     'unanswerable', not 'false'. `rel_tol` is `_close`'s relative
     allowance."""
+    if holds_nan(a) or holds_nan(b):
+        return False
     if relation in ("==", "~="):
         return _close(a, b, tolerance=slack, rel_tol=rel_tol)
     if relation == "!=":
         if exact_inequality:
-            return not (a == b or (a != a and b != b))
+            return not (a == b)
         return not _close(a, b, tolerance=slack, rel_tol=rel_tol)
     if relation == "<=":
         return a <= b + slack
@@ -457,22 +549,6 @@ def _is_matrix_value(v) -> bool:
     if isinstance(v, (list, tuple)):
         return True
     return hasattr(v, "shape") and hasattr(v, "__array__")
-
-
-class _NotAnArray(Exception):
-    """A structure numpy cannot read as one array; compared leaf by leaf."""
-
-
-def _numeric_leaves(v) -> bool:
-    """Whether every leaf of a (nested) sequence or array is a number,
-    the precondition of the numpy comparison: a `None` leaf is not a
-    NaN and a string leaf is not a number, so a structure holding one
-    is compared value by value instead."""
-    if isinstance(v, (list, tuple)):
-        return all(_numeric_leaves(e) for e in v)
-    if hasattr(v, "dtype"):
-        return getattr(v.dtype, "kind", "O") in "biufc"
-    return isinstance(v, (int, float, complex))
 
 
 def _pinned_float_env():
@@ -683,8 +759,11 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                                rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """Whether `lv <relation> rv` holds: a scalar comparison, or, when a
     side is matrix/array-valued, the relation at EVERY element (a scalar
-    broadcasts against a matrix). numpy fast path when either side is an
-    array, a recursive walk over nested lists otherwise. Returns
+    broadcasts against a matrix), numpy values read as the plain values
+    they hold (`plain_value`). `==`, `~=` and `!=` over arrays are one
+    fact about the whole value (`values_agree`), so `!=` holds when some
+    element differs; an ordering holds when it holds at every element. A
+    NaN anywhere fails every relation. Returns
     `True`/`False`, or `None` when the comparison is structurally
     meaningless (an ordering over non-orderable values, or mismatched
     shapes), which the caller reads as skip, never falsify.
@@ -693,71 +772,38 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     and a toleranced `!=` get on top of `slack`. A 0-d numpy value (a
     numpy scalar) is a scalar. Over complex values `==`, `~=` and `!=`
     compare by `abs(a - b)`, with the tolerance rules of reals; an
-    ordering over a complex value is unanswerable. A structure with a
-    non-numeric leaf (`None`, a string, a tuple of them: a parser's
-    result) is compared leaf by leaf, equality exact, ordering
-    unanswerable."""
-    lv, rv = (v.item() if getattr(v, "shape", None) == ()
-              and hasattr(v, "item") else v for v in (lv, rv))
+    ordering over a complex value is unanswerable. Two values of
+    different lengths or shapes are unequal outright under `==`, `~=`
+    and `!=`; an ordering over them is unanswerable. Leaves that are
+    not numbers (a record, a string, `None`) are equal only by their
+    own equality."""
+    lv, rv = plain_value(lv), plain_value(rv)
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,
                                          exact_inequality, rel_tol))
         except TypeError:
             return None
-    from .matrices import _numpy
-    np = _numpy()
-    if np is not None and _numeric_leaves(lv) and _numeric_leaves(rv) and (
-            hasattr(lv, "__array__") or hasattr(rv, "__array__")
-            or isinstance(lv, (list, tuple))
-            or isinstance(rv, (list, tuple))):
-        try:
-            kind = complex if (np.iscomplexobj(lv) or np.iscomplexobj(rv)) \
-                else float
-            a = np.asarray(lv, dtype=kind)
-            b = np.asarray(rv, dtype=kind)
-        except Exception:
-            # a ragged structure (a scalar beside a list, a parser's
-            # result) is no array; the leaf walk below reads it
-            a = b = None
-        if a is not None and kind is complex and relation not in ("==", "~=", "!="):
-            return None     # an ordering over complex values
-        try:
-            if a is None:
-                raise _NotAnArray
-            try:
-                np.broadcast_shapes(a.shape, b.shape)
-            except ValueError:
-                # shapes that do not broadcast are unequal outright
-                # under equality, and unanswerable under an ordering
-                return (relation == "!=") if relation in ("==", "~=", "!=") else None
-            if relation in ("==", "~="):
-                return bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
-            if relation == "!=":
-                if exact_inequality:
-                    return not bool(np.array_equal(a, b, equal_nan=True))
-                return not bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
-            if relation == "<=":
-                return bool((a <= b + slack).all())
-            if relation == ">=":
-                return bool((a >= b - slack).all())
-            if relation == "<":
-                return bool((a < b).all())
-            return bool((a > b).all())
-        except _NotAnArray:
-            pass
-        except (ValueError, TypeError):
-            return None       # incompatible shapes: unanswerable
-
-    equality = relation in ("==", "~=", "!=")
+    if relation in ("==", "~=", "!="):
+        # equality of two arrays is one fact about every element; a
+        # NaN anywhere is no value and fails the relation, `!=` too
+        if holds_nan(lv) or holds_nan(rv):
+            return False
+        exact = relation == "!=" and exact_inequality
+        agree = values_agree(lv, rv, 0.0 if exact else slack,
+                             0.0 if exact else rel_tol, broadcast=True)
+        if agree is None:
+            # two values of different shapes are unequal outright
+            return relation == "!="
+        return agree if relation != "!=" else not agree
 
     def _walk(x, y):
+        # an ordering, at every element: over sequences of different
+        # length, or leaves that do not order, it is unanswerable
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
         if xs and ys:
             if len(x) != len(y):
-                # two sequences of different length are unequal
-                # outright; only an ordering over them is unanswerable
-                return (relation == "!=") if equality else None
+                return None
             parts = [_walk(u, v) for u, v in zip(x, y)]
         elif xs:
             parts = [_walk(u, y) for u in x]   # broadcast scalar y
@@ -768,18 +814,7 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                 return bool(_scalar_relation(x, y, relation, slack,
                                              exact_inequality, rel_tol))
             except TypeError:
-                if not equality:
-                    return None
-                # leaves that do not subtract (a record, an object)
-                # still answer equality by their own __eq__
-                try:
-                    same = bool(x == y)
-                except Exception:
-                    return None
-                return (not same) if relation == "!=" else same
-        if equality and relation == "!=":
-            # a sequence differs when any leaf does
-            return None if any(pt is None for pt in parts) else any(parts)
+                return None
         return None if any(pt is None for pt in parts) else all(parts)
 
     return _walk(lv, rv)
@@ -1203,11 +1238,7 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         # that only iterates its values. The claim path uses
         # `_synth_dict(keys, ...)` with the body's real keys instead.
         return _synth_dict([], rng, specials=specials)
-    if kind == "sequence":
-        # a language bound is the parameter's own domain, whatever kind
-        # the body's usage suggested (iterating a string looks like a
-        # sequence): the author said the value IS a member, so it is
-        # sampled as one below
+    if kind in SEQUENCE_KINDS:
         # `length`, when a dimension premise fixed it for this trial,
         # overrides the free 2..8 draw so the premise holds by
         # construction rather than by rejection
@@ -1382,6 +1413,10 @@ def _fmt(args: tuple, names: tuple[str, ...] | None = None) -> str:
 def _sampling_shorthand(kinds: dict, domain: dict, n: int,
                         critical_hints: dict[str, list[float]] | None = None,
                         truncated_hints: "set[str] | None" = None,
+                        observed_lengths: "dict[str, set] | None" = None,
+                        premise_drawn: "set[str] | None" = None,
+                        runtime_names: "dict[str, str] | None" = None,
+                        nested: "set[str] | None" = None,
                         lap_floor: "tuple[int, int] | None" = None) -> str:
     """How a probe actually sampled, in compact mathematical notation: the
     distribution per parameter, the seed, the trial count. Meant to make a
@@ -1397,6 +1432,17 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
     `_hints_from_points`'s own `max_critical_hints_per_param`), appending
     `[truncated@N]` so a reader knows `n` covers a capped hint pool plus
     ordinary sampling, not every point that was actually found.
+
+    A sequence parameter states the lengths its checked samples had
+    (`observed_lengths`: one length as `len=20`, several as their
+    range, none recorded as the free draw's `len∈[2,8]`) and how its
+    elements were drawn: the declared element domain (`elem~...`, the
+    special shapes are not used under one), the free draw with its
+    shapes, or `drawn on the premise` for a parameter in
+    `premise_drawn`, which an equality premise draws directly. A
+    parameter in `runtime_names` states the runtime type each draw was
+    realised as (`as pandas.Series`); one in `nested`, drawn as nested
+    lists, states the size cap per axis those are drawn up to.
     `lap_floor`, `(lap, budget)`, says the trial count was raised from
     the budget to a language's lap so every hazard is visited."""
     critical_hints = critical_hints or {}
@@ -1415,65 +1461,108 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         reach = max(abs(lo) if un_lo else 0.0, abs(hi) if un_hi else 0.0)
         return f"⊔far(≤{reach:g})"
 
-    parts = []
-    for p, k in kinds.items():
-        bounds = domain.get(p) if k != "sequence" else None
+    lengths_seen = observed_lengths or {}
+    premise_drawn = premise_drawn or set()
+
+    def sequence_text(p: str) -> str:
+        lengths = sorted(lengths_seen.get(p) or ())
+        if not lengths:
+            size = "len∈[2,8]"
+        elif len(lengths) == 1:
+            size = f"len={lengths[0]}"
+        else:
+            size = f"len∈[{lengths[0]},{lengths[-1]}]"
+        element_bound = domain.get(p)
+        if p in premise_drawn:
+            draw = "drawn on the premise"
+        elif element_bound is not None:
+            draw = "elem~" + element_text(p, element_bound)
+        else:
+            draw = "shape∈{U,const,sorted,rev,+0,extreme}[p=.3]"
+        realised = (runtime_names or {}).get(p)
+        if realised:
+            draw += f"; as {realised}"
+        elif p in (nested or ()):
+            from .runtime_types import ListAdapter
+            draw += (f"; as nested lists, at most {ListAdapter.SIZE_CAP} "
+                     f"per axis")
+        return f"Seq({size}; {draw})"
+
+    def element_text(p: str, bound) -> str:
+        # a space binding (`[0, 1]^n`, `R^n`) is a Domain with `dims`,
+        # each element drawn from the Domain without them
+        if isinstance(bound, Domain) and bound.dims:
+            element = dataclasses.replace(bound, dims=())
+            if not element.excluded and element.base_type == "R":
+                if not element.pieces:
+                    return "U(-10,10)"
+                if len(element.pieces) == 1 and isinstance(
+                        element.pieces[0], (tuple, list)):
+                    lo, hi = element.pieces[0]
+                    return f"U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]"
+            return one(p, "float", element)
+        return one(p, "float", bound)
+
+    def one(p: str, k: str, bounds) -> str:
+        if k == "table":
+            return ("Table(equal-length columns, len∈[2,8], each drawn "
+                    "as a free Seq)")
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
                 and not bounds.excluded):
             # a bare real line given the reach samples as a bare parameter
             bounds = bounds.pieces[0]
         if getattr(bounds, "bare", False):
-            parts.append(f"{p}~U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]"
-                         f"{far_suffix(bounds)}[p=.1]{crit_suffix(p)}")
-            continue
+            return (f"U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]"
+                    f"{far_suffix(bounds)}[p=.1]{crit_suffix(p)}")
         if isinstance(bounds, tuple) and k != "int" and (
                 getattr(bounds, "reach_lo", False)
                 or getattr(bounds, "reach_hi", False)):
             mlo, mhi = _moderate_bounds(*_reach_ends(bounds))
-            parts.append(f"{p}~U({mlo:g},{mhi:g})⊔{{lo,hi,mid,±ε}}[p=.3]"
-                         f"{far_suffix(bounds)}{crit_suffix(p)}")
-            continue
+            return (f"U({mlo:g},{mhi:g})⊔{{lo,hi,mid,±ε}}[p=.3]"
+                    f"{far_suffix(bounds)}{crit_suffix(p)}")
         bound_shape = _classify_bound(bounds)
         if bound_shape == "frozenset":
             from .domain import _member_sort_key
             members = sorted(bounds, key=_member_sort_key)
-            parts.append(f"{p}~U{{{', '.join(str(v) for v in members)}}}")
-        elif bound_shape == "Z":
-            parts.append(f"{p}~{{0,±1,±2}}[p=.3]⊔U{{-1000..1000}}")
-        elif bound_shape == "N":
-            parts.append(f"{p}~{{0,1,2}}[p=.3]⊔U{{0..1000}}")
-        elif k == "sequence":
-            parts.append(f"{p}~Seq(len∈[2,8]; shape∈{{U,const,sorted,rev,+0,extreme}}[p=.3])")
-        elif k == "int" and (bounds is None or isinstance(bounds, tuple)):
+            return f"U{{{', '.join(str(v) for v in members)}}}"
+        if bound_shape == "Z":
+            return "{0,±1,±2}[p=.3]⊔U{-1000..1000}"
+        if bound_shape == "N":
+            return "{0,1,2}[p=.3]⊔U{0..1000}"
+        if k in SEQUENCE_KINDS:
+            return sequence_text(p)
+        if k == "int" and (bounds is None or isinstance(bounds, tuple)):
             # only a plain (lo, hi) tuple/Interval is subscriptable; a
             # Domain-typed bound (a `⊂ Z` refinement) falls through to
-            # the set-notation rendering below, subscripting it blind
-            # was a real crash on the empirical-fallback path
-            # the integers actually drawn: an open or fractional end
-            # rounds inward and an unbounded end is capped, as
-            # `_synth_int_in` samples them
+            # the set-notation rendering below. The integers actually
+            # drawn: an open or fractional end rounds inward and an
+            # unbounded end is capped, as `_synth_int_in` samples them
             if bounds:
                 first, last = _integer_range(bounds, "Z")
-                parts.append(f"{p}~U{{{first}..{last}}}")
-            else:
-                parts.append(f"{p}~{{0,1,2}}[p=.3]⊔U{{0..10}}")
-        elif bound_shape == "interval":
+                return f"U{{{first}..{last}}}"
+            return "{0,1,2}[p=.3]⊔U{0..10}"
+        if bound_shape == "interval":
             lo, hi = bounds
-            parts.append(f"{p}~U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]{crit_suffix(p)}")
-        elif bound_shape != "none":
+            return f"U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]{crit_suffix(p)}"
+        if bound_shape != "none":
             # "domain" (grammar.Domain: union/exclusion/an explicit
-            # type refinement) or "other", a richer shape this
-            # function's own compact notation has no bespoke rendering
-            # for. Fall back to the same canonical set-notation text a
-            # person would type for it, rather than assuming every
-            # non-plain-tuple bound is a (lo, hi) pair, the real gap
-            # that used to crash here on a Domain object _synth already
-            # knew how to handle.
+            # type refinement) or "other": the canonical set-notation
+            # text a person would type for it
             from .grammar import render_domain_bound
-            parts.append(f"{p}~{render_domain_bound(bounds)}{crit_suffix(p)}")
-        else:
-            parts.append(f"{p}~U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]{crit_suffix(p)}")
+            return f"{render_domain_bound(bounds)}{crit_suffix(p)}"
+        return f"U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]{crit_suffix(p)}"
+
+    def bound_of(p: str, k: str):
+        # a sequence's declared bound is its element domain, read by
+        # `sequence_text`; a language bound is the parameter's own
+        # domain whatever its kind
+        bound = domain.get(p)
+        if k in SEQUENCE_KINDS and _classify_bound(bound) != "language":
+            return None
+        return bound
+
+    parts = [f"{p}~{one(p, k, bound_of(p, k))}" for p, k in kinds.items()]
     floor = (f", n raised to {lap_floor[0]} to visit every hazard (budget {lap_floor[1]})"
              if lap_floor else "")
     return ", ".join(parts) + f", seed={_RNG_SEED}, n={n}" + floor
@@ -1811,7 +1900,7 @@ def probe(fn, facts, domain: dict | None = None,
                 and _keeps_default(fn, param)):
             return param.default
         shape = resolver.shapes.get(p) if resolver is not None else None
-        if shape is not None and k != "sequence" and shape.ndim >= 1:
+        if shape is not None and k not in SEQUENCE_KINDS and shape.ndim >= 1:
             # a space binding (`R^n`, `R^(n,n)`) from the claims shapes
             # a parameter whose kind the signature does not state
             return resolver.synth(
@@ -1832,17 +1921,22 @@ def probe(fn, facts, domain: dict | None = None,
     # signature mismatch (fails identically every time) apart from a
     # one-off arithmetic exception from landing exactly on a pole.
     last_exc: Exception | None = None
+    from .runtime_types import calling
+    call = calling(fn, facts)
     for _ in range(3):
         try:
             call_args, call_kwargs = args_for()
-            fn(*call_args, **call_kwargs)
+            call(*call_args, **call_kwargs)
             break
         except Exception as e:
             last_exc = e
     else:
+        hints = "".join(f"; {h['text']}" for h in
+                        (getattr(facts, "runtime_hints", None) or {}).values())
         return [Probe("callable", callable_statement, "skipped",
                       note="could not synthesize valid inputs from the "
-                           f"signature ({type(last_exc).__name__}: {last_exc})",
+                           f"signature ({type(last_exc).__name__}: {last_exc})"
+                           + hints,
                       meta={"mathema.probe_gap": "input-synthesis"})]
 
     probes: list[Probe] = []

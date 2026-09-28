@@ -10,7 +10,7 @@ reference: [that page](api.md) covers what you use to write and check
 claims. The surface here is narrower in audience and wider in what it
 exposes.
 
-## The four entry-point groups
+## The five entry-point groups
 
 | Group | What it registers | Discovered by |
 |---|---|---|
@@ -18,6 +18,7 @@ exposes.
 | `mathema.capabilities` | a presentation hook: how should something already computed be shown | `mathema._providers` |
 | `mathema.mcp_tools` | extra tools for the MCP server | `mathema.interfaces.mcp.server` |
 | `mathema.target_resolvers` | a resolver for language-tagged target keys (`ts:...`) | `mathema._target_resolvers` |
+| `mathema.runtime_types` | a runtime type adapter: how a vector, matrix or table is realised as the object a function receives (see [runtime types](runtime-types.md#adding-a-runtime-type)) | `mathema.runtime_types` |
 | `mathema.languages` | a named language a claim quantifies over with `L[<name>]` | `mathema.languages` |
 | `mathema.language_adaptors` | an adaptor turning an imported object (a schema class, a type) into a language, or `None` for "not mine" | `mathema.languages` |
 | `mathema.language_refinements` | a refinement key inside `L[...]` (`len`, `depth`), the entry point's name being the key | `mathema.languages` |

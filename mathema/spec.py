@@ -209,6 +209,13 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
                     "CDD_spec_version": SPEC_VERSION,
                     "date": datetime.date.today().isoformat()},
     }
+    from .runtime_types import identity_entries
+    runtime = identity_entries(f)
+    if runtime:
+        # each parameter realised as something other than a list: the
+        # runtime type, the evidence it was read from, and the library
+        # version whose semantics the evidence holds under
+        spec["identity"]["runtime_types"] = runtime
     deps = list(getattr(ex, "dependencies", None) or [])
     if deps:
         # one-deep callee records (inventory.function_dependencies):
@@ -827,7 +834,8 @@ def authored_route(row: dict) -> str:
 
 
 def record(ex, key: str | None = None, root: str = ".",
-          claims: list | None = None, declared_intent: str | None = None) -> str:
+          claims: list | None = None, declared_intent: str | None = None,
+          grammar: str = "mathema") -> str:
     """Write this explanation into the machine layer of the project store:
     one file per function under .mathema/verified/. `claims` (the declared
     entry's raw claim dicts this record was checked against, if any) gets
@@ -836,7 +844,9 @@ def record(ex, key: str | None = None, root: str = ".",
     edited even when the code itself hasn't changed. Pass the raw declared
     dicts (as loaded from YAML), not Conjecture objects, the fingerprint
     must stay comparable across implementations, and Conjecture is a
-    Python-only parse of that same declared shape.
+    Python-only parse of that same declared shape. `grammar` is the
+    declared entry's grammar (its own, else its file's), the grammar
+    of every claim that names none.
 
     `declared_intent` (an `intent:` field on the declared entry this
     record was checked against, when one exists) fills the record's
@@ -856,7 +866,8 @@ def record(ex, key: str | None = None, root: str = ".",
                 f"and superseded row from both sides of a merge), or "
                 f"restore it from git, and run again")
     spec = to_spec(ex)
-    spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [])
+    spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [],
+                                                                grammar)
     _stamp_authored_routes(spec, claims or [])
     if declared_intent and not spec.get("intent"):
         # the declared layer's intent is the skeleton when the
@@ -1269,7 +1280,7 @@ _CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
                  "grammar", "funcs", "pseudo_infinity", "meta", "authored",
                  "source", "family", "note", "versions")
 _ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references",
-                 "pseudo_infinity")
+                 "pseudo_infinity", "runtime_types")
 
 
 _ENTRY_ANNOTATIONS = ("an entry's annotations go in `meta:` (structured "
@@ -1453,6 +1464,9 @@ def validate_claims_file(data, rel_path: str) -> None:
         problem = _pseudo_infinity_problem(entry.get("pseudo_infinity"))
         if problem:
             fail(key, f"`pseudo_infinity`: {problem}")
+        problem = _runtime_types_problem(entry.get("runtime_types"))
+        if problem:
+            fail(key, f"`runtime_types`: {problem}")
         claims = entry.get("claims")
         if claims is None:
             continue
@@ -1531,6 +1545,32 @@ def validate_claims_file(data, rel_path: str) -> None:
                     problem = _domain_problem(bound)
                     if problem:
                         fail(key, f"{label}: `domain` for {param}: {problem}")
+
+
+def _runtime_types_problem(value) -> "str | None":
+    """Intent:
+        Why a claims-file entry's `runtime_types` value is refused, in
+        the words the refusal prints, or None when it is absent or a
+        mapping of parameter names to runtime type names mathema knows
+        (`{returns: pandas.Series}`).
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return (f"a {type(value).__name__}, not a mapping of parameter "
+                f"names to runtime types (`{{returns: pandas.Series}}`)")
+    from .runtime_types import adapters
+    known = list(adapters())
+    for param, name in value.items():
+        if not isinstance(param, str) or not isinstance(name, str):
+            return (f"{param!r}: {name!r} is not a parameter name mapped "
+                    f"to a runtime type name")
+        if name not in known:
+            near = _misspelling(name, tuple(known))
+            return (f"{param}: unknown runtime type {name!r}"
+                    + (f" (did you mean {near!r}?)" if near else "")
+                    + f"; known: {', '.join(known)}")
+    return None
 
 
 def _pseudo_infinity_problem(value) -> "str | None":
@@ -1671,6 +1711,64 @@ def load_declared(root: str = ".") -> dict:
                 entry = merge_entries(prev["entry"], entry)
             merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
     return merged
+
+
+def foreign_grammar_files(root: str = ".") -> list:
+    """Intent:
+        The claims files under `root` whose every claim is written in a
+        grammar this checker does not adjudicate, as
+        `(relative path, grammars, claim count)`, each claim's grammar
+        being its own, else its entry's, else its file's.
+
+    Notes:
+        A `mathema/<dialect>` grammar is adjudicated here; a file that
+        cannot be read, or holds no claims, is not listed.
+    """
+    from .conjecture import GRAMMAR
+
+    def adjudicated(grammar: str) -> bool:
+        return grammar == GRAMMAR or grammar.startswith(GRAMMAR + "/")
+
+    out = []
+    for path in claims_file_paths(root, exclude=(_bundled_compendium_dir(),)):
+        rel_path = os.path.relpath(path, root)
+        try:
+            data = read_claims_file(path, rel_path)
+        except Exception:
+            continue
+        if not data:
+            continue
+        file_grammar = data.get("grammar") or GRAMMAR
+        grammars: list = []
+        for key, entry in data.items():
+            if key in _FILE_FIELDS or not isinstance(entry, dict):
+                continue
+            entry_grammar = entry.get("grammar") or file_grammar
+            grammars += [str(c.get("grammar") or entry_grammar)
+                         for c in entry.get("claims") or []
+                         if isinstance(c, dict)]
+        if grammars and not any(adjudicated(g) for g in grammars):
+            out.append((rel_path, sorted(set(grammars)), len(grammars)))
+    return out
+
+
+def foreign_grammar_warnings(root: str = ".") -> list:
+    """Intent:
+        One warning line per claims file written wholly in a grammar
+        this checker does not adjudicate (`foreign_grammar_files`),
+        naming the file and the grammar and saying that mathema's claim
+        language is the default when `grammar:` is omitted.
+    """
+    lines = []
+    for rel_path, grammars, count in foreign_grammar_files(root):
+        named = ", ".join(repr(g) for g in grammars)
+        noun = "grammar" if len(grammars) == 1 else "grammars"
+        lines.append(
+            f"warning: all {count} claim(s) in {rel_path} use {noun} "
+            f"{named}, which this checker does not adjudicate; mathema's "
+            f"claim language is the default, so omit `grammar:` to have "
+            f"them checked here")
+    return lines
 
 
 def load_specs(root: str = ".") -> dict:
@@ -2095,8 +2193,9 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
 
     # `eps`/`epsilon`/`ε` are the claim's tolerance, not parameters to
     # rename
+    from .linalg import VOCABULARY
     excluded = (funcs | {"f", "eps", "epsilon", "ε"} | set(cj.free_vars)
-                | reserved_names())
+                | reserved_names() | VOCABULARY)
     real_params = _ordered_real_param_names(cj, excluded)
 
     param_renames: dict = {}
@@ -2289,7 +2388,26 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     `pi` or `oo` suppresses that constant's usual unicode glyph
     (`π`/`∞`) for this render, printing the plain word instead; see
     `_auto_renames`'s own docstring for why suppressing beats renaming
-    here."""
+    here.
+
+    Bars around a matrix read as its determinant, so the `abs` of a
+    matrix the claim's domain declares keeps its call spelling."""
+    from .grammar import _BAR_MATRICES, bars_over_matrices
+    from .linalg import declared_matrix_names
+    mats = declared_matrix_names(cj.domain) | _BAR_MATRICES.get()
+    with bars_over_matrices(mats):
+        return _render_claim_text(cj, unicode=unicode,
+                                  long_param_threshold=long_param_threshold,
+                                  canonical=canonical)
+
+
+def _render_claim_text(cj, *, unicode: bool | None,
+                       long_param_threshold: int,
+                       canonical: bool) -> str:
+    """Intent:
+        `render_claim_text`'s rendering, under whatever bar reading
+        `grammar.bars_over_matrices` has set.
+    """
     from .conjecture import GRAMMAR
     from .grammar import display_len, get_unicode_output, render_domain, render_law_expr
     from ._providers import get_provider, report_provider_failure

@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """The derive route reasons over the reals and the declared sets, and
-infinity there is infinity (P1). Nothing about the float carrier reaches
-it: not the largest double, not the exponent where `math.exp` overflows,
-not a declared pseudo-infinity. A proof over R is a proof over R, and an
-overflow is a fact about the computation, reported by the `[float]`
-companion and the probe route.
+infinity there is infinity (P1). Nothing about the float number
+representation reaches it: not the largest double, not the exponent where
+`math.exp` overflows, not a declared pseudo-infinity. A proof over R is a
+proof over R, and an overflow is a fact about the computation, reported by
+the `[float]` companion and the probe route.
 
 What still enters derive is mathematics and the author's own definition
 of the function (P2): the real domain of the primitives, and a raise the
@@ -96,7 +96,7 @@ def test_the_exponential_companion_reports_the_overflow_at_a_corner():
                                       + companion.sketch), companion.sketch
 
 
-def test_the_symbolic_package_reads_no_carrier_constant():
+def test_the_symbolic_package_reads_no_number_representation_constant():
     root = os.path.join(os.path.dirname(mathema.__file__), "symbolic")
     for dirpath, _dirs, files in os.walk(root):
         for name in files:

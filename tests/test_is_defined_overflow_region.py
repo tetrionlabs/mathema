@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """`is_defined` checked by execution samples inside the function's
-recorded `is_overflow_safe` region when one exists, a library row or
-the project's own claim alike, and otherwise runs to the carrier's
-reach, where an overflow is no value. Overflow outside the region is
-reported by `is_overflow_safe`, not `is_defined`.
+recorded `is_overflow_safe` region when one exists, a library row or the
+project's own claim alike, and otherwise runs to the number
+representation's reach, where an overflow is no value. Overflow outside
+the region is reported by `is_overflow_safe`, not `is_defined`.
 
 The execution half runs when the derive half declines: a function with
 Python source has its totality settled by the mathematics (exp is

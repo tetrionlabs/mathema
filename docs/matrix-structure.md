@@ -40,6 +40,14 @@ The markers, by level: `Real`, `Finite` (element-wise); `Symmetric`,
 `PositiveSemidefinite` (spectral). Each maps to a registry predicate
 (`Symmetric` to `is_symmetric`, and so on).
 
+A matrix parameter is drawn as nested lists unless its signature names
+another runtime type: `A: np.ndarray`, or `Mat("n", "n",
+runtime="numpy.ndarray")` beside the structure markers, samples it as a
+2-D array, so `def transpose(A: np.ndarray): return A.T` holds `for A
+in R^(n,n), f(f(A)) == A` where a list of lists would raise at `.T`.
+Nested lists are drawn up to 64 per axis. See [runtime
+types](runtime-types.md).
+
 A declared structure is **entailment-closed**: `PositiveDefinite` also
 asserts `is_symmetric` (and everything symmetry implies), because a
 positive-definite matrix is symmetric. Declaring the specific property
@@ -100,6 +108,124 @@ I(n)         the n-by-n identity
 x.T @ A @ x  a quadratic form
 ```
 
+### What each operator means
+
+The operators read the way numpy reads them, whatever the function's
+own runtime type: a list-of-lists matrix is evaluated as an array, so
+`x + y` never concatenates two lists.
+
+| spelling | on vectors and matrices |
+|---|---|
+| `A @ B` | the matrix product; two vectors give their dot product |
+| `A * B` | elementwise (the Hadamard product); `c * A` scales |
+| `A ** k` | elementwise power; the matrix power is `matrix_power(A, k)` |
+| `A + B`, `A - B`, `-A` | elementwise; `A + c` shifts every element |
+| `abs(A)` | elementwise absolute value |
+| <code>&#124;A&#124;</code> | the determinant of a declared matrix (sugar, below) |
+| `norm(x)` | Euclidean on a vector, Frobenius on a matrix |
+| `norm(A, 2)`, `norm(A, 1)`, `norm(A, inf)` | spectral, largest column sum, largest row sum |
+| `A ~= B` | element by element, with the scalar tolerance |
+
+An ordering between a matrix or vector and anything (`A >= 0`,
+`A * A >= 0`) is not defined, and the claim is refused as misspecified
+with the reason; compare a number drawn from it instead (`det`,
+`trace`, `norm`, an element). An elementwise reading spelled
+`all(...)` is future work. The scalar derive route never reads a
+vector or matrix as a number: a claim that uses one as a value goes
+to the matrix algebra below or, when that cannot close it, to
+sampling.
+
+<!-- example: semantics run -->
+```python
+from mathema.types import Mat, Vec
+
+def two(A: Mat("n", "n"), B: Mat("n", "n")):
+    return A
+
+def vecs(x: Vec("n"), y: Vec("n")):
+    return x
+```
+
+<!-- example: semantics verdicts fn=two -->
+```
+A * B == B * A   # proven
+A @ B == B @ A   # falsified
+A ** 2 == A * A   # proven
+matrix_power(A, 2) == A @ A   # proven
+matrix_power(A, 2) == A * A   # falsified
+```
+
+<!-- example: semantics verdicts fn=vecs -->
+```
+norm(x + y) <= norm(x) + norm(y)   # holds
+norm(x + y)**2 == norm(x)**2 + norm(y)**2   # falsified
+norm(x + y)**2 == norm(x)**2 + norm(y)**2 + 2*dot(x, y)   # holds
+```
+
+### The vocabulary
+
+Beyond `det`, `inv`, `trace`, `transpose` and `I(n)`:
+
+| word | meaning |
+|---|---|
+| `dot(x, y)`, `outer(x, y)`, `kron(A, B)` | inner, outer and Kronecker products |
+| `diag(A)`, `diag(v)` | the diagonal of a matrix; the diagonal matrix of a vector |
+| `rank(A)`, `cond(A)` | numerical rank; the 2-norm condition number |
+| `eigvals(A)`, `eigvalsh(A)` | eigenvalues (complex in general); of a symmetric matrix, real and ascending |
+| `solve(A, b)`, `pinv(A)` | the solution of `A @ x == b`; the pseudo-inverse |
+| `A[i, :]`, `A[:, j]` | a row, a column |
+| `sum(A, axis=0)`, `mean(A, axis=1)` | reductions along an axis (also `prod`, `min`, `max`) |
+| `x.T @ A @ x` | a quadratic form, a number (a 1-by-1 result is its element) |
+
+A decomposition is a claim about its factors, with the numpy function
+bound by `let`: `let q = numpy.linalg.qr, q(A)[0] @ q(A)[1] ~= A`. A
+vector of the claim's own is declared with `let b be R^n`, and takes
+the size the parameters give `n`. `x != 0` over a vector says it is not
+the zero vector.
+
+<!-- example: vocabulary run -->
+```python
+from mathema.types import Mat, Vec
+
+def one(A: Mat("n", "n")):
+    return A
+
+def form(A: Mat("n", "n"), x: Vec("n")):
+    return A
+```
+
+<!-- example: vocabulary verdicts fn=one -->
+```
+trace(A) ~= sum(eigvals(A))   # holds
+det(A) ~= prod(eigvals(A))   # holds
+trace(A) ~= prod(eigvals(A))   # falsified
+let b be R^n, assuming det(A) != 0, A @ solve(A, b) ~= b   # proven
+A @ pinv(A) @ A ~= A   # holds
+sum(A, axis=0) ~= sum(A.T, axis=1)   # holds
+let q = numpy.linalg.qr, q(A)[0] @ q(A)[1] ~= A   # holds
+let q = numpy.linalg.qr, q(A)[1] @ q(A)[0] ~= A   # falsified
+```
+
+<!-- example: vocabulary verdicts fn=form -->
+```
+assuming A is positive definite and x != 0, x.T @ A @ x > 0   # holds
+assuming A is symmetric and x != 0, x.T @ A @ x > 0   # falsified
+```
+
+A structure premise and a relation premise combine with `and`:
+`assuming A is symmetric and det(A) != 0, inv(A) ~= inv(A).T`. The identity and
+skew-symmetric premises reach the derive route as exact rewrites
+(`A` is `I(n)`; `A.T` is `-A`), since sympy has no assumption for them;
+positive semidefiniteness has none either, so it narrows sampling only.
+
+### Real matrices only
+
+Matrices and vectors are real in this release: a claim over `C^n` or
+`C^(m,n)` is refused as misspecified, with the reason "matrices and
+vectors are real-only in this release". Complex scalars are unaffected.
+
+### Sugar
+
 Three math-paper spellings are accepted as sugar. Each is **ambiguous**
 against a scalar reading, so mathema resolves it from the operand's
 declared type: on a matrix it is the matrix operation, on a scalar the
@@ -118,6 +244,10 @@ The type is known from a signature marker, an `R^(m,n)` domain, or a
 let A be R^(n,n), A^T == A          #  ->  A.T == A
 for A in R^(n,n), |A| >= 0          #  ->  det(A) >= 0
 ```
+
+The bars are the determinant only as written: an explicit `abs(A)`
+is always elementwise, and a rendered claim keeps the `abs(...)`
+spelling for a matrix.
 
 Because the reading is per-operand, one expression can mix the two:
 with `A` a matrix and `c` a scalar, `inv(c * A) == c^-1 * A^-1` reads
@@ -206,5 +336,13 @@ The dependency `numpy` is optional (the `test` extra); element-wise and
 structural checks fall back to pure Python, spectral checks decline
 without it. Determinant and inverse sampling need numpy. Bars around any
 matrix expression are its determinant, so `|A @ B|` is the same claim as
-`det(A @ B)`, and the record writes it with the `det` spelling. A matrix ordering (`A > B`) is undefined and declined; only
-scalar comparisons of determinants and traces are decided.
+`det(A @ B)`, and the record writes it with the `det` spelling. A
+matrix ordering (`A > B`) is undefined and refused as misspecified;
+only scalar comparisons (a determinant, a trace, a norm) are decided.
+A probe draw whose two sides differ by no more than the round-off its
+own magnitudes produce (entries near `1e6` and `1e-9` cancelling in a
+determinant) is not a counterexample, and the note says so; a loss of
+precision that matters is the float companion's claim. Numerical rank
+is `numpy.linalg.matrix_rank` with its default tolerance, so
+`rank(A @ A.T) == rank(A)`, true of real matrices, can fail at a draw
+whose condition number the product squares past that tolerance.

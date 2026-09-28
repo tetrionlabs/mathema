@@ -4,8 +4,8 @@
 
 The operational infinity resolves claim (`let |inf| be`) > function (a
 claims-file entry's `pseudo_infinity:` field, `check(fn,
-pseudo_infinity=)`) > project (`MATHEMA_PSEUDO_INFINITY`) > the
-carrier's maximum. It bounds only the computation, never a claim's
+pseudo_infinity=)`) > project (`MATHEMA_PSEUDO_INFINITY`) > the number
+representation's maximum. It bounds only the computation, never a claim's
 identity, and it is rendered, with its source, only where it bounds an
 unbounded direction of the claim's effective domain."""
 import math
@@ -42,7 +42,7 @@ def _proof_and_companion(fn, law, **kw):
 
 # --- the resolver ----------------------------------------------------------
 
-def test_nothing_set_resolves_to_none_the_carrier_maximum():
+def test_nothing_set_resolves_to_none_the_number_representation_maximum():
     from mathema.records import resolve_pseudo_infinity
     assert resolve_pseudo_infinity(None, None) is None
 
@@ -164,10 +164,10 @@ def test_nothing_about_infinity_when_every_direction_is_bounded(monkeypatch):
                 assert "|inf|" not in (p.note or ""), p
 
 
-# --- the sq demo: carrier, environment, function level ---------------------
+# --- the sq demo: number representation, environment, function level ---
 
 @pytest.mark.needs_full_proof_budget
-def test_sq_companion_falls_at_the_carrier_corner_with_no_setting():
+def test_sq_companion_falls_at_the_number_representation_corner_with_no_setting():
     proof, companion = _proof_and_companion(sq, "for x in R, f(x) >= 0")
     assert proof.verdict == "proven"
     assert companion.verdict == "falsified", companion.note

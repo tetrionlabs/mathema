@@ -99,6 +99,8 @@ sugar for the same 4-argument call.
 from __future__ import annotations
 
 import ast
+import contextlib
+import contextvars
 import re
 from dataclasses import dataclass
 
@@ -911,12 +913,13 @@ def _parse_pseudo_infinity(form: str, rhs: str) -> float:
     return magnitude
 
 
-# the named sets a representation declaration rebinds, and the carrier
-# vocabulary it rebinds them to (`let Z be i64`). Reserved: the parser
-# refuses both spellings with guidance rather than reading either as an
-# ordinary free-variable binding, so the future meaning stays free.
+# the named sets a representation declaration rebinds, and the number
+# representation vocabulary it rebinds them to (`let Z be i64`). Reserved:
+# the parser refuses both spellings with guidance rather than reading
+# either as an ordinary free-variable binding, so the future meaning stays
+# free.
 _BASE_SET_NAMES = frozenset({"R", "Z", "N", "C"})
-_RESERVED_CARRIERS = frozenset({
+_RESERVED_REPRESENTATIONS = frozenset({
     "i8", "i16", "i32", "i64", "i128",
     "u8", "u16", "u32", "u64", "u128",
     "f16", "f32", "f64", "bigint", "f64int",
@@ -1052,19 +1055,21 @@ def extract_let_bindings(
                         _LET_PIN_LITERALS[bounds])
                     text = ",".join(segments[1:]).strip()
                     continue
-                if fname in _BASE_SET_NAMES or bounds in _RESERVED_CARRIERS:
-                    # the representation-declaration spelling: rebinding
-                    # a named set's machine carrier, the same shape as
-                    # `let |inf| be 1e6` rebinding infinity. Reserved
-                    # rather than squattable, so the future meaning is
-                    # not taken by an accidental free-variable binding.
+                if (fname in _BASE_SET_NAMES
+                        or bounds in _RESERVED_REPRESENTATIONS):
+                    # the representation-declaration spelling: rebinding a
+                    # named set's machine number representation, the same
+                    # shape as `let |inf| be 1e6` rebinding infinity.
+                    # Reserved rather than squattable, so the future
+                    # meaning is not taken by an accidental free-variable
+                    # binding.
                     raise InvalidDomain(
                         f"`let {fname} be {bounds}` is reserved for "
                         f"representation declarations (binding a named "
-                        f"set to a machine carrier such as i64 or f32), "
-                        f"which are not supported yet; a free variable "
-                        f"cannot be named {fname!r} and a carrier name "
-                        f"cannot be a bound")
+                        f"set to a machine number representation such as "
+                        f"i64 or f32), which are not supported yet; a free "
+                        f"variable cannot be named {fname!r} and a number "
+                        f"representation name cannot be a bound")
                 parsed_binding = parse_binding(f"{fname} in {bounds}")
                 if parsed_binding is None:
                     # parse_binding has no bare-scalar shape (`for x in
@@ -2059,13 +2064,41 @@ def _bar_pairs(text: str) -> "list[tuple[int, int]] | None":
     return None if stack else pairs
 
 
+#: the names bars read as matrices while a claim is parsed: bars
+#: around one of them (or an expression over them that is a matrix)
+#: are its determinant
+_BAR_MATRICES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "bar_matrices", default=frozenset())
+
+
+@contextlib.contextmanager
+def bars_over_matrices(names):
+    """Within the block, bars around a matrix expression over `names`
+    fold to `det(...)` rather than `abs(...)`."""
+    token = _BAR_MATRICES.set(frozenset(names))
+    try:
+        yield
+    finally:
+        _BAR_MATRICES.reset(token)
+
+
+def _bars_hold_matrix(content: str, names: frozenset) -> bool:
+    from .linalg import is_matrix_expr
+    try:
+        node = ast.parse(_caret_to_power(content.strip()), mode="eval").body
+    except SyntaxError:
+        return False
+    return is_matrix_expr(node, names)
+
+
 def _fold_bars(text: str) -> str:
     """`|expr|` -> `abs(expr)` for any expression between the bars, and
     `||expr||` -> `norm(expr)`: a pair whose content is exactly one
     further pair reads as a norm, so `||a| - |b||` (content not a
     single pair) stays an absolute value of a difference. Text whose
     bars do not pair up is returned unchanged for the claim parser to
-    refuse. A matrix operand turns `abs` into `det` later, by type."""
+    refuse. Within `bars_over_matrices`, bars around a matrix
+    expression are its determinant, `det(expr)`."""
     if "|" not in text:
         return text
     pairs = _bar_pairs(text)
@@ -2081,7 +2114,11 @@ def _fold_bars(text: str) -> str:
             replace[o], replace[c] = "norm(", ")"
             replace[o + 1] = replace[c - 1] = ""
         else:
-            replace[o], replace[c] = "abs(", ")"
+            mats = _BAR_MATRICES.get()
+            opening = ("det(" if mats and "|" not in text[o + 1:c]
+                       and _bars_hold_matrix(text[o + 1:c], mats)
+                       else "abs(")
+            replace[o], replace[c] = opening, ")"
     return "".join(replace.get(i, ch) for i, ch in enumerate(text))
 
 
@@ -2421,9 +2458,13 @@ def _verbatim_atom(node: ast.AST):
 
 
 def _string_literals(node: ast.AST) -> list:
-    """Every string literal in a subtree, in source order."""
+    """Every string literal in a subtree that is a value, in source
+    order: a subscript's key (`df["returns"]`, a column) names a part
+    of its container and is not one."""
+    keys = {id(n.slice) for n in ast.walk(node) if isinstance(n, ast.Subscript)}
     return [n.value for n in ast.walk(node)
-            if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and id(n) not in keys]
 
 
 def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
@@ -2445,8 +2486,32 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
             return sympy.Transpose(
                 _node_to_sympy(node.value, funcs, matrix_names))
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.MatMult):
-            return (_node_to_sympy(node.left, funcs, matrix_names)
-                    * _node_to_sympy(node.right, funcs, matrix_names))
+            left = _node_to_sympy(node.left, funcs, matrix_names)
+            right = _node_to_sympy(node.right, funcs, matrix_names)
+            if isinstance(left, sympy.MatrixExpr) \
+                    and isinstance(right, sympy.MatrixExpr):
+                # unevaluated, so `inv(A) @ A` renders as written rather
+                # than as the identity it equals
+                factors = [*(left.args if isinstance(left, sympy.MatMul)
+                             else (left,)),
+                           *(right.args if isinstance(right, sympy.MatMul)
+                             else (right,))]
+                return sympy.MatMul(*factors, evaluate=False)
+            return left * right
+        if isinstance(node, ast.BinOp) and isinstance(node.op,
+                                                      (ast.Mult, ast.Pow)):
+            left = _node_to_sympy(node.left, funcs, matrix_names)
+            right = _node_to_sympy(node.right, funcs, matrix_names)
+            if isinstance(left, sympy.MatrixExpr):
+                # `*` and `**` act element by element on matrices: the
+                # Hadamard product and power, written A ∘ B and A^∘k
+                from sympy.matrices.expressions.hadamard import (
+                    HadamardPower, HadamardProduct)
+                if isinstance(node.op, ast.Pow):
+                    return HadamardPower(left, right)
+                if isinstance(right, sympy.MatrixExpr):
+                    return HadamardProduct(left, right)
+            return _BINOPS[type(node.op)](left, right)
     if isinstance(node, ast.Constant):
         if isinstance(node.value, complex) and not isinstance(node.value, (int, float)):
             v = node.value
@@ -2497,6 +2562,10 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
             # straight off the node
             arg_nodes = arg_nodes[:3]
         args = [_node_to_sympy(a, funcs, matrix_names) for a in arg_nodes]
+        if matrix_names and len(args) == 1 and fname == "I":
+            # the identity renders without its size, so one square
+            # placeholder dimension serves every `I(n)`
+            return sympy.Identity(_MATRIX_RENDER_DIM)
         if matrix_names and len(args) == 1 and fname in _MATRIX_RENDER_CALLS:
             return _MATRIX_RENDER_CALLS[fname](args[0])
         special = _SPECIAL_RENDER_CALLS.get(fname)
@@ -3111,14 +3180,19 @@ def _abs_calls_to_bars(text: str) -> str:
         bar of its own. `|x - 1|` is not one, so `abs(x - 1)` keeps
         the call spelling (the grammar reads `|x - 1|` on input too);
         every string this returns folds back to the same `abs(...)`
-        calls under `_fold_bars`. The scan is by balanced parens
+        calls under `_fold_bars`. Within `bars_over_matrices`, the
+        `abs` of a matrix keeps the call spelling, since bars around a
+        matrix are its determinant. The scan is by balanced parens
         (`_find_balanced_call`), since an argument can itself contain
         parens, and inner calls are rewritten first, so an outer
         argument holding an inner `|y|` keeps the call spelling too.
     """
+    mats = _BAR_MATRICES.get()
+
     def rewrite(m, args, call_end):
         inner = _abs_calls_to_bars(args)
-        if "|" not in inner and re.fullmatch(_BAR_TOKEN, inner):
+        if "|" not in inner and re.fullmatch(_BAR_TOKEN, inner) \
+                and not (mats and _bars_hold_matrix(inner, mats)):
             return f"|{inner}|"
         return f"abs({inner})"
 

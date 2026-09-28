@@ -35,6 +35,7 @@ from ._loop_shapes import (
 )
 from ._proof_support import ProofResult
 from ._seq_common import _unliftable_result, SeqLiftView, try_prove_seq
+from ..runtime_types import SEQUENCE_KINDS
 
 # --- linear accumulator folds -----------------------------------------------
 #
@@ -261,7 +262,7 @@ def _lift_fold_impl(fn, facts) -> "FoldLift | dict":
                "hint": "the function also recurses, not derivable regardless "
                       "of the loop shape",
                "derive_unlock": "limitation"}
-    seq_params = [p for p in facts.params if facts.param_kinds.get(p) == "sequence"]
+    seq_params = [p for p in facts.params if facts.param_kinds.get(p) in SEQUENCE_KINDS]
     if len(seq_params) > 1:
         return {"reason": "wrong-sequence-param-count",
                "hint": f"{len(seq_params)} sequence-typed parameters, at most "
@@ -626,16 +627,8 @@ def _fold_eval_mapped(fold: "FoldLift", subs: dict):
     if elem_map is None or fold.seq is None:
         return out
     mapper, scalar_args = elem_map
-
-    def is_elem(e):
-        return isinstance(e, sympy.Indexed) and e.base == fold.seq
-
-    def mapped(e):
-        return mapper(e, *scalar_args)
-
-    if isinstance(out, tuple):
-        return tuple(t.replace(is_elem, mapped) for t in out)
-    return out.replace(is_elem, mapped)
+    from ._seq_common import map_sequence_elements
+    return map_sequence_elements(out, fold.seq, mapper, scalar_args)
 
 
 def _fold_view(fold: "FoldLift") -> SeqLiftView:

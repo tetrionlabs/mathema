@@ -55,6 +55,12 @@ docs = ["mkdocs>=1.6", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.25",
 # turns on the array fast paths (matrix structure checks, array-shaped
 # parameter synthesis) and is exercised unconditionally by the tests.
 numpy = ["numpy"]
+# pandas and polars are optional like numpy: installed, a parameter
+# annotated `pd.Series`, `pd.DataFrame`, `pl.Series` or `pl.DataFrame`
+# is sampled as one (its runtime type adapter); absent, that adapter is
+# inert.
+pandas = ["pandas"]
+polars = ["polars"]
 # Needed to run the test suite. pytest-xdist parallelises it, which
 # matters here because proof attempts are capped on the WALL clock:
 # oversubscribing the machine starves a proof of CPU and turns a
@@ -62,7 +68,7 @@ numpy = ["numpy"]
 # the verdict. Measured on 8 cores: `-n 4` runs the suite in 2:41 fully
 # green, `-n auto` in 3:10 with one drifted verdict, and one process in
 # 8:15. Leave the machine headroom rather than claiming every core.
-test = ["pytest>=7", "pytest-xdist>=3", "pytest-cov>=7", "mathema[numpy,coverage]",
+test = ["pytest>=7", "pytest-xdist>=3", "pytest-cov>=7", "mathema[numpy,pandas,polars,coverage]",
         # tomllib is stdlib only from 3.11, and the packaging-metadata
         # test reads pyproject directly, so it needs the backport on
         # the declared floor

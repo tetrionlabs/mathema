@@ -418,6 +418,11 @@ is below `1e100`, since values beyond it are then not checked for
 computation, and suggest an explicit domain for the variables instead; see
 [operational infinity](grammar.md#operational-infinity-let-inf-be).
 
+A claims-file entry's `runtime_types:` field names the runtime type of
+a parameter whose signature names none, for code that cannot be
+annotated (`runtime_types: {returns: pandas.Series}`); see [runtime
+types](runtime-types.md).
+
 ### `is_pole_safe(param)` / `is_builtin_safe(param)`
 
 Two family-derive-only predicates (`route="derive"` always, neither
@@ -669,7 +674,7 @@ mathema.Record(softmax) · source, no side effects · form 7982b776d687
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (n=192)
   holds   preserves_length: dim(f(scores), 0) = dim(scores, 0) (n=192)
   FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
-           counterexample ([0, 6.12225]): [0.0021887084924676944, 0.9978112915075322] vs [0.0, 6.122252531363742]
+           counterexample scores=[0, 6.12225]: [0.0021887084924676944, 0.9978112915075322] vs [0.0, 6.122252531363742]
   holds   preserves_type: type(f(scores)) = type(scores) (n=192)
   FALSIFY is_sorted_output: is_sorted_output(f(scores))
            counterexample ([4.86304, 8.4521, -9.06059, -3.61645]): output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output

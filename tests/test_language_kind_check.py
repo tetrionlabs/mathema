@@ -58,7 +58,11 @@ def _load(tmp_path, body, name="kind_fns"):
 
 def test_the_table():
     assert _kind_compatible("row", "dict")
-    assert _kind_compatible("frame", "sequence")
+    assert _kind_compatible("table", "sequence")
+    assert _kind_compatible("table", "table")
+    assert _kind_compatible("sequence", "vec")
+    assert _kind_compatible("sequence", "mat")
+    assert not _kind_compatible("row", "table")
     assert _kind_compatible("object", "unknown")
     assert _kind_compatible("string", None)
     assert not _kind_compatible("string", "int")

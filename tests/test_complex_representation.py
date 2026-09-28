@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Claims over the complex plane, computed in complex128: the companion
-of a claim over C runs in the complex128 carrier and is named
+of a claim over C runs in the complex128 number representation and is named
 `<claim>[complex]`; equality and closeness adjudicate over C on the
 probe route (`~=` as `abs(a - b)` within the tolerance), while ordering
 stays refused; a NaN or an infinity in either component is no value."""
@@ -29,7 +29,7 @@ def _rows(fn, text, name="sq", **kw):
     return {p.name: p for p in rec.probes}
 
 
-def test_the_complex128_carrier():
+def test_the_complex128_number_representation():
     import sys
 
     from mathema.representations import (PY_COMPLEX128, PY_FLOAT64,

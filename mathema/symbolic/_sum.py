@@ -26,6 +26,7 @@ from ._proof_support import ProofResult
 from ._seq_common import (_unliftable_result, SeqLiftView,
                           positional_f_call_subs, subs_eval_f,
                           try_prove_seq)
+from ..runtime_types import SEQUENCE_KINDS
 
 # --- general sum accumulation: nested loops, multiple sequences, no --------
 # --- telescoping needed at all ----------------------------------------------
@@ -270,7 +271,7 @@ def lift_sum(fn, facts) -> "SumLift | None":
     # whose condition reads only the item/index lifts as an exact
     # Piecewise summand (see _recognize_sum_piece); anything else
     # falls out of recognition naturally
-    seq_params = {p for p in facts.params if facts.param_kinds.get(p) == "sequence"}
+    seq_params = {p for p in facts.params if facts.param_kinds.get(p) in SEQUENCE_KINDS}
     # a sequence parameter is no longer required at all, a bare
     # `for i in range(n):` loop (n an ordinary scalar parameter, no
     # sequence involved) is exactly classify_loop_header's own

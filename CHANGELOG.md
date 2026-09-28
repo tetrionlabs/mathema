@@ -38,7 +38,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - The operational infinity resolves at three levels, the claim (`let
   |inf| be`), the function (a claims-file entry's `pseudo_infinity:`,
   or `check(fn, pseudo_infinity=)`) and the project
-  (`MATHEMA_PSEUDO_INFINITY`), else the carrier's maximum. It bounds
+  (`MATHEMA_PSEUDO_INFINITY`), else the number representation's maximum. It bounds
   only the computation, never a claim's identity, and is shown as a
   plain `let |inf| be ...` in front of a computation row's condition
   only where it bounds an unbounded direction. Along an unbounded
@@ -52,7 +52,7 @@ Notable changes to mathema are recorded here from its first public release onwar
   the first two questions and `is_repeatable(f)` for the third, where a
   function taking a seed or generator is held to `is_reproducible`.
   `is_memory_safe`, `is_precision_safe`, `is_order_invariant`,
-  `is_concurrency_safe` and `is_carrier_consistent` are reserved:
+  `is_concurrency_safe` and `is_representation_consistent` are reserved:
   `skipped` in this release.
 - The clarity score reads each call's hazard from the callee's own
   record (`CLARITY_ALGO` entropy-dimensions@1.2), so clarity scores move

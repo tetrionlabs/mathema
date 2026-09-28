@@ -110,3 +110,30 @@ def test_the_companion_descriptor_parses_the_bracket():
     assert companion_descriptor("law[float, cpython3.12]") == (
         "float", "cpython3.12")
     assert companion_descriptor("law") == ()
+
+
+# public record keys, meta keys or names that contain "carrier" and
+# stay as they are; none today
+_PUBLIC_CARRIER_NAMES: frozenset = frozenset()
+
+
+def test_a_number_representation_is_never_called_a_carrier():
+    # float64, complex128 and i64 are number representations; the word
+    # "carrier" appears in the package only inside a public name listed
+    # above
+    import os
+    import re
+    root = os.path.dirname(mathema.__file__)
+    found = []
+    for dirpath, _dirs, files in os.walk(root):
+        for name in files:
+            if not name.endswith((".py", ".yaml", ".md")):
+                continue
+            path = os.path.join(dirpath, name)
+            with open(path, encoding="utf-8") as fh:
+                for n, line in enumerate(fh, 1):
+                    for word in re.findall(r"[\w.]*carrier[\w.]*", line,
+                                           re.IGNORECASE):
+                        if word not in _PUBLIC_CARRIER_NAMES:
+                            found.append(f"{path}:{n}: {word}")
+    assert not found, found

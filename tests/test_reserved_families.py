@@ -9,7 +9,7 @@ name."""
 import pytest
 
 RESERVED = ("is_precision_safe", "is_order_invariant",
-            "is_concurrency_safe", "is_carrier_consistent")
+            "is_concurrency_safe", "is_representation_consistent")
 
 
 def half(x: float) -> float:
