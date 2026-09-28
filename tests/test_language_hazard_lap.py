@@ -113,4 +113,4 @@ def test_the_members_at_a_bound_come_first_and_plain(letters):
     assert [lap.next(), lap.next()] == ["a" * 3, "a" * 81]
     (p,) = check_conjectures(headline, [claim("for s in L[any_text, len <= 81], f(s) == s")])
     assert p.verdict == "falsified"
-    assert p.counterexample.startswith("('" + "a" * 81 + "')"), p.counterexample
+    assert p.counterexample.startswith("s='" + "a" * 81 + "':"), p.counterexample

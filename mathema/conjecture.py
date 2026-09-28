@@ -22,6 +22,7 @@ comparisons handled by the relation, and a fixed set of safe calls can run.
 """
 from __future__ import annotations
 
+from ._signatures import module_scope
 import ast
 import cmath as _cmath
 import inspect
@@ -48,7 +49,7 @@ from . import linalg
 from ._scan import _split_commas, blank_strings
 from .domain import DuplicateBinding
 from .domain import operational_domain as _operational_domain
-from .probing import (ComplexResult, _close, _fmt, _prepare_sampling,
+from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
                       holds_nan, same_infinity,
@@ -858,6 +859,9 @@ _SAFE_FUNCS = {
     # not sympy functions (the derive route reports them unsupported and
     # the probe evaluates them).
     "sorted": sorted, "type": type,
+    # a value's text, for a round trip through a parser that returns an
+    # object: probe-only, the derive route has no reading of it
+    "str": str,
     # sympy's own capitalization, mirroring _math_vocab._SYMPY_FUNCS's
     # Abs/Min/Max synonyms so a claim written that way adjudicates on
     # either route
@@ -1604,6 +1608,22 @@ def _special_call_problem(node: ast.Call) -> str | None:
     return None if ok else f"{shape}, the variable a plain name"
 
 
+def _is_grammar_function(name: str) -> bool:
+    """Whether `name` is one of the claim grammar's own functions (a
+    reserved call form, a probe-route builtin, or a linalg reduction)
+    rather than a function the claim names."""
+    return (is_reserved(name) or name in _SAFE_FUNCS
+            or name in linalg.CALL_KEYWORDS)
+
+
+def _is_keyword_value(node: ast.AST) -> bool:
+    """Whether `node` can be a keyword argument's value in a claim: a
+    literal (a negative number included) or a bare name."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        node = node.operand
+    return isinstance(node, (ast.Constant, ast.Name))
+
+
 def _unreadable_side(side: str) -> str | None:
     """Intent:
         Why one side of a relation is not claim syntax, or None when it
@@ -1640,15 +1660,26 @@ def _unreadable_side(side: str) -> str | None:
         if isinstance(node, ast.Call) and node.keywords:
             if any(k.arg is None for k in node.keywords):
                 return "argument unpacking (`**`) is not claim syntax"
-            allowed = linalg.CALL_KEYWORDS.get(
-                node.func.id if isinstance(node.func, ast.Name) else "", ())
+            called = node.func.id if isinstance(node.func, ast.Name) else ""
             words = [k.arg for k in node.keywords]
-            if not words or any(w not in allowed for w in words) \
-                    or len(set(words)) != len(words):
-                return ("keyword arguments are not claim syntax: pass each "
-                        "argument by position (the keywords are `axis=` "
+            if len(set(words)) != len(words):
+                return "a keyword argument passed twice is not claim syntax"
+            if called and not _is_grammar_function(called):
+                # a function the claim names takes keywords as its own
+                # callers pass them, each a literal or a name
+                for k in node.keywords:
+                    if not _is_keyword_value(k.value):
+                        return (f"{k.arg}={ast.unparse(k.value)} is not "
+                                "claim syntax: a keyword argument takes a "
+                                "literal or a name")
+                continue
+            allowed = linalg.CALL_KEYWORDS.get(called, ())
+            if any(w not in allowed for w in words):
+                return ("keyword arguments are not claim syntax on the "
+                        "grammar's own functions: the keywords are `axis=` "
                         "on sum, mean, prod, min, max, std, var, count, "
-                        "cumsum and cumprod, and `ddof=` on std and var)")
+                        "cumsum and cumprod, and `ddof=` on std and var; a "
+                        "function the claim names takes its own")
         if isinstance(node, ast.Constant) and (
                 isinstance(node.value, bytes) or node.value is Ellipsis):
             return f"the literal {ast.unparse(node)} is not claim syntax"
@@ -2477,12 +2508,12 @@ def _bind_scope_functions(cj, fn) -> str:
                if n not in wanted]
     if not wanted:
         return ""
-    module_scope = getattr(fn, "__globals__", None) or {}
+    fn_scope = module_scope(fn)
     caller_scope: dict | None = None
     bound = []
     for name in wanted:
         target, where = None, None
-        v = module_scope.get(name)
+        v = fn_scope.get(name)
         if inspect.isfunction(v):
             target, where = v, "f's module"
         else:
@@ -4069,7 +4100,18 @@ def _merge_under(meta: dict, extra: dict) -> dict:
 _WITNESS_SHRINK_EVALUATIONS = 400
 
 
-def _failure_at(cj, kinds, env, args, code_l, code_r) -> "str | None":
+def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set | None]":
+    """Intent:
+        `(names, shown)` for `_fmt` on a witness: over a language, every
+        parameter by name with only the ones the claim reads shown;
+        `(None, None)` otherwise, the positional tuple.
+    """
+    if any(getattr(cj_domain.get(p), "base_type", None) == "L" for p in kinds):
+        return tuple(kinds), _names_in_claim(cj)
+    return None, None
+
+
+def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "str | None":
     """Intent:
         The counterexample text the claim fails with at `args` (a raise,
         a membership, or a comparison, in the claim loop's own words),
@@ -4083,7 +4125,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r) -> "str | None":
         lv = eval(code_l, {"__builtins__": {}}, trial_env)
         rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
     except Exception as e:
-        return (f"{_fmt(tuple(args))}: raised {type(e).__name__}, narrow "
+        return (f"{_fmt(tuple(args), *labels)}: raised {type(e).__name__}, narrow "
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
     if cj.relation in ("in", "not in"):
@@ -4095,7 +4137,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r) -> "str | None":
             except TypeError:
                 return None
         if member != (cj.relation == "in"):
-            return (f"{_fmt(tuple(args))}: {lv!r} is "
+            return (f"{_fmt(tuple(args), *labels)}: {lv!r} is "
                     f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
         return None
     if is_missing(lv) or is_missing(rv):
@@ -4105,7 +4147,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r) -> "str | None":
                                     exact_inequality=cj.tolerance is None,
                                     rel_tol=_declared_rel_tol(cj))
     if ok is False:
-        return f"{_fmt(tuple(args))}: {lv!r} vs {rv!r}"
+        return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
     return None
 
 
@@ -4121,7 +4163,8 @@ def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
     from .domain import LanguageRef, domain_contains, path_bindings_hold
     from .languages import resolve_language
     args = list(args)
-    current = _failure_at(cj, kinds, env, args, code_l, code_r)
+    labels = _witness_labels(cj, kinds, cj_domain)
+    current = _failure_at(cj, kinds, env, args, code_l, code_r, labels)
     if current is None:
         return None
     budget, steps = _WITNESS_SHRINK_EVALUATIONS, 0
@@ -4165,7 +4208,7 @@ def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
                         continue
                     budget -= 1
                     trial = [*args[:i], candidate, *args[i + 1:]]
-                    failure = _failure_at(cj, kinds, env, trial, code_l, code_r)
+                    failure = _failure_at(cj, kinds, env, trial, code_l, code_r, labels)
                     if failure is not None:
                         args, current, steps, improved = trial, failure, steps + 1, True
                         break
@@ -4580,10 +4623,13 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # channel a Literal[...]/Enum annotation uses, so the stated
     # values are the real False/True objects
     _ANNOTATION_DOMAIN = {"int": "Z"}
+    # only a parameter the claim reads is a coordinate; one it fills
+    # with a literal, or leaves at its default, has nothing to infer
+    read = _names_in_claim(cj)
     annotation_inferred = {
         p: _ANNOTATION_DOMAIN[facts.param_kinds.get(p)]
         for p in facts.params
-        if p not in cj_domain
+        if p not in cj_domain and p in read
         and facts.param_kinds.get(p) in _ANNOTATION_DOMAIN}
     if annotation_inferred:
         cj_domain = {**annotation_inferred, **cj_domain}
@@ -4601,7 +4647,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
     literal_inferred = {
         p: frozenset(vals)
         for p, vals in getattr(facts, "finite_domains", {}).items()
-        if p not in cj_domain}
+        if p not in cj_domain and p in read}
     if literal_inferred:
         cj_domain = {**literal_inferred, **cj_domain}
         note = (f"{note}; inferred "
@@ -4616,7 +4662,9 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # inference above: only a parameter no binding names, rendered
     # explicitly with the adaptor that answered; with no adaptor
     # installed nothing is inferred
-    adaptor_inferred = _adaptor_inferred_domains(fn, facts, cj_domain)
+    adaptor_inferred = {p: v for p, v in
+                        _adaptor_inferred_domains(fn, facts, cj_domain).items()
+                        if p in read}
     if adaptor_inferred:
         from .domain import render_domain
         cj_domain = {**{p: b for p, (b, _, _) in adaptor_inferred.items()},
@@ -6224,9 +6272,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if k == "string" and p in named and ctx.cj_domain.get(p) is None:
             return Probe(
                 cj.name, statement, "skipped", route=None,
-                note=(f"{note}; parameter {p!r} is a string with no declared "
-                      f"domain; declare its values, e.g. 'for {p} in "
-                      f'{{"a", "b"}}, ...\', or annotate it Literal[...]'),
+                note=(f"{note}; {string_domain_hint(p)}, or annotate it "
+                      "Literal[...]"),
                 meta={"mathema.probe_gap": "string-domain-missing"})
     # the generic loop's reading of the domain: every unbounded direction,
     # declared or bare, runs with finite values out to the resolved
@@ -6445,7 +6492,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                    if p in kinds or p in (cj.free_vars or ())]
     as_arrays = bool(array_names) and _numpy() is not None
     # a witness over vectors or matrices names each argument
-    arg_names = tuple(kinds) if as_arrays else None
+    arg_names, shown_names = _witness_labels(cj, kinds, cj_domain)
+    if as_arrays:
+        arg_names, shown_names = tuple(kinds), None
     table_columns = {p: _table_columns(p, cj, facts)
                      for p, k in kinds.items() if k == "table"}
     fn_call = calling(fn, facts)
@@ -6673,12 +6722,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             except Exception as e:
                 checked += 1
                 if raised_type is not None and not isinstance(e, raised_type):
-                    cx = (f"{_fmt(tuple(args), arg_names)}: raised "
+                    cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: raised "
                           f"{type(e).__name__}, claimed {cj.rhs}")
                     break
                 continue
             checked += 1
-            cx = f"{_fmt(tuple(args), arg_names)}: returned {v!r} instead of raising"
+            cx = f"{_fmt(tuple(args), arg_names, shown_names)}: returned {v!r} instead of raising"
             break
         try:
             lv = eval(code_l, {"__builtins__": {}}, env)
@@ -6739,7 +6788,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     break
             if boundary:
                 checked += 1
-                cx = (f"{_fmt(tuple(args), arg_names)}: raised {type(e).__name__} at a "
+                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: raised {type(e).__name__} at a "
                       f"floating-point boundary (the same inputs nudged "
                       f"within ε evaluate cleanly), a clamp at the raising "
                       f"operation's argument would remove the instability")
@@ -6750,7 +6799,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               "blame": "implementation",
                               "cause": "implementation:sub-epsilon-boundary",
                               "representation": "f64",
-                              "witness": _fmt(tuple(args), arg_names)}
+                              "witness": _fmt(tuple(args), arg_names, shown_names)}
                 break
             # a TypeError under a NON-INTEGER sample against a callable
             # with an int-typed parameter is a claim-domain
@@ -6777,7 +6826,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         cj.name, statement, "skipped:misspecified",
                         route=None,
                         note=f"{note}; {call_raised[0]} raised TypeError at "
-                             f"{_fmt(tuple(args), arg_names)}: parameter(s) "
+                             f"{_fmt(tuple(args), arg_names, shown_names)}: parameter(s) "
                              f"{', '.join(int_params)} of "
                              f"{call_raised[0]} are int-typed but the "
                              f"claim's domain admits non-integers "
@@ -6799,21 +6848,21 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         cj.name, statement, "skipped:misspecified",
                         route=None,
                         note=f"{note}; f raised {type(e).__name__} at "
-                             f"{_fmt(tuple(args), arg_names)}, sampled as a list: "
+                             f"{_fmt(tuple(args), arg_names, shown_names)}, sampled as a list: "
                              + "; ".join(listed))
             # a raise is not a value: the claim asserts an equality or
             # ordering AT this in-domain point, and there is nothing on
             # one side to compare, pedantically, that falsifies it.
             checked += 1
             if isinstance(e, ComplexResult):
-                cx = (f"{_fmt(tuple(args), arg_names)}: {e}, which a real claim reads "
+                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {e}, which a real claim reads "
                       f"as a raise; narrow the claim's domain to where every "
                       f"call is real, or annotate the function complex")
                 break
-            cx = (f"{_fmt(tuple(args), arg_names)}: raised {type(e).__name__}, narrow "
+            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: raised {type(e).__name__}, narrow "
                   "the claim's domain to where every call returns, or state "
                   "the raising region as its own raises(...) claim")
-            cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args), arg_names))
+            cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args), arg_names, shown_names))
             break
         if cj.relation in ("in", "not in"):
             # membership is exact: a value is in the language or the
@@ -6834,7 +6883,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if member != (cj.relation == "in"):
                 if as_arrays:
                     lv = _linalg_eval.shown(lv)
-                cx = (f"{_fmt(tuple(args), arg_names)}: {lv!r} is "
+                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {lv!r} is "
                       f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
                 break
             continue
@@ -6845,9 +6894,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # in-domain point, `!=` included, and the witness names
             # the callee that returned it
             checked += 1
-            cx = (f"{_fmt(tuple(args), arg_names)}: {call_nan[0]} returned nan"
+            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {call_nan[0]} returned nan"
                   if call_nan[0] is not None else
-                  f"{_fmt(tuple(args), arg_names)}: "
+                  f"{_fmt(tuple(args), arg_names, shown_names)}: "
                   f"{_linalg_eval.shown(lv)!r} vs "
                   f"{_linalg_eval.shown(rv)!r}, and a nan is no value")
             break
@@ -6858,7 +6907,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             checked += 1
             if cj.relation in ("==", "~=", "<=", ">="):
                 continue
-            cx = (f"{_fmt(tuple(args), arg_names)}: both sides are "
+            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: both sides are "
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, the same point, "
                   f"which {cj.relation} does not admit")
             break
@@ -6868,7 +6917,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # (the case where `math` raises): against a value, or the
             # opposite infinity, every value relation fails
             checked += 1
-            cx = (f"{_fmt(tuple(args), arg_names)}: {call_inf[0]} returned "
+            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {call_inf[0]} returned "
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "
                   f"infinity for a finite input is no value")
             break
@@ -6925,7 +6974,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 ok = True
                 gap = _linalg_eval.largest_gap(lv, rv)
                 if gap > roundoff_absorbed:
-                    roundoff_absorbed, roundoff_at = gap, _fmt(tuple(args), arg_names)
+                    roundoff_absorbed, roundoff_at = gap, _fmt(tuple(args), arg_names, shown_names)
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex value), or two
@@ -6947,14 +6996,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if ok and cj.tolerance is None:
             gap = ordering_shortfall(lv, rv, cj.relation)
             if gap > absorbed:
-                absorbed, absorbed_at = gap, _fmt(tuple(args), arg_names)
+                absorbed, absorbed_at = gap, _fmt(tuple(args), arg_names, shown_names)
         if not ok:
             aux_part = ("; " + ", ".join(
                 f"{a}={env[a]:.3g}" if isinstance(env[a], (int, float))
                 else f"{a}={env[a]!r}" for a in aux) if aux else "")
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
-            cx = f"{_fmt(tuple(args), arg_names)}{aux_part}: {_sides(lv, rv)}"
+            cx = f"{_fmt(tuple(args), arg_names, shown_names)}{aux_part}: {_sides(lv, rv)}"
             break
     shrunk_meta: dict = {}
     if cx is not None and cx_stratum is None and assum_eval is None and not aux \

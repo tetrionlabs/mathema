@@ -454,6 +454,16 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             bounds = merged_domain.get(name)
             if bounds is None:
                 return None
+            if getattr(bounds, "base_type", None) == "L":
+                # a language judges the argument as one value, even one
+                # that iterates (a model over its fields, a list over its
+                # items), and its own explanation says why it refused
+                if _check_scalar(value, bounds):
+                    return None
+                from .claim_families import _why_outside, _witness_value
+                return (f"={_witness_value(value)} outside its declared domain "
+                        f"{render_domain(bounds, show_missing=True)}"
+                        f"{_why_outside(value, bounds)}")
             # A sequence-valued argument (list/tuple/array/Series, any
             # real iterable that isn't itself a string/bytes/mapping) is
             # checked element by element against the same domain a
@@ -469,11 +479,11 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
                     hasattr(value, "__iter__") and not isinstance(value, (str, bytes, dict))):
                 for i, el in enumerate(value):
                     if not _check_scalar(el, bounds):
-                        return (f"has element {i} ({el!r}) outside its declared "
+                        return (f"={value!r} has element {i} ({el!r}) outside its declared "
                                 f"domain {render_domain(bounds, show_missing=True)}")
                 return None
             if not _check_scalar(value, bounds):
-                return f"outside its declared domain {render_domain(bounds, show_missing=True)}"
+                return f"={value!r} outside its declared domain {render_domain(bounds, show_missing=True)}"
             return None
 
         @functools.wraps(fn)
@@ -483,7 +493,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             for name, value in bound.arguments.items():
                 problem = _violation(name, value)
                 if problem is not None:
-                    raise DomainError(f"{fn.__name__}(): {name}={value!r} {problem}")
+                    raise DomainError(f"{fn.__name__}(): {name}{problem}")
             return fn(*args, **kwargs)
 
         wrapper.__mathema_enforced_domain__ = merged_domain

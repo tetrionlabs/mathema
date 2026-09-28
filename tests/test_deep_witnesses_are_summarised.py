@@ -73,7 +73,7 @@ class _Trees:
 def test_a_value_too_deep_for_repr_is_summarised():
     n = sys.getrecursionlimit() + 50
     text = _fmt_value(_spine(n))
-    assert text == f"<Node nested {2 * n} levels deep ({n} Node records)>", text
+    assert text == f"<Node tree {n} records deep>", text
     deep_list: list = []
     for _ in range(sys.getrecursionlimit() + 50):
         deep_list = [deep_list]
@@ -88,4 +88,4 @@ def test_a_crash_on_a_deep_value_is_a_witness_not_an_exception():
     finally:
         unregister_language("deep_trees")
     assert p.verdict == "falsified", (p.verdict, p.note)
-    assert "RecursionError" in p.counterexample and "levels deep" in p.counterexample, p.counterexample
+    assert "RecursionError" in p.counterexample and "records deep" in p.counterexample, p.counterexample
