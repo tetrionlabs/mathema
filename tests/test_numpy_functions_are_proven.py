@@ -10,9 +10,9 @@ beside a false sibling that does not prove and, sampled, is falsified.
 
 Some claims here are pinned at `holds`: the probe finds no
 counterexample, and the derive route does not read the call (numpy's
-`abs` and `clip` state no definition row; `min` and `max` over a
-vector, an index into a vector, and a definition row over a matrix and
-a vector together are outside it). Each is marked with the row that
+`abs` and `clip` state no definition row; an index into a vector and
+a definition row over a matrix and a vector together are outside
+it). Each is marked with the row that
 carries it or the row it lacks.
 """
 from __future__ import annotations
@@ -127,6 +127,8 @@ def _rows_used(p) -> list:
     pytest.param(spread, "for x in R^n, y in R^n, f(x, y) ~= abs(x - y)",
                  ["numpy.maximum definition", "numpy.minimum definition"],
                  marks=_FROM_2_4),
+    (mean_np, "for x in R^n, min(x) <= f(x) <= max(x)",
+     ["numpy.mean definition"]),
     pytest.param(total_np, "for x in R^n, f(x) == sum(x)",
                  ["numpy.sum definition"], marks=_FROM_2_4),
     (nan_total, "for x in R^n, f(x) == sum(x)", ["numpy.nansum definition"]),
@@ -203,8 +205,6 @@ def test_a_norm_is_not_positive_at_the_zero_vector():
     # lowers
     (running, "for x in R^n, f(x)[dim(x) - 1] == sum(x)",
      "only the reversal"),
-    # numpy.mean definition carries this once min and max lower
-    (mean_np, "for x in R^n, min(x) <= f(x) <= max(x)", "every link"),
 ])
 def test_held_on_the_probe_until_the_derive_route_reads_the_row(fn, law,
                                                                   why):
