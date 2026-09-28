@@ -1014,8 +1014,8 @@ def complete(bound, defaults: MissingDefaults):
         return None
     dom = _as_domain(bound)
     if _is_enumerated(dom) or dom.base_type == "L":
-        members = tuple(defaults.members) if MISSING in _set_sentinels(dom) else ()
-        return replace(dom, members=members, policy=defaults)
+        listed = tuple(defaults.members) if MISSING in _set_sentinels(dom) else ()
+        return replace(dom, members=listed, policy=defaults)
     absent, holes = admitted(dom, defaults)
     pieces = [p for p in dom.pieces if not _sentinel_piece(p)]
     excluded = set(dom.excluded)

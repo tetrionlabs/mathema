@@ -11,13 +11,13 @@ import os
 
 import pytest
 
-np = pytest.importorskip("numpy")
-
 import mathema
 from mathema.conjecture import claim
 from mathema.domain import MissingDefaults, complete, parse_binding, render_domain
 from mathema.lexicon import LEXICON, get
 from mathema.spec import read_claims_file, render_claim_text
+
+np = pytest.importorskip("numpy")
 
 
 def both(text: str, defaults=None) -> tuple:
