@@ -1,0 +1,20 @@
+# Rows for pandas.DataFrame reductions, stated over tables with nothing
+# missing; the receiver of `df.sum()` is `a`, and `a.x` is its column
+# `x`. A column read (`df.x`, `df["x"]`) is itself grammar: a claim
+# reads it as a vector, and the derive route reads a method called on
+# it through the pandas.Series rows. mathema's own test suite verifies
+# each row against the installed pandas.
+compendium: pandas
+versions: ">=2,<4"
+
+pandas.DataFrame.sum:
+  claims:
+    - name: column_sums
+      statement: "for a in R^n \\ {∅}, f(a)[0] ~= sum(a.x)"
+      note: "One number per column, in column order."
+
+pandas.DataFrame.mean:
+  claims:
+    - name: column_means
+      statement: "for a in R^n \\ {∅}, f(a)[0] ~= mean(a.x)"
+      note: "One number per column, in column order."

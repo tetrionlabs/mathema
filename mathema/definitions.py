@@ -50,6 +50,82 @@ _TRANSFORMS = {"mathema.f.scale_seq": "scale",
 #: builtins a body may call, read as the grammar word of the same name
 _BUILTIN_WORDS = frozenset({"abs", "sum", "len", "min", "max", "float"})
 
+#: the runtime type of a column of each table runtime type
+_COLUMN_TYPES = {"pandas.DataFrame": "pandas.Series",
+                 "polars.DataFrame": "polars.Series"}
+
+
+def _runtime_params(facts, kinds: tuple) -> dict:
+    """`{parameter: runtime type}` for each parameter whose first
+    detected runtime type carries one of `kinds`."""
+    return {p: found[0].adapter
+            for p, found in (getattr(facts, "runtime_types", None)
+                             or {}).items()
+            if found and found[0].kind in kinds}
+
+
+def column_read(node, tables) -> "str | None":
+    """The column name when `node` reads a column of a table parameter
+    in `tables`, by attribute (`df.w`) or by item (`df["w"]`), else
+    None."""
+    from .conjecture import _TABLE_ATTRIBUTES
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+            and node.value.id in tables and not node.attr.startswith("_") \
+            and node.attr not in _TABLE_ATTRIBUTES:
+        return node.attr
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) \
+            and node.value.id in tables \
+            and isinstance(node.slice, ast.Constant) \
+            and isinstance(node.slice.value, str):
+        return node.slice.value
+    return None
+
+
+class _Typing:
+    """Intent:
+        The runtime type of the value a body expression denotes, where
+        it is a vector the definition rows read: a parameter with a
+        vector or matrix runtime type, a column of a table parameter,
+        a local assigned one of these, arithmetic with such an operand,
+        and a method whose definition row gives a vector (`cummax`).
+    """
+
+    def __init__(self, facts, book: "RowBook | None"):
+        self.runtime = _runtime_params(facts, ("vec", "mat"))
+        self.tables = _runtime_params(facts, ("table",))
+        self.local: dict = {}
+        self.book = book
+
+    def of(self, node) -> "str | None":
+        if isinstance(node, ast.Name):
+            return self.runtime.get(node.id) or self.local.get(node.id)
+        if column_read(node, self.tables) is not None:
+            return _COLUMN_TYPES.get(self.tables[node.value.id])
+        if isinstance(node, ast.BinOp) and not isinstance(node.op,
+                                                          ast.MatMult):
+            found = {t for t in (self.of(node.left), self.of(node.right))
+                     if t is not None}
+            return next(iter(found)) if len(found) == 1 else None
+        if isinstance(node, ast.UnaryOp):
+            return self.of(node.operand)
+        if isinstance(node, ast.Call) and isinstance(node.func,
+                                                     ast.Attribute):
+            rt = self.of(node.func.value)
+            if rt is not None and self._gives_vector(f"{rt}.{node.func.attr}"):
+                return rt
+        return None
+
+    def _gives_vector(self, key: str) -> bool:
+        """Whether every usable definition row of `key` states a vector
+        of the same length as its receiver."""
+        from .linalg import static_rank
+        if self.book is None or not self.book.states(key):
+            return False
+        rows = self.book.rows(key)
+        return bool(rows) and all(
+            static_rank(r.rhs, {p: r.ranks.get(p, 0) for p in r.params}) == 1
+            and r.ranks.get(r.params[0]) == 1 for r in rows)
+
 
 class Decline(Exception):
     """The body or the claim is outside what definition rows rewrite;
@@ -464,12 +540,8 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
     origins = _alias_origins(fn, facts)
     scope = module_scope(fn)
     params = set(facts.params)
-    runtime = {p: found[0].adapter
-               for p, found in (getattr(facts, "runtime_types", None)
-                                or {}).items()
-               if found and found[0].kind in ("vec", "mat")}
+    typing = _Typing(facts, book)
     local: dict = {}
-    local_runtime: dict = {}
     inlined = Inlined(expr=ast.Constant(value=0))
 
     def no_row(key: str) -> Decline:
@@ -477,10 +549,7 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
         return Decline(f"{key} has no definition row"
                        + (f" usable here ({why})" if why else ""))
 
-    def receiver_type(node) -> "str | None":
-        if isinstance(node, ast.Name):
-            return runtime.get(node.id) or local_runtime.get(node.id)
-        return None
+    receiver_type = typing.of
 
     def through_row(key: str, positional: list, keywords: dict):
         rows = book.rows(key)
@@ -531,6 +600,8 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub,
                                                                   ast.UAdd)):
             return ast.UnaryOp(op=node.op, operand=rewrite(node.operand))
+        if column_read(node, typing.tables) is not None:
+            return copy.deepcopy(node)
         if isinstance(node, ast.Attribute):
             rt = receiver_type(node.value)
             if rt is None:
@@ -619,8 +690,9 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
                           f"{type(stmt).__name__} is outside the "
                           f"definition rewrite (straight-line assignments "
                           f"and one return)")
-        if isinstance(value, ast.Name) and receiver_type(value) is not None:
-            local_runtime[target] = receiver_type(value)
+        found = receiver_type(value)
+        if found is not None:
+            typing.local[target] = found
         local[target] = rewrite(value)
     if result is None:
         raise Decline("the body has no return")
@@ -686,28 +758,28 @@ def inline_claim(side: str, fn, facts, inlined: Inlined,
     return ast.fix_missing_locations(_Inline().visit(tree))
 
 
-def called_keys(fn, facts) -> set:
+def called_keys(fn, facts, root: "str | None" = None) -> set:
     """Intent:
         Every library key `fn`'s body reaches: a method or attribute
-        of a parameter with a runtime type (`returns.std(...)` on a
+        of a value with a runtime type (`returns.std(...)` on a
         `pandas.Series` is `pandas.Series.std`, `A.T` on an array is
-        `numpy.ndarray.T`), and a function called through an import
-        alias (`np.mean` is `numpy.mean`).
+        `numpy.ndarray.T`, `(df.w * df.r).sum()` on a
+        `pandas.DataFrame`'s columns is `pandas.Series.sum`), and a
+        function called through an import alias (`np.mean` is
+        `numpy.mean`).
     """
     from .compendium import _resolve_called_keys
     tree = getattr(facts, "tree", None)
     out = set(_resolve_called_keys(fn, facts))
     if tree is None:
         return out
-    runtime = {p: found[0].adapter
-               for p, found in (getattr(facts, "runtime_types", None)
-                                or {}).items()
-               if found and found[0].kind in ("vec", "mat")}
+    typing = _Typing(facts, RowBook(root))
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and isinstance(node.value,
-                                                          ast.Name) \
-                and node.value.id in runtime:
-            out.add(f"{runtime[node.value.id]}.{node.attr}")
+        if isinstance(node, ast.Attribute) \
+                and column_read(node, typing.tables) is None:
+            rt = typing.of(node.value)
+            if rt is not None:
+                out.add(f"{rt}.{node.attr}")
     return out
 
 
@@ -723,7 +795,7 @@ def definition_state(fn, facts, root: "str | None" = None) -> dict:
     """
     book = RowBook(root)
     out: dict = {}
-    for key in sorted(called_keys(fn, facts)):
+    for key in sorted(called_keys(fn, facts, root)):
         if not book.states(key):
             continue
         rows = book.rows(key)
@@ -942,6 +1014,73 @@ def _implied_nonzero(expr, provided: list, min_length: dict,
     return False
 
 
+def _columns_as_names(tree, tables: set):
+    """A copy of `tree` with each column read of a table in `tables`
+    (`df.w`, `df["w"]`) replaced by the name `df.w`, which the
+    sequence lowering reads as a vector of its own."""
+    class _Columns(ast.NodeTransformer):
+        def visit_Attribute(self, node):
+            name = column_read(node, tables)
+            if name is not None:
+                return ast.Name(id=f"{node.value.id}.{name}", ctx=ast.Load())
+            return self.generic_visit(node)
+
+        def visit_Subscript(self, node):
+            name = column_read(node, tables)
+            if name is not None:
+                return ast.Name(id=f"{node.value.id}.{name}", ctx=ast.Load())
+            return self.generic_visit(node)
+    return ast.fix_missing_locations(_Columns().visit(copy.deepcopy(tree)))
+
+
+def _element_bound(bound):
+    """The domain one element of a vector (or one column of a table)
+    is drawn from: the claim's bound on it without its axes, or None
+    when the claim states none."""
+    import dataclasses
+
+    from .domain import Domain
+    if isinstance(bound, Domain) and bound.dims:
+        return dataclasses.replace(bound, dims=())
+    return None
+
+
+def _element_sign(element) -> dict:
+    """The sign assumptions an element bound entails, for the
+    sequence's `IndexedBase`."""
+    from .domain import bound_assumptions
+    if element is None:
+        return {}
+    kwargs = dict(bound_assumptions(element) or {})
+    return {k: v for k, v in kwargs.items()
+            if k in ("positive", "negative", "nonnegative", "nonpositive")}
+
+
+def _element_text(element) -> str:
+    """An element bound as a proof's quantifier shows it: `ℝ`, or the
+    one interval every element lies in."""
+    pieces = getattr(element, "pieces", ()) or ()
+    if not pieces:
+        return "ℝ"
+    if len(pieces) == 1 and isinstance(pieces[0], (tuple, list)) \
+            and not isinstance(pieces[0], frozenset):
+        lo, hi = pieces[0]
+        return (f"{'[' if getattr(pieces[0], 'closed_lo', True) else '('}"
+                f"{lo}, {hi}"
+                f"{']' if getattr(pieces[0], 'closed_hi', True) else ')'}")
+    return "their declared domain"
+
+
+def _over(seqs: dict, elements: dict) -> str:
+    """The vectors a proof covers, grouped by the bound on their
+    elements: `returns over [-0.1, 0.1]`, `w, r over [0.0, 1.0]`."""
+    groups: dict = {}
+    for name, (base, _length) in sorted(seqs.items()):
+        groups.setdefault(_element_text(elements.get(base)), []).append(name)
+    return ", ".join(f"{', '.join(names)} over {text}"
+                     for text, names in groups.items())
+
+
 def lengths_of(seqs: dict) -> list:
     """The distinct length symbols of the lowered sequences, in the
     order first met."""
@@ -963,7 +1102,8 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     from .symbolic._base import NotSymbolic
     from .symbolic._proof_support import (ProofResult, _domain_assumptions,
                                           _prove_relation)
-    from .symbolic._seqir import Lowering, Obligations, Vec, normalised
+    from .symbolic._seqir import (Bounds, Lowering, Obligations, Vec,
+                                  normalised, order_by_bounds)
     claim_premises = []
     for a_lhs, rel, a_rhs in assumption or ():
         try:
@@ -973,6 +1113,18 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
         except SyntaxError:
             return ProofResult("unliftable", sketch=f"the premise {a_lhs} "
                                f"{rel} {a_rhs} does not parse", meta=meta)
+    ranks = linalg.array_ranks(cj_domain, shapes, facts.param_kinds)
+    tables = {n for n, r in ranks.items() if r == "table"} \
+        | {n for n, k in facts.param_kinds.items() if k == "table"}
+    if tables:
+        lhs, rhs = _columns_as_names(lhs, tables), _columns_as_names(rhs,
+                                                                     tables)
+        claim_premises = [(_columns_as_names(a, tables), rel,
+                           _columns_as_names(b, tables))
+                          for a, rel, b in claim_premises]
+        row_premises = [(row, (_columns_as_names(a, tables), rel,
+                               _columns_as_names(b, tables)))
+                        for row, (a, rel, b) in row_premises]
     trees = [lhs, rhs] + [t for p in claim_premises for t in (p[0], p[2])] \
         + [t for _row, p in row_premises for t in (p[0], p[2])]
     transforms = _transform_kinds(cj.funcs)
@@ -992,22 +1144,31 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             "unliftable", meta=meta,
             sketch=f"the definition row {row.key} {row.name} is stated over "
                    f"matrices, outside the sequence lowering")
-    ranks = linalg.array_ranks(cj_domain, shapes, facts.param_kinds)
     names = _names_in(trees)
     seqs: dict = {}
     lengths: dict = {}
+    elements: dict = {}
     for n in sorted(names):
-        r = ranks.get(n)
+        table = n.split(".", 1)[0] if "." in n else None
+        r = 1 if table in tables else ranks.get(n)
         if r in (2, "table"):
             return ProofResult("unliftable", meta=meta,
                                sketch=f"{n} is a matrix or a table, outside "
                                       f"the sequence lowering")
         if r == 1:
-            dims = getattr(cj_domain.get(n), "dims", ()) or ()
-            dim = str(dims[0]) if dims else n
+            # a column's own binding (`for df.w in [0, 1]^n`) before
+            # the table's (`for df in [0, 1]^n`)
+            bound = cj_domain.get(n) if n in cj_domain \
+                else cj_domain.get(table or n)
+            dims = getattr(bound, "dims", ()) or ()
+            dim = str(dims[0]) if dims else (table or n)
             length = lengths.setdefault(dim, sympy.Symbol(
                 f"L_{dim}", integer=True, positive=True))
-            seqs[n] = (sympy.IndexedBase(n, real=True), length)
+            element = _element_bound(bound)
+            base = sympy.IndexedBase(n, real=True,
+                                     **_element_sign(element))
+            seqs[n] = (base, length)
+            elements[base] = element
     scalars = {n: sympy.Symbol(n, real=True)
                for n in names - set(seqs) - set(transforms) - {"pi"}}
     try:
@@ -1021,8 +1182,10 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     for n, (_ib, length) in seqs.items():
         by_length.setdefault(length, n)
 
+    bounds = Bounds(elements)
+
     def lower(node, into: Obligations):
-        low = Lowering(seqs, dict(assumed), transforms)
+        low = Lowering(seqs, dict(assumed), transforms, bounds)
         value = low.lower(node)
         into.merge(low.obligations)
         if pins:
@@ -1116,6 +1279,16 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
         q = sympy.And(*facts_q) if len(facts_q) > 1 else (
             facts_q[0] if facts_q else None)
         scalar_domain = {n: cj_domain[n] for n in assumed if n in cj_domain}
+        by_bounds = order_by_bounds(
+            lv, rv, rel, bounds, bases,
+            {"params": assumed, "domain": scalar_domain, "q": q},
+            extensive=extensive)
+        if by_bounds is not None:
+            status, why = by_bounds
+            return {"proven": status == "proven", "bounds": True,
+                    "result": ProofResult(
+                        "proven" if status == "proven" else "undecided",
+                        sketch=why)}
         result = _prove_relation(normalised(lv, bases), normalised(rv, bases),
                                  rel, scalar_domain, q, assumed,
                                  extensive=extensive)
@@ -1157,12 +1330,16 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             f"{by_length.get(L, L)} of every length"
             + (f" from {shortest[L]}" if shortest.get(L, 1) > 1 else "")
             for L in sorted(set(lengths_of(seqs)), key=str))
+        detail = outcome.get("result")
+        lemma = (f" ({detail.sketch})" if detail is not None
+                 and getattr(detail, "status", None) == "proven"
+                 and detail.sketch and outcome.get("bounds") else "")
         return ProofResult(
             "proven", meta=meta,
             sketch=f"{through}, lowered to sums over {vectors} at a symbolic "
-                   f"length: the relation holds for every length",
-            quantifier=(f"∀ {vectors} over ℝ with nothing missing, "
-                        f"{spans}" if seqs else None))
+                   f"length: the relation holds for every length{lemma}",
+            quantifier=(f"∀ {_over(seqs, elements)} with nothing "
+                        f"missing, {spans}" if seqs else None))
     detail = outcome.get("result")
     why = (detail.sketch if detail is not None and detail.sketch else
            "the difference of the two sides does not simplify to 0")

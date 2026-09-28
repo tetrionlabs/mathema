@@ -83,7 +83,14 @@ def test_a_sample_statistic_needs_more_positions_than_its_ddof():
     assert [text for _e, text in obligations.nonzero] == ["std(x)"]
 
 
-@pytest.mark.parametrize("src", ["min(x)", "sqrt(x)", "x / x", "x[0]"])
+@pytest.mark.parametrize("src", ["median(x)", "sqrt(x)", "x ** x",
+                                 "x[0]"])
 def test_a_construct_outside_the_lowering_is_named(src):
     with pytest.raises(NotSymbolic):
         _lower(src)
+
+
+def test_a_least_element_and_an_elementwise_quotient_lower():
+    _lower("min(x)")
+    _, obligations = _lower("x / x")
+    assert [text for _e, text in obligations.nonzero] == ["x"]

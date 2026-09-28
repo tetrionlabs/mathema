@@ -79,7 +79,9 @@ def receiver_form(key: str):
 
     Notes:
         A method gives `f(a, *args, **kwargs) = a.<name>(*args,
-        **kwargs)` with the method's signature (receiver renamed `a`);
+        **kwargs)` with the method's signature (receiver renamed `a`),
+        whose parameters, for a claim, are `a` and each positional
+        parameter the method requires (`__mathema_receiver_params__`);
         an attribute gives `f(a) = a.<name>`. Its `__module__` and
         `__qualname__` spell the key, so the key is its dotted name.
     """
@@ -111,6 +113,14 @@ def receiver_form(key: str):
             return None
         if list(sig.parameters) == [RECEIVER, "kwargs"]:
             fn.__mathema_unstated_signature__ = True  # type: ignore[attr-defined]
+        # the parameters a claim quantifies: the receiver and every
+        # positional parameter the method requires (`other` of
+        # `Series.add`); one with a default is pinned with `let`
+        fn.__mathema_receiver_params__ = (  # type: ignore[attr-defined]
+            RECEIVER, *(p.name for p in list(sig.parameters.values())[1:]
+                        if p.default is inspect.Parameter.empty
+                        and p.kind in (inspect.Parameter.POSITIONAL_ONLY,
+                                       inspect.Parameter.POSITIONAL_OR_KEYWORD)))
     else:
         return None
     fn.__name__ = name

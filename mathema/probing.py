@@ -1941,6 +1941,11 @@ def probe(fn, facts, domain: dict | None = None,
         if (param is not None and p not in domain
                 and _keeps_default(fn, param)):
             return param.default
+        if k == "table":
+            # a table: equal-length columns, each drawn as a sequence
+            n = rng.randint(2, 8)
+            return {c: _synth("sequence", rng, None, specials=specials,
+                              length=n) for c in ("a", "b")}
         shape = resolver.shapes.get(p) if resolver is not None else None
         if shape is not None and k not in SEQUENCE_KINDS and shape.ndim >= 1:
             # a space binding (`R^n`, `R^(n,n)`) from the claims shapes
