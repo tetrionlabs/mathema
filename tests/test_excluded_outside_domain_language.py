@@ -138,3 +138,48 @@ def test_enforce_domain_still_proves_rejection_by_construction():
     p = _one(shout, "for s in L[letters], excluded_outside_domain(s)")
     assert p.verdict == "proven", (p.verdict, p.note)
     assert "rejection by construction" in (p.sketch or "")
+
+
+class _Row:
+    """A record whose repr is Python's default."""
+
+    def __init__(self, name):
+        self.name = name
+
+
+class _Rows(_Everything):
+    """Records whose name is letters; any other record is outside."""
+
+    name = "rows"
+    kind = "row"
+
+    def contains(self, value):
+        return isinstance(value, _Row) and value.name.isalpha()
+
+    def explain(self, value):
+        return None if self.contains(value) else [Problem(".name", "letters", value)]
+
+    def sample(self, rng):
+        return _Row("abc")
+
+    def outside(self, rng):
+        return _Row("1")
+
+    def render(self, ascii_mode=True):
+        return "L[rows]"
+
+
+def greet(row) -> str:
+    """A greeting for the record."""
+    return "hello " + row.name
+
+
+def test_a_record_witness_is_shown_by_its_fields():
+    register_language("rows", _Rows())
+    try:
+        p = _one(greet, "for row in L[rows], excluded_outside_domain(row)")
+    finally:
+        unregister_language("rows")
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "row = _Row(name='1') (outside L[rows] at .name: letters)" in p.counterexample, \
+        p.counterexample

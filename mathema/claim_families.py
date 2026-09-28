@@ -1058,7 +1058,8 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
         state["idx"] += 1
         if language_bound:
             value = bad
-            spelled = f"{target} = {bad!r} (outside L[{names}]{_why_outside(bad, bounds)})"
+            spelled = (f"{target} = {_witness_value(bad)} "
+                       f"(outside L[{names}]{_why_outside(bad, bounds)})")
         elif sequence_target:
             # a sequence parameter is violated one ELEMENT at a time:
             # a fresh in-domain sequence with one out-of-domain entry
@@ -1117,6 +1118,16 @@ def _outside_language(bounds, rng: random.Random) -> "tuple[str, list]":
             if not any(value == seen for seen in out):
                 out.append(value)
     return " | ".join(name for name, _ in pieces), out
+
+
+def _witness_value(value) -> str:
+    """A witness value as a counterexample shows it: a string by its
+    repr, anything else as the probe formats it, so a record with only a
+    default repr shows its fields."""
+    if isinstance(value, str):
+        return repr(value)
+    from .probing import _fmt_value
+    return _fmt_value(value)
 
 
 def _why_outside(value, bounds) -> str:
@@ -1584,7 +1595,7 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     and bool(domain_contains(s, bound)) == inside)
 
         minimal = _shrink_in_language(value, still_fails, bound)
-        return (f"{target} = {minimal!r} ({side} {names}) raised {exc} on "
+        return (f"{target} = {_witness_value(minimal)} ({side} {names}) raised {exc} on "
                 f"arbitrary input, an unguarded crash, not a declared "
                 f"rejection")
 
