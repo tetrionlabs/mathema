@@ -28,6 +28,7 @@ import sympy
 from ._base import NotSymbolic, OpaqueRegistry, _expr_to_sympy, strip_docstring
 from ._conditioned import ConditionedLift, _condition_to_sympy
 from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+from ..runtime_types import SEQUENCE_KINDS
 
 _MAX_ORDER = 6   # recurrence depth budget: rsolve is exact but the
                  # characteristic polynomial's roots grow unwieldy fast
@@ -149,7 +150,7 @@ def lift_recurrence(fn, facts) -> "ConditionedLift | None":
     """
     if facts.tree is None or facts.loops or not facts.recursion:
         return None
-    if len(facts.params) != 1 or facts.param_kinds.get(facts.params[0]) == "sequence":
+    if len(facts.params) != 1 or facts.param_kinds.get(facts.params[0]) in SEQUENCE_KINDS:
         return None
     param = facts.params[0]
     fname = facts.tree.name

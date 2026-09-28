@@ -33,7 +33,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Concept:
     """One concept tag with its provenance (`declared` | `mechanism`
-    | `keyword`); the carrier `Record.concepts` holds, whose `.name`
+    | `keyword`); the value `Record.concepts` holds, whose `.name`
     the record's own "instantiates: ..." reasoning line renders."""
     name: str
     source: str

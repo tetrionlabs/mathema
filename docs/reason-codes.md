@@ -16,7 +16,7 @@ codes are not derivability blockers but falsification causes, attached
 to a `falsified` claim whose failure is pinned on the implementation
 stratum (an overflow, a recursion ceiling, float instability) rather
 than on the mathematics; they ride the claim row's `reason` field the
-same way, so tooling separates a broken carrier from broken
+same way, so tooling separates a broken number representation from broken
 mathematics without parsing prose. A `+N` suffix on a branch code means N further
 distinct blocked kinds occur in the same function; the detail block
 lists each one.
@@ -50,7 +50,7 @@ id is never renumbered.
 | 3.3 | `branch:two-names-compare` | limitation | two names compared and at least one is not an unmodified parameter | pruning supports 'param <op> literal' and 'param <op> param' between unmodified parameters |
 | 3.10 | `branch:unrecognized-shape` | limitation | the condition's shape is outside the grammar | only and/or/not, a bare parameter, or a single comparison are recognized |
 | 3.5 | `branch:untraceable-local` | limitation | the condition's local is not traceable to unmodified parameters | only straight-line assignments from unmodified parameters are traced before the first branch |
-| 5.1 | `implementation:overflow` | N/A | the call overflowed at an admitted point | the carrier is too narrow for the domain; widen the representation, guard the range, or narrow the claim's domain below the overflow threshold |
+| 5.1 | `implementation:overflow` | N/A | the call overflowed at an admitted point | the number representation is too narrow for the domain; widen the representation, guard the range, or narrow the claim's domain below the overflow threshold |
 | 5.2 | `implementation:recursion-depth` | N/A | the call exhausted the recursion limit at an admitted point | an iterative rewrite removes the ceiling; otherwise narrow the claim's domain below the depth that exhausts the stack |
 | 5.3 | `implementation:memory` | N/A | the call exhausted memory at an admitted point | narrow the claim's domain, or bound the allocation the input size drives |
 | 5.4 | `implementation:nan` | N/A | the call returned a non-finite value where the exact value is finite | stated only when an exact-arithmetic result exists to compare against; clamp or reorder the operation that loses the value |

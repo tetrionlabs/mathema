@@ -74,7 +74,7 @@ class ClaimReasonCode:
     the full story and carries no code; the one exception is a
     falsification whose stratum pins the failure on the implementation
     (`meta["mathema.stratum"]`), which carries its `implementation:`
-    cause so tooling can separate a broken carrier from broken
+    cause so tooling can separate a broken number representation from broken
     mathematics without parsing prose.
 
     `DERIVE_TIMEOUT` is the one real code change behind this registry,
@@ -513,8 +513,9 @@ CODE_TABLE: dict[str, dict] = {
     "implementation:overflow": {
         "derive_unlock": _NOT_APPLICABLE,
         "meaning": "the call overflowed at an admitted point",
-        "hint": "the carrier is too narrow for the domain; widen the "
-                "representation, guard the range, or narrow the "
+        "hint": "the number representation is too narrow for the "
+                "domain; widen the representation, guard the range, "
+                "or narrow the "
                 "claim's domain below the overflow threshold"},
     "implementation:recursion-depth": {
         "derive_unlock": _NOT_APPLICABLE,

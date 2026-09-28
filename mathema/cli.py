@@ -162,6 +162,13 @@ def _check_rows(args) -> list[dict]:
                  + report.unknown + report.owned)
         verified = proven + holds + report.refuted   # refutation is knowledge
         problems = report.problems
+        # the runtime type to annotate, for each parameter the body
+        # uses as a vector while the signature names none: always when
+        # a list cannot serve that use, else when a claim was skipped
+        # as misspecified over it
+        hints = [h["text"] for h in (rec.facts.runtime_hints or {}).values()
+                 if h.get("strong") or any(h["text"] in (p.note or "")
+                                           for p in rec.probes)]
         rows.append({"name": name, "tier": rec.facts.tier,
                      "identity": {"form": rec.facts.form, "sig": rec.facts.sigh},
                      "proven": proven, "holds": holds, "refuted": report.refuted,
@@ -176,7 +183,8 @@ def _check_rows(args) -> list[dict]:
                      "claims": rec.to_spec()["claims"],
                      "claim_rows": [claim_row(p, accepted_risk=accepted)
                                     for p in rec.probes],
-                     "problems": problems})
+                     "problems": problems,
+                     **({"hints": hints} if hints else {})})
     return rows
 
 
@@ -254,6 +262,7 @@ def _format_check(rows: list[dict], fmt: str) -> str:
         if r["problems"]:
             line += "  <- " + "; ".join(r["problems"])
         lines.append(line)
+        lines.extend(f"     hint: {h}" for h in r.get("hints", ()))
     return "\n".join(lines)
 
 
@@ -293,6 +302,9 @@ def cmd_check(args) -> int:
     `--strict`), 0 otherwise, suitable for a pre-commit check on a
     single target."""
     _warn_small_pseudo_infinity()
+    from .spec import foreign_grammar_warnings
+    for line in foreign_grammar_warnings(getattr(args, "root", ".")):
+        print(line, file=sys.stderr)
     rows = _check_rows(args)
     out = _format_check(rows, args.format)
     if args.output:
@@ -377,7 +389,7 @@ def cmd_verify(args) -> int:
             _emit_json({"passed": True, "nothing_declared": True,
                         "keys": [], "problems": [],
                         "totals": {"fresh": 0, "adjudicated": 0,
-                                   "problems": 0}},
+                                   "problems": 0, "skip_reasons": {}}},
                        getattr(args, "output", None))
             return 0
         if args.target:
@@ -397,7 +409,8 @@ def cmd_verify(args) -> int:
             "grammar_verified_here": GRAMMAR,
             "totals": {"fresh": result.fresh,
                        "adjudicated": result.adjudicated,
-                       "problems": len(result.problems)},
+                       "problems": len(result.problems),
+                       "skip_reasons": _skip_reasons(result.keys)},
         }, getattr(args, "output", None))
         return _verify_exit(args, result)
     lines = list(result.lines)
@@ -413,6 +426,23 @@ def cmd_verify(args) -> int:
            f"{', '.join(other_grammars)}" if other_grammars else ""))
     print("\n".join(lines))
     return _verify_exit(args, result)
+
+
+def _skip_reasons(keys: list) -> dict:
+    """Intent:
+        How many claims the sweep skipped, per reason: each skipped
+        row counted under its `reason` code (`foreign-grammar`, ...),
+        or its `blocked_by` code when it has no reason.
+    """
+    counts: dict = {}
+    for entry in keys:
+        for row in entry.get("claims") or []:
+            if not str(row.get("verdict") or "").startswith("skipped"):
+                continue
+            reason = str(row.get("reason") or row.get("blocked_by")
+                         or "skipped")
+            counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _verify_exit(args, result) -> int:

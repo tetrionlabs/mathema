@@ -150,3 +150,44 @@ def test_an_unreadable_authored_claim_names_its_file_not_the_record(tmp_path):
     assert row.startswith("FAIL") and "claims/demo.claims.yaml" in row
     assert "delete .mathema/verified" not in row
     assert "Traceback" not in r.stdout + r.stderr
+
+
+def _json(root, *extra):
+    import json
+    r = _run(root, "--format", "json", *extra)
+    return json.loads(r.stdout)
+
+
+def test_the_json_totals_count_skipped_claims_by_reason(tmp_path):
+    root = _project(tmp_path)
+    (root / "claims" / "demo.claims.yaml").write_text(
+        _CLAIMS
+        + "    - name: other_tool\n"
+          '      statement: "f(x) >= -1"\n'
+          "      grammar: other\n"
+          "    - name: other_tool_too\n"
+          '      statement: "f(x) >= -2"\n'
+          "      grammar: other\n")
+    out = _json(root)
+    reasons = out["totals"]["skip_reasons"]
+    rows = [c for k in out["keys"] for c in k["claims"]
+            if c["verdict"].startswith("skipped")]
+    assert sum(reasons.values()) == len(rows) == 2, (reasons, rows)
+    assert reasons == {"foreign-grammar": 2}, reasons
+
+
+def test_a_supersession_is_a_field_on_the_claim_row(tmp_path):
+    root = _project(tmp_path)
+    (root / "claims" / "demo.claims.yaml").write_text(
+        _CLAIMS.replace("[-5, 5]", "[-4, 4]"))
+    out = _json(root)
+    assert any("re-authored" in p for p in out["problems"]), out["problems"]
+    (row,) = [c for k in out["keys"] if k["key"] == "funcs.settle"
+              for c in k["claims"] if c["claim"] == "nonneg"]
+    sup = row["supersession"]
+    assert "[-4" in sup["authored"], sup
+    assert sup["adopt"] == ("mathema accept funcs.settle nonneg "
+                            "--as superseded"), sup
+    others = [c for k in out["keys"] for c in k["claims"]
+              if c["claim"] != "nonneg"]
+    assert all("supersession" not in c for c in others), others

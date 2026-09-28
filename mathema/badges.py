@@ -108,7 +108,7 @@ _NO_SOURCE = frozenset({
     "is_computation_safe", "is_repeatable",
     "is_memory_safe",
     "is_precision_safe", "is_order_invariant", "is_concurrency_safe",
-    "is_carrier_consistent"})
+    "is_representation_consistent"})
 
 
 def _strength(verdict: str, route: str) -> float:
@@ -311,7 +311,12 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         str_params = set(_string_input_params(facts))
     except Exception:
         str_params = set()
-    param_kinds = tuple("string" if p in str_params else kinds.get(p, "scalar")
+    # a vector, matrix or table whose runtime type the signature names
+    # scores as the sequence it is sampled as
+    param_kinds = tuple("string" if p in str_params
+                        else "sequence" if kinds.get(p) in ("vec", "mat",
+                                                            "table")
+                        else kinds.get(p, "scalar")
                         for p in params)
     guarded = sum(1 for p in params if guards.get(p) not in (None, "none"))
     if store is None:

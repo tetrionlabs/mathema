@@ -852,6 +852,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        write_yaml)
 
     out = VerifyResult()
+    from .spec import foreign_grammar_warnings
+    out.lines.extend(foreign_grammar_warnings(root))
     from .compendium import own_package_compendium_files
     for where, library in own_package_compendium_files(root):
         out.lines.append(
@@ -934,6 +936,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          "integrity_mismatch": False, "counts": {},
                          "claims": []})
     key_problems: dict = {}   # key -> failure lines raised outside the gate
+    # key -> claim name -> the pending re-authored text, for the rows
+    supersessions: dict = {}
+    # key -> {claim name: new grammar} for a claim verified under
+    # mathema that now declares another grammar
+    grammar_changes: dict = {}
     # an orphan record (its key no longer resolves) whose form hash
     # matches a function with no record: old key -> new keys, and the
     # reverse, so both sides of a likely move name the rename remedy
@@ -1077,6 +1084,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
             for conflict in _conflicts:
                 if conflict.get("kind") == "supersession":
+                    supersessions.setdefault(key, {})[conflict["claim"]] = \
+                        conflict["authored"]
                     msg = (f"{key}: claim {conflict['claim']!r} was "
                            f"re-authored but is already verified, the "
                            f"verified version keeps adjudicating; adopt the "
@@ -1120,7 +1129,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             entry_grammar = merged_entry.get("grammar", GRAMMAR)
             out.grammars_seen.update(c.get("grammar", entry_grammar)
                                      for c in current_claims)
-            current_fp = claims_fingerprint(current_claims)
+            current_fp = claims_fingerprint(current_claims, entry_grammar)
         except InvalidConjecture as e:
             if _record_has_unreadable_claim(verified_entry):
                 msg = (f"{key}: a claim in this function's verified "
@@ -1205,6 +1214,18 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             _dependency_state(d, verified) in ("stale", "invalidated")
             for d in deps_now or [])
         if is_fresh and not dependency_changed:
+            # a callee's form stored when this record was adjudicated
+            # against the callee's live form: a change re-adjudicates
+            # whether or not the callee has a record of its own
+            stored_forms = {d.get("key"): d.get("form") for d in
+                            verified_entry.get("dependencies") or []
+                            if d.get("kind") == "function"
+                            and d.get("key") and d.get("form")}
+            dependency_changed = any(
+                d.get("key") in stored_forms and d.get("form")
+                and d.get("form") != stored_forms[d.get("key")]
+                for d in deps_now or [] if d.get("kind") == "function")
+        if is_fresh and not dependency_changed:
             # a module-level constant is compared by VALUE against this
             # record's own stored dependency entry, the form hash
             # cannot see a global change, so this check is what keeps
@@ -1260,7 +1281,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         rec = check(fn, claims=claims if claims else [],
                     trials_scale=trials_scale,
                     known_premises=stub_premises,
-                    pseudo_infinity=merged_entry.get("pseudo_infinity"))
+                    pseudo_infinity=merged_entry.get("pseudo_infinity"),
+                    runtime_types=merged_entry.get("runtime_types"))
         rec.probes = [p for p in rec.probes
                       if getattr(p, "name", None) not in withheld]
         rec.probes, late_notes = _strip_retired_probes(
@@ -1269,6 +1291,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.lines.extend(_born_falsified_hint(key, rec.probes,
                                               verified_entry or {}))
         _apply_declared_extras(rec, merged_entry)
+        moved = _grammar_changes(rec.probes, verified_entry or {})
+        if moved:
+            grammar_changes[key] = moved
         rec.probes.append(dependencies_current_probe(rec.dependencies,
                                                      root=root))
         why = ("dependency changed" if dependency_changed
@@ -1287,7 +1312,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                     "mathema.premise_state": premise_now}
         written = write_record(rec, key=key, root=root,
                                claims=current_claims,
-                               declared_intent=merged_entry.get("intent"))
+                               declared_intent=merged_entry.get("intent"),
+                               grammar=entry_grammar)
         _carry_recorded_verdicts(rec.probes, written, key)
         out.adjudicated += 1
         if key in library:
@@ -1402,6 +1428,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 line += "  <- " + "; ".join(report.problems + hints)
         out.problems.extend(f"{key}: {p}" for p in report.problems)
         out.lines.append(line)
+        out.lines.extend(
+            f"     warning: claim {name} of {key} was verified under "
+            f"mathema; its grammar is now {grammar!r}, so mathema no "
+            f"longer adjudicates it"
+            for name, grammar in grammar_changes.get(key, {}).items())
         out.keys.append({
             "key": key,
             "why": why,
@@ -1422,7 +1453,60 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        "foreign_grammar": len(report.foreign)},
             # claim_row reads a live Probe or a stored claim dict alike,
             # so fresh and re-adjudicated keys serialize identically
-            "claims": [claim_row(c, accepted_risk=accepted)
+            "claims": [_with_grammar_change(_with_supersession(
+                           claim_row(c, accepted_risk=accepted), key,
+                           supersessions.get(key, {})),
+                           grammar_changes.get(key, {}))
                        for c in claims_for_gate],
         })
     return out
+
+
+def _grammar_changes(probes, verified_entry: dict) -> dict:
+    """Intent:
+        The claims skipped this run as another grammar's that carry a
+        real verdict (proven, holds, falsified) recorded under
+        mathema's own grammar, `{claim name: the grammar it declares
+        now}`.
+    """
+    recorded = {c.get("name"): c for c in (verified_entry.get("claims")
+                                          or []) if isinstance(c, dict)}
+    out: dict = {}
+    for p in probes:
+        grammar = (getattr(p, "meta", None) or {}).get(
+            "mathema.foreign_grammar")
+        prior = recorded.get(getattr(p, "name", None))
+        if grammar is None or prior is None:
+            continue
+        if prior.get("verdict") in ("proven", "holds", "falsified") and \
+                prior.get("grammar") in (None, "mathema") and \
+                "mathema.foreign_grammar" not in (prior.get("meta") or {}):
+            out[p.name] = grammar
+    return out
+
+
+def _with_grammar_change(row: dict, changes: dict) -> dict:
+    """Intent:
+        A claim row with `grammar_changed: {from: "mathema", to: ...}`
+        when the claim was verified under mathema and now declares
+        another grammar.
+    """
+    moved = changes.get(row.get("claim"))
+    if moved is not None:
+        row["grammar_changed"] = {"from": "mathema", "to": moved}
+    return row
+
+
+def _with_supersession(row: dict, key: str, pending: dict) -> dict:
+    """Intent:
+        A claim row with its pending supersession, when the claim was
+        re-authored after it was verified: `supersession` holds the
+        re-authored text and the command that adopts it, while the
+        verified version keeps adjudicating.
+    """
+    authored = pending.get(row.get("claim"))
+    if authored is not None:
+        row["supersession"] = {
+            "authored": authored,
+            "adopt": f"mathema accept {key} {row['claim']} --as superseded"}
+    return row

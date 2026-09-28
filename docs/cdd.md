@@ -92,7 +92,7 @@ name the mechanism that actually decided).
 Verdicts are pedantic and exact: nothing is called proven that isn't,
 and a raise is not a value, so a value claim whose calls raise anywhere
 inside its declared domain is falsified, the `[float]` companion where
-the mathematics is proven and the raise is the carrier's (an overflow
+the mathematics is proven and the raise is the number representation's (an overflow
 past what a double holds), the claim itself otherwise; the remedy is
 always claims-side, narrowing the domain, declaring an operational
 infinity, or stating the raising region as its own `raises(...)` claim,

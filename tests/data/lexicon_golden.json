@@ -244,6 +244,126 @@
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, det(A @ B) = det(A)*det(B)",
   "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, det(A @ B) = det(A)*det(B)"
  },
+ "matrix_hadamard_trace": {
+  "input": "for A in R^(n,n), B in R^(n,n), trace(A * B) == trace(A.T @ B)",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, trace(A * B) = trace(A.T @ B)",
+  "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, trace(A * B) = trace(A.T @ B)"
+ },
+ "matrix_power_word": {
+  "input": "for A in R^(n,n), matrix_power(A, 2) == A @ A",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, matrix_power(A, 2) = A @ A",
+  "ascii": "for A in R^(n,n)|missing, matrix_power(A, 2) = A @ A"
+ },
+ "matrix_elementwise_abs": {
+  "input": "for A in R^(n,n), trace(abs(A)) >= abs(trace(A))",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, trace(abs(A)) ≥ |trace(A)|",
+  "ascii": "for A in R^(n,n)|missing, trace(abs(A)) >= |trace(A)|"
+ },
+ "vector_triangle_inequality": {
+  "input": "for x in R^n, y in R^n, norm(x + y) <= norm(x) + norm(y)",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, y ∈ ℝⁿ ∪ {∅}, norm(x + y) ≤ norm(x) + norm(y)",
+  "ascii": "for x in R^n|missing, y in R^n|missing, norm(x + y) <= norm(x) + norm(y)"
+ },
+ "matrix_frobenius_norm": {
+  "input": "for A in R^(n,n), norm(A) ~= sqrt(trace(A.T @ A))",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, norm(A) ≈ sqrt(trace(A.T @ A))",
+  "ascii": "for A in R^(n,n)|missing, norm(A) ~= sqrt(trace(A.T @ A))"
+ },
+ "matrix_spectral_norm": {
+  "input": "for A in R^(n,n), norm(A, 2) <= norm(A)",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, norm(A, 2) ≤ norm(A)",
+  "ascii": "for A in R^(n,n)|missing, norm(A, 2) <= norm(A)"
+ },
+ "vector_dot": {
+  "input": "for x in R^n, y in R^n, dot(x, y) == dot(y, x)",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, y ∈ ℝⁿ ∪ {∅}, dot(x, y) = dot(y, x)",
+  "ascii": "for x in R^n|missing, y in R^n|missing, dot(x, y) = dot(y, x)"
+ },
+ "vector_outer": {
+  "input": "for x in R^n, y in R^n, outer(x, y).T == outer(y, x)",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, y ∈ ℝⁿ ∪ {∅}, outer(x, y).T = outer(y, x)",
+  "ascii": "for x in R^n|missing, y in R^n|missing, outer(x, y).T = outer(y, x)"
+ },
+ "matrix_kron_transpose": {
+  "input": "for A in R^(n,n), B in R^(n,n), kron(A, B).T == kron(A.T, B.T)",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, B ∈ ℝⁿˣⁿ ∪ {∅}, kron(A, B).T = kron(A.T, B.T)",
+  "ascii": "for A in R^(n,n)|missing, B in R^(n,n)|missing, kron(A, B).T = kron(A.T, B.T)"
+ },
+ "matrix_diag_trace": {
+  "input": "for A in R^(n,n), sum(diag(A)) ~= trace(A)",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, sum(diag(A)) ≈ trace(A)",
+  "ascii": "for A in R^(n,n)|missing, sum(diag(A)) ~= trace(A)"
+ },
+ "matrix_rank_transpose": {
+  "input": "for A in R^(n,n), rank(A.T) == rank(A)",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, rank(A.T) = rank(A)",
+  "ascii": "for A in R^(n,n)|missing, rank(A.T) = rank(A)"
+ },
+ "matrix_eigvals_trace": {
+  "input": "for A in R^(n,n), sum(eigvals(A)) ~= trace(A)",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, sum(eigvals(A)) ≈ trace(A)",
+  "ascii": "for A in R^(n,n)|missing, sum(eigvals(A)) ~= trace(A)"
+ },
+ "matrix_eigvalsh_positive": {
+  "input": "assuming A is positive definite, for A in R^(n,n), min(eigvalsh(A)) > 0",
+  "unicode": "assuming A is positive definite, ∀ A ∈ ℝⁿˣⁿ ∪ {∅}, min(eigvalsh(A)) > 0",
+  "ascii": "assuming A is positive definite, for A in R^(n,n)|missing, min(eigvalsh(A)) > 0"
+ },
+ "matrix_cond_at_least_one": {
+  "input": "for A in R^(n,n), cond(A) >= 1",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, cond(A) ≥ 1",
+  "ascii": "for A in R^(n,n)|missing, cond(A) >= 1"
+ },
+ "matrix_solve": {
+  "input": "let b be R^n, assuming det(A) != 0, for A in R^(n,n), A @ solve(A, b) ~= b",
+  "unicode": "assuming det(A) != 0, let b be ℝⁿ ∪ {∅}, ∀ A ∈ ℝⁿˣⁿ ∪ {∅}, A @ solve(A, b) ≈ b",
+  "ascii": "assuming det(A) != 0, let b be R^n|missing, for A in R^(n,n)|missing, A @ solve(A, b) ~= b"
+ },
+ "matrix_pinv": {
+  "input": "for A in R^(m,n), A @ pinv(A) @ A ~= A",
+  "unicode": "∀ A ∈ ℝᵐˣⁿ ∪ {∅}, A @ pinv(A) @ A ≈ A",
+  "ascii": "for A in R^(m,n)|missing, A @ pinv(A) @ A ~= A"
+ },
+ "matrix_quadratic_form": {
+  "input": "assuming A is positive definite and x != 0, for A in R^(n,n), x in R^n, x.T @ A @ x > 0",
+  "unicode": "assuming A is positive definite and x != 0, ∀ A ∈ ℝⁿˣⁿ ∪ {∅}, x ∈ ℝⁿ ∪ {∅}, x.T @ A @ x > 0",
+  "ascii": "assuming A is positive definite and x != 0, for A in R^(n,n)|missing, x in R^n|missing, x.T @ A @ x > 0"
+ },
+ "matrix_structure_and_relation_premise": {
+  "input": "assuming A is symmetric and det(A) != 0, for A in R^(n,n), inv(A) ~= inv(A).T",
+  "unicode": "assuming A is symmetric and det(A) != 0, ∀ A ∈ ℝⁿˣⁿ ∪ {∅}, inv(A) ≈ inv(A).T",
+  "ascii": "assuming A is symmetric and det(A) != 0, for A in R^(n,n)|missing, inv(A) ~= inv(A).T"
+ },
+ "matrix_row_and_column": {
+  "input": "for A in R^(n,n), A[0, :] == A.T[:, 0]",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, A[0, :] = A.T[:, 0]",
+  "ascii": "for A in R^(n,n)|missing, A[0, :] = A.T[:, 0]"
+ },
+ "matrix_axis_sum": {
+  "input": "for A in R^(n,n), sum(A, axis=0) ~= sum(A.T, axis=1)",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, sum(A, axis=0) ≈ sum(A.T, axis=1)",
+  "ascii": "for A in R^(n,n)|missing, sum(A, axis=0) ~= sum(A.T, axis=1)"
+ },
+ "matrix_axis_mean": {
+  "input": "for A in R^(m,n), mean(A, axis=1) ~= sum(A, axis=1) / n",
+  "unicode": "∀ A ∈ ℝᵐˣⁿ ∪ {∅}, mean(A, axis=1) ≈ sum(A, axis=1)/n",
+  "ascii": "for A in R^(m,n)|missing, mean(A, axis=1) ~= sum(A, axis=1)/n"
+ },
+ "matrix_qr_factors": {
+  "input": "let q = numpy.linalg.qr, for A in R^(n,n), q(A)[0] @ q(A)[1] ~= A",
+  "unicode": "let q = numpy.linalg.qr, ∀ A ∈ ℝⁿˣⁿ ∪ {∅}, q(A)[0] @ q(A)[1] ≈ A",
+  "ascii": "let q = numpy.linalg.qr, for A in R^(n,n)|missing, q(A)[0] @ q(A)[1] ~= A"
+ },
+ "table_column_attribute": {
+  "input": "for c in [-2, 2], f(df, c) == c * df.returns",
+  "unicode": "∀ c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {∅}, f(df, c) = c*df.returns",
+  "ascii": "for c in [-2.0, 2.0]:float|missing, f(df, c) = c*df.returns"
+ },
+ "table_column_item": {
+  "input": "for c in [-2, 2], f(df, c) == c * df[\"returns\"]",
+  "unicode": "∀ c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {∅}, f(df, c) = c*df['returns']",
+  "ascii": "for c in [-2.0, 2.0]:float|missing, f(df, c) = c*df['returns']"
+ },
  "inferred_literal_domain": {
   "input": "raises(f(50, 0), ValueError)",
   "unicode": "let x = ValueError, raises(f(50, 0), ValueError)",

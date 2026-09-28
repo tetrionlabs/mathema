@@ -29,7 +29,7 @@ names no record fails as a clear per-key problem line, exit 2.
 | `--all` | re-adjudicate everything, ignoring form-hash freshness |
 | `--strict` / `--lenient` | one strictness pair shared with `check`; strict is the default here (CI gates a settled store), `--lenient` reports unverifiable claims and accepted risk instead of failing on them |
 | `--status [TARGET]` | report fresh/stale per `@track_claims`-tagged function, adjudicate nothing, exit 0; an optional TARGET (dotted name or file path) is imported first so its tagged functions register |
-| `--format` | `text` (default) or `json`: the whole sweep as data; per-key entries with `why`, gate `counts`, and claim rows in the same vocabulary `check --format compact` and the MCP tools speak (`stance`/`verdict`/`route`/`source`/`gates`, `counterexample` iff refuted). Exit codes are identical either way |
+| `--format` | `text` (default) or `json`: the whole sweep as data; per-key entries with `why`, gate `counts`, and claim rows in the same vocabulary `check --format compact` and the MCP tools speak (`stance`/`verdict`/`route`/`source`/`gates`, `counterexample` iff refuted, `supersession` iff the claim was re-authored after it was verified: the new text and the `mathema accept` command that adopts it); `totals.skip_reasons` counts the skipped claims per reason. Exit codes are identical either way |
 | `--output FILE` | write the report to a file instead of stdout |
 
 Store keys are canonical dotted `module.qualname` names, resolved by
@@ -388,3 +388,16 @@ closing lines name every grammar seen across the whole run versus what
 this particular command actually verifies, `verify` never adjudicates
 a foreign-grammar claim itself, whatever module owns that grammar; that
 needs real data/context a static sweep can't provide.
+
+A claim that already has a real verdict recorded under mathema
+(proven, holds or falsified) and now declares another grammar, on the
+claim, its entry or its file, is warned about under the key's line,
+never counted as a failure:
+
+<!-- illustration -->
+```text
+     warning: claim commutative of funcs.add was verified under mathema; its grammar is now 'other', so mathema no longer adjudicates it
+```
+
+The claim's row in `--format json` carries `grammar_changed: {from:
+"mathema", to: "other"}`.

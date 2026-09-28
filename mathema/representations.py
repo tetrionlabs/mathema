@@ -1,25 +1,25 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Machine carriers: what a mathematical set is represented AS.
+"""Number representations: what a mathematical set is represented AS.
 
-A claim quantifies over a mathematical set (`Z`, `R`); an
-implementation computes over a carrier (`bigint`, `f64`, an `i64`).
-The two agree on most points and part company exactly where
-implementation-level falsifications live: an overflow threshold, a
-denormal band, an integer that wraps. This module names carriers and
-the facts that differ between them, so evidence about the machine can
-say which machine.
+A claim quantifies over a mathematical set (`Z`, `R`); an implementation
+computes over a number representation (`bigint`, `f64`, an `i64`). The two
+agree on most points and part company exactly where implementation-level
+falsifications live: an overflow threshold, a denormal band, an integer
+that wraps. This module names number representations and the facts that
+differ between them, so evidence about the machine can say which machine.
 
-Two profiles exist today, Python's own. The vocabulary is the point:
-a hazard ladder is a property of a CARRIER (an IEEE-754 double is the
-same carrier in every language), not of a language, so a future
-target declares its carriers and inherits their hazards, and only the
-native-type-to-carrier mapping is per-language. The `let Z be i64`
-claim-level declaration and carrier-driven hazard generation build on
-this vocabulary; neither is wired yet.
+Two profiles exist today, Python's own. The vocabulary is the point: a
+hazard ladder is a property of a NUMBER REPRESENTATION (an IEEE-754 double
+is the same number representation in every language), not of a language,
+so a future target declares its number representations and inherits their
+hazards, and only the native-type-to-representation mapping is
+per-language. The `let Z be i64` claim-level declaration and
+representation-driven hazard generation build on this vocabulary; neither
+is wired yet.
 
-Overflow semantics vocabulary: `arbitrary` (the carrier grows,
-overflow cannot happen), `inf` (IEEE saturation to an infinity),
+Overflow semantics vocabulary: `arbitrary` (the number representation
+grows, overflow cannot happen), `inf` (IEEE saturation to an infinity),
 `wrap` (two's-complement wraparound, a WRONG VALUE and no failure at
 the call boundary), `trap` (a raise/panic at the point of overflow),
 `ub` (undefined behaviour: anything, including silence). A wrapped or
@@ -41,13 +41,14 @@ __all__ = ["PY_COMPLEX128", "PY_FLOAT64", "PY_INT", "PYTHON_PROFILES", "Represen
 
 @dataclass(frozen=True)
 class Representation:
-    """One carrier: its tag, how it overflows, the hazard ladder worth
-    probing on it, the exception types that signal the MACHINE failing
-    (as opposed to a value-level rejection like ValueError, which is
-    the mathematics or the contract talking), and the largest finite
-    magnitude it represents (None for a carrier that grows without
-    bound). The maximum is how far a computation over the carrier can
-    reach along an unbounded direction."""
+    """One number representation: its tag, how it overflows, the hazard
+    ladder worth probing on it, the exception types that signal the
+    MACHINE failing (as opposed to a value-level rejection like
+    ValueError, which is the mathematics or the contract talking), and
+    the largest finite magnitude it represents (None for a number
+    representation that grows without bound). The maximum is how far a
+    computation over the number representation can reach along an
+    unbounded direction."""
     tag: str
     overflow: str                       # arbitrary | inf | wrap | trap | ub
     ladder: tuple = ()

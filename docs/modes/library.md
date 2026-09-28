@@ -18,7 +18,7 @@ mathema.registry.load_specs(root)             # read the whole spec store
 mathema.registry.load_claims(path)            # parse an authoring-shape claims file
 ```
 
-## `check(fn, claims=None, domain=None, trials=None, trials_scale=1.0, extensive=False, declared=None, known_premises=None, pseudo_infinity=None)`
+## `check(fn, claims=None, domain=None, trials=None, trials_scale=1.0, extensive=False, declared=None, known_premises=None, pseudo_infinity=None, runtime_types=None)`
 
 Verify a function's claims, each adjudicated against the real
 function: mathema's suggested standard claims when `claims` is
@@ -56,6 +56,11 @@ binds its own `let |inf| be`. Left out, a `declared=` entry's
 `MATHEMA_PSEUDO_INFINITY`, then float64's own maximum. A proof never
 reads it; see [operational
 infinity](../grammar.md#operational-infinity-let-inf-be).
+
+`runtime_types` names the [runtime type](../runtime-types.md) of a
+parameter whose signature names none, for code that cannot be
+annotated: `runtime_types={"returns": "pandas.Series"}`. Left out, a
+`declared=` entry's `runtime_types:` field applies.
 
 A parameter or return type hinted with a mathema type marker
 (`Annotated[float, Probability]`, `Annotated[list, Shape("m", "n")]`)

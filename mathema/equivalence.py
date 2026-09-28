@@ -383,9 +383,10 @@ def _raise_witness_probe(case: _Case, proof) -> Probe | None:
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             v = _as_int_if_whole(v) if kind in ("int", "bool") else float(v)
         args.append(v)
-    fv, f_exc = _run_side(case.fn, args,
+    from .runtime_types import calling
+    fv, f_exc = _run_side(calling(case.fn, case.facts), args,
                           complex_is_a_raise(case.fn, case.cj_domain))
-    gv, g_exc = _run_side(case.gfn, args,
+    gv, g_exc = _run_side(calling(case.gfn, case.gfacts), args,
                           complex_is_a_raise(case.gfn, case.cj_domain))
     cx = _one_sided_raise(args, params, fv, f_exc, gv, g_exc, case.rhs_name)
     what = "one side raises where the other returns a value"
@@ -626,6 +627,10 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     rel_slack = 0.0 if cj.tolerance is not None else EQUIV_REL_SLACK
     f_complex = complex_is_a_raise(case.fn, case.cj_domain)
     g_complex = complex_is_a_raise(case.gfn, case.cj_domain)
+    # each side's drawn values realised as its parameters' runtime types
+    from .runtime_types import calling
+    f_call = calling(case.fn, case.facts)
+    g_call = calling(case.gfn, case.gfacts)
     checked, cx, both_raised = 0, None, 0
     discarded = {"out_of_domain": 0, "not_compared": 0, "non_numeric": 0}
     for _ in range(EQUIV_SAMPLE_DRAWS):
@@ -635,8 +640,8 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
                    for p, a in zip(kinds, args)):
             discarded["out_of_domain"] += 1
             continue
-        fv, f_exc = _run_side(case.fn, args, f_complex)
-        gv, g_exc = _run_side(case.gfn, args, g_complex)
+        fv, f_exc = _run_side(f_call, args, f_complex)
+        gv, g_exc = _run_side(g_call, args, g_complex)
         state.executed += 1
         one_sided = _one_sided_raise(args, kinds, fv, f_exc, gv, g_exc,
                                      case.rhs_name)

@@ -132,6 +132,7 @@ nav:
       - Conditional claims: conditional-claims.md
       - Lemmas: lemmas.md
       - Matrix structure and linear algebra: matrix-structure.md
+      - "Runtime types: numpy, pandas, polars": runtime-types.md
       - Language domains: language.md
       - Multi-function claims: multi-function-claims.md
   - Command reference:

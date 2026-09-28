@@ -15,7 +15,9 @@ The vocabulary is Python-flavoured: `A @ B` (matmul), `A.T` (transpose),
 spellings `A^T`, `|A|`, `A^-1` are ambiguous against a power, an
 absolute value, and a reciprocal, and read as transpose / determinant /
 inverse only when their operand is known to be a matrix (see
-`apply_matrix_sugar`); a scalar operand keeps the ordinary reading.
+`apply_matrix_sugar`, and `grammar.bars_over_matrices` for the bars); a
+scalar operand keeps the ordinary reading, and an explicit `abs(A)` is
+always elementwise.
 """
 from __future__ import annotations
 
@@ -136,15 +138,15 @@ def undeclared_matrix_operands(srcs, declared) -> tuple:
 def undeclared_operand_reason(names) -> str:
     """The one wording both matrix routes give for those names: what is
     wrong, and the spelling that fixes it. A claim writes `x.T @ A @ x`
-    over a `Vec("n")`, which is one-dimensional, so neither route can
-    give it a shape; `Mat("n", 1)` states the same vector as a column
-    matrix, which both can."""
+    over an `x` with no shape, so neither route can give it one; a
+    `Vec("n")` marker or an `R^n` domain states it as a vector, and
+    `Mat("n", 1)` as a column matrix."""
     listed = ", ".join(repr(n) for n in names)
     subject = "is" if len(names) == 1 else "are"
-    return (f"{listed} {subject} used as a matrix operand but not "
-            f"declared two-dimensional: a 1-D vector parameter is not "
-            f"yet integrated with `@`/`.T` (declare it as Mat(\"n\", 1) "
-            f"to reason about it as a column matrix)")
+    return (f"{listed} {subject} used as a matrix operand but declared "
+            f"neither a vector nor a matrix (declare it with Vec(\"n\") "
+            f"or an R^n domain as a vector, or Mat(\"n\", 1) as a column "
+            f"matrix)")
 
 
 def is_matrix_expr(node: ast.AST, matrix_names: frozenset) -> bool:
@@ -173,11 +175,13 @@ def is_matrix_expr(node: ast.AST, matrix_names: frozenset) -> bool:
 
 
 class _MatrixSugar(ast.NodeTransformer):
-    """Rewrite the matrix spelling of the three sugars whose reading
-    depends on whether their operand is a matrix: `A^T` (`A ** T`, a bare
-    `T` exponent) to `A.T`, `A^-1` to `inv(A)`, and `|A|` (`abs(A)`) to
-    `det(A)`. A scalar operand is left untouched, so `x^-1` stays a
-    reciprocal and `|x|` an absolute value."""
+    """Rewrite the matrix spelling of the sugars whose reading depends
+    on whether their operand is a matrix: `A^T` (`A ** T`, a bare `T`
+    exponent) to `A.T` and `A^-1` to `inv(A)`. A scalar operand is left
+    untouched, so `x^-1` stays a reciprocal. The bars `|A|` read as the
+    determinant while the claim text is folded
+    (`grammar.bars_over_matrices`); an explicit `abs(A)` is
+    elementwise and never rewritten."""
     def __init__(self, matrix_names: frozenset):
         self._mats = matrix_names
         self.changed = False
@@ -201,24 +205,13 @@ class _MatrixSugar(ast.NodeTransformer):
                                 args=[node.left], keywords=[])
         return node
 
-    def visit_Call(self, node: ast.Call) -> ast.AST:
-        self.generic_visit(node)
-        if (isinstance(node.func, ast.Name) and node.func.id == "abs"
-                and len(node.args) == 1
-                and is_matrix_expr(node.args[0], self._mats)):
-            self.changed = True
-            return ast.Call(func=ast.Name(id="det", ctx=ast.Load()),
-                            args=node.args, keywords=[])
-        return node
-
 
 def apply_matrix_sugar(src: str, matrix_names: frozenset) -> str:
     """Resolve the type-dependent matrix sugar in one already-parsed
     expression string, given the names known to be matrices: `A^T` to
-    `A.T`, `A^-1` to `inv(A)`, `|A|` (which the base grammar has already
-    rendered `abs(A)`) to `det(A)`. Returns `src` unchanged when there
-    are no matrix names, when it does not parse, or when nothing
-    matched, so a scalar claim is never touched."""
+    `A.T`, `A^-1` to `inv(A)`. Returns `src` unchanged when there are
+    no matrix names, when it does not parse, or when nothing matched,
+    so a scalar claim is never touched."""
     if not matrix_names or not src:
         return src
     try:
@@ -231,3 +224,229 @@ def apply_matrix_sugar(src: str, matrix_names: frozenset) -> str:
         return src
     ast.fix_missing_locations(rewritten)
     return ast.unparse(rewritten.body)
+
+
+# --- vectors and matrices as claim values -----------------------------
+
+#: calls whose result is a number whatever the rank of their argument
+SCALAR_CALLS = frozenset({"det", "trace", "norm", "dot", "rank", "cond",
+                          "len", "dim"})
+#: calls whose result is a matrix
+MATRIX_CALLS = frozenset({"inv", "transpose", "matrix_power", "pinv",
+                          "kron", "outer", "I"})
+#: reductions: a number without `axis=`, one rank lower with it
+REDUCTION_CALLS = frozenset({"sum", "mean", "prod", "min", "max"})
+#: calls that act element by element, keeping their argument's rank
+ELEMENTWISE_CALLS = frozenset({"abs", "Abs"})
+#: the calls of the linear-algebra vocabulary the probe evaluates
+VOCABULARY = (SCALAR_CALLS | MATRIX_CALLS | REDUCTION_CALLS
+              | frozenset({"eigvals", "eigvalsh", "solve", "diag"})) \
+    - frozenset({"len", "dim", "min", "max", "sum"})
+
+
+def array_ranks(domain: "dict | None", shapes: "dict | None" = None,
+                param_kinds: "dict | None" = None,
+                structures: "dict | None" = None) -> dict:
+    """Intent:
+        The names a claim quantifies over as vectors, matrices or
+        tables, `{name: rank}`: 1 for a vector, 2 for a matrix, and
+        the string `"table"` for a table. Read from the claim's own
+        domain (`R^n`, `R^(m,n)`), the signature's `Shape` markers and
+        structure markers, and the parameter kinds a runtime type
+        gives (`vec`, `mat`, `table`).
+
+    Notes:
+        A domain's rank wins over a runtime kind, so an `np.ndarray`
+        parameter quantified over `R^(n,n)` is a matrix. A column
+        `Mat("n", 1)` reads as a vector. A plain list parameter with no
+        space form is not in the result: it is a sequence, not a
+        vector.
+    """
+    out: dict = {}
+    for p, kind in (param_kinds or {}).items():
+        if kind == "vec":
+            out[p] = 1
+        elif kind == "mat":
+            out[p] = 2
+        elif kind == "table":
+            out[p] = "table"
+    for p in (structures or {}):
+        if p != "return":
+            out[p] = 2
+    for p, shape in (shapes or {}).items():
+        dims = getattr(shape, "dims", ())
+        if p != "return" and dims:
+            out[p] = _rank_of(dims)
+    for p, bound in (domain or {}).items():
+        dims = getattr(bound, "dims", ())
+        if dims:
+            out[p] = _rank_of(dims)
+    return out
+
+
+def _rank_of(dims) -> int:
+    """The rank a shape reads with: a column `(n, 1)` is a vector, so
+    `x.T @ A @ x` over it is a number."""
+    if len(dims) == 2 and str(dims[1]) == "1":
+        return 1
+    return len(dims)
+
+
+def _is_pass_through(node, parent, callables: frozenset) -> bool:
+    """Whether a name at `node` is handed on rather than read as a
+    number: an argument of `f` or a bound function, the subject of a
+    subscript, the argument of `dim`/`len`, or the iterable of a
+    comprehension."""
+    if isinstance(parent, ast.Call):
+        func = parent.func
+        name = func.id if isinstance(func, ast.Name) else None
+        if node in parent.args or any(k.value is node
+                                      for k in parent.keywords):
+            return name in callables or name in ("dim", "len")
+        return False
+    if isinstance(parent, ast.Subscript):
+        return parent.value is node
+    if isinstance(parent, ast.comprehension):
+        return parent.iter is node
+    return False
+
+
+def array_value_uses(srcs, names, callables=frozenset({"f"})) -> list:
+    """Intent:
+        The names in `names` (vectors, matrices, tables) that the
+        claim's expressions use as values, in the order first met: in
+        arithmetic, a comparison, a vocabulary call, or on their own.
+        A name only handed to `f` (or a bound function), subscripted,
+        measured with `dim`/`len`, or iterated in a comprehension is
+        not a value use; a table's column read (`df["returns"]`, when
+        `names` maps the name to `"table"`) is one, since the column
+        is a vector.
+    """
+    names_ranks = names if isinstance(names, dict) else {}
+    names = set(names)
+    found: list = []
+    for src in srcs:
+        if not src:
+            continue
+        try:
+            tree = ast.parse(str(src), mode="eval")
+        except SyntaxError:
+            continue
+        parents = {id(c): p for p in ast.walk(tree)
+                   for c in ast.iter_child_nodes(p)}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Name) and node.id in names):
+                continue
+            parent = parents.get(id(node))
+            if isinstance(parent, ast.keyword):
+                parent = parents.get(id(parent))
+            column = (isinstance(parent, ast.Subscript)
+                      and names_ranks.get(node.id) == "table")
+            if parent is not None and not column \
+                    and _is_pass_through(node, parent, callables):
+                continue
+            if node.id not in found:
+                found.append(node.id)
+    return found
+
+
+def static_rank(node, ranks: dict):
+    """Intent:
+        The rank of the value an expression denotes, read off its
+        syntax: 0 for a number, 1 for a vector, 2 for a matrix, or
+        None when it cannot be told without evaluating (a call of
+        `f`, a bound function, an unknown call).
+
+    Notes:
+        A name absent from `ranks` is a number. `@` follows numpy:
+        two vectors give a number, a matrix and a vector a vector.
+        Arithmetic broadcasts, so it takes the larger rank.
+    """
+    if isinstance(node, ast.Expression):
+        return static_rank(node.body, ranks)
+    if isinstance(node, ast.Name):
+        r = ranks.get(node.id, 0)
+        return None if r == "table" else r
+    if isinstance(node, ast.Constant):
+        return 0
+    if isinstance(node, ast.UnaryOp):
+        return static_rank(node.operand, ranks)
+    if isinstance(node, ast.BinOp):
+        left = static_rank(node.left, ranks)
+        right = static_rank(node.right, ranks)
+        if left is None or right is None:
+            return None
+        if isinstance(node.op, ast.MatMult):
+            if left == 0 or right == 0:
+                return None
+            return max(0, left + right - 2)
+        return max(left, right)
+    if isinstance(node, ast.Attribute):
+        if node.attr == "T":
+            return static_rank(node.value, ranks)
+        if isinstance(node.value, ast.Name) \
+                and ranks.get(node.value.id) == "table":
+            return 1
+        return None
+    if isinstance(node, ast.Subscript):
+        base = node.value
+        if isinstance(base, ast.Name) and ranks.get(base.id) == "table" \
+                and isinstance(node.slice, ast.Constant) \
+                and isinstance(node.slice.value, str):
+            return 1
+        inner = static_rank(base, ranks)
+        if not inner:
+            return None
+        index = node.slice
+        parts = index.elts if isinstance(index, ast.Tuple) else [index]
+        kept = sum(isinstance(p, ast.Slice) for p in parts)
+        return inner - len(parts) + kept
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        name = node.func.id
+        args = [static_rank(a, ranks) for a in node.args]
+        axis = any(k.arg == "axis" for k in node.keywords)
+        if name in SCALAR_CALLS:
+            return 0
+        if name in MATRIX_CALLS:
+            return 2
+        if name in REDUCTION_CALLS:
+            if len(node.args) != 1:
+                return 0 if all(a == 0 for a in args) else None
+            if args[0] is None:
+                return None
+            return max(0, args[0] - 1) if axis else 0
+        if name in ELEMENTWISE_CALLS and args:
+            return args[0]
+        if name in ("eigvals", "eigvalsh"):
+            return 1
+        if name == "diag" and args and args[0] is not None:
+            return 1 if args[0] == 2 else 2
+        if name == "solve" and len(args) == 2:
+            return args[1]
+        return None
+    return None
+
+
+def matrix_ordering_reason(relation: str, sides, ranks: dict) -> "str | None":
+    """Intent:
+        Why an ordering claim over a vector or matrix side is refused,
+        or None when the relation is not an ordering or every side is
+        a number (or cannot be told without evaluating).
+    """
+    if relation not in ("<", "<=", ">", ">="):
+        return None
+    for src in sides:
+        try:
+            rank = static_rank(ast.parse(str(src or "0"), mode="eval"),
+                               ranks)
+        except SyntaxError:
+            continue
+        if rank:
+            what = "a vector" if rank == 1 else "a matrix"
+            return (f"{src.strip()!r} is {what}, and an ordering "
+                    f"({relation}) between {what} and anything is not "
+                    f"defined; compare a number drawn from it (det, "
+                    f"trace, norm, an element), or an elementwise reading "
+                    f"spelled all(...), which the grammar does not have "
+                    f"yet")
+    return None
