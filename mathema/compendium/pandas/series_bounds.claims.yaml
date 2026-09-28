@@ -1,0 +1,17 @@
+# Definition rows for the least and greatest elements of a
+# pandas.Series, stated over Series with nothing missing; the receiver
+# of `returns.min()` is `a`. pandas skips a missing element in each.
+# mathema's own test suite verifies each row against the installed
+# pandas.
+compendium: pandas
+versions: ">=2,<4"
+
+pandas.Series.min:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) == min(a)"
+
+pandas.Series.max:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) == max(a)"

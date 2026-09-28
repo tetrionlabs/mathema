@@ -49,6 +49,82 @@ _TRANSFORMS = {"mathema.f.scale_seq": "scale",
 #: builtins a body may call, read as the grammar word of the same name
 _BUILTIN_WORDS = frozenset({"abs", "sum", "len", "min", "max", "float"})
 
+#: the runtime type of a column of each table runtime type
+_COLUMN_TYPES = {"pandas.DataFrame": "pandas.Series",
+                 "polars.DataFrame": "polars.Series"}
+
+
+def _runtime_params(facts, kinds: tuple) -> dict:
+    """`{parameter: runtime type}` for each parameter whose first
+    detected runtime type carries one of `kinds`."""
+    return {p: found[0].adapter
+            for p, found in (getattr(facts, "runtime_types", None)
+                             or {}).items()
+            if found and found[0].kind in kinds}
+
+
+def column_read(node, tables) -> "str | None":
+    """The column name when `node` reads a column of a table parameter
+    in `tables`, by attribute (`df.w`) or by item (`df["w"]`), else
+    None."""
+    from .conjecture import _TABLE_ATTRIBUTES
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+            and node.value.id in tables and not node.attr.startswith("_") \
+            and node.attr not in _TABLE_ATTRIBUTES:
+        return node.attr
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) \
+            and node.value.id in tables \
+            and isinstance(node.slice, ast.Constant) \
+            and isinstance(node.slice.value, str):
+        return node.slice.value
+    return None
+
+
+class _Typing:
+    """Intent:
+        The runtime type of the value a body expression denotes, where
+        it is a vector the definition rows read: a parameter with a
+        vector or matrix runtime type, a column of a table parameter,
+        a local assigned one of these, arithmetic with such an operand,
+        and a method whose definition row gives a vector (`cummax`).
+    """
+
+    def __init__(self, facts, book: "RowBook | None"):
+        self.runtime = _runtime_params(facts, ("vec", "mat"))
+        self.tables = _runtime_params(facts, ("table",))
+        self.local: dict = {}
+        self.book = book
+
+    def of(self, node) -> "str | None":
+        if isinstance(node, ast.Name):
+            return self.runtime.get(node.id) or self.local.get(node.id)
+        if column_read(node, self.tables) is not None:
+            return _COLUMN_TYPES.get(self.tables[node.value.id])
+        if isinstance(node, ast.BinOp) and not isinstance(node.op,
+                                                          ast.MatMult):
+            found = {t for t in (self.of(node.left), self.of(node.right))
+                     if t is not None}
+            return next(iter(found)) if len(found) == 1 else None
+        if isinstance(node, ast.UnaryOp):
+            return self.of(node.operand)
+        if isinstance(node, ast.Call) and isinstance(node.func,
+                                                     ast.Attribute):
+            rt = self.of(node.func.value)
+            if rt is not None and self._gives_vector(f"{rt}.{node.func.attr}"):
+                return rt
+        return None
+
+    def _gives_vector(self, key: str) -> bool:
+        """Whether every usable definition row of `key` states a vector
+        of the same length as its receiver."""
+        from .linalg import static_rank
+        if self.book is None or not self.book.states(key):
+            return False
+        rows = self.book.rows(key)
+        return bool(rows) and all(
+            static_rank(r.rhs, {p: r.ranks.get(p, 0) for p in r.params}) == 1
+            and r.ranks.get(r.params[0]) == 1 for r in rows)
+
 
 class Decline(Exception):
     """The body or the claim is outside what definition rows rewrite;
@@ -463,12 +539,8 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
     origins = _alias_origins(fn, facts)
     scope = getattr(fn, "__globals__", {}) or {}
     params = set(facts.params)
-    runtime = {p: found[0].adapter
-               for p, found in (getattr(facts, "runtime_types", None)
-                                or {}).items()
-               if found and found[0].kind in ("vec", "mat")}
+    typing = _Typing(facts, book)
     local: dict = {}
-    local_runtime: dict = {}
     inlined = Inlined(expr=ast.Constant(value=0))
 
     def no_row(key: str) -> Decline:
@@ -476,10 +548,7 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
         return Decline(f"{key} has no definition row"
                        + (f" usable here ({why})" if why else ""))
 
-    def receiver_type(node) -> "str | None":
-        if isinstance(node, ast.Name):
-            return runtime.get(node.id) or local_runtime.get(node.id)
-        return None
+    receiver_type = typing.of
 
     def through_row(key: str, positional: list, keywords: dict):
         rows = book.rows(key)
@@ -530,6 +599,8 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub,
                                                                   ast.UAdd)):
             return ast.UnaryOp(op=node.op, operand=rewrite(node.operand))
+        if column_read(node, typing.tables) is not None:
+            return copy.deepcopy(node)
         if isinstance(node, ast.Attribute):
             rt = receiver_type(node.value)
             if rt is None:
@@ -618,8 +689,9 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
                           f"{type(stmt).__name__} is outside the "
                           f"definition rewrite (straight-line assignments "
                           f"and one return)")
-        if isinstance(value, ast.Name) and receiver_type(value) is not None:
-            local_runtime[target] = receiver_type(value)
+        found = receiver_type(value)
+        if found is not None:
+            typing.local[target] = found
         local[target] = rewrite(value)
     if result is None:
         raise Decline("the body has no return")
@@ -685,28 +757,28 @@ def inline_claim(side: str, fn, facts, inlined: Inlined,
     return ast.fix_missing_locations(_Inline().visit(tree))
 
 
-def called_keys(fn, facts) -> set:
+def called_keys(fn, facts, root: "str | None" = None) -> set:
     """Intent:
         Every library key `fn`'s body reaches: a method or attribute
-        of a parameter with a runtime type (`returns.std(...)` on a
+        of a value with a runtime type (`returns.std(...)` on a
         `pandas.Series` is `pandas.Series.std`, `A.T` on an array is
-        `numpy.ndarray.T`), and a function called through an import
-        alias (`np.mean` is `numpy.mean`).
+        `numpy.ndarray.T`, `(df.w * df.r).sum()` on a
+        `pandas.DataFrame`'s columns is `pandas.Series.sum`), and a
+        function called through an import alias (`np.mean` is
+        `numpy.mean`).
     """
     from .compendium import _resolve_called_keys
     tree = getattr(facts, "tree", None)
     out = set(_resolve_called_keys(fn, facts))
     if tree is None:
         return out
-    runtime = {p: found[0].adapter
-               for p, found in (getattr(facts, "runtime_types", None)
-                                or {}).items()
-               if found and found[0].kind in ("vec", "mat")}
+    typing = _Typing(facts, RowBook(root))
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and isinstance(node.value,
-                                                          ast.Name) \
-                and node.value.id in runtime:
-            out.add(f"{runtime[node.value.id]}.{node.attr}")
+        if isinstance(node, ast.Attribute) \
+                and column_read(node, typing.tables) is None:
+            rt = typing.of(node.value)
+            if rt is not None:
+                out.add(f"{rt}.{node.attr}")
     return out
 
 
@@ -722,7 +794,7 @@ def definition_state(fn, facts, root: "str | None" = None) -> dict:
     """
     book = RowBook(root)
     out: dict = {}
-    for key in sorted(called_keys(fn, facts)):
+    for key in sorted(called_keys(fn, facts, root)):
         if not book.states(key):
             continue
         rows = book.rows(key)
