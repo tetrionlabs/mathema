@@ -3,8 +3,9 @@
 """The site imports the mathema-language reference when its docs are
 present and builds unchanged when they are not: the hook finds the
 docs at `$MATHEMA_LANGUAGE_DOCS`, prefixes every page with
-`language/reference/`, adds the package's nav after "Language domains",
-and serves the pages from where they are, so nothing is copied into
+`language/reference/`, adds the package's nav after "Language domains"
+or, when the package names a section, as its own top-level section with
+"Language domains" moved into it, and serves the pages from where they are, so nothing is copied into
 `docs/` for this repository's docs runner to find."""
 import importlib.util
 import pathlib
@@ -70,3 +71,29 @@ def test_every_page_is_served_from_the_package_docs(package_docs):
 def test_the_repository_ignores_the_imported_docs():
     ignore = (_PATH.parents[1] / ".gitignore").read_text()
     assert "_external/" in ignore.splitlines()
+
+
+@pytest.fixture
+def sectioned_docs(package_docs):
+    (package_docs / "reference.yml").write_text(
+        "section: Strings, records and schemas\n"
+        "nav:\n  - Quick start: index.md\n  - Adaptors:\n      - Writing one: adaptors.md\n")
+    return package_docs
+
+
+def test_a_named_section_is_its_own_top_level_section(sectioned_docs):
+    nav = [{"Home": "index.md"},
+           {"Writing claims": [{"The claim grammar": "grammar.md"},
+                               {"Language domains": "language.md"},
+                               {"Lemmas": "lemmas.md"}]},
+           {"Command reference": [{"mathema check": "modes/check.md"}]}]
+    config = hook.on_config({"nav": nav})
+    titles = [next(iter(s)) for s in config["nav"]]
+    assert titles == ["Home", "Writing claims", "Strings, records and schemas", "Command reference"]
+    assert config["nav"][1]["Writing claims"] == [{"The claim grammar": "grammar.md"},
+                                                  {"Lemmas": "lemmas.md"}]
+    assert config["nav"][2]["Strings, records and schemas"] == [
+        {"Language domains": "language.md"},
+        {"Quick start": "language/reference/index.md"},
+        {"Adaptors": [{"Writing one": "language/reference/adaptors.md"}]},
+    ]
