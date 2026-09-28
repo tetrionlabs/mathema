@@ -3699,37 +3699,45 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # generic stage applies
             out.append(stamp(_adjudicate_equivalence(ctx, fn, facts)))
             continue
-        if call_pins:
-            # the derive route reads the call the claim writes, never a
-            # pinned parameter it does not pass, so a pinned claim is
-            # adjudicated by execution
-            ctx.derive_undecided = Probe(
-                cj.name, statement, "unknown", route="derive",
-                note=f"{ctx.note}; the derive route does not model the "
-                     f"pinned parameter(s) {', '.join(sorted(call_pins))}",
-                meta={"mathema.derive_status": "unsupported"})
-        elif cj.route in ("derive", "best", "examine"):
-            # route="best" IS the cascade: its derive attempt engages
-            # the extensive ladder inside the same try_prove call (the
-            # fast attempt runs once; the ladder only starts where it
-            # left off), so nothing is ever re-derived on the way down.
-            # "examine" cascades the same way: structural half first,
-            # empirical half when structure can't establish the fact.
-            derived = _adjudicate_derive(
-                ctx, fn, facts,
-                extensive or cj.route in ("best", "examine"))
-            if derived is not None:
-                out.append(stamp(derived, _cap=verdict_cap))
-                if ctx.companion is not None:
-                    _emit_companion(out, _stamped(ctx.companion, cj),
-                                    derived.name)
-                continue
-            # route == "best" and the derive stage couldn't settle it:
-            # fall through to the probe stage, same as an ordinary
-            # probe claim.
-        probed = _arbitrate_empirical_fallback(
-            _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
-        out.append(stamp(probed, _cap=verdict_cap))
+        from .probing import LanguageDrawFailed
+        try:
+            if call_pins:
+                # the derive route reads the call the claim writes, never a
+                # pinned parameter it does not pass, so a pinned claim is
+                # adjudicated by execution
+                ctx.derive_undecided = Probe(
+                    cj.name, statement, "unknown", route="derive",
+                    note=f"{ctx.note}; the derive route does not model the "
+                         f"pinned parameter(s) {', '.join(sorted(call_pins))}",
+                    meta={"mathema.derive_status": "unsupported"})
+            elif cj.route in ("derive", "best", "examine"):
+                # route="best" IS the cascade: its derive attempt engages
+                # the extensive ladder inside the same try_prove call (the
+                # fast attempt runs once; the ladder only starts where it
+                # left off), so nothing is ever re-derived on the way down.
+                # "examine" cascades the same way: structural half first,
+                # empirical half when structure can't establish the fact.
+                derived = _adjudicate_derive(
+                    ctx, fn, facts,
+                    extensive or cj.route in ("best", "examine"))
+                if derived is not None:
+                    out.append(stamp(derived, _cap=verdict_cap))
+                    if ctx.companion is not None:
+                        _emit_companion(out, _stamped(ctx.companion, cj),
+                                        derived.name)
+                    continue
+                # route == "best" and the derive stage couldn't settle it:
+                # fall through to the probe stage, same as an ordinary
+                # probe claim.
+            probed = _arbitrate_empirical_fallback(
+                _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
+            out.append(stamp(probed, _cap=verdict_cap))
+        except LanguageDrawFailed as e:
+            # the language produced no member to evaluate the claim at
+            out.append(stamp(Probe(
+                cj.name, statement, "skipped", route=None,
+                note=f"{ctx.note}; {e}",
+                meta={"mathema.probe_gap": "input-synthesis"})))
     out.sort(key=lambda p: _emit_position(p, conjectures, declared_order))
     return out
 

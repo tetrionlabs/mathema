@@ -20,7 +20,7 @@ exposes.
 | `mathema.target_resolvers` | a resolver for language-tagged target keys (`ts:...`) | `mathema._target_resolvers` |
 | `mathema.runtime_types` | a runtime type adapter: how a vector, matrix or table is realised as the object a function receives (see [runtime types](runtime-types.md#adding-a-runtime-type)) | `mathema.runtime_types` |
 | `mathema.languages` | a named language a claim quantifies over with `L[<name>]` | `mathema.languages` |
-| `mathema.language_adaptors` | an adaptor turning an imported object (a schema class, a type) into a language, or `None` for "not mine" | `mathema.languages` |
+| `mathema.language_adaptors` | an adaptor turning an imported object (a schema class, a type) into a language, or `None` for an object it does not handle | `mathema.languages` |
 | `mathema.language_refinements` | a refinement key inside `L[...]` (`len`, `depth`), the entry point's name being the key | `mathema.languages` |
 | `mathema.lexicon` | worked claims (rows, sections, tags, example functions) that join mathema's lexicon | `mathema.lexicon` |
 
@@ -39,7 +39,7 @@ target key (`ts:src/ema.ts#ema`) into ordinary callables. The entry
 point's name is the tag it serves; the loaded object is a callable
 `resolver(target, root)` returning a `Target` (from the `targets`
 seam) whose values are Python callables standing in for the foreign
-functions, or `None` for "not mine", in which case resolution falls
+functions, or `None` for a target it does not handle, in which case resolution falls
 through to the normal import path. The seam is consulted by
 `mathema check`'s target resolution and by `verify`'s store-key
 sweep, and it is fail-soft: a resolver that fails to load warns and
