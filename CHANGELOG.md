@@ -192,6 +192,10 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A claim whose domain bound turns complex under interval evaluation
   (`sqrt(1 - r**2)` over an unbounded `r`) returns a verdict instead of
   raising out of `check_conjectures`.
+- A claim over a language that cannot produce a member to sample (a
+  schema whose checks reject every record drawn) is skipped with the
+  `input-synthesis` gap and the language's reason, instead of raising
+  out of `check_conjectures`.
 
 ## 0.6.0
 

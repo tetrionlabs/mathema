@@ -1105,6 +1105,16 @@ def _language_hazards(dom, kinds: bool = False) -> list:
     return values
 
 
+class LanguageDrawFailed(Exception):
+    """A language could not produce a member to sample (a schema whose
+    checks reject every record drawn): the claim over it cannot be
+    evaluated at all, on any route."""
+
+    def __init__(self, piece, error: Exception) -> None:
+        super().__init__(f"L[{getattr(piece, 'text', piece)}] produced no member to "
+                         f"sample ({type(error).__name__}: {error})")
+
+
 def _sample_language(rng: random.Random, dom: Domain):
     """Intent:
         One member of a language domain: a piece chosen uniformly (a
@@ -1136,7 +1146,12 @@ def _sample_language(rng: random.Random, dom: Domain):
             if hazards and rng.random() < 0.3:
                 value = rng.choice(hazards).value
             else:
-                value = resolved.language.sample(rng)
+                try:
+                    value = resolved.language.sample(rng)
+                except TimeoutError:
+                    raise
+                except Exception as e:
+                    raise LanguageDrawFailed(piece, e) from e
         else:
             continue
         try:
