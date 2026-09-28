@@ -602,6 +602,10 @@ def _fmt_point(point, names):
         if n not in point:
             continue
         v = point[n]
+        if isinstance(v, str):
+            from .probing import spell_text
+            parts.append(f"{n}={spell_text(v)}")
+            continue
         parts.append(f"{n}={v:.6g}" if isinstance(v, (int, float))
                      and not isinstance(v, bool) else f"{n}={v!r}")
     return ", ".join(parts)

@@ -862,8 +862,16 @@ def ordering_shortfall(lv, rv, relation: str) -> float:
                 or not isinstance(lv, (int, float)) \
                 or not isinstance(rv, (int, float)):
             return 0.0
-        gap = sign * (lv - rv)
-        return gap if gap > 0 and math.isfinite(gap) else 0.0
+        # the difference is taken exactly, so an integer too large for
+        # a float never has to be converted unless it is the answer
+        exact = (lv - rv) if relation == "<=" else (rv - lv)
+        if exact <= 0:
+            return 0.0
+        try:
+            gap = float(exact)
+        except OverflowError:
+            return 0.0
+        return gap if math.isfinite(gap) else 0.0
     from .matrices import _numpy
     np = _numpy()
     if np is None:
@@ -1253,6 +1261,30 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
 
 
+def _hides_characters(s: str) -> bool:
+    """Whether printing `s` would hide some of its characters from a
+    reader: a combining mark, a format character, or a space other than
+    the ordinary one. Controls need no help; `repr` escapes them."""
+    import unicodedata
+    for c in s:
+        cat = unicodedata.category(c)
+        if cat in ("Mn", "Mc", "Me", "Cf", "Zl", "Zp") or (cat == "Zs" and c != " "):
+            return True
+    return False
+
+
+def spell_text(s: str, *, force: bool = False) -> str:
+    """A string for a witness: its repr, followed by its escaped form in
+    parentheses when printing it would hide characters (or `force`, for
+    two sides that differ yet read the same)."""
+    shown = repr(s)
+    if force or _hides_characters(s):
+        escaped = ascii(s)
+        if escaped != shown:
+            return f"{shown} ({escaped})"
+    return shown
+
+
 def sample_bound(bound, rng: random.Random, kind: str = "scalar"):
     """Intent:
         One value drawn from a declared bound, the draw the probe route
@@ -1331,6 +1363,8 @@ def _fmt_value_of(v) -> str:
         return "[" + ", ".join(_fmt_value_of(x) for x in v) + "]"
     if isinstance(v, tuple):
         return "(" + ", ".join(_fmt_value_of(x) for x in v) + ")"
+    if isinstance(v, str):
+        return spell_text(v)
     return repr(v)
 
 
@@ -1402,7 +1436,9 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             continue
         bound_shape = _classify_bound(bounds)
         if bound_shape == "frozenset":
-            parts.append(f"{p}~U{{{', '.join(str(v) for v in sorted(bounds))}}}")
+            from .domain import _member_sort_key
+            members = sorted(bounds, key=_member_sort_key)
+            parts.append(f"{p}~U{{{', '.join(str(v) for v in members)}}}")
         elif bound_shape == "Z":
             parts.append(f"{p}~{{0,±1,±2}}[p=.3]⊔U{{-1000..1000}}")
         elif bound_shape == "N":

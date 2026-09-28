@@ -135,7 +135,9 @@ def _yaml_safe_args(args) -> list:
     out = []
     for v in args:
         if isinstance(v, complex) and not isinstance(v, (int, float)):
-            out.append(f"{v.real:g}{v.imag:+g}j")
+            # tagged, so a string witness that reads as a complex
+            # number (`"j"`) can never be mistaken for one
+            out.append({"complex": f"{v.real:g}{v.imag:+g}j"})
         elif isinstance(v, (list, tuple)):
             out.append(_yaml_safe_args(v))
         else:
@@ -356,12 +358,18 @@ def _sample_in_domain(value, bound) -> bool:
         return True
 
 
-def _pinned_arg_sets(cj, arity: int) -> list:
+def _pinned_arg_sets(cj, arity: int, kinds: "list | None" = None) -> list:
     """Intent:
         The claim's recorded counterexamples (`Conjecture.pins`) as
         replayable argument tuples, restored from their YAML-safe
         spellings; entries with the wrong arity are skipped rather
         than misapplied.
+
+    Notes:
+        A complex witness is stored tagged, `{"complex": "1+2j"}`. An
+        older record stored it as a bare string, which is read as a
+        complex number only where the parameter's kind can hold one:
+        a string parameter's `"j"` stays the string it was.
     """
     out = []
     for pin in cj.pins or []:
@@ -369,8 +377,13 @@ def _pinned_arg_sets(cj, arity: int) -> list:
         if not isinstance(stored, list) or len(stored) != arity:
             continue
         restored = []
-        for v in stored:
-            if isinstance(v, str) and ("j" in v or "J" in v):
+        for i, v in enumerate(stored):
+            kind = kinds[i] if kinds is not None and i < len(kinds) else None
+            if isinstance(v, dict) and set(v) == {"complex"}:
+                restored.append(complex(v["complex"]))
+                continue
+            if (isinstance(v, str) and ("j" in v or "J" in v)
+                    and kind not in ("string", "dict", "sequence", "bool")):
                 try:
                     restored.append(complex(v))
                     continue
@@ -1967,6 +1980,42 @@ def _bound_by_calls(tree) -> set:
             elif isinstance(arg, ast.Name):
                 bound.add(arg.id)
     return bound
+
+
+def _sides(lv, rv) -> str:
+    """Intent:
+        The two compared values of a failed relation, `left vs right`;
+        two strings that differ yet read the same (a composed and a
+        decomposed character) are both spelled out.
+    """
+    if isinstance(lv, str) and isinstance(rv, str):
+        import unicodedata
+
+        from .probing import spell_text
+        alike = lv != rv and (unicodedata.normalize("NFC", lv)
+                              == unicodedata.normalize("NFC", rv))
+        return f"{spell_text(lv, force=alike)} vs {spell_text(rv, force=alike)}"
+    return f"{lv!r} vs {rv!r}"
+
+
+def _names_in_claim(cj) -> set:
+    """Intent:
+        Every bare name the claim's statement reads, across its sides
+        and chain links: the parameters it quantifies. A parameter the
+        claim fills with a literal (`f(values, "nope")`) is not among
+        them.
+    """
+    names: set = set()
+    sides = [cj.lhs, cj.rhs] + [t for link in (cj.links or ()) for t in (link[0], link[2])]
+    for side in sides:
+        if not side:
+            continue
+        try:
+            tree = ast.parse(side, mode="eval")
+        except SyntaxError:
+            continue
+        names |= {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    return names
 
 
 def _declared_names(cj, cj_domain: dict, facts, fn) -> set:
@@ -5747,6 +5796,18 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      note=f"{note}; the registered family for this claim's "
                           "own name couldn't decide it, and the generic "
                           "sampling loop has no meaning for this predicate")
+    # a string parameter with no stated domain has no honest sampling
+    # story, as in the automatic probes: numbers drawn for it would
+    # falsify the claim on inputs the function was never meant to take
+    named = _names_in_claim(cj)
+    for p, k in kinds.items():
+        if k == "string" and p in named and ctx.cj_domain.get(p) is None:
+            return Probe(
+                cj.name, statement, "skipped", route=None,
+                note=(f"{note}; parameter {p!r} is a string with no declared "
+                      f"domain; declare its values, e.g. 'for {p} in "
+                      f'{{"a", "b"}}, ...\', or annotate it Literal[...]'),
+                meta={"mathema.probe_gap": "string-domain-missing"})
     # the generic loop's reading of the domain: every unbounded
     # direction, declared or bare, runs with finite values out to the
     # resolved pseudo-infinity, else the carrier's maximum (P1: a real
@@ -5901,7 +5962,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the largest exact ordering violation the default allowance
     # absorbed, and the arguments it happened at
     absorbed, absorbed_at = 0.0, None
-    pinned = _pinned_arg_sets(cj, len(kinds))
+    pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # a literal argument in the claim's own call (`f(values, "nope",
     # 0.35)`) fixes that parameter to the literal; the call passes it
     # verbatim, so sampling must not overwrite it with a synthesized
@@ -6405,7 +6466,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             aux_part = ("; " + ", ".join(
                 f"{a}={env[a]:.3g}" if isinstance(env[a], (int, float))
                 else f"{a}={env[a]!r}" for a in aux) if aux else "")
-            cx = f"{_fmt(tuple(args))}{aux_part}: {lv!r} vs {rv!r}"
+            cx = f"{_fmt(tuple(args))}{aux_part}: {_sides(lv, rv)}"
             break
     shrunk_meta: dict = {}
     if cx is not None and cx_stratum is None and assum_eval is None and not aux \
