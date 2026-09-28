@@ -111,6 +111,7 @@ def test_an_unknown_key_is_refused_at_resolution_naming_the_known_keys(words):
     assert p.verdict == "skipped"
     assert p.meta["mathema.probe_gap"] == "language-unresolved"
     assert "mathema.language_refinements" in p.note
+    assert "len, depth, nodes and width" in p.note
 
 
 def test_core_owns_no_key(monkeypatch):

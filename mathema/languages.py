@@ -446,7 +446,7 @@ class UnknownRefinement(UnknownLanguage):
             f"{key!r}; known keys are {known}; a package adds one under the "
             f"{REFINEMENT_GROUP!r} entry-point group, and "
             f"'pip install \"mathema[language]\"' brings len, depth, nodes "
-            f"and children")
+            f"and width")
         self.name = ref.text
         self.vocabulary = refinement_keys()
 
