@@ -191,7 +191,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         calls_nonfinite[0] = None
 
     from .runtime_types import calling
-    base_env = {"f": _tag(calling(fn, facts), "f"), **_SAFE_FUNCS, **MATH_CONSTANTS,
+    from ._linalg_eval import FUNCTIONS as _VECTOR_FUNCS
+    base_env = {"f": _tag(calling(fn, facts), "f"), **_SAFE_FUNCS,
+                **_VECTOR_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
                 **{name: (cj.tolerance if cj.tolerance is not None else 1e-9)
                    for name in eps_names},

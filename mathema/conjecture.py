@@ -4930,7 +4930,7 @@ def _provenance_meta(proof) -> dict:
     meta = {}
     for key in ("mathema.derive_route", "mathema.engine_disagreement",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
-                "mathema.corroboration_reason"):
+                "mathema.corroboration_reason", "mathema.definitions"):
         if key in proof.meta:
             meta[key] = proof.meta[key]
     return meta
@@ -5242,6 +5242,18 @@ def _chained_definedness_proof(family_derive, fn, facts, cj, cj_domain,
                "conjunct for conjunct")
 
 
+def _bound_callables(cj) -> dict:
+    """A claim's bound functions as callables, each reference resolved
+    (None for one that does not resolve)."""
+    out = {}
+    for name, v in (cj.funcs or {}).items():
+        try:
+            out[name] = v if callable(v) else _resolve_func_ref(v)
+        except AttributeError:
+            out[name] = None
+    return out
+
+
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        extensive: bool) -> "Probe | None":
     """Intent:
@@ -5376,6 +5388,36 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             meta={"mathema.derive_status": "undecided",
                   **_provenance_meta(family_proof)})
         return None
+    # a body that calls library functions reads, through their
+    # definition rows, in the grammar's own words; a claim about it is
+    # then decided as mathematics (sums over a symbolic length, or the
+    # matrix algebra). A route that does not apply returns None; one
+    # that applies but does not decide leaves its reason as the derive
+    # note should nothing below decide the claim either.
+    definitions_hint = None
+    if not ctx.assume_defined:
+        from .definitions import prove_through_definitions
+        dproof = prove_through_definitions(
+            cj, fn, facts, cj_domain, assumption,
+            ctx.premise_structures, extensive)
+        if dproof is not None and dproof.status == "proven":
+            proven = Probe(cj.name, statement, "proven",
+                           sketch=dproof.sketch, note=note,
+                           condition=dproof.quantifier, route="derive",
+                           meta=_provenance_meta(dproof))
+            _spawn_float_companion(ctx, proven, fn, facts,
+                                   _bound_callables(cj), assumption or [])
+            return proven
+        if dproof is not None and dproof.status == "disproven":
+            falsified = Probe(cj.name, statement, "falsified",
+                              route="derive", sketch=dproof.sketch,
+                              counterexample=dproof.counterexample,
+                              note=note, meta=_provenance_meta(dproof))
+            return _corroboration_gate(falsified, dproof, cj, fn, facts,
+                                       cj_domain, _bound_callables(cj),
+                                       assum=assumption or [])
+        if dproof is not None and dproof.sketch:
+            definitions_hint = dproof.sketch
     # a claim over vectors or matrices (an `R^n`/`R^(m,n)` domain, a
     # Vec/Mat or structure marker, a vector, matrix or table runtime
     # type) that uses one as a value is an identity of linear algebra,
@@ -5416,6 +5458,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                     f"{'is a vector or matrix' if len(array_uses) == 1 else 'are vectors or matrices'}"
                     f", which the scalar derive route does not read, and "
                     f"the matrix algebra did not close the claim")
+        if definitions_hint is not None:
+            why = definitions_hint
         unknown = Probe(
             cj.name, statement, "unknown", route="derive",
             sketch=(mproof.sketch if mproof is not None else None),
@@ -5541,6 +5585,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                           extensive=extensive, funcs=bound_funcs or None,
                           assumption=assumption,
                           assume_defined=ctx.assume_defined)
+        if definitions_hint is not None \
+                and proof.status in ("undecided", "unliftable"):
+            from .symbolic._proof_support import ProofResult
+            proof = ProofResult(proof.status, sketch=definitions_hint,
+                                meta=dict(proof.meta))
     def _brute_force_fallback():
         """A claim quantified over a FINITE declared domain needs no
         symbolic argument: visiting every point the domain admits
