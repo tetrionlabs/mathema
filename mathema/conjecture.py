@@ -523,7 +523,10 @@ def _resolve_func_ref(ref: str, *, root: str = "."):
     key (`ts:src/ema.ts#ema`) resolves through its registered target
     resolver instead, so a store sweep reaches foreign implementations
     the same way it reaches Python ones. `None` if nothing importable
-    or the name isn't found there."""
+    or the name isn't found there. A method or attribute of a runtime
+    type's class (`pandas.Series.std`, `numpy.ndarray.T`) resolves to
+    its receiver form, a function of the receiver `a`
+    (`runtime_types._receivers.receiver_form`)."""
     from .targets import _prefix_walk
 
     if ":" in ref:
@@ -539,6 +542,10 @@ def _resolve_func_ref(ref: str, *, root: str = "."):
         return None
     if "." not in ref:
         return None
+    from .runtime_types._receivers import receiver_form
+    receiver = receiver_form(ref)
+    if receiver is not None:
+        return receiver
     walked = _prefix_walk(ref, root)
     if walked is None:
         return None

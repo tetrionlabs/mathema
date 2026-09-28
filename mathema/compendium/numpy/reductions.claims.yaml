@@ -1,5 +1,9 @@
 # Claims about numpy's reductions. Over an empty array each returns nan
-# with a RuntimeWarning, which the `is_defined` rows exclude.
+# with a RuntimeWarning, which the `is_defined` rows exclude. A
+# `definition` row states what the function computes in the grammar's
+# own words, over inputs with nothing missing (a missing element, nan,
+# propagates to the result); `definition@ddof=1` states the call that
+# passes ddof=1.
 compendium: numpy
 versions: ">=1.24,<3"
 
@@ -8,18 +12,32 @@ numpy.mean:
     - name: is_defined
       statement: "dim(a) >= 1"
       note: "Arithmetic mean; the mean of an empty array is nan with a RuntimeWarning, never raises."
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= mean(a)"
 
 numpy.std:
   claims:
     - name: is_defined
       statement: "dim(a) >= 1"
       note: "Standard deviation; the standard deviation of an empty array is nan with a RuntimeWarning."
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= std(a, ddof=0)"
+      note: "The population standard deviation: ddof defaults to 0."
+    - name: definition@ddof=1
+      statement: "let ddof be 1, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      note: "The sample standard deviation; one element with ddof=1 gives nan."
 
 numpy.var:
   claims:
     - name: is_defined
       statement: "dim(a) >= 1"
       note: "Variance; the variance of an empty array is nan with a RuntimeWarning."
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= var(a, ddof=0)"
+      note: "The population variance: ddof defaults to 0."
+    - name: definition@ddof=1
+      statement: "let ddof be 1, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
+      note: "The sample variance; one element with ddof=1 gives nan."
 
 numpy.average:
   claims:
