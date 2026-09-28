@@ -1156,7 +1156,10 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                                sketch=f"{n} is a matrix or a table, outside "
                                       f"the sequence lowering")
         if r == 1:
-            bound = cj_domain.get(table or n)
+            # a column's own binding (`for df.w in [0, 1]^n`) before
+            # the table's (`for df in [0, 1]^n`)
+            bound = cj_domain.get(n) if n in cj_domain \
+                else cj_domain.get(table or n)
             dims = getattr(bound, "dims", ()) or ()
             dim = str(dims[0]) if dims else (table or n)
             length = lengths.setdefault(dim, sympy.Symbol(

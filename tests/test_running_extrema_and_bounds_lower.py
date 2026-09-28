@@ -151,6 +151,9 @@ def test_a_table_column_reads_as_a_vector_on_derive():
 @pytest.mark.needs_full_proof_budget
 def test_elementwise_division_of_two_columns():
     _proven(ratio_total, "for df in [1, 2]^n, f(df) ~= sum(df.w / df.r)")
+    # a column's own binding bounds that column
+    _proven(ratio_total, "for df.w in R^n, df.r in [1, 2]^n, "
+                         "f(df) ~= sum(df.w / df.r)")
     _not_proven_and_false(ratio_total,
                           "for df in [1, 2]^n, f(df) ~= sum(df.r / df.w)")
 
