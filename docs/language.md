@@ -124,7 +124,7 @@ says the value on the left is never found in the value on the right,
 Python's own containment, which is how a claim states that an escaper
 never emits a character. Both are decided by execution: a member is a
 member or it is not, a missing value is a member of nothing unless the
-right-hand side admits it in so many words, and the derive route
+right-hand side names it explicitly, and the derive route
 declines with the reason.
 
 ```
