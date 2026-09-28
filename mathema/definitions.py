@@ -76,6 +76,7 @@ class Row:
     rhs: ast.expr
     pins: dict
     premises: list
+    ranks: dict = field(default_factory=dict)
 
     def use(self) -> dict:
         return {"key": self.key, "row": self.name,
@@ -234,7 +235,9 @@ def _parse_row(key: str, row: dict) -> "tuple | None":
     premises = _parse_premises(cj.assuming or "")
     if premises is None:
         return None
-    return params, rhs, pins, premises
+    ranks = {p: len(getattr((cj.domain or {}).get(p), "dims", ()) or ())
+             for p in params}
+    return params, rhs, pins, premises, ranks
 
 
 class RowBook:
@@ -288,13 +291,14 @@ class RowBook:
                 why = why or (f"{row.get('name')}: its statement is not "
                               f"f(...) == <expression>")
                 continue
-            params, rhs, pins, premises = parsed
+            params, rhs, pins, premises, ranks = parsed
             version = _installed_version(info["compendium"]) or "*"
             out.append(Row(
                 key=key, name=str(row["name"]),
                 statement=str(row.get("statement")), source=info["source"],
                 status=status, library=f"{info['compendium']} {version}",
-                params=params, rhs=rhs, pins=pins, premises=premises))
+                params=params, rhs=rhs, pins=pins, premises=premises,
+                ranks=ranks))
         self._rows[key] = out
         if why and not out:
             self._withheld[key] = why
@@ -819,6 +823,14 @@ def _matrix_route(cj, facts, cj_domain, shapes, assumption, structures, fn,
     from .symbolic import try_prove_matrix
     from .symbolic._proof_support import ProofResult
     from .types import structures_from_signature
+    vector_rows = [r for r in inlined.uses
+                   if any(k == 1 for k in r.ranks.values())]
+    if vector_rows:
+        row = vector_rows[0]
+        return ProofResult(
+            "undecided", meta=dict(meta),
+            sketch=f"the definition row {row.key} {row.name} is stated over "
+                   f"vectors, and this claim is about matrices")
     for row, premise in row_premises:
         if not _stated(premise, assumption):
             text = _premise_text(*premise)
@@ -956,6 +968,14 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             sketch=f"the bound function(s) {', '.join(other)} are not law "
                    f"transforms the sequence lowering reads (scale_seq, "
                    f"shift_seq, reverse_seq)")
+    matrix_rows = [r for r in inlined.uses
+                   if any(k == 2 for k in r.ranks.values())]
+    if matrix_rows:
+        row = matrix_rows[0]
+        return ProofResult(
+            "unliftable", meta=meta,
+            sketch=f"the definition row {row.key} {row.name} is stated over "
+                   f"matrices, outside the sequence lowering")
     ranks = linalg.array_ranks(cj_domain, shapes, facts.param_kinds)
     names = _names_in(trees)
     seqs: dict = {}
