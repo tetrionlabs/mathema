@@ -6284,6 +6284,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                  f"{unresolved}, define it in f's module or "
                                  f"the calling scope, or bind it explicitly "
                                  f"with funcs=")
+    from ._exact_premises import premise_functions
+    from ._linalg_eval import FUNCTIONS as _float_words
+    premise_words = premise_functions(_float_words)
     assum_eval = None
     if ctx.assumption is not None:
         compiled: list = []
@@ -6732,9 +6735,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             for a_name in a_aux:
                 if a_name not in env:
                     env[a_name] = rng.uniform(-5, 5)
+            premise_env = {**env, **premise_words}
             try:
-                if not all(a_op(eval(a_l, {"__builtins__": {}}, env),
-                                eval(a_r, {"__builtins__": {}}, env))
+                if not all(a_op(eval(a_l, {"__builtins__": {}}, premise_env),
+                                eval(a_r, {"__builtins__": {}}, premise_env))
                            for a_l, a_r, a_op in compiled):
                     continue
             except Exception:
