@@ -22,6 +22,7 @@ comparisons handled by the relation, and a fixed set of safe calls can run.
 """
 from __future__ import annotations
 
+from ._signatures import module_scope
 import ast
 import cmath as _cmath
 import inspect
@@ -2478,12 +2479,12 @@ def _bind_scope_functions(cj, fn) -> str:
                if n not in wanted]
     if not wanted:
         return ""
-    module_scope = getattr(fn, "__globals__", None) or {}
+    fn_scope = module_scope(fn)
     caller_scope: dict | None = None
     bound = []
     for name in wanted:
         target, where = None, None
-        v = module_scope.get(name)
+        v = fn_scope.get(name)
         if inspect.isfunction(v):
             target, where = v, "f's module"
         else:

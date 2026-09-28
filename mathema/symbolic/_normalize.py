@@ -28,6 +28,7 @@ every structural fact keep reading the code as written.
 """
 from __future__ import annotations
 
+from .._signatures import module_scope
 import ast
 import copy
 
@@ -400,7 +401,7 @@ def _inline_numeric_globals(tree, fn, facts) -> dict:
         params, and callables are untouched, and anything non-numeric
         stays exactly as written.
     """
-    g = getattr(fn, "__globals__", {}) or {}
+    g = module_scope(fn)
     candidates = {}
     for name in getattr(facts, "global_vars", []) or []:
         value = g.get(name)

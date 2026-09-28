@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The signature of a callable, numpy ufuncs included.
+"""The signature of a callable, numpy ufuncs included, and the module
+scope its names resolve in.
 
 numpy releases before 2.3 give a ufunc no `inspect.signature`; the
 signature numpy documents for every ufunc (and reports from 2.3 on) is
@@ -70,3 +71,18 @@ def callable_signature(fn) -> inspect.Signature:
         if _is_ufunc(fn):
             return ufunc_signature(fn)
         raise
+
+
+def module_scope(fn) -> dict:
+    """Intent:
+        The globals of the module that defines `fn`: a function under a
+        decorator (anything setting `__wrapped__`, as `functools.wraps`
+        does) is followed to the function it wraps, whose source is the
+        one read, so its names resolve where it was written rather than
+        in the decorator's module. Empty for a callable with no globals.
+    """
+    try:
+        inner = inspect.unwrap(fn)
+    except ValueError:
+        inner = fn
+    return getattr(inner, "__globals__", None) or getattr(fn, "__globals__", None) or {}

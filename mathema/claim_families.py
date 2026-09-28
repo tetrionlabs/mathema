@@ -24,6 +24,7 @@ this module registering itself as an import side effect.
 """
 from __future__ import annotations
 
+from ._signatures import module_scope
 import math
 import random
 
@@ -905,7 +906,7 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if not facts.params:
         return None
     target = facts.params[0]
-    module_dict = getattr(fn, "__globals__", {}) or {}
+    module_dict = module_scope(fn)
 
     def data_globals():
         out = {}
