@@ -1634,12 +1634,15 @@ def _unreadable_side(side: str) -> str | None:
         if isinstance(node, ast.Call) and node.keywords:
             if any(k.arg is None for k in node.keywords):
                 return "argument unpacking (`**`) is not claim syntax"
-            if not (isinstance(node.func, ast.Name)
-                    and node.func.id in linalg.REDUCTION_CALLS
-                    and [k.arg for k in node.keywords] == ["axis"]):
+            allowed = linalg.CALL_KEYWORDS.get(
+                node.func.id if isinstance(node.func, ast.Name) else "", ())
+            words = [k.arg for k in node.keywords]
+            if not words or any(w not in allowed for w in words) \
+                    or len(set(words)) != len(words):
                 return ("keyword arguments are not claim syntax: pass each "
-                        "argument by position (the one keyword is `axis=` "
-                        "on sum, mean, prod, min and max)")
+                        "argument by position (the keywords are `axis=` "
+                        "on sum, mean, prod, min, max, std, var, count, "
+                        "cumsum and cumprod, and `ddof=` on std and var)")
         if isinstance(node, ast.Constant) and (
                 isinstance(node.value, bytes) or node.value is Ellipsis):
             return f"the literal {ast.unparse(node)} is not claim syntax"

@@ -235,11 +235,22 @@ SCALAR_CALLS = frozenset({"det", "trace", "norm", "dot", "rank", "cond",
 MATRIX_CALLS = frozenset({"inv", "transpose", "matrix_power", "pinv",
                           "kron", "outer", "I"})
 #: reductions: a number without `axis=`, one rank lower with it
-REDUCTION_CALLS = frozenset({"sum", "mean", "prod", "min", "max"})
+REDUCTION_CALLS = frozenset({"sum", "mean", "prod", "min", "max", "std",
+                             "var", "count"})
+#: running reductions: a vector without `axis=` (a matrix is read in
+#: row order, as numpy does), the argument's own rank with it
+CUMULATIVE_CALLS = frozenset({"cumsum", "cumprod"})
 #: calls that act element by element, keeping their argument's rank
 ELEMENTWISE_CALLS = frozenset({"abs", "Abs"})
+#: the keywords each call of the vocabulary accepts; every other call
+#: takes its arguments by position
+CALL_KEYWORDS = {
+    **{name: ("axis",) for name in REDUCTION_CALLS | CUMULATIVE_CALLS},
+    "std": ("axis", "ddof"), "var": ("axis", "ddof"),
+}
 #: the calls of the linear-algebra vocabulary the probe evaluates
 VOCABULARY = (SCALAR_CALLS | MATRIX_CALLS | REDUCTION_CALLS
+              | CUMULATIVE_CALLS
               | frozenset({"eigvals", "eigvalsh", "solve", "diag"})) \
     - frozenset({"len", "dim", "min", "max", "sum"})
 
@@ -415,6 +426,10 @@ def static_rank(node, ranks: dict):
             if args[0] is None:
                 return None
             return max(0, args[0] - 1) if axis else 0
+        if name in CUMULATIVE_CALLS and len(node.args) == 1:
+            if args[0] is None:
+                return None
+            return args[0] if axis else 1
         if name in ELEMENTWISE_CALLS and args:
             return args[0]
         if name in ("eigvals", "eigvalsh"):

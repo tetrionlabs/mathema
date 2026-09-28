@@ -330,6 +330,49 @@ def _prod(*args, axis=None):
     return math.prod(args[0] if len(args) == 1 else args)
 
 
+def _values(args):
+    """The one vector a reduction reads: its single argument as an
+    array, or its several numeric arguments gathered into one."""
+    np = _np()
+    if len(args) == 1:
+        a = args[0]
+        return a if is_array(a) else np.asarray(as_array(a), dtype=float)
+    return np.asarray(args, dtype=float)
+
+
+def _moment(numpy_name):
+    """`std` or `var` as numpy computes them: `ddof` is subtracted
+    from the number of positions in the divisor (0 by default, the
+    population statistic; 1 for the sample statistic), and `axis`
+    reduces a matrix along one axis."""
+    def moment(*args, ddof=0, axis=None):
+        out = getattr(_np(), numpy_name)(_values(args), ddof=ddof,
+                                         axis=axis)
+        return out.item() if getattr(out, "ndim", 1) == 0 else out
+    moment.__name__ = numpy_name
+    return moment
+
+
+def _count(*args, axis=None):
+    """The number of positions: every element of a vector or matrix,
+    or the positions along `axis` (one count per remaining index)."""
+    a = _values(args)
+    if axis is None:
+        return int(a.size)
+    np = _np()
+    return np.full(np.delete(np.array(a.shape), axis), a.shape[axis],
+                   dtype=float) if a.ndim > 1 else int(a.shape[axis])
+
+
+def _cumulative(numpy_name):
+    """`cumsum` or `cumprod`: the running sums or products, a matrix
+    read in row order without `axis`, along it with one."""
+    def running(*args, axis=None):
+        return getattr(_np(), numpy_name)(_values(args), axis=axis)
+    running.__name__ = numpy_name
+    return running
+
+
 def _matrix(x):
     a = as_array(x) if not is_array(x) else x
     if not is_array(a):
@@ -427,6 +470,8 @@ FUNCTIONS = {
     "min": _reduction(builtins.min, "min"),
     "max": _reduction(builtins.max, "max"),
     "mean": _mean, "prod": _prod,
+    "std": _moment("std"), "var": _moment("var"), "count": _count,
+    "cumsum": _cumulative("cumsum"), "cumprod": _cumulative("cumprod"),
     "det": _det, "inv": _inv, "trace": _trace, "transpose": _transpose,
     "I": _identity, "matrix_power": _matrix_power,
     "dot": _dot, "outer": _outer, "kron": _kron, "diag": _diag,
