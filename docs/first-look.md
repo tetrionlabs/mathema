@@ -183,7 +183,7 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   holds   collapses_probed: f(x, 1.0) = x[-1] (n=160)
   proven  collapses_derived: f(x, 1.0) = x[-1]
            ∀ x ∈ Seq(ℝ)
-  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (n=44)
+  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (n=42)
 ```
 
 Both say the claim is true, but they are not the same kind of true.
@@ -205,7 +205,7 @@ still not liftable, and probe stays the only route for them.
 
 The third row is the proof's float companion, as in step 1. With
 `alpha` fixed at `1.0` the loop only copies elements, nothing overflows,
-and it holds at all 44 points it ran, including elements at float64's maximum.
+and it holds at all 42 points it ran, including elements at float64's maximum.
 
 ## Step 4: keep the record
 
@@ -250,8 +250,8 @@ ema:
     - name: "collapses_derived[float]"
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
-      n: 44
-      note: "the computation of collapses_derived in float64, executed at 44 points (every domain corner, then sampled interior points); unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
+      n: 42
+      note: "the computation of collapses_derived in float64, executed at 42 points (every domain corner, then sampled interior points); unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
       route: "probe"
     - name: "collapses_probed"
       statement: "f(x, 1.0) = x[-1]"
@@ -278,7 +278,7 @@ ema:
       basis: "when L = 1: x[0]; otherwise x[L - 1] and x[L - 1] simplify identically"
     - step: "evidence"
       claim: "f(x, 1.0) = x[-1]"
-      basis: "probed, n=44"
+      basis: "probed, n=42"
     - step: "situating"
       claim: "instantiates: summation, folded-sum"
       basis: "deterministic concept tagging"

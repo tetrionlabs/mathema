@@ -54,3 +54,28 @@ def test_a_finite_set_of_strings_still_runs(mod):
 def test_the_arbitrary_input_family_still_runs(mod):
     (p,) = check_conjectures(mod.label, [claim("is_arbitrary_input_safe(s)")])
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note, p.counterexample)
+
+
+def _callable_row(fn):
+    from mathema.analysis import analyze_source
+    from mathema.probing import probe
+    return next(p for p in probe(fn, analyze_source(fn)) if p.name == "callable")
+
+
+def test_the_hint_offers_a_string_language_when_one_is_installed(mod):
+    from mathema.languages import StringLanguage, register_language, unregister_language
+    register_language("unicode", StringLanguage("unicode", char_ok=lambda c: True, pool="abé"))
+    try:
+        row = _callable_row(mod.label)
+    finally:
+        unregister_language("unicode")
+    assert row.verdict == "skipped"
+    assert "'for s in L[unicode], ...'" in row.note, row.note
+
+
+def test_the_hint_names_a_finite_set_when_no_string_language_is_installed(mod):
+    from mathema.languages import resolves
+    if resolves("unicode"):
+        pytest.skip("a string language is installed")
+    row = _callable_row(mod.label)
+    assert "L[unicode]" not in row.note and 'for s in {"a", "b"}' in row.note, row.note

@@ -93,8 +93,11 @@ def test_dict_param_is_detected_and_synthesised(tmp_path):
     # synthesised as a dict, so summing its values does not crash
     assert _one(mod.total, "total(d) >= -1e9").verdict == "holds"
     # the specific keys the body reads are present in the synthesised dict
-    p = _one(mod.weighted, 'weighted(cfg) == cfg["price"] * cfg["qty"]')
+    (p,) = check_conjectures(mod.weighted, [claim('weighted(cfg) == cfg["price"] * cfg["qty"]',
+                                                  route="probe")])
     assert p.verdict == "holds"
+    # and the derive route proves the same identity over the keys' symbols
+    assert _one(mod.weighted, 'weighted(cfg) == cfg["price"] * cfg["qty"]').verdict == "proven"
 
 
 def test_dict_param_law_falsifies_with_a_dict_witness(tmp_path):
@@ -103,9 +106,12 @@ def test_dict_param_law_falsifies_with_a_dict_witness(tmp_path):
             """Claims non-negativity, but a - b can be negative."""
             return cfg["a"] - cfg["b"]
     ''')
-    pr = _one(mod.diff, "diff(cfg) >= 0")
-    assert pr.verdict == "falsified"
-    assert "'a'" in (pr.counterexample or "") and "'b'" in (pr.counterexample or "")
+    for law in ("diff(cfg) >= 0", "f(cfg) >= 0"):
+        pr = _one(mod.diff, law)
+        assert pr.verdict == "falsified"
+        assert "'a'" in (pr.counterexample or "") and "'b'" in (pr.counterexample or ""), \
+            pr.counterexample
+        assert "KeyError" not in (pr.counterexample or "")
 
 
 def test_dict_return_subscript_still_works(tmp_path):
