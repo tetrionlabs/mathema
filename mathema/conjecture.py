@@ -4713,10 +4713,13 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # channel a Literal[...]/Enum annotation uses, so the stated
     # values are the real False/True objects
     _ANNOTATION_DOMAIN = {"int": "Z"}
+    # only a parameter the claim reads is a coordinate; one it fills
+    # with a literal, or leaves at its default, has nothing to infer
+    read = _names_in_claim(cj)
     annotation_inferred = {
         p: _ANNOTATION_DOMAIN[facts.param_kinds.get(p)]
         for p in facts.params
-        if p not in cj_domain
+        if p not in cj_domain and p in read
         and facts.param_kinds.get(p) in _ANNOTATION_DOMAIN}
     if annotation_inferred:
         cj_domain = {**annotation_inferred, **cj_domain}
@@ -4734,7 +4737,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
     literal_inferred = {
         p: frozenset(vals)
         for p, vals in getattr(facts, "finite_domains", {}).items()
-        if p not in cj_domain}
+        if p not in cj_domain and p in read}
     if literal_inferred:
         cj_domain = {**literal_inferred, **cj_domain}
         note = (f"{note}; inferred "
@@ -4749,7 +4752,9 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # inference above: only a parameter no binding names, rendered
     # explicitly with the adaptor that answered; with no adaptor
     # installed nothing is inferred
-    adaptor_inferred = _adaptor_inferred_domains(fn, facts, cj_domain)
+    adaptor_inferred = {p: v for p, v in
+                        _adaptor_inferred_domains(fn, facts, cj_domain).items()
+                        if p in read}
     if adaptor_inferred:
         from .domain import render_domain
         cj_domain = {**{p: b for p, (b, _, _) in adaptor_inferred.items()},

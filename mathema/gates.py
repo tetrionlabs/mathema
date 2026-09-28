@@ -135,7 +135,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # `ε`/`eps`/`epsilon` in a law is the claim's tolerance, a fixed
     # value, never a free variable to sample
     eps_names = (aux_l | aux_r) & {"eps", "epsilon", "ε"}
-    names = [p for p in kinds if p not in bound_indices] + sorted(
+    # a parameter the claim never reads (a literal fills it, or its
+    # default does) is no coordinate of the point
+    from .conjecture import _names_in_claim
+    read = _names_in_claim(cj)
+    names = [p for p in kinds if p not in bound_indices and p in read] + sorted(
         (aux_l | aux_r) - MATH_CONSTANTS.keys() - eps_names)
     # raises from the function under test (or a bound function) are
     # tagged so the evaluators below can tell a genuine in-domain raise,
