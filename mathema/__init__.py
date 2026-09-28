@@ -728,7 +728,7 @@ def write_spec(fn, claims: list | None = None, root: str = ".",
     merged = merge_entries(dict(declared), {"claims": explicit},
                            on_conflict="silent")
     rec.spec_path = record(rec, key=key, root=root, claims=merged["claims"],
-                           grammar=declared.get("grammar", "mathema"))
+                           grammar=declared.get("grammar", "mathema"), fn=fn)
     return rec
 
 

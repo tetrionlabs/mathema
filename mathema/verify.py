@@ -393,7 +393,7 @@ def _drop_retired_declared(key: str, current_claims: list,
         stmt = row.get("statement") or row.get("law") or ""
         # a statement-less retired row (an older record's shape) cannot
         # be law-compared and retires its name outright
-        matchers.append((row["name"], _same_law_as(stmt) if stmt else None))
+        matchers.append((row["name"], _same_law_as(stmt, key) if stmt else None))
     if not matchers:
         return current_claims, []
     kept: list = []
@@ -629,6 +629,13 @@ def resolve_claims_file(target: str, root: str = ".") -> "str | None":
     return None
 
 
+def _defines_only(entry) -> bool:
+    """Whether a claims-file entry only states its runtime's definitions
+    (`defines:`) and no claim: a key with nothing to adjudicate."""
+    return (isinstance(entry, dict) and bool(entry.get("defines"))
+            and not entry.get("claims"))
+
+
 def claims_file_entries(path: str, root: str,
                         library_claims: dict) -> "tuple[dict, bool, list]":
     """Intent:
@@ -657,7 +664,7 @@ def claims_file_entries(path: str, root: str,
     entries: dict = {}
     if library is None:
         for key, entry in data.items():
-            if isinstance(entry, dict):
+            if isinstance(entry, dict) and not _defines_only(entry):
                 entry = dict(entry)
                 if file_grammar:
                     entry.setdefault("grammar", file_grammar)
@@ -679,7 +686,7 @@ def claims_file_entries(path: str, root: str,
     stamp_library_rows(data, tag)
     mark_row_versions(data, library, aliases)
     for key, entry in data.items():
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or _defines_only(entry):
             continue
         info = library_claims.get(key)
         entries[key] = ({"entry": info["entry"], "source": info["source"]}
@@ -854,6 +861,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        write_yaml)
 
     out = VerifyResult()
+    # claims whose record differs from what is written only because the
+    # canonical text moved in one release, reported once for the run
+    release_moved: list = []
     from .spec import foreign_grammar_warnings
     out.lines.extend(foreign_grammar_warnings(root))
     from .compendium import own_package_compendium_files
@@ -868,7 +878,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     policy = load_policy(root)
     locks = load_locks(root)
     verified = load_verified(root)
-    declared = load_declared(root)
+    declared = {key: info for key, info in load_declared(root).items()
+                if not _defines_only((info or {}).get("entry"))}
     from .spec import unreadable_verified
     broken = unreadable_verified(root)
     # the library functions this project calls or rests a premise on
@@ -1085,6 +1096,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             from .sync import apply_verified_wins, claim_conflicts
             _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
             for conflict in _conflicts:
+                if conflict.get("kind") == "release-move":
+                    release_moved.append((key, conflict["claim"]))
+                    continue
                 if conflict.get("kind") == "supersession":
                     supersessions.setdefault(key, {})[conflict["claim"]] = \
                         conflict["authored"]
@@ -1131,7 +1145,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             entry_grammar = merged_entry.get("grammar", GRAMMAR)
             out.grammars_seen.update(c.get("grammar", entry_grammar)
                                      for c in current_claims)
-            current_fp = claims_fingerprint(current_claims, entry_grammar)
+            current_fp = claims_fingerprint(current_claims, entry_grammar, fn)
         except InvalidConjecture as e:
             if _record_has_unreadable_claim(verified_entry):
                 msg = (f"{key}: a claim in this function's verified "
@@ -1330,7 +1344,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         written = write_record(rec, key=key, root=root,
                                claims=current_claims,
                                declared_intent=merged_entry.get("intent"),
-                               grammar=entry_grammar)
+                               grammar=entry_grammar, fn=fn)
         _carry_recorded_verdicts(rec.probes, written, key)
         out.adjudicated += 1
         if key in library:
@@ -1476,6 +1490,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                            grammar_changes.get(key, {}))
                        for c in claims_for_gate],
         })
+    if release_moved:
+        from .sync import IDENTITY_RELEASE
+        out.lines.append(
+            f"note: fingerprints move once in {IDENTITY_RELEASE}: the rendered "
+            f"domain now states what it admits, so {len(release_moved)} "
+            f"claim{'s' if len(release_moved) != 1 else ''} recorded by an "
+            f"earlier release {'are' if len(release_moved) != 1 else 'is'} "
+            f"re-recorded under the new text; nothing the author wrote "
+            f"changed")
     return out
 
 

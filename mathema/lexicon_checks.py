@@ -224,15 +224,20 @@ def check_verified_record(src: LexiconSource, *, skip=()) -> list:
 
 def check_missing_policy(src: LexiconSource) -> list:
     from .conjecture import claim
+    from .domain import stated
     from .spec import canonical_claim_text, render_claim_text
     out = []
     for key, law in src.rows.items():
         cj = claim(law)
         if not cj.domain or all(isinstance(b, frozenset) for b in cj.domain.values()):
             continue
+        # a binding that does not state its missing-value policy renders
+        # the default it resolves to; a stated one renders what it lists
+        unstated = any(not stated(b) for p, b in cj.domain.items()
+                       if p.isidentifier())
         for unicode_mode in (True, False):
             shown = render_claim_text(cj, unicode=unicode_mode)
-            if "∅" not in shown and "missing" not in shown:
+            if unstated and "None" not in shown:
                 out.append(f"{key}: the rendered domain states no missing policy: {shown}")
             if canonical_claim_text(claim(shown)) != canonical_claim_text(cj):
                 out.append(f"{key}: the rendered missing policy reparses to another claim")

@@ -414,7 +414,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
         merged_domain = {**domain_from_signature(fn), **declared_domain, **explicit}
         sig = callable_signature(fn)
 
-        def _check_scalar(value, bounds) -> bool:
+        def _check_scalar(value, bounds, slot: bool = False) -> bool:
             """`True` when `value` is a candidate this `bounds` shape
             could ever be violated by, an `Interval`/`"Z"`/`"N"`/a
             `Domain` with no discrete-set piece can only ever be
@@ -431,7 +431,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             exempt a missing value from a domain that explicitly
             excludes it."""
             if is_missing(value):
-                return domain_contains(value, bounds)
+                return domain_contains(value, bounds, slot=slot)
             if getattr(bounds, "base_type", None) == "L":
                 # a language domain judges every value, a string first
                 # of all; nothing is exempt from it
@@ -478,7 +478,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             if isinstance(value, (list, tuple)) or (
                     hasattr(value, "__iter__") and not isinstance(value, (str, bytes, dict))):
                 for i, el in enumerate(value):
-                    if not _check_scalar(el, bounds):
+                    if not _check_scalar(el, bounds, slot=True):
                         return (f"={value!r} has element {i} ({el!r}) outside its declared "
                                 f"domain {render_domain(bounds, show_missing=True)}")
                 return None

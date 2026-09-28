@@ -1233,7 +1233,7 @@ def _claim(law: str, name: str | None, source: str, route: str,
             f"`#` has no meaning in a claim and would silently cut off "
             f"everything after it; remove it (a comment belongs outside "
             f"the claim text): {law.strip()!r}")
-    if ":=" in blank_strings(law):
+    if ":=" in blank_strings(law).replace("=:=", "   ").replace("≡", " "):
         raise InvalidConjecture(
             f"`:=` states a definition, which a claim never holds: a "
             f"runtime's missing values are stated under its key's "
@@ -2739,8 +2739,11 @@ def _shape_constraints(assumption, resolver):
 def _single_point(bound) -> "float | None":
     """The one value a bound admits when it is a single point (`let c
     be 2.0` reads as the interval [2.0, 2.0]), else None."""
-    pieces = getattr(bound, "pieces", None)
-    if pieces and len(pieces) == 1:
+    from .domain import _sentinel_piece
+    pieces = [p for p in getattr(bound, "pieces", None) or ()
+              if not _sentinel_piece(p)]
+    if len(pieces) == 1 and isinstance(pieces[0], tuple) \
+            and not isinstance(pieces[0], frozenset):
         lo, hi = pieces[0]
         if isinstance(lo, (int, float)) and lo == hi:
             return lo
@@ -3304,6 +3307,12 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # structured fields beside it are the same claim for machines.
         from .grammar import domain_bound_to_json
         from .spec import canonical_claim_text
+        if cj.domain:
+            # the record states each binding completed from the
+            # function's annotations, whichever path produced the row
+            completed = _complete_missing(cj, fn)[0]
+            if completed:
+                cj = _dc_replace(cj, domain=completed)
         if canonical:
             # the renderer is total over everything claim() accepts, so
             # a failure here is a renderer bug worth a loud crash, never
@@ -3692,7 +3701,9 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # generic stage applies
             out.append(stamp(_adjudicate_equivalence(ctx, fn, facts)))
             continue
+        from .domain import RECORD_DOMAIN
         from .probing import LanguageDrawFailed
+        record_token = RECORD_DOMAIN.set(ctx.record_domain)
         try:
             if call_pins:
                 # the derive route reads the call the claim writes, never a
@@ -3731,6 +3742,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 cj.name, statement, "skipped", route=None,
                 note=f"{ctx.note}; {e}",
                 meta={"mathema.probe_gap": "input-synthesis"})))
+        finally:
+            RECORD_DOMAIN.reset(record_token)
     out.sort(key=lambda p: _emit_position(p, conjectures, declared_order))
     return out
 

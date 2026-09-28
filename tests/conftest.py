@@ -79,7 +79,11 @@ def _library_claims_isolated():
     computation = {k: list(v) for k, v in compendium._COMPUTATION.items()}
     generators = dict(hazards._GENERATORS)
     installed = dict(compendium._INSTALLED)
+    from mathema.runtime_types import _missing
+    definitions = dict(_missing._DEFINITIONS)
     yield
+    _missing._DEFINITIONS.clear()
+    _missing._DEFINITIONS.update(definitions)
     _partiality._PARTIALITY_LEMMAS.clear()
     _partiality._PARTIALITY_LEMMAS.update(lemmas)
     compendium._COMPUTATION.clear()

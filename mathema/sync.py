@@ -525,7 +525,8 @@ def sync(targets: list, root: str = ".",
         v_entry = (verified_store.get(key) or {}).get("entry")
         report.conflicts.extend(
             {"key": key, **c}
-            for c in claim_conflicts(fn, file_entry, v_entry))
+            for c in claim_conflicts(fn, file_entry, v_entry)
+            if c.get("kind") != "release-move")
         entry = materialize_entry(fn, key, root)
         report.materialized.append(key)
         v_entry = (verified_store.get(key) or {}).get("entry")

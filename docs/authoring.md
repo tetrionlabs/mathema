@@ -201,49 +201,63 @@ for n in Z, ...                                # bare, unbounded, still a stated
 
 ### Missing values
 
-A sequence-typed parameter (a `list`/array/Series, not a scalar) can
-contain a missing value, `None`, NaN, or another library's own null
-sentinel. Whether that's allowed is governed by one rule, applied the
-same way regardless of which library produced the vector: **a missing
-value is allowed unless the domain excludes it with `\ {∅}`.** Stating a
-type does not change this.
+A missing value is one of two kinds. **Absence**, written `None`, is the
+object itself not being there: the parameter, the whole vector, a field
+of a record. A **hole**, written `missing` (`∅` in the unicode form), is
+one slot with no computable content: a NaN in a float, a `null` or `nan`
+element of a list, a `pd.NA` in a Series. `nan`, `NA`, `null` and `NaT`
+each name one member of the hole class, and a runtime's definition rows
+(see [Claims transfer](claims-transfer.md#definitions)) can add more.
 
-```
-for x in [0, 100], ...              # missing allowed
-for x in [0, 100] ⊂ Z, ...          # missing allowed
-for x in [0, 100] \ {∅}, ...        # missing excluded
-for x in [0, 100] ⊂ Z \ {∅}, ...    # missing excluded
-```
+A domain says which kinds it admits. A type clause states the whole
+policy, so `[0, 1] : float` admits neither, `[0, 1] : float|None` admits
+absence, `[0, 1] : float|missing` a hole, and `[0, 1] : float|nan` only
+the NaN member; `\ {missing}` and `\ {None}` exclude a kind. A finite set
+is exactly its members: `{6, 28, 496}` admits nothing missing and
+`{0.25, None}` admits 0.25 and absence. Inside a space the slot's holes
+sit in brackets before the power, `([0, 1] | {missing})^n`.
 
-The missing-value sentinel is `∅`, or the ASCII spellings
-`missing`/`NA`/`nan`. Writing `∪ {∅}` (or `∪ {missing}`) states the
-default explicitly and changes nothing.
+A binding without a type clause takes its policy from the parameter's
+annotation: a `float` slot may hold its NaN hole, an `int`, `bool` or
+`str` holds none, `Optional[...]` may be absent, a `list` element may be
+`null` or `nan`, and a parameter with no annotation admits both. The
+record says how the class was resolved, and a written clause wins over
+the annotation, the note saying whether it widens or narrows it:
 
-Detection is dependency-free: `None`, a Python/numpy/pandas float NaN
-(all ordinary IEEE-754 under the hood, caught by one self-inequality
-check with no import of any of them), and a small, extensible set of
-other known missing-sentinel type names (pandas' `pd.NA`/`pd.NaT`,
-neither of which is NaN-like), never a hard dependency on any one
-data-science library.
+<!-- example: missing-default run -->
+```python
+import math
+import mathema
 
-Input stays terse, nothing above is required beyond an ordinary
-interval, but every place mathema *renders* a domain back (a proof
-sketch's `∀ x ∈ ...` clause, `enforce_domain()`'s own violation message)
-always states the resolved missing-value policy explicitly, via the same
-`∪ {∅}` / `\ {∅}` notation, never left for a reader to infer from what's
-absent:
+def root(x: float) -> float:
+    return math.sqrt(x)
 
-```
-∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}     # from [0, 100]: missing allowed
-∀ x ∈ [0, 100] ⊂ ℤ ∪ {∅}         # from [0, 100] ⊂ Z: missing allowed
-∀ x ∈ [0, 100] ⊂ ℤ \ {∅}         # from [0, 100] ⊂ Z \ {∅}: missing excluded
+row = mathema.check(root, claims=["for x in [0, 1], f(x) >= 0"]).probes[0]
+print(row.statement)
+print(row.note)
 ```
 
-`enforce_domain()` (and, in `strict=True` probing, the `domain_enforced`
-prober) checks a sequence argument element by element against its
-declared domain, including this missing-value policy, an out-of-bounds
-or unexpectedly-missing element is rejected the same way a scalar
-argument outside its own domain already is.
+<!-- example: missing-default output -->
+```text
+for x in [0.0, 1.0] : float|missing, f(x) >= 0
+missing for x (float): nan
+```
+
+The canonical text renders what a domain admits and never what it
+excludes, in the order `None`, `missing`, then members, fused onto the
+type in ASCII and written as a union in unicode; every spelling an
+earlier release wrote (`[0.0, 1.0]:float|missing`, `∪ {∅}`, `\ {∅}`)
+still reads, and comes back in this form:
+
+<!-- example: missing-spelling run inline -->
+```python
+from mathema import claim
+from mathema.spec import render_claim_text
+
+render_claim_text(claim("for x in [0, 1] ⊂ ℝ ∪ {None, ∅}, f(x) >= 0"), unicode=False)  # 'for x in [0.0, 1.0] : float|None|missing, f(x) >= 0'
+render_claim_text(claim("for x in [0, 1] : float|None, f(x) >= 0"), unicode=True)  # '∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {None}, f(x) ≥ 0'
+render_claim_text(claim("for xs in [0, 1]^n : float|missing, f(xs) >= 0"), unicode=False)  # 'for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0'
+```
 
 ### Language domains
 

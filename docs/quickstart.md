@@ -95,7 +95,8 @@ random prices and shrug, it lifted the body to a symbolic expression
 and decided the inequality algebraically, so the result covers every
 price in that range rather than the ones a sampler happened to pick.
 The region it proved over is printed back explicitly, including the
-`∪ {∅}` that says a missing value is part of the declared input space.
+`∪ {∅}` that says a float's hole, NaN, is part of the declared input
+space, as the `price: float` annotation implies.
 
 That difference is the whole idea: `holds` is evidence, `proven` is
 proof, and mathema always tells you which one you have. The full
@@ -160,8 +161,9 @@ pricing.discounted:
     form: "d2ab6eef1b84"
   claims:
     - name: "never_raises_price"
-      statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
+      statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "proven"
+      note: "missing for price (float): nan; missing for rate (float): nan"
       sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative"
       condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
       route: "derive"
@@ -170,7 +172,7 @@ pricing.discounted:
         ref: "pricing.discounted:docstring:L1"
         route: "best"
     - name: "never_raises_price[float]"
-      statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
+      statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "holds"
       n: 44
       note: "the computation of never_raises_price in float64, executed at 44 points (every domain corner, then sampled interior points)"

@@ -6,6 +6,8 @@
 # [-] page:line               marked as an illustration, not a run
 
 [x] docs/authoring.md:raises-guard               run verdicts
+[x] docs/authoring.md:missing-default            run output
+[x] docs/authoring.md:missing-spelling           run
 [x] docs/authoring.md:write-spec                 run repl
 [x] docs/case-studies.md:parity                  verdicts
 [x] docs/case-studies.md:delta-lower             verdicts
@@ -84,7 +86,7 @@
 [-] docs/runtime-types.md:105
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
-[ ] docs/symbology.md:127
+[ ] docs/symbology.md:129
 [-] docs/three-layers.md:36
 [x] docs/tutorial.md:loop                        file run file run output file run output run output run output run output run output
 [x] README.md:parity                             file run output
@@ -93,4 +95,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 78 examples checked, 4 output fences not yet marked
+# 80 examples checked, 4 output fences not yet marked

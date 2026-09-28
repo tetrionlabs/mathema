@@ -420,7 +420,8 @@ def _quantifier_clause(names: set, order: list, domain: dict,
         bounds = domain.get(n)
         if bounds is None:
             return "ℝ"
-        return render_domain(bounds, ascii_mode=False)
+        from ..domain import RECORD_DOMAIN
+        return render_domain(RECORD_DOMAIN.get().get(n, bounds), ascii_mode=False)
 
     groups: dict = {}
     for n in free:

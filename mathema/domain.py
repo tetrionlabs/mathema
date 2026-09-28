@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from ._render_mode import get_unicode_output
@@ -894,6 +895,11 @@ class MissingDefaults:
 #: without its function: the object may be absent and a slot may hold
 #: the scalar runtime's own hole
 NO_ANNOTATION = MissingDefaults(True, ("nan",), "unannotated", annotated=False)
+#: the bindings of the claim being adjudicated, completed from its
+#: function's annotations: what a proof's quantifier clause renders for
+#: a parameter, so the clause and the record state the same domain
+RECORD_DOMAIN: ContextVar = ContextVar("mathema_record_domain", default={})
+
 #: the defaults of a path binding (`o.qty`): what a field may hold is its
 #: language's business, so a binding that does not state it admits
 #: neither kind
@@ -998,11 +1004,12 @@ def complete(bound, defaults: MissingDefaults):
     absent, holes = admitted(dom, defaults)
     pieces = [p for p in dom.pieces if not _sentinel_piece(p)]
     excluded = set(dom.excluded)
+    implied = stated(dom)   # a stated domain already excludes the rest
     if holes:
         pieces.append(frozenset(holes))
-    elif not any(is_hole_sentinel(v) for v in excluded):
+    elif not implied and not any(is_hole_sentinel(v) for v in excluded):
         excluded.add(MISSING)
-    if not absent:
+    if not absent and not implied:
         excluded.add(ABSENT)
     members: tuple = ()
     if MISSING in holes:
@@ -1910,9 +1917,22 @@ def parse_binding(part: str):
     return None if isinstance(result, str) else result
 
 
-def _sentinel_word_pattern() -> str:
-    words = sorted(sentinel_tokens(), key=len, reverse=True)
-    return "(?:" + "|".join(re.escape(w) for w in words) + ")"
+_PEEL_CACHE: dict = {}
+
+
+def _peel_patterns() -> tuple:
+    """The fused and braced sentinel-clause patterns for the sentinel
+    words in force, compiled once per set of words."""
+    tokens = sentinel_tokens()
+    found = _PEEL_CACHE.get(tokens)
+    if found is None:
+        word = "(?:" + "|".join(re.escape(w) for w in
+                                sorted(tokens, key=len, reverse=True)) + ")"
+        found = (re.compile(rf"\s*\|\s*({word})\s*$"),
+                 re.compile(rf"\s*(?:\||∪)\s*\{{\s*({word}(?:\s*,\s*{word})*)"
+                            rf"\s*\}}\s*$"))
+        _PEEL_CACHE[tokens] = found
+    return found
 
 
 def _peel_trailing_sentinels(text: str) -> tuple:
@@ -1925,10 +1945,7 @@ def _peel_trailing_sentinels(text: str) -> tuple:
         set holding anything else is a piece of the domain, not a
         clause, and stays.
     """
-    word = _sentinel_word_pattern()
-    fused = re.compile(rf"\s*\|\s*({word})\s*$")
-    braced = re.compile(
-        rf"\s*(?:\||∪)\s*\{{\s*({word}(?:\s*,\s*{word})*)\s*\}}\s*$")
+    fused, braced = _peel_patterns()
     words: list = []
     while True:
         m = braced.search(text) or fused.search(text)
@@ -1995,7 +2012,7 @@ def _parse_binding(part: str):
         exactly its members, sentinels included.
     """
     text = _desuperscript(part.strip())
-    if ":=" in text:
+    if ":=" in text.replace("=:=", "   "):
         return (f"{part!r}: `:=` states a definition (a `defines:` row), "
                 f"which a binding never holds; state the type after a "
                 f"colon, `x in [0, 1] : float`")
@@ -2160,6 +2177,10 @@ def _parse_binding(part: str):
 
     absent = ABSENT in unique
     holes = [s for s in unique if s.kind == "missing"]
+    if type_explicit is not None:
+        # a stated type excludes whatever it does not admit, so an
+        # excluded sentinel says nothing more and is not kept
+        excluded = {v for v in excluded if not isinstance(v, _Sentinel)}
     # collapse to the OLD raw shape only when nothing but a plain piece
     # was stated: a stated type, an exclusion, a sentinel or a space
     # power needs the Domain shape to carry it
@@ -2370,13 +2391,13 @@ def canonical_bound(bound) -> tuple:
 
 
 def missing_included(bound) -> bool:
-    """Whether the declared bound admits a missing value of either kind:
-    the absence of the object or a hole. A bound that does not state its
-    policy admits both, the default of a parameter with no annotation;
-    the prover states it in sketches, the renderer prints it, and
-    neither re-detects it from the pieces."""
-    absent, holes = admitted(bound)
-    return absent or bool(holes)
+    """Whether the declared bound leaves a missing value in: it does
+    unless its own text excludes the hole class (`\\ {missing}`), the
+    reading `is_missing_safe` takes of a declared domain. `admitted()`
+    gives the two kinds a domain admits."""
+    if isinstance(bound, Domain):
+        return MISSING not in bound.excluded
+    return True
 
 
 def bound_pin(bound):

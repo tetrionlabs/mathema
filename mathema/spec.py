@@ -467,7 +467,8 @@ def save_spec(ex, path: str) -> str:
 # Keys are dotted names (module.qualname) so many files share one namespace.
 # ---------------------------------------------------------------------------
 
-def claims_fingerprint(raw_claims: list, grammar: str = "mathema") -> str:
+def claims_fingerprint(raw_claims: list, grammar: str = "mathema",
+                       fn=None) -> str:
     """A stable hash of a declared claim set's portable identity. For
     each claim, its `fingerprint_text` (the canonical ascii rendering
     of the parsed claim, advisory `-->` regions stripped) beside the
@@ -491,7 +492,9 @@ def claims_fingerprint(raw_claims: list, grammar: str = "mathema") -> str:
     as unchanged (or as changed).
 
     `mathema verify` uses this alongside the form hash: unchanged code
-    plus an unchanged claim set is what "fresh" actually means."""
+    plus an unchanged claim set is what "fresh" actually means. With
+    `fn`, each claim's bindings are completed from its annotations
+    first, so a claim and its record's canonical text hash alike."""
     import hashlib
 
     def sort_key(c):
@@ -502,7 +505,9 @@ def claims_fingerprint(raw_claims: list, grammar: str = "mathema") -> str:
         cgrammar = c.get("grammar", grammar)
         statement = (c.get("statement") or c.get("law") or "").strip()
         if cgrammar == "mathema":
-            statement = fingerprint_text(_declared_conjecture(c, grammar))
+            from .sync import _completed
+            statement = fingerprint_text(_completed(
+                _declared_conjecture(c, grammar), fn))
         parts.append(f"{c.get('name', '')}|{statement}|{c.get('route', 'best')}"
                      f"|{cgrammar}|{c.get('tolerance')}")
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
@@ -835,7 +840,7 @@ def authored_route(row: dict) -> str:
 
 def record(ex, key: str | None = None, root: str = ".",
           claims: list | None = None, declared_intent: str | None = None,
-          grammar: str = "mathema") -> str:
+          grammar: str = "mathema", fn=None) -> str:
     """Write this explanation into the machine layer of the project store:
     one file per function under .mathema/verified/. `claims` (the declared
     entry's raw claim dicts this record was checked against, if any) gets
@@ -867,7 +872,7 @@ def record(ex, key: str | None = None, root: str = ".",
                 f"restore it from git, and run again")
     spec = to_spec(ex)
     spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [],
-                                                                grammar)
+                                                                grammar, fn)
     _stamp_authored_routes(spec, claims or [])
     if declared_intent and not spec.get("intent"):
         # the declared layer's intent is the skeleton when the
@@ -2488,10 +2493,10 @@ def _render_claim_text(cj, *, unicode: bool | None,
     sep = ", "
     domain_show_missing = show_missing
     if provider is not None:
-        show_missing = getattr(provider, "show_missing", None)
-        if show_missing is not None:
+        provider_says = getattr(provider, "show_missing", None)
+        if provider_says is not None:
             try:
-                result = show_missing(cj)
+                result = provider_says(cj)
             except Exception as exc:
                 report_provider_failure("symbology", exc)
                 result = None

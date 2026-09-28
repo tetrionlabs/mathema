@@ -32,10 +32,10 @@ print(mathema.check(midpoint, claims=[
 <!-- example: finds output -->
 ```text
 mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
-  proven  between_integers: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) ≤ f(a, b) ≤ max(a, b)
-           for a in [0, 100]:int|missing, b in [0, 100]:int|missing
-  holds   between_integers[float]: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) <= f(a, b) <= max(a, b) (n=44)
-  FALSIFY between_reals: for a in [0.0, 100.0]:float|missing, b in [0.0, 100.0]:float|missing, min(a, b) <= f(a, b) <= max(a, b)
+  proven  between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) ≤ f(a, b) ≤ max(a, b)
+           for a in [0, 100] : int, b in [0, 100] : int
+  holds   between_integers[float]: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b) (n=44)
+  FALSIFY between_reals: for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)
            counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
 ```
 
@@ -181,12 +181,12 @@ Among the results, all found with no claims written:
            counterexample ([-8.45341, 4.50714, -6.81355, 9.56619, 9.82492, -3.48464], -3.87612): -8.453411994413011 vs -31170.68185339262
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
            counterexample ([0, 4.3345], -8.15071): -35.32926960780323 vs 39.66377358173939
-  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
+  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|None|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
+  FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|None|missing, c*f(x, alpha) = f(g(x, c), alpha)
            counterexample x=[-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha=-1.79769e+308, c=-5
            [mathematics sound, implementation:numerical-instability]
-  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
+  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|None|missing, c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
 ```
 

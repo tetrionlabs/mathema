@@ -228,7 +228,8 @@ strongest evidence seen: holds`.
 
 A **definition row** is a row named `definition` that states what a
 library function computes, in the grammar's own words, over inputs
-with nothing missing:
+with nothing missing (a named space such as `R^n` states that on its
+own):
 
 ```yaml
 compendium: pandas
@@ -237,9 +238,9 @@ versions: ">=2,<4"
 pandas.Series.std:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
     - name: definition@ddof=0
-      statement: "let ddof be 0, for a in R^n \\ {∅}, f(a) ~= std(a, ddof=0)"
+      statement: "let ddof be 0, for a in R^n, f(a) ~= std(a, ddof=0)"
 ```
 
 A method's key names its class (`pandas.Series.std`,
@@ -284,6 +285,73 @@ record also stamps the rows its body could read through
 (`mathema.definition_rows`), so a row verified, falsified, re-stated or
 moved out of its library's `versions` since makes the record stale, and
 `mathema verify` adjudicates it again.
+
+### Definitions
+
+Which values a runtime holds as missing is stated once, under the
+runtime's own key, as a **definition**: a row of `defines:`, never of
+`claims:`, written `<word> := {<members>}` with the word `missing` (the
+hole class) or `None` (absence). A definition is taken at face value,
+never adjudicated: its record reads `verdict: trusted`, `route: axiom`,
+and `mathema verify` lists it under `definitions (trusted)`, outside the
+verdict counts. A plain set replaces what the key had, and the word
+inside the set extends it; a spelling the runtime type cannot realise
+fails when the file loads. mathema ships the polars and pandas ones:
+
+```yaml
+compendium: polars
+versions: ">=1,<2"
+
+polars.Series:
+  defines:
+    - "missing := {null, nan}"            # this runtime's members
+  claims: []
+```
+
+```yaml
+compendium: pandas
+versions: ">=2,<4"
+
+pandas.Series:
+  defines:
+    - "missing := {missing, NaT}"         # the built-in nan, null, NA, and NaT
+```
+
+The layers apply in order: the runtime type's own built-ins, the
+bundled compendium, a project's compendium files, a project's claims
+files. A claim over a Series then resolves `missing` to those members
+and its record says so (`missing for xs (pandas.Series): nan, null, NA,
+NaT`). A runtime that is not Python states its spellings the same way,
+read by that runtime's adapter:
+
+```yaml
+compendium: rust-std
+runtime: rust
+f64:
+  defines: ["missing := {nan}"]
+Option:
+  defines: ["None := {Option::None}"]
+std::iter::Iterator.sum:
+  claims:
+    - {name: missing, statement: "for a in (R | {nan})^n, assuming any_missing(a), f(a) in {missing}"}
+```
+
+```yaml
+compendium: jdk
+runtime: jvm
+java.lang.Double:
+  defines: ["missing := {NaN}"]
+java.lang.Object:
+  defines: ["None := {null}"]
+java.util.stream.DoubleStream.average:
+  claims:
+    - {name: absent, statement: "for a in {None}, raises(f(a), NullPointerException)"}
+    - {name: missing, statement: "for a in (R | {nan})^n, assuming any_missing(a), f(a) in {missing}"}
+```
+
+A TypeScript compendium writes `None := {undefined, null}` on its object
+key; `null` in `missing := {null}` on an array key is a different set,
+since the position decides which kind it is.
 
 ### Guarding a numpy hazard, and superseding the finding
 

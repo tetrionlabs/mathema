@@ -379,7 +379,10 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         stamp_library_rows(data, tag)
         mark_row_versions(data, library, aliases)
         for key, entry in data.items():
-            if isinstance(entry, dict):
+            if isinstance(entry, dict) and not (entry.get("defines")
+                                                and not entry.get("claims")):
+                # a key that only defines its runtime's missing values
+                # (`defines:`) has no function claims to register
                 out[key] = {"entry": entry, "compendium": library,
                             "versions": versions, "source": where,
                             "bundled": path in shipped}

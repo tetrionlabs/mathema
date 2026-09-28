@@ -310,9 +310,9 @@ for row in proof.meta["mathema.definitions"]:
 <!-- example: rt-proofs output -->
 ```text
 mathema.Record(sharpe) · source, no side effects · form ef276c12c167
-  proven  f_s_returns_c_approx_f_returns: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns)
+  proven  f_s_returns_c_approx_f_returns: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0] : float|None|missing, for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)
            ∀ returns over ℝ with nothing missing, returns of every length from 2
-  holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns) (n=39)
+  holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0] : float|None|missing, for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns) (n=39)
 through the definition rows pandas.Series.mean definition, pandas.Series.std definition, lowered to sums over returns at a symbolic length: the relation holds for every length
 pandas.Series.mean definition bundled mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std definition bundled mathema/compendium/pandas/series.claims.yaml

@@ -13,6 +13,7 @@ import pytest
 from mathema.grammar import (Domain, Interval, InvalidDomain, MISSING,
                              is_missing, domain_contains, normalize,
                              render_domain, split_quantifier)
+from mathema.domain import member
 
 
 def _dom(text: str):
@@ -91,16 +92,29 @@ def test_omitted_type_defaults_to_real_unrestricted():
 
 # ---- missing-value sentinel spellings --------------------------------------
 
-@pytest.mark.parametrize("token", ["∅", "missing", "NA", "nan"])
-def test_missing_sentinel_spellings_all_exclude_the_same_way(token):
+@pytest.mark.parametrize("token", ["∅", "missing"])
+def test_the_class_spellings_exclude_every_hole_and_leave_absence_unstated(token):
     dom = _dom(f"for x in [0, 1] \\ {{{token}}}, True")
     assert MISSING in dom.excluded
     assert not domain_contains(float("nan"), dom)
+    assert domain_contains(None, dom)
+
+
+@pytest.mark.parametrize("token", ["NA", "nan"])
+def test_a_member_spelling_excludes_that_member(token):
+    dom = _dom(f"for x in [0, 1] \\ {{{token}}}, True")
+    assert member(token) in dom.excluded
+    assert MISSING not in dom.excluded
+
+
+def test_none_excludes_absence():
+    dom = _dom("for x in [0, 1] \\ {None}, True")
     assert not domain_contains(None, dom)
+    assert domain_contains(float("nan"), dom)
 
 
-# ---- missing is included by default, regardless of type; only an ---------
-# ---- explicit exclusion clause ever excludes it, for either type ---------
+# ---- a bare interval states no missing-value policy and admits both kinds;
+# ---- a stated type admits only what it lists ------------------------------
 
 def test_corner_a_implicit_type_missing_allowed_by_default():
     dom = _dom("for x in [0, 100], True")
@@ -108,10 +122,11 @@ def test_corner_a_implicit_type_missing_allowed_by_default():
     assert domain_contains(None, dom)
 
 
-def test_corner_b_explicit_type_missing_also_allowed_by_default():
-    # stating a type never excludes missing as a side effect, the
-    # default is the same, wider, unverified-safe one either way.
+def test_corner_b_explicit_type_admits_only_what_it_lists():
     dom = _dom("for x in [0, 100] \\subset Z, True")
+    assert not domain_contains(float("nan"), dom)
+    assert not domain_contains(None, dom)
+    dom = _dom("for x in [0, 100] \\subset Z ∪ {None, ∅}, True")
     assert domain_contains(float("nan"), dom)
     assert domain_contains(None, dom)
 
@@ -152,11 +167,11 @@ def test_rendering_distinguishes_all_four_corners_via_glyph_notation():
     c = _dom("for x in [0, 100] \\ {missing}, True")
     d = _dom("for x in [0, 100] \\subset Z \\ {missing}, True")
     ra, rb, rc, rd = (render_domain(x, show_missing=True) for x in (a, b, c, d))
-    assert ra != rb   # differ by type glyph (ℝ vs ℤ), not missing-status
-    assert ra.endswith("∪ {∅}") and rb.endswith("∪ {∅}")
-    assert rc.endswith("\\ {∅}") and rd.endswith("\\ {∅}")
-    for r in (ra, rb, rc, rd):
-        assert "∅" in r   # glyph notation, never an English phrase
+    assert ra.endswith("⊂ ℝ ∪ {None, ∅}")
+    assert rb == rd == "[0, 100] ⊂ ℤ"   # a stated type admits nothing unlisted
+    assert rc.endswith("⊂ ℝ ∪ {None}")  # the exclusion never renders
+    for r in (ra, rc):
+        assert "None" in r   # glyph notation, never an English phrase
 
 
 def test_render_domain_never_uses_a_natural_language_phrase():

@@ -303,14 +303,14 @@ def total(x: float) -> float:
 
 
 @pytest.mark.parametrize("law, ascii_domain", [
-    (r"for x in [0, 1] \ {missing}, f(x) >= 0", r"[0.0, 1.0] \ {missing}:float"),
+    (r"for x in [0, 1] \ {missing}, f(x) >= 0", r"[0.0, 1.0] : float|None,"),
     (r"for x in [0, 1] \ {3, missing}, f(x) >= 0",
-     r"[0.0, 1.0] \ {3, missing}:float"),
-    (r"for x in [0, 1] \ {3}, f(x) >= 0", r"[0.0, 1.0] \ {3}:float|missing"),
-    (r"for n in [0, 5] subset Z \ {missing}, f(n) >= 0", r"[0, 5] \ {missing}:int"),
-    (r"for x in R \ {missing}, f(x) >= 0", r"R \ {missing}"),
+     r"[0.0, 1.0] \ {3} : float|None,"),
+    (r"for x in [0, 1] \ {3}, f(x) >= 0", r"[0.0, 1.0] \ {3} : float|None|missing,"),
+    (r"for n in [0, 5] subset Z \ {missing}, f(n) >= 0", r"[0, 5] : int,"),
+    (r"for x in R \ {missing}, f(x) >= 0", r"R,"),
 ])
-def test_an_excluded_missing_value_is_stated_and_survives_reparse(
+def test_an_excluded_missing_value_is_left_unstated_and_survives_reparse(
         law, ascii_domain):
     canon = assert_round_trips(law, total)
     assert ascii_domain in canon

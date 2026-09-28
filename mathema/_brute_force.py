@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import itertools
 
-from .domain import finite_members
+from .domain import _as_domain, _set_sentinels, finite_members
 from .symbolic import ProofResult
 
 __all__ = ["BRUTE_FORCE_POINT_BUDGET", "brute_force_proof"]
@@ -72,6 +72,12 @@ def _sweep_grid(params: list, cj_domain: dict, budget: int,
             return None
         grid[p] = members
     return grid
+
+
+def _lists_a_sentinel(cj_domain: dict, names: list) -> bool:
+    """Whether any swept parameter's finite set lists a sentinel."""
+    return any(cj_domain.get(n) is not None
+               and _set_sentinels(_as_domain(cj_domain[n])) for n in names)
 
 
 def _raised_at(fn, facts, point: dict) -> "str | None":
@@ -236,7 +242,11 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                        + ", found by checking every point of a finite domain",
                 counterexample=_fmt_point(point, names),
                 witness=dict(point),
-                meta={"mathema.derive_route": "brute_force"})
+                meta={"mathema.derive_route": "brute_force",
+                      # a value a listed sentinel stands for is only
+                      # reproduced by calling with that same value
+                      **({"mathema.witness_executed": True}
+                         if _lists_a_sentinel(cj_domain, names) else {})})
         checked += 1
     if checked == 0:
         # every point was excluded: nothing was actually verified, and a

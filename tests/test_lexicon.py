@@ -105,20 +105,20 @@ def test_every_spelling_is_a_render_parse_render_fixed_point():
     assert not drifted, "rendered claims drift on reparse:\n" + "\n".join(drifted)
 
 
-def test_a_rendered_domain_always_states_its_missing_policy():
+def test_a_rendered_domain_always_states_what_it_admits():
     """Terse input, explicit output: nothing has to say anything about
     missing values, and a rendered domain always does."""
     from mathema.conjecture import claim
     from mathema.spec import render_claim_text
 
     allowed = claim("for x in [0,10], f(x) >= 0")
-    assert "∪ {∅}" in render_claim_text(allowed, unicode=True)
-    assert "|missing" in render_claim_text(allowed, unicode=False)
+    assert "∪ {None, ∅}" in render_claim_text(allowed, unicode=True)
+    assert "|None|missing" in render_claim_text(allowed, unicode=False)
 
     excluded = claim("for x in [0,10] \\ {missing}, f(x) >= 0")
-    assert "\\ {∅}" in render_claim_text(excluded, unicode=True)
-    assert "|missing" not in render_claim_text(excluded, unicode=False)
-    assert "\\ {missing}" in render_claim_text(excluded, unicode=False)
+    assert "∪ {None}" in render_claim_text(excluded, unicode=True)
+    assert "missing" not in render_claim_text(excluded, unicode=False)
+    assert "|None" in render_claim_text(excluded, unicode=False)
 
     from mathema.spec import canonical_claim_text
     for conjecture in (allowed, excluded):

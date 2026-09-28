@@ -4,6 +4,36 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## 0.6.1
 
+- Fingerprints move once in 0.6.1: the rendered domain now states what
+  it admits. A missing value is one of two kinds, the absence of the
+  object (`None`) and a hole in a slot (`missing`, `∅` in unicode, with
+  the members `nan`, `NA`, `null` and `NaT`), and a domain renders only
+  what it admits: `[0.0, 1.0] : float|missing` in ASCII, `[0.0, 1.0] ⊂ ℝ
+  ∪ {∅}` in unicode, a space's slot holes in brackets before the power
+  (`([0.0, 1.0] | {missing})^n : float`). A type clause states the whole
+  policy (`[0, 100] ⊂ Z` now admits no missing value), a binding without
+  one is completed from the annotation (a `float` holds `nan`, an `int`
+  or `str` nothing, `Optional[...]` may be absent), the record's note
+  states the resolution (`missing for x (float): nan`), and a finite set
+  is exactly its members (`{0.25, None}` is 0.25 and absence). Every
+  earlier spelling still reads and comes back in the new form. `mathema
+  verify` re-records a claim whose record differs only by this change
+  and says so once for the run, not claim by claim.
+- A record writes a sentinel as its word, `{"sentinel": "missing"}`,
+  and reads the older `__mathema_missing__` as `missing`.
+- A function is called with the values a listed sentinel stands for,
+  `None` or `nan`, never with mathema's internal marker; each is tried
+  at least once per claim, and the record lists what was tried
+  (`meta["mathema.missing"]`).
+- A runtime's missing values are stated as definition rows under a
+  key's `defines:` (`missing := {null, nan}`), taken at face value
+  (`verdict: trusted`, `route: axiom`) and listed by `mathema verify`
+  under `definitions (trusted)`. `:=` is refused in a claim and in a
+  binding. mathema ships `polars.Series` and `pandas.Series` definitions,
+  and the bundled definition rows state `R^n` without `\ {∅}`.
+- A `raises(...)` claim over a finite domain is proven by calling the
+  function at every point.
+
 - The wheel now ships the bundled compendium. The 0.6.0 wheel carried
   none of its compendium files (the package-data pattern missed the
   per-library directories), so `is_compendium_safe(numpy)` was `unknown`

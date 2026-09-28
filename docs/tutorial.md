@@ -80,13 +80,13 @@ the three declared claims):
 
 ```yaml
     - name: "negative_exposure_negative"
-      statement: "for x in [-5.0, -1.0]:float|missing, f(x) <= 0"
+      statement: "for x in [-5.0, -1.0] : float|missing, f(x) <= 0"
       verdict: "holds"
       n: 34
       route: "probe"
       # ...
     - name: "nonneg"
-      statement: "for x in [-5.0, 5.0]:float|missing, f(x) >= 0"
+      statement: "for x in [-5.0, 5.0] : float|missing, f(x) >= 0"
       verdict: "falsified"
       n: 1
       counterexample: "(-5): -5.0 vs 0"
@@ -96,7 +96,7 @@ the three declared claims):
           - -5.0
       # ...
     - name: "symmetric_in_sign"
-      statement: "for x in [-5.0, 5.0]:float|missing, f(x) = f(-x)"
+      statement: "for x in [-5.0, 5.0] : float|missing, f(x) = f(-x)"
       verdict: "falsified"
       n: 1
       counterexample: "(-5): -5.0 vs 5.0"
@@ -145,7 +145,7 @@ and the record now keeps the arc (trimmed):
 
 ```yaml
     - name: "negative_exposure_negative"
-      statement: "for x in [-5.0, -1.0]:float|missing, f(x) <= 0"
+      statement: "for x in [-5.0, -1.0] : float|missing, f(x) <= 0"
       verdict: "invalidated"
       n: 1
       counterexample: "(-5): 5.0 vs 0"
@@ -153,13 +153,13 @@ and the record now keeps the arc (trimmed):
         mathema.previous_verdict: "holds"
         mathema.regressed_to: "falsified"
     - name: "nonneg"
-      statement: "for x in [-5.0, 5.0]:float|missing, f(x) >= 0"
+      statement: "for x in [-5.0, 5.0] : float|missing, f(x) >= 0"
       verdict: "holds"
       n: 130
       # ...
         mathema.previous_verdict: "falsified"
     - name: "symmetric_in_sign"
-      statement: "for x in [-5.0, 5.0]:float|missing, f(x) = f(-x)"
+      statement: "for x in [-5.0, 5.0] : float|missing, f(x) = f(-x)"
       verdict: "holds"
       n: 130
       # ...
@@ -241,12 +241,12 @@ echo y | mathema accept funcs.settle negative_exposure_negative --as discovery -
 ```text
 accepting funcs.settle :: negative_exposure_negative (verdict invalidated) as discovery, by Ada Lovelace
   - move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness
-  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 130 trials
+  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', adjudicated now: holds over 128 trials
   - rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
-write this acceptance? [y/N] written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 130 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
+write this acceptance? [y/N] written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', adjudicated now: holds over 128 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
 declared layer: claims/demo.claims.yaml now declares negative_exposure_negative_corrected in place of negative_exposure_negative (the superseded claim stays in the record's discoveries section):
   - name: negative_exposure_negative_corrected
-    statement: "for x in [-5.0, -1.0]:float|missing, f(x) > 0"
+    statement: "for x in [-5.0, -1.0] : float|missing, f(x) > 0"
     route: probe
 ```
 

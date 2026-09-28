@@ -43,7 +43,7 @@ print(mathema.check(ema, claims=[]))
 <!-- example: ema output -->
 ```text
 mathema.Record(ema) · source, no side effects · form 0a80d14e175f
-  holds   bounded: for x in [0.0, 1.0]^n:float|missing, alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= 1 (n=160)
+  holds   bounded: for x in ([0.0, 1.0] | {missing})^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1 (n=160)
 ```
 
 This is additive, a docstring with none of these sections behaves
@@ -365,7 +365,7 @@ Intent:
     Blends each new value with the running mean.
 
 Claims:
-    bounded: for x in [0.0, 1.0]^n:float|missing, alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= 1
+    bounded: for x in ([0.0, 1.0] | {missing})^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1
 ```
 
 `render_docstring()` returns text only; it never writes to the `.py`
