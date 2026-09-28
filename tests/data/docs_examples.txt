@@ -79,6 +79,7 @@
 [x] docs/runtime-types.md:rt-mean                run verdicts verdicts  (requires)
 [x] docs/runtime-types.md:rt-series              run verdicts verdicts  (requires)
 [x] docs/runtime-types.md:rt-frame               run verdicts verdicts  (requires)
+[x] docs/runtime-types.md:rt-proofs              run verdicts verdicts verdicts run output  (requires)
 [-] docs/runtime-types.md:105
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
@@ -91,4 +92,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 76 examples checked, 4 output fences not yet marked
+# 77 examples checked, 4 output fences not yet marked
