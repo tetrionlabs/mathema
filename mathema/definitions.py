@@ -171,7 +171,7 @@ def row_standing(root: "str | None", key: str, row: dict,
         return local, ""
     return None, ("it is not bundled with mathema and mathema verify has "
                   "not recorded it holds here (run mathema verify, or "
-                  "accept it with --as trusted); until then it feeds "
+                  "accept it with --as trusted), so until then it feeds "
                   "sampling only")
 
 
@@ -837,11 +837,11 @@ def _matrix_route(cj, facts, cj_domain, shapes, assumption, structures, fn,
                               cj_domain, shapes, structs,
                               premises=assumption)
     if mproof is not None and mproof.status == "proven":
-        return ProofResult("proven", sketch=f"{through}; {mproof.sketch}",
+        return ProofResult("proven", sketch=f"{through}: {mproof.sketch}",
                            meta=dict(meta))
     why = (mproof.sketch if mproof is not None and mproof.sketch
            else "the matrix algebra did not close it")
-    return ProofResult("undecided", sketch=f"{through}; {why}",
+    return ProofResult("undecided", sketch=f"{through}, and {why}",
                        meta=dict(meta))
 
 
@@ -1011,6 +1011,20 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             gap = a - b
             if rel in (">", "<", "!="):
                 provided_nonzero.append(gap)
+            for side, other, above in ((a, b, rel in (">", ">=")),
+                                       (b, a, rel in ("<", "<="))):
+                # a quantity above a nonnegative bound, strictly above
+                # zero, is nonzero (and below a nonpositive one)
+                if above and other.is_number and (
+                        other.is_positive or (other.is_zero
+                                              and rel in (">", "<"))):
+                    provided_nonzero.append(side)
+            for side, other, below in ((a, b, rel in ("<", "<=")),
+                                       (b, a, rel in (">", ">="))):
+                if below and other.is_number and (
+                        other.is_negative or (other.is_zero
+                                              and rel in (">", "<"))):
+                    provided_nonzero.append(side)
             if rel in ("<", "<="):
                 gap = -gap
             facts_q.append(sympy.Q.positive(gap) if rel in (">", "<")
@@ -1183,10 +1197,10 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
                             counterexample=(f"{shown}: {detail}" if detail
                                             else shown),
                             sketch=f"{through}, f has no value where "
-                                   f"{region}, inside the claim's domain; "
-                                   f"executed there, the claim fails")
+                                   f"{region}, inside the claim's domain, "
+                                   f"and executed there the claim fails")
                     break
     return ProofResult(
         "undecided", meta=meta,
         sketch=f"{through}, f has no value where {region}, which the claim's "
-               f"domain does not exclude; state it: assuming {remedy}")
+               f"domain does not exclude (state it: assuming {remedy})")
