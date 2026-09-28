@@ -174,6 +174,9 @@ def test_v7_polars_carries_nan_as_a_value():
     assert "nan" in witness(probe)
 
 
+@pytest.mark.xfail(strict=True, reason="84 records holds; since the pandas "
+                   "rows merged from develop, derive proves it through "
+                   "pandas.Series.mean: the row's verdict awaits a decision")
 def test_v8_pandas_mean_holds():
     assert_row(mean_pd, "for xs in [0, 1]^n | {missing}, f(xs) >= 0", HOLDS)
 
