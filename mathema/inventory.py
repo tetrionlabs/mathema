@@ -19,6 +19,7 @@ surfaces functions with *zero* claims, which the declared/verified
 store alone can never show."""
 from __future__ import annotations
 
+from ._signatures import module_scope
 import ast
 import inspect
 import os
@@ -152,7 +153,7 @@ def wrapped_target(fn) -> str | None:
     if not isinstance(call, ast.Call):
         return None
 
-    g = getattr(fn, "__globals__", {})
+    g = module_scope(fn)
 
     def resolved_name(obj, fallback: str) -> str:
         mod = getattr(obj, "__module__", None)
@@ -604,7 +605,7 @@ def derivability_report(fn) -> dict | None:
     # this never contradicts is_pure_enough()/purity_reason().
     from .symbolic._base import _method_ctx_fields
     _sp, _sc = _method_ctx_fields(fn, facts)
-    ctx = _LiftCtx(globals_ns=getattr(fn, "__globals__", {}), depth=3,
+    ctx = _LiftCtx(globals_ns=module_scope(fn), depth=3,
                    seen=frozenset({id(fn)}), domain={},
                    unmodified=frozenset(_unmodified_params(facts.tree, set(facts.params))),
                    self_param=_sp, self_class=_sc)
@@ -949,7 +950,7 @@ def function_dependencies(fn, facts=None) -> list[dict]:
     facts = facts if facts is not None else quiet_facts(fn)
     if facts is None:
         return []
-    g = getattr(fn, "__globals__", {}) or {}
+    g = module_scope(fn)
     out: list[dict] = []
     # a module-level numeric constant the lift may inline is a real
     # dependency: its exact value rides the record, and the freshness

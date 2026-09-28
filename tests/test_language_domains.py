@@ -299,7 +299,7 @@ def test_explain_names_the_offending_character():
 
 
 def test_shrink_offers_smaller_members_only():
-    smaller = LETTERS.shrink("abcd")
+    smaller = list(LETTERS.shrink("abcd"))
     assert smaller and all(LETTERS.contains(s) and len(s) <= 4 for s in smaller)
     assert "" in smaller
 

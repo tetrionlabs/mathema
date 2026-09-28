@@ -28,6 +28,7 @@ that fails to load is skipped with a warning.
 """
 from __future__ import annotations
 
+from .._signatures import module_scope
 import ast
 import functools
 import importlib.util
@@ -268,7 +269,7 @@ def detect_parameters(fn, declared: "dict | None" = None) -> dict:
     sig = _signature(fn)
     if sig is None:
         return {}
-    scope = getattr(fn, "__globals__", {}) or {}
+    scope = module_scope(fn)
     try:
         hints = typing.get_type_hints(fn, include_extras=True)
     except Exception:
@@ -562,7 +563,7 @@ def usage_hints(fn, fdef, params: list, param_kinds: dict,
         "type", "text"}}`. Empty when the module imports none of
         numpy, pandas or polars.
     """
-    scope = getattr(fn, "__globals__", {}) or {}
+    scope = module_scope(fn)
     imported = module_imports(scope)
     if not imported or fdef is None:
         return {}

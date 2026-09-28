@@ -33,6 +33,7 @@ used (`meta["mathema.definitions"]`) with its source and local status.
 """
 from __future__ import annotations
 
+from ._signatures import module_scope
 import ast
 import copy
 import os
@@ -461,7 +462,7 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
     if fdef is None:
         raise Decline("the function has no source")
     origins = _alias_origins(fn, facts)
-    scope = getattr(fn, "__globals__", {}) or {}
+    scope = module_scope(fn)
     params = set(facts.params)
     runtime = {p: found[0].adapter
                for p, found in (getattr(facts, "runtime_types", None)

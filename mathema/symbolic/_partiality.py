@@ -41,6 +41,7 @@ proof over the reals is a proof over the reals, and where the computation
 leaves the doubles is found by executing it (the `[float]` companion, the
 probe route), never by this walk.
 """
+from .._signatures import module_scope
 import ast
 import contextvars
 import copy
@@ -404,7 +405,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                              or _integer_bound((domain or {}).get(name)))
                          and isinstance(sym, sympy.Symbol))
 
-    scope = dict(getattr(fn, "__globals__", None) or {})
+    scope = dict(module_scope(fn))
     guards: list = []
     unread: list = []
     missed: list = []

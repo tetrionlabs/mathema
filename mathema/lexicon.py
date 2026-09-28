@@ -261,6 +261,9 @@ LEXICON: dict[str, str] = {
     "auto_let_long_param": "for acceleration in [0, 100], f(acceleration) >= 0",
     "auto_let_long_func": ("let compute_square_root = numpy.sqrt, for x in [0, 100], "
                           "compute_square_root(x) >= 0"),
+    # a keyword argument to a named function, kept as written --------
+    "let_function_keyword": ("let g = numpy.round, for x in [0, 1], "
+                             "g(x, decimals=1) <= 1"),
     # mixed unicode/ascii spelling in the input --------------------
     # the grammar accepts either spelling for most tokens; these mix
     # them within one claim on purpose, to check that the *output*
@@ -501,7 +504,7 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "named_under_test", "let_alias_for_under_test",
         "let_free_var_typed", "let_pseudo_infinity",
         "auto_let_greek_param", "auto_let_long_param",
-        "auto_let_long_func"),
+        "auto_let_long_func", "let_function_keyword"),
     "notation": (
         "forall_symbol", "domain_subset_symbol",
         "domain_blackboard_reals", "relation_approx_unicode",

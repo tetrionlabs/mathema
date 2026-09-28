@@ -24,6 +24,7 @@ this module registering itself as an import side effect.
 """
 from __future__ import annotations
 
+from ._signatures import module_scope
 import math
 import random
 
@@ -945,7 +946,7 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if not facts.params:
         return None
     target = facts.params[0]
-    module_dict = getattr(fn, "__globals__", {}) or {}
+    module_dict = module_scope(fn)
 
     def data_globals():
         out = {}
@@ -1102,7 +1103,8 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
         state["idx"] += 1
         if language_bound:
             value = bad
-            spelled = f"{target} = {bad!r} (outside L[{names}])"
+            spelled = (f"{target} = {_witness_value(bad)} "
+                       f"(outside L[{names}]{_why_outside(bad, bounds)})")
         elif sequence_target:
             # a sequence parameter is violated one ELEMENT at a time:
             # a fresh in-domain sequence with one out-of-domain entry
@@ -1163,20 +1165,58 @@ def _outside_language(bounds, rng: random.Random) -> "tuple[str, list]":
     return " | ".join(name for name, _ in pieces), out
 
 
+def _witness_value(value) -> str:
+    """A witness value as a counterexample shows it: a string by its
+    repr, anything else as the probe formats it, so a record with only a
+    default repr shows its fields."""
+    if isinstance(value, str):
+        return repr(value)
+    from .probing import _fmt_value
+    return _fmt_value(value)
+
+
+def _why_outside(value, bounds) -> str:
+    """Intent:
+        Why `value` is not a member, as the witness states it: the first
+        problem the bound's first language explains, ` at <path>: <why>`,
+        or `: <why>` for the value as a whole; empty when no language
+        explains it.
+    """
+    for _, language in _language_pieces(bounds):
+        try:
+            problems = language.explain(value) or []
+        except Exception:
+            continue
+        if problems:
+            first = problems[0]
+            where = f" at {first.path}" if first.path else ""
+            return f"{where}: {first.predicate}"
+    return ""
+
+
 def _language_corpus(bounds, rng: random.Random) -> "tuple[str, list]":
     """Intent:
         The fuzz corpus for a parameter bound to a language:
-        `(names, [(value, side)])` with the language's own hazards and
-        four draws inside, then its near non-members outside, so a
-        crash is reported for the side it happened on.
+        `(label, [(value, side)])` with the language's own hazards and
+        four draws, each on the side of the claim's domain it falls (a
+        value the claim excludes is outside), then its near non-members
+        outside, so a crash is reported for the side it happened on;
+        `label` names the domain as the claim writes it.
     """
+    from .domain import domain_contains, is_missing, render_domain
     names, outsides = _outside_language(bounds, rng)
-    inside: list = []
+    drawn: list = []
     for _, language in _language_pieces(bounds):
-        inside.extend(h.value for h in language.hazards())
-        inside.extend(language.sample(rng) for _ in range(4))
-    return names, ([(v, "inside") for v in inside]
-                   + [(v, "outside") for v in outsides])
+        drawn.extend(h.value for h in language.hazards())
+        drawn.extend(language.sample(rng) for _ in range(4))
+    if any(not is_missing(v) for v in getattr(bounds, "excluded", ()) or ()):
+        # a value the claim excludes is outside its domain, and the label
+        # is the domain as written, exclusion included
+        label = render_domain(bounds, show_missing=False, ascii_mode=True)
+    else:
+        label = f"L[{names}]"
+    sides = [(v, "inside" if domain_contains(v, bounds) else "outside") for v in drawn]
+    return label, sides + [(v, "outside") for v in outsides]
 
 
 def _shrink_in_language(value, still_fails, bounds):
@@ -1605,7 +1645,7 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     and bool(domain_contains(s, bound)) == inside)
 
         minimal = _shrink_in_language(value, still_fails, bound)
-        return (f"{target} = {minimal!r} ({side} L[{names}]) raised {exc} on "
+        return (f"{target} = {_witness_value(minimal)} ({side} {names}) raised {exc} on "
                 f"arbitrary input, an unguarded crash, not a declared "
                 f"rejection")
 

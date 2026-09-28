@@ -14,6 +14,7 @@ branch.
 """
 from __future__ import annotations
 
+from .._signatures import module_scope
 import ast
 import operator
 from dataclasses import dataclass, field
@@ -1019,7 +1020,7 @@ def lift_conditioned(fn, facts, domain: dict, max_callee_depth: int = 3,
 
     from ._base import _method_ctx_fields
     _sp, _sc = _method_ctx_fields(fn, facts)
-    ctx = _ctx or _LiftCtx(globals_ns=getattr(fn, "__globals__", {}),
+    ctx = _ctx or _LiftCtx(globals_ns=module_scope(fn),
                            depth=max_callee_depth, seen=frozenset({id(fn)}),
                            domain=domain, unmodified=frozenset(unmodified),
                            self_param=_sp, self_class=_sc)
