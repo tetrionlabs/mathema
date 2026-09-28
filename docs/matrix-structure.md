@@ -76,7 +76,10 @@ pure-Python fallback otherwise. A spectral check with no numpy declines
 (`skipped`) rather than guessing.
 
 `is_finite(A)` is the matrix-scale sibling of the missing-value axis: it
-narrows a domain away from `nan`/`inf`, fast via numpy.
+narrows a domain away from `nan`/`inf`, fast via numpy. On an expression
+(`is_finite(f(x))`) the check reads the claim's `assuming` clause like
+every other claim, and a raise from `f` at a point inside it falsifies
+the claim, naming the exception.
 
 ## Narrowing the domain
 
