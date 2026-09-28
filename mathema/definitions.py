@@ -99,7 +99,7 @@ def is_definition_name(name: "str | None") -> bool:
                            or str(name).startswith(DEFINITION + "@"))
 
 
-# --- which rows may be used -------------------------------------------------
+# which rows may be used
 
 def _canonical(statement: str) -> "str | None":
     try:
@@ -325,7 +325,7 @@ def _library_claims(root: "str | None", load) -> dict:
     return loaded
 
 
-# --- reading a body through the rows ---------------------------------------
+# reading a body through the rows
 
 def _substitute(node: ast.expr, names: dict) -> ast.expr:
     """A copy of `node` with each bare name in `names` replaced by a
@@ -712,7 +712,7 @@ def definition_state(fn, facts, root: "str | None" = None) -> dict:
     return out
 
 
-# --- deciding the rewritten claim -------------------------------------------
+# deciding the rewritten claim
 
 def _transform_kinds(funcs: dict) -> dict:
     """The claim's bound functions that are law transforms the
@@ -914,6 +914,12 @@ def _implied_nonzero(expr, provided: list, min_length: dict,
     return False
 
 
+def lengths_of(seqs: dict) -> list:
+    """The distinct length symbols of the lowered sequences, in the
+    order first met."""
+    return list(dict.fromkeys(length for _ib, length in seqs.values()))
+
+
 def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                     lhs, rhs, row_premises, inlined, meta):
     """The rewritten claim decided over sequences of symbolic length:
@@ -1057,6 +1063,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                               max(provided.min_length.values() or [1])))
         if unstated or unmet:
             return {"unmet": unmet, "unstated": unstated}
+        shortest.update(required.min_length)
         rel = cj.relation
         if isinstance(lv, Vec) or isinstance(rv, Vec):
             if not (isinstance(lv, Vec) and isinstance(rv, Vec)) \
@@ -1078,6 +1085,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                                  extensive=extensive)
         return {"proven": result.status == "proven", "result": result}
 
+    shortest: dict = {}
     cap = EXTENSIVE_TIMEOUT_SECONDS if extensive else FAST_TIMEOUT_SECONDS
     through = f"through the definition rows {_rows_text(inlined.uses)}"
     try:
@@ -1109,12 +1117,16 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                            f"{outcome['undecided']}", meta=meta)
     vectors = ", ".join(sorted(seqs))
     if outcome.get("proven"):
+        spans = ", ".join(
+            f"{by_length.get(L, L)} of every length"
+            + (f" from {shortest[L]}" if shortest.get(L, 1) > 1 else "")
+            for L in sorted(set(lengths_of(seqs)), key=str))
         return ProofResult(
             "proven", meta=meta,
             sketch=f"{through}, lowered to sums over {vectors} at a symbolic "
                    f"length: the relation holds for every length",
-            quantifier=(f"∀ {vectors} ∈ ℝ^L with nothing missing, at every "
-                        f"length L" if seqs else None))
+            quantifier=(f"∀ {vectors} over ℝ with nothing missing, "
+                        f"{spans}" if seqs else None))
     detail = outcome.get("result")
     why = (detail.sketch if detail is not None and detail.sketch else
            "the difference of the two sides does not simplify to 0")

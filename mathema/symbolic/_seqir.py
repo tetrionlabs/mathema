@@ -182,7 +182,7 @@ class Lowering:
         raise NotSymbolic(f"{ast.unparse(node)!r} is outside the sequence "
                           f"lowering")
 
-    # -- arithmetic ------------------------------------------------------
+    # arithmetic
 
     def _binop(self, node: ast.BinOp):
         left, right = self.lower(node.left), self.lower(node.right)
@@ -233,7 +233,7 @@ class Lowering:
         length = self._same_length(left, right, node)
         return _reduce("sum", left.elem * right.elem, length)
 
-    # -- vector forms ----------------------------------------------------
+    # vector forms
 
     def _subscript(self, node: ast.Subscript):
         value = self.lower(node.value)
@@ -250,7 +250,7 @@ class Lowering:
         raise NotSymbolic(f"{ast.unparse(node)!r}: only the reversal "
                           f"`[::-1]` of a vector is lowered")
 
-    # -- calls -----------------------------------------------------------
+    # calls
 
     def _call(self, node: ast.Call):
         name = node.func.id
@@ -356,7 +356,7 @@ class Lowering:
         return Vec(elem, v.length)
 
 
-# -- the normaliser ----------------------------------------------------------
+# the normaliser
 
 def _split_sum(s):
     """One sum split over `+`, each term's index-free factors pulled
