@@ -1,0 +1,121 @@
+# Definition rows and bounds for numpy's statistics: what each function
+# computes, stated in the grammar's own words over inputs with nothing
+# missing (numpy's nan-ignoring functions then compute the plain
+# statistic). A function with no grammar word of its own (median,
+# percentile, quantile) states the range its value lies in. mathema's
+# own test suite verifies each row against the installed numpy.
+compendium: numpy
+versions: ">=1.24,<3"
+
+numpy.max:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == max(a)"
+
+numpy.min:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == min(a)"
+
+numpy.amax:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == max(a)"
+
+numpy.amin:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == min(a)"
+
+numpy.median:
+  claims:
+    - name: within_range
+      statement: "for a in R^n, min(a) <= f(a) <= max(a)"
+
+numpy.percentile:
+  claims:
+    - name: within_range
+      statement: "for a in R^n, q in [0, 100], min(a) <= f(a, q) <= max(a)"
+
+numpy.quantile:
+  claims:
+    - name: within_range
+      statement: "for a in R^n, q in [0, 1], min(a) <= f(a, q) <= max(a)"
+
+numpy.diff:
+  claims:
+    - name: definition
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= a[1:] - a[:-1]"
+
+numpy.nansum:
+  claims:
+    - name: definition
+      statement: "for a in R^n, assuming count(a) >= 1, f(a) ~= sum(a)"
+      note: "Over the values; an array with no value sums to 0."
+
+numpy.nanprod:
+  claims:
+    - name: definition
+      statement: "for a in R^n, assuming count(a) >= 1, f(a) ~= prod(a)"
+      note: "Over the values; an array with no value has product 1."
+
+numpy.nanmean:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) ~= mean(a)"
+
+numpy.nanstd:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) ~= std(a, ddof=0)"
+    - name: definition@ddof=1
+      statement: "let ddof be 1, for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+
+numpy.nanvar:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) ~= var(a, ddof=0)"
+    - name: definition@ddof=1
+      statement: "let ddof be 1, for a in R^n, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
+
+numpy.nanmax:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == max(a)"
+
+numpy.nanmin:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == min(a)"
+
+numpy.ndarray.min:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == min(a)"
+
+numpy.ndarray.max:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == max(a)"
+
+numpy.ndarray.prod:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) ~= prod(a)"
+
+numpy.ndarray.cumsum:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) ~= cumsum(a)"
+
+numpy.ndarray.cumprod:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) ~= cumprod(a)"
+
+numpy.ndarray.var:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) ~= var(a, ddof=0)"
+    - name: definition@ddof=1
+      statement: "let ddof be 1, for a in R^n, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"

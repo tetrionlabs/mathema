@@ -262,9 +262,12 @@ def test_m6_an_unannotated_identity_is_missing_safe():
     assert_row(ident, "is_missing_safe(f)", PROVEN)
 
 
-@stage(5)
-def test_l1_the_ladder_hands_missing_points_to_the_policy():
-    probe, companions = assert_row(
-        sqrt_guarded, "assuming is_missing_safe(f), for x in [0, 1], f(x) >= 0",
-        PROVEN)
-    assert all(c.verdict in PROVEN_OR_HOLDS for c in companions)
+@pytest.mark.parametrize("gate, word", [("is_missing_safe", "missing"),
+                                        ("is_absent_safe", "absent")])
+def test_l1_a_gate_is_not_a_premise(gate, word):
+    probe, _ = run(sqrt_guarded, f"assuming {gate}(f), for x in [0, 1], f(x) >= 0")
+    assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
+    assert (f"assuming {gate}(f) is not a premise: a value claim is judged only "
+            f"where the function returns a value, and the {word} behaviour is the "
+            f"policy rows'. To keep {word} values out of the execution, write "
+            f"\\ {{{word}}} in the domain.") in probe.note

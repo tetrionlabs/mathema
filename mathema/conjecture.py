@@ -1945,6 +1945,17 @@ def _interpret_assumption(cj, conjectures):
     if not raw:
         return None
     text = re.sub(r"^assuming\s+", "", raw).strip()
+    for part in _split_top_and(text):
+        gate = re.match(r"^\s*(is_missing_safe|is_absent_safe)\s*\(.*\)\s*$", part)
+        if gate is not None:
+            word = "missing" if gate.group(1) == "is_missing_safe" else "absent"
+            return Probe(cj.name, statement_text(cj.relation, cj.lhs, cj.rhs),
+                         "skipped:misspecified", route=None,
+                         note=(f"assuming {part.strip()} is not a premise: a value "
+                               f"claim is judged only where the function returns a "
+                               f"value, and the {word} behaviour is the policy rows'. "
+                               f"To keep {word} values out of the execution, write "
+                               f"\\ {{{word}}} in the domain."))
 
     # a matrix STRUCTURE premise (`assuming A is symmetric`,
     # `assuming is_positive_definite(A)`): a conjunct naming a matrix

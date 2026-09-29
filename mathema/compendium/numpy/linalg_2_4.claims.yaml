@@ -1,0 +1,12 @@
+# Definition rows for numpy's linear algebra that mathema can adjudicate
+# from numpy 2.4 on: before it, `numpy.matmul` (a generalized ufunc)
+# states no signature a row's parameters bind to. Stated as in
+# linalg.claims.yaml, over inputs with nothing missing.
+compendium: numpy
+versions: ">=2.4,<3"
+
+numpy.matmul:
+  claims:
+    - name: definition
+      statement: "for x1 in R^(m,k), x2 in R^(k,n), f(x1, x2) ~= x1 @ x2"
+      note: "The matrix product, the `@` operator."

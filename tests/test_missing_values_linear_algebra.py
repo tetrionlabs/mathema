@@ -140,9 +140,11 @@ def test_v2_a_nan_slot_propagates_and_the_companion_holds():
 
 
 def test_v3_nanmean_drops_some_holes_and_propagates_an_all_hole_vector():
-    probe, _ = assert_row(nanmean_np, "for xs in [0, 1]^n | {missing}, f(xs) >= 0",
-                          HOLDS, behaves={"xs": {"nan": "mixed"}})
-    mixed = probe.meta["mathema.missing"]["mixed"]["xs"]["nan"]
+    _, companions = assert_row(nanmean_np, "for xs in [0, 1]^n | {missing}, f(xs) >= 0",
+                               PROVEN, behaves={"xs": {"nan": "mixed"}})
+    (companion,) = companions
+    assert companion.verdict == "holds"
+    mixed = companion.meta["mathema.missing"]["mixed"]["xs"]["nan"]
     assert set(mixed) == {"drops", "propagates"}
     assert mixed["propagates"] in ("xs=[nan]", "xs=[nan, nan]"), mixed
 

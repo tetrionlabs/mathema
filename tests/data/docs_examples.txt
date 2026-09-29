@@ -59,6 +59,7 @@
 [x] docs/matrix-structure.md:vocabulary          run verdicts verdicts
 [x] docs/matrix-structure.md:identities          run verdicts
 [x] docs/matrix-structure.md:lemmas              run verdicts verdicts verdicts verdicts verdicts
+[x] docs/matrix-structure.md:numpy-functions     run verdicts verdicts  (requires)
 [x] docs/matrix-structure.md:enforce-structure   run  (requires)
 [x] docs/modes/accept.md:balance                 file file session session run file session session
 [x] docs/modes/audit.md:branches                 file session
@@ -96,4 +97,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 81 examples checked, 4 output fences not yet marked
+# 82 examples checked, 4 output fences not yet marked
