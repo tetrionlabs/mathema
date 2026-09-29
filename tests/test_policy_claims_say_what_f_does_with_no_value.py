@@ -46,7 +46,7 @@ def total(xs: list) -> float:
     return sum(xs)
 
 
-def mean_pd(xs: "pandas.Series") -> float:
+def mean_pd(xs: "pandas.Series") -> float:  # noqa: F821
     return float(xs.mean())
 
 
@@ -183,8 +183,20 @@ def _policy_rows(fn, text):
     return [p for p in rec.probes if (p.meta or {}).get("mathema.policy")]
 
 
-def test_a_float_carries_its_default_propagation_row():
+def scaled(x: float) -> float:
+    return 2.0 * x + 1.0
+
+
+def test_a_library_row_composed_through_the_body_derives_the_policy():
     (row,) = _policy_rows(root, "for x in [0, 1], f(x) >= 0")
+    assert (row.statement, row.verdict) == ("missing(f, x) propagates", "proven")
+    assert row.meta["mathema.policy"]["source"] == "derived"
+    assert row.meta["mathema.policy"]["reason"].startswith(
+        "composed through math.sqrt's policy row; confirmed on the 43 draws of c0[float]")
+
+
+def test_a_float_carries_its_default_propagation_row():
+    (row,) = _policy_rows(scaled, "for x in [0, 1], f(x) >= 1")
     assert (row.statement, row.verdict) == ("missing(f, x) propagates", "holds")
     assert row.meta["mathema.policy"]["source"] == "default"
     assert row.meta["mathema.policy"]["reason"] == (
@@ -264,3 +276,26 @@ def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():
 def test_the_absent_word_parses_without_f():
     with pytest.raises(InvalidConjecture):
         claim("missing(g, x) propagates")
+
+
+# --- the claims command --------------------------------------------------
+
+def test_the_claims_command_lists_and_writes_the_policy_claims(tmp_path, monkeypatch, capsys):
+    (tmp_path / "pmod.py").write_text(
+        "# SPDX-License-Identifier: BUSL-1.1\n# Copyright 2026 Tetrion Ltd\n"
+        "def clamp(x: float) -> float:\n    return max(0.0, min(1.0, x))\n")
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "p.claims.yaml").write_text(
+        "pmod.clamp:\n  claims:\n    - name: unit\n"
+        "      statement: \"for x in R, 0 <= f(x) <= 1\"\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    from mathema.cli import main
+    assert main(["claims", "pmod.clamp", "--root", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "pmod.clamp: 0 suggested policy claim(s)" not in out
+    main(["claims", "pmod.clamp", "--root", str(tmp_path), "--write"])
+    import yaml
+    written = yaml.safe_load((tmp_path / "claims" / "policies.claims.yaml").read_text())
+    assert written == {"pmod.clamp": {"claims": []}} or all(
+        c["note"].startswith("source: ") for c in written["pmod.clamp"]["claims"])

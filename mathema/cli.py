@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from typing import NoReturn
 
@@ -1913,6 +1914,50 @@ def _exclusive_group(claim_name: str) -> str | None:
     return None
 
 
+def _suggested_policies(fn, declared_rows: list) -> list:
+    """The policy rows mathema writes for a function that its declared
+    claims do not state: each parameter's default, derived or observed
+    behaviour at a value that is not there, decided on the declared
+    claims' own calls."""
+    import mathema
+
+    from .spec import entry_claims
+    claims = entry_claims({"claims": declared_rows}) if declared_rows else []
+    rec = mathema.check(fn, claims=claims)
+    return [p for p in rec.probes
+            if (p.meta or {}).get("mathema.policy")
+            and (p.meta or {}).get("mathema.surface") == "mathema"
+            and (p.meta["mathema.policy"].get("behaviour"))]
+
+
+def _write_policies(args, declared_rows: list, policies: list) -> int:
+    """Write the suggested policy rows into the declared claims file, each
+    with the source it came from."""
+    import yaml
+    path = os.path.join(args.root or ".", "claims", "policies.claims.yaml")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    doc: dict = {}
+    if os.path.exists(path):
+        with open(path) as fh:
+            doc = yaml.safe_load(fh) or {}
+    have = {c.get("statement") for c in declared_rows}
+    rows = doc.setdefault(args.key, {}).setdefault("claims", [])
+    have |= {c.get("statement") for c in rows}
+    written = 0
+    for p in policies:
+        if p.statement in have:
+            continue
+        pol = p.meta["mathema.policy"]
+        rows.append({"name": re.sub(r"\W+", "_", p.name).strip("_"), "statement": p.statement,
+                     "note": f"source: {pol.get('source')}"})
+        written += 1
+    with open(path, "w") as fh:
+        yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
+    print(f"{args.key}: wrote {written} policy claim(s) to "
+          f"{os.path.relpath(path, args.root or '.')}")
+    return 0
+
+
 def cmd_claims(args) -> int:
     """The claim-authoring surface for one function: bare lists what
     the declared layer already states; `--suggest` renders mathema's
@@ -1934,14 +1979,23 @@ def cmd_claims(args) -> int:
     declared_names = {c.get("name") for c in declared_rows if c.get("name")}
 
     if not args.suggest and not args.adopt:
+        policies = _suggested_policies(fn, declared_rows)
+        if getattr(args, "write", False):
+            return _write_policies(args, declared_rows, policies)
         if not declared_rows:
             print(f"{args.key}: no declared claims "
                   "(mathema claims --suggest lists candidates)")
-            return 0
-        print(f"{args.key}: {len(declared_rows)} declared claim(s)")
-        for c in declared_rows:
-            print(f"  - {c.get('name')}: {c.get('statement') or c.get('law')}"
-                  + (f"  [route {c['route']}]" if c.get("route") else ""))
+        else:
+            print(f"{args.key}: {len(declared_rows)} declared claim(s)")
+            for c in declared_rows:
+                print(f"  - {c.get('name')}: {c.get('statement') or c.get('law')}"
+                      + (f"  [route {c['route']}]" if c.get("route") else ""))
+        if policies:
+            print(f"{args.key}: {len(policies)} suggested policy claim(s) "
+                  f"(write them with: mathema claims {args.key} --write)")
+            for p in policies:
+                pol = p.meta["mathema.policy"]
+                print(f"  - {p.statement}  [{pol.get('reason')}]")
         return 0
 
     suggestions = _suggest(fn, key=args.key, root=args.root)
@@ -3043,6 +3097,10 @@ def main(argv: list[str] | None = None) -> int:
     pcl.add_argument("--adopt", default=None, metavar="NAME",
                      help="write the named suggestion into the declared "
                           "claims file (claims/adopted.claims.yaml)")
+    pcl.add_argument("--write", action="store_true",
+                     help="write the suggested policy claims (what each "
+                          "parameter does at a value that is not there) into "
+                          "claims/policies.claims.yaml")
     pcl.add_argument("--root", default=None, help="project root")
     pcl.add_argument("--format", default="text", choices=["text", "json"],
                      help="report format: json emits --suggest's rows "

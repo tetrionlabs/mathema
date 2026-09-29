@@ -465,7 +465,7 @@ def guard_policies(facts) -> dict:
     out: dict = {}
 
     def covered(test) -> list:
-        keys = []
+        keys: list = []
         for node in ast.walk(test):
             if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) \
                     and node.left.id in params and len(node.ops) == 1:
@@ -585,8 +585,16 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
                 or origin is not None
             if not admitted or (p, kind) in covered:
                 continue
+            if origin is None or origin == "type":
+                origin = ("optional" if kind == "absent" and sig.annotated
+                          and sig.absent else "type")
             done_members: set = set()
-            if p in composed and any(pol.kind == kind for pol in composed[p][1]):
+            guarded = any(k[0] == p and k[1] == kind for k in guards)
+            # a library row composed through the body speaks for a kind
+            # the type admits and no guard in the body decides; a kind the
+            # author admitted stays observed (FM17)
+            if p in composed and origin == "type" and not guarded \
+                    and any(pol.kind == kind for pol in composed[p][1]):
                 made = composed_rows(fn, facts, p, kind, composed[p][0],
                                      composed[p][1], name_of)
                 rows += made
@@ -594,9 +602,6 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
                                 for r in made}
                 if None in done_members:
                     continue
-            if origin is None or origin == "type":
-                origin = ("optional" if kind == "absent" and sig.annotated
-                          and sig.absent else "type")
             calls = [c for c in _relevant(current.calls if current else [], p, kind,
                                           None, "")
                      if not done_members

@@ -22,6 +22,12 @@ polars.Series.mean:
     - name: nan_propagates
       statement: "missing(f, a, nan) propagates"
       note: "polars carries nan through as a float."
+    - name: null_skipped
+      statement: "assuming count(a) >= 1, missing(f, a, null) drops"
+      note: "A null is left out while a value remains."
+    - name: all_null_is_none
+      statement: "assuming count(a) == 0, missing(f, a, null) converts"
+      note: "A Series of nulls has mean None: the missing slots come back as an absent value."
 
 polars.Series.std:
   claims:
