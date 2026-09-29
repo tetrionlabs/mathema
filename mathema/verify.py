@@ -61,6 +61,12 @@ class GateReport:
     owned: int = 0
     skipped: int = 0
     foreign: list = field(default_factory=list)
+    # of the proven, the built-in ones mathema adds (dependencies_current)
+    builtin_proven: int = 0
+    # the unknown claims by name, each with its one-line reason
+    unknown_reasons: list = field(default_factory=list)
+    # raises at a missing input no claim accounts for: (witness, exception)
+    unaccounted: list = field(default_factory=list)
 
     @property
     def refuted(self) -> int:
@@ -68,6 +74,18 @@ class GateReport:
         `invalidated` together: the `refuted` stance of the claim-row
         vocabulary."""
         return self.falsified + self.invalidated
+
+
+def _unaccounted_text(report) -> str:
+    """`; 1 unaccounted raise at a missing input (xs=[NA], TypeError)`,
+    or an empty string."""
+    found = getattr(report, "unaccounted", None) or []
+    if not found:
+        return ""
+    at, exc = found[0]
+    n = len(found)
+    return (f"; {n} unaccounted raise{'s' if n != 1 else ''} at a missing input "
+            f"({at}, {exc})")
 
 
 def summary_counts(counts) -> str:
@@ -80,8 +98,14 @@ def summary_counts(counts) -> str:
     get = ((lambda k: counts.get(k, 0)) if isinstance(counts, dict)
            else (lambda k: getattr(counts, "owned" if k == "accepted_risk"
                                    else k)))
-    parts = [f"{get('proven')} proven", f"{get('holds')} holds",
-             f"{get('falsified')} falsified"]
+    builtin = (counts.get("builtin_proven", 0) if isinstance(counts, dict)
+               else getattr(counts, "builtin_proven", 0))
+    proven = f"{get('proven')} proven"
+    if builtin and get("proven") > builtin:
+        mine = get("proven") - builtin
+        proven += (f" ({mine} claim{'s' if mine != 1 else ''}, {builtin} "
+                   f"built-in)")
+    parts = [proven, f"{get('holds')} holds", f"{get('falsified')} falsified"]
     for key, word in (("invalidated", "invalidated"), ("unknown", "unknown"),
                       ("skipped", "skipped"),
                       ("accepted_risk", "accepted risk")):
@@ -176,8 +200,11 @@ def gate(claims, *, strict: bool,
             # the stored form of an unknown a person accepted as risk
             r.owned += 1
             continue
+        _note_unaccounted(r, meta)
         if kind == "proven":
             r.proven += 1
+            if meta.get("mathema.surface") == "builtin":
+                r.builtin_proven += 1
         elif kind == "holds":
             r.holds += 1
         elif kind == "falsified":
@@ -189,6 +216,7 @@ def gate(claims, *, strict: bool,
                 r.owned += 1
             else:
                 r.unknown += 1
+                r.unknown_reasons.append((name, _first_sentence(note)))
         elif kind == "skipped":
             r.skipped += 1
     # a falsified or invalidated claim is a failing check, in every
@@ -202,7 +230,10 @@ def gate(claims, *, strict: bool,
         # an unaccepted unknown is an open epistemic gap: it fails in
         # every mode until it is resolved or a human owns the risk
         # (mathema accept --as risk)
-        r.problems.append(f"{r.unknown} unknown claim(s)")
+        named = [f"{n} unknown: {why}" if why else f"{n} unknown"
+                 for n, why in r.unknown_reasons]
+        r.problems.append("; ".join(named) if named else
+                          f"{r.unknown} unknown claim(s)")
     if strict and (r.skipped or r.owned):
         # accepted risk is visible relaxation, not laundering: lenient
         # proceeds past it, strict still refuses it
@@ -213,6 +244,51 @@ def gate(claims, *, strict: bool,
     if unresolved:
         r.problems.append(f"unresolved names: {', '.join(unresolved)}")
     return r
+
+
+def _first_sentence(note) -> str:
+    """A note's first clause, short enough for a summary line: `x = nan
+    gives nan, nothing to compare`."""
+    text = (note or "").strip()
+    head = text.split(". ", 1)[0].split("; ", 1)[0]
+    head = head.replace("the only listed point, ", "")
+    head = head.replace(", gives", " gives").replace(", raises", " raises")
+    head = head.replace(" back, so there is no value to compare with",
+                        ", nothing to compare with")
+    return head[:120]
+
+
+def _note_unaccounted(r, meta: dict) -> None:
+    """Collect a row's raises at a missing input that no claim accounts
+    for: a hole the type admits that raises, or an absence the author
+    admitted that raises."""
+    missing = meta.get("mathema.missing") or {}
+    behaviour = missing.get("behaviour") or {}
+    origin = missing.get("origin") or {}
+    for p, members in behaviour.items():
+        for member, seen in members.items():
+            kind = "absent" if member == "None" else "missing"
+            if kind == "absent" and (origin.get(p) or {}).get(kind, "type") == "type":
+                continue
+            if seen == "raises":
+                entry = (missing.get("executed") or {}).get(p, {}).get(member, "")
+                exc = entry[len("raised "):] if entry.startswith("raised ") else "an exception"
+                at = f"{p}=[{member}]" if kind == "missing" and member != "nan" else f"{p}={member}"
+                witness = (missing.get("said") or {}).get(p, {}).get(member, "")
+                if " = " in witness:
+                    at = witness.split("at ", 1)[1].split(" f ", 1)[0].replace(" = ", "=")
+                pair = (at, exc)
+            elif seen == "mixed":
+                ways = (missing.get("mixed") or {}).get(p, {}).get(member, {})
+                if "raises" not in ways:
+                    continue
+                entry = (missing.get("executed") or {}).get(p, {}).get(member, "")
+                exc = entry[len("raised "):] if entry.startswith("raised ") else "an exception"
+                pair = (ways["raises"].replace(" = ", "="), exc)
+            else:
+                continue
+            if pair not in r.unaccounted:
+                r.unaccounted.append(pair)
 
 
 def _accepted_risk(entry: dict | None) -> frozenset:
@@ -1440,13 +1516,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             line = f"{state:4} {key}: fresh"
             if is_library:
                 line += f"; library claims from {library[key]}"
+            line += _unaccounted_text(report)
             if report.problems:
                 line += "; " + "; ".join(report.problems + hints)
         else:
             line = (f"{state:4} {key}: "
                     + (f"library claims from {library[key]}; "
                        if is_library else "")
-                    + f"{why}; {summary_counts(report)}")
+                    + f"{why}; {summary_counts(report)}"
+                    + _unaccounted_text(report))
             if report.foreign:
                 grammars = sorted({_claim_fields(p)[2]
                                    ["mathema.foreign_grammar"]

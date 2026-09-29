@@ -116,9 +116,10 @@ def test_a_rendered_domain_always_states_what_it_admits():
     assert "|absent|missing" in render_claim_text(allowed, unicode=False)
 
     excluded = claim("for x in [0,10] \\ {missing}, f(x) >= 0")
-    assert "\\ {∅}" in render_claim_text(excluded, unicode=True)
-    assert "\\ {missing}" in render_claim_text(excluded, unicode=False)
-    assert "|absent" in render_claim_text(excluded, unicode=False)
+    # the type clause states what it admits, so the excluded hole needs
+    # no exclusion beside it
+    assert "⊂ ℝ ∪ {absent}" in render_claim_text(excluded, unicode=True)
+    assert ": float|absent," in render_claim_text(excluded, unicode=False)
 
     from mathema.spec import canonical_claim_text
     for conjecture in (allowed, excluded):

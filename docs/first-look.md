@@ -55,20 +55,20 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=192)
-  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=20)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (192 draws, sizes (2, 1) to (8, 1), up to 968 entries)
+  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (20 draws)
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
            counterexample ([-993714, 311292, -166437, 620054, 0, 999998, -999998], 6.79181): -999998.0 vs -53425523112.88785
   FALSIFY bounded_upper: f(x, alpha) <= max(x)
            counterexample ([551081, 0, 0, 937864, -860102, -288141, 726070], -4.23217): 10840391161.550304 vs 937863.7282631358
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
            counterexample ([567047, -597790, -1e+06, 223930, 683724, -934060, -933610], -1.67919): 425108676.6026794 vs -181372134.92932475
-  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|absent|missing, c*f(x, alpha) = f(g(x, c), alpha)
+  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
-  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|absent|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=53)
-  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|absent|missing, c + f(x, alpha) = f(g(x, c), alpha)
+  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), up to 227 entries)
+  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
-  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|absent|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=53)
+  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), up to 227 entries)
 ```
 
 Every counterexample names the inputs that produced it, so a failure is
@@ -116,18 +116,18 @@ the picture, not just the wording (an excerpt, from the bounds on):
 
 <!-- example: ema output match=subset -->
 ```text
-  proven  bounded_lower: min(x) ≤ f(x, alpha)
-  holds   bounded_lower[float]: min(x) <= f(x, alpha) (n=47)
-  proven  bounded_upper: f(x, alpha) ≤ max(x)
-  holds   bounded_upper[float]: f(x, alpha) <= max(x) (n=47)
+  proven  bounded_lower: min(x) <= f(x, alpha)
+  holds   bounded_lower[float]: min(x) <= f(x, alpha) (47 draws, sizes (1, 1) to (8, 1), up to 225 entries)
+  proven  bounded_upper: f(x, alpha) <= max(x)
+  holds   bounded_upper[float]: f(x, alpha) <= max(x) (47 draws, sizes (1, 1) to (8, 1), up to 225 entries)
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
            counterexample ([-999998, 978369, 111462, -869239, -926712, -999998, -1e+06, 894282], 0.499951): -11445.14869760722 vs -341186.2123510968
-  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|absent|missing, c*f(x, alpha) = f(g(x, c), alpha)
+  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ
-  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|absent|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=53)
-  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|absent|missing, c + f(x, alpha) = f(g(x, c), alpha)
+  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), up to 227 entries)
+  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ
-  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|absent|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=53)
+  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), up to 227 entries)
 ```
 
 Both bounds flip to `proven`. Inside `[0, 1]` each step of the loop is
@@ -180,10 +180,10 @@ print(mathema.check(ema, claims=collapses))
 <!-- example: ema output -->
 ```text
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
-  holds   collapses_probed: f(x, 1.0) = x[-1] (n=160)
+  holds   collapses_probed: f(x, 1.0) = x[-1] (160 draws, sizes (2, 1) to (8, 1), up to 854 entries)
   proven  collapses_derived: f(x, 1.0) = x[-1]
            ∀ x ∈ Seq(ℝ)
-  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (n=45)
+  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (45 draws, sizes (1, 1) to (8, 1), up to 208 entries)
 ```
 
 Both say the claim is true, but they are not the same kind of true.
@@ -251,7 +251,7 @@ ema:
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
       n: 45
-      note: "the computation of collapses_derived in float64, executed at 45 points (every domain corner, then sampled interior points); unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
+      note: "the float64 computation of collapses_derived ran at 45 points: every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
       route: "probe"
     - name: "collapses_probed"
       statement: "f(x, 1.0) = x[-1]"

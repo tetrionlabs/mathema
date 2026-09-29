@@ -249,8 +249,10 @@ def _format_check(rows: list[dict], fmt: str) -> str:
                        f'| {r["proven"]} | {r["holds"]} | {r["falsified"]} '
                        f'| {r["invalidated"]} | {r["unknown"]} '
                        f'| {r["skipped"]} | {r["accepted_risk"]} | {status} |')
-        out.append(f"\ncdd spec v{SPEC_VERSION}. a falsified claim counts as "
-                   "knowledge, never as failure.")
+        footer = ("" if all(not r["problems"] for r in rows) else
+                  " A falsified claim is knowledge about the code; verify "
+                  "still fails on it.")
+        out.append(f"\ncdd spec v{SPEC_VERSION}.{footer}")
         return "\n".join(out)
     # text
     lines = []

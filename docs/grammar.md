@@ -227,7 +227,7 @@ for route in ["probe", "derive"]:
 <!-- example: just-below output -->
 ```text
 probe   holds
-        fails by 1e-10 at (0), within the default tolerance (1e-09)
+        fails by 1e-10 at (0), within the default tolerance (1e-09); at x = nan f returned -1e-10: the hole became a value; write `missing(f, x) drops` to accept this, or guard the input
 derive  falsified x=0.0616333
         reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
 ```

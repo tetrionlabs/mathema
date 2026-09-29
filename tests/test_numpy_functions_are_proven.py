@@ -211,4 +211,4 @@ def test_held_on_the_probe_until_the_derive_route_reads_the_row(fn, law,
                                                                   why):
     p = _one(fn, law)
     assert (p.verdict, p.route) == ("holds", "probe"), (p.verdict, p.note)
-    assert why in p.note, p.note
+    assert why in f"{p.note} {(p.meta or {}).get('mathema.routes_attempted', '')}", p.note

@@ -94,7 +94,7 @@ def test_a_pinned_domain_proves_by_visiting_its_one_point(divisor_count):
     p = _verdict(divisor_count, "for n in [30,30] subset Z, f(n) == 8")
     assert p.verdict == "proven", (p.verdict, p.note)
     assert p.route == "derive:brute_force", p.route
-    assert "exactly 1 point" in (p.sketch or ""), p.sketch
+    assert "the declared domain has one point, n = 30" in (p.sketch or ""), p.sketch
 
 
 def test_a_small_finite_domain_proves_across_all_of_it(divisor_count):

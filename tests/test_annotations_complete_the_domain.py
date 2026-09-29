@@ -157,13 +157,13 @@ def test_the_record_renders_the_completed_domain(fn, text, statement, holes):
     probe = run(fn, text)
     assert probe.statement == statement
     admitted = ((probe.meta or {}).get("mathema.missing") or {}).get("admitted") or {}
-    found = next(iter(admitted.values()), {}).get("holes", [])
+    found = next(iter(admitted.values()), {}).get("missing", [])
     assert tuple(found) == (holes or ()), admitted
 
 
 def test_a_stated_type_clause_with_no_suffix_excludes_and_says_so_where_it_narrows():
     assert run(bare, "for x in [0, 100] subset Z, f(x) >= 0").statement == \
-        "for x in [0, 100] \\ {absent, missing} : int, f(x) >= 0"
+        "for x in [0, 100] : int, f(x) >= 0"
 
 
 def test_a_written_clause_that_admits_more_widens_the_type():
@@ -174,7 +174,7 @@ def test_a_written_clause_that_admits_more_widens_the_type():
 
 def test_a_written_clause_that_admits_less_narrows_the_type():
     probe = run(optional, "for x in [0, 1] : float, f(x) >= 0")
-    assert probe.statement == "for x in [0.0, 1.0] \\ {absent, missing} : float, f(x) >= 0"
+    assert probe.statement == "for x in [0.0, 1.0] : float, f(x) >= 0"
     assert ("the claim excludes absence, which x's type Optional[float] admits; the "
             "claim no longer covers x = None") in probe.note
 

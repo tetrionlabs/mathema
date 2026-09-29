@@ -69,8 +69,8 @@ def test_a_second_axis_keeps_dim():
 
 
 @pytest.mark.parametrize("unicode", [True, False])
-def test_outside_the_language_dialect_dim_stays(unicode):
+def test_outside_the_language_dialect_len_reads_as_len_too(unicode):
     cj = claim("assuming len(x) == len(y), f(x, y) == f(y, x)")
     assert cj.grammar == "mathema"
     assert render_claim_text(cj, unicode=unicode).startswith(
-        "assuming dim(x, 0) == dim(y, 0), ")
+        "assuming len(x) == len(y), ")

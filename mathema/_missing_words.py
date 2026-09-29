@@ -105,10 +105,12 @@ def outcome_entry(member: str, output=None, raised: "str | None" = None,
     if raised is not None:
         return f"raised {raised}"
     what = f"{member} slot in" if in_slot else f"{member} in"
-    out = respelled or value_shown(output)
+    out = value_shown(output)
     tag = behaviour or ""
     if respelled:
-        tag = f"{tag}, member changed" if tag else "member changed"
+        out = respelled.rsplit(" returned as ", 1)[-1]
+        tag = (f"{tag}, member changed: {respelled}" if tag
+               else f"member changed: {respelled}")
     return f"{what}, {out} out ({tag})" if tag else f"{what}, {out} out"
 
 

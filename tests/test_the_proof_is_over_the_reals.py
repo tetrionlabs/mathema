@@ -62,7 +62,7 @@ def test_an_optional_parameter_has_its_absence_executed_by_the_companion():
                               float_companions=True)
     companion = next(p for p in found if p.name.startswith("c["))
     assert companion.meta["mathema.missing"]["executed"]["x"] == {
-        "None": "propagates (None)", "nan": "propagates (nan)"}
+        "None": "None in, None out (propagates)", "nan": "nan in, nan out (propagates)"}
 
 
 def test_a_listed_sentinel_is_executed_by_the_claim_itself():

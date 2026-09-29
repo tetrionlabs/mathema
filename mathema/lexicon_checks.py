@@ -233,8 +233,10 @@ def check_missing_policy(src: LexiconSource) -> list:
             continue
         # a binding that does not state its missing-value policy renders
         # the default it resolves to; a stated one renders what it lists
+        # a claim's own constant (`let c be [0, 1]`) admits nothing
+        # missing and says nothing about it
         unstated = any(not stated(b) for p, b in cj.domain.items()
-                       if p.isidentifier())
+                       if p.isidentifier() and p not in (cj.free_vars or ()))
         for unicode_mode in (True, False):
             shown = render_claim_text(cj, unicode=unicode_mode)
             if unstated and not any(word in shown for word in

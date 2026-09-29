@@ -2,14 +2,14 @@
 # Copyright 2026 Tetrion Ltd
 """At every missing input it executed, the record states what the code
 did, per parameter and member: `meta["mathema.missing"]["executed"]`
-maps each parameter to `{member: outcome}`, the outcome one of
-`propagates (<value>)`, `raised <Exception>`, `returned <value>` or
-`replaced`; `behaviour` names the one behaviour per member (or
-`mixed`). A note says it in words only where a verdict needs it."""
-import math
-
+maps each parameter to `{member: outcome}` (`nan in, nan out
+(propagates)`, `raised TypeError`, `nan in, 1.0 out (drops)`),
+`behaviour` names the one behaviour per member (or `mixed`), and the
+row's note says it in one sentence, with the claim to write where the
+behaviour is not what the parameter's type leads a reader to expect."""
 from mathema.conjecture import check_conjectures, claim
-from mathema.probing import ExecutedMissing, execution_outcome, executed_words
+from mathema.probing import ExecutedMissing
+from mathema._missing_words import outcome_entry, said
 
 NAN = float("nan")
 
@@ -26,17 +26,28 @@ def zero_for_none(x: "float | None") -> float:
     return 0.0 if x is None else x
 
 
+def clamp01(x: float) -> float:
+    return max(0.0, min(1.0, x))
+
+
 def _executed(row):
     return ((row.meta or {}).get("mathema.missing") or {}).get("executed")
 
 
-def test_an_outcome_is_named_in_the_record_vocabulary():
-    assert execution_outcome(value=NAN) == "propagates (nan)"
-    assert execution_outcome(value=None) == "propagates (None)"
-    assert execution_outcome(raised="TypeError") == "raised TypeError"
-    assert execution_outcome(value=0.0) == "returned 0.0"
-    assert execution_outcome(value=[1.0, NAN]) == "propagates ([1.0, nan])"
-    assert execution_outcome(value=[1.0, 0.0], holed_input=True) == "replaced"
+def test_an_outcome_is_one_entry_form():
+    assert outcome_entry("nan", NAN, behaviour="propagates") == "nan in, nan out (propagates)"
+    assert outcome_entry("None", raised="TypeError") == "raised TypeError"
+    assert outcome_entry("nan", 1.0, behaviour="drops") == "nan in, 1.0 out (drops)"
+    assert outcome_entry("null", [1.0, NAN], behaviour="propagates", in_slot=True) == \
+        "null slot in, [1.0, nan] out (propagates)"
+
+
+def test_what_happened_is_one_sentence():
+    assert said("x", "nan", {"x": NAN}, NAN, behaviour="propagates") == \
+        "at x = nan f gave nan back (missing in, missing out)"
+    assert said("x", "None", {"x": None}, raised="TypeError") == "at x = None f raised TypeError"
+    assert said("x", "nan", {"x": NAN}, 1.0, behaviour="drops") == \
+        "at x = nan f returned 1.0: the hole became a value"
 
 
 def test_a_missing_input_is_recorded_under_its_member():
@@ -46,51 +57,54 @@ def test_a_missing_input_is_recorded_under_its_member():
     record.add_call({"y": 0.5}, output=1.0)
     assert record.meta()["executed"] == {
         "x": {"None": "raised TypeError"},
-        "xs": {"nan": "propagates (nan)", "null": "propagates (nan)"}}
+        "xs": {"nan": "nan slot in, nan out (propagates)",
+               "null": "null slot in, nan out (propagates)"}}
 
 
 def test_the_record_keeps_the_first_outcome_per_member():
     record = ExecutedMissing()
     record.add_call({"x": NAN, "y": 1.0}, output=NAN)
-    record.add_call({"x": math.nan}, raised="ValueError")
+    record.add_call({"x": NAN}, raised="ValueError")
     record.add_call({"x": None}, raised="TypeError")
     meta = record.meta()
-    assert meta["executed"] == {"x": {"nan": "propagates (nan)",
+    assert meta["executed"] == {"x": {"nan": "nan in, nan out (propagates)",
                                       "None": "raised TypeError"}}
     assert meta["behaviour"] == {"x": {"nan": "mixed", "None": "raises"}}
-    assert meta["mixed"] == {"x": {"nan": {"propagates": "x=nan, y=1.0",
-                                           "raises": "x=nan"}}}
+    assert meta["mixed"] == {"x": {"nan": {"propagates": "x = nan, y = 1.0",
+                                           "raises": "x = nan"}}}
 
 
-def test_the_words_are_a_sentence_per_parameter_and_member():
-    assert executed_words({"x": {"nan": "propagates (nan)",
-                                 "None": "raised TypeError"}}) \
-        == "at x=nan the function returned nan; at x=None the function raised TypeError"
-
-
-def test_a_proof_over_listed_sentinels_states_what_the_code_did():
-    (row,) = check_conjectures(
-        doubled, [claim("for x in {1.0, None, nan}, f(x) == 2*x")])
+def test_a_listed_raise_is_said_with_the_claim_to_write():
+    (row,) = check_conjectures(doubled, [claim("for x in {1.0, None, nan}, f(x) == 2*x")])
     assert row.verdict == "proven", (row.verdict, row.note)
     assert _executed(row) == {"x": {"None": "raised TypeError",
-                                    "nan": "propagates (nan)"}}
-    assert "raised" not in (row.note or "")
+                                    "nan": "nan in, nan out (propagates)"}}
+    assert ("at x = None f raised TypeError, a point the claim lists; no claim says "
+            "what f should do with None. State `absent(f, x) raises(TypeError)` if "
+            "that is intended, or remove None from the set") in row.note
 
 
 def test_a_value_returned_at_a_missing_input_is_stated():
-    (row,) = check_conjectures(
-        zero_for_none, [claim("for x in {1.0, None}, f(x) >= 0")])
-    assert _executed(row) == {"x": {"None": "returned 0.0"}}
+    (row,) = check_conjectures(zero_for_none, [claim("for x in {1.0, None}, f(x) >= 0")])
+    assert _executed(row) == {"x": {"None": "None in, 0.0 out (drops)"}}
+    assert "at x = None f returned 0.0: the absence became a value" in row.note
+
+
+def test_a_silent_drop_names_the_claim_that_accepts_it():
+    rows = check_conjectures(clamp01, [claim("for x in R, 0 <= f(x) <= 1", name="c")],
+                             float_companions=True)
+    companion = next(p for p in rows if p.name.startswith("c["))
+    assert ("at x = nan f returned 1.0: the hole became a value; write "
+            "`missing(f, x) drops` to accept this, or guard the input") in companion.note
 
 
 def test_a_propagated_hole_is_stated_on_the_proven_row():
-    (row,) = check_conjectures(
-        plus_one, [claim("for x in {1.0, nan}, f(x) == x + 1")])
+    (row,) = check_conjectures(plus_one, [claim("for x in {1.0, nan}, f(x) == x + 1")])
     assert row.verdict == "proven"
-    assert _executed(row) == {"x": {"nan": "propagates (nan)"}}
+    assert _executed(row) == {"x": {"nan": "nan in, nan out (propagates)"}}
+    assert "at x = nan f gave nan back (missing in, missing out)" in row.note
 
 
 def test_a_row_that_executed_no_missing_input_states_none():
-    (row,) = check_conjectures(
-        plus_one, [claim("for x in {1.0, 2.0}, f(x) == x + 1")])
+    (row,) = check_conjectures(plus_one, [claim("for x in {1.0, 2.0}, f(x) == x + 1")])
     assert _executed(row) is None

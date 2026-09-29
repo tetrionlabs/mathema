@@ -5,14 +5,14 @@ Notable changes to mathema are recorded here from its first public release onwar
 ## 0.6.1
 
 - Fingerprints move once in 0.6.1: the rendered domain now states what
-  it admits. A missing value is one of two kinds, the absence of the
-  object (`absent`, which `None` also spells) and a hole in a slot
-  (`missing`, `∅` in unicode, with
-  the members `nan`, `NA`, `null` and `NaT`), and a domain renders only
+  it admits. A value can be not there in two ways: absent (`absent`;
+  Python spells it `None`), the object itself not there, and missing
+  (`missing`, `∅` in unicode), one slot holding no computable value,
+  with the members `nan`, `NA`, `null` and `NaT`. A domain renders only
   what it admits: `[0.0, 1.0] : float|missing` in ASCII, `[0.0, 1.0] ⊂ ℝ
   ∪ {∅}` in unicode, a space's slot holes in brackets before the power
-  (`([0.0, 1.0] | {missing})^n : float`). A type clause states the whole
-  policy (`[0, 100] ⊂ Z` now admits no missing value), a binding without
+  (`([0.0, 1.0] | {missing})^n : float`). A type clause states exactly
+  what the domain admits (`[0, 100] ⊂ Z` now admits no missing value), a binding without
   one is completed from the annotation (a `float` holds `nan`, an `int`
   or `str` nothing, `Optional[...]` may be absent), the record's
   `meta["mathema.missing"]` states the members the class resolved to,
@@ -23,23 +23,26 @@ Notable changes to mathema are recorded here from its first public release onwar
   and says so once for the run, not claim by claim.
 - A record writes a sentinel as its word, `{"sentinel": "missing"}`,
   and reads the older `__mathema_missing__` as `missing`.
-- A function is called with the values a listed sentinel stands for,
-  `None` or `nan`, never with mathema's internal marker; each is tried
-  at least once per claim, and the record lists what was tried
-  (`meta["mathema.missing"]`).
+- A function is called with the real value a listed word stands for
+  (`None`, `nan`, `pd.NA`), never with a placeholder of mathema's own;
+  each is tried at least once per claim, and the record lists what was
+  tried (`meta["mathema.missing"]`).
 - A runtime's missing values are stated as definition rows under a
   key's `defines:` (`missing := {null, nan}`), taken at face value
-  (`verdict: trusted`, `route: axiom`) and listed by `mathema verify`
-  under `definitions (trusted)`. `:=` is refused in a claim and in a
+  (`verdict: trusted`, `route: axiom`); `mathema verify` lists a
+  project's own under `definitions (trusted)`. `:=` is refused in a claim and in a
   binding. mathema ships `polars.Series` and `pandas.Series` definitions,
   and the bundled definition rows state `R^n` without `\ {∅}`.
 - A `raises(...)` claim over a finite domain is proven by calling the
   function at every point.
 - A value claim is judged wherever the function returns a value, a
   missing input it replaces included, and never where it returns a
-  missing value or raises at a missing input: that point is recorded,
-  not compared. A value claim with no point left to compare is
-  `unknown`. `meta["mathema.missing"]` records what the function did at
+  missing value: that point is recorded in the record's missing
+  behaviour, not compared. A raise at a missing input is recorded the
+  same way and, where no claim accounts for it, reported in the row's
+  note and on `mathema verify`'s line for the function. A value claim
+  with no point left to compare is `unknown`, and its note says what to
+  write instead. `meta["mathema.missing"]` records what the function did at
   each missing input it was called with (`executed`) and the behaviour
   per parameter and member (`behaviour`: `raises`, `drops`,
   `propagates`, `converts` or `introduces`, or `mixed` with a witness
@@ -49,18 +52,26 @@ Notable changes to mathema are recorded here from its first public release onwar
   1, all-missing vectors, a missing value at the first and at the last
   position, the zero, constant and rank-deficient matrices, a missing
   entry and an all-missing row, a missing value in every column and an
-  all-missing column), and a random draw then carries one to three
-  missing values at a rate of 0.15, each admitted member in turn. A
-  float companion runs these too.
+  all-missing column); a random vector then has each slot missing with
+  probability 0.15, at least one and at most three slots per vector,
+  each admitted member in turn. A float companion runs these too.
 - `sum`, `mean`, `std`, `var`, `min`, `max`, `prod`, `median`,
   `quantile`, `dot`, `cumsum`, `cumprod` and `count` in a claim read the
   values of a vector, a missing value left out. Over no value `sum` is
   0, `prod` 1, `count` 0, `dot` and `norm` 0, and `mean`, `std`, `var`,
   `min`, `max`, `median` and `quantile` are missing; `len` counts every
-  position. The bundled `polars.Series.count` row admits `null` only.
+  position. The bundled `polars.Series.count` row counts `null` slots
+  as missing and `nan` slots as values.
 - A definition row may define `absent` (`absent := {Option::None}`); one
   value may be both the absence and a hole member, and two hole members
   that are one value are refused at load.
+- A record says in one sentence what the function did at each missing
+  input it was called with (`at x = nan f gave nan back`, `at x = None
+  f raised TypeError`) and, where that is not what the parameter's type
+  leads a reader to expect, the claim to write; a declared `Optional`
+  return's `None` is recorded, not judged; a row's count reads
+  `(43 draws)`, or for a container `(57 draws, sizes (1, 1) to (8, 1),
+  up to 224 entries)`.
 
 - The wheel now ships the bundled compendium. The 0.6.0 wheel carried
   none of its compendium files (the package-data pattern missed the

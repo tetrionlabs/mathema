@@ -164,8 +164,8 @@ def test_two_behaviours_are_mixed_with_a_witness_each():
     table.add({"xs": [NAN]}, NAN)
     table.add({"xs": [NAN, 1.0]}, 1.0)
     assert table.behaviour(("xs", "missing", "nan")) == "mixed"
-    assert table.mixed() == {"xs": {"nan": {"propagates": "xs=[nan]",
-                                            "drops": "xs=[nan, 1.0]"}}}
+    assert table.mixed() == {"xs": {"nan": {"propagates": "xs = [nan]",
+                                            "drops": "xs = [nan, 1.0]"}}}
 
 
 def test_a_call_with_no_missing_input_files_nothing():
@@ -200,7 +200,8 @@ def test_a_null_slot_returned_as_nan_propagates_and_says_so():
     record = ExecutedMissing()
     record.add_call({"values": values}, output=out)
     assert record.meta()["executed"] == {
-        "values": {"null": "values[1]=None returned as nan"}}
+        "values": {"null": "null slot in, nan out (propagates, member changed: "
+                           "values[1]=None returned as nan)"}}
     assert record.meta()["behaviour"] == {"values": {"null": "propagates"}}
 
 

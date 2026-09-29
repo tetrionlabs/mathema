@@ -3366,6 +3366,16 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 means = _missing_means(merged.get("admitted") or {}, resolution or {})
                 if means:
                     merged["means"] = means
+                # who admitted each kind: the type alone, or the author
+                origin = {}
+                for p2, entry in (merged.get("admitted") or {}).items():
+                    kinds_here = (["absent"] if entry.get("absent") else []) + \
+                        (["missing"] if entry.get("missing") else [])
+                    if kinds_here:
+                        origin[p2] = {k: _missing_origin(p2, k, written, resolution or {})
+                                      for k in kinds_here}
+                if origin:
+                    merged["origin"] = origin
                 probe.meta = {**(probe.meta or {}), "mathema.missing": merged}
                 told = _missing_told(merged, written, resolution or {}, fn)
                 if told and told not in (probe.note or "") \
@@ -4410,11 +4420,19 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
         why = _derive_attempt_label(fallback).split("(", 1)
         reason = why[1].rsplit(")", 1)[0] if len(why) > 1 else ""
         branch = re.search(r"line (\d+) \('([^']*)'\)", reason or "")
+        needs = re.search(r"needs a domain specific enough for ([\w, ]+)", reason or "")
         told = (f"derive could not decide the branch at line {branch.group(1)} "
-                f"({branch.group(2)}); the probe decided it" if branch else
+                f"({branch.group(2)})"
+                + (f": it needs a domain specific enough for {needs.group(1).strip()}"
+                   if needs else "")
+                + "; the probe decided it" if branch else
                 f"derive could not decide it ({reason}); the probe decided it"
                 if reason else "derive could not decide it; the probe decided it")
         winner.note = f"{winner.note}; {told}".lstrip("; ")
+    elif winner is fallback:
+        # derive's own report stands; the note says why the probe could
+        # not settle it either
+        winner.note = f"{winner.note}; {_probe_attempt_label(probed)}".lstrip("; ")
     winner.meta = {**(winner.meta or {}), "mathema.routes_attempted": trail}
     carried = {k: v for k, v in (fallback.meta or {}).items()
                if k.startswith("mathema.derive") or k == "mathema.timeout"

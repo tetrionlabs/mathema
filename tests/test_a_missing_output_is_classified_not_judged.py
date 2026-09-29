@@ -92,7 +92,8 @@ def test_s16_a_listed_absence_at_the_second_parameter_is_classified():
 def test_a_value_claim_with_no_judged_point_is_unknown():
     (p,) = check_conjectures(sqrt_plain, [claim("for x in {missing}, f(x) >= 0")])
     assert p.verdict == "unknown", (p.verdict, p.note)
-    assert "at x=nan the function returned nan" in p.note
+    assert p.note.startswith("the only listed point, x = nan, gives nan back, so "
+                             "there is no value to compare with >= 0.")
     assert "`missing(f, x) propagates`" in p.note
 
 

@@ -201,16 +201,16 @@ for n in Z, ...                                # bare, unbounded, still a stated
 
 ### Missing values
 
-A missing value is one of two kinds. **Absence**, written `absent`
-(`None` reads as the same word), is the object itself not being there: the parameter, the whole vector, a field
-of a record. A **hole**, written `missing` (`∅` in the unicode form), is
-one slot with no computable content: a NaN in a float, a `null` or `nan`
+A value can be not there in two ways. Absent (`absent`; Python spells
+it `None`) means the object itself is not there: the argument, the
+whole vector, a field. Missing (`missing`, `∅` in unicode) means one
+slot holds no computable value: a `nan` in a float, a `None` or `nan`
 element of a list, a `pd.NA` in a Series. `nan`, `NA`, `null` and `NaT`
-each name one member of the hole class, and a runtime's definition rows
-(see [Claims transfer](claims-transfer.md#definitions)) can add more.
+each name one member of the missing class, and a compendium can add more
+(see [Definitions](claims-transfer.md#definitions)).
 
-A domain says which kinds it admits. A type clause states the whole
-policy, so `[0, 1] : float` admits neither, `[0, 1] : float|absent` admits
+A domain says which kinds it admits. A type clause states exactly what
+the domain admits, so `[0, 1] : float` admits neither, `[0, 1] : float|absent` admits
 absence, `[0, 1] : float|missing` a hole, and `[0, 1] : float|nan` only
 the NaN member; `\ {missing}` and `\ {absent}` exclude a kind. A bare
 interval and a bare named space (`R`, `R^n`, `Z`) state nothing. A finite set
@@ -218,8 +218,8 @@ is exactly its members: `{6, 28, 496}` admits nothing missing and
 `{0.25, absent}` admits 0.25 and absence. Inside a space the slot's holes
 sit in brackets before the power, `([0, 1] | {missing})^n`.
 
-A binding without a type clause takes its policy from the parameter's
-annotation: a `float` slot may hold its NaN hole, an `int`, `bool` or
+A binding without a type clause takes what it admits from the
+parameter's annotation: a `float` slot may hold its NaN hole, an `int`, `bool` or
 `str` holds none, `Optional[...]` may be absent, a `list` element may be
 `null` or `nan`, and a parameter with no annotation admits both. The
 record's `meta["mathema.missing"]` names the members the class resolved
@@ -243,16 +243,16 @@ print(row.meta["mathema.missing"]["admitted"])
 <!-- example: missing-default output -->
 ```text
 for x in [0.0, 1.0] : float|missing, f(x) >= 0
-{'x': {'None': False, 'holes': ['nan']}}
+{'x': {'absent': False, 'missing': ['nan']}}
 ```
 
-The canonical text renders what a domain admits, in the order `absent`,
-`missing`, then members, fused onto the type in ASCII and written as a
-union in unicode, and an exclusion only where it narrows what the
-annotation would admit (read without a function, what no annotation
-would); every spelling an
-earlier release wrote (`[0.0, 1.0]:float|missing`, `∪ {∅}`, `\ {∅}`)
-still reads, and comes back in this form:
+The canonical text lists what the domain admits in the order `absent`,
+`missing`, then member words, fused onto the type in ASCII and written
+as a union in unicode. It shows an exclusion only when the exclusion
+removes something the annotation would admit and no type clause says
+so already. Every spelling from an earlier release
+(`[0.0, 1.0]:float|missing`, `∪ {∅}`, `\ {∅}`) still reads and comes
+back in this form:
 
 <!-- example: missing-spelling run inline -->
 ```python
@@ -260,8 +260,8 @@ from mathema import claim
 from mathema.spec import render_claim_text
 
 render_claim_text(claim("for x in [0, 1] ⊂ ℝ ∪ {None, ∅}, f(x) >= 0"), unicode=False)  # 'for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0'
-render_claim_text(claim("for x in [0, 1] : float|None, f(x) >= 0"), unicode=True)  # '∀ x ∈ [0.0, 1.0] \\ {∅} ⊂ ℝ ∪ {absent}, f(x) ≥ 0'
-render_claim_text(claim("for xs in [0, 1]^n : float|missing, f(xs) >= 0"), unicode=False)  # 'for xs in ([0.0, 1.0] | {missing})^n \\ {absent} : float, f(xs) >= 0'
+render_claim_text(claim("for x in [0, 1] : float|None, f(x) >= 0"), unicode=True)  # '∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent}, f(x) ≥ 0'
+render_claim_text(claim("for xs in [0, 1]^n : float|missing, f(xs) >= 0"), unicode=False)  # 'for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0'
 ```
 
 ### Language domains
@@ -687,17 +687,17 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 ```
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7982b776d687
-  holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (n=32)
-  holds   is_deterministic: f(scores) = f(scores) (n=192)
-  holds   is_state_safe: f(scores) = f(scores) (n=48)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (n=192)
-  holds   preserves_length: dim(f(scores), 0) = dim(scores, 0) (n=192)
+  holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (32 draws)
+  holds   is_deterministic: f(scores) = f(scores) (192 draws, sizes (1, 1) to (8, 1), up to 1027 entries)
+  holds   is_state_safe: f(scores) = f(scores) (48 draws)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (192 draws, sizes (1, 1) to (8, 1), up to 949 entries)
+  holds   preserves_length: len(f(scores)) = len(scores) (192 draws, sizes (1, 1) to (8, 1), up to 979 entries)
   FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
            counterexample scores=[0, 0]: [0.5, 0.5] vs [0.0, 0.0]
-  holds   preserves_type: type(f(scores)) = type(scores) (n=192)
+  holds   preserves_type: type(f(scores)) = type(scores) (192 draws, sizes (1, 1) to (8, 1), up to 1017 entries)
   FALSIFY is_sorted_output: is_sorted_output(f(scores))
            counterexample ([4.86304, 8.4521, -9.06059, -3.61645]): output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
-  holds   sums_to_one: sum(f(scores)) = 1 (n=192)
+  holds   sums_to_one: sum(f(scores)) = 1 (192 draws, sizes (1, 1) to (8, 1), up to 938 entries)
 ```
 
 `shape` came from the `Annotated[list, Shape("n")]` hints,

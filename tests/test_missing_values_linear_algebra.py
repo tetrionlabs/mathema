@@ -146,7 +146,7 @@ def test_v3_nanmean_drops_some_holes_and_propagates_an_all_hole_vector():
     assert companion.verdict == "holds"
     mixed = companion.meta["mathema.missing"]["mixed"]["xs"]["nan"]
     assert set(mixed) == {"drops", "propagates"}
-    assert mixed["propagates"] in ("xs=[nan]", "xs=[nan, nan]"), mixed
+    assert mixed["propagates"] in ("xs = [nan]", "xs = [nan, nan]"), mixed
 
 
 def test_v8_pandas_mean_is_proven_through_its_definition_row():

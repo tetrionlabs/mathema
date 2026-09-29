@@ -96,7 +96,8 @@ and decided the inequality algebraically, so the result covers every
 price in that range rather than the ones a sampler happened to pick.
 The region it proved over is printed back explicitly, and it is over
 the reals: the NaN a `price: float` admits is not a real number, so the
-proof leaves it to the computation, and the record names it there.
+proof leaves it to the float computation, whose record lists what f did
+at nan.
 
 That difference is the whole idea: `holds` is evidence, `proven` is
 proof, and mathema always tells you which one you have. The full
@@ -174,7 +175,7 @@ pricing.discounted:
       statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "holds"
       n: 46
-      note: "the computation of never_raises_price in float64, executed at 46 points (nan first, then every domain corner, then sampled interior points)"
+      note: "the float64 computation of never_raises_price ran at 46 points: nan, every corner and 40 interior points; at price = nan f gave nan back (missing in, missing out); at rate = nan f gave nan back (missing in, missing out)"
       route: "probe"
 ```
 

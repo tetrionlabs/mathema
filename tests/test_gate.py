@@ -31,7 +31,7 @@ def test_subrouted_verdicts_classify_through_the_family():
 
 def test_unknown_gates_unless_risk_accepted():
     r = gate([_probe("law", "unknown")], strict=False)
-    assert r.problems == ["1 unknown claim(s)"]
+    assert r.problems == ["law unknown"]
     r = gate([_probe("law", "unknown")], strict=False,
              accepted_risk=frozenset({"law"}))
     assert r.problems == [] and r.owned == 1

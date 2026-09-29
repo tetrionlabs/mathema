@@ -46,18 +46,18 @@
  },
  "factorial_postfix": {
   "input": "for n in [1, 5] subset Z, f(n) <= n!",
-  "unicode": "∀ n ∈ [1, 5] \\ {absent, ∅} ⊂ ℤ, f(n) ≤ factorial(n)",
-  "ascii": "for n in [1, 5] \\ {absent, missing} : int, f(n) <= factorial(n)"
+  "unicode": "∀ n ∈ [1, 5] ⊂ ℤ, f(n) ≤ factorial(n)",
+  "ascii": "for n in [1, 5] : int, f(n) <= factorial(n)"
  },
  "dim_length_premise": {
   "input": "assuming len(x) == len(y), f(x, y) == f(y, x)",
-  "unicode": "assuming dim(x, 0) == dim(y, 0), f(x, y) = f(y, x)",
-  "ascii": "assuming dim(x, 0) == dim(y, 0), f(x, y) = f(y, x)"
+  "unicode": "assuming len(x) == len(y), f(x, y) = f(y, x)",
+  "ascii": "assuming len(x) == len(y), f(x, y) = f(y, x)"
  },
  "dim_conformability": {
   "input": "assuming cols(A) == rows(B), f(A, B) == f(A, B)",
-  "unicode": "assuming dim(A, 1) == dim(B, 0), f(A, B) = f(A, B)",
-  "ascii": "assuming dim(A, 1) == dim(B, 0), f(A, B) = f(A, B)"
+  "unicode": "assuming dim(A, 1) == len(B), f(A, B) = f(A, B)",
+  "ascii": "assuming dim(A, 1) == len(B), f(A, B) = f(A, B)"
  },
  "dim_marker_premise": {
   "input": "assuming n >= 2, f(a) >= 0",
@@ -96,8 +96,8 @@
  },
  "domain_subset_integer": {
   "input": "for n in [0, 100] subset Z, f(n) >= 0",
-  "unicode": "∀ n ∈ [0, 100] \\ {absent, ∅} ⊂ ℤ, f(n) ≥ 0",
-  "ascii": "for n in [0, 100] \\ {absent, missing} : int, f(n) >= 0"
+  "unicode": "∀ n ∈ [0, 100] ⊂ ℤ, f(n) ≥ 0",
+  "ascii": "for n in [0, 100] : int, f(n) >= 0"
  },
  "relation_indexing": {
   "input": "f(x, 1.0) == x[-1]",
@@ -406,8 +406,8 @@
  },
  "domain_subset_symbol": {
   "input": "∀ n ∈ [0, 100] ⊂ ℤ, f(n) ≥ 0",
-  "unicode": "∀ n ∈ [0, 100] \\ {absent, ∅} ⊂ ℤ, f(n) ≥ 0",
-  "ascii": "for n in [0, 100] \\ {absent, missing} : int, f(n) >= 0"
+  "unicode": "∀ n ∈ [0, 100] ⊂ ℤ, f(n) ≥ 0",
+  "ascii": "for n in [0, 100] : int, f(n) >= 0"
  },
  "domain_blackboard_reals": {
   "input": "∀ x ∈ ℝ, f(x) == 2*x",
@@ -501,13 +501,13 @@
  },
  "let_free_var_closed": {
   "input": "let c be [-1e6,1e6], for x in [0,10], f(x) + c >= 0",
-  "unicode": "let c be [-1000000.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0",
-  "ascii": "let c be [-1000000.0, 1000000.0] : float|absent|missing, for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0"
+  "unicode": "let c be [-1000000.0, 1000000.0], ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0",
+  "ascii": "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0"
  },
  "let_free_var_typed": {
   "input": "let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0",
-  "unicode": "let c be [1, 100] \\ {absent, ∅} ⊂ ℤ, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0",
-  "ascii": "let c be [1, 100] \\ {absent, missing} : int, for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0"
+  "unicode": "let c be [1, 100] ⊂ ℤ, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0",
+  "ascii": "let c be [1, 100] : int, for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0"
  },
  "let_pseudo_infinity": {
   "input": "let |inf| be 1e12, for x in [0, oo], f(x) >= 0",
@@ -516,13 +516,13 @@
  },
  "stress_gauge_invariance": {
   "input": "let c be [-1e6,1e6], for dh in [-1e6,1e6], t in [0,1000], ds in [-1e6,1e6], d(f(dh+c,t,ds), t) == d(f(dh,t,ds), t)",
-  "unicode": "let c be [-1000000.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, ∀ dh ∈ [-1000000.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, t ∈ [0.0, 1000.0] ⊂ ℝ ∪ {absent, ∅}, ds ∈ [-1000000.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, ∂(f(c + dh, t, ds)/∂t) = ∂(f(dh, t, ds)/∂t)",
-  "ascii": "let c be [-1000000.0, 1000000.0] : float|absent|missing, for dh in [-1000000.0, 1000000.0] : float|absent|missing, t in [0.0, 1000.0] : float|absent|missing, ds in [-1000000.0, 1000000.0] : float|absent|missing, d(f(c + dh, t, ds), t) = d(f(dh, t, ds), t)"
+  "unicode": "let c be [-1000000.0, 1000000.0], ∀ dh ∈ [-1000000.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, t ∈ [0.0, 1000.0] ⊂ ℝ ∪ {absent, ∅}, ds ∈ [-1000000.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, ∂(f(c + dh, t, ds)/∂t) = ∂(f(dh, t, ds)/∂t)",
+  "ascii": "let c be [-1000000.0, 1000000.0], for dh in [-1000000.0, 1000000.0] : float|absent|missing, t in [0.0, 1000.0] : float|absent|missing, ds in [-1000000.0, 1000000.0] : float|absent|missing, d(f(c + dh, t, ds), t) = d(f(dh, t, ds), t)"
  },
  "stress_mixed_let_and_types": {
   "input": "let g = math.sqrt, let c be [1,100] subset integer, for x in (0, 100], g(x) + c >= 0",
-  "unicode": "let g = math.sqrt, let c be [1, 100] \\ {absent, ∅} ⊂ ℤ, ∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, c + g(x) ≥ 0",
-  "ascii": "let g = math.sqrt, let c be [1, 100] \\ {absent, missing} : int, for x in (0.0, 100.0] : float|absent|missing, c + g(x) >= 0"
+  "unicode": "let g = math.sqrt, let c be [1, 100] ⊂ ℤ, ∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, c + g(x) ≥ 0",
+  "ascii": "let g = math.sqrt, let c be [1, 100] : int, for x in (0.0, 100.0] : float|absent|missing, c + g(x) >= 0"
  },
  "auto_let_greek_param": {
   "input": "for theta in [0, 1], f(theta) >= 0",
@@ -661,13 +661,13 @@
  },
  "sum_subscript": {
   "input": "let n be [1, 20] subset Z, Sum(f(i))_{i=1}^n == n*(n+1)",
-  "unicode": "let n be [1, 20] \\ {absent, ∅} ⊂ ℤ, Sum(f(i), i, 1, n) = n*(n + 1)",
-  "ascii": "let n be [1, 20] \\ {absent, missing} : int, Sum(f(i), i, 1, n) = n*(n + 1)"
+  "unicode": "let n be [1, 20] ⊂ ℤ, Sum(f(i), i, 1, n) = n*(n + 1)",
+  "ascii": "let n be [1, 20] : int, Sum(f(i), i, 1, n) = n*(n + 1)"
  },
  "prod_call": {
   "input": "let n be [1, 20] subset Z, Prod(f(i), i, 1, n) >= 0",
-  "unicode": "let n be [1, 20] \\ {absent, ∅} ⊂ ℤ, Prod(f(i), i, 1, n) ≥ 0",
-  "ascii": "let n be [1, 20] \\ {absent, missing} : int, Prod(f(i), i, 1, n) >= 0"
+  "unicode": "let n be [1, 20] ⊂ ℤ, Prod(f(i), i, 1, n) ≥ 0",
+  "ascii": "let n be [1, 20] : int, Prod(f(i), i, 1, n) >= 0"
  },
  "principal_value": {
   "input": "P.V.(integrate(1/(x - c), x, -1, 1)) == f(c)",
@@ -701,8 +701,8 @@
  },
  "assuming_prerequisite_proven": {
   "input": "assuming base_case is proven, for n in [2, 30] subset Z, f(n) == f(n-1) + f(n-2)",
-  "unicode": "assuming base_case is proven, ∀ n ∈ [2, 30] \\ {absent, ∅} ⊂ ℤ, f(n) = f(n - 2) + f(n - 1)",
-  "ascii": "assuming base_case is proven, for n in [2, 30] \\ {absent, missing} : int, f(n) = f(n - 2) + f(n - 1)"
+  "unicode": "assuming base_case is proven, ∀ n ∈ [2, 30] ⊂ ℤ, f(n) = f(n - 2) + f(n - 1)",
+  "ascii": "assuming base_case is proven, for n in [2, 30] : int, f(n) = f(n - 2) + f(n - 1)"
  },
  "assuming_is_defined": {
   "input": "assuming is_defined(f), for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)",
@@ -791,13 +791,13 @@
  },
  "second_function_by_name": {
   "input": "let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(budget_line(x, I, px, py), x) == -px/py",
-  "unicode": "let I be [10.0, 1000.0] ⊂ ℝ ∪ {absent, ∅}, let px be [0.5, 20.0] ⊂ ℝ ∪ {absent, ∅}, let py be [0.5, 20.0] ⊂ ℝ ∪ {absent, ∅}, ∂(budget_line(x, I, px, py)/∂x) = -px/py",
-  "ascii": "let I be [10.0, 1000.0] : float|absent|missing, let px be [0.5, 20.0] : float|absent|missing, let py be [0.5, 20.0] : float|absent|missing, d(budget_line(x, I, px, py), x) = -px/py"
+  "unicode": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], ∂(budget_line(x, I, px, py)/∂x) = -px/py",
+  "ascii": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], d(budget_line(x, I, px, py), x) = -px/py"
  },
  "let_function_bare_name": {
   "input": "let g = budget_line, let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(g(x, I, px, py), x) == -px/py",
-  "unicode": "let I be [10.0, 1000.0] ⊂ ℝ ∪ {absent, ∅}, let px be [0.5, 20.0] ⊂ ℝ ∪ {absent, ∅}, let py be [0.5, 20.0] ⊂ ℝ ∪ {absent, ∅}, ∂(budget_line(x, I, px, py)/∂x) = -px/py",
-  "ascii": "let I be [10.0, 1000.0] : float|absent|missing, let px be [0.5, 20.0] : float|absent|missing, let py be [0.5, 20.0] : float|absent|missing, d(budget_line(x, I, px, py), x) = -px/py"
+  "unicode": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], ∂(budget_line(x, I, px, py)/∂x) = -px/py",
+  "ascii": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], d(budget_line(x, I, px, py), x) = -px/py"
  },
  "two_function_equality": {
   "input": "f(x) == g(x)",
@@ -806,13 +806,13 @@
  },
  "bound_function_nested_in_f": {
   "input": "let I be [10,1000], let px be [0.5,20], let py be [0.5,20], for a in [0.1,0.9], d(f(x, budget_line(x,I,px,py), a), x) @ {x = a*I/px} == 0",
-  "unicode": "let I be [10.0, 1000.0] ⊂ ℝ ∪ {absent, ∅}, let px be [0.5, 20.0] ⊂ ℝ ∪ {absent, ∅}, let py be [0.5, 20.0] ⊂ ℝ ∪ {absent, ∅}, ∀ a ∈ [0.1, 0.9] ⊂ ℝ ∪ {absent, ∅}, ∂(f(x, budget_line(x, I, px, py), a)/∂x) at {x=I*a/px} = 0",
-  "ascii": "let I be [10.0, 1000.0] : float|absent|missing, let px be [0.5, 20.0] : float|absent|missing, let py be [0.5, 20.0] : float|absent|missing, for a in [0.1, 0.9] : float|absent|missing, d(f(x, budget_line(x, I, px, py), a), x) @ {x=I*a/px} = 0"
+  "unicode": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], ∀ a ∈ [0.1, 0.9] ⊂ ℝ ∪ {absent, ∅}, ∂(f(x, budget_line(x, I, px, py), a)/∂x) at {x=I*a/px} = 0",
+  "ascii": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], for a in [0.1, 0.9] : float|absent|missing, d(f(x, budget_line(x, I, px, py), a), x) @ {x=I*a/px} = 0"
  },
  "recurrence_identity": {
   "input": "for n in [2, 30] subset Z, f(n) == f(n-1) + f(n-2)",
-  "unicode": "∀ n ∈ [2, 30] \\ {absent, ∅} ⊂ ℤ, f(n) = f(n - 2) + f(n - 1)",
-  "ascii": "for n in [2, 30] \\ {absent, missing} : int, f(n) = f(n - 2) + f(n - 1)"
+  "unicode": "∀ n ∈ [2, 30] ⊂ ℤ, f(n) = f(n - 2) + f(n - 1)",
+  "ascii": "for n in [2, 30] : int, f(n) = f(n - 2) + f(n - 1)"
  },
  "chained_comparison": {
   "input": "for a in [0.1,10], b in [0.1,10], 2/(1/a+1/b) <= f(a,b) <= (a+b)/2",
@@ -826,13 +826,13 @@
  },
  "finite_domain_pinned": {
   "input": "for n in [30,30] subset Z, f(n) == 8",
-  "unicode": "∀ n ∈ [30, 30] \\ {absent, ∅} ⊂ ℤ, f(n) = 8",
-  "ascii": "for n in [30, 30] \\ {absent, missing} : int, f(n) = 8"
+  "unicode": "∀ n ∈ [30, 30] ⊂ ℤ, f(n) = 8",
+  "ascii": "for n in [30, 30] : int, f(n) = 8"
  },
  "finite_domain_small_range": {
   "input": "for n in [2,30] subset Z, f(n) >= 2",
-  "unicode": "∀ n ∈ [2, 30] \\ {absent, ∅} ⊂ ℤ, f(n) ≥ 2",
-  "ascii": "for n in [2, 30] \\ {absent, missing} : int, f(n) >= 2"
+  "unicode": "∀ n ∈ [2, 30] ⊂ ℤ, f(n) ≥ 2",
+  "ascii": "for n in [2, 30] : int, f(n) >= 2"
  },
  "finite_domain_discrete_set": {
   "input": "for n in {6, 28, 496}, f(n) >= 4",
@@ -856,33 +856,33 @@
  },
  "floor_div_sugar": {
   "input": "for n in [1,100] subset Z, f(n) == n // 2",
-  "unicode": "∀ n ∈ [1, 100] \\ {absent, ∅} ⊂ ℤ, f(n) = floor(n/2)",
-  "ascii": "for n in [1, 100] \\ {absent, missing} : int, f(n) = floor(n/2)"
+  "unicode": "∀ n ∈ [1, 100] ⊂ ℤ, f(n) = floor(n/2)",
+  "ascii": "for n in [1, 100] : int, f(n) = floor(n/2)"
  },
  "floor_div_evaluable": {
   "input": "for n in [1,100] subset Z, f(n) == floor(n/2)",
-  "unicode": "∀ n ∈ [1, 100] \\ {absent, ∅} ⊂ ℤ, f(n) = floor(n/2)",
-  "ascii": "for n in [1, 100] \\ {absent, missing} : int, f(n) = floor(n/2)"
+  "unicode": "∀ n ∈ [1, 100] ⊂ ℤ, f(n) = floor(n/2)",
+  "ascii": "for n in [1, 100] : int, f(n) = floor(n/2)"
  },
  "remainder_below_modulus": {
   "input": "for n in [0,1000] subset Z, n % 24 <= 23",
-  "unicode": "∀ n ∈ [0, 1000] \\ {absent, ∅} ⊂ ℤ, Mod(n, 24) ≤ 23",
-  "ascii": "for n in [0, 1000] \\ {absent, missing} : int, Mod(n, 24) <= 23"
+  "unicode": "∀ n ∈ [0, 1000] ⊂ ℤ, Mod(n, 24) ≤ 23",
+  "ascii": "for n in [0, 1000] : int, Mod(n, 24) <= 23"
  },
  "ceil_div_lower_bound": {
   "input": "for a in [1,500] subset Z, b in [1,30] subset Z, f(a,b) >= a/b",
-  "unicode": "∀ a ∈ [1, 500] \\ {absent, ∅} ⊂ ℤ, b ∈ [1, 30] \\ {absent, ∅} ⊂ ℤ, f(a, b) ≥ a/b",
-  "ascii": "for a in [1, 500] \\ {absent, missing} : int, b in [1, 30] \\ {absent, missing} : int, f(a, b) >= a/b"
+  "unicode": "∀ a ∈ [1, 500] ⊂ ℤ, b ∈ [1, 30] ⊂ ℤ, f(a, b) ≥ a/b",
+  "ascii": "for a in [1, 500] : int, b in [1, 30] : int, f(a, b) >= a/b"
  },
  "dim_premise_pins_length": {
   "input": "assuming len(x) == 2, f(x) == x[0]^2 + x[1]^2",
-  "unicode": "assuming dim(x, 0) == 2, f(x) = x[0]^2 + x[1]^2",
-  "ascii": "assuming dim(x, 0) == 2, f(x) = x[0]^2 + x[1]^2"
+  "unicode": "assuming len(x) == 2, f(x) = x[0]^2 + x[1]^2",
+  "ascii": "assuming len(x) == 2, f(x) = x[0]^2 + x[1]^2"
  },
  "dim_premise_ties_two_lengths": {
   "input": "assuming len(x) == len(y), f(x, y) == f(y, x)",
-  "unicode": "assuming dim(x, 0) == dim(y, 0), f(x, y) = f(y, x)",
-  "ascii": "assuming dim(x, 0) == dim(y, 0), f(x, y) = f(y, x)"
+  "unicode": "assuming len(x) == len(y), f(x, y) = f(y, x)",
+  "ascii": "assuming len(x) == len(y), f(x, y) = f(y, x)"
  },
  "premise_relates_two_params": {
   "input": "assuming hi >= lo, f(xs, lo, hi) >= 0",

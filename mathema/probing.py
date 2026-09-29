@@ -583,9 +583,9 @@ class ExecutedMissing:
                 where = "".join(f"[{i}]" for i in position)
                 word = next(sl.member for sl in no_value_slots(point[p]).slots
                             if sl.position == position)
+                shown = "None" if drawn is None else value_shown(drawn)
                 respelled.setdefault((p, word),
-                                     f"{p}{where}={value_shown(drawn, in_slot=True)} "
-                                     f"returned as {back}")
+                                     f"{p}{where}={shown} returned as {back}")
         for p, _kind, member in keys:
             in_slot = no_value_slots(point[p]).shape != ()
             entry = (outcome_entry(member, raised=raised) if raised is not None

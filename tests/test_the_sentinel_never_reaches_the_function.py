@@ -58,7 +58,10 @@ def test_the_record_names_the_members_tried():
 def test_a_raises_claim_over_the_class_is_called_with_nan():
     probe = run(recording_raises, "for x in {missing}, raises(f(x), ValueError)")
     assert probe.verdict == "proven"
-    assert SEEN and all(isinstance(v, float) and math.isnan(v) for v in SEEN)
+    # the claim's own point reaches f as the float nan; the smoke call
+    # that checks f can be called at all uses a value from its signature
+    assert any(isinstance(v, float) and math.isnan(v) for v in SEEN)
+    assert all(isinstance(v, float) for v in SEEN)
 
 
 def sqrt_guarded(x: float) -> float:
@@ -120,7 +123,7 @@ def test_g8_a_string_has_no_hole():
 def test_every_row_admitting_a_sentinel_records_what_it_admits_and_tried():
     probe = run(recording, "for x in {0.25, None, missing}, f(x) == 0")
     record = probe.meta["mathema.missing"]
-    assert record["admitted"]["x"] == {"None": True, "holes": ["nan"]}
+    assert record["admitted"]["x"] == {"absent": True, "missing": ["nan"]}
     assert record["tried"]["x"] == ["None", "nan"]
 
 

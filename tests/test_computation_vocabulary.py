@@ -53,8 +53,7 @@ def test_a_holding_companion_names_the_computation_in_float64():
     probes = _check(doubled, "for x in [0, 1], f(x) >= 0")
     comp = probes["law[float]"]
     assert comp.verdict == "holds"
-    assert comp.note.startswith("the computation of law in float64, "
-                                "executed at ")
+    assert comp.note.startswith("the float64 computation of law ran at ")
     assert "implementation" not in comp.note
 
 
@@ -89,8 +88,7 @@ def test_a_nan_from_the_computation_is_named_as_such():
 def test_the_chained_companion_names_the_computation():
     probes = _check(plus_one_minus, "for x in [0, 1e300], 0.5 <= f(x) <= 1")
     comp = probes["law[float]"]
-    assert comp.note.startswith("the computation of law in float64, "
-                                "executed link by link; ")
+    assert comp.note.startswith("the float64 computation of law ran link by link")
 
 
 def test_the_extremity_probe_names_the_computation():

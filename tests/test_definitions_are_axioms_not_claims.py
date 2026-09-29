@@ -202,7 +202,7 @@ def test_a_foreign_runtime_renders_both_kinds_and_states_its_members(toy_runtime
                                                            name="c")])
     probe = next(p for p in report.probes if p.name == "c")
     assert probe.statement == "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"
-    assert probe.meta["mathema.missing"]["admitted"]["x"]["holes"] == ["NaN"]
+    assert probe.meta["mathema.missing"]["admitted"]["x"]["missing"] == ["NaN"]
 
 
 def test_a_foreign_runtime_records_its_own_spelling(toy_runtime):

@@ -310,10 +310,11 @@ for row in proof.meta["mathema.definitions"]:
 <!-- example: rt-proofs output -->
 ```text
 mathema.Record(sharpe) · source, no side effects · form ef276c12c167
-  proven  f_s_returns_c_approx_f_returns: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0] : float|absent|missing, for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)
-           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every length from 2
-  holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0] : float|absent|missing, for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns) (n=43)
-through the definition rows pandas.Series.mean definition, pandas.Series.std definition, lowered to sums over returns at a symbolic length: the relation holds for every length
+  proven  f_s_returns_c_approx_f_returns: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)
+           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every length from 2; missing for returns (pandas.Series) means nan, null or NA
+  holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns) (43 draws, sizes (2, 1) to (8, 1), up to 229 entries)
+           the float64 computation of f_s_returns_c_approx_f_returns ran at 43 points: nan, null, NA, every corner and 37 interior points; f drops a missing slot when values remain (returns = [nan, -0.087, -0.1], c = 0.1) and gives a hole back when every slot is missing (returns = [nan, -0.087, -0.1], c = 0.1); at returns = [null, -0.087, -0.1] f raised TypeError, which no claim accounts for: state `missing(f, returns, null) raises(TypeError)`, or make f return a value there; at returns = [NA, -0.087, -0.1] f returned HoledArray([        nan, -0.0087012 ,...: the hole became a value; write `missing(f, returns, NA) drops` to accept this, or guard the input
+through the pandas.Series.mean definition and pandas.Series.std definition rows, lowered to a sum over returns at a symbolic length; holds for every length
 pandas.Series.mean definition bundled mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std definition bundled mathema/compendium/pandas/series.claims.yaml
 ```
@@ -374,7 +375,7 @@ print(proof.sketch)
 ```text
 proven derive
 ∀ prices over [1.0, 100.0] with nothing missing, prices of every length
-through the definition rows pandas.Series.cummax definition, pandas.Series.min definition, lowered to sums over prices at a symbolic length: the relation holds for every length (every element of prices / cummax(prices) - 1.0 is <= 0 (0 < prices[i] / cummax(prices)[i] <= 1), so min(prices / cummax(prices) - 1.0) is too)
+through the pandas.Series.cummax definition and pandas.Series.min definition rows, lowered to a sum over prices at a symbolic length; holds for every length (every element of prices / cummax(prices) - 1.0 is <= 0 (0 < prices[i] / cummax(prices)[i] <= 1), so min(prices / cummax(prices) - 1.0) is too)
 ```
 
 A DataFrame's columns are vectors on the derive route too, read by

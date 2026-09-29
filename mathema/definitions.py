@@ -849,7 +849,11 @@ def _uses_meta(uses: list) -> list:
 
 
 def _rows_text(uses: list) -> str:
-    return ", ".join(dict.fromkeys(f"{r.key} {r.name}" for r in uses))
+    """`the polars.Series.sum definition row`, or several joined."""
+    names = list(dict.fromkeys(f"{r.key} {r.name}" for r in uses))
+    if len(names) == 1:
+        return f"the {names[0]} row"
+    return "the " + ", ".join(names[:-1]) + f" and {names[-1]} rows"
 
 
 def prove_through_definitions(cj, fn, facts, cj_domain: dict, assumption,
@@ -931,7 +935,7 @@ def _matrix_route(cj, facts, cj_domain, shapes, assumption, structures, fn,
     structs = dict(structures_from_signature(fn))
     for p, props in (structures or {}).items():
         structs[p] = tuple(sorted(set(structs.get(p, ())) | set(props)))
-    through = (f"through the definition rows {_rows_text(inlined.uses)} the "
+    through = (f"through {_rows_text(inlined.uses)} the "
                f"claim reads {lhs_text} {cj.relation} {rhs_text}")
     mproof = try_prove_matrix(lhs_text, rhs_text, cj.relation, facts,
                               cj_domain, shapes, structs,
@@ -1296,7 +1300,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
 
     shortest: dict = {}
     cap = EXTENSIVE_TIMEOUT_SECONDS if extensive else FAST_TIMEOUT_SECONDS
-    through = f"through the definition rows {_rows_text(inlined.uses)}"
+    through = f"through {_rows_text(inlined.uses)}"
     try:
         outcome = _with_timeout(decide, cap)
     except TimeoutError:
@@ -1336,8 +1340,8 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                  and detail.sketch and outcome.get("bounds") else "")
         return ProofResult(
             "proven", meta=meta,
-            sketch=f"{through}, lowered to sums over {vectors} at a symbolic "
-                   f"length: the relation holds for every length{lemma}",
+            sketch=f"{through}, lowered to a sum over {vectors} at a symbolic "
+                   f"length; holds for every length{lemma}",
             quantifier=(f"∀ {_over(seqs, elements)} with nothing "
                         f"missing, {spans}" if seqs else None))
     detail = outcome.get("result")

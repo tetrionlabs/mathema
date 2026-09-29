@@ -168,8 +168,8 @@ def test_rendering_distinguishes_all_four_corners_via_glyph_notation():
     d = _dom("for x in [0, 100] \\subset Z \\ {missing}, True")
     ra, rb, rc, rd = (render_domain(x, show_missing=True) for x in (a, b, c, d))
     assert ra.endswith("⊂ ℝ ∪ {absent, ∅}")
-    assert rb == rd == "[0, 100] \\ {absent, ∅} ⊂ ℤ"   # stated, narrowing the default
-    assert rc == "[0.0, 100.0] \\ {∅} ⊂ ℝ ∪ {absent}"
+    assert rb == rd == "[0, 100] ⊂ ℤ"   # stated, narrowing the default
+    assert rc == "[0.0, 100.0] ⊂ ℝ ∪ {absent}"
     for r in (ra, rc):
         assert "absent" in r   # the word, never an English phrase
 

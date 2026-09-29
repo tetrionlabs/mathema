@@ -161,9 +161,10 @@ print(mathema.check(midpoint, claims=[
 <!-- example: midpoint output -->
 ```text
 mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
-  proven  between_integers: for a in [0, 100] \ {missing} : int, b in [0, 100] \ {missing} : int, min(a, b) ≤ f(a, b) ≤ max(a, b)
-           for a in [0, 100] \ {missing} : int, b in [0, 100] \ {missing} : int
+  proven  between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
+           for a in [0, 100] : int, b in [0, 100] : int
   FALSIFY between_reals: for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)
+           chained comparison falsified at link 1: min(a, b) <= f(a, b); at a = nan f gave nan back (missing in, missing out); at b = nan f gave nan back (missing in, missing out)
            counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
 ```
 
