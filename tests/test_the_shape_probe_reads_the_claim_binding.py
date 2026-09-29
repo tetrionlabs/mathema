@@ -118,6 +118,38 @@ def test_size_enforced_witnesses_an_accepted_wrong_fixed_size():
     assert re.search(r"A is 3[123] by 15 where the shape fixes 30 by 15",
                      probe.counterexample or ""), probe.counterexample
     assert "30 by 15" in probe.statement, probe.statement
+    # the witness names distinct wrong sizes only, the smallest and the
+    # largest tried, never the same size twice
+    entries = probe.counterexample.split("; ")
+    assert len(entries) == len(set(entries)) <= 2, entries
+    assert all(re.fullmatch(r"A is \d+ by \d+ where the shape fixes 30 by 15", e)
+               for e in entries), entries
+    assert probe.n == 6, probe.n
+
+
+def test_size_enforced_gates_exactly_as_dimensions_enforced():
+    """Both rows are type probes (surface `types`): a falsified one is a
+    falsified claim that fails `check` and `verify` in every mode, the
+    same for a wrong fixed size as for a mismatched shared dimension."""
+    from mathema.verify import gate
+
+    def matmul(a: Mat("m", "n"), b: Mat("n", "p")) -> Mat("m", "p"):
+        m, n, p = len(a), len(a[0]), len(b[0])
+        return [[sum(a[i][k] * b[k][j] for k in range(n)) for j in range(p)]
+                for i in range(m)]
+
+    def diag_sum(A: Mat(30, 15)) -> float:
+        return float(sum(A[i][i] for i in range(15)))
+
+    for fn, name in ((matmul, "dimensions_enforced"), (diag_sum, "size_enforced")):
+        rec = mathema.check(fn, claims=[])
+        (row,) = [p for p in rec.probes if p.name == name]
+        assert row.verdict == "falsified", (name, row.verdict, row.note)
+        assert row.meta.get("mathema.surface") == "types", (name, row.meta)
+        for strict in (False, True):
+            report = gate([row], strict=strict)
+            assert report.falsified == 1, (name, strict, report)
+            assert report.problems == ["1 falsified claim(s)"], (name, strict, report.problems)
 
 
 def test_size_enforced_holds_when_the_function_refuses_the_size():

@@ -491,7 +491,10 @@ def _size_enforced_probe(fn, sig, param_dims: dict, names: set,
     stated = ", ".join(f"{p} ({expected(param_dims[p])})" for p in targets)
     stmt = (f"{fn.__name__}(" + ", ".join(param_dims) + ") rejects a "
             f"wrong fixed size on {stated}")
-    rejected, accepted_examples, checked = 0, [], 0
+    rejected, checked = 0, 0
+    # the wrong sizes each parameter accepted, distinct, so the witness
+    # shows the smallest and the largest tried
+    accepted: dict = {}
     for p, axes in targets.items():
         for axis in axes:
             for _ in range(_SHAPE_MISMATCH_TRIALS):
@@ -512,13 +515,18 @@ def _size_enforced_probe(fn, sig, param_dims: dict, names: set,
                     continue
                 tried = tuple(sizes[d] if isinstance(d, str) else d
                               for d in bumped)
-                accepted_examples.append(
-                    f"{p} {'is' if len(tried) == 2 else 'has'} {words(tried)} "
-                    f"where the shape fixes {expected(param_dims[p])}")
+                accepted.setdefault(p, set()).add(tried)
     if rejected == checked:
         return Probe("size_enforced", stmt, "holds", n=checked)
+    examples = []
+    for p, sizes_tried in accepted.items():
+        ordered = sorted(sizes_tried)
+        for tried in dict.fromkeys((ordered[0], ordered[-1])):
+            examples.append(
+                f"{p} {'is' if len(tried) == 2 else 'has'} {words(tried)} "
+                f"where the shape fixes {expected(param_dims[p])}")
     return Probe("size_enforced", stmt, "falsified", n=checked,
-                 counterexample="; ".join(accepted_examples[:3]),
+                 counterexample="; ".join(examples),
                  note="silently accepting a wrong fixed size violates the "
                       "declared shape")
 

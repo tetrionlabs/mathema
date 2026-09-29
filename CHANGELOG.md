@@ -76,9 +76,9 @@ Notable changes to mathema are recorded here from its first public release onwar
   `is_recursion_safe`, and two roll-ups, `is_computation_safe(f)` for
   the first two questions and `is_repeatable(f)` for the third, where a
   function taking a seed or generator is held to `is_reproducible`.
-  `is_memory_safe`, `is_precision_safe`, `is_order_invariant`,
-  `is_concurrency_safe` and `is_representation_consistent` are reserved:
-  `skipped` in this release.
+  `is_precision_safe`, `is_order_invariant`, `is_concurrency_safe` and
+  `is_representation_consistent` are reserved: `skipped` in this
+  release.
 - The clarity score reads each call's hazard from the callee's own
   record (`CLARITY_ALGO` entropy-dimensions@1.2), so clarity scores move
   once with this release.

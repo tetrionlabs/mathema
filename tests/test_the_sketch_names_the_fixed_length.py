@@ -26,6 +26,11 @@ def gram_trace(A: np.ndarray) -> float:
     return float(np.trace(A @ A.T))
 
 
+def np_total(xs: np.ndarray) -> float:
+    """Sum through numpy, proved through the definition rows."""
+    return float(np.sum(xs))
+
+
 def entries(A: np.ndarray) -> float:
     """Sum of every entry."""
     return float(A.sum())
@@ -58,6 +63,22 @@ def test_the_sketch_keeps_every_length_when_none_is_fixed(mod):
         "for xs in [0, 1]^n, f(xs) >= 0", route="derive")])
     assert p.verdict == "proven", (p.verdict, p.sketch)
     assert "of length" not in (p.sketch or ""), p.sketch
+
+
+@pytest.mark.needs_full_proof_budget
+def test_the_definition_row_sketch_covers_the_fixed_length(mod):
+    # the definition-row route proves over every length and says so,
+    # then names the length the binding fixed as a consequence, never
+    # as a proof it ran at that length alone
+    pytest.importorskip("numpy")
+    (p,) = check_conjectures(mod.np_total, [claim(
+        "for xs in [0, 1]^30, f(xs) >= 0", route="derive")])
+    assert p.verdict == "proven", (p.verdict, p.sketch)
+    assert "xs of every length, so for length 30" in (p.sketch or ""), p.sketch
+    (free,) = check_conjectures(mod.np_total, [claim(
+        "for xs in [0, 1]^n, f(xs) >= 0", route="derive")])
+    assert free.verdict == "proven", (free.verdict, free.sketch)
+    assert "so for length" not in (free.sketch or ""), free.sketch
 
 
 @pytest.mark.needs_full_proof_budget
