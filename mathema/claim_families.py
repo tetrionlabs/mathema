@@ -1092,38 +1092,66 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
         candidates = [c for c in _out_of_domain_candidates(bounds)
                       if not is_missing(c)]   # missing spellings are
         # is_missing_safe's own hazard, not this member's
-        if not candidates:
-            return None
-    sequence_target = (facts.param_kinds.get(target) in SEQUENCE_KINDS
-                       and not language_bound)
+    from . import _shapes
+    # a space domain (`R^(30,15)`, `[0, 1]^30`) has an outside of its
+    # own: a value of another shape, its elements inside the domain
+    space_dims = _shapes.dims_of(bounds) if not language_bound else ()
+    if not candidates and not space_dims:
+        return None
+    element_bound = bounds
+    if space_dims:
+        import dataclasses
+        element_bound = dataclasses.replace(bounds, dims=())
+    sequence_target = ((facts.param_kinds.get(target) in SEQUENCE_KINDS
+                        or bool(space_dims)) and not language_bound)
+    # the function receives each value as its own runtime type
+    from .runtime_types import calling
+    call = calling(fn, facts)
     state = {"idx": 0}
+    cycle = len(candidates) + (1 if space_dims else 0)
 
     def trial(args):
-        bad = candidates[state["idx"] % len(candidates)]
+        slot = state["idx"] % cycle
         state["idx"] += 1
-        if language_bound:
+        if space_dims and slot == len(candidates):
+            value, why = _shapes.wrong_shaped(
+                bounds, rng, lambda: _synth("float", rng, element_bound))
+            spelled = f"{target} {why}"
+        elif language_bound:
+            bad = candidates[slot]
             value = bad
             spelled = (f"{target} = {_witness_value(bad)} "
                        f"(outside L[{names}]{_why_outside(bad, bounds)})")
         elif sequence_target:
             # a sequence parameter is violated one ELEMENT at a time:
-            # a fresh in-domain sequence with one out-of-domain entry
-            seq = [rng.uniform(-10, 10) for _ in range(4)]
-            seq[rng.randrange(len(seq))] = bad
-            value: object = seq
+            # a fresh in-domain sequence with one out-of-domain entry,
+            # of the shape the space fixes when it fixes one
+            bad = candidates[slot]
+            if space_dims:
+                seq = _shapes.shaped(
+                    bounds, rng, lambda: _synth("float", rng, element_bound))
+                leaf = seq
+                while leaf and isinstance(leaf[0], list):
+                    leaf = leaf[0]
+                leaf[rng.randrange(len(leaf))] = bad
+            else:
+                seq = [rng.uniform(-10, 10) for _ in range(4)]
+                seq[rng.randrange(len(seq))] = bad
+            value = seq
             spelled = f"{target}[...] = {bad!r}"
         else:
+            bad = candidates[slot]
             value = bad
             spelled = f"{target} = {bad!r}"
         try:
-            out = _call_with_target(fn, facts, target, args, value)
+            out = _call_with_target(call, facts, target, args, value)
         except Exception:
             return True   # rejected, as the claim demands
         return (f"{spelled} is outside the declared domain but was "
                 f"accepted (returned {out!r}); the exclusion is "
                 f"asserted, not enforced")
 
-    rounds = max(len(candidates), min(trials, len(candidates) * 4))
+    rounds = max(cycle, min(trials, cycle * 4))
     return _probe_trials(fn, facts, target, domain, rng, rounds, trial)
 
 

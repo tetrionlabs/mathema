@@ -714,3 +714,35 @@ the same parameter, the marker is authoritative on RANK: a claim that
 gives it a different number of axes is a conflict, skipped with the
 reason. A different NAME at the same axis is not a conflict, it aliases
 the claim's name to the signature's, so the two are one dimension.
+
+A dimension written as a number is fixed: `for A in R^(30,15)` draws a
+30 by 15 matrix on every trial, on every runtime type the parameter is
+realised as, and `Mat(30, 15)` or `Vec(30)` fixes a marker the same
+way. A fixed axis and a name mix in one binding (`R^(n,15)`). A value
+of another shape, another size on a fixed axis or another rank, is
+outside the domain: a claim stating the output's space is judged by the
+output's shape, and `excluded_outside_domain(A)` tries a wrong-shaped
+value. The proof sketch names what was fixed (`A of shape 30 by 15`,
+`xs of length 30`) rather than every length.
+
+<!-- example: fixed-shape run requires=numpy -->
+```python
+import numpy as np
+
+def gram_trace(A: np.ndarray) -> float:
+    return float(np.trace(A @ A.T))
+
+def same(A: np.ndarray) -> np.ndarray:
+    return A
+```
+
+<!-- example: fixed-shape verdicts fn=gram_trace -->
+```
+for A in [-1, 1]^(30,15), f(A) >= 0   # proven
+```
+
+<!-- example: fixed-shape verdicts fn=same -->
+```
+for A in R^(3,4), f(A) in R^(3,4)   # holds
+for A in R^(3,4), f(A) in R^(4,3)   # falsified
+```

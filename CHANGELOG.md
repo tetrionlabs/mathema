@@ -7,6 +7,17 @@ Notable changes to mathema are recorded here from its first public release onwar
 - `is_memory_safe` is not part of this release: it is named nowhere,
   and a claim naming it fails as an unknown predicate does, with one
   sentence saying the family is planned.
+- A dimension written as a number in a claim's binding (`for A in
+  R^(30,15)`, `for xs in [0, 1]^30`) or in a marker (`Mat(30, 15)`,
+  `Vec(30)`) is drawn at that size by every route on every runtime
+  type: the probe, the built-in battery's call, and the companion a
+  proof spawns; a fixed axis and a shared name mix in one binding
+  (`R^(n,15)`). A value of another shape or rank is outside the
+  domain, so `f(A) in R^(4,3)` is judged by the output's shape and
+  `excluded_outside_domain(A)` tries a wrong-shaped value. The sketch
+  names the fixed size (`xs of length 30`, `A of shape 30 by 15`), the
+  sampling note prints a matrix's size, and a premise contradicting a
+  fixed dimension is reported as the vacuous premise it is.
 - The wheel now ships the bundled compendium. The 0.6.0 wheel carried
   none of its compendium files (the package-data pattern missed the
   per-library directories), so `is_compendium_safe(numpy)` was `unknown`

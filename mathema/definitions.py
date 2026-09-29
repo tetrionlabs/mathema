@@ -1326,10 +1326,16 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                            f"{outcome['undecided']}", meta=meta)
     vectors = ", ".join(sorted(seqs))
     if outcome.get("proven"):
+        # a binding that fixes a length (`xs in [0, 1]^30`) is named at
+        # that length; a free length is every length
+        fixed_at = {L: int(dim) for dim, L in lengths.items()
+                    if str(dim).isdigit()}
         spans = ", ".join(
-            f"{by_length.get(L, L)} of every length"
+            f"{by_length.get(L, L)} of length {fixed_at[L]}" if L in fixed_at
+            else f"{by_length.get(L, L)} of every length"
             + (f" from {shortest[L]}" if shortest.get(L, 1) > 1 else "")
             for L in sorted(set(lengths_of(seqs)), key=str))
+        holds_for = spans if fixed_at else "every length"
         detail = outcome.get("result")
         lemma = (f" ({detail.sketch})" if detail is not None
                  and getattr(detail, "status", None) == "proven"
@@ -1337,7 +1343,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
         return ProofResult(
             "proven", meta=meta,
             sketch=f"{through}, lowered to sums over {vectors} at a symbolic "
-                   f"length: the relation holds for every length{lemma}",
+                   f"length: the relation holds for {holds_for}{lemma}",
             quantifier=(f"∀ {_over(seqs, elements)} with nothing "
                         f"missing, {spans}" if seqs else None))
     detail = outcome.get("result")

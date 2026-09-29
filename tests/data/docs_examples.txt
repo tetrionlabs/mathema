@@ -7,6 +7,7 @@
 
 [x] docs/authoring.md:raises-guard               run verdicts
 [x] docs/authoring.md:write-spec                 run repl
+[x] docs/authoring.md:fixed-shape                run verdicts verdicts  (requires)
 [x] docs/case-studies.md:parity                  verdicts
 [x] docs/case-studies.md:delta-lower             verdicts
 [x] docs/case-studies.md:delta-upper             verdicts
@@ -95,4 +96,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 80 examples checked, 4 output fences not yet marked
+# 81 examples checked, 4 output fences not yet marked

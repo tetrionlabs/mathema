@@ -1495,14 +1495,26 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
     lengths_seen = observed_lengths or {}
     premise_drawn = premise_drawn or set()
 
+    def size_text(p: str, free: str) -> str:
+        # the sizes the checked samples had: one length as `len=20`,
+        # several as their range, a matrix as `size=(30,15)` or the
+        # range of the sizes seen; none recorded is the free draw
+        seen = sorted({(s,) if isinstance(s, int) else tuple(s)
+                       for s in (lengths_seen.get(p) or ())})
+        if not seen:
+            return free
+        if all(len(s) == 1 for s in seen):
+            lengths = [s[0] for s in seen]
+            if len(lengths) == 1:
+                return f"len={lengths[0]}"
+            return f"len∈[{lengths[0]},{lengths[-1]}]"
+        compact = ["(" + ",".join(str(n) for n in s) + ")" for s in seen]
+        if len(compact) == 1:
+            return f"size={compact[0]}"
+        return f"size∈[{compact[0]},{compact[-1]}]"
+
     def sequence_text(p: str) -> str:
-        lengths = sorted(lengths_seen.get(p) or ())
-        if not lengths:
-            size = "len∈[2,8]"
-        elif len(lengths) == 1:
-            size = f"len={lengths[0]}"
-        else:
-            size = f"len∈[{lengths[0]},{lengths[-1]}]"
+        size = size_text(p, "len∈[2,8]")
         element_bound = domain.get(p)
         if p in premise_drawn:
             draw = "drawn on the premise"
@@ -1536,8 +1548,8 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
 
     def one(p: str, k: str, bounds) -> str:
         if k == "table":
-            return ("Table(equal-length columns, len∈[2,8], each drawn "
-                    "as a free Seq)")
+            return (f"Table(equal-length columns, {size_text(p, 'len∈[2,8]')}, "
+                    f"each drawn as a free Seq)")
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
                 and not bounds.excluded):
@@ -1941,21 +1953,31 @@ def probe(fn, facts, domain: dict | None = None,
         if (param is not None and p not in domain
                 and _keeps_default(fn, param)):
             return param.default
+        shape = resolver.shapes.get(p) if resolver is not None else None
         if k == "table":
-            # a table: equal-length columns, each drawn as a sequence
-            n = rng.randint(2, 8)
+            # a table: equal-length columns, each drawn as a sequence,
+            # at the length a vector domain on the table fixes
+            n = (sizes.get(resolver.key(p, 0)) if shape is not None
+                 else None) or rng.randint(2, 8)
             return {c: _synth("sequence", rng, None, specials=specials,
                               length=n) for c in ("a", "b")}
-        shape = resolver.shapes.get(p) if resolver is not None else None
-        if shape is not None and k not in SEQUENCE_KINDS and shape.ndim >= 1:
-            # a space binding (`R^n`, `R^(n,n)`) from the claims shapes
-            # a parameter whose kind the signature does not state
+        if shape is not None and shape.ndim >= 1 and (
+                shape.ndim >= 2 or k not in SEQUENCE_KINDS):
+            # a matrix-shaped parameter (a marker, or a space binding
+            # such as `R^(m,n)`), or a space binding on a parameter
+            # whose kind the signature does not state: nested to its
+            # axes, sizes from the plan, so a fixed size is that size
             return resolver.synth(
                 p, sizes, lambda: _synth("float", rng, domain.get(p),
                                          specials=specials), rng)
+        # a 1-D sequence takes the length its marker or binding fixes
+        # or shares; an anonymous axis keeps the sampler's own draw
+        length = None
+        if shape is not None and shape.ndim == 1 and shape.axes[0] is not None:
+            length = sizes.get(resolver.key(p, 0))
         return _synth(k, rng, domain.get(p), specials=specials,
                       extra=critical_hints.get(p),
-                      extra_cycle=extra_cycles.get(p))
+                      extra_cycle=extra_cycles.get(p), length=length)
 
     def args_for() -> "tuple[list, dict]":
         sizes = resolver.draw_sizes(rng) if resolver is not None else {}
