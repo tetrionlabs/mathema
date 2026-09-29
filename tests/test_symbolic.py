@@ -1419,7 +1419,7 @@ def test_proven_scalar_claim_quantifier_reflects_a_declared_domain():
     results = check_conjectures(
         clamp01, [claim("for x in [0, 1], f(x) == x", route="derive")])
     assert results[0].verdict == "proven"
-    assert results[0].condition == "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
+    assert results[0].condition == "∀ x ∈ [0.0, 1.0] ⊂ ℝ"
 
 
 def test_proven_fold_claim_quantifies_over_the_sequence():
@@ -1452,7 +1452,7 @@ def test_quantifier_groups_shared_domains_and_remaps_long_names():
         "some_var + some_other_var + other_var", route="derive")])
     assert results[0].verdict == "proven"
     assert results[0].condition == \
-        "where x=some_var, y=some_other_var, z=other_var: ∀ x, y ∈ ℝ, z ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
+        "where x=some_var, y=some_other_var, z=other_var: ∀ x, y ∈ ℝ, z ∈ [0.0, 1.0] ⊂ ℝ"
 
 
 def test_disproven_and_undecided_claims_have_no_quantifier():

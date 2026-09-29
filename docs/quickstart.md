@@ -87,16 +87,16 @@ print(p.condition)
 <!-- example: falsify output -->
 ```text
 proven
-where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}
+where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ, y ∈ [0.0, 1.0] ⊂ ℝ
 ```
 
 `proven`, not `holds`. mathema did not run `discounted` on a thousand
 random prices and shrug, it lifted the body to a symbolic expression
 and decided the inequality algebraically, so the result covers every
 price in that range rather than the ones a sampler happened to pick.
-The region it proved over is printed back explicitly, including the
-`∪ {∅}` that says a float's hole, NaN, is part of the declared input
-space, as the `price: float` annotation implies.
+The region it proved over is printed back explicitly, and it is over
+the reals: the NaN a `price: float` admits is not a real number, so the
+proof leaves it to the computation, and the record names it there.
 
 That difference is the whole idea: `holds` is evidence, `proven` is
 proof, and mathema always tells you which one you have. The full
@@ -164,8 +164,8 @@ pricing.discounted:
       statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "proven"
       note: "missing for price (float): nan; missing for rate (float): nan"
-      sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative"
-      condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
+      sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative; over the reals; the points price = nan, rate = nan are the computation's"
+      condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ, y ∈ [0.0, 1.0] ⊂ ℝ"
       route: "derive"
       authored:
         surface: "docstring"

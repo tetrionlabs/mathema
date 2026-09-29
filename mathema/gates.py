@@ -93,10 +93,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     """
     import math
     from .domain import (_as_int_if_whole, bound_to_sympy_set,
-                         domain_contains, is_missing, operational_domain)
+                         domain_contains, operational_domain)
     from .probing import (ComplexResult, _bound_is_complex, _fmt_value,
                           _is_matrix_value, _synth, complex_is_a_raise,
-                          holds_inf, holds_nan, is_complex_value,
+                          holds_inf, holds_nan, inputs_missing,
+                          is_complex_value, missing_class,
                           plain_value, relation_holds_elementwise,
                           same_infinity, values_agree, values_differ)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
@@ -313,12 +314,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
     def _array_relation(lv, rv, tol, point):
         # an array result compared element by element: a NaN the code
-        # computed from non-missing inputs is no value and fails; one
-        # that propagates a missing input is the missing-value axis's
-        # business
+        # computed from inputs that are not missing is no value and
+        # fails (a missing input was compared by kind before this)
         if holds_nan(lv) or holds_nan(rv):
-            if any(is_missing(v) or holds_nan(v) for v in point.values()):
-                return None
             return False
         return relation_holds_elementwise(
             lv, rv, cj.relation, tol,
@@ -343,6 +341,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if _same_no_value(lv, rv):
                 return cj.relation in ("==", "~=", "<=", ">=")
             return False
+        if inputs_missing(point.values()) or "absent" in (missing_class(lv), missing_class(rv)):
+            # a missing value meets the relation by kind (a hole agrees
+            # with a hole, an absence with an absence, and either fails
+            # against a number)
+            return relation_holds_elementwise(
+                lv, rv, cj.relation, slack, exact_inequality=cj.tolerance is None,
+                rel_tol=0.0, missing_inputs=True)
         if _complex_pair(lv, rv) and not (holds_nan(lv) or holds_nan(rv)):
             if (holds_inf(lv) or holds_inf(rv)) and not calls_nonfinite[0]:
                 # an infinity only the law's own arithmetic produced
@@ -364,15 +369,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # non-numeric result: an EQUALITY relation still compares
         # exactly (None vs a real number is a genuine mismatch, so an
         # opaque disproof reproduces), and ordering over non-orderable
-        # values proves nothing. A NaN that propagates a missing input
-        # is the missing-policy axis's business, inconclusive here; a
-        # NaN computed from non-missing inputs, a scalar or an element
-        # of an array or list, is no value and fails every relation,
-        # `!=` included: it agrees with nothing, another NaN included
-        # (P4)
+        # values proves nothing. A NaN computed from inputs that are not
+        # missing, a scalar or an element of an array or list, is no
+        # value and fails every relation, `!=` included: it agrees with
+        # nothing, another NaN included (the no-value rule; a missing
+        # input was compared by kind before this)
         if holds_nan(lv) or holds_nan(rv):
-            if any(is_missing(v) or holds_nan(v) for v in point.values()):
-                return None
             return False
         if cj.relation in ("==", "~="):
             try:
@@ -403,6 +405,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # says nothing about the code
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
+            return None
+        if inputs_missing(point.values()) or "absent" in (missing_class(lv), missing_class(rv)):
+            # a missing input meets the relation by kind
+            if relation_holds_elementwise(
+                    lv, rv, cj.relation, slack, exact_inequality=cj.tolerance is None,
+                    rel_tol=0.0, missing_inputs=True) is False:
+                return (f"the relation fails at a missing value "
+                        f"({_fmt_value(lv)} {cj.relation} {_fmt_value(rv)})")
             return None
         if calls_nonfinite[0] is not None:
             # no value at a finite input: an overflow, a pole, a nan.
@@ -1014,7 +1024,7 @@ def _finite_arguments(args, kwargs) -> bool:
 
 
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
-                     assum=(), budget=None) -> "Probe | None":
+                     assum=(), budget=None, missing=None) -> "Probe | None":
     """Intent:
         The computation claim a derive proof spawns. `parent` is proven in
         exact arithmetic, which is all a derive `proven` says; the
@@ -1038,7 +1048,11 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         `unknown`, naming the point that was executing. `budget`, when
         given, is the total number of points drawn, corners included
         (the caller's trials); otherwise every corner plus the
-        corroboration budget of interior points.
+        corroboration budget of interior points. `missing` lists the
+        missing values the claim's completed domain admits, `(param,
+        word, value)`: each is executed at the first domain corner,
+        after the corners and before the sampled points, and a raise or
+        a relation failing there by kind falsifies the companion.
     """
     from . import corroboration as C
     from ._sampling import representation_reach
@@ -1057,15 +1071,20 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     top = float(representation.max_magnitude or representation_reach())
     reach = cap if cap is not None else (-top, top)
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
+    corners = list(deps["corners"])
+    missing_corners = [{**corners[0], p: v} for p, _w, v in (missing or ())
+                       if corners and p in deps["names"]]
+    corners += missing_corners
     interior = (C._CORROBORATION_BUDGET if budget is None
-                else max(0, int(budget) - len(deps["corners"])))
+                else max(0, int(budget) - len(corners)))
     progress = C.StabilitySweep()
     try:
         sweep = _with_timeout(
             lambda: C.sweep_stability(deps["probe_finite"], deps["names"],
                                       sample=deps["sample"],
-                                      corners=deps["corners"],
-                                      admits=deps["admits"],
+                                      corners=corners,
+                                      admits=lambda pt: deps["admits"](pt)
+                                      or pt in missing_corners,
                                       budget=interior, progress=progress),
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
@@ -1080,9 +1099,16 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                  + (f" executing {at}" if at else "")
                  + (f"; {reach_text}" if reach_text else ""),
             meta={"mathema.timeout": "fast"})
+    words = ", ".join(dict.fromkeys(w for _p, w, _v in (missing or ())))
+    tried: dict = {}
+    for p, _w, v in (missing or ()):
+        if missing_corners and p in deps["names"]:
+            tried.setdefault(p, []).append(repr(v))
+    tried_meta = {"mathema.missing": {"tried": tried}} if tried else {}
     what = (f"the computation of {parent.name} in {representation_word}, "
-            f"executed at {sweep.checked} points (every domain corner, then sampled "
-            f"interior points)"
+            f"executed at {sweep.checked} points (every domain corner, "
+            + (f"{words}, " if words and missing_corners else "")
+            + "then sampled interior points)"
             + (f"; {reach_text}" if reach_text else ""))
     if sweep.fragile_point is not None:
         pt = _fmt_point(sweep.fragile_point, deps["names"])
@@ -1107,10 +1133,11 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             # evidence that the mathematics is sound and the code is not
             stratum={"mathematics": "sound", "blame": "implementation",
                      "cause": "implementation:numerical-instability",
-                     "representation": representation.tag, "witness": pt})
+                     "representation": representation.tag, "witness": pt},
+            meta=tried_meta or None)
     if sweep.checked == 0:
         return Probe(name, parent.statement, "skipped", route="probe",
                      note=f"{what}; no in-domain point satisfied the "
                           f"claim's premises, so nothing was executed")
     return Probe(name, parent.statement, "holds", route="probe",
-                 n=sweep.checked, note=what)
+                 n=sweep.checked, note=what, meta=tried_meta or None)

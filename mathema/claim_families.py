@@ -3296,7 +3296,6 @@ def _matrix_output_probe(prop):
     def probe(fn, facts, cj, domain, rng, trials):
         import ast as _ast
 
-        from .domain import is_missing
         from ._premises import PremiseRejected
         try:
             code = compile(_ast.parse(cj.lhs, mode="eval"), "<claim>", "eval")
@@ -3315,7 +3314,9 @@ def _matrix_output_probe(prop):
             except PremiseRejected:
                 continue
             except Exception:
-                if raised and not any(is_missing(v) for v in filled):
+                # a raise from f at an admitted point, a missing one
+                # included, is no value
+                if raised:
                     checked += 1
                     return ("falsified", checked,
                             f"{_fmt(tuple(filled))}: f raised "
@@ -3450,11 +3451,10 @@ def _output_predicate_probe(check):
     """A probe over a function's OUTPUT value: per trial synthesize every
     argument by its kind (on the claim's equality premises), call f, and
     test the returned value with `check` (True has the property, False
-    does not with a witness, None undecided this round). A raise at a
-    point without a missing argument is no output and falsifies."""
+    does not with a witness, None undecided this round). A raise at an
+    admitted point, a missing argument included, is no output and
+    falsifies."""
     def probe(fn, facts, cj, domain, rng, trials):
-        from .domain import is_missing
-
         def trial(_args):
             point = _placed({p: _synth(facts.param_kinds.get(p, "scalar"),
                                        rng, (domain or {}).get(p))
@@ -3466,8 +3466,8 @@ def _output_predicate_probe(check):
                 with _pinned_float_env():
                     out = fn(*filled)
             except Exception as exc:
-                if any(is_missing(v) for v in filled):
-                    return None
+                # a raise at an admitted point, a missing one included,
+                # is no output
                 return (f"{_fmt(tuple(filled))}: f raised "
                         f"{type(exc).__name__}, no output")
             got = check(out)

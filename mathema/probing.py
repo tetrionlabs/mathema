@@ -429,7 +429,8 @@ def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
 
 def values_agree(u, v, tolerance: float | None = None,
                  rel_tol: float = DEFAULT_RELATIVE_TOLERANCE,
-                 broadcast: bool = False) -> "bool | None":
+                 broadcast: bool = False,
+                 missing_inputs: bool = False) -> "bool | None":
     """Intent:
         Whether two executed values are equal, the one reading every
         comparison shares: Python numbers, numpy scalars, 0-d arrays,
@@ -444,10 +445,15 @@ def values_agree(u, v, tolerance: float | None = None,
         `None` when the two sides have different shapes. With
         `broadcast`, a number against an array or list is compared
         with every element. A bool, and a value that is not a number,
-        agrees only by exact equality.
+        agrees only by exact equality. With `missing_inputs` (an
+        argument was missing), missing values agree by kind
+        (`missing_relation`): a hole with a hole, `None` with `None`.
     """
     abs_tol = tolerance if tolerance is not None else 1e-9
     u, v = plain_value(u), plain_value(v)
+    if missing_inputs:
+        return _missing_walk(u, v, "==", lambda a, b: values_agree(
+            a, b, tolerance, rel_tol, broadcast))
 
     def walk(x, y):
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
@@ -542,6 +548,98 @@ def _scalar_relation(a, b, relation: str, slack: float,
     if relation == "<":
         return a < b
     return a > b
+
+
+def missing_class(value) -> "str | None":
+    """Intent:
+        The kind of missing value `value` is: `"absent"` for `None`,
+        `"hole"` for a value with no computable content (NaN, `pd.NA`,
+        `NaT`, a hole a runtime type's adapter reads back), None for a
+        value that is not missing. A container is not itself a missing
+        value, whatever it holds.
+    """
+    from .domain import is_missing
+    if value is None:
+        return "absent"
+    if isinstance(value, (list, tuple, dict, str)) or _is_matrix_value(value):
+        return None
+    try:
+        return "hole" if is_missing(value) else None
+    except Exception:
+        return None
+
+
+def inputs_missing(args) -> bool:
+    """Intent:
+        Whether any argument is missing or holds a missing value: `None`,
+        a hole, or a vector, matrix, table or record holding one (read
+        through the runtime type adapters' `observe`).
+    """
+    from .runtime_types import observed_plain
+
+    def holds(v) -> bool:
+        if missing_class(v) is not None:
+            return True
+        if isinstance(v, dict):
+            return any(holds(x) for x in v.values())
+        if isinstance(v, (list, tuple)):
+            return any(holds(x) for x in v)
+        if _is_matrix_value(v) or type(v).__module__.split(".")[0] in ("pandas",
+                                                                       "polars"):
+            try:
+                seen = observed_plain(v)
+            except Exception:
+                return False
+            return seen is not v and holds(seen)
+        return False
+
+    return any(holds(a) for a in args)
+
+
+def missing_relation(lv, rv, relation: str) -> "bool | None":
+    """Intent:
+        The comparison rule where a missing value meets the relation,
+        by kind: two holes agree under `==`/`~=` whatever member each is
+        (a NaN in, a `pd.NA` out, is one hole propagated), two absences
+        agree, an absence against a hole disagrees, and a missing value
+        against a number fails every relation, `!=` included; an
+        ordering at a missing value fails. None when neither side is
+        missing, for the ordinary comparison to decide.
+    """
+    kl, kr = missing_class(lv), missing_class(rv)
+    if kl is None and kr is None:
+        return None
+    if kl is None or kr is None:
+        return False
+    if relation in ("==", "~="):
+        return kl == kr
+    if relation == "!=":
+        return kl != kr
+    return False
+
+
+def _missing_walk(lv, rv, relation: str, compare, pairs=None) -> "bool | None":
+    """`lv <relation> rv` element by element where missing values take
+    the kind rule (`missing_relation`) and present ones `compare`; a
+    sequence against a sequence of another length is None. With
+    `pairs`, each leaf pair is judged by `pairs(a, b)` instead."""
+    xs, ys = isinstance(lv, (list, tuple)), isinstance(rv, (list, tuple))
+    if xs and ys:
+        if len(lv) != len(rv):
+            return None
+        parts = [_missing_walk(a, b, relation, compare, pairs) for a, b in zip(lv, rv)]
+    elif xs:
+        parts = [_missing_walk(a, rv, relation, compare, pairs) for a in lv]
+    elif ys:
+        parts = [_missing_walk(lv, b, relation, compare, pairs) for b in rv]
+    else:
+        if pairs is not None:
+            return pairs(lv, rv)
+        decided = missing_relation(lv, rv, relation)
+        return compare(lv, rv) if decided is None else decided
+    if any(pt is None for pt in parts):
+        return None
+    return all(parts)
 
 
 def _is_matrix_value(v) -> bool:
@@ -757,7 +855,8 @@ def same_infinity(lv, rv) -> bool:
 
 def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                                exact_inequality: bool = False,
-                               rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
+                               rel_tol: float = DEFAULT_RELATIVE_TOLERANCE,
+                               missing_inputs: bool = False):
     """Whether `lv <relation> rv` holds: a scalar comparison, or, when a
     side is matrix/array-valued, the relation at EVERY element (a scalar
     broadcasts against a matrix), numpy values read as the plain values
@@ -777,8 +876,30 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     different lengths or shapes are unequal outright under `==`, `~=`
     and `!=`; an ordering over them is unanswerable. Leaves that are
     not numbers (a record, a string, `None`) are equal only by their
-    own equality."""
+    own equality.
+
+    With `missing_inputs` (an argument was `None` or held a hole), a
+    missing value on either side takes the kind rule of
+    `missing_relation`, element by element: holes at the same positions
+    agree and the numbers between them are compared as ever."""
     lv, rv = plain_value(lv), plain_value(rv)
+    if missing_inputs:
+        def present(a, b):
+            try:
+                return bool(_scalar_relation(a, b, "==" if relation == "!=" else relation,
+                                             slack, exact_inequality, rel_tol))
+            except TypeError:
+                return None
+        if relation == "!=":
+            agree = _missing_walk(lv, rv, "==", present)
+            if agree is None:
+                return True if (_is_matrix_value(lv) or _is_matrix_value(rv)) else None
+            # a missing value against a number fails `!=` as well
+            mixed = _missing_walk(lv, rv, "~=", lambda a, b: True,
+                                  pairs=lambda a, b: (missing_class(a) is None)
+                                  == (missing_class(b) is None)) is False
+            return False if mixed else not agree
+        return _missing_walk(lv, rv, relation, present)
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,
@@ -1280,6 +1401,11 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         if lap is not None and lap.guaranteed_remaining():
             return lap.next()
         return _sample_language(rng, bounds)
+    if lap is not None and lap.guaranteed_remaining() \
+            and kind not in (*SEQUENCE_KINDS, "dict", "table"):
+        # the sentinels a scalar's domain admits, each drawn once
+        # before any random draw
+        return lap.next()
     if kind == "dict":
         # a mapping parameter with no key list to hand (the automatic
         # type-probes): a generic dict, enough not to crash a function

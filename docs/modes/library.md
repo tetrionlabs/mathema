@@ -109,7 +109,7 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
            counterexample alpha=7.32889, h=0.02: curvature estimate 4463.56 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {None, ∅}
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=192)
   holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=20)
@@ -120,10 +120,10 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
            counterexample ([0, -233862, -563795, -582346, 312626], 9.38242): 969404644.5167232 vs 4408328610.953807
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|None|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {None, ∅}
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
   holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|None|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|None|missing, c + f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {None, ∅}
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
   holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|None|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=48)
 ```
 

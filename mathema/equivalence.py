@@ -615,9 +615,9 @@ def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
 
 def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     from .conjecture import DEFAULT_TOLERANCE
-    from .domain import is_missing
     from .probing import (_fmt, _fmt_value, _synth, complex_is_a_raise,
-                          holds_nan, same_infinity)
+                          inputs_missing, missing_class, missing_relation,
+                          same_infinity)
 
     cj = case.cj
     kinds = {p: case.facts.param_kinds.get(p, "unknown")
@@ -657,15 +657,21 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
                 break
             both_raised += 1
             continue
+        if inputs_missing(args) or "absent" in (missing_class(fv), missing_class(gv)):
+            # a missing value meets equivalence by kind: a hole agrees
+            # with a hole and an absence with an absence, and either
+            # disagrees with a number
+            checked += 1
+            if missing_relation(fv, gv, "==") is False:
+                cx = (_fmt(tuple(args), names=tuple(kinds))
+                      + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
+                break
+            if missing_relation(fv, gv, "==") is True:
+                continue
         if not (_numberlike(fv) and _numberlike(gv)):
             discarded["non_numeric"] += 1
             continue
         if not (_finite(fv) and _finite(gv)):
-            if any(is_missing(a) or holds_nan(a) for a in args):
-                # a missing input: its NaN is the missing-value
-                # policy's business, not compared here
-                discarded["not_compared"] += 1
-                continue
             # no value from non-missing inputs (P4): two sides at the
             # same infinity are one extended-real point and agree; a
             # NaN agrees with nothing, and an infinity disagrees with a

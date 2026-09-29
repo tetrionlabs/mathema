@@ -52,7 +52,7 @@ from .domain import operational_domain as _operational_domain
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
-                      holds_nan, same_infinity,
+                      holds_nan, inputs_missing, missing_class, same_infinity,
                       is_complex_value, ordering_shortfall,
                       quiet_while_probing, relation_holds_elementwise,
                       values_differ)
@@ -1511,6 +1511,19 @@ def _membership_bound(rhs: str):
     except InvalidDomain:
         return None
     return None if parsed is None else parsed[1]
+
+
+def _membership_member(value, bound) -> bool:
+    """Intent:
+        Whether `value` is a member of a membership relation's
+        right-hand side: a domain that states nothing about missing
+        values admits none (`f(x) in [0, 1]` is false at a NaN), and one
+        that lists a sentinel admits what it lists, resolved against the
+        value tested (`nan in {missing}` on a float).
+    """
+    from .domain import MissingDefaults, complete, domain_contains
+    nothing = MissingDefaults(False, (), "value", annotated=False)
+    return domain_contains(value, complete(bound, nothing))
 
 
 def _membership_as_chain(lhs: str, rel: str, bound) -> "str | None":
@@ -3714,9 +3727,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # generic stage applies
             out.append(stamp(_adjudicate_equivalence(ctx, fn, facts)))
             continue
-        from .domain import RECORD_DOMAIN
         from .probing import LanguageDrawFailed
-        record_token = RECORD_DOMAIN.set(ctx.record_domain)
         try:
             if call_pins:
                 # the derive route reads the call the claim writes, never a
@@ -3755,8 +3766,6 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 cj.name, statement, "skipped", route=None,
                 note=f"{ctx.note}; {e}",
                 meta={"mathema.probe_gap": "input-synthesis"})))
-        finally:
-            RECORD_DOMAIN.reset(record_token)
     out.sort(key=lambda p: _emit_position(p, conjectures, declared_order))
     return out
 
@@ -4166,7 +4175,6 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         a membership, or a comparison, in the claim loop's own words),
         or None when it holds there or cannot be evaluated.
     """
-    from .domain import domain_contains
     trial_env = dict(env)
     for p, v in zip(kinds, args):
         trial_env[p] = v
@@ -4179,7 +4187,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
                 "the raising region as its own raises(...) claim")
     if cj.relation in ("in", "not in"):
         if cj.rhs_bound is not None:
-            member = (not is_missing(lv)) and domain_contains(lv, cj.rhs_bound)
+            member = _membership_member(lv, cj.rhs_bound)
         else:
             try:
                 member = lv in rv  # type: ignore[operator]
@@ -4189,12 +4197,16 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
             return (f"{_fmt(tuple(args), *labels)}: {lv!r} is "
                     f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
         return None
-    if is_missing(lv) or is_missing(rv):
-        return None
     slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
+    missing_in = inputs_missing(args)
+    if not missing_in and (holds_nan(lv) or holds_nan(rv)):
+        return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, and a nan is no value"
     ok = relation_holds_elementwise(lv, rv, cj.relation, slack,
                                     exact_inequality=cj.tolerance is None,
-                                    rel_tol=_declared_rel_tol(cj))
+                                    rel_tol=_declared_rel_tol(cj),
+                                    missing_inputs=missing_in
+                                    or missing_class(lv) == "absent"
+                                    or missing_class(rv) == "absent")
     if ok is False:
         return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
     return None
@@ -4957,26 +4969,158 @@ def _validate_claim(cj, statement: str, note: str, facts,
                          missing=resolution, record_domain=completed)
 
 
-def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict) -> dict:
+def _admitted_scalar_points(ctx) -> list:
     """Intent:
-        `{param: _SpecialCycle}` for every parameter bound to a finite
-        set that lists a sentinel: the values each listed sentinel
-        stands for, realised with the parameter's resolution (`None`,
-        or its absence spellings, for absence; one value per member for
-        the class), dispensed in order before any random draw.
+        `[(param, word, value), ...]`: every missing value a scalar
+        parameter's completed domain admits, realised with its
+        resolution (`None` for absence, one value per hole member), in
+        the order absence, then members; the points a proof's companion
+        executes beside the domain's corners.
     """
-    from .domain import (NO_ANNOTATION, _as_domain, _is_enumerated,
+    from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _is_enumerated,
+                         admitted, member, realise_sentinel)
+    out: list = []
+    for p, bound in (ctx.record_domain or {}).items():
+        dom = _as_domain(bound)
+        if not p.isidentifier() or dom.base_type == "L" or dom.dims \
+                or _is_enumerated(dom):
+            continue
+        policy = ctx.missing.get(p, NO_ANNOTATION)
+        absent, holes = admitted(dom, dom.policy)
+        if absent:
+            out += [(p, "None", v) for v in realise_sentinel(
+                ABSENT, policy.members, policy.absence)]
+        for h in holes:
+            for word in (policy.members if h.member is None else (h.member,)):
+                out += [(p, word, v) for v in realise_sentinel(member(word))]
+    return out
+
+
+def _with_computation_points(sketch: str, record_domain: dict) -> str:
+    """Intent:
+        A proof's sketch with the missing points its domain admits named
+        as the computation's: the proof is over the reals, and the
+        points `x = None`, `x = nan` are executed by the companion.
+    """
+    from .domain import _as_domain, _is_enumerated, admitted
+    points: list = []
+    for p, bound in (record_domain or {}).items():
+        dom = _as_domain(bound)
+        if not p.isidentifier() or dom.base_type == "L" or _is_enumerated(dom):
+            continue
+        absent, holes = admitted(dom, dom.policy)
+        words = (["None"] if absent else []) + [
+            w for h in holes for w in (dom.members if h.member is None
+                                       else (h.member,))]
+        points += [f"{p} = {w}" for w in dict.fromkeys(words)]
+    if not points:
+        return sketch
+    return (f"{sketch}; over the reals; the points {', '.join(points)} are "
+            f"the computation's").lstrip("; ")
+
+
+def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
+                           assumption, statement: str, note: str) -> "Probe | None":
+    """Intent:
+        After a proof over the reals, the claim's own listed sentinels
+        executed: every sentinel an enumerated binding lists
+        (`{0.25, None}`, `{missing}`) belongs to the claim's point set,
+        so the function is called at each, against in-domain points of
+        the other parameters (their domain corners), and a raise or a
+        failing relation there falsifies the claim itself. Returns a
+        falsified `Probe` naming the first failing point, listed
+        sentinels in the order absence, the class, then members; a
+        `Probe` carrying only `meta["mathema.missing"]["tried"]` when
+        every one holds; None when the claim lists none or its points
+        cannot be evaluated here.
+    """
+    from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _is_enumerated,
                          _member_sort_key, _set_sentinels, realise_sentinel)
+    from .gates import _fmt_point, _point_evaluator
+    from .runtime_types import calling
+    listed: dict = {}
+    for p, bound in (cj_domain or {}).items():
+        dom = _as_domain(bound)
+        if not p.isidentifier() or dom.base_type == "L" or not _is_enumerated(dom):
+            continue
+        sentinels = sorted(set(_set_sentinels(dom)), key=_member_sort_key)
+        if not sentinels:
+            continue
+        policy = ctx.missing.get(p, NO_ANNOTATION)
+        listed[p] = [(s, v) for s in sentinels
+                     for v in realise_sentinel(s, policy.members, policy.absence)]
+    if not listed:
+        return None
+    deps = _point_evaluator(ctx.cj, calling(fn, facts), facts, cj_domain,
+                            bound_funcs, assumption)
+    if deps is None:
+        return None
+    names = list(deps["names"])
+    bases = [c for c in deps["corners"][:8] if deps["admits"](c)] or deps["corners"][:1]
+    tried: dict = {}
+    failures: list = []
+    for p, values in listed.items():
+        if p not in names:
+            continue
+        for sentinel, value in values:
+            tried.setdefault(p, []).append(repr(value))
+            for base in bases:
+                point = {**base, p: value}
+                if deps["evaluate"](point) is False:
+                    rank = (0 if sentinel == ABSENT else 1 if sentinel.member is None
+                            else 2)
+                    failures.append((rank, point))
+                    break
+    meta = {"mathema.missing": {"tried": tried}}
+    if not failures:
+        return Probe(ctx.cj.name, statement, "proven", meta=meta)
+    point = sorted(failures, key=lambda f: f[0])[0][1]
+    witness = _fmt_point(point, names)
+    from ._brute_force import _raised_at
+    raised = _raised_at(calling(fn, facts), facts, point)
+    return Probe(ctx.cj.name, statement, "falsified", route="derive",
+                 counterexample=witness, note=note,
+                 sketch=(f"the real members are proven, and the claim's own "
+                         f"listed point {witness} fails"
+                         + (f": the function raised {raised}" if raised else "")),
+                 meta={**meta, "mathema.corroboration": "reproduced",
+                       "mathema.witness_executed": True})
+
+
+def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
+                  record_domain: "dict | None" = None) -> dict:
+    """Intent:
+        `{param: _SpecialCycle}` for every parameter whose domain admits
+        a sentinel: a finite set's listed sentinels, and for a scalar
+        the sentinels its completed domain admits (a `float` slot's
+        `nan`, an `Optional` parameter's `None`), each realised with the
+        parameter's resolution (`None`, or its absence spellings, for
+        absence; one value per member for the class), dispensed in
+        order before any random draw. A vector's holes are drawn by the
+        gap draws, not here.
+    """
+    from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _is_enumerated,
+                         _member_sort_key, _set_sentinels, admitted,
+                         realise_sentinel)
     from .probing import _SpecialCycle
     out: dict = {}
-    for p in kinds:
+    for p, kind in kinds.items():
         bound = cj_domain.get(p)
         if bound is None:
             continue
         dom = _as_domain(bound)
-        if not _is_enumerated(dom) or dom.base_type == "L":
+        if dom.base_type == "L" or dom.dims:
             continue
-        listed = sorted(set(_set_sentinels(dom)), key=_member_sort_key)
+        if _is_enumerated(dom):
+            listed = sorted(set(_set_sentinels(dom)), key=_member_sort_key)
+        elif (record_domain or {}).get(p) is not None \
+                and kind not in (*SEQUENCE_KINDS, "dict", "table", "string"):
+            record = _as_domain(record_domain[p])
+            absent, holes = admitted(record, record.policy)
+            listed = ([ABSENT] if absent else []) + sorted(set(holes),
+                                                           key=_member_sort_key)
+        else:
+            continue
         if not listed:
             continue
         policy = resolution.get(p, NO_ANNOTATION)
@@ -5661,6 +5805,14 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                            sketch=dproof.sketch, note=note,
                            condition=dproof.quantifier, route="derive",
                            meta=_provenance_meta(dproof))
+            listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain,
+                                            _bound_callables(cj), assumption or [],
+                                            statement, note)
+            if listed is not None:
+                if listed.verdict == "falsified":
+                    return listed
+                proven.meta = {**(proven.meta or {}), **listed.meta}
+            proven.sketch = _with_computation_points(proven.sketch, ctx.record_domain)
             _spawn_float_companion(ctx, proven, fn, facts,
                                    _bound_callables(cj), assumption or [])
             return proven
@@ -5927,10 +6079,20 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        sketch=proof.sketch, note=note,
                        condition=proof.quantifier, route=route,
                        meta=meta)
+        if route != "derive:brute_force":
+            listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain, bound_funcs,
+                                            assumption or [], statement, note)
+            if listed is not None:
+                if listed.verdict == "falsified":
+                    return listed
+                proven.meta = {**(proven.meta or {}), **listed.meta}
+            proven.sketch = _with_computation_points(proven.sketch, ctx.record_domain)
         # a derive proof is exact arithmetic; the computation is the
-        # float companion's claim
-        _spawn_float_companion(ctx, proven, fn, facts, bound_funcs,
-                               assumption or [])
+        # float companion's claim. A proof by executing every point of a
+        # finite set already is the computation, and spawns none
+        if route != "derive:brute_force":
+            _spawn_float_companion(ctx, proven, fn, facts, bound_funcs,
+                                   assumption or [])
         return proven
     if proof.status == "disproven":
         # a brute-force disproof names its own mechanism for the same
@@ -5968,8 +6130,6 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                condition=swept.quantifier,
                                route="derive:brute_force",
                                meta=_provenance_meta(swept))
-                _spawn_float_companion(ctx, proven, fn, facts, bound_funcs,
-                                       assumption or [])
                 return proven
             if swept.status == "disproven":
                 return Probe(cj.name, statement, "falsified",
@@ -7017,11 +7177,6 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 lv = _linalg_eval.scalar(lv)
                 rv = _linalg_eval.scalar(rv) if code_r is not None else None
         except Exception as e:
-            if any(is_missing(v) for v in args):
-                # missing-value behavior is its own axis
-                # (is_missing_safe), never adjudicated through a value
-                # claim's samples
-                continue
             if not call_raised[0]:
                 # the law's own plumbing failed, not the function,
                 # a broken sample, never a counterexample
@@ -7148,8 +7303,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # set, or it is not, and a missing value is in neither
             # unless the right-hand side admits it in so many words
             if cj.rhs_bound is not None:
-                from .domain import domain_contains
-                member = (not is_missing(lv)) and domain_contains(lv, cj.rhs_bound)
+                member = _membership_member(lv, cj.rhs_bound)
             else:
                 try:
                     member = bool(lv in rv)  # type: ignore[operator]
@@ -7166,8 +7320,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                       f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
                 break
             continue
-        if not any(is_missing(v) for v in args) \
-                and (holds_nan(lv) or holds_nan(rv)):
+        missing_in = inputs_missing(args)
+        if not missing_in and (holds_nan(lv) or holds_nan(rv)):
             # a NaN computed from inputs that are not missing is no
             # value, like a raise: every value relation fails at this
             # in-domain point, `!=` included, and the witness names
@@ -7200,14 +7354,22 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "
                   f"infinity for a finite input is no value")
             break
-        if is_missing(lv) or is_missing(rv):
-            # a domain that includes missing by default (see
-            # grammar.parse_binding's own policy) can sample the
-            # missing sentinel itself as a candidate value; a
-            # function that returns it unchanged (identity, say)
-            # leaves lv/rv genuinely non-comparable, neither
-            # confirming nor denying the claim, so this sample is
-            # inconclusive
+        if missing_in or "absent" in (missing_class(lv), missing_class(rv)):
+            # a missing value meets the relation by kind: a hole agrees
+            # with a hole and an absence with an absence under `==`,
+            # and against a number every relation fails
+            ok = relation_holds_elementwise(
+                lv, rv, cj.relation,
+                cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE,
+                exact_inequality=cj.tolerance is None,
+                rel_tol=_declared_rel_tol(cj), missing_inputs=True)
+            if ok is None:
+                continue
+            checked += 1
+            if ok is False:
+                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: "
+                      f"{_linalg_eval.shown(lv)!r} vs {_linalg_eval.shown(rv)!r}")
+                break
             continue
         checked += 1
         # a declared tolerance governs the comparison outright; the

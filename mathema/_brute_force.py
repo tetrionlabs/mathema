@@ -103,6 +103,70 @@ def _raised_at(fn, facts, point: dict) -> "str | None":
     return None
 
 
+def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
+                      resolution: "dict | None"):
+    """Intent:
+        The sweep of a membership claim (`f(x) in {missing}`) over a
+        finite domain: the value at every point is tested against the
+        right-hand side, a missing value by its kind. `proven` when each
+        point agrees with the relation, `disproven` at the first that
+        does not, None when the domain is not finite or a point's value
+        cannot be computed.
+    """
+    from .conjecture import _SAFE_FUNCS, _membership_member
+    from ._math_vocab import MATH_CONSTANTS
+    from .gates import _fmt_point
+    names = [p for p in facts.params if p in cj_domain]
+    if not names or any(p not in cj_domain for p in facts.params):
+        return None
+    grid = _sweep_grid(names, cj_domain, budget, resolution)
+    if grid is None:
+        return None
+    try:
+        code = compile(cj.lhs, "<membership>", "eval")
+    except SyntaxError:
+        return None
+    wanted = cj.relation == "in"
+    checked = 0
+    for combo in itertools.product(*(grid[n] for n in names)):
+        point = dict(zip(names, combo))
+        env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **(bound_funcs or {}),
+               "f": fn, **point}
+        where = _fmt_point(point, names)
+        try:
+            value = eval(code, {"__builtins__": {}}, env)
+        except Exception:
+            raised = _raised_at(fn, facts, point)
+            if raised is None:
+                return None
+            return ProofResult(
+                "disproven", sketch=f"at {where} the function raised {raised}",
+                counterexample=f"{where}: raised {raised}", witness=dict(point),
+                meta={"mathema.derive_route": "brute_force", **_tried(grid),
+                      "mathema.witness_executed": True})
+        if _membership_member(value, cj.rhs_bound) != wanted:
+            return ProofResult(
+                "disproven",
+                sketch=f"at {where} the value {value!r} is "
+                       f"{'not ' if wanted else ''}in {cj.rhs}",
+                counterexample=f"{where}: {value!r} is "
+                               f"{'not ' if wanted else ''}in {cj.rhs}",
+                witness=dict(point),
+                meta={"mathema.derive_route": "brute_force", **_tried(grid),
+                      "mathema.witness_executed": True})
+        checked += 1
+    if checked == 0:
+        return None
+    plural = "point" if checked == 1 else "points"
+    return ProofResult(
+        "proven",
+        sketch=f"the declared domain admits {checked} {plural}, and the "
+               f"value at every one is {'' if wanted else 'not '}in {cj.rhs}",
+        quantifier=f"∀ {', '.join(names)} in the declared finite domain "
+                   f"({checked} {plural})",
+        meta={"mathema.derive_route": "brute_force", **_tried(grid)})
+
+
 def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                   resolution: "dict | None"):
     """Intent:
@@ -222,6 +286,9 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     budget = BRUTE_FORCE_POINT_BUDGET if budget is None else budget
     if cj.relation == "raises":
         return None if assumption else _raises_proof(
+            cj, fn, facts, cj_domain, bound_funcs, budget, resolution)
+    if cj.relation in ("in", "not in") and getattr(cj, "rhs_bound", None) is not None:
+        return None if assumption else _membership_proof(
             cj, fn, facts, cj_domain, bound_funcs, budget, resolution)
     from .gates import _fmt_point, _point_evaluator
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assumption)

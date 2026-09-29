@@ -112,13 +112,11 @@ def test_s1_a_float_proof_carries_a_companion_falsified_at_nan():
                companion="falsified", companion_member="nan")
 
 
-@stage(2)
 def test_s3_a_listed_none_is_executed_by_the_claim_and_raises():
     assert_row(sqrt_plain, "for x in {0.25, None}, f(x) >= 0", FALSIFIED,
                member="None", raised="TypeError", executed={"x": ["None"]})
 
 
-@stage(2)
 def test_s4_a_listed_nan_is_a_hole_against_an_ordering():
     assert_row(sqrt_plain, "for x in {0.25, nan}, f(x) >= 0", FALSIFIED,
                member="nan", executed={"x": ["nan"]})
@@ -142,7 +140,6 @@ def test_s7_an_optional_float_companion_fails_at_a_missing_point():
     assert any("None" in witness(c) or "nan" in witness(c) for c in companions)
 
 
-@stage(2)
 def test_s8_absence_against_a_number_is_not_true():
     assert_row(double_or_missing, "for x in {0.25, None}, f(x) >= 0", FALSIFIED,
                member="None", executed={"x": ["None"]})
@@ -156,7 +153,6 @@ def test_s9_a_replaced_hole_holds_on_both_halves():
     assert any(set(tried(c).get("x", [])) >= {"None", "nan"} for c in companions)
 
 
-@stage(2)
 def test_s10_a_replaced_absence_is_proven_by_execution_alone():
     assert_row(zero_if_missing, "for x in {0.25, None}, f(x) >= 0", PROVEN,
                executed={"x": ["None"]}, companions_none=True)
@@ -169,19 +165,16 @@ def test_s11_propagation_agrees_with_itself():
     assert any("nan" in tried(c).get("x", []) for c in companions)
 
 
-@stage(2)
 def test_s12_absence_agrees_with_itself():
     assert_row(ident, "for x in {0.25, None}, f(x) == x", PROVEN,
                executed={"x": ["None"]})
 
 
-@stage(2)
 def test_s13_a_hole_agrees_with_itself():
     assert_row(ident, "for x in {0.25, nan}, f(x) == x", PROVEN,
                executed={"x": ["nan"]})
 
 
-@stage(2)
 def test_s16_absence_at_the_second_parameter_raises():
     assert_row(add, "for x in [0, 1], y in {0.5, None}, f(x, y) >= 0", FALSIFIED,
                member="None", raised="TypeError", executed={"y": ["None"]})
@@ -202,7 +195,6 @@ def test_p3_a_replacement_policy_is_proven():
                executed={"x": ["nan"]})
 
 
-@stage(2)
 def test_p4_membership_by_class_is_proven():
     assert_row(double_or_missing, "for x in {missing}, f(x) in {missing}", PROVEN,
                executed={"x": ["nan"]})

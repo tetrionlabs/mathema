@@ -241,6 +241,9 @@ def _compare_truth(test: ast.AST, domain: dict, unmodified: set,
         return None
     op = test.ops[0]
     left, right = test.left, test.comparators[0]
+    over_reals = _real_guard_truth(left, op, right, domain, unmodified)
+    if over_reals is not None:
+        return over_reals
 
     # every case below is left/right symmetric: `flipped` records which
     # side the subject sat on, so a single loop over both orientations
@@ -286,6 +289,39 @@ def _compare_truth(test: ast.AST, domain: dict, unmodified: set,
             py_op = _COMPARE_OPS.get(type(op))
             if py_op is not None:
                 return _decide_affine_condition(left_expr - right_expr, py_op, 0.0, domain, params)
+    return None
+
+
+def _real_domain(bound) -> bool:
+    """Whether a declared bound is a set of real numbers (an interval, a
+    named number set, a numeric `Domain` over them), not a finite set of
+    listed values or a language."""
+    from ..domain import Domain
+    if isinstance(bound, Domain):
+        return bound.base_type in ("R", "Z", "N") and not bound.dims and not (
+            bound.pieces and all(isinstance(p, frozenset) for p in bound.pieces))
+    return (isinstance(bound, tuple) and not isinstance(bound, frozenset)) \
+        or bound in ("Z", "N", "R")
+
+
+def _real_guard_truth(left, op, right, domain: dict, unmodified: set) -> "bool | None":
+    """Intent:
+        A missing-value guard on a parameter decided over the reals: a
+        real number is never `None` (`x is None` is False, `x is not
+        None` True) and always equal to itself (`x != x` is False,
+        `x == x` True). The proof is over the reals; the missing points
+        its domain admits are the computation's, executed apart.
+    """
+    for subject, other in ((left, right), (right, left)):
+        if not (isinstance(subject, ast.Name) and subject.id in unmodified
+                and _real_domain(domain.get(subject.id))):
+            continue
+        if isinstance(op, (ast.Is, ast.IsNot)) and isinstance(other, ast.Constant) \
+                and other.value is None:
+            return isinstance(op, ast.IsNot)
+        if isinstance(op, (ast.Eq, ast.NotEq)) and isinstance(other, ast.Name) \
+                and other.id == subject.id:
+            return isinstance(op, ast.Eq)
     return None
 
 

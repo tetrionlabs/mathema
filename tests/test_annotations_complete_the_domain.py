@@ -227,7 +227,6 @@ def test_any_hole_written_on_a_string_is_refused(text):
     assert "s: a string has no hole; write `|None`" in probe.note
 
 
-@pytest.mark.xfail(strict=True, reason="missing values stage 2")
 def test_a_claim_may_widen_a_float_with_absence_and_the_none_is_executed():
     probe = run(plain_raising, "for x in {0.25, None}, f(x) >= 0")
     assert "x: the claim widens the type float" in probe.note

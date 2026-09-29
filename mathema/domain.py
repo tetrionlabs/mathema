@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import math
 import re
-from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from ._render_mode import get_unicode_output
@@ -902,11 +901,6 @@ class MissingDefaults:
 #: without its function: the object may be absent and a slot may hold
 #: the scalar runtime's own hole
 NO_ANNOTATION = MissingDefaults(True, ("nan",), "unannotated", annotated=False)
-#: the bindings of the claim being adjudicated, completed from its
-#: function's annotations: what a proof's quantifier clause renders for
-#: a parameter, so the clause and the record state the same domain
-RECORD_DOMAIN: ContextVar = ContextVar("mathema_record_domain", default={})
-
 #: the defaults of a path binding (`o.qty`): what a field may hold is its
 #: language's business, so a binding that does not state it admits
 #: neither kind

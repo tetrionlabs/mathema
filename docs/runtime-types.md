@@ -313,7 +313,7 @@ mathema.Record(sharpe) · source, no side effects · form ef276c12c167
   proven  f_s_returns_c_approx_f_returns: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0] : float|None|missing, for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)
            ∀ returns over [-0.1, 0.1] with nothing missing, returns of every length from 2
   holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0] : float|None|missing, for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns) (n=39)
-through the definition rows pandas.Series.mean definition, pandas.Series.std definition, lowered to sums over returns at a symbolic length: the relation holds for every length
+through the definition rows pandas.Series.mean definition, pandas.Series.std definition, lowered to sums over returns at a symbolic length: the relation holds for every length; over the reals; the points c = None, c = nan, returns = nan, returns = null, returns = NA are the computation's
 pandas.Series.mean definition bundled mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std definition bundled mathema/compendium/pandas/series.claims.yaml
 ```
@@ -374,7 +374,7 @@ print(proof.sketch)
 ```text
 proven derive
 ∀ prices over [1.0, 100.0] with nothing missing, prices of every length
-through the definition rows pandas.Series.cummax definition, pandas.Series.min definition, lowered to sums over prices at a symbolic length: the relation holds for every length (every element of prices / cummax(prices) - 1.0 is <= 0 (0 < prices[i] / cummax(prices)[i] <= 1), so min(prices / cummax(prices) - 1.0) is too)
+through the definition rows pandas.Series.cummax definition, pandas.Series.min definition, lowered to sums over prices at a symbolic length: the relation holds for every length (every element of prices / cummax(prices) - 1.0 is <= 0 (0 < prices[i] / cummax(prices)[i] <= 1), so min(prices / cummax(prices) - 1.0) is too); over the reals; the points prices = nan, prices = null, prices = NA are the computation's
 ```
 
 A DataFrame's columns are vectors on the derive route too, read by

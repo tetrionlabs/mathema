@@ -54,11 +54,17 @@ def test_the_corroboration_kit_reads_a_nan_result_as_a_counterexample():
     assert kit["evaluate"]({"x": 0.5}) is True
 
 
-def test_a_nan_that_propagates_a_missing_input_is_not_a_counterexample():
+def test_a_nan_that_propagates_a_missing_input_fails_an_ordering():
+    # a hole in, a hole out: propagation, compared by kind, and an
+    # ordering at a hole fails
     cj = claim("for x in [-1, 1], f(x) >= 0")
     kit = _point_evaluator(cj, identity, analyze_source(identity),
                            cj.domain, {})
-    assert kit["evaluate"]({"x": float("nan")}) is None
+    assert kit["evaluate"]({"x": float("nan")}) is False
+    cj = claim("for x in [-1, 1], f(x) == x")
+    kit = _point_evaluator(cj, identity, analyze_source(identity),
+                           cj.domain, {})
+    assert kit["evaluate"]({"x": float("nan")}) is True
 
 
 def test_not_equal_is_falsified_by_a_nan_result():

@@ -101,12 +101,12 @@ def test_proof_sketch_domain_rendering_states_missing_policy_explicitly():
     assert lenient != strict
 
 
-def test_quantifier_clause_states_missing_included_for_a_bare_named_type():
+def test_quantifier_clause_is_over_the_named_set():
     # a hand-built domain dict may pass "Z"/"N" directly (not through a
-    # Domain object); a bare named type states no missing-value policy,
-    # so with no annotation it admits both kinds, as the Domain path does.
-    assert _quantifier_clause({"x"}, ["x"], {"x": "Z"}, set()) == "∀ x ∈ ℤ ∪ {None, ∅}"
-    assert _quantifier_clause({"x"}, ["x"], {"x": "N"}, set()) == "∀ x ∈ ℕ ∪ {None, ∅}"
+    # Domain object); a proof's quantifier is over the numbers, the
+    # missing values any domain admits being the computation's
+    assert _quantifier_clause({"x"}, ["x"], {"x": "Z"}, set()) == "∀ x ∈ ℤ"
+    assert _quantifier_clause({"x"}, ["x"], {"x": "N"}, set()) == "∀ x ∈ ℕ"
 
 
 # --- end-to-end: the derive route accepts an excluded/union domain
