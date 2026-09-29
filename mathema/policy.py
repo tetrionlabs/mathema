@@ -368,7 +368,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
                                "exception": stated.exception, "premise": stated.premise,
                                "source": "stated"}}
     if not rows_calls:
-        return Probe(cj.name, statement, "unknown", route="probe",
+        return Probe(cj.name, statement, "unknown", route="probe:classified",
                      note=(f"no call reached a {'missing' if stated.kind == 'missing' else 'absent'} "
                            f"{stated.parameter or 'parameter'}, so nothing says what f does "
                            f"there; bind the parameter in a claim that admits it"),
@@ -387,7 +387,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
         nxt = (f"state {_stated_word(stated, did, wrong, calls)} if that is "
                f"intended, or change f")
         meta["mathema.policy"].update({"reason": reason, "next": nxt})
-        return Probe(cj.name, statement, "falsified", n=len(calls), route="probe",
+        return Probe(cj.name, statement, "falsified", n=len(calls), route="probe:classified",
                      counterexample=_witness(wrong), note=f"{reason}; {nxt}",
                      meta=meta)
     guard = None
@@ -406,7 +406,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
                      note=reason, meta=meta)
     reason = f"stated; confirmed {evidence}"
     meta["mathema.policy"]["reason"] = reason
-    return Probe(cj.name, statement, "holds", n=len(calls), route="probe",
+    return Probe(cj.name, statement, "holds", n=len(calls), route="probe:classified",
                  note=reason, meta=meta)
 
 
@@ -606,14 +606,9 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
                                           None, "")
                      if not done_members
                      or set(_members_in(c.point[p], kind)) - done_members]
-            if done_members and not calls:
-                continue
+            # a record's own rows read the calls its claims made, and run
+            # nothing of their own
             floor = False
-            if not calls:
-                members = ["None"] if kind == "absent" else (list(sig.members) or ["nan"])
-                calls = _run_floor(fn, facts, _floor_points(fn, facts, p, kind,
-                                                            members, domain))
-                floor = True
             if not calls:
                 continue
             by_member: dict = {}
@@ -646,7 +641,7 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current, floor
     meta = {"mathema.policy": meta_policy, "mathema.surface": "mathema"}
 
     def row(verdict, behaviour, exception, source, bracket, note=None, cx=None,
-            route="probe", nxt=None):
+            route="probe:classified", nxt=None):
         stated = replace(policy, behaviour=behaviour, exception=exception, source=source)
         meta_policy.update({"behaviour": behaviour, "exception": exception,
                             "source": source, "reason": bracket})
@@ -707,7 +702,7 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current, floor
         meta_policy.update({"behaviour": expected, "source": "default",
                             "reason": bracket, "next": nxt})
         return Probe(name_of(stated_default), policy_text(stated_default), "falsified",
-                     n=len(calls), route="probe", counterexample=_witness(call),
+                     n=len(calls), route="probe:classified", counterexample=_witness(call),
                      note=f"{bracket}. {nxt}", meta=meta)
     why = _why_admitted(fn, p, kind, origin)
     if behaviour == "raises":
@@ -742,7 +737,7 @@ def contradicting_policies(statements: list) -> "str | None":
     """
     seen: dict = {}
     for text in statements:
-        stated = parse_policy(text or "")
+        stated = parse_policy(text if isinstance(text, str) else "")
         if stated is None or stated.behaviour is None:
             continue
         key = (stated.kind, stated.parameter, stated.member, stated.premise)
@@ -872,6 +867,6 @@ def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
                f"intended, or change f")
         meta_policy.update({"reason": reason, "next": nxt})
         rows.append(Probe(name_of(policy), statement, "falsified", n=len(calls),
-                          route="probe", counterexample=_witness(wrong),
+                          route="probe:classified", counterexample=_witness(wrong),
                           note=f"{reason}; {nxt}", meta=meta))
     return rows

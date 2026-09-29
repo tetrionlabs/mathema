@@ -222,9 +222,8 @@ def test_v0_a_value_claim_over_a_propagated_hole_alone_is_unknown():
                behaves={"x": {"nan": "propagates"}})
 
 
-# the policy claims each behaviour above states (stage 4 builds them)
+# the policy claims each behaviour above states
 
-@stage(4)
 @pytest.mark.parametrize("fn, text, verdicts", [
     (sqrt_plain, "missing(f, x) propagates", PROVEN_OR_HOLDS),
     (sqrt_plain, "absent(f, x) raises(TypeError)", PROVEN_OR_HOLDS),

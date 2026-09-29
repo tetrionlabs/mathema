@@ -209,9 +209,8 @@ def test_t2_the_table_companion_holds_and_every_member_drops():
                      "holds", TABLE_DROPS)
 
 
-# the policy claims each behaviour above states (stage 4 builds them)
+# the policy claims each behaviour above states
 
-@stage(4)
 @pytest.mark.parametrize("fn, text, verdicts", [
     (nan_sum, "missing(f, xs) drops", HOLDS),                       # Q5
     (plain_sum, "missing(f, xs) drops", FALSIFIED),                 # Q6
