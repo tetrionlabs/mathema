@@ -187,6 +187,9 @@ LEXICON: dict[str, str] = {
     "norm_bars_distance_symmetric":
         "for x in R^n, y in R^n, f(y, x) == ||x - y||",
     "norm_bars_distance_zero": "for x in R^n, f(x, x) == 0",
+    # the triangle inequality: a distance is at most the sum of the two
+    # lengths
+    "norm_bars_triangle": "for x in R^n, y in R^n, f(x, y) <= ||x|| + ||y||",
     # long-only portfolio weights from positive scores sum to one, so
     # their L1 norm is one
     "norm_bars_portfolio_weights":
@@ -541,7 +544,7 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "norm_bars_inf", "norm_bars_chain", "norm_bars_homogeneous",
         "norm_bars_unit_vector", "norm_bars_distance",
         "norm_bars_distance_symmetric", "norm_bars_distance_zero",
-        "norm_bars_portfolio_weights", "norm_bars_squared",
+        "norm_bars_triangle", "norm_bars_portfolio_weights", "norm_bars_squared",
         "norm_bars_order_trap", "matrix_norm_bars_frobenius",
         "matrix_norm_bars_gram_trace", "matrix_norm_bars_spectral",
         "matrix_norm_bars_spectral_below_frobenius", "vector_dot",
@@ -641,6 +644,7 @@ TAGS: dict[str, tuple[str, ...]] = {
     "norm_bars_distance": ("norm", "euclidean", "distance"),
     "norm_bars_distance_symmetric": ("norm", "distance", "symmetric"),
     "norm_bars_distance_zero": ("norm", "distance", "zero"),
+    "norm_bars_triangle": ("norm", "distance", "triangle inequality"),
     "norm_bars_portfolio_weights": ("norm", "subscript", "portfolio",
                                     "weights", "long only", "sum to one"),
     "norm_bars_squared": ("norm", "euclidean", "squared", "dot product"),
@@ -1041,9 +1045,10 @@ def squared_length(x: "numpy.ndarray") -> float:
 
 def distance(x: "numpy.ndarray", y: "numpy.ndarray") -> float:
     """The Euclidean distance between two vectors, `||x - y||`:
-    symmetric, and zero between a vector and itself
-    ("norm_bars_distance", "norm_bars_distance_symmetric",
-    "norm_bars_distance_zero")."""
+    symmetric, zero between a vector and itself, and at most the sum
+    of the two lengths ("norm_bars_distance",
+    "norm_bars_distance_symmetric", "norm_bars_distance_zero",
+    "norm_bars_triangle")."""
     import numpy as np
     return float(np.linalg.norm(x - y))
 
@@ -1435,7 +1440,7 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "unit_vector": (unit_vector, ["norm_bars_unit_vector"]),
     "distance": (distance, ["norm_bars_distance",
                             "norm_bars_distance_symmetric",
-                            "norm_bars_distance_zero"]),
+                            "norm_bars_distance_zero", "norm_bars_triangle"]),
     "portfolio_weights": (portfolio_weights, ["norm_bars_portfolio_weights"]),
     "squared_length": (squared_length, ["norm_bars_squared"]),
     "frobenius_norm": (frobenius_norm, ["matrix_norm_bars_frobenius"]),

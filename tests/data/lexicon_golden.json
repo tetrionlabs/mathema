@@ -324,6 +324,11 @@
   "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, f(x, x) = 0",
   "ascii": "for x in R^n|missing, f(x, x) = 0"
  },
+ "norm_bars_triangle": {
+  "input": "for x in R^n, y in R^n, f(x, y) <= ||x|| + ||y||",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, y ∈ ℝⁿ ∪ {∅}, f(x, y) ≤ ‖x‖ + ‖y‖",
+  "ascii": "for x in R^n|missing, y in R^n|missing, f(x, y) <= ||x|| + ||y||"
+ },
  "norm_bars_portfolio_weights": {
   "input": "for scores in [0.1, 10]^n, ||f(scores)||_1 ~= 1",
   "unicode": "∀ scores ∈ [0.1, 10.0]ⁿ ⊂ ℝ ∪ {∅}, ‖f(scores)‖₁ ≈ 1",

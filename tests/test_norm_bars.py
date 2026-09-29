@@ -377,6 +377,7 @@ _LEXICON_ROWS = {
     "norm_bars_distance": ("holds", "probe"),
     "norm_bars_distance_symmetric": ("holds", "probe"),
     "norm_bars_distance_zero": ("holds", "probe"),
+    "norm_bars_triangle": ("holds", "probe"),
     "norm_bars_portfolio_weights": ("holds", "probe"),
     "norm_bars_squared": ("holds", "probe"),
     "norm_bars_order_trap": ("falsified", "probe"),
@@ -412,6 +413,15 @@ def test_the_trap_row_names_the_two_numbers_that_differ():
     p = _adjudicate(manhattan_length, LEXICON["norm_bars_order_trap"])
     assert p.verdict == "falsified"
     assert " vs " in str(p.counterexample), p.counterexample
+
+
+def test_the_triangle_inequality_fails_with_the_wrong_norms():
+    # the control for the triangle row: the same distance is not bounded
+    # by the sum of the largest magnitudes, and a witness says so
+    from mathema.lexicon import distance as lexicon_distance
+    p = _adjudicate(lexicon_distance,
+                    "for x in R^n, y in R^n, f(x, y) <= ||x||_inf + ||y||_inf")
+    assert p.verdict == "falsified" and p.counterexample, (p.verdict, p.note)
 
 
 def test_the_unit_vector_row_needs_its_premise_for_the_zero_vector():
