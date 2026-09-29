@@ -542,8 +542,10 @@ for law in ["∫(f(x), x, -oo, oo) == 1",
 ∫(f(x), x, -oo, oo) == 1        proven
 f(x) >= 0                       proven    ∀ x ∈ ℝ
   [float]                       falsified x=-1.79769e+308
+f(x) >= 0                       holds
 let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ ℝ
   [float]                       holds
+let |inf| be 1e100, f(x) >= 0   holds
 ```
 
 The integral over the whole line is proven, since an integral, like a
@@ -616,12 +618,12 @@ MATHEMA_PSEUDO_INFINITY=1e100 python levels.py 1e50
 
 <!-- example: levels output -->
 ```text
-f(x) >= 0                   [float] holds     {'value': 1e+100, 'source': 'environment'}
-  unbounded directions (x) run to let |inf| be 1e+100
+f(x) >= 0                   [float] holds     None
+  (every direction bounded)
 for x in [-3, 3], f(x) >= 0 [float] holds     None
   (every direction bounded)
-f(x) >= 0                   [float] holds     {'value': 1e+50, 'source': 'function'}
-  unbounded directions (x) run to let |inf| be 1e+50
+f(x) >= 0                   [float] holds     None
+  (every direction bounded)
 for x in [-3, 3], f(x) >= 0 [float] holds     None
   (every direction bounded)
 ```

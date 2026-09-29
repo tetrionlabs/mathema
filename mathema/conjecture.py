@@ -3397,15 +3397,19 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # structured fields beside it are the same claim for machines.
         from .grammar import domain_bound_to_json
         from .spec import canonical_claim_text
-        if cj.domain:
+        implied, implied_resolution = _implied_bindings(
+            cj, fn, {p2: k for p2, k in kinds.items()
+                     if p2 not in (cj.domain or {}) and p2 not in domain})
+        if cj.domain or implied:
             # the record states each binding completed from the
-            # function's annotations, whichever path produced the row
-            written = dict(written if written is not None else cj.domain)
-            done = _complete_missing(cj, fn)
-            completed, resolution = done[0], done[3]
+            # function's annotations, whichever path produced the row,
+            # and what a parameter the claim leaves unbound admits
+            written = dict(written if written is not None else (cj.domain or {}))
+            done = _complete_missing(cj, fn) if cj.domain else ({}, [], None, {})
+            completed, resolution = done[0], {**implied_resolution, **done[3]}
             if completed:
                 cj = _dc_replace(cj, domain=completed)
-            admitted_now = _missing_record(cj.domain)
+            admitted_now = _missing_record({**implied, **(cj.domain or {})})
             if not admitted_now and ((probe.meta or {}).get("mathema.missing") or {}).get("returned"):
                 admitted_now = {"admitted": {}}
             if admitted_now:
@@ -3748,8 +3752,9 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             out.append(_stamped(validated, cj, canonical=_renders(cj)))
             continue
         ctx = validated
-        cj_record = (_dc_replace(cj, domain=ctx.record_domain)
-                     if ctx.record_domain else cj)
+        written_domain = {p: b for p, b in (ctx.record_domain or {}).items()
+                          if p not in ctx.implied}
+        cj_record = _dc_replace(cj, domain=written_domain) if written_domain else cj
         if assumption is not None:
             ctx.assumption = assumption[2]
             ctx.assumption_display = assumption[1]
@@ -4576,6 +4581,10 @@ class _ClaimContext:
     # the claim's own bindings completed from the annotations, which the
     # record's canonical text renders; the routes read `cj_domain`
     record_domain: dict = field(default_factory=dict)
+    # the parameters the claim names without binding, completed from the
+    # signature into `record_domain` for their holes and absence; the
+    # record's text leaves them unbound
+    implied: frozenset = frozenset()
 
 
 def _claim_array_ranks(cj_domain: dict, fn, facts) -> dict:
@@ -5134,9 +5143,14 @@ def _validate_claim(cj, statement: str, note: str, facts,
                      note=f"{note}; {refusal}")
     if missing_notes:
         note = f"{note}; " + "; ".join(missing_notes)
+    implied, implied_resolution = _implied_bindings(
+        cj, fn, {p: k for p, k in facts.param_kinds.items()
+                 if p in facts.params and p not in cj_domain})
     return _ClaimContext(cj=cj, statement=statement, note=note.lstrip("; "),
                          cj_domain=cj_domain, extra=frozenset(cj.funcs),
-                         missing=resolution, record_domain=completed)
+                         missing={**implied_resolution, **resolution},
+                         record_domain={**implied, **completed},
+                         implied=frozenset(implied))
 
 
 def _admitted_scalar_points(ctx) -> list:
@@ -5402,6 +5416,8 @@ def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
     for p, kind in kinds.items():
         bound = cj_domain.get(p)
         if bound is None:
+            bound = (record_domain or {}).get(p)
+        if bound is None:
             continue
         dom = _as_domain(bound)
         if dom.base_type == "L" or dom.dims:
@@ -5630,6 +5646,54 @@ def _for_element_domain(defaults, bound):
         return replace(defaults, members=tuple(m for m in defaults.members
                                                if m != "NaT"))
     return defaults
+
+
+_IMPLIED_KINDS = frozenset({"scalar", "int", "sequence", "vec", "mat", "table"})
+
+
+def _implied_bindings(cj, fn, kinds: dict) -> tuple:
+    """Intent:
+        `(completed, resolution)` for each parameter a claim names
+        without binding it (`f(x) == 2*x + 1`): its domain completed from
+        its annotation as `for x in R` (`for xs in R^n` for a container)
+        would be, so the claim draws the holes and absence the signature
+        admits. Only an annotated parameter of a number, container or
+        table kind whose annotation admits a kind takes part; the claim's
+        own text is not changed by it.
+    """
+    from .domain import Domain, complete
+    from .types import missing_policy_from_signature
+    if fn is None:
+        return {}, {}
+    names: set = set()
+    calls = False
+    for src in _claim_sides(cj) + [a for a in (cj.assuming or "",) if a]:
+        text = re.sub(r"^\s*assuming\s+", "", str(src))
+        try:
+            tree = ast.parse(text, mode="eval")
+        except SyntaxError:
+            continue
+        names |= {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        calls |= any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                     and n.func.id == "f" for n in ast.walk(tree))
+    if not calls:
+        return {}, {}
+    bound = set(cj.domain or {}) | set(cj.free_vars or ())
+    policy = missing_policy_from_signature(fn)
+    completed: dict = {}
+    resolution: dict = {}
+    for p, kind in kinds.items():
+        defaults = policy.get(p)
+        if p in bound or p not in names or kind not in _IMPLIED_KINDS \
+                or defaults is None or not defaults.annotated \
+                or not (defaults.absent or defaults.members):
+            continue
+        dims = () if kind in ("scalar", "int") else ("n",)
+        written = Domain(base_type="R", explicit_type=True, dims=dims)
+        defaults = _for_element_domain(defaults, written)
+        completed[p] = complete(written, defaults)
+        resolution[p] = defaults
+    return completed, resolution
 
 
 def _complete_missing(cj, fn) -> tuple:
@@ -7278,7 +7342,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # a container's elements are drawn from its completed domain, so
         # every spelling of one claim draws the same points; a scalar's
         # from the binding as written
-        if p in containers:
+        if p in containers and p not in ctx.implied:
             return (ctx.record_domain or {}).get(p) or cj_domain.get(p)
         return cj_domain.get(p)
 

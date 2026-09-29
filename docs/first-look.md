@@ -180,10 +180,14 @@ print(mathema.check(ema, claims=collapses))
 <!-- example: ema output -->
 ```text
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
-  holds   collapses_probed: f(x, 1.0) = x[-1] (160 draws, sizes (2, 1) to (8, 1), 854 entries in all)
+  holds   collapses_probed: f(x, 1.0) = x[-1] (127 draws, sizes (2, 1) to (8, 1), 777 entries in all)
+           inferred alpha=1 from the claim's own literal argument; at x = [null, null] f raised TypeError, which no claim accounts for: state `missing(f, x, null) raises(TypeError)`, or make f return a value there; at x = [nan, nan, nan, nan, nan, nan] f gave nan back (missing in, missing out)
   proven  collapses_derived: f(x, 1.0) = x[-1]
-           ∀ x ∈ Seq(ℝ)
-  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (45 draws, sizes (1, 1) to (8, 1), 208 entries in all)
+           ∀ x ∈ Seq(ℝ); missing for x (list) means null or nan
+  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (53 draws, sizes (1, 1) to (8, 1), 245 entries in all)
+           the float64 computation of collapses_derived ran at 53 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); f an all-null list it raises an exception instead; converts at x = [null]; at x = [nan] f gave nan back (missing in, missing out)
+  FALSIFY missing(f, x)   [f treats a missing x more than one way: raises at x = [null, null], alpha = 1.0: f raised TypeError; propagates at x = [nan, nan, nan, nan, nan, nan], alpha = 1.0: f returned nan; converts at x = [null]: f returned None]
+           state what f does in each case with a premise that tells the cases apart (`assuming <premise>, missing(f, x) raises`), or make f treat it one way
 ```
 
 Both say the claim is true, but they are not the same kind of true.

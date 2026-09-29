@@ -91,6 +91,26 @@ def _table_columns(value) -> "dict | None":
     return None
 
 
+def _is_ndarray(value) -> bool:
+    """Whether `value` is a numpy array, a subclass included."""
+    import sys
+    np = sys.modules.get("numpy")
+    return np is not None and isinstance(value, np.ndarray)
+
+
+def _array_list(value) -> list:
+    """A numpy array as nested Python lists, each position an array
+    marks in `hole_values` (a hole drawn as `None` that the array holds
+    as nan) restored to the value it stands for."""
+    out = value.tolist()
+    for position, held in (getattr(value, "hole_values", None) or {}).items():
+        target = out
+        for k in position[:-1]:
+            target = target[k]
+        target[position[-1]] = held
+    return out
+
+
 def _cells(value) -> "list | None":
     """A 1-D container's elements as Python values, or None."""
     module = type(value).__module__.split(".")[0]
@@ -101,16 +121,15 @@ def _cells(value) -> "list | None":
         return value.tolist()
     if module == "polars" and type(value).__name__ == "Series":
         return value.to_list()
-    if module == "numpy" and getattr(value, "ndim", None) == 1:
-        return value.tolist()
+    if _is_ndarray(value) and value.ndim == 1:
+        return _array_list(value)
     return None
 
 
 def _rows(value) -> "list | None":
     """A matrix's rows as lists of Python values, or None."""
-    module = type(value).__module__.split(".")[0]
-    if module == "numpy" and getattr(value, "ndim", None) == 2:
-        return value.tolist()
+    if _is_ndarray(value) and value.ndim == 2:
+        return _array_list(value)
     if isinstance(value, (list, tuple)) and value and all(
             isinstance(r, (list, tuple)) for r in value):
         return [list(r) for r in value]

@@ -299,3 +299,114 @@ def test_the_claims_command_lists_and_writes_the_policy_claims(tmp_path, monkeyp
     written = yaml.safe_load((tmp_path / "claims" / "policies.claims.yaml").read_text())
     assert written == {"pmod.clamp": {"claims": []}} or all(
         c["note"].startswith("source: ") for c in written["pmod.clamp"]["claims"])
+
+
+# --- a bare claim completes its bindings from the signature ---------------
+
+def test_a_bare_claim_draws_the_hole_its_annotation_admits():
+    rec = mathema.check(scaled, claims=[mathema.claim("f(x) == 2*x + 1", name="c0")])
+    (value,) = [p for p in rec.probes if p.name == "c0"]
+    assert value.statement == "f(x) = 2*x + 1"
+    rows = [p for p in rec.probes if (p.meta or {}).get("mathema.policy")]
+    assert [(p.statement, p.verdict) for p in rows] == \
+        [("missing(f, x) propagates", "holds")]
+    assert rows[0].meta["mathema.policy"]["reason"].startswith("default for a float")
+    assert "           ∀ x ∈ ℝ; missing for x (float) means nan" in repr(rec)
+
+
+def test_a_bare_claim_on_a_list_carries_a_row_per_member():
+    rows = {p.statement: p.verdict for p in _policy_rows(total, "f(xs) == sum(xs)")}
+    assert rows == {"missing(f, xs, null) propagates": "falsified",
+                    "missing(f, xs, nan) propagates": "holds"}
+
+
+# --- every remedy a row prints is a claim that holds ----------------------
+
+def floor_of(x: float) -> int:
+    return math.floor(x)
+
+
+def converted(x: float) -> Optional[float]:
+    return None if x != x else x
+
+
+def doubled(x: float) -> list:
+    return [x, x]
+
+
+def kept(xs: list) -> list:
+    return [v for v in xs if v is not None and v == v]
+
+
+def copied(xs: list) -> list:
+    return list(xs)
+
+
+def emptied(xs: list) -> Optional[list]:
+    return None if any(v is None or v != v for v in xs) else list(xs)
+
+
+def padded(xs: list) -> list:
+    return list(xs) + [float("nan")]
+
+
+_BEHAVIOURS = [
+    (floor_of, "for x in [0, 10], f(x) <= x", "raises"),
+    (clamp01, "for x in R, 0 <= f(x) <= 1", "drops"),
+    (scaled, "for x in [0, 1], f(x) >= 1", "propagates"),
+    (converted, "for x in [0, 1], f(x) == x", "converts"),
+    (doubled, "for x in [0, 1], len(f(x)) == 2", "introduces"),
+    (total, "for xs in [0, 1]^n, f(xs) >= 0", "raises"),
+    (kept, "for xs in [0, 1]^n, len(f(xs)) <= len(xs)", "drops"),
+    (copied, "for xs in [0, 1]^n, len(f(xs)) == len(xs)", "propagates"),
+    (emptied, "for xs in [0, 1]^n, len(f(xs)) == len(xs)", "converts"),
+    (padded, "for xs in [0, 1]^n, len(f(xs)) == len(xs) + 1", "introduces"),
+]
+
+
+def _remedies(rec) -> list:
+    import re
+    texts = []
+    for p in rec.probes:
+        pol = (p.meta or {}).get("mathema.policy") or {}
+        for said in (p.note or "", pol.get("next") or "", pol.get("reason") or ""):
+            texts += re.findall(r"`([^`]+)`", said)
+    out = []
+    for t in dict.fromkeys(texts):
+        try:
+            cj = claim(t)
+        except InvalidConjecture:
+            continue
+        if cj.relation == "policy":
+            out.append(t)
+    return out
+
+
+@pytest.mark.parametrize("fn, text, observed", _BEHAVIOURS,
+                         ids=[f"{f.__name__}-{b}" for f, _, b in _BEHAVIOURS])
+def test_every_remedy_a_row_prints_holds_once_written(fn, text, observed):
+    param = "xs" if "xs" in text else "x"
+    wrong = "drops" if observed == "raises" else "raises"
+    rec = mathema.check(fn, claims=[mathema.claim(text, name="c0"),
+                                    mathema.claim(f"missing(f, {param}) {wrong}")])
+    remedies = _remedies(rec)
+    assert remedies, "the contradicted row names no claim to write"
+    for remedy in remedies:
+        again = mathema.check(fn, claims=[mathema.claim(text, name="c0"),
+                                          mathema.claim(remedy)])
+        (row,) = [p for p in again.probes
+                  if (p.meta or {}).get("mathema.policy") and p.statement == remedy]
+        assert row.verdict in ("holds", "proven"), (remedy, row.verdict, row.note)
+
+
+def test_a_member_row_remedy_names_its_member():
+    rows = {p.statement: p for p in _policy_rows(total, "for xs in [0, 1]^n, f(xs) >= 0")}
+    nxt = rows["missing(f, xs, null) propagates"].meta["mathema.policy"]["next"]
+    assert "`missing(f, xs, null) raises(TypeError)`" in nxt
+
+
+def test_an_array_holding_a_drawn_null_counts_it():
+    from mathema._linalg_eval import as_array
+    from mathema._missing_policy import classify_call
+    held = as_array([None, float("nan")])
+    assert classify_call({"xs": [None, float("nan")]}, held) == "propagates"

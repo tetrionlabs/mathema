@@ -238,9 +238,12 @@ def test_trials_budget_is_configurable():
 
     r = mathema.check(double, trials=10)
     # a falsification stops at its first witness, so its n counts the
-    # trials run up to it, never more than the budget
+    # trials run up to it, never more than the budget; a policy row's n
+    # counts the calls at missing inputs among those trials
+    policy = [p for p in r.probes if (p.meta or {}).get("mathema.policy")]
     assert all(p.n == 10 for p in r.probes
-               if p.n and p.verdict != "falsified")
+               if p.n and p.verdict != "falsified" and p not in policy)
+    assert policy and all(p.n <= 10 for p in policy)
     assert all(p.n <= 10 for p in r.probes if p.n)
 
 
@@ -594,7 +597,8 @@ def test_probe_claim_carries_its_sampling_meta(tmp_path):
     # statement/domain on a probe row) are omitted rather than written as
     # placeholders
     assert det["meta"] and "mathema.sampling" in det["meta"]
-    assert "note" not in det and "sketch" not in det and "condition" not in det
+    # the note says what f did at each missing input the claim drew
+    assert "sketch" not in det and "condition" not in det
     assert (tmp_path / ".mathema" / "verified").exists()
 
 

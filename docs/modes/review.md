@@ -92,7 +92,7 @@ git commit -qm "softmax, verified"
 <!-- example: delta output -->
 ```text
 ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
-ok   functions.softmax: no baseline record; 1 proven, 2 holds, 0 falsified
+ok   functions.softmax: no baseline record; 1 proven, 2 holds, 0 falsified; 1 unaccounted raise at a missing input (scores=[null], TypeError)
 0 fresh (form unchanged, skipped), 2 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -135,7 +135,7 @@ mathema review HEAD
 <!-- example: delta output -->
 ```text
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-FAIL functions.softmax: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
+FAIL functions.softmax: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated; 1 unaccounted raise at a missing input (scores=[null], TypeError)  <- 1 invalidated claim(s)
 1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 Claim changes since HEAD: 1 function(s), 1 verdict flip(s), 1 added, 0 removed, 0 newly falsified, 0 reconciled.

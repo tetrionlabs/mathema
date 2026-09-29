@@ -688,16 +688,22 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7982b776d687
   holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (32 draws)
-  holds   is_deterministic: f(scores) = f(scores) (192 draws, sizes (1, 1) to (8, 1), 1027 entries in all)
+  holds   is_deterministic: f(scores) = f(scores) (150 draws, sizes (1, 1) to (8, 1), 930 entries in all)
+           derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; f gives a hole back when every slot is missing (scores = [nan]); introduces at scores = [nan, 4.23, 6.86, 9.76]; at scores = [null] f raised TypeError, which no claim accounts for: state `missing(f, scores, null) raises(TypeError)`, or make f return a value there
   holds   is_state_safe: f(scores) = f(scores) (48 draws)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (192 draws, sizes (1, 1) to (8, 1), 949 entries in all)
-  holds   preserves_length: len(f(scores)) = len(scores) (192 draws, sizes (1, 1) to (8, 1), 979 entries in all)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (192 draws, sizes (1, 1) to (8, 1), 930 entries in all)
+  holds   preserves_length: len(f(scores)) = len(scores) (159 draws, sizes (1, 1) to (8, 1), 1000 entries in all)
+           f gives a hole back when every slot is missing (scores = [nan]); introduces at scores = [nan, -3.06, -0.181, -5.74]; at scores = [null] f raised TypeError, which no claim accounts for: state `missing(f, scores, null) raises(TypeError)`, or make f return a value there
   FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
-           counterexample scores=[0, 0]: [0.5, 0.5] vs [0.0, 0.0]
-  holds   preserves_type: type(f(scores)) = type(scores) (192 draws, sizes (1, 1) to (8, 1), 1017 entries in all)
+           counterexample scores=[0, 0, 0, 0, 0, 0, 0]: [0.14285714285714285, 0.14285714285714285, 0.14285714285714285, 0.14285714285714285, 0.14285714285714285, 0.14285714285714285, 0.14285714285714285] vs [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  holds   preserves_type: type(f(scores)) = type(scores) (162 draws, sizes (1, 1) to (8, 1), 952 entries in all)
+           f gives a hole back when every slot is missing (scores = [nan]); introduces at scores = [nan, -0.35, -1.98]; at scores = [null] f raised TypeError, which no claim accounts for: state `missing(f, scores, null) raises(TypeError)`, or make f return a value there
   FALSIFY is_sorted_output: is_sorted_output(f(scores))
-           counterexample ([4.86304, 8.4521, -9.06059, -3.61645]): output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
-  holds   sums_to_one: sum(f(scores)) = 1 (192 draws, sizes (1, 1) to (8, 1), 938 entries in all)
+           counterexample ([6.05242, -2.048, -3.70269, 5.34094, 8.33555, -2.13602]): output [0.0885038934141533, 2.685305328110152e-05, 5.133040594050027e-06, 0.043448364744748474, 0.8679911651901723, 2.4590557050831213e-05] fails is_sorted_output
+  holds   sums_to_one: sum(f(scores)) = 1 (154 draws, sizes (1, 1) to (8, 1), 956 entries in all)
+           derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; f gives a hole back when every slot is missing (scores = [nan]); introduces at scores = [nan, 5.18, -2.53, 0.272, 4.42, -0.00905]; at scores = [null] f raised TypeError, which no claim accounts for: state `missing(f, scores, null) raises(TypeError)`, or make f return a value there
+  FALSIFY missing(f, scores)   [f treats a missing scores more than one way: raises at scores = [null]: f raised TypeError; propagates at scores = [nan]: f returned nan; introduces at scores = [nan, 4.23, 6.86, 9.76]: f returned [nan, nan, nan, nan]]
+           state what f does in each case with a premise that tells the cases apart (`assuming <premise>, missing(f, scores) raises`), or make f treat it one way
 ```
 
 `shape` came from the `Annotated[list, Shape("n")]` hints,

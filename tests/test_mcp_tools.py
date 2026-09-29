@@ -379,7 +379,11 @@ def test_adjudicate_target_empty_claims_no_longer_collapses(tmp_path):
     battery = _with_path(root, lambda: tools.adjudicate_target(
         "ckpkg.mod:scale", claims=None, root=str(root), include="all"))
     assert len(explicit["claims"]) < len(battery["claims"])
-    assert not any(r["source"] == "suggested" for r in explicit["claims"])
+    # a policy row is the record's own statement of what f did at a
+    # missing input, written beside any claim that drew one
+    from mathema.policy import parse_policy
+    assert not any(r["source"] == "suggested" and parse_policy(r["statement"]) is None
+                   for r in explicit["claims"])
 
 
 def test_adjudicate_target_lints_before_adjudicating(tmp_path):

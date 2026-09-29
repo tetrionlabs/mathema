@@ -668,9 +668,10 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current, floor
         ways = "; ".join(f"{b} at {_witness(c)}" for b, c in seen.items())
         return row("falsified", None, None, "observed",
                    f"f treats a {kind} {p} more than one way: {ways}",
-                   nxt=(f"state what f should do for each case with a premise, e.g. "
-                        f"`assuming count({p}) >= 1, {kind}(f, {p}) drops`, or make f "
-                        f"treat it one way"),
+                   nxt=(f"state what f does in each case with a premise that tells "
+                        f"the cases apart (`assuming <premise>, "
+                        f"{policy_text(replace(policy, behaviour=next(iter(seen))))}`), "
+                        f"or make f treat it one way"),
                    cx=_witness(next(iter(seen.values()))))
     (behaviour, call), = seen.items()
     exception = call.raised if behaviour == "raises" else None
@@ -699,16 +700,17 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current, floor
                    f"default: {p} may be missing; f {behaviour} instead: {entry}"
                    if kind == "missing" else
                    f"default: {p} may be None; f {behaviour} instead: {entry}")
+        accepted = policy_text(replace(policy, behaviour=behaviour, exception=exception))
         if behaviour == "drops":
             out = value_shown(call.output)
-            nxt = (f"if {out} is the intended answer, write `{kind}(f, {p}) drops`; "
+            nxt = (f"if {out} is the intended answer, write `{accepted}`; "
                    f"otherwise guard with `if {p} != {p}: raise ValueError` or "
                    f"return nan")
         elif behaviour == "raises":
-            nxt = (f"if raising is intended, write `{kind}(f, {p}) raises({exception})`; "
+            nxt = (f"if raising is intended, write `{accepted}`; "
                    f"otherwise make f return a value there")
         else:
-            nxt = f"write `{kind}(f, {p}) {behaviour}` to accept it, or change f"
+            nxt = f"write `{accepted}` to accept it, or change f"
         stated_default = replace(policy, behaviour=expected, source="default")
         meta_policy.update({"behaviour": expected, "source": "default",
                             "reason": bracket, "next": nxt})
@@ -719,10 +721,11 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current, floor
     if behaviour == "raises":
         bracket = (f"observed: {why}; f raised {exception} at "
                    f"{_witness(call).split(':', 1)[0]}")
-        fix = (f"handle None in f, or state `{kind}(f, {p}) raises({exception})`, "
+        accepted = policy_text(replace(policy, behaviour="raises", exception=exception))
+        fix = (f"handle None in f, or state `{accepted}`, "
                f"or change the annotation to {_plain_type(fn, p)}"
                if origin == "optional" else
-               f"handle it in f, or state `{kind}(f, {p}) raises({exception})`, or "
+               f"handle it in f, or state `{accepted}`, or "
                f"remove it from the claim")
         return row("falsified", None, None, "observed", bracket,
                    nxt=fix, cx=_witness(call))
