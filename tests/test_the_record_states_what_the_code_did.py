@@ -7,6 +7,7 @@ maps each parameter to `{member: outcome}` (`nan in, nan out
 `behaviour` names the one behaviour per member (or `mixed`), and the
 row's note says it in one sentence, with the claim to write where the
 behaviour is not what the parameter's type leads a reader to expect."""
+import mathema
 from mathema.conjecture import check_conjectures, claim
 from mathema.probing import ExecutedMissing
 from mathema._missing_words import outcome_entry, said
@@ -44,10 +45,10 @@ def test_an_outcome_is_one_entry_form():
 
 def test_what_happened_is_one_sentence():
     assert said("x", "nan", {"x": NAN}, NAN, behaviour="propagates") == \
-        "at x = nan f gave nan back (missing in, missing out)"
+        "at x = nan f gave nan back"
     assert said("x", "None", {"x": None}, raised="TypeError") == "at x = None f raised TypeError"
     assert said("x", "nan", {"x": NAN}, 1.0, behaviour="drops") == \
-        "at x = nan f returned 1.0: the hole became a value"
+        "at x = nan f returned 1.0, so it drops the hole"
 
 
 def test_a_missing_input_is_recorded_under_its_member():
@@ -74,35 +75,42 @@ def test_the_record_keeps_the_first_outcome_per_member():
                                            "raises": "x = nan"}}}
 
 
-def test_a_listed_raise_is_said_with_the_claim_to_write():
+def test_a_listed_raise_is_said_and_its_claim_is_on_the_policy_row():
     (row,) = check_conjectures(doubled, [claim("for x in {1.0, None, nan}, f(x) == 2*x")])
     assert row.verdict == "proven", (row.verdict, row.note)
     assert _executed(row) == {"x": {"None": "raised TypeError",
                                     "nan": "nan in, nan out (propagates)"}}
-    assert ("at x = None f raised TypeError, a point the claim lists; no claim says "
-            "what f should do with None. State `absent(f, x) raises(TypeError)` if "
-            "that is intended, or remove None from the set") in row.note
+    assert "at x = None f raised TypeError" in row.note
+    assert "`" not in row.note
+    rec = mathema.check(doubled, claims=[claim("for x in {1.0, None, nan}, f(x) == 2*x",
+                                               name="c")])
+    (policy,) = [p for p in rec.probes if p.name == "absent[x]"]
+    assert policy.meta["mathema.policy"]["sentence"] == (
+        "f raised TypeError at x = None, a point the claim lists, and no claim says "
+        "it may")
+    assert policy.meta["mathema.policy"]["next"] == (
+        "if the raise is intended, state `absent(f, x) raises(TypeError)`; otherwise "
+        "handle None in f, or remove None from the set")
 
 
 def test_a_value_returned_at_a_missing_input_is_stated():
     (row,) = check_conjectures(zero_for_none, [claim("for x in {1.0, None}, f(x) >= 0")])
     assert _executed(row) == {"x": {"None": "None in, 0.0 out (drops)"}}
-    assert "at x = None f returned 0.0: the absence became a value" in row.note
+    assert "at x = None f returned 0.0, so it drops the absence" in row.note
 
 
-def test_a_silent_drop_names_the_claim_that_accepts_it():
+def test_a_silent_drop_is_said_once_as_a_fact():
     rows = check_conjectures(clamp01, [claim("for x in R, 0 <= f(x) <= 1", name="c")],
                              float_companions=True)
     companion = next(p for p in rows if p.name.startswith("c["))
-    assert ("at x = nan f returned 1.0: the hole became a value; write "
-            "`missing(f, x) drops` to accept this, or guard the input") in companion.note
+    assert companion.note.endswith("; at x = nan f returned 1.0, so it drops the hole")
 
 
 def test_a_propagated_hole_is_stated_on_the_proven_row():
     (row,) = check_conjectures(plus_one, [claim("for x in {1.0, nan}, f(x) == x + 1")])
     assert row.verdict == "proven"
     assert _executed(row) == {"x": {"nan": "nan in, nan out (propagates)"}}
-    assert "at x = nan f gave nan back (missing in, missing out)" in row.note
+    assert "at x = nan f gave nan back" in row.note
 
 
 def test_a_row_that_executed_no_missing_input_states_none():

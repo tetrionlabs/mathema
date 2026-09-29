@@ -175,7 +175,7 @@ pricing.discounted:
       statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "holds"
       n: 46
-      note: "the float64 computation of never_raises_price ran at 46 points: nan, every corner and 40 interior points; at price = nan f gave nan back (missing in, missing out); at rate = nan f gave nan back (missing in, missing out)"
+      note: "the float64 computation of never_raises_price ran at 46 points: nan, every corner and 40 interior points; at price = nan f gave nan back; at rate = nan f gave nan back"
       route: "probe"
 ```
 

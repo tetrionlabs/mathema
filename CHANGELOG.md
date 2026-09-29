@@ -4,6 +4,17 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## 0.6.1
 
+- A policy claim states what a function does with a value that is not
+  there: `missing(f, x) propagates`, `absent(f, x) raises(TypeError)`,
+  `missing(f, xs, null) drops`, with an optional premise (`assuming
+  count(xs) >= 1, ...`). mathema writes one for every parameter that
+  admits a kind, from a library's row, from a guard in the code, from
+  what the code did, or as the default for the type (propagates for a
+  hole, raises for absence), and checks each; `mathema claims KEY` lists
+  them and `--write` puts the confirmed ones in
+  claims/policies.claims.yaml, where changing a policy is editing one
+  word. The bundled math, numpy, pandas and polars compendiums carry
+  their policy rows.
 - Fingerprints move once in 0.6.1: the rendered domain now states what
   it admits. A value can be not there in two ways: absent (`absent`;
   Python spells it `None`), the object itself not there, and missing

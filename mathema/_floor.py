@@ -16,14 +16,42 @@ The floor, once per claim and parameter, in order:
   all-hole first column;
 - the container itself absent, when its domain admits that.
 
-A length the claim's shape plan fixes is kept: the length-1 and
-length-2 items then take the planned length. After the floor, a draw
+A length the claim's shape plan fixes, or a literal size in the
+binding (`^30`, `^(30,15)`), is kept: the length-1 and length-2 items
+then take that length, and every draw has that size. After the floor, a draw
 carries holes at `HOLE_RATE`: one to three positions, one member per
 draw, the members taken in turn.
 """
 from __future__ import annotations
 
 HOLE_RATE = 0.15
+
+
+def fixed_sizes(bound) -> tuple:
+    """The size a binding's space fixes on each axis, None for an axis a
+    name leaves free: `(30,)` for `^30`, `(None, 15)` for `^(n,15)`, `()`
+    for a scalar or an unbound parameter."""
+    out = []
+    for d in tuple(getattr(bound, "dims", ()) or ()):
+        text = str(d).strip()
+        out.append(int(text) if text.isdigit() else None)
+    return tuple(out)
+
+
+def sizes(bound, rng, free=(2, 8), ndim: int = 1) -> tuple:
+    """One draw's size on each of `ndim` axes: the binding's fixed size
+    where it states one, a draw from `free` elsewhere, the two axes of a
+    square space (`^(n,n)`) equal."""
+    fixed = fixed_sizes(bound)
+    dims = tuple(getattr(bound, "dims", ()) or ())
+    out: list = []
+    for k in range(ndim):
+        size = fixed[k] if k < len(fixed) else None
+        if size is None and k > 0 and k < len(dims) and dims[k] == dims[0] \
+                and out:
+            size = out[0]
+        out.append(size if size is not None else rng.randint(*free))
+    return tuple(out)
 
 
 def vector_floor(holes: list, admits_zero: bool, length_free: bool,

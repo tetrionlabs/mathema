@@ -275,6 +275,8 @@ class PolicyTable:
     """The behaviours seen per (parameter, kind, member) over many calls,
     the first witness of each behaviour kept."""
     seen: dict = field(default_factory=dict)
+    # the exception first raised per key
+    raised: dict = field(default_factory=dict)
 
     def add(self, inputs: dict, output=None, raised: "str | None" = None) -> None:
         """Classify one call and file it under every missing member its
@@ -287,6 +289,8 @@ class PolicyTable:
         witness = point_shown(inputs)
         for key in keys:
             self.seen.setdefault(key, {}).setdefault(behaviour, witness)
+            if raised is not None:
+                self.raised.setdefault(key, raised)
 
     def behaviour(self, key: tuple) -> "str | None":
         """The one behaviour seen for `key`, `mixed` for more than one,
@@ -309,4 +313,12 @@ class PolicyTable:
         for (p, _kind, member), found in self.seen.items():
             if len(found) > 1:
                 out.setdefault(p, {})[member] = dict(found)
+        return out
+
+    def mixed_raised(self) -> dict:
+        """`{param: {member: exception}}` for the mixed keys that raised."""
+        out: dict = {}
+        for key, found in self.seen.items():
+            if len(found) > 1 and key in self.raised:
+                out.setdefault(key[0], {})[key[2]] = self.raised[key]
         return out

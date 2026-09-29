@@ -293,7 +293,9 @@ def test_bounded_counterexample_names_which_side_failed_and_by_what_margin():
     # "(args): lv vs rv" shape, not a bespoke "result=... > max(x)=..."
     # message the old hardcoded check built. Real, minor loss of
     # message detail; the args and both compared values are still there.
-    r = mathema.check(ema)
+    # alpha past 1 and finite: ema is no weighted average there, and
+    # unbounded the probe can reach an overflow witness first
+    r = mathema.check(ema, domain={"alpha": (1.5, 3)})
     bounded = next(p for p in r.probes if p.name == "bounded_lower")
     assert bounded.verdict == "falsified"
     assert ": " in bounded.counterexample and " vs " in bounded.counterexample

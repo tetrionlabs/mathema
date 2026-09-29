@@ -134,6 +134,8 @@ class Batch:
     calls: list = field(default_factory=list)
     draws: dict = field(default_factory=dict)
     origins: dict = field(default_factory=dict)
+    # the calls where f gave None back from present inputs
+    introduced: list = field(default_factory=list)
 
 
 _BATCH: contextvars.ContextVar = contextvars.ContextVar("mathema_policy_batch",
@@ -177,6 +179,14 @@ def record_call(point: dict, output=None, raised: "str | None" = None) -> None:
     if current is None:
         return
     current.calls.append(Call(dict(point), output, raised, _CLAIM.get()))
+
+
+def record_introduced(point: dict) -> None:
+    """File one call where f gave None back from present inputs."""
+    current = _BATCH.get()
+    if current is None:
+        return
+    current.introduced.append(Call(dict(point), None, None, _CLAIM.get()))
 
 
 def note_draws(claim: str, n: "int | None", origin: "dict | None") -> None:
@@ -271,7 +281,8 @@ def _floor_points(fn, facts, param: str, kind: str, members: list,
         from .conjecture import _table_columns
         holes = [v for w in members for v in realise_sentinel(member_sentinel(w))]
         bound = (domain or {}).get(param)
-        base = {c: [_synth("float", rng, bound) for _ in range(3)]
+        (length,) = _floor.sizes(bound, rng, (3, 3))
+        base = {c: [_synth("float", rng, bound) for _ in range(length)]
                 for c in _table_columns(param, cj, facts)}
         for item in _floor.table_floor(holes):
             made = item(base)
@@ -279,8 +290,11 @@ def _floor_points(fn, facts, param: str, kind: str, members: list,
                 values.append(made)
     elif container:
         holes = [v for w in members for v in realise_sentinel(member_sentinel(w))]
-        base = _synth("sequence", rng, (domain or {}).get(param), length=3)
-        for item in _floor.vector_floor(holes, admits_zero=False, length_free=True):
+        bound = (domain or {}).get(param)
+        (length,) = _floor.sizes(bound, rng, (3, 3))
+        base = _synth("sequence", rng, bound, length=length)
+        for item in _floor.vector_floor(holes, admits_zero=False,
+                                        length_free=not any(_floor.fixed_sizes(bound))):
             made = item(base)
             if made is not None and not isinstance(made, _floor._Absent) \
                     and any(_members_in(made, "missing")):
@@ -306,17 +320,59 @@ def _run_floor(fn, facts, points: list) -> list:
     return out
 
 
-def _evidence(calls: list, current: "Batch | None", floor: bool) -> str:
-    """Where a verdict came from: `on the 57 draws of c`, `on its own
-    floor (6 draws)`."""
-    if floor:
-        return f"on its own floor ({len(calls)} draw{'s' if len(calls) != 1 else ''})"
-    claims = list(dict.fromkeys(c.claim for c in calls if c.claim))
-    if len(claims) == 1 and current is not None and current.draws.get(claims[0]):
-        return f"on the {current.draws[claims[0]]} draws of {claims[0]}"
-    if claims:
-        return "on the draws of " + ", ".join(claims)
+def _base_claim(name: str) -> str:
+    """A row's claim name as its author wrote it: `c0[float]` for the
+    companion of a chained comparison's link `c0[link1][float]`."""
+    return re.sub(r"\[link\d+\]", "", name or "")
+
+
+def _and(words: list) -> str:
+    """`a`, `a and b`, `a, b and c`."""
+    words = list(words)
+    if len(words) <= 1:
+        return "".join(words)
+    return ", ".join(words[:-1]) + " and " + words[-1]
+
+
+def _on_draws(calls: list, current: "Batch | None") -> str:
+    """Whose draws made the calls: `on the 43 draws of c[float]`, the
+    claim named as its author wrote it."""
+    bases = list(dict.fromkeys(_base_claim(c.claim) for c in calls if c.claim))
+    draws = current.draws if current else {}
+
+    def count(base: str) -> int:
+        return max((n for k, n in draws.items() if _base_claim(k) == base), default=0)
+    if len(bases) == 1:
+        n = count(bases[0])
+        return f"on the {n} draws of {bases[0]}" if n else f"on the draws of {bases[0]}"
+    roots = list(dict.fromkeys(b.split("[", 1)[0] for b in bases))
+    if len(roots) == 1 and bases:
+        n = max([count(b) for b in bases] + [count(roots[0])])
+        return f"on the {n} draws of {roots[0]}" if n else f"on the draws of {roots[0]}"
+    if bases:
+        return "on the draws of " + _and(bases)
     return f"on {len(calls)} call{'s' if len(calls) != 1 else ''}"
+
+
+def _at(call: Call, param: "str | None") -> str:
+    """The point of a call as the record shows it, the one parameter
+    alone when it names one: `x = None`, `xs = [null, 0.609]`."""
+    from ._missing_words import point_shown
+    if param and param in call.point:
+        return point_shown({param: call.point[param]})
+    return point_shown(call.point)
+
+
+def _confirmed(calls: list, current: "Batch | None", floor: bool,
+               param: "str | None" = None) -> str:
+    """The clause every bracket ends with: `confirmed on the 43 draws of
+    c[float]`, or `confirmed by calling f at x = None` for calls made for
+    the row alone."""
+    if floor:
+        points = list(dict.fromkeys(_at(c, param) for c in calls))
+        shown = points[:3] + ([f"{len(points) - 3} more"] if len(points) > 3 else [])
+        return f"confirmed by calling f at {_and(shown)}"
+    return "confirmed " + _on_draws(calls, current)
 
 
 def _witness(call: Call) -> str:
@@ -327,11 +383,18 @@ def _witness(call: Call) -> str:
     return f"{point_shown(call.point)}: {did}"
 
 
+def _in_slot(call: Call, param: str, kind: str) -> bool:
+    from ._missing_words import _in_slot as held_in_slot
+    return kind == "missing" and held_in_slot(call.point.get(param))
+
+
 def _entry(call: Call, param: str, kind: str) -> str:
-    """`nan in, 1.0 out`, `None in, raised TypeError`."""
+    """`nan in, 1.0 out`, `a null slot in, TypeError`."""
     from ._missing_words import value_shown
     member = (_members_in(call.point.get(param), kind) or ["?"])[0]
-    out = f"raised {call.raised}" if call.raised else f"{value_shown(call.output)} out"
+    out = call.raised if call.raised else f"{value_shown(call.output)} out"
+    if _in_slot(call, param, kind):
+        return f"a {member} slot in, {out}"
     return f"{member} in, {out}"
 
 
@@ -343,24 +406,123 @@ def _decide(calls: list) -> dict:
     return seen
 
 
+def _hole_column(calls: list, param: str) -> "str | None":
+    """The one column of a table parameter every call's holes sit in,
+    or None."""
+    from ._missing_policy import _hole_word, _table_columns
+    columns: set = set()
+    for c in calls:
+        cols = _table_columns(c.point.get(param))
+        if cols is None:
+            return None
+        columns |= {k for k, cells in cols.items()
+                    if any(_hole_word(v) is not None for v in cells)}
+    return next(iter(columns)) if len(columns) == 1 else None
+
+
+def _count_class(value, column: "str | None") -> "str | None":
+    """`>= 1` when a container still holds a value slot (in `column` for
+    a table), `== 0` when every slot is a hole, None for a scalar."""
+    from ._missing_policy import _hole_word, _table_columns, no_value_slots
+    if column is not None:
+        cells = (_table_columns(value) or {}).get(column) or []
+        return ">= 1" if any(_hole_word(v) is None for v in cells) else "== 0"
+    slots = no_value_slots(value)
+    if slots.shape == ():
+        return None
+    return ">= 1" if slots.count() < slots.capacity() else "== 0"
+
+
+def _cases(calls: list, param: str, kind: str, member: "str | None" = None,
+           admitted: "list | None" = None) -> "list | None":
+    """Intent:
+        The policy rows that state what `calls` did at a missing `param`,
+        one per (member, count class) observed: a member that behaves one
+        way at every count is one row, one that behaves one way while
+        values remain and another when every slot is a hole is a premised
+        pair (`assuming count(xs) >= 1, ...` beside `assuming count(xs) ==
+        0, ...`, a frame's count naming its column), and members that all
+        behave alike share one row without a member, unless `member`
+        names one or some member of `admitted` was not seen. None when
+        some case holds more than one behaviour.
+    """
+    column = _hole_column(calls, param)
+    seen: dict = {}
+    for c in calls:
+        members = _members_in(c.point.get(param), kind)
+        if len(members) != 1:
+            continue
+        cls = _count_class(c.point.get(param), column) if kind == "missing" else None
+        b = _behaviour_of(c)
+        seen.setdefault(members[0], {}).setdefault(cls, set()).add(
+            (b, c.raised if b == "raises" else None))
+    if not seen or any(len(ways) > 1 for classes in seen.values()
+                       for ways in classes.values()):
+        return None
+    count = f"count({param}.{column})" if column else f"count({param})"
+    per_member: dict = {}
+    for m, classes in seen.items():
+        ways = {cls: next(iter(w)) for cls, w in classes.items()}
+        if len(set(ways.values())) == 1:
+            per_member[m] = ((None,) + next(iter(ways.values())),)
+        else:
+            per_member[m] = tuple((cls,) + ways[cls] for cls in (">= 1", "== 0")
+                                  if cls in ways)
+    alike = len(set(per_member.values())) == 1
+    groups: list
+    if member is not None:
+        groups = [(member, next(iter(per_member.values())))] if alike else []
+    elif alike and (admitted is None or set(per_member) >= set(admitted)):
+        groups = [(None, next(iter(per_member.values())))]
+    else:
+        groups = list(per_member.items())
+    if not groups:
+        return None
+    out = []
+    for m, rows in groups:
+        for cls, b, exc in rows:
+            out.append(Policy(kind=kind, parameter=param, member=m, behaviour=b,
+                              exception=exc, premise=f"{count} {cls}" if cls else ""))
+    return out
+
+
+def _written(policies: list) -> str:
+    """`a`, `a` and `b` for claims to write."""
+    return _and([f"`{policy_text(p)}`" for p in policies])
+
+
 # --- a stated policy claim ------------------------------------------------
 
 def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
     """Intent:
         The row for one stated policy claim `cj` (relation `policy`),
-        decided on the calls the check already made, or on its own
-        floor where none reached the parameter and member it names:
-        `holds` when every call behaves as it says, `proven` when a
-        guard in the body also says so, `falsified` with the executed
-        witness otherwise, `unknown` when no call could be made.
+        decided on the calls the check already made, or by calling f
+        where none reached the parameter and member it names: `holds`
+        when every call behaves as it says, `proven` when a guard in the
+        body also says so, `falsified` with the executed witness
+        otherwise, `unknown` with the reason when no call could decide
+        it.
     """
     from .records import Probe
     stated = parse_policy((f"{cj.assuming}, " if cj.assuming else "")
                           + f"{cj.lhs} {cj.rhs}".strip())
     statement = policy_text(stated)
+    current = active_batch()
+    meta = {"mathema.policy": {"kind": stated.kind, "parameter": stated.parameter,
+                               "member": stated.member, "behaviour": stated.behaviour,
+                               "exception": stated.exception, "premise": stated.premise,
+                               "source": "stated"}}
+
+    def unknown(reason: str):
+        meta["mathema.policy"]["reason"] = reason
+        return Probe(cj.name, statement, "unknown", route="probe:classified",
+                     note=reason, meta=meta)
+
+    if stated.kind == "absent" and stated.parameter is None \
+            and stated.behaviour == "introduces":
+        return _adjudicate_return(cj, fn, stated, statement, current, meta, unknown)
     params = [stated.parameter] if stated.parameter else [
         p for p in facts.params if _admits(fn, p, stated.kind)]
-    current = active_batch()
     rows_calls: list = []
     floor = False
     for p in params:
@@ -374,18 +536,11 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
             found = _run_floor(fn, facts, points)
             floor = floor or bool(found)
         rows_calls += [(p, c) for c in found]
-    meta = {"mathema.policy": {"kind": stated.kind, "parameter": stated.parameter,
-                               "member": stated.member, "behaviour": stated.behaviour,
-                               "exception": stated.exception, "premise": stated.premise,
-                               "source": "stated"}}
     if not rows_calls:
-        return Probe(cj.name, statement, "unknown", route="probe:classified",
-                     note=(f"no call reached a {'missing' if stated.kind == 'missing' else 'absent'} "
-                           f"{stated.parameter or 'parameter'}, so nothing says what f does "
-                           f"there; bind the parameter in a claim that admits it"),
-                     meta=meta)
+        return unknown(_why_undecided(stated, params, current))
     calls = [c for _p, c in rows_calls]
-    evidence = _evidence(calls, current, floor)
+    param = stated.parameter or (params[0] if len(params) == 1 else None)
+    evidence = _confirmed(calls, current, floor, param)
     meta["mathema.policy"]["evidence"] = evidence
     wrong = next((c for p, c in rows_calls
                   if _behaviour_of(c) != stated.behaviour
@@ -394,9 +549,16 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
     if wrong is not None:
         p = next(pp for pp, c in rows_calls if c is wrong)
         did = _behaviour_of(wrong)
-        reason = f"stated; f {did} instead: {_entry(wrong, p, stated.kind)}"
-        nxt = (f"state {_stated_word(stated, did, wrong, calls)} if that is "
-               f"intended, or change f")
+        cases = _cases([c for pp, c in rows_calls if pp == p], p, stated.kind,
+                       stated.member)
+        if cases is not None and len(cases) > 1 and all(c.premise for c in cases) \
+                and len({c.member for c in cases}) == 1:
+            reason = (f"stated; f {_split_words(cases, p)}")
+            nxt = f"state the two cases: {_written(cases)}; or change f"
+        else:
+            reason = f"stated; f {did} instead: {_entry(wrong, p, stated.kind)}"
+            nxt = (f"state {_stated_word(stated, did, wrong, calls)} if that is "
+                   f"intended, or change f")
         meta["mathema.policy"].update({"reason": reason, "next": nxt})
         return Probe(cj.name, statement, "falsified", n=len(calls), route="probe:classified",
                      counterexample=_witness(wrong), note=f"{reason}; {nxt}",
@@ -404,19 +566,100 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
     guard = None
     for p in params:
         members = [stated.member] if stated.member else _members_of(fn, p, stated.kind)
-        found_guards = [(derived or {}).get((p, stated.kind, m))
-                        or (derived or {}).get((p, stated.kind, None)) for m in members]
+        found_guards = [_guard_for(derived or {}, fn, p, stated.kind, m) for m in members]
         if found_guards and all(g and g[0] == stated.behaviour
                                 and _raised_matches(g[1], stated.exception)
                                 for g in found_guards):
             guard = found_guards[0]
     if guard is not None:
-        reason = f"stated; derived from the guard on line {guard[2]}; confirmed {evidence}"
+        reason = f"stated; from the guard on line {guard[2]}; {evidence}"
         meta["mathema.policy"]["reason"] = reason
         return Probe(cj.name, statement, "proven", n=len(calls), route="examine",
                      note=reason, meta=meta)
-    reason = f"stated; confirmed {evidence}"
+    reason = f"stated; {evidence}"
     meta["mathema.policy"]["reason"] = reason
+    return Probe(cj.name, statement, "holds", n=len(calls), route="probe:classified",
+                 note=reason, meta=meta)
+
+
+def _split_words(cases: list, param: str) -> str:
+    """What a member split by count does, in words: `drops a null slot
+    when values remain and raises TypeError when every slot is null`."""
+    member = cases[0].member
+    what = f"a {member} slot" if member else "a missing slot"
+
+    def did(case) -> str:
+        return (f"raises {case.exception}" if case.behaviour == "raises" and case.exception
+                else case.behaviour)
+    parts = []
+    for case in cases:
+        when = ("when values remain" if case.premise.endswith(">= 1")
+                else f"when every slot is {member or 'missing'}")
+        parts.append(f"{did(case)} {when}")
+    head = parts[0].split(" ", 1)
+    first = f"{head[0]} {what} {head[1]}" if cases[0].behaviour == "drops" else parts[0]
+    return " and ".join([first] + parts[1:])
+
+
+def _premise_names_param(premise: str, param: str) -> bool:
+    """Whether a premise reads the value of `param` itself, not only its
+    count or length."""
+    rest = re.sub(rf"\b(count|len)\(\s*{re.escape(param)}\b[^)]*\)", "", premise)
+    return re.search(rf"\b{re.escape(param)}\b", rest) is not None
+
+
+def _why_undecided(stated: Policy, params: list, current: "Batch | None") -> str:
+    """Why no call decided a stated policy row: a premise that cannot be
+    read at the missing point, or no call reaching it."""
+    from ._missing_words import point_shown
+    word = "None" if stated.kind == "absent" else (stated.member or "nan")
+    for p in params:
+        if stated.premise and _premise_names_param(stated.premise, p):
+            return (f"the premise {stated.premise} cannot be decided at {p} = {word}; a "
+                    f"policy row's premise is about the other parameters or about "
+                    f"count(...)")
+        reached = _relevant(current.calls if current else [], p, stated.kind,
+                            stated.member, "")
+        if stated.premise and reached:
+            from ._linalg_eval import FUNCTIONS, as_array
+            call = reached[0]
+            env = {**FUNCTIONS, **{q: as_array(v) for q, v in call.point.items()}}
+            try:
+                eval(compile(stated.premise, "<premise>", "eval"),
+                     {"__builtins__": {}}, env)
+            except Exception:
+                column = _hole_column(reached, p)
+                if isinstance(call.point.get(p), dict) or column:
+                    col = column or next(iter(call.point[p]), "c")
+                    return (f"the premise {stated.premise} cannot be evaluated on a "
+                            f"frame; name a column, count({p}.{col})")
+                return (f"the premise {stated.premise} cannot be evaluated at "
+                        f"{point_shown({p: call.point[p]})}")
+            return (f"no call where {p} is missing met the premise {stated.premise}")
+    who = stated.parameter or "a parameter"
+    if stated.kind == "absent":
+        return (f"no call reached {who} = None, so nothing says what f does there; bind "
+                f"{who} in a claim that admits None")
+    return (f"no call reached a missing {who}, so nothing says what f does there; bind "
+            f"{who} in a claim that admits it")
+
+
+def _adjudicate_return(cj, fn, stated, statement, current, meta, unknown):
+    """`absent(f) introduces`: decided on the calls where f returned None
+    from present inputs."""
+    from .records import Probe
+    from ._missing_words import declared_optional_return, point_shown
+    calls = list(current.introduced) if current else []
+    if not calls:
+        return unknown("no call gave None back from present inputs, so nothing says "
+                       "f introduces an absence")
+    declared = declared_optional_return(fn)
+    as_declared = (f", as its return type {declared} declares" if declared
+                   else ", which its return type does not declare")
+    reason = (f"stated; f returned None at {point_shown(calls[0].point)}, from present "
+              f"inputs{as_declared}")
+    meta["mathema.policy"].update({"reason": reason,
+                                   "evidence": _confirmed(calls, current, False)})
     return Probe(cj.name, statement, "holds", n=len(calls), route="probe:classified",
                  note=reason, meta=meta)
 
@@ -452,6 +695,17 @@ def _members_of(fn, param: str, kind: str) -> list:
         return ["None"]
     policy = missing_policy_from_signature(fn).get(param, NO_ANNOTATION)
     return list(policy.members) or ["nan"]
+
+
+def _guard_for(guards: dict, fn, p: str, kind: str, member: "str | None"):
+    """The guard that decides a parameter's kind (and member), or None."""
+    if kind == "absent":
+        return guards.get((p, "absent", "None")) or guards.get((p, "absent", None))
+    found = guards.get((p, kind, member)) or guards.get((p, kind, None))
+    if found is None and member in (None, "nan") \
+            and set(_members_of(fn, p, kind)) <= {"nan"}:
+        found = guards.get((p, kind, "nan"))
+    return found
 
 
 # --- what the body says ----------------------------------------------------
@@ -498,8 +752,16 @@ def guard_policies(facts) -> dict:
                              (node.args[0].id, "absent", "None")]
         return keys
 
-    def returned(body) -> "str | None":
+    def returned(body, param) -> "str | None":
         for stmt in body:
+            if isinstance(stmt, ast.Assign) and any(
+                    isinstance(t, ast.Name) and t.id == param for t in stmt.targets):
+                # the parameter replaced by a value: `if scale is None:
+                # scale = 1.0`
+                value = stmt.value
+                if isinstance(value, ast.Constant) and value.value is None:
+                    return "None"
+                return "nan" if "nan" in ast.unparse(value) else "value"
             if isinstance(stmt, ast.Return):
                 value = stmt.value
                 if value is None or (isinstance(value, ast.Constant) and value.value is None):
@@ -517,8 +779,8 @@ def guard_policies(facts) -> dict:
         if not keys:
             continue
         raise_stmt = next((s for s in node.body if isinstance(s, ast.Raise)), None)
-        back = returned(node.body)
         for p, kind, member in keys:
+            back = returned(node.body, p)
             if raise_stmt is not None:
                 exc = raise_stmt.exc
                 name = None
@@ -542,16 +804,15 @@ def guard_policies(facts) -> dict:
 
 # --- the rows a record carries for every parameter -------------------------
 
-def _why_admitted(fn, param: str, kind: str, origin: str) -> str:
+def _why_admitted(fn, param: str, kind: str, origin: str, word: str) -> str:
     """Why a kind reaches a parameter, as the row says it: `x is
-    Optional[float], so None is promised`, `the claim lists None for x`."""
+    Optional[float], so f promised to take None`, `the claim lists nan
+    for x`."""
     from .conjecture import _annotation_words
     if origin == "optional":
-        return f"{param} is {_annotation_words(fn, param)}, so None is promised"
+        return f"{param} is {_annotation_words(fn, param)}, so f promised to take None"
     if origin == "listed":
-        word = "None" if kind == "absent" else "a missing value"
         return f"the claim lists {word} for {param}"
-    word = "None" if kind == "absent" else "a missing value"
     return f"the claim admits {word} for {param}"
 
 
@@ -567,19 +828,51 @@ def _plain_type(fn, param: str) -> str:
     return " | ".join(parts) or text
 
 
+def _or(words: list) -> str:
+    words = list(words)
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " or " + words[-1]
+
+
+def _default_words(p: str, kind: str, member: "str | None", sig, container: bool,
+                   short: bool = False) -> str:
+    """What a default row is the default for: `default for a float,
+    which may be nan`, `default for a list slot that may be null`,
+    `default: x has no annotation, so it may be None`."""
+    if kind == "absent":
+        if sig.slot_type == "unannotated":
+            return f"default: {p} has no annotation, so it may be None"
+        return f"default for a {sig.slot_type}, which may be None"
+    members = [member] if member else (list(sig.members) or ["nan"])
+    if sig.slot_type == "unannotated":
+        return f"default: {p} has no annotation, so it may be {_or(members)}"
+    if container:
+        return f"default for a {sig.slot_type} slot that may be {_or(members)}"
+    if short:
+        return f"default for a {sig.slot_type}"
+    return f"default for a {sig.slot_type}, which may be {_or(members)}"
+
+
+def _function_key(fn) -> str:
+    from .authoring import _fn_key
+    return _fn_key(fn)
+
+
 def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
     """Intent:
         The policy rows a record carries for every parameter that admits
-        a kind and no stated policy covers: a default for a kind the type
-        alone admits (`missing(f, x) propagates` for a float, `absent(f,
-        x) raises` for a parameter with no annotation), confirmed or
-        contradicted by the calls; the observed behaviour for a kind the
-        author admitted, where a raise stays unaccounted for until a
-        claim states it; a derived row where a guard in the body states
-        the behaviour. One row per member when the members behave
-        differently.
+        a kind, beside the cases stated policy rows cover (`covered`, a
+        set of `(kind, parameter, member, premise)`, parameter None for
+        every parameter): a default for a kind the type alone admits
+        (`missing(f, x) propagates` for a float, `absent(f, x) raises`
+        for a parameter with no annotation), confirmed or contradicted by
+        the calls; the observed behaviour for a kind the author admitted,
+        where a raise stays unaccounted for until a claim states it; a
+        derived row where a guard in the body or a library's own policy
+        row states the behaviour; `absent(f) introduces` where the return
+        type declares the None f gave back from present inputs. One row
+        per member when the members behave differently or a stated row
+        covers some of them.
     """
-    from ._missing_words import DEFAULTS, value_shown
     from .domain import NO_ANNOTATION
     from .records import Probe
     from .types import missing_policy_from_signature
@@ -594,8 +887,13 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
             origin = (current.origins.get((p, kind)) if current else None)
             admitted = (sig.absent if kind == "absent" else bool(sig.members)) \
                 or origin is not None
-            if not admitted or (p, kind) in covered:
+            if not admitted:
                 continue
+            mine = {(m, pr) for (k, q, m, pr) in covered if k == kind and q in (p, None)}
+            if (None, "") in mine:
+                continue
+            stated_members = {m for m, pr in mine if m and not pr}
+            premised = [(m, pr) for m, pr in mine if pr]
             if origin is None or origin == "type":
                 origin = ("optional" if kind == "absent" and sig.annotated
                           and sig.absent else "type")
@@ -607,7 +905,10 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
             if p in composed and origin == "type" and not guarded \
                     and any(pol.kind == kind for pol in composed[p][1]):
                 made = composed_rows(fn, facts, p, kind, composed[p][0],
-                                     composed[p][1], name_of)
+                                     [pol for pol in composed[p][1]
+                                      if (pol.member, pol.premise) not in mine
+                                      and pol.member not in stated_members],
+                                     name_of)
                 rows += made
                 done_members = {(r.meta or {}).get("mathema.policy", {}).get("member")
                                 for r in made}
@@ -615,11 +916,12 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
                     continue
             calls = [c for c in _relevant(current.calls if current else [], p, kind,
                                           None, "")
-                     if not done_members
-                     or set(_members_in(c.point[p], kind)) - done_members]
+                     if not (set(_members_in(c.point[p], kind))
+                             & (done_members | stated_members))
+                     and not any((m is None or m in _members_in(c.point[p], kind))
+                                 and _premise_holds(pr, c.point) for m, pr in premised)]
             # a record's own rows read the calls its claims made, and run
             # nothing of their own
-            floor = False
             if not calls:
                 continue
             by_member: dict = {}
@@ -630,116 +932,184 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
             singles = {m: next(iter(w)) for m, w in ways.items() if len(w) == 1}
             split = (len(ways) > 1 and len(singles) == len(ways)
                      and len(set(singles.values())) > 1)
-            groups = ([(m, by_member[m]) for m in ways] if split
-                      else [(None, calls)])
+            apart = bool(stated_members or premised) and kind == "missing"
+            groups = ([(m, [c for c in by_member[m]
+                            if _members_in(c.point[p], kind) == [m]] or by_member[m])
+                       for m in ways] if split or apart else [(None, calls)])
             for member, cs in groups:
                 rows.append(_default_row(fn, p, kind, member, cs, origin, sig,
-                                         guards, current, floor, name_of,
-                                         DEFAULTS, value_shown, Probe))
+                                         guards, current, name_of, Probe))
+    rows += _return_rows(fn, covered, current, name_of)
     return rows
 
 
-def _default_row(fn, p, kind, member, calls, origin, sig, guards, current, floor,
-                 name_of, DEFAULTS, value_shown, Probe):
+def _return_rows(fn, covered: set, current: "Batch | None", name_of) -> list:
+    """`absent(f) introduces` from the return type, where f gave None back
+    from present inputs and its return type declares it (FM15)."""
+    from .records import Probe
+    from ._missing_words import declared_optional_return, point_shown
+    calls = list(current.introduced) if current else []
+    declared = declared_optional_return(fn)
+    if not calls or not declared or ("absent", None, None, "") in covered:
+        return []
+    policy = Policy(kind="absent", behaviour="introduces", source="annotation")
+    reason = (f"from the return type {declared}: f returned None at "
+              f"{point_shown(calls[0].point)} from present inputs; "
+              f"{_confirmed(calls, current, False)}")
+    meta = {"mathema.policy": {"kind": "absent", "parameter": None, "member": None,
+                               "behaviour": "introduces", "exception": None,
+                               "premise": "", "source": "annotation", "reason": reason},
+            "mathema.surface": "mathema"}
+    return [Probe(name_of(policy), policy_text(policy), "proven", n=len(calls),
+                  route="examine", note=reason, meta=meta)]
+
+
+def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
+                 name_of, Probe):
+    from ._missing_words import mixed_sentence, value_shown
     seen = _decide(calls)
-    evidence = _evidence(calls, current, floor)
-    guard = guards.get((p, kind, member)) or guards.get((p, kind, None)) or (
-        guards.get((p, kind, "nan")) if kind == "missing" and member in (None, "nan")
-        and set(_members_of(fn, p, kind)) <= {"nan"} else None)
+    container = any(_in_slot(c, p, kind) for c in calls)
+    guard = _guard_for(guards, fn, p, kind, member)
     policy = Policy(kind=kind, parameter=p, member=member)
-    meta_policy = {"kind": kind, "parameter": p, "member": member,
+    evidence = _confirmed(calls, current, False, p)
+    meta_policy = {"kind": kind, "parameter": p, "member": member, "premise": "",
                    "evidence": evidence}
     meta = {"mathema.policy": meta_policy, "mathema.surface": "mathema"}
+    key = _function_key(fn)
 
-    def row(verdict, behaviour, exception, source, bracket, note=None, cx=None,
-            route="probe:classified", nxt=None):
+    def row(verdict, behaviour, exception, source, bracket, cx=None,
+            route="probe:classified", nxt=None, sentence=None, said=None,
+            shown=None):
         stated = replace(policy, behaviour=behaviour, exception=exception, source=source)
-        meta_policy.update({"behaviour": behaviour, "exception": exception,
+        shown = shown or stated
+        meta_policy.update({"behaviour": shown.behaviour, "exception": shown.exception,
                             "source": source, "reason": bracket})
         if nxt:
             meta_policy["next"] = nxt
-            note = note or f"{bracket}. {nxt}"
-        statement = policy_text(stated)
-        return Probe(name_of(stated), statement, verdict, n=len(calls), route=route,
-                     counterexample=cx, note=note or f"{bracket}; {evidence}",
-                     meta=meta)
+        if sentence:
+            meta_policy["sentence"] = sentence
+        if said:
+            meta_policy["said"] = said
+        note = ". ".join(t for t in (sentence or bracket, said, nxt) if t)
+        return Probe(name_of(stated), policy_text(shown), verdict, n=len(calls),
+                     route=route, counterexample=cx, note=note, meta=meta)
 
     if len(seen) > 1:
-        ways = "; ".join(f"{b} at {_witness(c)}" for b, c in seen.items())
+        members_seen = list(dict.fromkeys(m for c in calls
+                                          for m in _members_in(c.point[p], kind)))
+        ways = {m: {} for m in members_seen}
+        raised: dict = {}
+        for c in calls:
+            ms = _members_in(c.point[p], kind)
+            b = _behaviour_of(c)
+            for m in ms:
+                ways[m].setdefault(b, _at(c, None))
+                if c.raised:
+                    raised.setdefault(m, c.raised)
+        noun = "slot" if container else None
+        said = mixed_sentence(p, {m: w for m, w in ways.items() if w}, raised,
+                              "container" if noun else None)
+        cases = _cases(calls, p, kind, member, list(sig.members) or None)
+        what = f"a missing {p}" if kind == "missing" else f"{p} = None"
+        if cases:
+            nxt = f"to state each case, write {_written(cases)}; or make f treat {what} one way"
+        else:
+            nxt = (f"give each case a premise on another parameter or on count(...) "
+                   f"that tells them apart, or make f treat {what} one way")
         return row("falsified", None, None, "observed",
-                   f"f treats a {kind} {p} more than one way: {ways}",
-                   nxt=(f"state what f does in each case with a premise that tells "
-                        f"the cases apart (`assuming <premise>, "
-                        f"{policy_text(replace(policy, behaviour=next(iter(seen))))}`), "
-                        f"or make f treat it one way"),
+                   f"f has no single policy for {what}",
+                   sentence=f"f has no single policy for {what}", said=said, nxt=nxt,
                    cx=_witness(next(iter(seen.values()))))
     (behaviour, call), = seen.items()
     exception = call.raised if behaviour == "raises" else None
+    accepted = policy_text(replace(policy, behaviour=behaviour, exception=exception))
     if guard is not None and guard[0] == behaviour:
         return row("proven", behaviour, exception, "derived",
-                   f"derived from the guard on line {guard[2]}; confirmed {evidence}",
-                   route="examine")
+                   f"from the guard on line {guard[2]}; {evidence}", route="examine")
     if origin == "type":
+        from ._missing_words import DEFAULTS
         expected = DEFAULTS[kind]
         if behaviour == expected:
-            if kind == "missing":
-                members = ", ".join(sig.members) or "nan"
-                what = (f"default: {p} has no annotation, so it may be {members}"
-                        if sig.slot_type == "unannotated" else
-                        f"default for a {sig.slot_type}: the type admits {members}")
-                bracket = (f"{what}; change the word to raises or drops if f should "
-                           f"do otherwise")
+            words = _default_words(p, kind, member, sig, container)
+            if kind == "absent" and sig.slot_type == "unannotated":
+                bracket = (f"{words}, and f raises on it; {evidence}. Annotate {p} as "
+                           f"float to exclude None, or write this row with mathema "
+                           f"claims {key} --write")
+            elif sig.slot_type == "unannotated":
+                bracket = (f"{words}; {evidence}. Annotate {p} as float to say so, or "
+                           f"write this row with mathema claims {key} --write")
             else:
-                bracket = (f"default: {p} has no annotation, so it may be None, and f "
-                           f"raises on it; annotate {p} as float to exclude None, or "
-                           f"keep this claim")
+                other = "raises or drops" if kind == "missing" else "drops or propagates"
+                bracket = (f"{words}; {evidence}. Keep it by writing it (mathema claims "
+                           f"{key} --write), or change the word to {other} if f should "
+                           f"do otherwise")
             return row("holds", behaviour, None, "default", bracket)
-        entry = _entry(call, p, kind)
-        bracket = (f"default for a {sig.slot_type}; f {behaviour} instead: {entry}"
-                   if kind == "missing" and sig.slot_type != "unannotated" else
-                   f"default: {p} may be missing; f {behaviour} instead: {entry}"
-                   if kind == "missing" else
-                   f"default: {p} may be None; f {behaviour} instead: {entry}")
-        accepted = policy_text(replace(policy, behaviour=behaviour, exception=exception))
+        words = _default_words(p, kind, member, sig, container, short=True)
+        bracket = f"{words}; f {behaviour} instead: {_entry(call, p, kind)}"
+        out = value_shown(call.output)
+        slot_member = member or (_members_in(call.point.get(p), kind) or ["nan"])[0]
         if behaviour == "drops":
-            out = value_shown(call.output)
-            nxt = (f"if {out} is the intended answer, write `{accepted}`; "
-                   f"otherwise guard with `if {p} != {p}: raise ValueError` or "
-                   f"return nan")
+            if kind == "absent":
+                nxt = (f"if {out} is the answer f should give for {p} = None, write "
+                       f"`{accepted}`; if not, make f raise")
+            elif container:
+                nxt = (f"if {out} is the answer f should give when a slot is "
+                       f"{slot_member}, write `{accepted}`; if not, make f raise or "
+                       f"give a hole back")
+            else:
+                nxt = (f"if {out} is the answer f should give for a missing {p}, write "
+                       f"`{accepted}`; if not, make f raise or give nan back")
         elif behaviour == "raises":
-            nxt = (f"if raising is intended, write `{accepted}`; "
-                   f"otherwise make f return a value there")
+            fix = (f"make f skip or fill the {slot_member} slot" if container
+                   else "make f give nan back")
+            nxt = f"if the raise is intended, write `{accepted}`; if not, {fix}"
+        elif behaviour == "propagates" and kind == "absent":
+            nxt = f"if giving None back is intended, write `{accepted}`; if not, make f raise"
         else:
-            nxt = f"write `{accepted}` to accept it, or change f"
-        stated_default = replace(policy, behaviour=expected, source="default")
-        meta_policy.update({"behaviour": expected, "source": "default",
-                            "reason": bracket, "next": nxt})
-        return Probe(name_of(stated_default), policy_text(stated_default), "falsified",
-                     n=len(calls), route="probe:classified", counterexample=_witness(call),
-                     note=f"{bracket}. {nxt}", meta=meta)
-    why = _why_admitted(fn, p, kind, origin)
+            nxt = f"if that is intended, write `{accepted}`; if not, change f"
+        expected_policy = replace(policy, behaviour=expected, source="default")
+        return row("falsified", expected, None, "default", bracket, nxt=nxt,
+                   cx=_witness(call), shown=expected_policy)
+    word = "None" if kind == "absent" else (member or _members_in(
+        call.point.get(p), kind)[0] if _members_in(call.point.get(p), kind) else "nan")
+    why = _why_admitted(fn, p, kind, origin, word)
     if behaviour == "raises":
-        bracket = (f"observed: {why}; f raised {exception} at "
-                   f"{_witness(call).split(':', 1)[0]}")
-        accepted = policy_text(replace(policy, behaviour="raises", exception=exception))
-        fix = (f"handle None in f, or state `{accepted}`, "
-               f"or change the annotation to {_plain_type(fn, p)}"
-               if origin == "optional" else
-               f"handle it in f, or state `{accepted}`, or "
-               f"remove it from the claim")
-        return row("falsified", None, None, "observed", bracket,
-                   nxt=fix, cx=_witness(call))
+        at = _at(call, p)
+        if origin == "optional":
+            sentence = f"f raised {exception} at {at}, and no claim says it may"
+            nxt = (f"{why}. If the raise is intended, state `{accepted}`; otherwise "
+                   f"handle None in f, or annotate {p} as {_plain_type(fn, p)}")
+        elif origin == "listed":
+            sentence = (f"f raised {exception} at {at}, a point the claim lists, and no "
+                        f"claim says it may")
+            nxt = (f"if the raise is intended, state `{accepted}`; otherwise handle "
+                   f"{word} in f, or remove {word} from the set")
+        else:
+            sentence = (f"f raised {exception} at {at}, a value the claim admits, and "
+                        f"no claim says it may")
+            nxt = (f"if the raise is intended, state `{accepted}`; otherwise handle "
+                   f"{word} in f, or remove |{kind} from the domain")
+        return row("falsified", None, None, "observed", sentence, sentence=sentence,
+                   nxt=nxt, cx=_witness(call))
     return row("holds", behaviour, None, "observed",
-               f"observed: {why}; f {behaviour}: {_entry(call, p, kind)}")
+               f"observed: {why}; f {behaviour} it ({_entry(call, p, kind)}) "
+               f"{_on_draws(calls, current)}")
 
 
 def row_name(policy: Policy) -> str:
-    """The name a record gives a policy row mathema writes:
-    `missing[x]`, `missing[xs, null]`, `absent[x]`."""
-    inner = policy.parameter or "f"
+    """The name a policy row goes by, on the record and in a claims file:
+    `missing[x]`, `missing[xs, null]`, `absent[x]`, `absent[f]` for the
+    return, `missing[xs, count >= 1]` for a premised row."""
+    parts = [policy.parameter or "f"]
     if policy.member:
-        inner += f", {policy.member}"
-    return f"{policy.kind}[{inner}]"
+        parts.append(policy.member)
+    if policy.premise:
+        premise = policy.premise
+        if policy.parameter:
+            premise = re.sub(rf"\bcount\(\s*{re.escape(policy.parameter)}\s*\)", "count",
+                             premise)
+        parts.append(premise)
+    return f"{policy.kind}[{', '.join(parts)}]"
 
 
 def contradicting_policies(statements: list) -> "str | None":
@@ -759,8 +1129,10 @@ def contradicting_policies(statements: list) -> "str | None":
         if other is not None and (other.behaviour, other.exception) != \
                 (stated.behaviour, stated.exception):
             return (f"`{policy_text(other)}` and `{policy_text(stated)}` state two "
-                    f"behaviours for one case; keep one, or give each a premise "
-                    f"that tells the cases apart")
+                    f"behaviours for one case. Keep one (the record shows which f "
+                    f"follows), or give each a premise on another parameter or on "
+                    f"count(...) that tells the cases apart, e.g. `assuming count(xs) "
+                    f">= 1, ...` beside `assuming count(xs) == 0, ...`")
         seen.setdefault(key, stated)
     return None
 
@@ -858,7 +1230,7 @@ def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
                           policy.member, policy.premise)
         if not calls:
             continue
-        evidence = _evidence(calls, current, False)
+        evidence = _confirmed(calls, current, False, param)
         meta_policy = {"kind": kind, "parameter": param, "member": policy.member,
                        "behaviour": policy.behaviour, "exception": policy.exception,
                        "premise": policy.premise, "source": "derived",
@@ -869,16 +1241,22 @@ def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
                           and not _raised_matches(c.raised, policy.exception))), None)
         statement = policy_text(policy)
         if wrong is None:
-            reason = f"composed through {key}'s policy row; confirmed {evidence}"
+            reason = f"from {key}'s own policy row, which f calls; {evidence}"
             meta_policy["reason"] = reason
             rows.append(Probe(name_of(policy), statement, "proven", n=len(calls),
                               route="examine", note=reason, meta=meta))
             continue
         did = _behaviour_of(wrong)
-        reason = (f"composed through {key}'s policy row; f {did} instead: "
-                  f"{_entry(wrong, param, kind)}")
-        nxt = (f"state {_stated_word(policy, did, wrong, calls)} if that is "
-               f"intended, or change f")
+        did_words = f"raises {wrong.raised}" if did == "raises" else did
+        reason = (f"from {key}'s own policy row, which f calls; f {did_words} instead "
+                  f"at {_at(wrong, param)}")
+        cases = _cases(calls, param, kind, policy.member)
+        if cases is not None and cases != [replace(policy, source="stated")] and \
+                len(cases) > 1:
+            nxt = f"state {_written(cases)} if that is intended, or change f"
+        else:
+            nxt = (f"state {_stated_word(policy, did, wrong, calls)} if that is "
+                   f"intended, or change f")
         meta_policy.update({"reason": reason, "next": nxt})
         rows.append(Probe(name_of(policy), statement, "falsified", n=len(calls),
                           route="probe:classified", counterexample=_witness(wrong),

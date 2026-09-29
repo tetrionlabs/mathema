@@ -169,6 +169,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the calls the function under test (or a bound function) made at
     # the current point, for the executed missing inputs
     f_calls = LastCall()
+    from .probing import parameter_defaults
+    f_calls.defaults = parameter_defaults(fn)
     executed = ExecutedMissing()
     from .probing import signature_defaults
     executed.defaults = signature_defaults(fn)
@@ -186,9 +188,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 out = callee(*a, **kw)
             except Exception as exc:
                 calls_raised[0] = type(exc).__name__
-                f_calls.calls.append(("raised", type(exc).__name__))
+                if label == "f":
+                    f_calls.calls.append(("raised", type(exc).__name__, a, kw))
                 raise
-            f_calls.calls.append(("returned", out))
+            if label == "f":
+                f_calls.calls.append(("returned", out, a, kw))
             if complex_raises and is_complex_value(out):
                 calls_raised[0] = "a complex result"
                 raise ComplexResult(label, out)
@@ -590,20 +594,19 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         if name in mat_names:
             # a matrix: rows of element draws, square when its two axes
             # share a name
-            dims = tuple(getattr(cj_domain.get(name), "dims", ()) or ())
-            n_rows = rng.randint(2, 4)
-            n_cols = n_rows if len(set(dims[:2])) == 1 else rng.randint(2, 4)
+            n_rows, n_cols = _floor.sizes(cj_domain.get(name), rng, (2, 4), ndim=2)
             rows = [[_synth("float", rng, b) for _ in range(n_cols)]
                     for _ in range(n_rows)]
             return _floor.gapped_rows(rows, hole_values.get(name, []), rng, 0)[0]
         if name in seq_names:
             # a sequence's declared bound is per element
-            return _floor.gapped(_synth("sequence", rng, b),
+            (length,) = _floor.sizes(cj_domain.get(name), rng)
+            return _floor.gapped(_synth("sequence", rng, b, length=length),
                                  hole_values.get(name, []), rng, 0)[0]
         if name in table_names:
             # a table: one equal-length column per name the claim or the
             # body reads
-            length = rng.randint(2, 8)
+            (length,) = _floor.sizes(cj_domain.get(name), rng)
             return {c: _floor.gapped(_synth("sequence", rng, b, length=length),
                                      hole_values.get(name, []), rng, 0)[0]
                     for c in table_columns[name]}

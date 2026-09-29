@@ -121,6 +121,15 @@ def _far_draw(rng: random.Random, lo: float, hi: float, un_lo: bool,
     return min(max(value, lo), hi)
 
 
+class _Wait:
+    """A lap entry that dispenses nothing: the draw it stands in for is an
+    ordinary one."""
+
+
+#: the one `_Wait` a lap pads its front with
+WAIT = _Wait()
+
+
 class _SpecialCycle:
     """Every value in _SPECIALS gets tested at least once, regardless of
     the random 30% special-vs-uniform draw below, the first
@@ -168,7 +177,7 @@ class _SpecialCycle:
 
     def first_values(self) -> list:
         """The values dispensed first, in order."""
-        return list(self._first)
+        return [v for v in self._first if v is not WAIT]
 
     def guaranteed_remaining(self) -> bool:
         return self._dispensed < len(self._values)

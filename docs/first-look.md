@@ -180,14 +180,15 @@ print(mathema.check(ema, claims=collapses))
 <!-- example: ema output -->
 ```text
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
-  holds   collapses_probed: f(x, 1.0) = x[-1] (127 draws, sizes (2, 1) to (8, 1), 777 entries in all)
-           inferred alpha=1 from the claim's own literal argument; at x = [null, null] f raised TypeError, which no claim accounts for: state `missing(f, x, null) raises(TypeError)`, or make f return a value there; at x = [nan, nan, nan, nan, nan, nan] f gave nan back (missing in, missing out)
+  holds   collapses_probed: f(x, 1.0) = x[-1] (129 draws, sizes (2, 1) to (8, 1), 854 entries in all)
+           inferred alpha=1 from the claim's own literal argument; at x = [null, null] f raised TypeError; at x = [nan, nan, nan, nan, nan, nan] f gave nan back
   proven  collapses_derived: f(x, 1.0) = x[-1]
            ∀ x ∈ Seq(ℝ); missing for x (list) means null or nan
   holds   collapses_derived[float]: f(x, 1.0) = x[-1] (53 draws, sizes (1, 1) to (8, 1), 245 entries in all)
-           the float64 computation of collapses_derived ran at 53 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); f an all-null list it raises an exception instead; converts at x = [null]; at x = [nan] f gave nan back (missing in, missing out)
-  FALSIFY missing(f, x)   [f treats a missing x more than one way: raises at x = [null, null], alpha = 1.0: f raised TypeError; propagates at x = [nan, nan, nan, nan, nan, nan], alpha = 1.0: f returned nan; converts at x = [null]: f returned None]
-           state what f does in each case with a premise that tells the cases apart (`assuming <premise>, missing(f, x) raises`), or make f treat it one way
+           the float64 computation of collapses_derived ran at 53 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raises TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back
+  FALSIFY missing[x]: f has no single policy for a missing x
+           f gives a hole back at x = [nan, nan, nan, nan, nan, nan], alpha = 1.0; at x = [null, null], alpha = 1.0 it raises TypeError instead; at x = [null] it converts the null slot to an absent result
+           give each case a premise on another parameter or on count(...) that tells them apart, or make f treat a missing x one way
 ```
 
 Both say the claim is true, but they are not the same kind of true.
@@ -254,14 +255,14 @@ ema:
     - name: "collapses_derived[float]"
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
-      n: 45
-      note: "the float64 computation of collapses_derived ran at 45 points: every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
+      n: 53
+      note: "the float64 computation of collapses_derived ran at 53 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raises TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back"
       route: "probe"
     - name: "collapses_probed"
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
-      n: 160
-      note: "inferred alpha=1 from the claim's own literal argument"
+      n: 129
+      note: "inferred alpha=1 from the claim's own literal argument; at x = [null, null] f raised TypeError; at x = [nan, nan, nan, nan, nan, nan] f gave nan back"
       route: "probe"
   concepts:
     - "summation"
@@ -276,13 +277,13 @@ ema:
       basis: "read off the AST"
     - step: "evidence"
       claim: "f(x, 1.0) = x[-1]"
-      basis: "probed, n=160"
+      basis: "probed, n=129"
     - step: "derivation"
       claim: "f(x, 1.0) = x[-1]"
       basis: "when L = 1: x[0]; otherwise x[L - 1] and x[L - 1] simplify identically"
     - step: "evidence"
       claim: "f(x, 1.0) = x[-1]"
-      basis: "probed, n=45"
+      basis: "probed, n=53"
     - step: "situating"
       claim: "instantiates: summation, folded-sum"
       basis: "deterministic concept tagging"

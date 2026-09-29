@@ -283,8 +283,8 @@ alphabet: `ascii` (`str.isascii`), `latin-1` (what the codec encodes),
 `json.loads` accepts) and more; [Language domains](language.md) lists
 them and shows how to register your own. An alphabet language is a
 Kleene star: it contains the empty string, and `L[ascii] \ {""}` is
-the way to exclude it. Union with a finite set of members and the
-missing-value policy read exactly as they do for a numeric domain:
+the way to exclude it. Union with a finite set of members, and what the domain admits,
+read exactly as they do for a numeric domain:
 `L[alnum] ∪ {"n/a"}`, `L[ascii] \ {missing}`. A length bound goes inside
 the brackets, `L[ascii, len <= 80]`, `L[unicode, len > 20]` or
 `L[unicode, len in [1, 80]]`, lengths counted in code points as Python's
@@ -320,7 +320,7 @@ mark), then random members, and it never draws a value outside the
 language. Every record states what a
 language resolved to (`meta["mathema.language"]`: the name, its
 source, its level and kind, and its persisted form), and the
-statement carries the resolved missing-value policy as usual. The
+statement carries what the domain admits, as usual. The
 derive route has no reading of a string, so it declines with the
 reason rather than proving real-only facts about a symbol standing in
 for one; a finite language (an enumeration a package registers) is
@@ -688,22 +688,23 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7982b776d687
   holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (32 draws)
-  holds   is_deterministic: f(scores) = f(scores) (150 draws, sizes (1, 1) to (8, 1), 930 entries in all)
-           derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; f gives a hole back when every slot is missing (scores = [nan]); introduces at scores = [nan, 4.23, 6.86, 9.76]; at scores = [null] f raised TypeError, which no claim accounts for: state `missing(f, scores, null) raises(TypeError)`, or make f return a value there
+  holds   is_deterministic: f(scores) = f(scores) (156 draws, sizes (1, 1) to (8, 1), 1012 entries in all)
+           derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; f gives a hole back when every slot is missing (scores = [nan]); at scores = [nan, 4.23, 6.86, 9.76] it introduces a missing value; at scores = [null] f raised TypeError
   holds   is_state_safe: f(scores) = f(scores) (48 draws)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (192 draws, sizes (1, 1) to (8, 1), 930 entries in all)
-  holds   preserves_length: len(f(scores)) = len(scores) (159 draws, sizes (1, 1) to (8, 1), 1000 entries in all)
-           f gives a hole back when every slot is missing (scores = [nan]); introduces at scores = [nan, -3.06, -0.181, -5.74]; at scores = [null] f raised TypeError, which no claim accounts for: state `missing(f, scores, null) raises(TypeError)`, or make f return a value there
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (192 draws, sizes (1, 1) to (8, 1), 949 entries in all)
+  holds   preserves_length: len(f(scores)) = len(scores) (155 draws, sizes (1, 1) to (8, 1), 967 entries in all)
+           f gives a hole back when every slot is missing (scores = [nan]); at scores = [nan, -8.39, 1.99, 6.61] it introduces a missing value; at scores = [null] f raised TypeError
   FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
-           counterexample scores=[0, 0, 0, 0, 0, 0, 0]: [0.14285714285714285, 0.14285714285714285, 0.14285714285714285, 0.14285714285714285, 0.14285714285714285, 0.14285714285714285, 0.14285714285714285] vs [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-  holds   preserves_type: type(f(scores)) = type(scores) (162 draws, sizes (1, 1) to (8, 1), 952 entries in all)
-           f gives a hole back when every slot is missing (scores = [nan]); introduces at scores = [nan, -0.35, -1.98]; at scores = [null] f raised TypeError, which no claim accounts for: state `missing(f, scores, null) raises(TypeError)`, or make f return a value there
+           counterexample scores=[0, 0]: [0.5, 0.5] vs [0.0, 0.0]
+  holds   preserves_type: type(f(scores)) = type(scores) (154 draws, sizes (1, 1) to (8, 1), 1001 entries in all)
+           f gives a hole back when every slot is missing (scores = [nan]); at scores = [nan, 3.68, 5.63, -6.09, 5.18] it introduces a missing value; at scores = [null] f raised TypeError
   FALSIFY is_sorted_output: is_sorted_output(f(scores))
-           counterexample ([6.05242, -2.048, -3.70269, 5.34094, 8.33555, -2.13602]): output [0.0885038934141533, 2.685305328110152e-05, 5.133040594050027e-06, 0.043448364744748474, 0.8679911651901723, 2.4590557050831213e-05] fails is_sorted_output
-  holds   sums_to_one: sum(f(scores)) = 1 (154 draws, sizes (1, 1) to (8, 1), 956 entries in all)
-           derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; f gives a hole back when every slot is missing (scores = [nan]); introduces at scores = [nan, 5.18, -2.53, 0.272, 4.42, -0.00905]; at scores = [null] f raised TypeError, which no claim accounts for: state `missing(f, scores, null) raises(TypeError)`, or make f return a value there
-  FALSIFY missing(f, scores)   [f treats a missing scores more than one way: raises at scores = [null]: f raised TypeError; propagates at scores = [nan]: f returned nan; introduces at scores = [nan, 4.23, 6.86, 9.76]: f returned [nan, nan, nan, nan]]
-           state what f does in each case with a premise that tells the cases apart (`assuming <premise>, missing(f, scores) raises`), or make f treat it one way
+           counterexample ([4.86304, 8.4521, -9.06059, -3.61645]): output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
+  holds   sums_to_one: sum(f(scores)) = 1 (154 draws, sizes (1, 1) to (8, 1), 922 entries in all)
+           derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; f gives a hole back when every slot is missing (scores = [nan]); at scores = [nan, 9.84] it introduces a missing value; at scores = [null] f raised TypeError
+  FALSIFY missing[scores]: f has no single policy for a missing scores
+           f gives a hole back when every slot is missing (scores = [nan]); at an all-null container it raises TypeError instead; at scores = [nan, 4.23, 6.86, 9.76] it introduces a missing value
+           to state each case, write `missing(f, scores, null) raises(TypeError)`, `assuming count(scores) >= 1, missing(f, scores, nan) introduces` and `assuming count(scores) == 0, missing(f, scores, nan) propagates`; or make f treat a missing scores one way
 ```
 
 `shape` came from the `Annotated[list, Shape("n")]` hints,

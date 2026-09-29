@@ -85,11 +85,10 @@ def test_a_policy_claim_round_trips_through_the_store():
         assert again.relation == "policy"
 
 
-def test_a_remedy_a_note_names_is_a_claim_that_parses():
-    rows = check_conjectures(clamp01, [claim("for x in R, 0 <= f(x) <= 1", name="c")],
-                             float_companions=True)
-    note = next(p for p in rows if p.name.startswith("c[")).note
-    remedy = note.split("write `", 1)[1].split("`", 1)[0]
+def test_a_remedy_a_row_names_is_a_claim_that_parses():
+    rec = mathema.check(clamp01, claims=[claim("for x in R, 0 <= f(x) <= 1", name="c")])
+    row = next(p for p in rec.probes if (p.meta or {}).get("mathema.policy"))
+    remedy = row.meta["mathema.policy"]["next"].split("write `", 1)[1].split("`", 1)[0]
     assert remedy == "missing(f, x) drops"
     assert claim(remedy).relation == "policy"
 
@@ -111,7 +110,7 @@ def test_a_stated_policy_is_confirmed_on_the_draws_the_check_made():
 def test_a_policy_alone_runs_its_own_floor():
     row = _rows(clamp01, "missing(f, x) drops")["missing(f, x) drops"]
     assert row.verdict == "holds"
-    assert row.note == "stated; confirmed on its own floor (1 draw)"
+    assert row.note == "stated; confirmed by calling f at x = nan"
 
 
 def test_a_contradicted_policy_carries_the_executed_witness_and_the_claim_to_write():
@@ -132,7 +131,7 @@ def test_a_named_exception_must_be_the_one_raised():
 def test_a_guard_that_states_the_policy_proves_it():
     row = _rows(guarded, "missing(f, x) raises(ValueError)")["missing(f, x) raises(ValueError)"]
     assert row.verdict == "proven", (row.verdict, row.note)
-    assert row.note.startswith("stated; derived from the guard on line 2; confirmed")
+    assert row.note.startswith("stated; from the guard on line 2; confirmed")
 
 
 def test_a_member_narrows_the_policy():
@@ -192,7 +191,8 @@ def test_a_library_row_composed_through_the_body_derives_the_policy():
     assert (row.statement, row.verdict) == ("missing(f, x) propagates", "proven")
     assert row.meta["mathema.policy"]["source"] == "derived"
     assert row.meta["mathema.policy"]["reason"].startswith(
-        "composed through math.sqrt's policy row; confirmed on the 43 draws of c0[float]")
+        "from math.sqrt's own policy row, which f calls; confirmed on the 43 draws of "
+        "c0[float]")
 
 
 def test_a_float_carries_its_default_propagation_row():
@@ -200,8 +200,10 @@ def test_a_float_carries_its_default_propagation_row():
     assert (row.statement, row.verdict) == ("missing(f, x) propagates", "holds")
     assert row.meta["mathema.policy"]["source"] == "default"
     assert row.meta["mathema.policy"]["reason"] == (
-        "default for a float: the type admits nan; change the word to raises or drops "
-        "if f should do otherwise")
+        "default for a float, which may be nan; confirmed on the 43 draws of c0[float]. "
+        "Keep it by writing it (mathema claims "
+        "test_policy_claims_say_what_f_does_with_no_value.scaled --write), or change the "
+        "word to raises or drops if f should do otherwise")
     assert row.meta["mathema.surface"] == "mathema"
 
 
@@ -211,8 +213,8 @@ def test_a_silent_drop_contradicts_the_default():
     assert row.meta["mathema.policy"]["reason"] == \
         "default for a float; f drops instead: nan in, 1.0 out"
     assert row.meta["mathema.policy"]["next"] == (
-        "if 1.0 is the intended answer, write `missing(f, x) drops`; otherwise guard "
-        "with `if x != x: raise ValueError` or return nan")
+        "if 1.0 is the answer f should give for a missing x, write `missing(f, x) "
+        "drops`; if not, make f raise or give nan back")
 
 
 def test_an_unannotated_parameter_raises_on_none_by_default():
@@ -220,8 +222,10 @@ def test_an_unannotated_parameter_raises_on_none_by_default():
     row = rows["absent(f, x) raises"]
     assert row.verdict == "holds"
     assert row.meta["mathema.policy"]["reason"] == (
-        "default: x has no annotation, so it may be None, and f raises on it; annotate "
-        "x as float to exclude None, or keep this claim")
+        "default: x has no annotation, so it may be None, and f raises on it; confirmed "
+        "on the 44 draws of c0[float]. Annotate x as float to exclude None, or write "
+        "this row with mathema claims "
+        "test_policy_claims_say_what_f_does_with_no_value.double --write")
 
 
 def test_an_author_admitted_absence_that_raises_is_unaccounted_for():
@@ -230,10 +234,11 @@ def test_an_author_admitted_absence_that_raises_is_unaccounted_for():
     assert row.verdict == "falsified"
     assert row.meta["mathema.policy"]["source"] == "observed"
     assert row.meta["mathema.policy"]["reason"] == (
-        "observed: x is Optional[float], so None is promised; f raised TypeError at x = None")
+        "f raised TypeError at x = None, and no claim says it may")
     assert row.meta["mathema.policy"]["next"] == (
-        "handle None in f, or state `absent(f, x) raises(TypeError)`, or change the "
-        "annotation to float")
+        "x is Optional[float], so f promised to take None. If the raise is intended, "
+        "state `absent(f, x) raises(TypeError)`; otherwise handle None in f, or annotate "
+        "x as float")
 
 
 def test_a_guard_derives_the_row():
@@ -267,10 +272,10 @@ def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():
     rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
                                                        name="c0")])
     text = repr(rec)
-    assert ("  FALSIFY missing(f, x) propagates   [default for a float; f drops instead: "
-            "nan in, 1.0 out]\n           if 1.0 is the intended answer, write "
-            "`missing(f, x) drops`; otherwise guard with `if x != x: raise ValueError` "
-            "or return nan") in text
+    assert ("  FALSIFY missing[x]: missing(f, x) propagates   [default for a float; f "
+            "drops instead: nan in, 1.0 out]\n           if 1.0 is the answer f should "
+            "give for a missing x, write `missing(f, x) drops`; if not, make f raise or "
+            "give nan back") in text
 
 
 def test_the_absent_word_parses_without_f():
@@ -280,25 +285,70 @@ def test_the_absent_word_parses_without_f():
 
 # --- the claims command --------------------------------------------------
 
-def test_the_claims_command_lists_and_writes_the_policy_claims(tmp_path, monkeypatch, capsys):
-    (tmp_path / "pmod.py").write_text(
-        "# SPDX-License-Identifier: BUSL-1.1\n# Copyright 2026 Tetrion Ltd\n"
-        "def clamp(x: float) -> float:\n    return max(0.0, min(1.0, x))\n")
+_PMOD = (
+    "# SPDX-License-Identifier: BUSL-1.1\n# Copyright 2026 Tetrion Ltd\n"
+    "import math\nfrom typing import Optional\n\n"
+    "def clamp(x: float) -> float:\n    return max(0.0, min(1.0, x))\n\n"
+    "def lin(x: float) -> float:\n    return 2.0 * x + 1.0\n\n"
+    "def root_opt(x: Optional[float]) -> float:\n    return math.sqrt(x)\n")
+_PCLAIMS = (
+    "pmod.clamp:\n  claims:\n    - name: unit\n"
+    "      statement: \"for x in R, 0 <= f(x) <= 1\"\n"
+    "pmod.lin:\n  claims:\n    - name: line\n"
+    "      statement: \"for x in R, f(x) == 2*x + 1\"\n"
+    "pmod.root_opt:\n  claims:\n    - name: nonneg\n"
+    "      statement: \"for x in [0, 4], f(x) >= 0\"\n")
+
+
+def _pproject(tmp_path, monkeypatch):
+    (tmp_path / "pmod.py").write_text(_PMOD)
     (tmp_path / "claims").mkdir()
-    (tmp_path / "claims" / "p.claims.yaml").write_text(
-        "pmod.clamp:\n  claims:\n    - name: unit\n"
-        "      statement: \"for x in R, 0 <= f(x) <= 1\"\n")
+    (tmp_path / "claims" / "p.claims.yaml").write_text(_PCLAIMS)
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
+
+def test_the_claims_command_groups_the_policy_rows_by_state(tmp_path, monkeypatch, capsys):
+    _pproject(tmp_path, monkeypatch)
     from mathema.cli import main
     assert main(["claims", "pmod.clamp", "--root", str(tmp_path)]) == 0
-    out = capsys.readouterr().out
-    assert "pmod.clamp: 0 suggested policy claim(s)" not in out
-    main(["claims", "pmod.clamp", "--root", str(tmp_path), "--write"])
+    out = capsys.readouterr().out.splitlines()
+    assert "pmod.clamp: 1 policy row about x" in out
+    at = out.index("  contradicted by the code (choose the word, or change the code; "
+                   "--write leaves these out):")
+    assert out[at + 1] == ("    FALSIFY missing[x]: missing(f, x) propagates   [default "
+                           "for a float; f drops instead: nan in, 1.0 out]")
+    assert main(["claims", "pmod.root_opt", "--root", str(tmp_path)]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "  a raise or a case no claim accounts for (state it, or change f; --write " \
+           "leaves these out):" in out
+    assert "    FALSIFY absent[x]: f raised TypeError at x = None, and no claim says it " \
+           "may" in out
+
+
+def test_write_writes_only_confirmed_rows_under_their_record_names(tmp_path, monkeypatch,
+                                                                     capsys):
+    _pproject(tmp_path, monkeypatch)
     import yaml
+
+    from mathema.cli import main
+    main(["claims", "pmod.clamp", "--root", str(tmp_path), "--write"])
+    assert capsys.readouterr().out.strip() == (
+        "pmod.clamp: wrote 0 policy rows to claims/policies.claims.yaml. Left out 1 the "
+        "code contradicts (missing[x]; choose the word, then state it)")
+    assert not (tmp_path / "claims" / "policies.claims.yaml").exists()
+    main(["claims", "pmod.lin", "--root", str(tmp_path), "--write"])
+    assert capsys.readouterr().out.strip() == (
+        "pmod.lin: wrote 1 policy row to claims/policies.claims.yaml: missing[x]")
     written = yaml.safe_load((tmp_path / "claims" / "policies.claims.yaml").read_text())
-    assert written == {"pmod.clamp": {"claims": []}} or all(
-        c["note"].startswith("source: ") for c in written["pmod.clamp"]["claims"])
+    assert written == {"pmod.lin": {"claims": [{
+        "name": "missing[x]", "statement": "missing(f, x) propagates",
+        "note": "default for a float, which may be nan; confirmed on the 43 draws of "
+                "line[float]"}]}}
+    # the file mathema wrote loads, and the row is now declared
+    assert main(["claims", "pmod.lin", "--root", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "  - missing[x]: missing(f, x) propagates" in out
 
 
 # --- a bare claim completes its bindings from the signature ---------------

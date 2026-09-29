@@ -35,16 +35,16 @@ mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
   proven  between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
            for a in [0, 100] : int, b in [0, 100] : int
   FALSIFY between_reals: for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)
-           chained comparison falsified at link 1: min(a, b) <= f(a, b); at a = nan f gave nan back (missing in, missing out); at b = nan f gave nan back (missing in, missing out)
+           chained comparison falsified at link 1: min(a, b) <= f(a, b); at a = nan f gave nan back; at b = nan f gave nan back
            counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
-  holds   missing(f, a) propagates   [default for a float: the type admits nan; change the word to raises or drops if f should do otherwise]
-  holds   missing(f, b) propagates   [default for a float: the type admits nan; change the word to raises or drops if f should do otherwise]
+  holds   missing[a]: missing(f, a) propagates   [default for a float, which may be nan; confirmed on the 46 draws of between_reals. Keep it by writing it (mathema claims mid.midpoint --write), or change the word to raises or drops if f should do otherwise]
+  holds   missing[b]: missing(f, b) propagates   [default for a float, which may be nan; confirmed on the 46 draws of between_reals. Keep it by writing it (mathema claims mid.midpoint --write), or change the word to raises or drops if f should do otherwise]
 ```
 
-Proven for every pair of integers in range (the `holds` row under it is the
-proof's `[float]` companion, the same claim run through the real code in
-floating point), and falsified over the reals, where floor division puts the
-midpoint of 99.9999 and 100 at 99. The same
+Proven for every pair of integers in range, and falsified over the reals,
+where floor division puts the midpoint of 99.9999 and 100 at 99. The two
+rows beneath are the policy rows mathema writes for a float's nan: both
+parameters propagate it, the default for a float. The same
 claim, two domains, two different and equally definite answers, which is why a
 claim always carries the domain it was checked over.
 
@@ -180,16 +180,19 @@ Among the results, all found with no claims written:
 <!-- example: finds output match=subset -->
 ```text
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([-8.45341, 4.50714, -6.81355, 9.56619, 9.82492, -3.48464], -3.87612): -8.453411994413011 vs -31170.68185339262
+           derive could not decide it (claim statement not derivable against the recognized fold: 'x' (a sequence) has no single scalar value outside indexing or an f(...) call); the probe decided it; at alpha = nan f gave nan back; at x = [nan, nan, nan, nan, nan, nan, ...] f gave nan back
+           counterexample ([-3.66547, 0.948403, 5.79621, -0.912667, -8.49899, 0.624936, -0.968484, -2.57127], -2.12558e+211): f returned -inf, and an infinity for a finite input is no value
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([2.99699, 5.79101, -3.39565], 2.42473): -22.155606222909892 vs -19.631315077691653
+           at alpha = nan f gave nan back; at x = [null, null, null, null, null] f raised TypeError; at x = [nan, nan, nan, nan, nan, nan, ...] f gave nan back
+           counterexample ([1.52658, -6.42162, -9.58658, 8.28692, -6.47385, 8.5393, 5.14559, -0.57719], -9.78935): 137842172.74570563 vs -100740237.52213857
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ; missing for x (list) means null or nan; missing for alpha (float) means nan
   FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-8.767334983247743, -8.767334983247743, -8.767334983247743], alpha=-1.79769e+308, c=-5
+           the float64 computation of scale_equivariant ran at 13 points: nan, null, every corner and 0 interior points; unbounded directions (x, alpha) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at alpha = nan f gave nan back; at x = [null, null], alpha = -1.8e+308 f raises TypeError; at x = [null], alpha = -1.8e+308 it converts the null slot to an absent result; at x = [nan] f gave nan back
+           counterexample x=[-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha=-1.79769e+308, c=-5
            [mathematics sound, implementation:numerical-instability]
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ; missing for x (list) means null or nan; missing for alpha (float) means nan
 ```
 
 Scaling or shifting every input scales or shifts the average the same way,

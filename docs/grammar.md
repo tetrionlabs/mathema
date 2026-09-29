@@ -227,7 +227,7 @@ for route in ["probe", "derive"]:
 <!-- example: just-below output -->
 ```text
 probe   holds
-        fails by 1e-10 at (0), within the default tolerance (1e-09); at x = nan f returned -1e-10: the hole became a value; write `missing(f, x) drops` to accept this, or guard the input
+        fails by 1e-10 at (0), within the default tolerance (1e-09); at x = nan f returned -1e-10, so it drops the hole
 derive  falsified x=0.0616333
         reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
 ```
@@ -533,6 +533,8 @@ for law in ["∫(f(x), x, -oo, oo) == 1",
             "f(x) >= 0",
             "let |inf| be 1e100, f(x) >= 0"]:
     for p in mathema.check(gauss, claims=[law]).probes:
+        if "mathema.policy" in (p.meta or {}):
+            continue    # what f does with a missing x, a row of its own
         label = "  [float]" if p.name.endswith("[float]") else law
         print(f"{label:31} {p.verdict:9} {p.counterexample or p.condition or ''}")
 ```
@@ -542,10 +544,8 @@ for law in ["∫(f(x), x, -oo, oo) == 1",
 ∫(f(x), x, -oo, oo) == 1        proven
 f(x) >= 0                       proven    ∀ x ∈ ℝ
   [float]                       falsified x=-1.79769e+308
-f(x) >= 0                       holds
 let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ ℝ
   [float]                       holds
-let |inf| be 1e100, f(x) >= 0   holds
 ```
 
 The integral over the whole line is proven, since an integral, like a

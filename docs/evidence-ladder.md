@@ -87,7 +87,10 @@ derive           missing[x] holds
 derive:math_only one        proven
 ```
 
-`(x + 1) - x` is `1` for every real `x`, so all three proofs stand. In
+`(x + 1) - x` is `1` for every real `x`, so all three proofs stand.
+The third row of the first block is the policy row mathema writes for a
+float's nan (what f does with a value that is not there); it holds
+because f gives nan back. In
 float64 the `+ 1` is lost once `|x|` passes `2^53`, so the companion of
 the unbounded claim is falsified, and its row names the stratum:
 mathematics sound, its computation numerically unstable

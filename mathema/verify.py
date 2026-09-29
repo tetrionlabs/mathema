@@ -39,6 +39,13 @@ def _claim_fields(c) -> tuple[str, str, dict, str]:
     return (c.name or "", c.verdict or "", c.meta or {}, str(c.note or ""))
 
 
+def _claim_statement(c) -> str:
+    """A claim's statement, from a live Probe or a stored claim dict."""
+    if isinstance(c, dict):
+        return str(c.get("statement") or "")
+    return str(getattr(c, "statement", "") or "")
+
+
 def _volunteered(meta: dict, note: str) -> bool:
     """Intent:
         True when mathema itself conjectured this claim (a suggestion):
@@ -65,8 +72,10 @@ class GateReport:
     builtin_proven: int = 0
     # the unknown claims by name, each with its one-line reason
     unknown_reasons: list = field(default_factory=list)
-    # raises at a missing input no claim accounts for: (witness, exception)
+    # the clauses of the policy rows mathema wrote that do not hold
     unaccounted: list = field(default_factory=list)
+    # the clauses of the declared policy rows that are falsified
+    policy_problems: list = field(default_factory=list)
 
     @property
     def refuted(self) -> int:
@@ -77,15 +86,32 @@ class GateReport:
 
 
 def _unaccounted_text(report) -> str:
-    """`; 1 unaccounted raise at a missing input (xs=[NA], TypeError)`,
-    or an empty string."""
+    """One clause per policy row mathema wrote that does not hold:
+    `; missing[x]: f drops a missing x (nan in, 1.0 out), the row says
+    propagates; change the word or the code`, `; absent[x]: f raised
+    TypeError at x = None, and no claim says it may (state
+    `absent(f, x) raises(TypeError)`)`, or an empty string."""
     found = getattr(report, "unaccounted", None) or []
-    if not found:
-        return ""
-    at, exc = found[0]
-    n = len(found)
-    return (f"; {n} unaccounted raise{'s' if n != 1 else ''} at a missing input "
-            f"({at}, {exc})")
+    return "".join(f"; {text}" for text in found)
+
+
+def _policy_clause(name: str, statement: str, pol: dict) -> "str | None":
+    """The clause a verify line carries for one policy row that does not
+    hold, from the row's own meta."""
+    import re as _re
+    if pol.get("sentence"):
+        remedy = _re.search(r"`([^`]+)`", pol.get("next") or "")
+        tail = f" (state `{remedy.group(1)}`)" if remedy else ""
+        return f"{name}: {pol['sentence']}{tail}"
+    m = _re.search(r"f (\w+) instead: (.+)$", pol.get("reason") or "")
+    if not m:
+        return None
+    kind = pol.get("kind") or "missing"
+    what = (f"{pol.get('parameter')} = None" if kind == "absent"
+            else f"a missing {pol.get('parameter') or 'input'}")
+    word = statement.split(") ", 1)[-1] if ") " in statement else pol.get("behaviour")
+    return (f"{name}: f {m.group(1)} {what} ({m.group(2)}), the row says {word}; "
+            f"change the word or the code")
 
 
 def summary_counts(counts) -> str:
@@ -193,6 +219,13 @@ def gate(claims, *, strict: bool,
         if "mathema.foreign_grammar" in meta:
             r.foreign.append(c)
             continue
+        pol = meta.get("mathema.policy")
+        if pol and classify_verdict(verdict) == "falsified":
+            clause = _policy_clause(name, _claim_statement(c), pol)
+            if clause and _volunteered(meta, note) and clause not in r.unaccounted:
+                r.unaccounted.append(clause)
+            elif clause:
+                r.policy_problems.append(clause)
         if _volunteered(meta, note):
             continue
         kind = classify_verdict(verdict)
@@ -200,7 +233,6 @@ def gate(claims, *, strict: bool,
             # the stored form of an unknown a person accepted as risk
             r.owned += 1
             continue
-        _note_unaccounted(r, meta)
         if kind == "proven":
             r.proven += 1
             if meta.get("mathema.surface") == "builtin":
@@ -223,7 +255,12 @@ def gate(claims, *, strict: bool,
     # mode; strictness only governs structurally-skipped claims, never
     # wrong or undecided ones
     if r.falsified:
-        r.problems.append(f"{r.falsified} falsified claim(s)")
+        # a policy row names itself and the one-word edit; any other
+        # falsified claim is counted
+        others = r.falsified - len(r.policy_problems)
+        r.problems.extend(r.policy_problems)
+        if others > 0:
+            r.problems.append(f"{others} falsified claim(s)")
     if r.invalidated:
         r.problems.append(f"{r.invalidated} invalidated claim(s)")
     if r.unknown:
@@ -256,39 +293,6 @@ def _first_sentence(note) -> str:
     head = head.replace(" back, so there is no value to compare with",
                         ", nothing to compare with")
     return head[:120]
-
-
-def _note_unaccounted(r, meta: dict) -> None:
-    """Collect a row's raises at a missing input that no claim accounts
-    for: a hole the type admits that raises, or an absence the author
-    admitted that raises."""
-    missing = meta.get("mathema.missing") or {}
-    behaviour = missing.get("behaviour") or {}
-    origin = missing.get("origin") or {}
-    for p, members in behaviour.items():
-        for member, seen in members.items():
-            kind = "absent" if member == "None" else "missing"
-            if kind == "absent" and (origin.get(p) or {}).get(kind, "type") == "type":
-                continue
-            if seen == "raises":
-                entry = (missing.get("executed") or {}).get(p, {}).get(member, "")
-                exc = entry[len("raised "):] if entry.startswith("raised ") else "an exception"
-                at = f"{p}=[{member}]" if kind == "missing" and member != "nan" else f"{p}={member}"
-                witness = (missing.get("said") or {}).get(p, {}).get(member, "")
-                if " = " in witness:
-                    at = witness.split("at ", 1)[1].split(" f ", 1)[0].replace(" = ", "=")
-                pair = (at, exc)
-            elif seen == "mixed":
-                ways = (missing.get("mixed") or {}).get(p, {}).get(member, {})
-                if "raises" not in ways:
-                    continue
-                entry = (missing.get("executed") or {}).get(p, {}).get(member, "")
-                exc = entry[len("raised "):] if entry.startswith("raised ") else "an exception"
-                pair = (ways["raises"].replace(" = ", "="), exc)
-            else:
-                continue
-            if pair not in r.unaccounted:
-                r.unaccounted.append(pair)
 
 
 def _accepted_risk(entry: dict | None) -> frozenset:
@@ -511,8 +515,20 @@ def _born_falsified_hint(key: str, probes: list,
              and (getattr(p, "meta", None) or {}).get("mathema.surface") != "mathema"]
     if not fresh:
         return []
+    lines = []
+    for p in list(fresh):
+        pol = (getattr(p, "meta", None) or {}).get("mathema.policy") or {}
+        clause = _policy_clause(p.name, p.statement, pol) if pol else None
+        if clause:
+            lines.append(f"note {key}: {p.name} falsified on first adjudication; "
+                         + clause.split(": ", 1)[1].replace(
+                             "; change the word or the code",
+                             ". Change the word in the claims file, or change f."))
+            fresh.remove(p)
+    if not fresh:
+        return lines
     names = ", ".join(sorted(str(p.name) for p in fresh))
-    return [f"note {key}: {names} falsified on first adjudication. A "
+    return lines + [f"note {key}: {names} falsified on first adjudication. A "
             f"declared claim is kept until a human decides it (fix the "
             f"code, `mathema accept {key} <claim> --as discovery`, or "
             f"supersede it). To try a spelling first, "

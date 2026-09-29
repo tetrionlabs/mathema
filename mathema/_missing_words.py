@@ -71,9 +71,12 @@ def value_shown(value, in_slot: bool = False) -> str:
 
 def _elements(value) -> "list | None":
     """The elements of a vector, or the rows of a matrix, as a list."""
+    from ._missing_policy import _array_list, _is_ndarray
     module = type(value).__module__.split(".")[0]
     if isinstance(value, (list, tuple)):
         return list(value)
+    if _is_ndarray(value):
+        return _array_list(value)
     if module in ("numpy", "pandas") and hasattr(value, "tolist"):
         out = value.tolist()
         return out if isinstance(out, list) else None
@@ -116,24 +119,25 @@ def outcome_entry(member: str, output=None, raised: "str | None" = None,
 
 def said(param: str, member: str, point: dict, output=None,
          raised: "str | None" = None, behaviour: "str | None" = None) -> str:
-    """What the function did at one missing input, as a sentence: `at x =
-    nan f gave nan back (missing in, missing out)`, `at x = None f raised
-    TypeError`, `at x = nan f returned 1.0: the hole became a value`."""
+    """What the function did at one missing input, as a fact: `at x =
+    nan f gave nan back`, `at x = None f raised TypeError`, `at x = nan
+    f returned 1.0, so it drops the hole`, `at xs = [null] f returned 0,
+    so it drops the null slot`."""
     at = f"at {point_shown(point)}"
     if raised is not None:
         return f"{at} f raised {raised}"
     shown = value_shown(output)
-    kind = kind_of(member) if not _in_slot(point.get(param)) else MISSING
+    slot = _in_slot(point.get(param))
+    kind = MISSING if slot else kind_of(member)
+    what = (f"the {member} slot" if slot else
+            "the hole" if kind == MISSING else "the absence")
     if behaviour == "propagates":
-        pair = "missing in, missing out" if kind == MISSING else "absent in, absent out"
-        return f"{at} f gave {shown} back ({pair})"
+        return f"{at} f gave {shown} back"
     if behaviour == "drops":
-        became = "the hole" if kind == MISSING else "the absence"
-        return f"{at} f returned {shown}: {became} became a value"
+        return f"{at} f returned {shown}, so it drops {what}"
     if behaviour == "converts":
-        became = ("the absence became a hole" if kind == ABSENT
-                  else "the hole became an absence")
-        return f"{at} f returned {shown}: {became}"
+        to = "a hole" if kind == ABSENT else "an absent result"
+        return f"{at} f returned {shown}, so it converts {what} to {to}"
     if behaviour == "introduces":
         return f"{at} f returned {shown}, with a missing value where it was given none"
     return f"{at} f returned {shown}"
@@ -151,47 +155,6 @@ def claim_word(kind: str, param: str, member: "str | None", behaviour: str,
     target = param + (f", {member}" if member else "")
     verb = f"raises({raised})" if behaviour == "raises" and raised else behaviour
     return f"`{kind}(f, {target}) {verb}`"
-
-
-def next_step(kind: str, param: str, member: "str | None", behaviour: str,
-              raised: "str | None", origin: str, annotation: "str | None") -> str:
-    """Intent:
-        What to do about one behaviour, or an empty string when it is
-        what the type leads a reader to expect. `origin` says who
-        admitted the kind: `type` (the annotation alone, or no
-        annotation), `optional` (an `Optional` annotation), `listed` (a
-        finite set the claim lists), `written` (a `|missing` or
-        `|absent` the claim writes).
-    """
-    stated = claim_word(kind, param, member, behaviour, raised)
-    if origin == "type":
-        if behaviour == DEFAULTS[kind] or behaviour == "mixed":
-            return ""
-        if behaviour == "raises":
-            return (f", which no claim accounts for: state {stated}, or make f "
-                    f"return a value there")
-        if behaviour == "drops":
-            return f"; write {stated} to accept this, or guard the input"
-        return f"; write {stated} to accept this"
-    if behaviour != "raises":
-        return ""
-    if origin == "optional":
-        import re
-        plain = re.sub(r"^Optional\[(.+)\]$", r"\1", annotation or "")
-        plain = " | ".join(t.strip() for t in plain.split("|")
-                           if t.strip() not in ("None", "NoneType")) or plain
-        return (f". {param} admits absence because it is {annotation}, and no "
-                f"claim says what should happen. Handle None in f, or state "
-                f"{stated} if raising is intended, or change the annotation to "
-                f"{plain}")
-    if origin == "listed":
-        word = "None" if kind == ABSENT else (member or "the missing value")
-        return (f", a point the claim lists; no claim says what f should do with "
-                f"{word}. State {stated} if that is intended, or remove {word} "
-                f"from the set")
-    return (f", a value the claim admits; no claim says what f should do there. "
-            f"State {stated} if that is intended, or remove |{kind} from the "
-            f"domain")
 
 
 def unknown_reason(first: dict, relation: str, listed: set) -> str:
@@ -323,38 +286,61 @@ def mixed_sentence(param: str, ways_by_member: dict, raised_by_member: dict,
         every slot is missing (xs = [nan], [null]); at an all-NA series
         it raises TypeError instead`. `ways_by_member` is `{member:
         {behaviour: witness}}`, the witness a point as the record shows
-        it (`xs = [nan]`).
+        it (`xs = [nan]`, `x = [null], alpha = 0.5`).
     """
     drops, holes, raises, other = [], [], [], []
     for member, ways in ways_by_member.items():
         for behaviour, at in ways.items():
-            shown = at.split(" = ", 1)[1] if " = " in at else at
             if behaviour == "drops":
-                drops.append(shown)
+                drops.append(at)
             elif behaviour == "propagates":
-                holes.append(shown)
+                holes.append(at)
             elif behaviour == "raises":
-                raises.append((member, shown))
+                raises.append((member, at))
             else:
-                other.append(f"{behaviour} at {param} = {shown}")
+                other.append((member, behaviour, at))
+
+    def where(points: list) -> str:
+        # one parameter's values alone read `xs = [nan], [null]`
+        points = list(dict.fromkeys(points))
+        lone = all(pt.startswith(f"{param} = ") and pt.count(" = ") == 1
+                   for pt in points)
+        if lone:
+            return f"{param} = " + ", ".join(pt.split(" = ", 1)[1] for pt in points)
+        return "; ".join(points)
+
     clauses = []
     if drops:
-        clauses.append(f"drops a missing slot when values remain ({param} = {drops[0]})"
-                       if container_noun else f"returns a value at {param} = {drops[0]}")
+        clauses.append(f"drops a missing slot when values remain ({where(drops[:1])})"
+                       if container_noun else f"drops the hole at {where(drops[:1])}")
     if holes:
-        seen = ", ".join(dict.fromkeys(holes))
-        clauses.append(f"gives a hole back when every slot is missing ({param} = {seen})"
-                       if container_noun else f"gives a hole back at {param} = {seen}")
+        every = container_noun and all(_all_holes(pt, param) for pt in holes)
+        clauses.append(f"gives a hole back when every slot is missing ({where(holes)})"
+                       if every else f"gives a hole back at {where(holes)}")
     text = "f " + " and ".join(clauses) if clauses else ""
-    for member, shown in raises:
+    for member, at in raises:
         exc = raised_by_member.get(member) or "an exception"
-        where = (f"an all-{member} {container_noun}" if container_noun
-                 and _all_member(shown, member) else f"{param} = {shown}")
-        tail = f"at {where} it raises {exc} instead"
-        text = f"{text}; {tail}" if text else f"f {tail[3:]}"
-    for extra in other:
-        text = f"{text}; {extra}" if text else f"f {extra}"
+        spot = (f"an all-{member} {container_noun}" if container_noun
+                and _all_member(at.split(" = ", 1)[-1], member)
+                and at.count(" = ") == 1 else where([at]))
+        text = (f"{text}; at {spot} it raises {exc} instead" if text
+                else f"at {spot} f raises {exc}")
+    for member, behaviour, at in other:
+        what = f"the {member} slot" if container_noun else "the hole"
+        verb = ("converts " + what + " to an absent result" if behaviour == "converts"
+                else "introduces a missing value")
+        text = (f"{text}; at {where([at])} it {verb}" if text
+                else f"at {where([at])} f {verb}")
     return text
+
+
+def _all_holes(point: str, param: str) -> bool:
+    """Whether a witness's container for `param` holds no value at all."""
+    if not point.startswith(f"{param} = ") or point.count(" = ") != 1:
+        return False
+    inner = point.split(" = ", 1)[1].strip("[]")
+    cells = [c.strip() for c in inner.split(",") if c.strip() and c.strip() != "..."]
+    return bool(cells) and all(c in ("nan", "null", "NA", "NaT", "None") for c in cells)
 
 
 def _all_member(shown: str, member: str) -> bool:

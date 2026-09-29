@@ -166,13 +166,22 @@ class Record:
             missing = (p.meta or {}).get("mathema.missing") or {}
             pol = (p.meta or {}).get("mathema.policy")
             if pol:
-                # a policy row: the claim, why it reads this way, and the
-                # next step when it does not hold
-                line = f"  {mark} {p.statement}"
-                if pol.get("reason"):
-                    line += f"   [{pol['reason']}]"
-                if pol.get("next") and p.verdict != "holds":
-                    line += f"\n           {pol['next']}"
+                # a policy row: its name and claim, where it came from, and
+                # the next step when it does not hold; a row with no single
+                # behaviour to state reads as a sentence
+                if pol.get("sentence"):
+                    line = f"  {mark} {p.name}: {pol['sentence']}"
+                elif p.verdict.startswith(("unknown", "skipped")):
+                    line = f"  {mark} {p.name}: {p.statement}"
+                    if pol.get("reason") or p.note:
+                        line += f"\n           {pol.get('reason') or p.note}"
+                else:
+                    line = f"  {mark} {p.name}: {p.statement}"
+                    if pol.get("reason"):
+                        line += f"   [{pol['reason']}]"
+                for extra in (pol.get("said"), pol.get("next")):
+                    if extra and p.verdict not in ("holds", "proven"):
+                        line += f"\n           {extra}"
                 lines.append(line)
                 continue
             if p.verdict == "proven":
@@ -677,9 +686,10 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                                                 pseudo_infinity=pseudo_infinity)
         # what f does with a value that is not there, for every parameter
         # that admits one and no stated policy row covers
-        covered = {(pol["parameter"], pol["kind"]) for pol in
+        covered = {(pol["kind"], pol.get("parameter"), pol.get("member"),
+                    pol.get("premise") or "") for pol in
                    ((p.meta or {}).get("mathema.policy") for p in probes)
-                   if pol and pol.get("parameter")}
+                   if pol and pol.get("source") == "stated"}
         probes = probes + _policy.default_rows(
             fn, facts, parent_domain or {}, covered, _policy.row_name)
     if not all_claims:

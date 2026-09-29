@@ -76,7 +76,7 @@
 [x] docs/modes/review.md:delta                   file file run output file file run output
 [x] docs/modes/verify.md:sweep                   file run session file session file session file file session session session run file session
 [x] docs/modes/verify.md:eager                   session
-[-] docs/modes/verify.md:398
+[-] docs/modes/verify.md:402
 [x] docs/multi-function-claims.md:ratio          run output
 [x] docs/quickstart.md:falsify                   file run output run output run output
 [x] docs/quickstart.md:docstring                 file run output run output

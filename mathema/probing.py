@@ -555,8 +555,11 @@ class ExecutedMissing:
         from ._missing_policy import PolicyTable
         self.table: dict = {}
         self.said: dict = {}
-        # `{param: default}` of the function called, set by the route
+        # `{param: default}` of the function called, set by the route:
+        # `defaults` the knobs never counted as an input, `flags` every
+        # default
         self.defaults: dict = {}
+        self.flags: dict = {}
         # the first call per (parameter, member): (value, output, raised,
         # behaviour)
         self.first: dict = {}
@@ -580,6 +583,13 @@ class ExecutedMissing:
         keys = keys_of(point)
         if not keys:
             return
+        # a parameter at its own default (`scale=None` meaning "no
+        # scale") speaks for itself only when no drawn input is missing
+        at_default = {p for p, _k, _m in keys
+                      if p in self.flags and point[p] is self.flags[p]}
+        if at_default and any(p not in at_default for p, _k, _m in keys):
+            point = {p: v for p, v in point.items() if p not in at_default}
+            keys = keys_of(point)
         behaviour = classify_call(point, output, raised)
         # a hole returned in its slot spelled as another member is said
         # slot by slot: `values[1]=None returned as nan`
@@ -610,6 +620,8 @@ class ExecutedMissing:
         """File a None the function returned from present inputs, which
         its return type declares."""
         from ._missing_words import point_shown
+        from .policy import record_introduced
+        record_introduced(point)
         self.introduced = self.introduced or {"at": point_shown(point),
                                               "declared": declared}
         self.classified += 1
@@ -627,6 +639,9 @@ class ExecutedMissing:
             mixed = self.policy.mixed()
             if mixed:
                 out["mixed"] = mixed
+                raised = self.policy.mixed_raised()
+                if raised:
+                    out["raised"] = raised
         return out
 
 
@@ -643,34 +658,84 @@ class LastCall:
             try:
                 out = fn(*a, **k)
             except Exception as exc:
-                self.calls.append(("raised", type(exc).__name__))
+                self.calls.append(("raised", type(exc).__name__, a, k))
                 raise
-            self.calls.append(("returned", out))
+            self.calls.append(("returned", out, a, k))
             return out
         return recorded
 
     def reset(self) -> None:
         self.calls = []
 
+    #: `{param: default}` of the function the calls are made to
+    defaults: dict = {}
+
     def raised(self) -> bool:
-        return any(kind == "raised" for kind, _ in self.calls)
+        return any(c[0] == "raised" for c in self.calls)
 
     def outputs(self) -> list:
-        return [v for kind, v in self.calls if kind == "returned"]
+        return [c[1] for c in self.calls if c[0] == "returned"]
 
     def record(self, executed: "ExecutedMissing", point: dict) -> None:
-        """File every call since the last record at `point`, then forget
-        them."""
-        if inputs_missing(point.values()):
-            for kind, value in self.calls:
-                if kind == "raised":
-                    executed.add_call(point, raised=value)
-                else:
-                    executed.add_call(point, output=value)
+        """File every call since the last record at the arguments it was
+        given (the drawn `point` where they cannot be read by name), then
+        forget them."""
+        executed.flags = self.defaults
+        for kind, value, *given in self.calls:
+            actual = (_called_at(point, given[0], given[1], self.defaults)
+                      if len(given) == 2 else point)
+            if not inputs_missing(actual.values()):
+                continue
+            if kind == "raised":
+                executed.add_call(actual, raised=value)
+            else:
+                executed.add_call(actual, output=value)
         self.calls = []
 
 
-def signature_defaults(fn) -> dict:
+def _called_at(point: dict, args: tuple, kwargs: dict, defaults: dict) -> dict:
+    """The arguments one call was given, by the parameter names `point`
+    lists in order, each one left out at its default from `defaults`;
+    `point` itself when they do not line up."""
+    names = list(point)
+    if len(args) > len(names) or any(k not in names for k in kwargs):
+        return point
+    actual = dict(zip(names, args))
+    actual.update(kwargs)
+    actual = {p: _as_drawn(point.get(p), v) for p, v in actual.items()}
+    if len(actual) == len(names):
+        return actual
+    # a parameter the call left out took its default
+    return {**actual, **{p: defaults[p] for p in names
+                         if p not in actual and p in defaults}}
+
+
+def _as_drawn(drawn, given):
+    """An argument as the record shows it: the drawn value when the call
+    got that value converted to an array, a numpy array as a plain list
+    with the holes it stands for restored, anything else as given."""
+    from ._missing_policy import _array_list, _hole_word, _is_ndarray
+    if isinstance(drawn, dict) and type(given).__name__ == "Table":
+        return drawn
+    if not _is_ndarray(given):
+        return given
+    cells = _array_list(given)
+
+    def same(a, b) -> bool:
+        wa, wb = _hole_word(a), _hole_word(b)
+        if wa is not None or wb is not None:
+            return wa == wb or (wa is not None and wb == "nan")
+        try:
+            return bool(a == b)
+        except Exception:
+            return False
+    if isinstance(drawn, (list, tuple)) and len(drawn) == len(cells) \
+            and all(same(a, b) for a, b in zip(drawn, cells)):
+        return drawn
+    return cells
+
+
+def parameter_defaults(fn) -> dict:
     """`{param: default}` for every parameter of `fn` that has one."""
     import inspect
 
@@ -681,6 +746,23 @@ def signature_defaults(fn) -> dict:
         return {}
     return {p: q.default for p, q in sig.parameters.items()
             if q.default is not inspect.Parameter.empty}
+
+
+def signature_defaults(fn) -> dict:
+    """`{param: default}` for every parameter of `fn` that has a default
+    and no annotation: a library's knob left alone (`axis=None`), not an
+    input a claim draws. An annotated parameter's default (`scale:
+    Optional[float] = None`) is a value like any other."""
+    import inspect
+
+    from ._signatures import callable_signature
+    try:
+        sig = callable_signature(fn)
+    except (TypeError, ValueError):
+        return {}
+    return {p: q.default for p, q in sig.parameters.items()
+            if q.default is not inspect.Parameter.empty
+            and q.annotation is inspect.Parameter.empty}
 
 
 def executed_missing(kit: dict) -> "ExecutedMissing | None":
@@ -700,7 +782,7 @@ def with_executed(meta: "dict | None", executed: "ExecutedMissing | None") -> "d
     missing = dict(out.get("mathema.missing") or {})
     if extra.get("returned") and "returned" not in missing:
         missing["returned"] = extra["returned"]
-    for key in ("executed", "behaviour", "said", "mixed"):
+    for key in ("executed", "behaviour", "said", "mixed", "raised"):
         merged = {p: dict(v) for p, v in (missing.get(key) or {}).items()}
         for p, members in extra.get(key, {}).items():
             for word, said in members.items():
@@ -1505,11 +1587,17 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         if lap is not None and lap.guaranteed_remaining():
             return lap.next()
         return _sample_language(rng, bounds)
+    waited = False
     if lap is not None and lap.guaranteed_remaining() \
             and kind not in (*SEQUENCE_KINDS, "dict", "table"):
         # the sentinels a scalar's domain admits, each drawn once
-        # before any random draw
-        return lap.next()
+        # before any random draw, after the draws another parameter's
+        # sentinels take
+        from ._sampling import WAIT
+        value = lap.next()
+        if value is not WAIT:
+            return value
+        waited = True
     if kind == "dict":
         # a mapping parameter with no key list to hand (the automatic
         # type-probes): a generic dict, enough not to crash a function
@@ -1555,7 +1643,7 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     # exclusion/explicit type refinement) is handled the same way, by
     # its own dedicated sampler, also regardless of kind.
     bound_shape = _classify_bound(bounds)
-    if bound_shape in ("domain", "frozenset") and lap is not None \
+    if bound_shape in ("domain", "frozenset") and lap is not None and not waited \
             and lap.guaranteed_remaining():
         # a finite set's listed sentinels, each realised member drawn
         # once before any random draw

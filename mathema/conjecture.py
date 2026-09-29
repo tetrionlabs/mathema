@@ -5303,19 +5303,25 @@ def _admitted_container_points(ctx, facts) -> tuple:
         except Exception:
             admits_zero = False
         dims = tuple(getattr(bound, "dims", ()) or ())
+        fixed = _floor.fixed_sizes(bound)
         if kind == "table":
-            base = {c: [_synth("float", rng, bound) for _ in range(3)]
+            (length,) = _floor.sizes(bound, rng, (3, 3))
+            base = {c: [_synth("float", rng, bound) for _ in range(length)]
                     for c in _table_columns(p, ctx.cj, facts)}
             floor = _floor.table_floor(holes, absent=absent)
         elif len(dims) >= 2:
-            n_cols = 2 if len(set(dims[:2])) == 1 else 3
+            square = len(set(dims[:2])) == 1
+            n_rows, n_cols = _floor.sizes(bound, rng, (2, 2) if square else (2, 3), 2)
+            if not square and fixed[1:2] == (None,):
+                n_cols = 3
             base = [[_synth("float", rng, bound) for _ in range(n_cols)]
-                    for _ in range(2)]
+                    for _ in range(n_rows)]
             floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
         else:
-            base = [_synth("float", rng, bound) for _ in range(3)]
-            floor = _floor.vector_floor(holes, admits_zero, length_free=True,
-                                        absent=absent)
+            (length,) = _floor.sizes(bound, rng, (3, 3))
+            base = [_synth("float", rng, bound) for _ in range(length)]
+            floor = _floor.vector_floor(holes, admits_zero,
+                                        length_free=not any(fixed), absent=absent)
         for item in floor:
             value = item(base)
             if value is None:
@@ -5413,6 +5419,7 @@ def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
                          realise_sentinel)
     from .probing import _SpecialCycle
     out: dict = {}
+    waiting = 0
     for p, kind in kinds.items():
         bound = cj_domain.get(p)
         if bound is None:
@@ -5438,7 +5445,14 @@ def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
         values = [v for s in listed
                   for v in realise_sentinel(s, policy.members, policy.absence)]
         if values:
-            out[p] = _SpecialCycle(rng, values=[], first=values)
+            # each parameter's sentinels come after the ones before it,
+            # so one missing input is drawn at a time
+            from ._sampling import WAIT
+            if _is_enumerated(dom):
+                out[p] = _SpecialCycle(rng, values=[], first=values)
+            else:
+                out[p] = _SpecialCycle(rng, values=[], first=[WAIT] * waiting + values)
+                waiting += len(values)
     return out
 
 
@@ -5556,25 +5570,23 @@ def _missing_origin(param: str, kind: str, written: dict, resolution: dict) -> s
 
 def _missing_told(missing: dict, written: dict, resolution: dict, fn) -> str:
     """Intent:
-        One sentence per missing input the row executed, what the
-        function did there and, where that is not what the type leads a
-        reader to expect, the claim or the edit that settles it.
+        One sentence per missing input the row executed: what the
+        function did there. What to do about it is said once, on the
+        policy row.
     """
-    from ._missing_words import kind_of, mixed_sentence, next_step
+    from ._missing_words import mixed_sentence
     said = missing.get("said") or {}
     behaviour = missing.get("behaviour") or {}
-    executed = missing.get("executed") or {}
     mixed = missing.get("mixed") or {}
+    raised_as = missing.get("raised") or {}
     parts = []
     returned = missing.get("returned") or {}
     if returned.get("absent") == "introduces":
         parts.append(f"f returns None at {returned.get('at')}, which its return type "
                      f"{returned.get('declared')} allows; that point has no value to "
-                     f"compare, so it is recorded, not judged (state `absent(f) "
-                     f"introduces` to make this explicit)")
+                     f"compare, so it is recorded, not judged")
     for p, members in said.items():
         seen = behaviour.get(p, {})
-        hole_behaviours = {b for m, b in seen.items() if kind_of(m) == "missing"}
         slot_type = getattr(resolution.get(p), "slot_type", "") or ""
         container = slot_type not in ("", "float", "complex", "datetime", "int",
                                       "bool", "str", "object", "unannotated")
@@ -5583,23 +5595,13 @@ def _missing_told(missing: dict, written: dict, resolution: dict, fn) -> str:
         if mixed_members:
             # a parameter treated more than one way is said once, by
             # behaviour, the member that differs named as the exception
-            raised_by = {m: e[len("raised "):] for m, e in executed.get(p, {}).items()
-                         if e.startswith("raised ")}
-            parts.append(mixed_sentence(p, mixed_members, raised_by,
+            parts.append(mixed_sentence(p, mixed_members, raised_as.get(p, {}),
                                         _CONTAINER_NOUNS.get(slot_type, "container")
                                         if container else None))
         for member, sentence in members.items():
-            b = seen.get(member)
-            kind = "missing" if container and member != "None" else kind_of(member)
-            if b == "mixed":
+            if seen.get(member) == "mixed":
                 continue
-            entry = executed.get(p, {}).get(member, "")
-            raised = entry[len("raised "):] if entry.startswith("raised ") else None
-            narrow = member if (kind == "missing" and len(hole_behaviours) > 1) else None
-            origin = _missing_origin(p, kind, written, resolution)
-            step = next_step(kind, p, narrow, b or "", raised, origin,
-                             _annotation_words(fn, p))
-            parts.append(f"{sentence}{step}")
+            parts.append(sentence)
     return "; ".join(parts)
 
 
@@ -7309,6 +7311,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     from .probing import signature_defaults
     executed_record.defaults = signature_defaults(fn)
     f_call = LastCall()
+    from .probing import parameter_defaults
+    f_call.defaults = parameter_defaults(fn)
     from ._missing_words import declared_optional_return
     declared_return = declared_optional_return(fn)
     # a membership whose right-hand side names a missing value asks
@@ -7321,6 +7325,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         for _axis in range(resolver.shapes[_p].ndim if _p in resolver.shapes else 0):
             axis_users.setdefault(resolver.key(_p, _axis), set()).add(_p)
     containers = {}
+    import random as _random_mod
+    from ._sampling import _RNG_SEED
+    implied_rng = _random_mod.Random(_RNG_SEED + 1)
     for _p, _k in kinds.items():
         # a length is the floor's to choose only when no other parameter
         # shares its axis and the claim names no number for it
@@ -7484,8 +7491,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return v
 
     fn_tagged = f_call.wrap(_tagged(fn_call, "f", inject=call_pins))
-    bound_tagged = {name: f_call.wrap(_tagged(v, name))
-                    for name, v in bound_funcs.items()}
+    bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
     # the lengths the samples inside the premise region actually had,
     # per sequence parameter, for the sampling note
     sequence_params = [p for p, k in kinds.items() if k in SEQUENCE_KINDS]
@@ -7611,7 +7617,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if p in containers and isinstance(v, (list, tuple)):
                     # the floor's degenerate containers first, then
                     # draws carrying holes
-                    v = containers[p].next(list(v), rng)
+                    # a binding the claim left to the signature draws its
+                    # holes from a stream of its own, so the values the
+                    # claim draws are the ones it drew without them
+                    v = containers[p].next(list(v), implied_rng if p in ctx.implied
+                                           else rng)
                 env[p] = v
                 args.append(v)
             for p, draw in premise_draws.items():

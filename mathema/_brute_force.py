@@ -168,8 +168,10 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
     wanted = cj.relation == "in"
     checked = 0
     executed, f_call = ExecutedMissing(), LastCall()
+    from .probing import parameter_defaults
+    f_call.defaults = parameter_defaults(fn)
     recorded = f_call.wrap(fn)
-    bound = {name: f_call.wrap(g) for name, g in (bound_funcs or {}).items()}
+    bound = dict(bound_funcs or {})
     for combo in itertools.product(*(grid[n] for n in names)):
         point = dict(zip(names, combo))
         env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **bound,
@@ -245,7 +247,9 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
         return None
     checked = 0
     executed, f_call = ExecutedMissing(), LastCall()
-    bound = {name: f_call.wrap(g) for name, g in (bound_funcs or {}).items()}
+    from .probing import parameter_defaults
+    f_call.defaults = parameter_defaults(fn)
+    bound = dict(bound_funcs or {})
     for combo in itertools.product(*(grid[n] for n in names)):
         point = dict(zip(names, combo))
         raised: list = []

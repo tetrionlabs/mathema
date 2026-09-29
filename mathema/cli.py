@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
 from typing import NoReturn
 
@@ -185,6 +184,7 @@ def _check_rows(args) -> list[dict]:
                      "claim_rows": [claim_row(p, accepted_risk=accepted)
                                     for p in rec.probes],
                      "problems": problems,
+                     "policy": list(report.unaccounted),
                      **({"hints": hints} if hints else {})})
     return rows
 
@@ -262,6 +262,8 @@ def _format_check(rows: list[dict], fmt: str) -> str:
         line = (f'{state:4} {r["name"]}: {tier_word(r["tier"])}; '
                 f'claims {r["coverage"]} '
                 f'adjudicated ({summary_counts(r)})')
+        for clause in r.get("policy") or ():
+            line += f"; {clause} (mathema claims {r['name']} lists it)"
         if r["problems"]:
             line += "  <- " + "; ".join(r["problems"])
         lines.append(line)
@@ -1917,8 +1919,8 @@ def _exclusive_group(claim_name: str) -> str | None:
 def _suggested_policies(fn, declared_rows: list) -> list:
     """The policy rows mathema writes for a function that its declared
     claims do not state: each parameter's default, derived or observed
-    behaviour at a value that is not there, decided on the declared
-    claims' own calls."""
+    behaviour at a value that is not there, and each raise no claim
+    accounts for, decided on the declared claims' own calls."""
     import mathema
 
     from .spec import entry_claims
@@ -1926,13 +1928,47 @@ def _suggested_policies(fn, declared_rows: list) -> list:
     rec = mathema.check(fn, claims=claims)
     return [p for p in rec.probes
             if (p.meta or {}).get("mathema.policy")
-            and (p.meta or {}).get("mathema.surface") == "mathema"
-            and (p.meta["mathema.policy"].get("behaviour"))]
+            and (p.meta or {}).get("mathema.surface") == "mathema"]
+
+
+def _policy_state(p) -> str:
+    """`confirmed` (holds or proven, written by --write), `contradicted`
+    (a row with a word the code does not follow), or `unaccounted` (a
+    raise or a mixed case with no word to write)."""
+    if p.verdict in ("holds", "proven"):
+        return "confirmed"
+    if (p.meta or {}).get("mathema.policy", {}).get("sentence"):
+        return "unaccounted"
+    return "contradicted"
+
+
+def _policy_line(p) -> str:
+    """One policy row as the record prints it, indented for a listing."""
+    pol = p.meta["mathema.policy"]
+    mark = {"holds": "holds  ", "proven": "proven ",
+            "falsified": "FALSIFY"}.get(p.verdict, p.verdict)
+    if pol.get("sentence"):
+        line = f"    {mark} {p.name}: {pol['sentence']}"
+    else:
+        line = f"    {mark} {p.name}: {p.statement}   [{pol.get('reason')}]"
+    for extra in (pol.get("said"), pol.get("next")):
+        if extra and p.verdict not in ("holds", "proven"):
+            line += f"\n             {extra}"
+    return line
+
+
+def _policy_note(p) -> str:
+    """The note a written policy row carries: where it came from and what
+    confirmed it, as its bracket says it, without the advice to write it."""
+    reason = p.meta["mathema.policy"].get("reason") or ""
+    return reason.split(". Keep it by writing", 1)[0].split(". Annotate ", 1)[0]
 
 
 def _write_policies(args, declared_rows: list, policies: list) -> int:
-    """Write the suggested policy rows into the declared claims file, each
-    with the source it came from."""
+    """Write the confirmed policy rows into the declared claims file, each
+    under the name the record prints and with the note saying where it
+    came from; a contradicted row and a raise no claim accounts for are
+    left out, and the write line says so."""
     import yaml
     path = os.path.join(args.root or ".", "claims", "policies.claims.yaml")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1943,19 +1979,54 @@ def _write_policies(args, declared_rows: list, policies: list) -> int:
     have = {c.get("statement") for c in declared_rows}
     rows = doc.setdefault(args.key, {}).setdefault("claims", [])
     have |= {c.get("statement") for c in rows}
-    written = 0
+    names = {c.get("name") for c in declared_rows} | {c.get("name") for c in rows}
+    written: list = []
     for p in policies:
-        if p.statement in have:
+        if _policy_state(p) != "confirmed" or p.statement in have or p.name in names:
             continue
-        pol = p.meta["mathema.policy"]
-        rows.append({"name": re.sub(r"\W+", "_", p.name).strip("_"), "statement": p.statement,
-                     "note": f"source: {pol.get('source')}"})
-        written += 1
-    with open(path, "w") as fh:
-        yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
-    print(f"{args.key}: wrote {written} policy claim(s) to "
-          f"{os.path.relpath(path, args.root or '.')}")
+        rows.append({"name": p.name, "statement": p.statement, "note": _policy_note(p)})
+        written.append(p.name)
+    if not rows:
+        doc.pop(args.key, None)
+    rel = os.path.relpath(path, args.root or ".")
+    if written:
+        with open(path, "w") as fh:
+            yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
+    left = [p for p in policies if _policy_state(p) != "confirmed"]
+    contradicted = [p.name for p in left if _policy_state(p) == "contradicted"]
+    unaccounted = [p.name for p in left if _policy_state(p) == "unaccounted"]
+    head = (f"{args.key}: wrote {len(written)} policy row"
+            f"{'' if len(written) == 1 else 's'} to {rel}"
+            + (f": {', '.join(written)}" if written else ""))
+    why = []
+    if contradicted:
+        why.append(f"{len(contradicted)} the code contradicts ({', '.join(contradicted)}; "
+                   f"choose the word, then state it)")
+    if unaccounted:
+        why.append(f"{len(unaccounted)} with no word to write ({', '.join(unaccounted)}; "
+                   f"state what f should do, or change f)")
+    print(head + (f". Left out {' and '.join(why)}" if why else ""))
     return 0
+
+
+def _list_policies(key: str, policies: list) -> None:
+    """The policy rows of one function, grouped by state."""
+    params = list(dict.fromkeys(
+        (p.meta["mathema.policy"].get("parameter") or "the result") for p in policies))
+    n = len(policies)
+    print(f"{key}: {n} policy row{'' if n == 1 else 's'} about {', '.join(params)}")
+    groups = (("confirmed", f"confirmed by the code (mathema claims {key} --write "
+                            f"writes these):"),
+              ("contradicted", "contradicted by the code (choose the word, or change "
+                               "the code; --write leaves these out):"),
+              ("unaccounted", "a raise or a case no claim accounts for (state it, or "
+                              "change f; --write leaves these out):"))
+    for state, title in groups:
+        rows = [p for p in policies if _policy_state(p) == state]
+        if rows:
+            print(f"  {title}")
+            for p in rows:
+                print(_policy_line(p))
 
 
 def cmd_claims(args) -> int:
@@ -1991,11 +2062,7 @@ def cmd_claims(args) -> int:
                 print(f"  - {c.get('name')}: {c.get('statement') or c.get('law')}"
                       + (f"  [route {c['route']}]" if c.get("route") else ""))
         if policies:
-            print(f"{args.key}: {len(policies)} suggested policy claim(s) "
-                  f"(write them with: mathema claims {args.key} --write)")
-            for p in policies:
-                pol = p.meta["mathema.policy"]
-                print(f"  - {p.statement}  [{pol.get('reason')}]")
+            _list_policies(args.key, policies)
         return 0
 
     suggestions = _suggest(fn, key=args.key, root=args.root)
