@@ -10,8 +10,17 @@ import textwrap
 
 import pytest
 
-import mathema
+from mathema.analysis import analyze_source
 from mathema.conjecture import check_conjectures, claim
+from mathema.probing import probe
+
+
+def _battery(fn, text=None):
+    """The built-in battery's probes for `fn`, over a claim's bindings
+    when a claim is given: the `callable` row is present only when the
+    call could not be made."""
+    domain = claim(text).domain if text else None
+    return probe(fn, analyze_source(fn), domain=domain)
 
 
 def _load(tmp_path, name, body):
@@ -38,9 +47,8 @@ def test_a_matrix_marker_with_a_numpy_runtime_is_drawn_at_its_size(tmp_path):
             SEEN.append((type(A).__name__, tuple(np.shape(A))))
             return float(np.trace(A @ A.T))
     ''')
-    rec = mathema.check(m.gram, claims=["f(A) >= 0"])
-    # the battery reports the call only when it could not be made
-    assert not [p.note for p in rec.probes if p.name == "callable"]
+    probes = _battery(m.gram)
+    assert not [p.note for p in probes if p.name == "callable"]
     assert set(m.SEEN) == {("ndarray", (30, 15))}, sorted(set(m.SEEN))
 
 
@@ -56,9 +64,8 @@ def test_a_matrix_marker_on_nested_lists_reaches_the_callable_probe(tmp_path):
             SEEN.append((len(A), len(A[0])))
             return float(sum(A[i][i] for i in range(15)))
     ''')
-    rec = mathema.check(m.diag_sum, claims=["f(A) == f(A)"])
-    # the battery reports the call only when it could not be made
-    assert not [p.note for p in rec.probes if p.name == "callable"]
+    probes = _battery(m.diag_sum)
+    assert not [p.note for p in probes if p.name == "callable"]
     assert set(m.SEEN) == {(30, 15)}, sorted(set(m.SEEN))
 
 
@@ -77,9 +84,8 @@ def test_a_vector_marker_with_a_pandas_runtime_is_drawn_at_its_length(tmp_path):
             SEEN.append((type(xs).__name__, len(xs)))
             return float(xs.sum())
     ''')
-    rec = mathema.check(m.total, claims=["f(xs) == f(xs)"])
-    # the battery reports the call only when it could not be made
-    assert not [p.note for p in rec.probes if p.name == "callable"]
+    probes = _battery(m.total)
+    assert not [p.note for p in probes if p.name == "callable"]
     assert set(m.SEEN) == {("Series", 30)}, sorted(set(m.SEEN))
 
 
@@ -116,9 +122,8 @@ def test_a_fixed_length_binding_reaches_a_pandas_series_parameter(tmp_path):
             SEEN.append((type(xs).__name__, len(xs)))
             return float(xs.sum())
     ''')
-    rec = mathema.check(m.total, claims=["for xs in [0, 1]^30, f(xs) >= 0"])
-    # the battery reports the call only when it could not be made
-    assert not [p.note for p in rec.probes if p.name == "callable"]
+    probes = _battery(m.total, "for xs in [0, 1]^30, f(xs) >= 0")
+    assert not [p.note for p in probes if p.name == "callable"]
     assert set(m.SEEN) == {("Series", 30)}, sorted(set(m.SEEN))
 
 

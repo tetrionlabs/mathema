@@ -66,23 +66,23 @@ def test_shape_marker_falsified_for_wrong_implementation():
     assert "expected shape" in shape.counterexample
 
 
-def test_shape_enforced_flags_matmul_accepting_a_mismatched_n():
+def test_dimensions_enforced_flags_matmul_accepting_a_mismatched_n():
     # a real, confirmed finding, not a hypothetical: neither matmul nor
     # bad_matmul guards against a's column count disagreeing with b's
     # row count; one truth, no mode: a declared shared dim the code
     # silently accepts a mismatch on is a witnessed policy violation
-    probe = next(p for p in type_probes(matmul) if p.name == "shape_enforced")
+    probe = next(p for p in type_probes(matmul) if p.name == "dimensions_enforced")
     assert probe.verdict == "falsified"
     assert probe.n > 0
     assert probe.counterexample
 
 
-def test_shape_enforced_absent_when_no_dim_is_shared_across_parameters():
+def test_dimensions_enforced_absent_when_no_dim_is_shared_across_parameters():
     def single_vector(x: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
         return list(x)
 
     names = [p.name for p in type_probes(single_vector)]
-    assert "shape_enforced" not in names
+    assert "dimensions_enforced" not in names
 
 
 def test_no_markers_produces_no_type_probes():

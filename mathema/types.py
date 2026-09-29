@@ -419,8 +419,9 @@ def _call(fn, sig, args: dict):
         else fn(*[args[p] for p in sig.parameters if p in args])
 
 
-def _shape_enforced_probe(fn, sig, param_dims: dict, names: set,
-                          rng: random.Random) -> Probe | None:
+def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: set,
+                               rng: random.Random,
+                               fixed: "dict | None" = None) -> Probe | None:
     """Does the real function guard against mismatched input shapes, the
     same way domain_enforced() checks whether a scalar guard exists,
     not "is the output the right shape for consistent input" (type_probes'
@@ -431,7 +432,8 @@ def _shape_enforced_probe(fn, sig, param_dims: dict, names: set,
     meaningful for a dim shared by two or more parameters (`Shape("m",
     "n")`/`Shape("n", "p")` sharing `n`, say); there's nothing to
     mismatch a single parameter's own dim against. `None` if no dim is
-    shared this way."""
+    shared this way. `fixed` holds the names a claim binding fixes, at
+    their sizes."""
     shared = sorted(n for n in names
                     if sum(1 for dims in param_dims.values() if n in dims) > 1)
     if not shared:
@@ -444,6 +446,7 @@ def _shape_enforced_probe(fn, sig, param_dims: dict, names: set,
         candidates = [p for p, dims in param_dims.items() if dim in dims]
         for _ in range(_SHAPE_MISMATCH_TRIALS):
             sizes = {n: rng.randint(1, 4) for n in names}
+            sizes.update(fixed or {})
             bad_param = rng.choice(candidates)
             bad_sizes = dict(sizes)
             bad_sizes[dim] = sizes[dim] + 1 + rng.randint(0, 2)
@@ -461,18 +464,72 @@ def _shape_enforced_probe(fn, sig, param_dims: dict, names: set,
             accepted_examples.append(f"{bad_param}[{dim}]={bad_sizes[dim]} "
                                      f"vs {dim}={sizes[dim]} elsewhere")
     if rejected == checked:
-        return Probe("shape_enforced", stmt, "holds", n=checked)
+        return Probe("dimensions_enforced", stmt, "holds", n=checked)
     # one truth, no mode: a declared shared dim the code silently
     # accepts a mismatch on is a witnessed policy violation
-    return Probe("shape_enforced", stmt, "falsified", n=checked,
+    return Probe("dimensions_enforced", stmt, "falsified", n=checked,
                  counterexample="; ".join(accepted_examples[:3]),
                  note="silently accepting a shape mismatch violates the "
                       "declared shared dims")
 
 
-def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS) -> list[Probe]:
+def _size_enforced_probe(fn, sig, param_dims: dict, names: set,
+                         rng: random.Random,
+                         fixed: "dict | None" = None) -> Probe | None:
+    """Does the real function reject a value of the wrong FIXED size (a
+    parameter marked `Mat(30, 15)`, or bound to `^30`, called with one
+    axis a little larger), the fixed-size counterpart of
+    `_dimensions_enforced_probe`. Every other argument is drawn at its
+    declared size. `None` when no parameter fixes an axis."""
+    from ._shapes import expected, words
+    targets = {p: [k for k, d in enumerate(dims)
+                   if isinstance(d, int) and not isinstance(d, bool)]
+               for p, dims in param_dims.items()}
+    targets = {p: axes for p, axes in targets.items() if axes}
+    if not targets:
+        return None
+    stated = ", ".join(f"{p} ({expected(param_dims[p])})" for p in targets)
+    stmt = (f"{fn.__name__}(" + ", ".join(param_dims) + ") rejects a "
+            f"wrong fixed size on {stated}")
+    rejected, accepted_examples, checked = 0, [], 0
+    for p, axes in targets.items():
+        for axis in axes:
+            for _ in range(_SHAPE_MISMATCH_TRIALS):
+                sizes = {n: rng.randint(1, 4) for n in names}
+                sizes.update(fixed or {})
+                bumped = tuple(d + 1 + rng.randint(0, 2) if k == axis else d
+                               for k, d in enumerate(param_dims[p]))
+                args = {q: _synth_nested(bumped if q == p else dims, sizes, rng)
+                        for q, dims in param_dims.items()}
+                checked += 1
+                try:
+                    result = _call(fn, sig, args)
+                except Exception:
+                    rejected += 1
+                    continue
+                if result is None:
+                    rejected += 1
+                    continue
+                tried = tuple(sizes[d] if isinstance(d, str) else d
+                              for d in bumped)
+                accepted_examples.append(
+                    f"{p} {'is' if len(tried) == 2 else 'has'} {words(tried)} "
+                    f"where the shape fixes {expected(param_dims[p])}")
+    if rejected == checked:
+        return Probe("size_enforced", stmt, "holds", n=checked)
+    return Probe("size_enforced", stmt, "falsified", n=checked,
+                 counterexample="; ".join(accepted_examples[:3]),
+                 note="silently accepting a wrong fixed size violates the "
+                      "declared shape")
+
+
+def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS,
+                domain: "dict | None" = None) -> list[Probe]:
     """Structural claims inferred from Shape markers, Annotated hints or
-    see shapes_from_signature(). Two checks:
+    see shapes_from_signature(), and from the spaces the claims being
+    checked bind (`domain`, each parameter's bound: `for A in
+    R^(30,15)` names A's axes and fixes their sizes the way a marker
+    would, and a fixed size in it fixes a marker's name). Three checks:
 
     - `shape`: synthesizes inputs whose declared dims agree on shared
       symbolic names within a trial, calls the real function, and checks
@@ -481,28 +538,42 @@ def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS) -> list[Probe]:
       input dims, sound for an elementwise transform, meaningless for
       something like a clustering function whose real output size
       depends on the data (how many clusters it actually converges to),
-      not just the input's declared length.
-    - `shape_enforced`: the input-side check that assumption's failure
-      mode motivates instead, does the function reject a *mismatched*
-      input shape (raise, or return `None`) rather than silently
-      proceeding on data its own declared contract says it shouldn't
-      accept. Whether the function's real output shape is data-dependent
-      or not, this is always well-defined: either it guards its input or
-      it doesn't. See _shape_enforced_probe().
+      not just the input's declared length. Needs a return marker.
+    - `dimensions_enforced`: the input-side check that assumption's
+      failure mode motivates instead, does the function reject a
+      *mismatched* input shape (raise, or return `None`) rather than
+      silently proceeding on data its own declared contract says it
+      shouldn't accept. Whether the function's real output shape is
+      data-dependent or not, this is always well-defined: either it
+      guards its input or it doesn't. See _dimensions_enforced_probe().
+    - `size_enforced`: does the function reject a value of the wrong
+      fixed size, for a parameter whose marker or binding fixes an axis.
+      See _size_enforced_probe().
 
-    Empty if the signature has no Shape markers at all; this is purely
-    additive, never a claim about a function that never opted in."""
-    shapes = shapes_from_signature(fn)
-    if "return" not in shapes:
-        return []
+    Empty if neither the signature nor a binding shapes a parameter;
+    this is purely additive, never a claim about a function that never
+    opted in."""
+    from ._shapes import dims_of, fixed_size
+    shapes = dict(shapes_from_signature(fn))
     try:
         sig = callable_signature(fn)
     except (TypeError, ValueError):
         return []
+    fixed_by_binding: dict = {}
+    for p in sig.parameters:
+        binding = dims_of((domain or {}).get(p))
+        if not binding:
+            continue
+        if p not in shapes:
+            shapes[p] = Shape(*(int(d) if d.isdigit() else d for d in binding))
+        elif len(shapes[p].dims) == len(binding):
+            for md, bd in zip(shapes[p].dims, binding):
+                if isinstance(md, str) and fixed_size(bd) is not None:
+                    fixed_by_binding[md] = fixed_size(bd)
     param_dims = {p: shapes[p].dims for p in sig.parameters if p in shapes}
-    return_dims = shapes["return"].dims
     if not param_dims:
         return []
+    return_dims = shapes["return"].dims if "return" in shapes else None
     # each call realises the drawn nested lists as the parameters'
     # runtime types and observes the result as plain nested lists
     from types import SimpleNamespace
@@ -511,33 +582,43 @@ def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS) -> list[Probe]:
     fn = calling(fn, SimpleNamespace(runtime_types=detect_parameters(fn)))
 
     names = {d for dims in param_dims.values() for d in dims if isinstance(d, str)}
-    names |= {d for d in return_dims if isinstance(d, str)}
+    names |= {d for d in (return_dims or ()) if isinstance(d, str)}
     rng = random.Random(_RNG_SEED)
-    stmt = (f"shape({fn.__name__}(" + ", ".join(param_dims) + f")) == "
-            f"{return_dims}, for shared dims {sorted(names) or 'none'}")
-
-    checked, cx = 0, None
-    for _ in range(trials):
-        sizes = {n: rng.randint(1, 4) for n in names}
-        args = {p: _synth_nested(dims, sizes, rng) for p, dims in param_dims.items()}
-        expected = tuple(sizes[d] if isinstance(d, str) else d for d in return_dims)
-        try:
-            result = _call(fn, sig, args)
-        except Exception:
-            continue
-        checked += 1
-        actual = _actual_shape(result)
-        if actual != expected:
-            cx = f"dims={sizes}: expected shape {expected}, got {actual}"
-            break
-    if cx is not None:
-        probes = [Probe("shape", stmt, "falsified", n=checked, counterexample=cx)]
-    elif checked == 0:
-        probes = [Probe("shape", stmt, "skipped", note="no evaluable inputs")]
-    else:
-        probes = [Probe("shape", stmt, "holds", n=checked)]
-
-    enforced = _shape_enforced_probe(fn, sig, param_dims, names, rng)
-    if enforced is not None:
-        probes.append(enforced)
+    probes: list[Probe] = []
+    if return_dims is not None:
+        stmt = (f"shape({fn.__name__}(" + ", ".join(param_dims) + f")) == "
+                f"{return_dims}, for shared dims {sorted(names) or 'none'}")
+        checked, cx = 0, None
+        for _ in range(trials):
+            sizes = {n: rng.randint(1, 4) for n in names}
+            sizes.update(fixed_by_binding)
+            args = {p: _synth_nested(dims, sizes, rng)
+                    for p, dims in param_dims.items()}
+            expected = tuple(sizes[d] if isinstance(d, str) else d
+                             for d in return_dims)
+            try:
+                result = _call(fn, sig, args)
+            except Exception:
+                continue
+            checked += 1
+            actual = _actual_shape(result)
+            if actual != expected:
+                cx = f"dims={sizes}: expected shape {expected}, got {actual}"
+                break
+        if cx is not None:
+            probes.append(Probe("shape", stmt, "falsified", n=checked,
+                                counterexample=cx))
+        elif checked == 0:
+            probes.append(Probe("shape", stmt, "skipped",
+                                note="no evaluable inputs"))
+        else:
+            probes.append(Probe("shape", stmt, "holds", n=checked))
+        enforced = _dimensions_enforced_probe(fn, sig, param_dims, names, rng,
+                                              fixed_by_binding)
+        if enforced is not None:
+            probes.append(enforced)
+    sized = _size_enforced_probe(fn, sig, param_dims, names, rng,
+                                 fixed_by_binding)
+    if sized is not None:
+        probes.append(sized)
     return probes

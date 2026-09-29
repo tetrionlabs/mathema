@@ -186,10 +186,13 @@ dot([1, 2], [3])   # ValueError: dot: dim(x, 0)=2 violates the declared premise 
 ```
 
 `@enforce_domain` guards a parameter's VALUE domain; `@enforce_
-dimensions` guards the relations between argument SHAPES. Neither
-makes a claim true by fiat: each makes the function reject inputs the
-claim was never about, so a premise and its runtime guard are one
-precondition stated once.
+dimensions` guards the relations between argument SHAPES, and the
+shapes themselves: the rank and fixed sizes a marker or a binding
+states, a shared dimension name agreeing across the arguments, and the
+result against the return marker (see [shape markers](authoring.md#shape-markers-and-their-shorthand)).
+Neither makes a claim true by fiat: each makes the function reject
+inputs the claim was never about, so a premise and its runtime guard
+are one precondition stated once.
 
 Beyond shape, a matrix parameter can declare its STRUCTURE (symmetric,
 positive definite, and so on) and state linear-algebra identities over

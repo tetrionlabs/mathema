@@ -181,18 +181,44 @@ def shape_text(shape: tuple) -> str:
     return "(" + ", ".join(str(n) for n in shape) + ("," if len(shape) == 1 else "") + ")"
 
 
-def describe(shape: "tuple | None") -> str:
-    """A value's shape in words, for a message: "has length 5", "is 3
-    by 4", "has shape (2, 3, 4)", "is a number", "has no shape"."""
+def words(shape: "tuple | None") -> str:
+    """A shape in words: "length 5", "3 by 4", "shape (2, 3, 4)", "a
+    number" for `()`, "no shape" for None."""
     if shape is None:
-        return "has no shape"
+        return "no shape"
     if shape == ():
-        return "is a number"
+        return "a number"
     if len(shape) == 1:
-        return f"has length {shape[0]}"
+        return f"length {shape[0]}"
     if len(shape) == 2:
-        return f"is {shape[0]} by {shape[1]}"
-    return f"has shape {shape_text(shape)}"
+        return f"{shape[0]} by {shape[1]}"
+    return f"shape {shape_text(shape)}"
+
+
+def describe(shape: "tuple | None") -> str:
+    """A value's shape as a predicate: "has length 5", "is 3 by 4",
+    "has shape (2, 3, 4)", "is a number", "has no shape"."""
+    verb = "is" if shape == () or (shape is not None and len(shape) == 2) else "has"
+    return f"{verb} {words(shape)}"
+
+
+def must(dims: tuple, sizes: "dict | None" = None) -> str:
+    """What a value of `dims` must be, after "so x must": "have length
+    4", "be 4 by p", "have shape (2, 3, 4)"."""
+    verb = "be" if len(dims) == 2 else "have"
+    return f"{verb} {expected(dims, sizes)}"
+
+
+def marker_text(dims: tuple) -> str:
+    """A shape as a marker is written: `Vec("n")`, `Mat("m", "n")`,
+    `Mat(30, 15)`, `Shape("a", "b", "c")`."""
+    shown = ", ".join(str(d) if fixed_size(d) is not None else f'"{d}"'
+                      for d in dims)
+    if len(dims) == 1:
+        return f"Vec({shown})"
+    if len(dims) == 2:
+        return f"Mat({shown})"
+    return f"Shape({shown})"
 
 
 def expected(dims: tuple, sizes: "dict | None" = None) -> str:
@@ -355,3 +381,120 @@ def premise_against_fixed_dim(premises, domain: dict) -> "tuple | None":
         return (param, f"dim({param}, {axis}) {relation} {shown}",
                 axis_text(axis, size, len(dims)))
     return None
+
+
+# --- a function's dimensions, enforced at entry and at exit ----------------
+
+@dataclasses.dataclass(frozen=True)
+class DimensionPlan:
+    """The dimensions a function declares: per parameter its dimension
+    tokens and the words naming where they come from (`the shape
+    Mat("m", "n")`, `the domain R^(30,15)`), and the return marker's
+    tokens, when there is one."""
+    params: dict
+    result: "tuple | None" = None
+    result_source: "str | None" = None
+
+
+def dimension_plan(shapes: dict, domains: dict) -> DimensionPlan:
+    """Intent:
+        The plan for a function from its `Shape` markers (`shapes`,
+        keyed by parameter and `"return"`) and the spaces its declared
+        claims bind (`domains`, keyed by parameter). A marker names the
+        axes; a binding on the same parameter fixes any axis it writes
+        as a number; a binding alone names the axes itself.
+
+    Raises:
+        ValueError when a marker and a binding disagree on a
+        parameter's rank.
+    """
+    params: dict = {}
+    for name in sorted(set(shapes) | set(domains)):
+        if name == "return":
+            continue
+        marker = (tuple(str(d) for d in shapes[name].dims)
+                  if name in shapes else ())
+        binding = dims_of(domains.get(name))
+        if marker and binding:
+            if len(marker) != len(binding):
+                raise ValueError(
+                    f"{name}: the claim gives it {len(binding)} dimension"
+                    f"{'s' if len(binding) != 1 else ''} "
+                    f"({space_text(domains[name])}) but its shape marker "
+                    f"declares {len(marker)} ({marker_text(marker)})")
+            dims = tuple(b if fixed_size(b) is not None else m
+                         for m, b in zip(marker, binding))
+            source = (f"the shape {marker_text(marker)} with the domain "
+                      f"{space_text(domains[name])}")
+        elif marker:
+            dims, source = marker, f"the shape {marker_text(marker)}"
+        elif binding:
+            dims, source = binding, f"the domain {space_text(domains[name])}"
+        else:
+            continue
+        params[name] = (dims, source)
+    result = (tuple(str(d) for d in shapes["return"].dims)
+              if "return" in shapes else None)
+    return DimensionPlan(params, result,
+                         marker_text(result) if result is not None else None)
+
+
+def entry_problem(plan: DimensionPlan, arguments: dict) -> tuple:
+    """Intent:
+        `(problem, bound)`: the first argument whose shape breaks the
+        plan, worded for the caller ("x has length 5; a is 3 by 4, so x
+        must have length 4"; "A is 2 by 3; the shape Mat(30, 15)
+        expects 30 by 15"), or None; and the sizes this call bound to
+        each dimension name, `{name: (size, param, shape)}`.
+    """
+    bound: dict = {}
+    for p, (dims, source) in plan.params.items():
+        if p not in arguments:
+            continue
+        shape = observed_shape(arguments[p])
+        if shape is None or len(shape) != len(dims):
+            return f"{p} {describe(shape)}; {source} expects {expected(dims)}", bound
+        for n, d in zip(shape, dims):
+            size = fixed_size(d)
+            if size is not None:
+                if n != size:
+                    return (f"{p} {describe(shape)}; {source} expects "
+                            f"{expected(dims)}", bound)
+                continue
+            if d in bound and bound[d][0] != n:
+                other_n, other_p, other_shape = bound[d]
+                sizes = {k: v[0] for k, v in bound.items()}
+                return (f"{p} {describe(shape)}; {other_p} "
+                        f"{describe(other_shape)}, so {p} must "
+                        f"{must(dims, sizes)}", bound)
+            bound.setdefault(d, (n, p, shape))
+    return None, bound
+
+
+def exit_problem(plan: DimensionPlan, bound: dict, result,
+                 fn_name: str) -> "str | None":
+    """Intent:
+        The words for a result whose shape breaks the return marker with
+        the names this call bound ("matvec returned length 4; the return
+        shape Vec("m") with m = 3 expects length 3"), or None when the
+        result fits or there is no return marker. A name no argument
+        bound is not checked.
+    """
+    if plan.result is None:
+        return None
+    dims = plan.result
+    sizes = {d: bound[d][0] for d in dims if d in bound}
+    shape = observed_shape(result)
+    if shape is not None and len(shape) == len(dims):
+        fits_all = True
+        for n, d in zip(shape, dims):
+            want = fixed_size(d) if fixed_size(d) is not None else sizes.get(d)
+            if want is not None and want != n:
+                fits_all = False
+        if fits_all:
+            return None
+    with_text = ", ".join(f"{d} = {sizes[d]}" for d in dims if d in sizes)
+    source = f"the return shape {plan.result_source}"
+    if with_text:
+        source += f" with {with_text}"
+    return f"{fn_name} returned {words(shape)}; {source} expects {expected(dims, sizes)}"

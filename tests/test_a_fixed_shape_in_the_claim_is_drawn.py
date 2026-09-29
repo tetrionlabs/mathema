@@ -11,7 +11,16 @@ import textwrap
 import pytest
 
 import mathema
+from mathema.analysis import analyze_source
 from mathema.conjecture import check_conjectures, claim
+from mathema.probing import probe
+
+
+def _battery(fn, text):
+    """The built-in battery's probes for `fn` over the claim's bindings:
+    the `callable` row is present only when the call could not be
+    made."""
+    return probe(fn, analyze_source(fn), domain=claim(text).domain)
 
 np = pytest.importorskip("numpy")
 
@@ -80,14 +89,14 @@ def test_a_fixed_axis_and_a_shared_name_mix_in_one_binding(mod):
 
 
 def test_the_callable_probe_builds_the_fixed_shape(mod):
-    rec = mathema.check(mod.trace_sq, claims=["for A in R^(30,15), f(A) >= 0"])
-    # the battery reports the call only when it could not be made
-    assert not [p.note for p in rec.probes if p.name == "callable"]
+    probes = _battery(mod.trace_sq, "for A in R^(30,15), f(A) >= 0")
+    assert not [p.note for p in probes if p.name == "callable"]
     assert set(mod.SEEN) == {(30, 15)}, sorted(set(mod.SEEN))
 
 
 def test_the_callable_probe_builds_the_fixed_length(mod):
-    mathema.check(mod.total, claims=["for xs in [0, 1]^30, f(xs) >= 0"])
+    probes = _battery(mod.total, "for xs in [0, 1]^30, f(xs) >= 0")
+    assert not [p.note for p in probes if p.name == "callable"]
     assert set(mod.SEEN) == {(30,)}, sorted(set(mod.SEEN))
 
 

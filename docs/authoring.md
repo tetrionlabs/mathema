@@ -746,3 +746,33 @@ for A in [-1, 1]^(30,15), f(A) >= 0   # proven
 for A in R^(3,4), f(A) in R^(3,4)   # holds
 for A in R^(3,4), f(A) in R^(4,3)   # falsified
 ```
+
+`@enforce_dimensions()` makes these dimensions a runtime guard, the
+way `@enforce_domain()` guards values, and the two stack. At entry,
+every shaped argument has the rank and the fixed sizes its marker or
+binding states, and a dimension name shared across parameters agrees
+across the actual arguments; at exit, the result matches the return
+marker with the names the call bound. Each failure is a `ValueError`
+naming the parameter (or the result), the shape found and the shape
+expected:
+
+<!-- example: enforce-dimensions-shapes run inline -->
+```python
+from mathema import enforce_dimensions, enforce_domain
+from mathema.types import Mat, Vec
+
+@enforce_dimensions()
+@enforce_domain()
+def matvec(a: Mat("m", "n"), x: Vec("n")) -> Vec("m"):
+    return [sum(a[i][j] * x[j] for j in range(len(x)))
+            for i in range(len(a))]
+
+matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1])   # [10, 10, 10]
+matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1, 1])   # ValueError: matvec: x has length 5; a is 3 by 4, so x must have length 4
+```
+
+The check `mathema.check` runs from the same markers is the `shape`
+row (the output's shape against the return marker, reading a claim's
+binding as well as a marker), the `dimensions_enforced` row (does the
+function reject a mismatch on a shared dimension) and the
+`size_enforced` row (does it reject a wrong fixed size).

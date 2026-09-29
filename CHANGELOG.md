@@ -18,6 +18,17 @@ Notable changes to mathema are recorded here from its first public release onwar
   names the fixed size (`xs of length 30`, `A of shape 30 by 15`), the
   sampling note prints a matrix's size, and a premise contradicting a
   fixed dimension is reported as the vacuous premise it is.
+- `@enforce_dimensions()` enforces a function's dimensions at entry and
+  at exit: each shaped argument has the rank and the fixed sizes its
+  marker or claim binding states, a dimension name shared across
+  parameters agrees across the actual arguments, and the result
+  matches the return marker with the names the call bound, each
+  failure a `ValueError` naming the parameter (or the result), the
+  shape found and the shape expected. It stacks with
+  `@enforce_domain()`, which stays about values. The `shape` row reads
+  a claim's binding as well as a marker, the row `shape_enforced` is
+  renamed `dimensions_enforced`, and a new row `size_enforced` asks
+  whether a function rejects a value of the wrong fixed size.
 - The wheel now ships the bundled compendium. The 0.6.0 wheel carried
   none of its compendium files (the package-data pattern missed the
   per-library directories), so `is_compendium_safe(numpy)` was `unknown`

@@ -517,11 +517,31 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
 
 
 def enforce_dimensions(key: str | None = None, root: str = "."):
-    """Decorator: wrap a function so a call whose arguments violate a
-    declared DIMENSION premise raises `ValueError` before the real
-    function runs. The shape analogue of `@enforce_domain`; where that
-    guards a parameter's value domain, this guards the relations
-    between argument shapes a claim states as its precondition.
+    """Decorator: wrap a function so a call whose arguments have the
+    wrong dimensions raises `ValueError` before the real function runs,
+    and a result of the wrong dimensions raises after it. The shape
+    analogue of `@enforce_domain`, which guards a parameter's value
+    domain and knows nothing about shapes; the two stack:
+
+        @enforce_dimensions()
+        @enforce_domain()
+        def matvec(a: Mat("m", "n"), x: Vec("n")) -> Vec("m"):
+            ...
+
+        matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1, 1])
+        # ValueError: matvec: x has length 5; a is 3 by 4, so x must have length 4
+
+    At entry, every shaped parameter (a `Shape`, `Vec` or `Mat` marker,
+    or a space a claim's own binding states, `for A in R^(30,15)`) has
+    the rank and the fixed sizes its dimensions state, and a dimension
+    name shared across parameters agrees across the actual arguments; a
+    runtime type reports its shape the way its adapter reads it. At
+    exit, the result matches the return marker with the names this call
+    bound (`Vec("m")` after `a` was 3 by 4 means length 3). Each
+    failure names the parameter (or the result), the shape found and
+    the shape expected.
+
+    A declared dimension premise is enforced too:
 
         @enforce_dimensions()
         @claims_decorator("assuming len(x) == len(y), f(x, y) == f(y, x)")
@@ -602,12 +622,23 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     def decorator(fn):
         premises = _premises(fn)
         sig = callable_signature(fn)
+        from . import _shapes
+        from .types import shapes_from_signature
+        try:
+            plan = _shapes.dimension_plan(
+                shapes_from_signature(fn),
+                _domain_from_declared_claims(fn, key, root))
+        except ValueError as e:
+            raise DomainError(f"enforce_dimensions(): {e}") from e
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
             av = bound.arguments
+            problem, bound_names = _shapes.entry_problem(plan, av)
+            if problem is not None:
+                raise ValueError(f"{fn.__name__}: {problem}")
             for lhs, rel, rhs in premises:
                 left = _dim_ref(lhs)
                 if left is None or left[0] not in av:
@@ -627,7 +658,12 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
                         f"{fn.__name__}: dim({left[0]}, {left[1]})={lval} "
                         f"violates the declared premise "
                         f"dim({left[0]}, {left[1]}) {rel} {rdesc}")
-            return fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
+            problem = _shapes.exit_problem(plan, bound_names, result,
+                                           fn.__name__)
+            if problem is not None:
+                raise ValueError(f"{fn.__name__}: {problem}")
+            return result
         return wrapper
 
     return decorator
