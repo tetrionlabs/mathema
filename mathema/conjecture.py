@@ -1289,7 +1289,10 @@ def _claim(law: str, name: str | None, source: str, route: str,
                     "the operational infinity is bound twice with "
                     "different ranges")
             let_pseudo_inf = new_pseudo_inf
-        text = normalize(text)
+        try:
+            text = normalize(text)
+        except UnreadableSpelling as e:
+            raise InvalidConjecture(str(e)) from e
         try:
             new_dom, text = split_quantifier(text)
         except DuplicateBinding as e:
@@ -3371,6 +3374,13 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         for said in strong_hints(facts):
             # a parameter used as a vector with no runtime type named:
             # the row says which runtime type to annotate
+            if said not in (probe.note or ""):
+                probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
+        for said in linalg.norm_notes(
+                cj, _claim_array_ranks({**domain, **(cj.domain or {})},
+                                       fn, facts)):
+            # a bare `||x||` names the norm it resolved to, Euclidean
+            # for a vector and Frobenius for a matrix
             if said not in (probe.note or ""):
                 probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         _stamp_examine_route(probe, cj, fn, facts)

@@ -20,8 +20,13 @@ and `|x|`/`||x||`/`⌊x⌋`/`⌈x⌉` mean `abs(x)`/`norm(x)`/`floor(x)`/`ceil(x
 an operand cannot end and closes where one can, so `|x + y - f(x)|`
 and `|x| + |y|` both read as written, and a pair whose content is
 exactly one further pair is a norm (`||x||`), while `||a| - |b||` is an
-absolute value of a difference. On a matrix expression the same bars
-are the determinant (see linalg.apply_matrix_sugar). `normalize()` maps any of these spellings to
+absolute value of a difference. A norm's order is a subscript on the
+closing bars, `||x||_1`, `||x||_2`, `||x||_inf` (also `_oo`, `_∞`) and
+`||x||_p` for an integer p >= 1, reading as `norm(x, 1)` and so on; the
+order is never a superscript, so `||x||^2` is the square of the norm.
+The unicode `‖x‖`, `‖x‖₂`, `‖x‖∞` spell the same. On a matrix
+expression single bars are the determinant (see
+linalg.apply_matrix_sugar) and double bars its norm. `normalize()` maps any of these spellings to
 the one canonical Python-expression form the probe and derive routes
 both consume, so `f(x)^2 ≥ 0` and `f(x)**2 >= 0` are the same statement
 with the same identity.
@@ -111,8 +116,8 @@ from ._float_text import exact_float_text
 from ._math_vocab import _BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _SYMPY_FUNCS, _call_name
 from ._render_mode import (get_unicode_output as get_unicode_output,
                            set_unicode_output as set_unicode_output)
-from ._scan import (_split_commas, mask_strings, outside_strings,
-                    sub_outside_strings, unmask_strings)
+from ._scan import (_split_commas, blank_strings, mask_strings,
+                    outside_strings, sub_outside_strings, unmask_strings)
 # The domain model moved wholesale to domain.py (a sympy-free leaf);
 # these re-exports keep every `from .grammar import <name>` consumer
 # working. New code should import from mathema.domain directly.
@@ -344,18 +349,19 @@ def auto_short_names(param_names: list, func_names: list, *, unicode: bool,
 # only: superscript *letters* exist for the whole alphabet in Unicode
 # (via two different blocks, confirmed with `unicodedata.lookup`,
 # not guessed), but nothing in this grammar's own `^`/`_` positions is
-# ever a bare letter, so there's no meaning to map one to. No matching
-# INPUT rule for subscript digits: every `_`-position this grammar has
-# (`Sum`/`Prod`'s own index) is always `name=value`, never a bare
-# digit. Subscript digits are still used on the *output* side, purely
-# decoratively: `_print_Integral` attaches a definite integral's own
-# integer bounds directly to its `∫` (subscript lower, superscript
-# upper, `∫₀¹`), redundantly with the same bounds already spelled out in
-# the call's own arguments, decoration only, never load-bearing, so
-# no matching input rule is needed there either.
+# ever a bare letter, so there's no meaning to map one to. Subscript
+# digits have one INPUT rule: a run on a norm's closing `‖` is the
+# norm's order (`‖x‖₂` is `||x||_2`, see `_double_bar_glyphs`); every
+# other `_`-position this grammar has (`Sum`/`Prod`'s own index) is
+# `name=value`, never a bare digit. On the *output* side they are the
+# norm's order again (`display_norm_bars`) and, purely decoratively,
+# `_print_Integral`'s own `∫₀¹`: a definite integral's integer bounds
+# attached to its `∫` (subscript lower, superscript upper), redundant
+# with the same bounds spelled out in the call's own arguments.
 _SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 _SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉"
 _SUPERSCRIPT_TO_DIGIT = str.maketrans(_SUPERSCRIPT_DIGITS, "0123456789")
+_SUBSCRIPT_TO_DIGIT = str.maketrans(_SUBSCRIPT_DIGITS, "0123456789")
 _DIGIT_TO_SUPERSCRIPT = str.maketrans("0123456789", _SUPERSCRIPT_DIGITS)
 _DIGIT_TO_SUBSCRIPT = str.maketrans("0123456789", _SUBSCRIPT_DIGITS)
 _SUPERSCRIPT_RUN = re.compile(f"⁻?[{_SUPERSCRIPT_DIGITS}]+")
@@ -1771,6 +1777,9 @@ def apply_unicode_synonyms(text: str) -> str:
     otherwise be converted to `^<digits>` and glued onto `integral`
     with no separator."""
     def substitute(masked: str) -> str:
+        # the norm glyph and its order glyphs first, so a closing
+        # `‖∞` is read as the order before `∞` becomes the constant `oo`
+        masked = _double_bar_glyphs(masked)
         masked = _desuperscript_spaces(masked)
         masked = _radical_to_call(_collapse_integral_marks(masked))
         masked = _LATEX_COMMAND.sub(
@@ -1799,7 +1808,9 @@ def normalize(text: str) -> str:
     evaluation-bar sugar; Unicode math symbols to ASCII; `||x||`/`|x|`/
     `⌊x⌋`/`⌈x⌉` to `norm(x)`/`abs(x)`/`floor(x)`/`ceil(x)` (double bars
     matched before single, so they can never be misread as nested
-    single bars); `^` to `**`. Idempotent. `extract_diff_fraction_sugar()`
+    single bars), a norm's subscript order to the call's second
+    argument (`||x||_2` and `‖x‖₂` to `norm(x, 2)`, `_inf`/`_oo`/`_∞`
+    and `‖x‖∞` to `norm(x, inf)`); `^` to `**`. Idempotent. `extract_diff_fraction_sugar()`
     (the `d(<expr>/d<var>)` fraction spelling) and `extract_let_bindings()`
     are separate, `claim()`-level passes that run on raw text *before*
     this function ever sees it, see their own docstrings.
@@ -2017,13 +2028,16 @@ def _lim_direction(text: str) -> str:
 # opening bar, or one of these words
 _BAR_OPENING_CHARS = frozenset("([{,+-*/^%=<>&@~:")
 _BAR_OPENING_WORDS = frozenset({"not", "and", "or", "in", "if", "else",
-                                "is", "return", "lambda"})
+                                "is", "return", "lambda", "assuming"})
 
 
-def _bar_pairs(text: str) -> "list[tuple[int, int]] | None":
+def _bar_pairs(text: str, lenient: bool = False) -> "list[tuple[int, int]] | None":
     """Intent:
         The matched `|...|` pairs in `text` as (open, close) index
-        pairs, or None when the bars do not pair up.
+        pairs, or None when the bars do not pair up. With `lenient`, a
+        bar with no partner is passed over and the pairs that do match
+        are returned, for reading a norm spelling out of a whole claim
+        whose domain clause carries a `|missing` bar of its own.
 
     Notes:
         A bar opens when what precedes it cannot end an operand (see
@@ -2057,10 +2071,14 @@ def _bar_pairs(text: str) -> "list[tuple[int, int]] | None":
             kinds[i] = "open"
             stack.append(i)
         else:
-            if not stack:
-                return None
             kinds[i] = "close"
+            if not stack:
+                if lenient:
+                    continue
+                return None
             pairs.append((stack.pop(), i))
+    if lenient:
+        return pairs
     return None if stack else pairs
 
 
@@ -2145,14 +2163,71 @@ def _bars_hold_matrix(content: str, names: frozenset) -> bool:
     return is_matrix_expr(node, names)
 
 
+#: the order written after a norm's closing bars: `_` and the token
+#: up to the next operator or space, read by `_norm_order`
+_NORM_ORDER_SUFFIX = re.compile(r"_([-\w.∞]+)")
+
+#: the unicode norm glyph, with the order glyphs a closing one carries
+_DOUBLE_BAR_GLYPH = re.compile(rf"‖([{_SUBSCRIPT_DIGITS}]+|∞)?")
+
+#: the spellings of an infinite order, each lowered to `inf`
+_INFINITE_ORDERS = frozenset({"inf", "oo", "∞"})
+
+
+def _norm_order(token: str) -> str:
+    """Intent:
+        The second argument `norm(e, ...)` takes for the subscript
+        `token` written after a norm's closing bars: `inf` for `inf`,
+        `oo` and `∞`, the integer itself for an integer literal of one
+        or more.
+
+    Raises:
+        UnreadableSpelling: any other token (`0`, `0.5`, `-1`, a name),
+        naming the orders the bars read.
+    """
+    if token in _INFINITE_ORDERS:
+        return "inf"
+    if token.isascii() and token.isdigit() and int(token) >= 1:
+        return str(int(token))
+    raise UnreadableSpelling(
+        f"`_{token}` is not an order the norm bars read: the order "
+        f"after `||...||` is 1, 2, an integer p >= 1, or inf (also "
+        f"spelled oo and ∞); for any other order write the call, "
+        f"norm(..., {token})")
+
+
+def _double_bar_glyphs(text: str) -> str:
+    """`‖e‖` -> `||e||`, and the order glyphs on a closing `‖` (`‖x‖₂`,
+    `‖x‖₁₂`, `‖x‖∞`) -> the ascii subscript `||x||_2`, `||x||_12`,
+    `||x||_inf`, for `_fold_bars` to read. The first step of
+    `apply_unicode_synonyms`, ahead of its symbol table, so the `∞`
+    here is the norm's order rather than the constant `oo`."""
+    if "‖" not in text:
+        return text
+
+    def ascii_bars(m):
+        order = m.group(1)
+        if order is None:
+            return "||"
+        if order == "∞":
+            return "||_inf"
+        return "||_" + order.translate(_SUBSCRIPT_TO_DIGIT)
+
+    return _DOUBLE_BAR_GLYPH.sub(ascii_bars, text)
+
+
 def _fold_bars(text: str) -> str:
     """`|expr|` -> `abs(expr)` for any expression between the bars, and
     `||expr||` -> `norm(expr)`: a pair whose content is exactly one
     further pair reads as a norm, so `||a| - |b||` (content not a
-    single pair) stays an absolute value of a difference. Text whose
-    bars do not pair up is returned unchanged for the claim parser to
-    refuse. Within `bars_over_matrices`, bars around a matrix
-    expression are its determinant, `det(expr)`."""
+    single pair) stays an absolute value of a difference. A subscript
+    on the norm's closing bars is its order, `||expr||_2` ->
+    `norm(expr, 2)` and `||expr||_inf` (or `_oo`, `_∞`) ->
+    `norm(expr, inf)`, see `_norm_order`; a `^` after the bars is the
+    ordinary power, so `||expr||^2` is the square of the norm. Text
+    whose bars do not pair up is returned unchanged for the claim
+    parser to refuse. Within `bars_over_matrices`, single bars around
+    a matrix expression are its determinant, `det(expr)`."""
     if "|" not in text:
         return text
     pairs = _bar_pairs(text)
@@ -2167,6 +2242,11 @@ def _fold_bars(text: str) -> str:
         if inner is not None and inner == c - 1:
             replace[o], replace[c] = "norm(", ")"
             replace[o + 1] = replace[c - 1] = ""
+            suffix = _NORM_ORDER_SUFFIX.match(text, c + 1)
+            if suffix is not None:
+                replace[c] = f", {_norm_order(suffix.group(1))})"
+                for k in range(c + 1, suffix.end()):
+                    replace[k] = ""
         else:
             mats = _BAR_MATRICES.get()
             opening = ("det(" if mats and "|" not in text[o + 1:c]
@@ -2190,6 +2270,74 @@ def _fold_brackets(text: str, opening: str, closing: str, name: str) -> str:
     if depth:
         return text
     return text.replace(opening, f"{name}(").replace(closing, ")")
+
+
+def norm_bars_written(text: str) -> bool:
+    """Intent:
+        Whether `text` spells a norm with double bars (`||x||`,
+        `||x||_2`, `‖x‖`), the spelling `spec.render_claim_text` keeps
+        when it renders the claim back.
+
+    Notes:
+        Read from the pairing `_fold_bars` uses, leniently, since the
+        text may be a whole claim whose domain clause (`R^n|missing`)
+        carries a bar of its own: `||a| - |b||` (an absolute value of a
+        difference) is no norm, and a bar with no partner is passed
+        over. Quoted literals are not read.
+    """
+    masked = blank_strings(text)
+    if "‖" in masked:
+        return True
+    if "||" not in masked:
+        return False
+    pairs = _bar_pairs(masked, lenient=True)
+    if not pairs:
+        return False
+    close_of = dict(pairs)
+    return any(close_of.get(o + 1) == c - 1 for o, c in pairs)
+
+
+_NORM_CALL = re.compile(r"\bnorm\(")
+
+
+def _display_order(order: str) -> "str | None":
+    """The ascii subscript for a rendered order (`inf`, `2`, `12`), or
+    None for an order the bars do not spell (`oo`, `0.5`, a name)."""
+    if order == "inf":
+        return order
+    if order.isascii() and order.isdigit() and int(order) >= 1:
+        return order
+    return None
+
+
+def display_norm_bars(text: str, unicode: bool = False) -> str:
+    """Intent:
+        `norm(e)` -> `||e||` and `norm(e, k)` -> `||e||_k` in rendered
+        claim text, nested calls included, for an order the bars read
+        (`1`, `2`, an integer p >= 1, `inf`); in unicode `‖e‖`, `‖e‖₂`,
+        `‖e‖∞`. The inverse of the norm half of `_fold_bars`, so the
+        displayed text parses back to the same canonical form.
+
+    Notes:
+        A norm whose argument already holds a bar (`norm(|x|)`), or
+        whose order is anything else (`norm(x, p)`, `norm(x, oo)`),
+        keeps the call spelling around a respelled argument; a quoted
+        literal is left untouched.
+    """
+    def rewrite(m, args, call_end):
+        parts = [p.strip() for p in _split_commas(args)]
+        inner = display_norm_bars(parts[0], unicode)
+        order = _display_order(parts[1]) if len(parts) == 2 else ""
+        if len(parts) > 2 or order is None or "|" in inner or "‖" in inner:
+            return f"norm({display_norm_bars(args, unicode)})"
+        if not unicode:
+            return f"||{inner}||" + (f"_{order}" if order else "")
+        glyph = ("" if not order else "∞" if order == "inf"
+                 else order.translate(_DIGIT_TO_SUBSCRIPT))
+        return f"‖{inner}‖{glyph}"
+
+    return outside_strings(
+        lambda masked: _rewrite_balanced_calls(masked, _NORM_CALL, rewrite), text)
 
 
 def _floor_bars(text: str) -> str:
@@ -2285,6 +2433,9 @@ _NORMALIZE_PASSES: tuple = (
     _expand_integral_bare,
     _integral_word_to_call,
     _expand_integrate_at,
+    # `apply_unicode_synonyms` reads the norm glyph `‖` and its order
+    # glyphs into the ascii bars and subscript first of all, so the
+    # bars fold below sees `||x||_inf` for a written `‖x‖∞`
     apply_unicode_synonyms,
     _fold_bars,
     _floor_bars,
@@ -3319,9 +3470,11 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     callers should compare re-parsed *meaning*, never rendered text
     byte-for-byte.
 
-    `norm(x)` (the `||x||` input spelling) renders as the `norm(x)` call
-    in both modes, kept apart from `abs(x)`: the two agree on a scalar
-    and differ on a vector, so they are different claims.
+    `norm(x)` renders as the `norm(x)` call in both modes here, kept
+    apart from `abs(x)`: the two agree on a scalar and differ on a
+    vector, so they are different claims. A claim whose author wrote
+    the double bars gets them back from `spec.render_claim_text`, which
+    respells the rendered statement with `display_norm_bars`.
 
     In ASCII mode, a Greek-letter identifier that has a known backslash
     spelling (`α` -> `\\alpha`, see `_GREEK_TO_BACKSLASH`) is converted

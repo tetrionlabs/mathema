@@ -188,6 +188,7 @@ def test_the_two_spellings_are_two_canonical_texts():
 
 _V = np.array([3.0, -4.0, 12.0])
 _M = np.array([[1.0, -2.0], [3.0, 4.0]])
+_RANK_ONE = np.array([[1.0, 2.0], [2.0, 4.0]])
 
 
 @pytest.mark.parametrize("value, order, expected", [
@@ -199,12 +200,50 @@ _M = np.array([[1.0, -2.0], [3.0, 4.0]])
     (_M, 1, 6.0),                                  # max column sum
     (_M, 2, np.linalg.svd(_M, compute_uv=False)[0]),   # spectral
     (_M, np.inf, 7.0),                             # max row sum
+    # the boundaries: the zero vector, one entry, one cell, rank one
+    (np.zeros(3), None, 0.0),
+    (np.zeros(3), 1, 0.0),
+    (np.zeros(3), np.inf, 0.0),
+    (np.array([-3.0]), None, 3.0),
+    (np.array([-3.0]), 1, 3.0),
+    (np.array([-3.0]), np.inf, 3.0),
+    (np.array([[-2.0]]), None, 2.0),
+    (np.array([[-2.0]]), 1, 2.0),
+    (np.array([[-2.0]]), 2, 2.0),
+    (np.array([[-2.0]]), np.inf, 2.0),
+    (_RANK_ONE, None, 5.0),                        # Frobenius equals spectral at rank one
+    (_RANK_ONE, 2, 5.0),
+    (_RANK_ONE, 1, 6.0),
+    (_RANK_ONE, np.inf, 6.0),
 ])
 def test_the_norm_agrees_with_numpy_for_both_ranks_and_every_order(value, order, expected):
     got = _norm(value) if order is None else _norm(value, order)
     assert got == pytest.approx(expected)
     assert got == pytest.approx(np.linalg.norm(value) if order is None
                                 else np.linalg.norm(value, order))
+
+
+def test_the_matrix_orders_are_three_different_numbers():
+    # a control on the parametrisation above: on this matrix the column
+    # sums, the singular values and the row sums do not coincide
+    values = {_norm(_M, 1), _norm(_M, 2), _norm(_M, np.inf), _norm(_M)}
+    assert len(values) == 4, values
+
+
+@pytest.mark.parametrize("text, written", [
+    ("for x in R^n, ||x|| >= 0", True),
+    ("for x in R^n|missing, ||x||_2 <= ||x||_1", True),
+    ("∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖₂ ≤ ‖x‖₁", True),
+    ("assuming ||x|| > 0, for x in R^n, f(x) >= 0", True),
+    ("for x in R^n, norm(x) >= 0", False),
+    ("for x in [0, 1], |x| <= 1", False),
+    ("for a in [0, 1], b in [0, 1], ||a| - |b|| <= 1", False),
+    ("for A in R^(n,n), |A| >= 0", False),
+    ('f(s) == "||x||"', False),
+])
+def test_the_renderer_reads_the_bar_spelling_from_the_author_text(text, written):
+    from mathema.grammar import norm_bars_written
+    assert norm_bars_written(text) is written
 
 
 # --- the same verdict on the same route as the words ---------------------
@@ -304,34 +343,89 @@ def test_a_bare_norm_of_a_difference_is_noted_from_its_operands():
     assert "||x - y|| is the Euclidean norm of x - y" in (p.note or ""), p.note
 
 
+def test_a_bare_norm_of_a_call_is_noted_for_either_rank():
+    # the rank of f(x) cannot be read from the claim, so the note says
+    # what the bars mean for a vector and for a matrix
+    from mathema.lexicon import unit_vector
+    p = _adjudicate(unit_vector, "assuming ||x|| > 0, for x in R^n, ||f(x)|| ~= 1")
+    assert ("||f(x)|| is the Euclidean norm of f(x) as a vector, "
+            "the Frobenius norm as a matrix") in (p.note or ""), p.note
+
+
 def test_a_written_order_needs_no_note():
     p = _adjudicate(manhattan_length, "for x in R^n, f(x) ~= ||x||_1")
     assert "norm of" not in (p.note or ""), p.note
 
 
+def test_the_call_spelling_gets_no_note():
+    p = _adjudicate(euclidean_length, "for x in R^n, f(x) ~= norm(x)")
+    assert "norm of" not in (p.note or ""), p.note
+
+
 # --- the lexicon rows -----------------------------------------------------
 
+#: every row of the sugar, with the verdict and route it reaches
+#: against its example function; the trap row falsifies with a witness
 _LEXICON_ROWS = {
-    "norm_bars_euclidean": "holds",
-    "norm_bars_one": "holds",
-    "norm_bars_two": "holds",
-    "norm_bars_inf": "holds",
-    "norm_bars_difference": "holds",
-    "norm_bars_squared": "holds",
-    "matrix_norm_bars_frobenius": "holds",
-    "matrix_norm_bars_spectral": "holds",
+    "norm_bars_euclidean": ("holds", "probe"),
+    "norm_bars_two": ("holds", "probe"),
+    "norm_bars_one": ("holds", "probe"),
+    "norm_bars_inf": ("holds", "probe"),
+    "norm_bars_chain": ("holds", "probe"),
+    "norm_bars_homogeneous": ("holds", "probe"),
+    "norm_bars_unit_vector": ("holds", "probe"),
+    "norm_bars_distance": ("holds", "probe"),
+    "norm_bars_distance_symmetric": ("holds", "probe"),
+    "norm_bars_distance_zero": ("holds", "probe"),
+    "norm_bars_portfolio_weights": ("holds", "probe"),
+    "norm_bars_squared": ("holds", "probe"),
+    "norm_bars_order_trap": ("falsified", "probe"),
+    "matrix_norm_bars_frobenius": ("holds", "probe"),
+    "matrix_norm_bars_gram_trace": ("holds", "probe"),
+    "matrix_norm_bars_spectral": ("holds", "probe"),
+    "matrix_norm_bars_spectral_below_frobenius": ("holds", "probe"),
 }
 
 
-@pytest.mark.parametrize("key, verdict", sorted(_LEXICON_ROWS.items()))
-def test_each_lexicon_row_holds_against_its_example_function(key, verdict):
+def test_every_sugar_row_of_the_lexicon_is_pinned_here():
+    from mathema.lexicon import LEXICON
+    sugar_rows = {key for key in LEXICON if "norm_bars" in key}
+    assert sugar_rows == set(_LEXICON_ROWS)
+
+
+@pytest.mark.parametrize("key, verdict, route", sorted(
+    (key, *want) for key, want in _LEXICON_ROWS.items()))
+def test_each_lexicon_row_reaches_its_pinned_verdict(key, verdict, route):
     from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON, SECTIONS, TAGS
     (fn,) = [fn for fn, keys in EXAMPLE_FUNCTIONS.values() if key in keys]
     assert key in SECTIONS["linear_algebra"]
     assert "norm" in TAGS[key]
     p = _adjudicate(fn, LEXICON[key])
-    assert (p.verdict, p.route) == (verdict, "probe"), (p.verdict, p.note)
+    assert (p.verdict, p.route) == (verdict, route), (p.verdict, p.note)
+    if verdict == "falsified":
+        assert p.counterexample, p.note
     assert_round_trips(LEXICON[key], fn)
+
+
+def test_the_trap_row_names_the_two_numbers_that_differ():
+    from mathema.lexicon import LEXICON
+    p = _adjudicate(manhattan_length, LEXICON["norm_bars_order_trap"])
+    assert p.verdict == "falsified"
+    assert " vs " in str(p.counterexample), p.counterexample
+
+
+def test_the_unit_vector_row_needs_its_premise_for_the_zero_vector():
+    # without the premise the zero vector divides by zero; the probe
+    # over R^n does not draw that one point, so the row states the
+    # premise rather than leaning on the draw
+    from mathema.lexicon import LEXICON, unit_vector
+    law = LEXICON["norm_bars_unit_vector"]
+    assert law.startswith("assuming ||x|| > 0, ")
+    p = _adjudicate(unit_vector, law)
+    assert p.verdict == "holds", (p.verdict, p.note)
+    with pytest.raises(FloatingPointError):
+        with np.errstate(all="raise"):
+            unit_vector(np.zeros(3))
 
 
 def test_the_lexicon_rows_carry_the_documented_tags():

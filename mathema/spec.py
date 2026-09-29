@@ -1993,6 +1993,11 @@ def declare(cj) -> dict:
     # duplicate it and re-type it on reparse.
     statement = _chain_text(cj) if cj.links else statement_text(
         cj.relation, cj.lhs, cj.rhs)
+    from .grammar import display_norm_bars, norm_bars_written
+    if norm_bars_written(getattr(cj, "raw", "")):
+        # a norm the author wrote with double bars is stored with them,
+        # so the claim read back keeps the spelling it was written in
+        statement = display_norm_bars(statement)
     if getattr(cj, "negated", False) and not statement.startswith("not "):
         statement = f"not {statement}"
     if getattr(cj, "outcome", ""):
@@ -2409,7 +2414,8 @@ def _render_claim_text(cj, *, unicode: bool | None,
         `grammar.bars_over_matrices` has set.
     """
     from .conjecture import GRAMMAR
-    from .grammar import display_len, get_unicode_output, render_domain, render_law_expr
+    from .grammar import (display_len, display_norm_bars, get_unicode_output,
+                          norm_bars_written, render_domain, render_law_expr)
     from ._providers import get_provider, report_provider_failure
     from ._scan import sub_outside_strings
 
@@ -2566,6 +2572,12 @@ def _render_claim_text(cj, *, unicode: bool | None,
     language_len = getattr(cj, "grammar", "") == f"{GRAMMAR}/language"
     if language_len:
         statement = display_len(statement)
+    # a norm the author wrote with double bars keeps them, the order a
+    # subscript (`||x||_2`, `‖x‖₂`); `norm(...)` written as the call
+    # stays the call. `display_norm_bars` is the inverse of the bar
+    # fold, so the text reparses to the same canonical form
+    if norm_bars_written(getattr(cj, "raw", "")):
+        statement = display_norm_bars(statement, unicode)
 
     # let/for's own displayed symbol never reaches ast.parse individually
     # (both are plain f-string text, joined into the final claim string
