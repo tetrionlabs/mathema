@@ -81,7 +81,7 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 $ mathema claims functions.softmax
 functions.softmax: no declared claims (mathema claims --suggest lists candidates)
 $ mathema claims functions.softmax --suggest
-functions.softmax: 7 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+functions.softmax: 8 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
   - is_deterministic: f(scores) == f(scores)  [route best]
   - is_state_safe: f(scores) == f(scores)  [route best]
   - is_numerically_stable: g(f, scores) == 1  [route best]
@@ -89,6 +89,7 @@ functions.softmax: 7 suggested claim(s) (adopt with: mathema claims KEY --adopt 
   - is_permutation_of_input: sorted(f(scores)) == sorted(scores)  [route probe]
   - preserves_type: type(f(scores)) == type(scores)  [route probe]
   - is_sorted_output: is_sorted_output(f(scores))  [route examine]
+  - is_missing_safe[f]: is_missing_safe(f)  [route examine]
 $ mathema claims functions.softmax --adopt is_deterministic --root .
 adopted is_deterministic into ./claims/adopted.claims.yaml: f(scores) == f(scores)
 $ mathema claims functions.softmax

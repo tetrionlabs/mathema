@@ -324,6 +324,89 @@ class DomainError(ValueError):
     `except ValueError` handling keeps working unchanged."""
 
 
+class MissingValueError(DomainError):
+    """A missing or absent input that a function's policy claim says it
+    raises on, rejected at entry by `enforce_domain()`, or an output that
+    does not carry the input's holes the way the policy says (`drops`,
+    `propagates`), found at exit. The message names the parameter and
+    the member."""
+
+
+def _policies_from_declared_claims(fn, key: str | None, root: str) -> list:
+    """The policy claims declared on `fn` (decorator, docstring, and a
+    claims file when `key` is given), parsed."""
+    from .policy import parse_policy
+    entries = declared_from_function(fn)
+    if key is not None:
+        from .spec import merge_entries, load_declared
+        file_entry = load_declared(root).get(key, {}).get("entry", {})
+        entries = merge_entries({"claims": entries}, file_entry)["claims"]
+    out = []
+    for c in entries:
+        found = parse_policy(str(c.get("statement") or c.get("law") or ""))
+        if found is not None and found.behaviour:
+            out.append(found)
+    return out
+
+
+def _policy_guard(fn, policies: list, arguments: dict) -> "str | None":
+    """Why a call's arguments meet a policy that says f raises there, or
+    None."""
+    from ._missing_words import point_shown
+    from .policy import _members_in, _premise_holds, policy_text
+    for pol in policies:
+        if pol.behaviour != "raises" or not _premise_holds(pol.premise, arguments):
+            continue
+        for p in ([pol.parameter] if pol.parameter else list(arguments)):
+            if p not in arguments:
+                continue
+            value = arguments[p]
+            if pol.kind == "absent":
+                if value is None:
+                    return (f"{point_shown({p: value})} is absent, and its policy "
+                            f"says f raises there ({policy_text(pol)})")
+                continue
+            held = _members_in(value, "missing")
+            hit = [m for m in held if pol.member in (None, m)]
+            if not hit:
+                continue
+            from ._missing_words import _in_slot
+            what = (f"holds a {hit[0]} slot" if _in_slot(value)
+                    else f"is missing ({hit[0]})")
+            return (f"{point_shown({p: value})} {what}, and its policy says f "
+                    f"raises there ({policy_text(pol)})")
+    return None
+
+
+def _policy_exit(policies: list, arguments: dict, output) -> "str | None":
+    """Why a call's output breaks a `drops` or `propagates` policy, or
+    None: the output's no-value slots counted against the input's."""
+    from ._missing_policy import classify_call
+    from ._missing_words import point_shown, value_shown
+    from .policy import _members_in, _premise_holds, policy_text
+    for pol in policies:
+        if pol.behaviour not in ("drops", "propagates") \
+                or not _premise_holds(pol.premise, arguments):
+            continue
+        for p in ([pol.parameter] if pol.parameter else list(arguments)):
+            if p not in arguments:
+                continue
+            value = arguments[p]
+            held = (["None"] if value is None else []) if pol.kind == "absent" \
+                else _members_in(value, "missing")
+            if not [m for m in held if pol.member in (None, m)]:
+                continue
+            did = classify_call({p: value}, output)
+            if did != pol.behaviour:
+                what = "the hole" if pol.kind == "missing" else "the absence"
+                verb = {"drops": f"drops {what}", "propagates": f"gives {what} back"}.get(
+                    did, did)
+                return (f"{point_shown({p: value})} in, {value_shown(output)} out: f "
+                        f"{verb}, and its policy says {pol.behaviour} "
+                        f"({policy_text(pol)})")
+    return None
+
+
 def _domain_from_declared_claims(fn, key: str | None, root: str) -> dict:
     """Every `for p in ...`-quantified domain already declared on `fn`'s
     own claims (decorator, docstring, and, if `key` is given, a
@@ -486,6 +569,8 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
                 return f"={value!r} outside its declared domain {render_domain(bounds, show_missing=True)}"
             return None
 
+        policies = _policies_from_declared_claims(fn, key, root)
+
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             bound = sig.bind(*args, **kwargs)
@@ -494,6 +579,19 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
                 problem = _violation(name, value)
                 if problem is not None:
                     raise DomainError(f"{fn.__name__}(): {name}{problem}")
+            if policies:
+                # a policy that says f raises on a missing or absent input
+                # rejects it here; drops and propagates are checked on the
+                # result
+                arguments = dict(bound.arguments)
+                refused = _policy_guard(fn, policies, arguments)
+                if refused is not None:
+                    raise MissingValueError(f"{fn.__name__}(): {refused}")
+                out = fn(*args, **kwargs)
+                broken = _policy_exit(policies, arguments, out)
+                if broken is not None:
+                    raise MissingValueError(f"{fn.__name__}(): {broken}")
+                return out
             return fn(*args, **kwargs)
 
         wrapper.__mathema_enforced_domain__ = merged_domain

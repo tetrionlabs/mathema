@@ -70,3 +70,17 @@ def test_a_policy_row_alone_calls_f_at_the_fixed_size():
                                domain=space)
     assert row.verdict == "falsified"
     assert row.counterexample.endswith("f returned 30.0"), row.counterexample
+
+
+pd = pytest.importorskip("pandas")
+
+
+def col_mean(df: pd.DataFrame) -> float:
+    return float(df["r"].mean())
+
+
+def test_a_column_binding_bounds_the_column_it_names():
+    (row,) = [p for p in check_conjectures(
+        col_mean, [claim("for df.r in [0, 1]^n, 0 <= f(df) <= 1", name="c", route="probe")])
+        if p.name == "c"]
+    assert row.verdict == "holds", (row.verdict, row.counterexample)

@@ -466,6 +466,29 @@ declared `excluded_outside_domain(p)` claim, stated explicitly,
 opted into with the `excluding` keyword, or auto-declared by
 `@enforce_domain` (the decorator that makes it true).
 
+`@enforce_domain` also reads the function's policy claims, what it
+does with a value that is not there. It is opt-in, like every
+enforcement. A `raises` row rejects the input at entry: under
+`absent(f, x) raises(TypeError)`, `f(None)` raises
+`mathema.MissingValueError` (a `DomainError`) naming `x` and `None`;
+under `missing(f, xs, null) raises(ValueError)`, `f([1.0, None])` names
+`xs` and its `null` slot, while a `nan` slot passes through. A `drops`
+or `propagates` row is checked at exit, by counting the output's
+no-value slots: under `missing(f, x) propagates`, a function that
+returns `1.0` for `nan` raises there. `converts` and `introduces`
+enforce nothing.
+
+`is_missing_safe(f)` and `is_absent_safe(f)` are the gates over those
+rows: every parameter that admits the kind has a policy the code
+follows at every member. Proven when each member's policy is derived
+(a guard in the body, a library's own policy row f calls) or stated
+and confirmed, or f was called at every case; holds when some member
+is confirmed by execution alone; falsified on a policy the code
+contradicts, a member treated more than one way, a raise no claim
+accounts for, or a None from present inputs the return type does not
+declare. mathema never asserts them for you; `mathema claims KEY
+--suggest` offers them.
+
 ### `mathema.suggest_claims(fn)`
 
 Suggests candidate claims for `fn` without checking any of them:

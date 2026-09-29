@@ -108,12 +108,10 @@ def test_g8_a_string_has_no_hole():
     assert probe.statement == 'for s in {missing}, f(s) = "-"'   # the whole claim
 
 
-@stage(5)
 def test_g9_an_optional_string_that_handles_none_is_missing_safe():
     assert_row(label, "is_missing_safe(f)", PROVEN)
 
 
-@stage(5)
 def test_g10_a_function_handling_every_missing_value_is_missing_safe():
     assert_row(label_any_missing, "is_missing_safe(f)", PROVEN)
 
@@ -147,7 +145,6 @@ def test_o4_an_absent_field_raises_typeerror():
 
 @needs_language
 @needs_pydantic
-@stage(5)
 def test_o5_an_absent_optional_field_is_not_missing_safe():
     probe, _ = assert_row(note_len, "is_missing_safe(f)", FALSIFIED)
     assert "None" in witness(probe)

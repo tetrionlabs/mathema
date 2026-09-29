@@ -1531,7 +1531,7 @@ def _is_empty_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     from .hazards import _emptiness_guard_params
     from .symbolic import ProofResult
     param = lhs_src
-    if facts.param_kinds.get(param) not in SEQUENCE_KINDS:
+    if facts.param_kinds.get(param) not in (*SEQUENCE_KINDS, "table"):
         return None
     if param in _emptiness_guard_params(facts):
         return ProofResult(
@@ -1542,30 +1542,89 @@ def _is_empty_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     return None
 
 
+def _realised(fn, facts, target: str, cells: list, cj=None):
+    """A container of `cells` for `target`, through its runtime type:
+    a float numpy array, a float pandas or polars Series, a frame whose
+    columns (the ones the body reads) hold `cells` each, a plain list
+    for a list parameter. An empty matrix is `(0, 0)`."""
+    from .runtime_types import realised_parameters
+    adapter = getattr(realised_parameters(facts).get(target), "adapter", None) or ""
+    kind = facts.param_kinds.get(target)
+    if adapter == "numpy.ndarray" or kind == "mat":
+        import numpy as np
+        if kind == "mat":
+            return np.array(cells, dtype=float).reshape(len(cells) and 1, len(cells)) \
+                if cells else np.zeros((0, 0))
+        return np.array(cells, dtype=float)
+    if adapter == "pandas.Series":
+        import pandas as pd
+        return pd.Series(cells, dtype=float)
+    if adapter == "polars.Series":
+        import polars as pl
+        return pl.Series(cells, dtype=pl.Float64)
+    if kind == "table" or adapter in ("pandas.DataFrame", "polars.DataFrame"):
+        from .conjecture import _table_columns
+        columns = _table_columns(target, cj, facts) if cj is not None else ["a", "b"]
+        if adapter == "polars.DataFrame":
+            import polars as pl
+            return pl.DataFrame({c: pl.Series(cells, dtype=pl.Float64) for c in columns})
+        import pandas as pd
+        return pd.DataFrame({c: pd.Series(cells, dtype=float) for c in columns})
+    return list(cells)
+
+
+def _empty_outcome(out, declared: "str | None") -> "str | None":
+    """Why a value returned for the empty input fails, or None: a hole,
+    an undeclared None, an infinity."""
+    from ._missing_words import value_shown
+    from .domain import member_of
+    if out is None:
+        if declared:
+            return None
+        return ("f returned None for the empty input; declare the return type "
+                "Optional[float], raise, or return a value")
+    try:
+        word = member_of(out)
+    except Exception:
+        word = None
+    if word not in (None, "None"):
+        return f"f returned {word} for the empty input; raise, or return a value"
+    try:
+        as_float = float(out)
+    except (TypeError, ValueError):
+        return None
+    if math.isinf(as_float):
+        return (f"f returned {value_shown(as_float)} for the empty input; raise, or "
+                f"return a value")
+    return None
+
+
 def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
                  trials: int):
     """Empirical half of is_empty_safe[xs]: call fn with the empty
-    sequence, a single-element sequence, and a longer one (every other
-    parameter freshly sampled). An UNGUARDED raise on the empty input
-    is an accidental boundary crash and falsifies with that witness
-    (min/max/mean of [] raise however sound the maths); a raise
-    behind a recognized emptiness guard is deliberate rejection and
-    passes. A raise or non-finite result on the non-empty sanity
-    inputs falsifies outright."""
+    container, realised through the parameter's runtime type, then a
+    single-element and a longer one (every other parameter freshly
+    sampled). At the empty input a raise behind a recognized emptiness
+    guard passes, an unguarded raise fails, a finite value passes, a
+    hole fails, and a None fails unless the return type declares it. A
+    raise or non-finite result on the non-empty inputs fails outright."""
+    from ._missing_words import declared_optional_return
     from .hazards import _emptiness_guard_params
     target = cj.lhs
-    if facts.param_kinds.get(target) not in SEQUENCE_KINDS:
+    if facts.param_kinds.get(target) not in (*SEQUENCE_KINDS, "table"):
         return None
     guarded = target in _emptiness_guard_params(facts)
+    declared = declared_optional_return(fn)
     shapes = ("empty", "single", "longer")
     state = {"idx": 0}
 
     def trial(args):
         shape = shapes[state["idx"] % len(shapes)]
         state["idx"] += 1
-        value = ([] if shape == "empty"
+        cells = ([] if shape == "empty"
                  else [rng.uniform(-10, 10)] if shape == "single"
                  else [rng.uniform(-10, 10) for _ in range(5)])
+        value = _realised(fn, facts, target, cells, cj)
         try:
             with _pinned_float_env():
                 out = _call_with_target(fn, facts, target, args, value)
@@ -1576,27 +1635,29 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 return (f"{target} = [] raised {type(exc).__name__} with no "
                         f"emptiness guard in the body, the empty boundary "
                         f"is stumbled into, not handled")
-            return (f"{target} = {value!r} raised {type(exc).__name__}")
+            return (f"{target} = {cells!r} raised {type(exc).__name__}")
+        if shape == "empty":
+            why = _empty_outcome(out, declared)
+            return True if why is None else f"{target} = []: {why}"
         try:
             as_float = float(out)
         except (TypeError, ValueError):
             return True
-        if shape != "empty" and (as_float != as_float
-                                 or math.isinf(as_float)):
-            return (f"{target} = {value!r} returned {out!r}")
+        if as_float != as_float or math.isinf(as_float):
+            return (f"{target} = {cells!r} returned {out!r}")
         return True
 
     result = _probe_trials(fn, facts, target, domain, rng,
                            max(trials // 4, 9), trial)
     verdict, checked, cx = result
     if verdict == "holds" and len(facts.params) == 1:
-        # exhaustive coverage: the empty-sequence hazard is one input,
-        # and with no other parameter to vary, observing that one call
-        # behave IS the whole hazard class
+        # exhaustive coverage: the empty container is one input, and with
+        # no other parameter to vary, observing that one call behave IS
+        # the whole hazard class
         return ("proven", checked, None,
-                "the empty-sequence hazard is a single input; with one "
-                "parameter the call at [] was observed to behave, so the "
-                "examination is exhaustive")
+                "the empty container is a single input; with one parameter "
+                "the call at it was observed to behave, so the examination is "
+                "exhaustive")
     return result
 
 

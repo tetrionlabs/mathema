@@ -2065,7 +2065,8 @@ def cmd_claims(args) -> int:
             _list_policies(args.key, policies)
         return 0
 
-    suggestions = _suggest(fn, key=args.key, root=args.root)
+    from .suggest import gate_suggestions
+    suggestions = _suggest(fn, key=args.key, root=args.root) + gate_suggestions(fn)
     if args.suggest and getattr(args, "format", "text") == "json":
         from .records import claim_statement
         from .families import aspect_label

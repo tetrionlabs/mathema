@@ -731,3 +731,23 @@ def _write_suggested_claims(fn, suggestions: list, key: str | None, root: str) -
     merged_entry = merge_entries(existing.get(key, {}), new_entry)
     existing[key] = merged_entry
     return write_yaml(path, existing)
+
+
+def gate_suggestions(fn) -> list:
+    """`is_missing_safe(f)` and `is_absent_safe(f)` for a function with a
+    parameter that admits the kind: the gates an author may assert,
+    offered by `mathema claims --suggest` and never asserted by
+    default."""
+    from .conjecture import claim
+    from .policy import _admits
+    try:
+        from . import analyze
+        params = analyze(fn).params
+    except Exception:
+        return []
+    out = []
+    for kind, gate in (("missing", "is_missing_safe"), ("absent", "is_absent_safe")):
+        if any(_admits(fn, p, kind) for p in params):
+            out.append(claim(f"{gate}(f)", name=f"{gate}[f]", source="mathema",
+                             route="examine"))
+    return out

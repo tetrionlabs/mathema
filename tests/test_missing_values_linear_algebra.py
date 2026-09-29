@@ -9,7 +9,7 @@ import pytest
 
 from tests.test_missing_values_core import (FALSIFIED, PROVEN,
                                             PROVEN_OR_HOLDS, assert_row,
-                                            stage, witness)
+                                            witness)
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
@@ -228,17 +228,15 @@ def test_the_behaviour_is_a_policy_claim(fn, text, verdicts):
     assert_row(fn, text, verdicts)
 
 
-@stage(5)
 def test_q8_a_list_sum_is_not_missing_safe():
     probe, _ = assert_row(plain_sum, "is_missing_safe(f)", FALSIFIED)
-    assert any(m in witness(probe) for m in HOLE)
+    # a None in a list slot is the member null
+    assert any(m in witness(probe) for m in ("null", "nan"))
 
 
-@stage(5)
 def test_q9_a_dropping_sum_is_missing_safe_on_evidence():
     assert_row(nan_sum, "is_missing_safe(f)", HOLDS)
 
 
-@stage(5)
 def test_v10_a_series_mean_is_not_missing_safe_at_an_all_na_series():
     assert_row(mean_pd, "is_missing_safe(f)", FALSIFIED)

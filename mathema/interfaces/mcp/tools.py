@@ -487,7 +487,8 @@ def suggest_claims(target: str, root: str = ".") -> dict:
     entry = (load_declared(root).get(key) or {}).get("entry", {})
     declared_names = {c.get("name") for c in entry.get("claims") or []}
     rows = []
-    for cj in _suggest(fn, key=key, root=root):
+    from mathema.suggest import gate_suggestions
+    for cj in _suggest(fn, key=key, root=root) + gate_suggestions(fn):
         text = claim_statement(cj).strip()
         rows.append([cj.name, text, cj.route, cj.name in declared_names,
                      aspect_label(cj.name)])

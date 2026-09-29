@@ -396,6 +396,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 and "absent" in (missing_class(lv), missing_class(rv)):
             # a None from present inputs is no value, like a NaN, unless
             # the return type declares it
+            if not declared_return and (lv is None or rv is None):
+                from .policy import record_introduced
+                record_introduced(dict(point))
             if declared_return and (lv is None or rv is None):
                 executed.returned_absent(dict(point), declared_return)
                 return None

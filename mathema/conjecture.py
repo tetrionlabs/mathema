@@ -1257,11 +1257,15 @@ def _claim(law: str, name: str | None, source: str, route: str,
             assuming=(f"assuming {stated_policy.premise}" if stated_policy.premise
                       else ""),
             raw=text)
-    if re.match(r"^\s*is_absent_safe\s*\(", law) and not re.search(
-            r"\bassuming\b", law):
-        raise InvalidConjecture(
-            "is_absent_safe(f) is not available yet; state the behaviour per "
-            "parameter, e.g. `absent(f, x) raises`")
+    absent_gate = re.match(r"^\s*is_absent_safe\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$", law)
+    if absent_gate:
+        # the absence gate reads as the missing one does, over the other kind
+        target = absent_gate.group(1)
+        return Conjecture(
+            name=name or f"is_absent_safe[{target}]", lhs=target, rhs="",
+            relation="is_absent_safe", source=source,
+            route="examine" if route == "best" else route, grammar=grammar,
+            meta=dict(meta or {}), raw=law)
     try:
         text, ambiguous_diff_vars = extract_diff_fraction_sugar(law.strip())
     except UnreadableSpelling as e:
@@ -3309,7 +3313,11 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     # it is adjudicated after them
     built = [claim(c) if isinstance(c, str) else c for c in conjectures]
     stated = [c for c in built if getattr(c, "relation", None) == "policy"]
-    values = [c for c in built if getattr(c, "relation", None) != "policy"]
+    # the function's gates read every policy row, so they come last
+    gates = [c for c in built if _policy_gate(c, fn, facts)]
+    scalar_empty = [c for c in built if _empty_on_a_scalar(c, fn, facts)]
+    values = [c for c in built if getattr(c, "relation", None) != "policy"
+              and c not in gates and c not in scalar_empty]
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
             matrices_in_view(fn_mats | runtime_mats), _policy.batch():
         out = _check_conjectures(
@@ -3347,7 +3355,53 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                 row.meta = {**(row.meta or {}), **(cj.meta or {})}
                 row.meta.setdefault("mathema.surface", cj.source)
                 out.append(row)
+        for cj in scalar_empty:
+            out.append(Probe(cj.name, statement_text(cj.relation, cj.lhs, cj.rhs),
+                             "skipped:misspecified", route=None,
+                             note=f"{cj.lhs} is a scalar; empty applies to a container",
+                             meta={"mathema.invalid_conjecture": True,
+                                   "mathema.surface": cj.source}))
+        if gates:
+            facts = facts if facts is not None else _effective_facts(fn, None)
+            guards = _policy.guard_policies(facts)
+            stated_rows = [p for p in out if (p.meta or {}).get("mathema.policy")]
+            for cj in gates:
+                row = _policy.safety_gate(cj, fn, facts, domain or {}, stated_rows,
+                                          guards)
+                row.grammar = cj.grammar
+                row.meta = {**(row.meta or {}), **(cj.meta or {})}
+                row.meta.setdefault("mathema.surface", cj.source)
+                out.append(row)
         return out
+
+
+def _empty_on_a_scalar(cj, fn, facts) -> bool:
+    """Whether a claim asks `is_empty_safe` of a scalar parameter, which
+    has no slots to be empty."""
+    if getattr(cj, "relation", None) != "is_empty_safe":
+        return False
+    try:
+        facts = facts or _effective_facts(fn, None)
+    except Exception:
+        return False
+    kind = facts.param_kinds.get(cj.lhs)
+    return cj.lhs in facts.params and kind in ("scalar", "int")
+
+
+def _policy_gate(cj, fn, facts) -> bool:
+    """Whether a claim is one of the gates the policy rows decide:
+    `is_missing_safe(f)`, `is_absent_safe(f)` or `is_absent_safe(x)`;
+    a parameter's `is_missing_safe(x)` stays its family's."""
+    relation = getattr(cj, "relation", None)
+    if relation == "is_absent_safe":
+        return True
+    if relation != "is_missing_safe":
+        return False
+    try:
+        params = (facts or _effective_facts(fn, None)).params
+    except Exception:
+        return False
+    return cj.lhs not in params
 
 
 def _check_conjectures(fn, conjectures: list[Conjecture],
@@ -5334,6 +5388,17 @@ def _admitted_container_points(ctx, facts) -> tuple:
         if holes:
             holes_of[p] = holes
     return points, holes_of
+
+
+def _column_bound(bound, table_bound):
+    """The element domain a table column is drawn from: its own binding's
+    element domain when the claim binds the column, else the table's."""
+    if bound is None:
+        return table_bound
+    from dataclasses import replace as _replace
+    if getattr(bound, "dims", ()):
+        return _replace(bound, dims=())
+    return bound
 
 
 def _container_draws(p: str, kind: str, bound, record, resolution: dict,
@@ -7568,7 +7633,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     bound = sample_bound(p)
                     column = bound if len(getattr(bound, "dims", ())
                                           or ()) == 1 else None
-                    v = {c: _synth("sequence", rng, column,
+                    # a column's own binding (`for df.r in [0, 1]^n`)
+                    # bounds that column
+                    v = {c: _synth("sequence", rng,
+                                   _column_bound(cj_domain.get(f"{p}.{c}"), column),
                                    specials=specials, length=length)
                          for c in table_columns[p]}
                     if p in containers:
@@ -7929,6 +7997,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "
                   f"infinity for a finite input is no value")
             break
+        if not missing_in and "absent" in (missing_class(lv), missing_class(rv)) \
+                and not declared_return and any(o is None for o in f_call.outputs()):
+            # an undeclared None from present inputs: a failure of the
+            # value claim, and a fact the absence gate reads
+            from .policy import record_introduced
+            record_introduced(dict(zip(kinds, args)))
         if not missing_in and "absent" in (missing_class(lv), missing_class(rv)) \
                 and declared_return and any(o is None for o in f_call.outputs()):
             # a None the return type declares: recorded, not judged

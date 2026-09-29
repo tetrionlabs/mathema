@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The is_missing_safe[param] claim family, until the gates are rebuilt:
+"""The is_missing_safe[param] claim family (the function-wide
+`is_missing_safe(f)` is the gate the policy rows decide):
 the function is called with each missing value its parameter's type
 admits (a float's nan; None only for an unannotated or Optional
 parameter), and must reject it (raise) when the domain excludes it and
@@ -154,15 +155,16 @@ def test_an_unannotated_parameter_admits_none_and_a_raise_there_falsifies():
         "`absent(f, x) raises(TypeError)`.")
 
 
-def test_function_wide_spelling_covers_every_numeric_parameter():
-    # is_missing_safe(f): the conjunction over all numeric parameters,
-    # falsified at the first parameter with a real witness (named)
+def test_function_wide_spelling_is_the_gate_over_every_parameter():
+    # is_missing_safe(f) is the gate the policy rows decide: every
+    # parameter's holes, each with a policy the code follows; a nan that
+    # propagates through two parameters is confirmed by execution alone
     cj = claim("is_missing_safe(f)", route="best")
     (probe,) = check_conjectures(unannotated_mean, [cj])
     assert probe.name == "is_missing_safe[f]"
-    assert probe.verdict == "falsified"
-    assert probe.counterexample.startswith("x: ")
-    assert probe.note == "is_missing_safe(f) is false: see x."
+    assert probe.verdict == "holds"
+    assert probe.note == ("x (unannotated): nan propagates, observed on the draws; "
+                          "y (unannotated): nan propagates, observed on the draws")
 
 
 def test_function_wide_spelling_holds_when_every_parameter_does():
@@ -173,7 +175,8 @@ def test_function_wide_spelling_holds_when_every_parameter_does():
     (probe,) = check_conjectures(handled,
                                  [claim("f is missing safe", route="best")])
     assert probe.verdict == "holds"
-    assert "every parameter" in probe.note
+    assert probe.note == ("x (float): nan propagates, observed on the draws; "
+                          "y (float): nan propagates, observed on the draws")
 
 
 def test_both_spellings_handled_proves_exhaustively_for_one_param():
