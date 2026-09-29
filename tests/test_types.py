@@ -55,13 +55,13 @@ def plain(x: float) -> float:
 
 def test_shape_marker_holds_for_correct_implementation():
     results = type_probes(matmul)
-    shape = next(p for p in results if p.name == "shape")
+    shape = next(p for p in results if p.name == "result_dimensions")
     assert shape.verdict == "holds"
 
 
 def test_shape_marker_falsified_for_wrong_implementation():
     results = type_probes(bad_matmul)
-    shape = next(p for p in results if p.name == "shape")
+    shape = next(p for p in results if p.name == "result_dimensions")
     assert shape.verdict == "falsified"
     assert "expected shape" in shape.counterexample
 
@@ -89,10 +89,10 @@ def test_no_markers_produces_no_type_probes():
     assert type_probes(plain) == []
 
 
-def test_check_picks_up_shape_probe_automatically():
+def test_check_picks_up_the_result_dimensions_row_automatically():
     rec = mathema.check(matmul)
     names = [p.name for p in rec.probes]
-    assert "shape" in names
+    assert "result_dimensions" in names
 
 
 def test_mat_marker_resolves_wrapped_and_bare():

@@ -425,7 +425,7 @@ def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: set,
     """Does the real function guard against mismatched input shapes, the
     same way domain_enforced() checks whether a scalar guard exists,
     not "is the output the right shape for consistent input" (type_probes'
-    own `shape` check, which assumes shape is a pure function of the
+    own `result_dimensions` check, which assumes shape is a pure function of the
     input dims and says nothing about a function whose real output shape
     depends on the data itself, e.g. a converged cluster count), but "does
     it reject or gracefully decline inconsistent input at all". Only
@@ -542,7 +542,7 @@ def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS,
     R^(30,15)` names A's axes and fixes their sizes the way a marker
     would, and a fixed size in it fixes a marker's name). Three checks:
 
-    - `shape`: synthesizes inputs whose declared dims agree on shared
+    - `result_dimensions`: synthesizes inputs whose declared dims agree on shared
       symbolic names within a trial, calls the real function, and checks
       the real output's shape against what its own declared Shape
       resolves to. This assumes output shape is a pure function of the
@@ -600,7 +600,7 @@ def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS,
     rng = random.Random(_RNG_SEED)
     probes: list[Probe] = []
     if return_dims is not None:
-        stmt = (f"shape({fn.__name__}(" + ", ".join(param_dims) + f")) == "
+        stmt = (f"result_dimensions({fn.__name__}(" + ", ".join(param_dims) + f")) == "
                 f"{return_dims}, for shared dims {sorted(names) or 'none'}")
         checked, cx = 0, None
         for _ in range(trials):
@@ -620,13 +620,13 @@ def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS,
                 cx = f"dims={sizes}: expected shape {expected}, got {actual}"
                 break
         if cx is not None:
-            probes.append(Probe("shape", stmt, "falsified", n=checked,
+            probes.append(Probe("result_dimensions", stmt, "falsified", n=checked,
                                 counterexample=cx))
         elif checked == 0:
-            probes.append(Probe("shape", stmt, "skipped",
+            probes.append(Probe("result_dimensions", stmt, "skipped",
                                 note="no evaluable inputs"))
         else:
-            probes.append(Probe("shape", stmt, "holds", n=checked))
+            probes.append(Probe("result_dimensions", stmt, "holds", n=checked))
         enforced = _dimensions_enforced_probe(fn, sig, param_dims, names, rng,
                                               fixed_by_binding)
         if enforced is not None:

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The `shape` probe reads a parameter's dimensions from the claim's
+"""The `result_dimensions` row reads a parameter's dimensions from the claim's
 binding as well as from a marker, so `for A in R^(30,15)` with a return
 marker gets the output check and draws the fixed input size. The
 `dimensions_enforced` probe (formerly `shape_enforced`) asks whether the
@@ -26,7 +26,7 @@ def _load(tmp_path, name, body):
     return m
 
 
-def test_the_shape_probe_reads_a_fixed_binding_and_draws_it(tmp_path):
+def test_the_result_dimensions_row_reads_a_fixed_binding_and_draws_it(tmp_path):
     pytest.importorskip("numpy")
     m = _load(tmp_path, "shape_binding_mod", '''
         import numpy as np
@@ -47,17 +47,17 @@ def test_the_shape_probe_reads_a_fixed_binding_and_draws_it(tmp_path):
             return A
     ''')
     rec = mathema.check(m.transpose, claims=["for A in R^(30,15), f(A) == f(A)"])
-    (shape,) = [p for p in rec.probes if p.name == "shape"]
-    assert shape.verdict == "holds", (shape.verdict, shape.note, shape.counterexample)
+    (row,) = [p for p in rec.probes if p.name == "result_dimensions"]
+    assert row.verdict == "holds", (row.verdict, row.note, row.counterexample)
     # every draw is 30 by 15: a fixed size stated only by the binding
     # emits no `size_enforced` row, so nothing tries another size
     assert set(m.SEEN) == {(30, 15)}, sorted(set(m.SEEN))
     assert not [p for p in rec.probes if p.name == "size_enforced"]
     rec = mathema.check(m.not_transposed,
                         claims=["for A in R^(30,15), f(A) == f(A)"])
-    (shape,) = [p for p in rec.probes if p.name == "shape"]
-    assert shape.verdict == "falsified", (shape.verdict, shape.note)
-    assert "expected shape (15, 30)" in (shape.counterexample or ""), shape.counterexample
+    (row,) = [p for p in rec.probes if p.name == "result_dimensions"]
+    assert row.verdict == "falsified", (row.verdict, row.note)
+    assert "expected shape (15, 30)" in (row.counterexample or ""), row.counterexample
 
 
 def test_a_shared_name_in_the_binding_binds_the_return_marker(tmp_path):
@@ -73,11 +73,11 @@ def test_a_shared_name_in_the_binding_binds_the_return_marker(tmp_path):
             return A.T
     ''')
     rec = mathema.check(m.transpose, claims=["for A in R^(m,n), f(A) == f(A)"])
-    (shape,) = [p for p in rec.probes if p.name == "shape"]
-    assert shape.verdict == "holds", (shape.verdict, shape.note, shape.counterexample)
+    (row,) = [p for p in rec.probes if p.name == "result_dimensions"]
+    assert row.verdict == "holds", (row.verdict, row.note, row.counterexample)
 
 
-def test_without_a_binding_or_marker_there_is_no_shape_probe(tmp_path):
+def test_without_a_binding_or_marker_there_is_no_result_dimensions_row(tmp_path):
     pytest.importorskip("numpy")
     m = _load(tmp_path, "shape_none_mod", '''
         import numpy as np
@@ -90,7 +90,7 @@ def test_without_a_binding_or_marker_there_is_no_shape_probe(tmp_path):
             return A.T
     ''')
     rec = mathema.check(m.transpose, claims=["f(A) == f(A)"])
-    assert not [p for p in rec.probes if p.name == "shape"]
+    assert not [p for p in rec.probes if p.name == "result_dimensions"]
 
 
 def test_dimensions_enforced_is_the_shared_dimension_probe():

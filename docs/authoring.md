@@ -672,7 +672,7 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 ```
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7982b776d687
-  holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (n=32)
+  holds   result_dimensions: result_dimensions(softmax(scores)) == ('n',), for shared dims ['n'] (n=32)
   holds   is_deterministic: f(scores) = f(scores) (n=192)
   holds   is_state_safe: f(scores) = f(scores) (n=48)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (n=192)
@@ -685,7 +685,7 @@ mathema.Record(softmax) · source, no side effects · form 7982b776d687
   holds   sums_to_one: sum(f(scores)) = 1 (n=192)
 ```
 
-`shape` came from the `Annotated[list, Shape("n")]` hints,
+`result_dimensions` came from the `Annotated[list, Shape("n")]` hints,
 `sums_to_one` came from the docstring `Claims:` block, and the rest are
 mathema's built-in battery: every function gets the determinism, state
 and stability probes, and a list-in, list-out function also gets the
@@ -775,7 +775,7 @@ matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1])   # [10, 10, 10]
 matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1, 1])   # ValueError: matvec: x has length 5; a is 3 by 4, so x must have length 4
 ```
 
-The check `mathema.check` runs from the same markers is the `shape`
+The check `mathema.check` runs from the same markers is the `result_dimensions`
 row (the output's shape against the return marker, reading a claim's
 binding as well as a marker), the `dimensions_enforced` row (does the
 function reject a mismatch on a shared dimension) and the

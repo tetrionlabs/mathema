@@ -27,8 +27,9 @@ Notable changes to mathema are recorded here from its first public release onwar
   shape found and the shape expected. It stacks with
   `@enforce_domain()`, which stays about values, and like it
   auto-declares `excluded_outside_domain(p)` for each parameter it
-  guards. The `shape` row reads a claim's binding as well as a marker,
-  the row `shape_enforced` is renamed `dimensions_enforced`, and a new
+  guards. The row `shape` is renamed `result_dimensions` and reads a
+  claim's binding as well as a marker, the row `shape_enforced` is
+  renamed `dimensions_enforced`, and a new
   row `size_enforced` asks whether a function rejects a value of the
   wrong fixed size a marker states (`Mat(30, 15)`); a fixed size stated
   only by a claim's binding gates nothing on its own, that question
