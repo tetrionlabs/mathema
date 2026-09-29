@@ -80,6 +80,7 @@ for law, route in [("for x in [0, 1e6], f(x) == 1", "derive"),
 ```text
 derive           one        proven
 derive           one[float] holds
+derive           missing[x] holds
 derive           one        proven
 derive           one[float] falsified x=-1.79769e+308
 derive:math_only one        proven

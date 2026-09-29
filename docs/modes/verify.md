@@ -212,7 +212,7 @@ A bundled file is named by the path records give it,
 $ mathema verify mathema/compendium/math.claims.yaml --root .
 ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
 FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- log_monotone unknown: derive route unliftable; compendium:math declares 'log_monotone' for math.log; mathema verify recorded it unknown against the installed library: accept it (mathema accept math.log log_monotone --as trusted) or let mathema verify adjudicate it against the installed library
-ok   math.sqrt: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 1 holds, 0 falsified
+ok   math.sqrt: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
 0 fresh (form unchanged, skipped), 3 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```

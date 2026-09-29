@@ -166,6 +166,8 @@ mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
   FALSIFY between_reals: for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)
            chained comparison falsified at link 1: min(a, b) <= f(a, b); at a = nan f gave nan back (missing in, missing out); at b = nan f gave nan back (missing in, missing out)
            counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
+  holds   missing(f, a) propagates   [default for a float: the type admits nan; change the word to raises or drops if f should do otherwise]
+  holds   missing(f, b) propagates   [default for a float: the type admits nan; change the word to raises or drops if f should do otherwise]
 ```
 
 So the test established that the function works at two integer points. mathema

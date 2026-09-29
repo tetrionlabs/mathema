@@ -244,11 +244,12 @@ def _raised_matches(raised: "str | None", expected: "str | None") -> bool:
 
 
 def _floor_points(fn, facts, param: str, kind: str, members: list,
-                  domain: dict) -> list:
+                  domain: dict, cj=None) -> list:
     """The points a policy row runs on its own: each member of the kind
     at `param` (as the whole value for a scalar, in the floor's
-    degenerate vectors for a vector), the other parameters drawn inside
-    their domains."""
+    degenerate vectors for a vector, inside a column of the floor's
+    tables for a table), the other parameters drawn inside their
+    domains."""
     import random
 
     from . import _floor
@@ -266,6 +267,16 @@ def _floor_points(fn, facts, param: str, kind: str, members: list,
     container = kinds.get(param) in SEQUENCE_KINDS
     if kind == "absent":
         values = [None]
+    elif kinds.get(param) == "table":
+        from .conjecture import _table_columns
+        holes = [v for w in members for v in realise_sentinel(member_sentinel(w))]
+        bound = (domain or {}).get(param)
+        base = {c: [_synth("float", rng, bound) for _ in range(3)]
+                for c in _table_columns(param, cj, facts)}
+        for item in _floor.table_floor(holes):
+            made = item(base)
+            if made is not None and not isinstance(made, _floor._Absent):
+                values.append(made)
     elif container:
         holes = [v for w in members for v in realise_sentinel(member_sentinel(w))]
         base = _synth("sequence", rng, (domain or {}).get(param), length=3)
@@ -358,7 +369,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
         if not found:
             members = [stated.member] if stated.member else _members_of(fn, p, stated.kind)
             points = [pt for pt in _floor_points(fn, facts, p, stated.kind, members,
-                                                 domain)
+                                                 domain, cj)
                       if _premise_holds(stated.premise, pt)]
             found = _run_floor(fn, facts, points)
             floor = floor or bool(found)

@@ -3338,12 +3338,14 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                 for cj in stated:
                     out.append(Probe(cj.name, policy_statement(cj), "skipped:misspecified",
                                      route=None, note=clash,
-                                     meta={"mathema.invalid_conjecture": True}))
+                                     meta={"mathema.invalid_conjecture": True,
+                                           "mathema.surface": cj.source}))
                 stated = []
             for cj in stated:
                 row = _policy.adjudicate(cj, fn, facts, domain or {}, derived)
                 row.grammar = cj.grammar
                 row.meta = {**(row.meta or {}), **(cj.meta or {})}
+                row.meta.setdefault("mathema.surface", cj.source)
                 out.append(row)
         return out
 

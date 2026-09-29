@@ -507,7 +507,8 @@ def _born_falsified_hint(key: str, probes: list,
               if d.get("name")}
     fresh = [p for p in probes
              if classify_verdict(getattr(p, "verdict", "")) == "falsified"
-             and getattr(p, "name", None) not in known]
+             and getattr(p, "name", None) not in known
+             and (getattr(p, "meta", None) or {}).get("mathema.surface") != "mathema"]
     if not fresh:
         return []
     names = ", ".join(sorted(str(p.name) for p in fresh))

@@ -82,7 +82,7 @@ mathema compendium status --root .
     mathema/compendium/numpy/reductions.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/scalars.claims.yaml (bundled, >=1.24,<3, in range)
   numpy.arcsin  1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
-  numpy.mean    1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
+  numpy.mean    1 call, 3 rows: 3 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.sqrt    1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   no claims: numpy.linspace
 ```
