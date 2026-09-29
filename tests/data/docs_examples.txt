@@ -87,7 +87,7 @@
 [-] docs/runtime-types.md:105
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
-[ ] docs/symbology.md:133
+[ ] docs/symbology.md:134
 [-] docs/three-layers.md:36
 [x] docs/tutorial.md:loop                        file run file run output file run output run output run output run output run output
 [x] README.md:parity                             file run output

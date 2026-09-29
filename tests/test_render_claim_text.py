@@ -199,7 +199,7 @@ def test_long_real_parameter_name_auto_lets_in_unicode_only():
 
     short = claim("for velocity in [0, 100], f(velocity) >= 0")
     assert render_claim_text(short, unicode=True) == \
-        "∀ velocity ∈ [0.0, 100.0] ⊂ ℝ ∪ {None, ∅}, f(velocity) ≥ 0"
+        "∀ velocity ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(velocity) ≥ 0"
 
     long = claim("for acceleration in [0, 100], f(acceleration) >= 0")
     unicode_text = render_claim_text(long, unicode=True)
@@ -271,7 +271,7 @@ def test_short_function_alias_is_never_renamed():
 
     cj = claim("let g = numpy.exp, for x in [0, 10], g(x) >= 1")
     assert render_claim_text(cj, unicode=True) == \
-        "let g = numpy.exp, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {None, ∅}, g(x) ≥ 1"
+        "let g = numpy.exp, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, g(x) ≥ 1"
 
 
 def test_a_function_alias_is_rendered_as_written_whatever_its_length():
@@ -308,7 +308,7 @@ def test_a_real_parameter_named_pi_or_oo_suppresses_the_glyph_not_renamed():
 
     cj = claim("for pi in [0, 100], f(pi) >= 0")
     unicode_text = render_claim_text(cj, unicode=True)
-    assert unicode_text == "∀ pi ∈ [0.0, 100.0] ⊂ ℝ ∪ {None, ∅}, f(pi) ≥ 0"
+    assert unicode_text == "∀ pi ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(pi) ≥ 0"
     assert "π" not in unicode_text and "let" not in unicode_text
 
     cj2 = claim("for oo in [0, 100], f(oo) >= 0")
@@ -324,7 +324,7 @@ def test_a_real_parameter_named_e_is_untouched_no_glyph_to_suppress():
 
     cj = claim("for e in [0, 100], f(e) >= 0")
     assert render_claim_text(cj, unicode=True) == \
-        "∀ e ∈ [0.0, 100.0] ⊂ ℝ ∪ {None, ∅}, f(e) ≥ 0"
+        "∀ e ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(e) ≥ 0"
 
 
 def test_pi_used_only_as_the_constant_is_unaffected_by_the_suppression():
@@ -354,7 +354,7 @@ def test_real_parameters_named_sum_prod_or_d_render_safely_as_bare_names():
     for name in ("Sum", "Prod", "d"):
         cj = claim(f"for {name} in [0, 100], f({name}) >= 0")
         unicode_text = render_claim_text(cj, unicode=True)
-        assert unicode_text == f"∀ {name} ∈ [0.0, 100.0] ⊂ ℝ ∪ {{None, ∅}}, f({name}) ≥ 0"
+        assert unicode_text == f"∀ {name} ∈ [0.0, 100.0] ⊂ ℝ ∪ {{absent, ∅}}, f({name}) ≥ 0"
 
 
 def test_non_greek_unicode_identifier_is_left_alone_in_ascii_mode():

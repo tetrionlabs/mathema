@@ -172,3 +172,33 @@ def test_a_call_with_no_missing_input_files_nothing():
     table = PolicyTable()
     table.add({"x": 1.0}, NAN)
     assert table.summary() == {}
+
+
+# converts is a change of kind, never of member spelling --------------
+
+def test_an_absent_argument_returned_as_a_hole_converts():
+    def fill(x):
+        return float("nan") if x is None else x
+    assert classify_call({"x": None}, fill(None)) == "converts"
+
+
+def test_a_hole_returned_as_an_absent_output_converts():
+    pd = pytest.importorskip("pandas")
+
+    def absent_if_missing(v):
+        return None if pd.isna(v) else v
+    assert classify_call({"v": NAN}, absent_if_missing(NAN)) == "converts"
+
+
+def test_a_null_slot_returned_as_nan_propagates_and_says_so():
+    pd = pytest.importorskip("pandas")
+    from mathema.probing import ExecutedMissing
+
+    values = [0.2, None]
+    out = pd.Series(values, dtype=float)
+    assert classify_call({"values": values}, out) == "propagates"
+    record = ExecutedMissing()
+    record.add_call({"values": values}, output=out)
+    assert record.meta()["executed"] == {
+        "values": {"null": "values[1]=None returned as nan"}}
+    assert record.meta()["behaviour"] == {"values": {"null": "propagates"}}

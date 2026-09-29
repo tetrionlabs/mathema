@@ -179,13 +179,13 @@ Among the results, all found with no claims written:
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
            counterexample ([-8.45341, 4.50714, -6.81355, 9.56619, 9.82492, -3.48464], -3.87612): -8.453411994413011 vs -31170.68185339262
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([0, 4.3345], -8.15071): -35.32926960780323 vs 39.66377358173939
-  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|None|missing, c*f(x, alpha) = f(g(x, c), alpha)
+           counterexample ([2.99699, 5.79101, -3.39565], 2.42473): -22.155606222909892 vs -19.631315077691653
+  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|absent|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
-  FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|None|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha=-1.79769e+308, c=-5
+  FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|absent|missing, c*f(x, alpha) = f(g(x, c), alpha)
+           counterexample x=[-8.767334983247743, -8.767334983247743, -8.767334983247743], alpha=-1.79769e+308, c=-5
            [mathematics sound, implementation:numerical-instability]
-  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|None|missing, c + f(x, alpha) = f(g(x, c), alpha)
+  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|absent|missing, c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
 ```
 

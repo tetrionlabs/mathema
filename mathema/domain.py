@@ -1453,7 +1453,12 @@ def domain_contains(value, bound, slot: bool = False) -> bool:
         return False
     if not dom.pieces:
         return True   # unrestricted within base_type
-    return any(_piece_contains(value, p) for p in dom.pieces)
+    value_pieces = [p for p in dom.pieces if not _sentinel_piece(p)]
+    if not value_pieces:
+        # a named space beside its sentinels (`R | {missing}`) is the
+        # whole space; a finite set of sentinels holds no number
+        return not _is_enumerated(dom)
+    return any(_piece_contains(value, p) for p in value_pieces)
 
 
 _TYPE_GLYPH = {"R": "ℝ", "Z": "ℤ", "N": "ℕ", "C": "ℂ"}
@@ -1498,11 +1503,12 @@ def _member_sort_key(v):
 
 
 def _sentinel_word(s: "_Sentinel", *, ascii_mode: bool, words: bool = False) -> str:
-    """A sentinel as the grammar spells it: `None` for absence, the class
-    as `missing` (`∅` in unicode, unless `words` asks for the word, as a
-    language domain does), a member as its own word."""
+    """A sentinel as the grammar spells it: `absent` for absence, the
+    class as `missing` (`∅` in unicode), a member as its own word. With
+    `words`, as a language domain and a path binding spell them,
+    absence is `None` and the class the word `missing` in both modes."""
     if s.kind == "absent":
-        return "None"
+        return "None" if words else "absent"
     if s.member is None:
         return "missing" if (ascii_mode or words) else "∅"
     return s.member
@@ -1636,7 +1642,7 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     if _is_enumerated(dom) and not dom.dims:
         values = sorted({v for p in dom.pieces for v in p}, key=_member_sort_key)
         text = "{" + ", ".join(_render_set_member(v, ascii_mode=ascii_mode,
-                                                  words=language)
+                                                  words=language or words)
                                for v in values) + "}"
         text += excluded_text()
         if dom.explicit_type and not language:
@@ -1665,7 +1671,8 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         text = union_op.join(_render_piece(p, ascii_mode=ascii_mode)
                              for p in value_pieces)
         text += excluded_text()
-        text += "".join("|" + _sentinel_word(s, ascii_mode=True) for s in ordered)
+        text += "".join("|" + _sentinel_word(s, ascii_mode=True, words=True)
+                        for s in ordered)
         return text
     fully_unbounded = (
         len(value_pieces) == 1 and not num_excl
@@ -1695,7 +1702,8 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         text += _type_annotation_suffix(dom.base_type, ascii_mode)
     if tail:
         if ascii_mode:
-            text += "".join("|" + _sentinel_word(s, ascii_mode=True) for s in tail)
+            text += "".join("|" + _sentinel_word(s, ascii_mode=True, words=words)
+                            for s in tail)
         else:
             text += " ∪ {" + ", ".join(_sentinel_word(s, ascii_mode=False,
                                                       words=words)

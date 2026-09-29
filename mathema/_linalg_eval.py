@@ -59,6 +59,29 @@ class Table(dict):
                 f"{', '.join(self) or 'none'})") from None
 
 
+_HOLED: list = []
+
+
+def _holed(array, holes: dict):
+    """`array` carrying the hole values its missing positions were drawn
+    as (`None`, `pd.NA`), `{position: value}`, so the function receives
+    them as drawn when the array goes back to a plain list; the array
+    itself holds NaN there."""
+    if not holes:
+        return array
+    if not _HOLED:
+        np = _np()
+
+        class HoledArray(np.ndarray):  # type: ignore[name-defined]
+            """A float array with the hole values it stands for."""
+            hole_values: dict = {}
+
+        _HOLED.append(HoledArray)
+    out = array.view(_HOLED[0])
+    out.hole_values = dict(holes)
+    return out
+
+
 def _numbers(value) -> bool:
     from .runtime_types import abstract_of
     from .runtime_types._abstract import AbstractMat, AbstractVec
@@ -86,11 +109,18 @@ def as_array(value):
         return value.astype(float) if value.dtype.kind in "biu" else value
     if isinstance(value, (list, tuple)) and value and _numbers(value):
         from .domain import is_missing
+
+        def kept(v):
+            # a hole drawn as something other than a float NaN
+            return is_missing(v) and not isinstance(v, float)
         if all(isinstance(r, (list, tuple)) for r in value):
-            return np.array([[math.nan if is_missing(v) else float(v)
-                              for v in r] for r in value], dtype=float)
-        return np.array([math.nan if is_missing(v) else float(v)
-                         for v in value], dtype=float)
+            return _holed(np.array([[math.nan if is_missing(v) else float(v)
+                                     for v in r] for r in value], dtype=float),
+                          {(i, j): v for i, r in enumerate(value)
+                           for j, v in enumerate(r) if kept(v)})
+        return _holed(np.array([math.nan if is_missing(v) else float(v)
+                                for v in value], dtype=float),
+                      {(k,): v for k, v in enumerate(value) if kept(v)})
     return value
 
 
@@ -104,7 +134,16 @@ def to_plain(value):
     if isinstance(value, Table):
         return {k: to_plain(v) for k, v in value.items()}
     if is_array(value):
-        return value.tolist()
+        out = value.tolist()
+        for position, hole in (getattr(value, "hole_values", None) or {}).items():
+            # the hole value the array was drawn with, back in its slot
+            if len(position) == 1 and isinstance(out, list) and position[0] < len(out):
+                out[position[0]] = hole
+            elif len(position) == 2 and isinstance(out, list) \
+                    and position[0] < len(out) and isinstance(out[position[0]], list) \
+                    and position[1] < len(out[position[0]]):
+                out[position[0]][position[1]] = hole
+        return out
     return value
 
 
@@ -303,9 +342,31 @@ def _norm(x, ord=None):
                          else np.linalg.norm(unit, ord))
 
 
+def _holes(a) -> bool:
+    """Whether an array holds a hole (a NaN position)."""
+    np = _np()
+    return bool(a.dtype.kind in "fc" and np.isnan(a).any())
+
+
+def _over_values(numpy_name: str, a, axis=None, **kwargs):
+    """A reduction over the value slots of `a`: numpy's NaN-skipping
+    reduction, a hole where every slot it reduces is a hole."""
+    np = _np()
+    out = getattr(np, "nan" + numpy_name)(a, axis=axis, **kwargs)
+    empty = np.all(np.isnan(a), axis=axis)
+    out = np.where(empty, np.nan, out)
+    return out.item() if getattr(out, "ndim", 1) == 0 else out
+
+
 def _reduction(builtin_fn, numpy_name):
     def reduce(*args, axis=None, **kwargs):
         if len(args) == 1 and _is_array_arg(args[0]):
+            if _holes(args[0]):
+                # over the value slots; a vector of holes reduces to one
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    return _over_values(numpy_name, args[0], axis=axis, **kwargs)
             out = getattr(_np(), numpy_name)(args[0], axis=axis, **kwargs)
             return out.item() if getattr(out, "ndim", 1) == 0 else out
         if axis is not None:
@@ -317,6 +378,11 @@ def _reduction(builtin_fn, numpy_name):
 
 def _mean(*args, axis=None):
     if len(args) == 1 and _is_array_arg(args[0]):
+        if _holes(args[0]):
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                return _over_values("mean", args[0], axis=axis)
         out = _np().mean(args[0], axis=axis)
         return out.item() if getattr(out, "ndim", 1) == 0 else out
     values = list(args[0]) if len(args) == 1 else list(args)
@@ -325,6 +391,8 @@ def _mean(*args, axis=None):
 
 def _prod(*args, axis=None):
     if len(args) == 1 and _is_array_arg(args[0]):
+        if _holes(args[0]):
+            return _over_values("prod", args[0], axis=axis)
         out = _np().prod(args[0], axis=axis)
         return out.item() if getattr(out, "ndim", 1) == 0 else out
     return math.prod(args[0] if len(args) == 1 else args)
@@ -341,34 +409,49 @@ def _values(args):
 
 
 def _moment(numpy_name):
-    """`std` or `var` as numpy computes them: `ddof` is subtracted
-    from the number of positions in the divisor (0 by default, the
-    population statistic; 1 for the sample statistic), and `axis`
-    reduces a matrix along one axis."""
+    """`std` or `var` as numpy computes them over the value slots:
+    `ddof` is subtracted from the number of value slots in the divisor
+    (0 by default, the population statistic; 1 for the sample
+    statistic), and `axis` reduces a matrix along one axis."""
     def moment(*args, ddof=0, axis=None):
-        out = getattr(_np(), numpy_name)(_values(args), ddof=ddof,
-                                         axis=axis)
+        a = _values(args)
+        if _holes(a):
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                return _over_values(numpy_name, a, axis=axis, ddof=ddof)
+        out = getattr(_np(), numpy_name)(a, ddof=ddof, axis=axis)
         return out.item() if getattr(out, "ndim", 1) == 0 else out
     moment.__name__ = numpy_name
     return moment
 
 
 def _count(*args, axis=None):
-    """The number of positions: every element of a vector or matrix,
-    or the positions along `axis` (one count per remaining index)."""
+    """The number of value slots: every element of a vector or matrix
+    that is not a hole, or those along `axis` (one count per remaining
+    index); `len` counts every slot."""
     a = _values(args)
-    if axis is None:
-        return int(a.size)
     np = _np()
-    return np.full(np.delete(np.array(a.shape), axis), a.shape[axis],
-                   dtype=float) if a.ndim > 1 else int(a.shape[axis])
+    present = ~np.isnan(a) if a.dtype.kind in "fc" else np.ones(a.shape, dtype=bool)
+    if axis is None:
+        return int(present.sum())
+    counts = present.sum(axis=axis)
+    return counts.astype(float) if a.ndim > 1 else int(counts)
 
 
 def _cumulative(numpy_name):
-    """`cumsum` or `cumprod`: the running sums or products, a matrix
-    read in row order without `axis`, along it with one."""
+    """`cumsum` or `cumprod`: the running sums or products over the
+    value slots, a hole kept at its own position; a matrix read in row
+    order without `axis`, along it with one."""
     def running(*args, axis=None):
-        return getattr(_np(), numpy_name)(_values(args), axis=axis)
+        a = _values(args)
+        np = _np()
+        if _holes(a):
+            out = getattr(np, "nan" + numpy_name)(a, axis=axis)
+            holes = np.isnan(a) if axis is not None or a.ndim == 1 \
+                else np.isnan(a).ravel()
+            return np.where(holes, np.nan, out)
+        return getattr(np, numpy_name)(a, axis=axis)
     running.__name__ = numpy_name
     return running
 
@@ -387,18 +470,31 @@ def _running_extremum(ufunc_name, word):
 
 
 def _median(*args, axis=None):
-    """The median: the middle element of the sorted vector, or the
-    mean of the middle two for an even length; along `axis` for a
-    matrix."""
-    out = _np().median(_values(args), axis=axis)
+    """The median of the value slots: the middle element of the sorted
+    values, or the mean of the middle two for an even count; along
+    `axis` for a matrix; a hole when every slot is one."""
+    a = _values(args)
+    if _holes(a):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            return _over_values("median", a, axis=axis)
+    out = _np().median(a, axis=axis)
     return out.item() if getattr(out, "ndim", 1) == 0 else out
 
 
 def _quantile(a, q):
-    """The `q`-quantile of a vector (`0 <= q <= 1`), interpolated
-    linearly between the two sorted elements it falls between, as
-    numpy and pandas compute it by default."""
-    out = _np().quantile(_values((a,)), q)
+    """The `q`-quantile of a vector's value slots (`0 <= q <= 1`),
+    interpolated linearly between the two sorted values it falls
+    between, as numpy and pandas compute it by default; a hole when
+    every slot is one."""
+    values = _values((a,))
+    if _holes(values):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            return _over_values("quantile", values, q=q)
+    out = _np().quantile(values, q)
     return out.item() if getattr(out, "ndim", 1) == 0 else out
 
 
@@ -443,7 +539,13 @@ def _matrix_power(A, k):
 
 
 def _dot(x, y):
-    out = _np().dot(_matrix(x), _matrix(y))
+    a, b = _matrix(x), _matrix(y)
+    np = _np()
+    if a.ndim == 1 and b.ndim == 1 and (_holes(a) or _holes(b)):
+        # over the value slots both vectors hold; a hole where none is
+        both = ~(np.isnan(a) | np.isnan(b))
+        return float(np.dot(a[both], b[both])) if both.any() else math.nan
+    out = np.dot(a, b)
     return out.item() if getattr(out, "ndim", 1) == 0 else out
 
 

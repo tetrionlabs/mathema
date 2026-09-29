@@ -108,7 +108,7 @@ def test_a_member_spelling_excludes_that_member(token):
 
 
 def test_none_excludes_absence():
-    dom = _dom("for x in [0, 1] \\ {None}, True")
+    dom = _dom("for x in [0, 1] \\ {absent}, True")
     assert not domain_contains(None, dom)
     assert domain_contains(float("nan"), dom)
 
@@ -126,7 +126,7 @@ def test_corner_b_explicit_type_admits_only_what_it_lists():
     dom = _dom("for x in [0, 100] \\subset Z, True")
     assert not domain_contains(float("nan"), dom)
     assert not domain_contains(None, dom)
-    dom = _dom("for x in [0, 100] \\subset Z ∪ {None, ∅}, True")
+    dom = _dom("for x in [0, 100] \\subset Z ∪ {absent, ∅}, True")
     assert domain_contains(float("nan"), dom)
     assert domain_contains(None, dom)
 
@@ -167,11 +167,11 @@ def test_rendering_distinguishes_all_four_corners_via_glyph_notation():
     c = _dom("for x in [0, 100] \\ {missing}, True")
     d = _dom("for x in [0, 100] \\subset Z \\ {missing}, True")
     ra, rb, rc, rd = (render_domain(x, show_missing=True) for x in (a, b, c, d))
-    assert ra.endswith("⊂ ℝ ∪ {None, ∅}")
-    assert rb == rd == "[0, 100] \\ {None, ∅} ⊂ ℤ"   # stated, narrowing the default
-    assert rc == "[0.0, 100.0] \\ {∅} ⊂ ℝ ∪ {None}"
+    assert ra.endswith("⊂ ℝ ∪ {absent, ∅}")
+    assert rb == rd == "[0, 100] \\ {absent, ∅} ⊂ ℤ"   # stated, narrowing the default
+    assert rc == "[0.0, 100.0] \\ {∅} ⊂ ℝ ∪ {absent}"
     for r in (ra, rc):
-        assert "None" in r   # glyph notation, never an English phrase
+        assert "absent" in r   # the word, never an English phrase
 
 
 def test_render_domain_never_uses_a_natural_language_phrase():

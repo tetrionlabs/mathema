@@ -227,9 +227,9 @@ for route in ["probe", "derive"]:
 <!-- example: just-below output -->
 ```text
 probe   holds
-        missing for x (float): nan; fails by 1e-10 at (0), within the default tolerance (1e-09)
+        fails by 1e-10 at (0), within the default tolerance (1e-09)
 derive  falsified x=0.0616333
-        missing for x (float): nan; reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
+        reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
 ```
 
 A declared tolerance is part of the claim, so it stays in force on both

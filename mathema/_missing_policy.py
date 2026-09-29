@@ -18,7 +18,8 @@ output:
 - `propagates`: the output holds as many no-value slots of the same
   kind as the inputs, at the same positions where the shapes match.
 - `converts`: the count is kept and the kind changes (a `None` in, a
-  `nan` out).
+  `nan` out; a hole in, `None` out). A hole spelled as another member
+  (a `None` slot returned as `nan`) keeps its kind, and propagates.
 - `introduces`: any other count, a no-value from present inputs
   included.
 
@@ -78,7 +79,11 @@ def _hole_word(v) -> "str | None":
 
 
 def _table_columns(value) -> "dict | None":
-    """`{name: [cell, ...]}` for a pandas or polars DataFrame, or None."""
+    """`{name: [cell, ...]}` for a pandas or polars DataFrame, or a dict
+    of equal-length columns (a table as drawn), or None."""
+    if isinstance(value, dict) and value and all(
+            isinstance(c, (list, tuple)) for c in value.values()):
+        return {str(k): list(c) for k, c in value.items()}
     module = type(value).__module__.split(".")[0]
     if module == "pandas" and type(value).__name__ == "DataFrame":
         return {str(c): value[c].tolist() for c in value.columns}
@@ -206,6 +211,33 @@ def classify_call(inputs: dict, output=None, raised: "str | None" = None) -> str
     if not (kinds_out & kinds_in):
         return "converts"
     return "introduces"
+
+
+def member_changes(inputs: dict, output) -> list:
+    """Intent:
+        `[(param, position, value, member), ...]`: the slots of the one
+        holding argument whose hole comes back at the same position of an
+        output of the same shape spelled as another member (a `None`
+        element returned as `nan`), with the value drawn and the member
+        returned. A change of spelling within a kind, which is no
+        conversion.
+    """
+    holding = [(p, v, no_value_slots(v)) for p, v in inputs.items()]
+    holding = [(p, v, sl) for p, v, sl in holding if sl.count()]
+    out = no_value_slots(output)
+    if len(holding) != 1 or holding[0][2].shape != out.shape or out.shape == ():
+        return []
+    p, value, slots = holding[0]
+    returned = {sl.position: sl for sl in out.slots}
+    cells = _cells(value)
+    changes = []
+    for sl in slots.slots:
+        back = returned.get(sl.position)
+        if back is not None and back.kind == sl.kind and back.member != sl.member:
+            drawn = cells[sl.position[0]] if cells is not None and len(sl.position) == 1 \
+                else sl.member
+            changes.append((p, sl.position, drawn, back.member))
+    return changes
 
 
 def keys_of(inputs: dict) -> list:

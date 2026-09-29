@@ -197,8 +197,8 @@ echo y | mathema accept funcs.settle nonneg --as evidence --by "Ada Lovelace"
 <!-- example: loop output -->
 ```text
 accepting funcs.settle :: nonneg (verdict holds) as evidence, by Ada Lovelace
-  - annotate nonneg as accepted evidence at n=130 (bound to form 3eb01e1d9919...)
-write this acceptance? [y/N] written: annotate nonneg as accepted evidence at n=130 (bound to form 3eb01e1d9919...)
+  - annotate nonneg as accepted evidence at n=129 (bound to form 3eb01e1d9919...)
+write this acceptance? [y/N] written: annotate nonneg as accepted evidence at n=129 (bound to form 3eb01e1d9919...)
 ```
 
 `accept` prints exactly what it will write and waits for a yes, here
@@ -241,9 +241,9 @@ echo y | mathema accept funcs.settle negative_exposure_negative --as discovery -
 ```text
 accepting funcs.settle :: negative_exposure_negative (verdict invalidated) as discovery, by Ada Lovelace
   - move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness
-  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', adjudicated now: holds over 128 trials
+  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', adjudicated now: holds over 127 trials
   - rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
-write this acceptance? [y/N] written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', adjudicated now: holds over 128 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
+write this acceptance? [y/N] written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', adjudicated now: holds over 127 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
 declared layer: claims/demo.claims.yaml now declares negative_exposure_negative_corrected in place of negative_exposure_negative (the superseded claim stays in the record's discoveries section):
   - name: negative_exposure_negative_corrected
     statement: "for x in [-5.0, -1.0] : float|missing, f(x) > 0"

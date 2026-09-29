@@ -201,4 +201,4 @@ def test_a_language_domain_says_missing_in_both_modes(letters):
                                   unicode=unicode)
         assert "L[letters]|missing" in shown and "∅" not in shown, shown
     shown = render_claim_text(claim("for x in [0, 1], f(x) >= 0"), unicode=True)
-    assert "∪ {None, ∅}" in shown, "a numeric domain keeps its glyph"
+    assert "∪ {absent, ∅}" in shown, "a numeric domain keeps its glyph"

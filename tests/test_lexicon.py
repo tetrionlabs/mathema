@@ -112,13 +112,13 @@ def test_a_rendered_domain_always_states_what_it_admits():
     from mathema.spec import render_claim_text
 
     allowed = claim("for x in [0,10], f(x) >= 0")
-    assert "∪ {None, ∅}" in render_claim_text(allowed, unicode=True)
-    assert "|None|missing" in render_claim_text(allowed, unicode=False)
+    assert "∪ {absent, ∅}" in render_claim_text(allowed, unicode=True)
+    assert "|absent|missing" in render_claim_text(allowed, unicode=False)
 
     excluded = claim("for x in [0,10] \\ {missing}, f(x) >= 0")
     assert "\\ {∅}" in render_claim_text(excluded, unicode=True)
     assert "\\ {missing}" in render_claim_text(excluded, unicode=False)
-    assert "|None" in render_claim_text(excluded, unicode=False)
+    assert "|absent" in render_claim_text(excluded, unicode=False)
 
     from mathema.spec import canonical_claim_text
     for conjecture in (allowed, excluded):

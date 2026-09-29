@@ -237,7 +237,8 @@ def check_missing_policy(src: LexiconSource) -> list:
                        if p.isidentifier())
         for unicode_mode in (True, False):
             shown = render_claim_text(cj, unicode=unicode_mode)
-            if unstated and "None" not in shown:
+            if unstated and not any(word in shown for word in
+                                    ("absent", "None", "missing", "∅")):
                 out.append(f"{key}: the rendered domain states no missing policy: {shown}")
             if canonical_claim_text(claim(shown)) != canonical_claim_text(cj):
                 out.append(f"{key}: the rendered missing policy reparses to another claim")

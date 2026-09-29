@@ -114,17 +114,17 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=192)
   holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=20)
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([-1e+06, 743857, -1e+06, -640264], -0.0903704): -1000000.0 vs -1219873.1423334838
+           counterexample ([-993714, 311292, -166437, 620054, 0, 999998, -999998], 6.79181): -999998.0 vs -53425523112.88785
   FALSIFY bounded_upper: f(x, alpha) <= max(x)
-           counterexample ([-18798, -1e+06, 614127, -980079, 539619], -3.76273): 359952260.7389567 vs 614127.441618376
+           counterexample ([551081, 0, 0, 937864, -860102, -288141, 726070], -4.23217): 10840391161.550304 vs 937863.7282631358
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([0, -233862, -563795, -582346, 312626], 9.38242): 969404644.5167232 vs 4408328610.953807
-  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|None|missing, c*f(x, alpha) = f(g(x, c), alpha)
+           counterexample ([567047, -597790, -1e+06, 223930, 683724, -934060, -933610], -1.67919): 425108676.6026794 vs -181372134.92932475
+  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|absent|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
-  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|None|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)
-  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|None|missing, c + f(x, alpha) = f(g(x, c), alpha)
+  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0] : float|absent|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=53)
+  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|absent|missing, c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
-  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|None|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=48)
+  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0] : float|absent|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=53)
 ```
 
 Read the `FALSIFY` rows as facts about `ema`, not as bugs in it. The
@@ -142,9 +142,9 @@ companions hold (an excerpt):
 ```python
 >>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (0, 1)})
   proven  bounded_lower: min(x) ≤ f(x, alpha)
-  holds   bounded_lower[float]: min(x) <= f(x, alpha) (n=44)
+  holds   bounded_lower[float]: min(x) <= f(x, alpha) (n=47)
   proven  bounded_upper: f(x, alpha) ≤ max(x)
-  holds   bounded_upper[float]: f(x, alpha) <= max(x) (n=44)
+  holds   bounded_upper[float]: f(x, alpha) <= max(x) (n=47)
 ```
 
 That is the loop in miniature: the suggestion found the assumption the

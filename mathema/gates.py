@@ -61,7 +61,7 @@ def _integer_bound(bound) -> bool:
 
 def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                      cap=None, reach=None, sequences=False,
-                     exact=False):
+                     exact=False, holes=None):
     """Intent:
         Build the injected dependencies the corroboration engine needs
         for THIS claim: `evaluate(point)` decides the original claim's
@@ -88,8 +88,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         +-`_EXTREME`. A sequence parameter is evaluable only with
         `sequences=True`: `sample` then draws a list (respecting a
         declared per-element bound) and `admits` requires a list whose
-        every element the bound admits. A coordinate whose domain is
-        integer-only reaches `fn` as an int, corners included.
+        every element the bound admits; a matrix coordinate (a claim
+        space of two axes) draws a list of rows, and a table coordinate
+        a dict of equal-length columns. `holes`, `{param: [value,
+        ...]}`, are the hole values a container's slots admit: a draw
+        carries them at `_floor.HOLE_RATE`, and `admits` accepts them. A
+        coordinate whose domain is integer-only reaches `fn` as an int,
+        corners included.
     """
     import math
     from .domain import (_as_int_if_whole, bound_to_sympy_set,
@@ -110,6 +115,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     seq_names = {p for p, k in kinds.items() if k in SEQUENCE_KINDS}
     if seq_names and not sequences:
         return None
+    # a table coordinate is a container too when list-valued points were
+    # asked for: a dict of columns, each a sequence
+    table_names = ({p for p, k in kinds.items() if k == "table"}
+                   if sequences else set())
+    mat_names = {p for p in seq_names
+                 if len(getattr(cj_domain.get(p), "dims", ()) or ()) >= 2}
+    hole_values = {p: list(v) for p, v in (holes or {}).items() if v}
     if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">"):
         return None
     extra = frozenset(bound_funcs)
@@ -204,10 +216,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         f_calls.reset()
         executed.last_classified = False
 
-    def _classify(point, raised):
+    def _classify(point, raised, sides=()):
         # at a missing input, a raise or a missing output is classified
-        # into the executed missing inputs and not judged; True when it was
-        at_missing = classified(point.values(), f_calls.outputs(), raised)
+        # into the executed missing inputs and not judged; True when it
+        # was. A law that calls no function has its own sides as output
+        at_missing = classified(point.values(), f_calls.outputs() or list(sides),
+                                raised)
         f_calls.record(executed, point)
         if at_missing:
             executed.classified += 1
@@ -224,7 +238,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # `2 * xs` scales and `xs + ys` adds elementwise, never a list
     # repeated or concatenated; the function still receives its own
     # runtime type and its result is read back as an array
-    as_arrays = bool(seq_names) and _numpy() is not None
+    as_arrays = bool(seq_names or table_names) and _numpy() is not None
     fn_call = calling(fn, facts)
     if as_arrays:
         fn_call = law_callable(fn_call)
@@ -244,6 +258,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     else:
         cap_lo, cap_hi = -_EXTREME, _EXTREME
 
+    from . import _floor
+    from .conjecture import _table_columns
+    table_columns = {p: _table_columns(p, cj, facts) for p in table_names}
     int_names = {name for name in names
                  if _integer_bound(cj_domain.get(name))
                  or kinds.get(name) in ("int", "bool")}
@@ -259,8 +276,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # int, the value the probe route draws there; a float would make
         # `range(n)` raise where the claim is about integers
         return {n: (_as_int_if_whole(v) if n in int_names else
-                    as_array(v) if as_arrays and n in seq_names
-                    and isinstance(v, (list, tuple)) else v)
+                    as_array(v) if as_arrays and n in seq_names | table_names
+                    and isinstance(v, (list, tuple, dict)) else v)
                 for n, v in point.items()}
 
     def _values(point):
@@ -354,7 +371,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if _classify(point, bool(calls_raised[0])):
                 return None
             return False if calls_raised[0] else None
-        if _classify(point, False):
+        if _classify(point, False, (lv, rv)):
             return None
         if calls_nonfinite[0] is not None:
             # a nan or an infinity the code returned for finite inputs
@@ -434,7 +451,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
             return None
-        if _classify(point, False):
+        if _classify(point, False, (lv, rv)):
             return None
         if not inputs_missing(point.values()) \
                 and "absent" in (missing_class(lv), missing_class(rv)):
@@ -556,9 +573,26 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # range (or the reach), so a declared range bounds the draws
         # too, not only the corners
         b = sample_domain.get(name)
+        if name in mat_names:
+            # a matrix: rows of element draws, square when its two axes
+            # share a name
+            dims = tuple(getattr(cj_domain.get(name), "dims", ()) or ())
+            n_rows = rng.randint(2, 4)
+            n_cols = n_rows if len(set(dims[:2])) == 1 else rng.randint(2, 4)
+            rows = [[_synth("float", rng, b) for _ in range(n_cols)]
+                    for _ in range(n_rows)]
+            return _floor.gapped_rows(rows, hole_values.get(name, []), rng, 0)[0]
         if name in seq_names:
             # a sequence's declared bound is per element
-            return _synth("sequence", rng, b)
+            return _floor.gapped(_synth("sequence", rng, b),
+                                 hole_values.get(name, []), rng, 0)[0]
+        if name in table_names:
+            # a table: one equal-length column per name the claim or the
+            # body reads
+            length = rng.randint(2, 8)
+            return {c: _floor.gapped(_synth("sequence", rng, b, length=length),
+                                     hole_values.get(name, []), rng, 0)[0]
+                    for c in table_columns[name]}
         if name in complex_names:
             # both components, each inside the pseudo-infinity range
             # when one applies
@@ -591,22 +625,43 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # computed exactly; the law itself stays in float
     premise_words = premise_functions(_VECTOR_FUNCS)
 
+    def _element_ok(n, e, bound):
+        # an element inside the declared per-element bound, or a hole
+        # the slot admits
+        if hole_values.get(n) and missing_class(e) is not None:
+            return True
+        return isinstance(e, (int, float)) and domain_contains(e, bound)
+
     def admits(point):
-        for n in seq_names:
-            # a sequence coordinate is a list, each element inside the
+        for n in seq_names | table_names:
+            # a sequence coordinate is a list (a matrix a list of rows, a
+            # table a dict of columns), each element inside the
             # declared per-element bound
             v = point.get(n)
-            if not isinstance(v, (list, tuple)):
-                return False
+            if n in table_names:
+                if not isinstance(v, dict):
+                    return False
+                elements = [e for col in v.values() for e in col]
+            elif n in mat_names:
+                if not isinstance(v, (list, tuple)) or not all(
+                        isinstance(r, (list, tuple)) for r in v):
+                    return False
+                elements = [e for r in v for e in r]
+            else:
+                if not isinstance(v, (list, tuple)):
+                    return False
+                elements = list(v)
             bound = cj_domain.get(n)
-            if bound is not None and not all(
-                    isinstance(e, (int, float)) and domain_contains(e, bound)
-                    for e in v):
+            if bound is not None and not all(_element_ok(n, e, bound)
+                                             for e in elements):
                 return False
         for n in names:
             bound = cj_domain.get(n)
             v = point.get(n)
-            if bound is None or v is None or n in seq_names:
+            if bound is None or v is None or n in seq_names | table_names:
+                continue
+            if n in hole_values and missing_class(v) is not None:
+                # a missing value the parameter's completed domain admits
                 continue
             if n in language_names or isinstance(v, complex):
                 # a language coordinate is judged by its language and a
@@ -659,7 +714,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return val
 
     def _corner_value(name, value):
-        # a sequence's corner is a short list at the per-element edge
+        # a sequence's corner is a short list at the per-element edge, a
+        # matrix's a small one, a table's short columns
+        if name in mat_names:
+            dims = tuple(getattr(cj_domain.get(name), "dims", ()) or ())
+            n_cols = 2 if len(set(dims[:2])) == 1 else 3
+            return [[value] * n_cols for _ in range(2)]
+        if name in table_names:
+            return {c: [value] * 3 for c in table_columns[name]}
         return [value] * 3 if name in seq_names else value
 
     def _language_edges(name):
@@ -1019,6 +1081,14 @@ def companion_descriptor(name: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in inside.split(",") if part.strip())
 
 
+def _and_words(words: str) -> str:
+    """`None, nan` as `None and nan`, a list of words said aloud."""
+    parts = [w.strip() for w in words.split(",") if w.strip()]
+    if len(parts) <= 1:
+        return words
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 def _reach_text(names, cj_domain, resolved, reach) -> str:
     """Intent:
         How far the float companion ran along the claim's unbounded
@@ -1060,7 +1130,8 @@ def _finite_arguments(args, kwargs) -> bool:
 
 
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
-                     assum=(), budget=None, missing=None) -> "Probe | None":
+                     assum=(), budget=None, missing=None,
+                     holes=None) -> "Probe | None":
     """Intent:
         The computation claim a derive proof spawns. `parent` is proven in
         exact arithmetic, which is all a derive `proven` says; the
@@ -1087,8 +1158,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         corroboration budget of interior points. `missing` lists the
         missing values the claim's completed domain admits, `(param,
         word, value)`: each is executed at the first domain corner,
-        after the corners and before the sampled points, and a raise or
-        a relation failing there by kind falsifies the companion.
+        after the corners and before the sampled points; a container's
+        floor is listed the same way (its word None for an item that
+        holds no hole). `holes`, `{param: [value, ...]}`, are the hole
+        values a container's slots admit, carried by its sampled draws.
+        A point where the code returns a missing value or raises at a
+        missing input is classified, never judged.
     """
     from . import corroboration as C
     from ._sampling import representation_reach
@@ -1098,9 +1173,16 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     cap = operational_range(cj)
     descriptor, representation, representation_word = \
         companion_representation(cj_domain, facts)
+    # the admitted missing values, a container's by slot and a scalar's
+    # as the parameter's own value, which the kit admits beside the
+    # domain's own points
+    holes = {p: list(v) for p, v in (holes or {}).items()}
+    for p, _w, v in (missing or ()):
+        if not isinstance(v, (list, tuple, dict)):
+            holes.setdefault(p, []).append(v)
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
                             cap=cap, reach=representation.max_magnitude,
-                            sequences=True)
+                            sequences=True, holes=holes)
     if deps is None:
         return None
     name = companion_name(parent.name, descriptor)
@@ -1110,7 +1192,9 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     corners = list(deps["corners"])
     missing_corners = [{**corners[0], p: v} for p, _w, v in (missing or ())
                        if corners and p in deps["names"]]
-    corners += missing_corners
+    # the admitted missing inputs run first, so each is executed and
+    # recorded whatever a domain corner does
+    corners = missing_corners + corners
     interior = (C._CORROBORATION_BUDGET if budget is None
                 else max(0, int(budget) - len(corners)))
     progress = C.StabilitySweep()
@@ -1119,8 +1203,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             lambda: C.sweep_stability(deps["probe_finite"], deps["names"],
                                       sample=deps["sample"],
                                       corners=corners,
-                                      admits=lambda pt: deps["admits"](pt)
-                                      or pt in missing_corners,
+                                      admits=deps["admits"],
                                       budget=interior, progress=progress),
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
@@ -1135,18 +1218,21 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                  + (f" executing {at}" if at else "")
                  + (f"; {reach_text}" if reach_text else ""),
             meta={"mathema.timeout": "fast"})
-    words = ", ".join(dict.fromkeys(w for _p, w, _v in (missing or ())))
+    words = ", ".join(dict.fromkeys(w for _p, w, _v in (missing or ()) if w))
     tried: dict = {}
-    for p, _w, v in (missing or ()):
-        if missing_corners and p in deps["names"]:
-            tried.setdefault(p, []).append(repr(v))
+    for p, w, v in (missing or ()):
+        if w and missing_corners and p in deps["names"]:
+            # a scalar's value as executed, a container's member word
+            said = w if isinstance(v, (list, tuple, dict)) else repr(v)
+            if said not in tried.get(p, []):
+                tried.setdefault(p, []).append(said)
     tried_meta = {"mathema.missing": {"tried": tried}} if tried else {}
     from .probing import executed_missing, with_executed
     tried_meta = with_executed(tried_meta, executed_missing(deps)) or {}
     what = (f"the computation of {parent.name} in {representation_word}, "
-            f"executed at {sweep.checked} points (every domain corner, "
-            + (f"{words}, " if words and missing_corners else "")
-            + "then sampled interior points)"
+            f"executed at {sweep.checked} points ("
+            + (f"{_and_words(words)} first, then " if words and missing_corners else "")
+            + "every domain corner, then sampled interior points)"
             + (f"; {reach_text}" if reach_text else ""))
     if sweep.fragile_point is not None:
         pt = _fmt_point(sweep.fragile_point, deps["names"])

@@ -201,8 +201,8 @@ for n in Z, ...                                # bare, unbounded, still a stated
 
 ### Missing values
 
-A missing value is one of two kinds. **Absence**, written `None`, is the
-object itself not being there: the parameter, the whole vector, a field
+A missing value is one of two kinds. **Absence**, written `absent`
+(`None` reads as the same word), is the object itself not being there: the parameter, the whole vector, a field
 of a record. A **hole**, written `missing` (`∅` in the unicode form), is
 one slot with no computable content: a NaN in a float, a `null` or `nan`
 element of a list, a `pd.NA` in a Series. `nan`, `NA`, `null` and `NaT`
@@ -210,20 +210,22 @@ each name one member of the hole class, and a runtime's definition rows
 (see [Claims transfer](claims-transfer.md#definitions)) can add more.
 
 A domain says which kinds it admits. A type clause states the whole
-policy, so `[0, 1] : float` admits neither, `[0, 1] : float|None` admits
+policy, so `[0, 1] : float` admits neither, `[0, 1] : float|absent` admits
 absence, `[0, 1] : float|missing` a hole, and `[0, 1] : float|nan` only
-the NaN member; `\ {missing}` and `\ {None}` exclude a kind. A bare
+the NaN member; `\ {missing}` and `\ {absent}` exclude a kind. A bare
 interval and a bare named space (`R`, `R^n`, `Z`) state nothing. A finite set
 is exactly its members: `{6, 28, 496}` admits nothing missing and
-`{0.25, None}` admits 0.25 and absence. Inside a space the slot's holes
+`{0.25, absent}` admits 0.25 and absence. Inside a space the slot's holes
 sit in brackets before the power, `([0, 1] | {missing})^n`.
 
 A binding without a type clause takes its policy from the parameter's
 annotation: a `float` slot may hold its NaN hole, an `int`, `bool` or
 `str` holds none, `Optional[...]` may be absent, a `list` element may be
 `null` or `nan`, and a parameter with no annotation admits both. The
-record says how the class was resolved, and a written clause wins over
-the annotation, the note saying whether it widens or narrows it:
+record's `meta["mathema.missing"]` names the members the class resolved
+to, and a written clause wins over the annotation, the note saying
+whether it widens or narrows it. The statement shows what the domain
+admits:
 
 <!-- example: missing-default run -->
 ```python
@@ -235,16 +237,16 @@ def root(x: float) -> float:
 
 row = mathema.check(root, claims=["for x in [0, 1], f(x) >= 0"]).probes[0]
 print(row.statement)
-print(row.note)
+print(row.meta["mathema.missing"]["admitted"])
 ```
 
 <!-- example: missing-default output -->
 ```text
 for x in [0.0, 1.0] : float|missing, f(x) >= 0
-missing for x (float): nan
+{'x': {'None': False, 'holes': ['nan']}}
 ```
 
-The canonical text renders what a domain admits, in the order `None`,
+The canonical text renders what a domain admits, in the order `absent`,
 `missing`, then members, fused onto the type in ASCII and written as a
 union in unicode, and an exclusion only where it narrows what the
 annotation would admit (read without a function, what no annotation
@@ -257,9 +259,9 @@ still reads, and comes back in this form:
 from mathema import claim
 from mathema.spec import render_claim_text
 
-render_claim_text(claim("for x in [0, 1] ⊂ ℝ ∪ {None, ∅}, f(x) >= 0"), unicode=False)  # 'for x in [0.0, 1.0] : float|None|missing, f(x) >= 0'
-render_claim_text(claim("for x in [0, 1] : float|None, f(x) >= 0"), unicode=True)  # '∀ x ∈ [0.0, 1.0] \\ {∅} ⊂ ℝ ∪ {None}, f(x) ≥ 0'
-render_claim_text(claim("for xs in [0, 1]^n : float|missing, f(xs) >= 0"), unicode=False)  # 'for xs in ([0.0, 1.0] | {missing})^n \\ {None} : float, f(xs) >= 0'
+render_claim_text(claim("for x in [0, 1] ⊂ ℝ ∪ {None, ∅}, f(x) >= 0"), unicode=False)  # 'for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0'
+render_claim_text(claim("for x in [0, 1] : float|None, f(x) >= 0"), unicode=True)  # '∀ x ∈ [0.0, 1.0] \\ {∅} ⊂ ℝ ∪ {absent}, f(x) ≥ 0'
+render_claim_text(claim("for xs in [0, 1]^n : float|missing, f(xs) >= 0"), unicode=False)  # 'for xs in ([0.0, 1.0] | {missing})^n \\ {absent} : float, f(xs) >= 0'
 ```
 
 ### Language domains
@@ -691,7 +693,7 @@ mathema.Record(softmax) · source, no side effects · form 7982b776d687
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (n=192)
   holds   preserves_length: dim(f(scores), 0) = dim(scores, 0) (n=192)
   FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
-           counterexample scores=[0, 6.12225]: [0.0021887084924676944, 0.9978112915075322] vs [0.0, 6.122252531363742]
+           counterexample scores=[0, 0]: [0.5, 0.5] vs [0.0, 0.0]
   holds   preserves_type: type(f(scores)) = type(scores) (n=192)
   FALSIFY is_sorted_output: is_sorted_output(f(scores))
            counterexample ([4.86304, 8.4521, -9.06059, -3.61645]): output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output

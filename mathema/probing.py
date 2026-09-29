@@ -587,13 +587,24 @@ class ExecutedMissing:
     def add_call(self, point: dict, output=None, raised: "str | None" = None) -> None:
         """File one call at `point` (its arguments by name) that returned
         `output` or raised `raised`."""
-        from ._missing_policy import keys_of
+        from ._missing_policy import keys_of, member_changes, no_value_slots
         keys = keys_of(point)
         if not keys:
             return
         said = execution_outcome(value=output, raised=raised, holed_input=True)
+        # a hole returned in its slot spelled as another member is said
+        # slot by slot: `values[1]=None returned as nan`
+        respelled: dict = {}
+        if raised is None:
+            for p, position, drawn, back in member_changes(point, output):
+                where = "".join(f"[{i}]" for i in position)
+                word = next(sl.member for sl in no_value_slots(point[p]).slots
+                            if sl.position == position)
+                respelled.setdefault((p, word),
+                                     f"{p}{where}={drawn!r} returned as {back}")
         for p, _kind, member in keys:
-            self.table.setdefault(p, {}).setdefault(member, said)
+            self.table.setdefault(p, {}).setdefault(
+                member, respelled.get((p, member), said))
         self.policy.add(point, output, raised)
 
     def meta(self) -> dict:

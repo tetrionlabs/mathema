@@ -36,8 +36,8 @@ print(render_claim_text(c))
 
 <!-- example: alphabets output -->
 ```text
-let x = acceleration, let θ = theta, ∀ θ ∈ [0.0, 1.0] ⊂ ℝ ∪ {None, ∅}, x ∈ [0.0, 100.0] ⊂ ℝ ∪ {None, ∅}, f(θ, x) ≥ 0
-for theta in [0.0, 1.0] : float|None|missing, acceleration in [0.0, 100.0] : float|None|missing, f(theta, acceleration) >= 0
+let x = acceleration, let θ = theta, ∀ θ ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, x ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(θ, x) ≥ 0
+for theta in [0.0, 1.0] : float|absent|missing, acceleration in [0.0, 100.0] : float|absent|missing, f(theta, acceleration) >= 0
 ```
 
 Both are the same claim and both parse back. Unicode is the default;
@@ -54,11 +54,12 @@ stands for which parameter, and reparsing it gives the claim back.
 
 ## Type suffixes and the missing values
 
-The ASCII form writes `[0.0, 1.0] : float|None|missing` where the
-Unicode form writes `[0.0, 1.0] ⊂ ℝ ∪ {None, ∅}`. Both say the same
-three things: the interval, that the object may be absent (`None`), and
-that its slot may hold a hole (`missing`, `∅`). A domain renders what it
-admits and never what it excludes, in the order `None`, `missing`, then
+The ASCII form writes `[0.0, 1.0] : float|absent|missing` where the
+Unicode form writes `[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}`. Both say the same
+three things: the interval, that the object may be absent (`absent`,
+which `None` also spells), and that its slot may hold a hole
+(`missing`, `∅`). A domain renders what it admits and never what it
+excludes, in the order `absent`, `missing`, then
 member words (`nan`, `NA`, `null`, `NaT`). A type clause admits what
 it lists and nothing else, and an exclusion renders where it narrows
 what the parameter's annotation would admit: `[0, 100] ⊂ Z` renders
@@ -131,8 +132,8 @@ With the package installed, a claim over `spot` and `strike` renders
 in the desk's own notation:
 
 ```text
-default        : ∀ spot ∈ [1.0, 500.0] ⊂ ℝ ∪ {None, ∅}, strike ∈ [1.0, 500.0] ⊂ ℝ ∪ {None, ∅}, f(spot, strike) ≥ 0
-with provider  : let S = spot, let K = strike, ∀ S ∈ [1.0, 500.0] ⊂ ℝ ∪ {None, ∅}, K ∈ [1.0, 500.0] ⊂ ℝ ∪ {None, ∅}, f(S, K) ≥ 0
+default        : ∀ spot ∈ [1.0, 500.0] ⊂ ℝ ∪ {absent, ∅}, strike ∈ [1.0, 500.0] ⊂ ℝ ∪ {absent, ∅}, f(spot, strike) ≥ 0
+with provider  : let S = spot, let K = strike, ∀ S ∈ [1.0, 500.0] ⊂ ℝ ∪ {absent, ∅}, K ∈ [1.0, 500.0] ⊂ ℝ ∪ {absent, ∅}, f(S, K) ≥ 0
 ```
 
 The `let` bindings come for free. mathema states every rename it made,

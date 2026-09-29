@@ -6,16 +6,18 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 - Fingerprints move once in 0.6.1: the rendered domain now states what
   it admits. A missing value is one of two kinds, the absence of the
-  object (`None`) and a hole in a slot (`missing`, `∅` in unicode, with
+  object (`absent`, which `None` also spells) and a hole in a slot
+  (`missing`, `∅` in unicode, with
   the members `nan`, `NA`, `null` and `NaT`), and a domain renders only
   what it admits: `[0.0, 1.0] : float|missing` in ASCII, `[0.0, 1.0] ⊂ ℝ
   ∪ {∅}` in unicode, a space's slot holes in brackets before the power
   (`([0.0, 1.0] | {missing})^n : float`). A type clause states the whole
   policy (`[0, 100] ⊂ Z` now admits no missing value), a binding without
   one is completed from the annotation (a `float` holds `nan`, an `int`
-  or `str` nothing, `Optional[...]` may be absent), the record's note
-  states the resolution (`missing for x (float): nan`), and a finite set
-  is exactly its members (`{0.25, None}` is 0.25 and absence). Every
+  or `str` nothing, `Optional[...]` may be absent), the record's
+  `meta["mathema.missing"]` states the members the class resolved to,
+  and a finite set is exactly its members (`{0.25, absent}` is 0.25 and
+  absence). Every
   earlier spelling still reads and comes back in the new form. `mathema
   verify` re-records a claim whose record differs only by this change
   and says so once for the run, not claim by claim.
@@ -33,6 +35,33 @@ Notable changes to mathema are recorded here from its first public release onwar
   and the bundled definition rows state `R^n` without `\ {∅}`.
 - A `raises(...)` claim over a finite domain is proven by calling the
   function at every point.
+- A value claim is judged wherever the function returns a value, a
+  missing input it replaces included, and never where it returns a
+  missing value or raises at a missing input: that point is recorded,
+  not compared. A value claim with no point left to compare is
+  `unknown`. `meta["mathema.missing"]` records what the function did at
+  each missing input it was called with (`executed`) and the behaviour
+  per parameter and member (`behaviour`: `raises`, `drops`,
+  `propagates`, `converts` or `introduces`, or `mixed` with a witness
+  for each).
+- A claim over a vector, a matrix or a table meets the degenerate
+  containers first (the zero and a constant vector, a vector of length
+  1, all-missing vectors, a missing value at the first and at the last
+  position, the zero, constant and rank-deficient matrices, a missing
+  entry and an all-missing row, a missing value in every column and an
+  all-missing column), and a random draw then carries one to three
+  missing values at a rate of 0.15, each admitted member in turn. A
+  float companion runs these too.
+- `sum`, `mean`, `std`, `var`, `min`, `max`, `prod`, `median`,
+  `quantile`, `dot`, `cumsum`, `cumprod` and `count` in a claim read the
+  values of a vector, a missing value left out; a reduction over no
+  value is missing, and `len` counts every position. The bundled
+  `pandas.Series.sum`, `pandas.Series.prod` and `pandas.DataFrame.sum`
+  rows now assume one value, and `polars.Series.count` admits `null`
+  only.
+- A definition row may define `absent` (`absent := {Option::None}`); one
+  value may be both the absence and a hole member, and two hole members
+  that are one value are refused at load.
 
 - The wheel now ships the bundled compendium. The 0.6.0 wheel carried
   none of its compendium files (the package-data pattern missed the

@@ -303,12 +303,12 @@ def total(x: float) -> float:
 
 
 @pytest.mark.parametrize("law, ascii_domain", [
-    (r"for x in [0, 1] \ {missing}, f(x) >= 0", r"[0.0, 1.0] \ {missing} : float|None,"),
+    (r"for x in [0, 1] \ {missing}, f(x) >= 0", r"[0.0, 1.0] \ {missing} : float|absent,"),
     (r"for x in [0, 1] \ {3, missing}, f(x) >= 0",
-     r"[0.0, 1.0] \ {3, missing} : float|None,"),
-    (r"for x in [0, 1] \ {3}, f(x) >= 0", r"[0.0, 1.0] \ {3} : float|None|missing,"),
-    (r"for n in [0, 5] subset Z \ {missing}, f(n) >= 0", r"[0, 5] \ {None, missing} : int,"),
-    (r"for x in R \ {missing}, f(x) >= 0", r"R \ {missing}|None,"),
+     r"[0.0, 1.0] \ {3, missing} : float|absent,"),
+    (r"for x in [0, 1] \ {3}, f(x) >= 0", r"[0.0, 1.0] \ {3} : float|absent|missing,"),
+    (r"for n in [0, 5] subset Z \ {missing}, f(n) >= 0", r"[0, 5] \ {absent, missing} : int,"),
+    (r"for x in R \ {missing}, f(x) >= 0", r"R \ {missing}|absent,"),
 ])
 def test_an_excluded_missing_value_is_stated_where_it_narrows_and_survives_reparse(
         law, ascii_domain):

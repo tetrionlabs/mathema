@@ -285,8 +285,8 @@ declared as a `let` binding. With it uninstalled, mathema renders its
 own names:
 
 ```text
-default        : ∀ mass ∈ [0.0, 10.0] ⊂ ℝ ∪ {None, ∅}, velocity ∈ [0.0, 5.0] ⊂ ℝ ∪ {None, ∅}, f(mass, velocity) ≥ 0
-with provider  : let m = mass, let v = velocity, ∀ m ∈ [0.0, 10.0] ⊂ ℝ ∪ {None, ∅}, v ∈ [0.0, 5.0] ⊂ ℝ ∪ {None, ∅}, f(m, v) ≥ 0
+default        : ∀ mass ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, velocity ∈ [0.0, 5.0] ⊂ ℝ ∪ {absent, ∅}, f(mass, velocity) ≥ 0
+with provider  : let m = mass, let v = velocity, ∀ m ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, v ∈ [0.0, 5.0] ⊂ ℝ ∪ {absent, ∅}, f(m, v) ≥ 0
 ```
 
 ## Reference

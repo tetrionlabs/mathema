@@ -201,7 +201,7 @@ def test_a_foreign_runtime_renders_both_kinds_and_states_its_members(toy_runtime
     report = mathema.check(toy_sqrt, claims=[mathema.claim("for x in [0, 1], f(x) >= 0",
                                                            name="c")])
     probe = next(p for p in report.probes if p.name == "c")
-    assert probe.statement == "for x in [0.0, 1.0] : float|None|missing, f(x) >= 0"
+    assert probe.statement == "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"
     assert probe.meta["mathema.missing"]["admitted"]["x"]["holes"] == ["NaN"]
 
 

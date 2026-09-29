@@ -39,12 +39,14 @@ pandas.Series.var:
 pandas.Series.sum:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= sum(a)"
+      statement: "for a in R^n, assuming count(a) >= 1, f(a) ~= sum(a)"
+      note: "Over the values; a Series with no value sums to 0."
 
 pandas.Series.prod:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= prod(a)"
+      statement: "for a in R^n, assuming count(a) >= 1, f(a) ~= prod(a)"
+      note: "Over the values; a Series with no value has product 1."
 
 pandas.Series.cumsum:
   claims:

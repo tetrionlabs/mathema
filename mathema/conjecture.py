@@ -5086,6 +5086,125 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                        "mathema.witness_executed": True})
 
 
+def _container_holes(p: str, record, resolution: dict) -> tuple:
+    """Intent:
+        `(absent, holes)` for a container parameter: whether its
+        completed domain admits the container itself absent, and the
+        realised hole values its slots admit, one per member the
+        resolution names (`[None, nan]` for a list).
+    """
+    from .domain import NO_ANNOTATION, _as_domain, admitted, member, realise_sentinel
+    if record is None:
+        return False, []
+    dom = _as_domain(record)
+    absent, admitted_holes = admitted(dom, dom.policy)
+    policy = resolution.get(p, NO_ANNOTATION)
+    words = [w for h in admitted_holes
+             for w in (policy.members if h.member is None else (h.member,))]
+    holes: list = []
+    for w in dict.fromkeys(words):
+        holes += realise_sentinel(member(w))
+    return bool(absent), holes
+
+
+def _admitted_container_points(ctx, facts) -> tuple:
+    """Intent:
+        `(points, holes)` for a proof's companion: `points` the floor of
+        every vector, matrix and table parameter as `(param, word,
+        value)`, `word` the hole member the value holds (`None` for the
+        container absent, None for an item holding no hole), each built
+        from a fixed small draw inside the element domain; `holes` the
+        realised hole values each container's slots admit.
+    """
+    import random as _random
+
+    from . import _floor
+    from ._missing_policy import keys_of
+    from ._sampling import _RNG_SEED
+    from .domain import domain_contains
+    rng = _random.Random(_RNG_SEED)
+    points: list = []
+    holes_of: dict = {}
+    for p in facts.params:
+        kind = facts.param_kinds.get(p, "unknown")
+        bound = (ctx.cj_domain or {}).get(p)
+        if kind not in SEQUENCE_KINDS and kind != "table":
+            continue
+        if bound is not None and getattr(bound, "base_type", None) == "L":
+            continue
+        absent, holes = _container_holes(p, (ctx.record_domain or {}).get(p),
+                                         ctx.missing or {})
+        try:
+            admits_zero = bound is None or bool(domain_contains(0.0, bound))
+        except Exception:
+            admits_zero = False
+        dims = tuple(getattr(bound, "dims", ()) or ())
+        if kind == "table":
+            base = {c: [_synth("float", rng, bound) for _ in range(3)]
+                    for c in _table_columns(p, ctx.cj, facts)}
+            floor = _floor.table_floor(holes, absent=absent)
+        elif len(dims) >= 2:
+            n_cols = 2 if len(set(dims[:2])) == 1 else 3
+            base = [[_synth("float", rng, bound) for _ in range(n_cols)]
+                    for _ in range(2)]
+            floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
+        else:
+            base = [_synth("float", rng, bound) for _ in range(3)]
+            floor = _floor.vector_floor(holes, admits_zero, length_free=True,
+                                        absent=absent)
+        for item in floor:
+            value = item(base)
+            if value is None:
+                continue
+            if isinstance(value, _floor._Absent):
+                points.append((p, "None", None))
+                continue
+            keys = keys_of({p: value})
+            points.append((p, keys[0][2] if keys else None, value))
+        if holes:
+            holes_of[p] = holes
+    return points, holes_of
+
+
+def _container_draws(p: str, kind: str, bound, record, resolution: dict,
+                     resolver, shared: bool, structured: bool):
+    """Intent:
+        The `_floor.ContainerDraws` of one vector, matrix or table
+        parameter: its floor (the degenerate containers, every admitted
+        hole member in it) and the holes its random draws carry; None
+        for a parameter that is not a container, or one drawn from a
+        language or with a structure a floor item would break.
+    """
+    from . import _floor
+    from .domain import domain_contains
+    if bound is not None and getattr(bound, "base_type", None) == "L":
+        return None
+    shape = resolver.shapes.get(p)
+    if kind == "table":
+        form = "table"
+    elif structured:
+        return None
+    elif shape is not None and shape.ndim >= 2:
+        form = "mat"
+    elif kind in SEQUENCE_KINDS or (shape is not None and shape.ndim == 1):
+        form = "vec"
+    else:
+        return None
+    absent, holes = _container_holes(p, record, resolution)
+    try:
+        admits_zero = bound is None or bool(domain_contains(0.0, bound))
+    except Exception:
+        admits_zero = False
+    if form == "vec":
+        floor = _floor.vector_floor(holes, admits_zero, length_free=not shared,
+                                    absent=absent)
+    elif form == "mat":
+        floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
+    else:
+        floor = _floor.table_floor(holes, absent=absent)
+    return _floor.ContainerDraws(form, floor, holes)
+
+
 def _asks_missing(cj) -> bool:
     """Whether a membership claim's right-hand side names a missing value
     (`in {missing}`, `in {nan}`, `in {None}`)."""
@@ -5293,8 +5412,9 @@ def _complete_missing(cj, fn) -> tuple:
                           if v.member is not None and v.member not in defaults.members})
         if foreign:
             return completed, notes, (
-                f"{p}: a {defaults.slot_type} slot holds no {', '.join(foreign)}; "
-                f"its holes are {', '.join(defaults.members)}"), resolution
+                f"a {defaults.slot_type} slot holds no {', '.join(foreign)}, so "
+                f"{p} cannot hold it; its holes are "
+                f"{', '.join(defaults.members)}"), resolution
         done = complete(bound, defaults)
         completed[p] = done
         resolution[p] = defaults
@@ -5546,10 +5666,12 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                        "mathema.float_companion":
                            "none (a claim family adjudicates this claim)"}
         return
+    containers, holes = _admitted_container_points(ctx, facts)
     companion = _float_companion(proven, ctx.cj, fn, facts, ctx.cj_domain,
                                  bound_funcs, assum=assumption,
                                  budget=ctx.companion_budget,
-                                 missing=_admitted_scalar_points(ctx))
+                                 missing=_admitted_scalar_points(ctx) + containers,
+                                 holes=holes)
     if companion is None:
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion":
@@ -6850,14 +6972,41 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # a membership whose right-hand side names a missing value asks
     # about the missing output itself, and is judged at every point
     asks_missing = _asks_missing(cj)
+    # each vector, matrix or table parameter meets its floor of
+    # degenerate containers first, then random draws carrying holes
+    axis_users: dict = {}
+    for _p in kinds:
+        for _axis in range(resolver.shapes[_p].ndim if _p in resolver.shapes else 0):
+            axis_users.setdefault(resolver.key(_p, _axis), set()).add(_p)
+    containers = {}
+    for _p, _k in kinds.items():
+        # a length is the floor's to choose only when no other parameter
+        # shares its axis and the claim names no number for it
+        shared = any(len(users) > 1 or not str(key).isidentifier()
+                     for key, users in axis_users.items()
+                     if key is not None and _p in users)
+        made = _container_draws(_p, _k, cj_domain.get(_p),
+                                (ctx.record_domain or {}).get(_p), ctx.missing or {},
+                                resolver, shared, bool(param_structures.get(_p)))
+        if made is not None:
+            containers[_p] = made
 
     def completed_at(point_args) -> bool:
         # a missing input the claim's own binding does not list
         return any(inputs_missing([v]) and not _lists_sentinel(cj_domain.get(p))
                    for p, v in zip(kinds, point_args))
     lap_floor = None
-    longest_lap = max((lap.lap_size() for lap in (*language_laps.values(),
-                                                   *missing_laps.values())),
+    def sample_bound(p):
+        # a container's elements are drawn from its completed domain, so
+        # every spelling of one claim draws the same points; a scalar's
+        # from the binding as written
+        if p in containers:
+            return (ctx.record_domain or {}).get(p) or cj_domain.get(p)
+        return cj_domain.get(p)
+
+    longest_lap = max([*(lap.lap_size() for lap in (*language_laps.values(),
+                                                     *missing_laps.values())),
+                       *(c.remaining() for c in containers.values())],
                       default=0)
     if longest_lap > budget:
         # a lap longer than the complexity budget raises the trial
@@ -7064,12 +7213,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # its own members below); a vector domain on the
                     # table (`for df in [0, 1]^n`) bounds every column
                     length = rng.randint(2, 8)
-                    bound = cj_domain.get(p)
+                    bound = sample_bound(p)
                     column = bound if len(getattr(bound, "dims", ())
                                           or ()) == 1 else None
                     v = {c: _synth("sequence", rng, column,
                                    specials=specials, length=length)
                          for c in table_columns[p]}
+                    if p in containers:
+                        v = containers[p].next(v, rng)
                     env[p] = v
                     args.append(v)
                     continue
@@ -7095,7 +7246,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # (shared marker dims agree by construction)
                     v = resolver.synth(
                         p, trial_sizes,
-                        lambda: _synth("float", rng, cj_domain.get(p),
+                        lambda: _synth("float", rng, sample_bound(p),
                                        specials=specials), rng)
                     if shape.ndim == 2:
                         from .matrices import rank_edge
@@ -7106,11 +7257,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # only fixes a 1-D length when a premise did
                     length = trial_sizes.get(resolver.key(p, 0))
                     v = narrowed(p, lambda p=p, k=k, length=length: _synth(
-                        k, rng, cj_domain.get(p),
+                        k, rng, sample_bound(p),
                         specials=specials, extra=critical_hints.get(p),
                         extra_cycle=extra_cycles.get(p),
                         length=length,
                         lap=language_laps.get(p) or missing_laps.get(p)))
+                if p in containers and isinstance(v, (list, tuple)):
+                    # the floor's degenerate containers first, then
+                    # draws carrying holes
+                    v = containers[p].next(list(v), rng)
                 env[p] = v
                 args.append(v)
             for p, draw in premise_draws.items():
@@ -7352,7 +7507,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             break
         if cj.relation in ("in", "not in") and not asks_missing \
                 and inputs_missing(args) \
-                and classified(args, f_call.outputs() or [lv]):
+                and classified(args, f_call.outputs() or [lv, rv]):
             # membership in a set of values at a missing input that came
             # back missing: classified, as a value claim's point is
             executed_record.classified += 1
@@ -7380,7 +7535,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 break
             continue
         missing_in = inputs_missing(args)
-        if missing_in and classified(args, f_call.outputs() or [lv]):
+        if missing_in and classified(args, f_call.outputs() or [lv, rv]):
             # a missing output at a missing input: classified into the
             # executed missing inputs, never judged
             executed_record.classified += 1

@@ -41,41 +41,41 @@ OPTIONAL_ARRAY = MissingDefaults(True, ("nan",), "numpy.ndarray")
 TABLE = [
     (FLOAT, "[0, 1]", "[0.0, 1.0] : float|missing", "[0.0, 1.0] ⊂ ℝ ∪ {∅}"),
     (FLOAT, "[0, 1] : float", "[0.0, 1.0] \\ {missing} : float", "[0.0, 1.0] \\ {∅} ⊂ ℝ"),
-    (OPTIONAL, "[0, 1]", "[0.0, 1.0] : float|None|missing", "[0.0, 1.0] ⊂ ℝ ∪ {None, ∅}"),
-    (OPTIONAL, "[0, 1] : float|None", "[0.0, 1.0] \\ {missing} : float|None",
-     "[0.0, 1.0] \\ {∅} ⊂ ℝ ∪ {None}"),
+    (OPTIONAL, "[0, 1]", "[0.0, 1.0] : float|absent|missing", "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"),
+    (OPTIONAL, "[0, 1] : float|None", "[0.0, 1.0] \\ {missing} : float|absent",
+     "[0.0, 1.0] \\ {∅} ⊂ ℝ ∪ {absent}"),
     (FLOAT, "[0, 1] : float|nan", "[0.0, 1.0] : float|nan", "[0.0, 1.0] ⊂ ℝ ∪ {nan}"),
-    (OPTIONAL, "[0, 1] : float", "[0.0, 1.0] \\ {None, missing} : float",
-     "[0.0, 1.0] \\ {None, ∅} ⊂ ℝ"),
+    (OPTIONAL, "[0, 1] : float", "[0.0, 1.0] \\ {absent, missing} : float",
+     "[0.0, 1.0] \\ {absent, ∅} ⊂ ℝ"),
     (FLOAT, "[0, 1] | {5}", "[0.0, 1.0] | {5} : float|missing", "[0.0, 1.0] ∪ {5} ⊂ ℝ ∪ {∅}"),
     (FLOAT, "R", "R|missing", "ℝ ∪ {∅}"),
-    (OPTIONAL, "R", "R|None|missing", "ℝ ∪ {None, ∅}"),
+    (OPTIONAL, "R", "R|absent|missing", "ℝ ∪ {absent, ∅}"),
     (INT, "[0, 1] subset Z", "[0, 1] : int", "[0, 1] ⊂ ℤ"),
-    (INT, "N|None", "N|None", "ℕ ∪ {None}"),
+    (INT, "N|None", "N|absent", "ℕ ∪ {absent}"),
     (INT, "Z", "Z", "ℤ"),
-    (FLOAT, "{0.25, None}", "{0.25, None}", "{0.25, None}"),
+    (FLOAT, "{0.25, None}", "{0.25, absent}", "{0.25, absent}"),
     (FLOAT, "{0.25, nan}", "{0.25, nan}", "{0.25, nan}"),
     (FLOAT, "{missing}", "{missing}", "{∅}"),
-    (FLOAT, "{None}", "{None}", "{None}"),
+    (FLOAT, "{None}", "{absent}", "{absent}"),
     (ARRAY, "[0, 1]^n", "([0.0, 1.0] | {missing})^n : float", "([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ"),
     (ARRAY, "[0, 1]^n \\ {missing}", "[0.0, 1.0]^n \\ {missing} : float",
      "[0.0, 1.0]ⁿ \\ {∅} ⊂ ℝ"),
     (ARRAY, "([0, 1] | {nan})^n", "([0.0, 1.0] | {nan})^n : float", "([0.0, 1.0] ∪ {nan})ⁿ ⊂ ℝ"),
     (ARRAY, "([0, 1] | {None})^n", "([0.0, 1.0] | {null})^n : float",
      "([0.0, 1.0] ∪ {null})ⁿ ⊂ ℝ"),
-    (OPTIONAL_ARRAY, "[0, 1]^n", "([0.0, 1.0] | {missing})^n : float|None",
-     "([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {None}"),
+    (OPTIONAL_ARRAY, "[0, 1]^n", "([0.0, 1.0] | {missing})^n : float|absent",
+     "([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}"),
     (ARRAY, "R^(n,n)", "(R | {missing})^(n,n)", "(ℝ ∪ {∅})ⁿˣⁿ"),
     (ARRAY, "R^(n,n) \\ {missing}", "R^(n,n) \\ {missing}", "ℝⁿˣⁿ \\ {∅}"),
 ]
 
 #: written, ASCII, unicode with no function: the default of no annotation
 UNANNOTATED = [
-    ("[0, 1]", "[0.0, 1.0] : float|None|missing", "[0.0, 1.0] ⊂ ℝ ∪ {None, ∅}"),
-    ("[0, 1] : float", "[0.0, 1.0] \\ {None, missing} : float", "[0.0, 1.0] \\ {None, ∅} ⊂ ℝ"),
-    ("R", "R|None|missing", "ℝ ∪ {None, ∅}"),
-    ("R^n", "(R | {missing})^n|None", "(ℝ ∪ {∅})ⁿ ∪ {None}"),
-    ("[1, 5] subset Z", "[1, 5] \\ {None, missing} : int", "[1, 5] \\ {None, ∅} ⊂ ℤ"),
+    ("[0, 1]", "[0.0, 1.0] : float|absent|missing", "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"),
+    ("[0, 1] : float", "[0.0, 1.0] \\ {absent, missing} : float", "[0.0, 1.0] \\ {absent, ∅} ⊂ ℝ"),
+    ("R", "R|absent|missing", "ℝ ∪ {absent, ∅}"),
+    ("R^n", "(R | {missing})^n|absent", "(ℝ ∪ {∅})ⁿ ∪ {absent}"),
+    ("[1, 5] subset Z", "[1, 5] \\ {absent, missing} : int", "[1, 5] \\ {absent, ∅} ⊂ ℤ"),
 ]
 
 
@@ -125,11 +125,11 @@ def test_a_language_spells_the_words_in_both_modes():
 
 
 def test_an_excluded_sentinel_renders_only_where_it_narrows_the_annotation():
-    assert both("[-1, 1] \\ {1, missing} : float|None", OPTIONAL) == (
-        "[-1.0, 1.0] \\ {1, missing} : float|None",
-        "[-1.0, 1.0] \\ {1, ∅} ⊂ ℝ ∪ {None}")
-    assert both("[-1, 1] \\ {1, missing} : float|None", OptionalInt) == (
-        "[-1.0, 1.0] \\ {1} : float|None", "[-1.0, 1.0] \\ {1} ⊂ ℝ ∪ {None}")
+    assert both("[-1, 1] \\ {1, missing} : float|absent", OPTIONAL) == (
+        "[-1.0, 1.0] \\ {1, missing} : float|absent",
+        "[-1.0, 1.0] \\ {1, ∅} ⊂ ℝ ∪ {absent}")
+    assert both("[-1, 1] \\ {1, missing} : float|absent", OptionalInt) == (
+        "[-1.0, 1.0] \\ {1} : float|absent", "[-1.0, 1.0] \\ {1} ⊂ ℝ ∪ {absent}")
 
 
 OptionalInt = MissingDefaults(True, (), "int")

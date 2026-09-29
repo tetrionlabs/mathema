@@ -35,7 +35,7 @@ def _law(space: str) -> str:
 ])
 def test_every_matrix_spelling_is_the_same_claim(space):
     canon = assert_round_trips(_law(space), corner)
-    assert canon == "for a in (R | {missing})^(m,n)|None, f(a) = a[0][0]"
+    assert canon == "for a in (R | {missing})^(m,n)|absent, f(a) = a[0][0]"
     assert _verdict(corner, claim(_law(space))) == "holds"
 
 
@@ -44,7 +44,7 @@ def test_every_matrix_spelling_is_the_same_claim(space):
 ])
 def test_a_fixed_size_matrix_reads_in_every_spelling(space):
     canon = assert_round_trips(_law(space), corner)
-    assert canon == "for a in (R | {missing})^(3,3)|None, f(a) = a[0][0]"
+    assert canon == "for a in (R | {missing})^(3,3)|absent, f(a) = a[0][0]"
 
 
 def test_the_ascii_display_uses_commas_and_the_unicode_superscripts():
@@ -84,7 +84,7 @@ def test_a_vector_dimension_the_superscripts_cannot_carry(space, shown):
 def test_a_parameter_named_x_is_unaffected():
     law = "for x in R^(m,n), f(x) == x[0][0]"
     canon = assert_round_trips(law, corner)
-    assert canon == "for x in (R | {missing})^(m,n)|None, f(x) = x[0][0]"
+    assert canon == "for x in (R | {missing})^(m,n)|absent, f(x) = x[0][0]"
     shown = render_claim_text(claim(law), unicode=True)
     assert "∀ x ∈ (ℝ ∪ {∅})ᵐˣⁿ" in shown
     assert_round_trips("for x in [0, 1], f(x) >= x² - 9", square)

@@ -120,9 +120,9 @@ def run(fn, text: str):
     (plain, "for x in [0, 1], f(x) >= 0",
      "for x in [0.0, 1.0] : float|missing, f(x) >= 0", ("nan",)),
     (optional, "for x in [0, 1], f(x) >= 0",
-     "for x in [0.0, 1.0] : float|None|missing, f(x) >= 0", ("nan",)),
+     "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0", ("nan",)),
     (bare, "for x in [0, 1], f(x) >= 0",
-     "for x in [0.0, 1.0] : float|None|missing, f(x) >= 0",
+     "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0",
      ("nan",)),
     (marked, "for x in [0, 1], f(x) >= 0",
      "for x in [0.0, 1.0] : float, f(x) >= 0", None),
@@ -140,7 +140,7 @@ def run(fn, text: str):
     (int_array, "for xs in [0, 1]^n, f(xs) >= 0",
      "for xs in [0.0, 1.0]^n : float, f(xs) >= 0", None),
     (optional_array, "for xs in [0, 1]^n, f(xs) >= 0",
-     "for xs in ([0.0, 1.0] | {missing})^n : float|None, f(xs) >= 0",
+     "for xs in ([0.0, 1.0] | {missing})^n : float|absent, f(xs) >= 0",
      ("nan",)),
     (series_mean, "for xs in [0, 1]^n, f(xs) >= 0",
      "for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0",
@@ -163,18 +163,18 @@ def test_the_record_renders_the_completed_domain(fn, text, statement, holes):
 
 def test_a_stated_type_clause_with_no_suffix_excludes_and_says_so_where_it_narrows():
     assert run(bare, "for x in [0, 100] subset Z, f(x) >= 0").statement == \
-        "for x in [0, 100] \\ {None, missing} : int, f(x) >= 0"
+        "for x in [0, 100] \\ {absent, missing} : int, f(x) >= 0"
 
 
 def test_a_written_clause_that_admits_more_widens_the_type():
     probe = run(plain, "for x in [0, 1] : float|None|missing, f(x) >= 0")
-    assert probe.statement == "for x in [0.0, 1.0] : float|None|missing, f(x) >= 0"
+    assert probe.statement == "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"
     assert "the claim widens x beyond its type float" in probe.note
 
 
 def test_a_written_clause_that_admits_less_narrows_the_type():
     probe = run(optional, "for x in [0, 1] : float, f(x) >= 0")
-    assert probe.statement == "for x in [0.0, 1.0] \\ {None, missing} : float, f(x) >= 0"
+    assert probe.statement == "for x in [0.0, 1.0] \\ {absent, missing} : float, f(x) >= 0"
     assert "the claim narrows x within its type float" in probe.note
 
 
@@ -219,7 +219,7 @@ def test_a_datetime_member_on_a_real_series_is_refused():
 
 @pytest.mark.parametrize("text", ['for s in {"a", nan}, f(s) == s',
                                   'for s in {"a", null}, f(s) == s',
-                                  'for s in {"a", None} \\ {missing}, f(s) == s'])
+                                  'for s in {"a", absent} \\ {missing}, f(s) == s'])
 def test_any_hole_written_on_a_string_is_refused(text):
     probe = run(named, text)
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
@@ -227,7 +227,7 @@ def test_any_hole_written_on_a_string_is_refused(text):
 
 
 def test_a_claim_may_widen_a_float_with_absence_and_the_none_is_executed():
-    probe = run(plain_raising, "for x in {0.25, None}, f(x) >= 0")
+    probe = run(plain_raising, "for x in {0.25, absent}, f(x) >= 0")
     assert "the claim widens x beyond its type float" in probe.note
     assert probe.verdict == "proven", (probe.verdict, probe.note)
     executed = probe.meta["mathema.missing"]["executed"]

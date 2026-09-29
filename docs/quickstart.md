@@ -163,8 +163,7 @@ pricing.discounted:
     - name: "never_raises_price"
       statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "proven"
-      note: "missing for price (float): nan; missing for rate (float): nan"
-      sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative; over the reals; the points price = nan, rate = nan are the computation's"
+      sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative"
       condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ, y ∈ [0.0, 1.0] ⊂ ℝ"
       route: "derive"
       authored:
@@ -174,8 +173,8 @@ pricing.discounted:
     - name: "never_raises_price[float]"
       statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "holds"
-      n: 44
-      note: "the computation of never_raises_price in float64, executed at 44 points (every domain corner, then sampled interior points)"
+      n: 46
+      note: "the computation of never_raises_price in float64, executed at 46 points (nan first, then every domain corner, then sampled interior points)"
       route: "probe"
 ```
 

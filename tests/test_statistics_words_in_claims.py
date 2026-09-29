@@ -4,9 +4,11 @@
 
 `mean`, `std(a, ddof=k)`, `var(a, ddof=k)`, `sum`, `prod`, `min`,
 `max`, `count`, `len`, `cumsum` and `cumprod` read a vector the way
-numpy does: `ddof` defaults to 0 (the population statistic), `count`
-is the number of positions, `cumsum` and `cumprod` are the running
-sum and product. Each true statement holds against a function that
+numpy does, over its value slots: `ddof` defaults to 0 (the population
+statistic), `count` is the number of value slots and `len` the number
+of positions, `cumsum` and `cumprod` are the running sum and product
+with a hole kept at its position. A sample statistic needs two value
+slots. Each true statement holds against a function that
 computes it, and a false sibling beside it is falsified.
 """
 from __future__ import annotations
@@ -53,10 +55,11 @@ def _verdict(fn, law):
 
 
 @pytest.mark.parametrize("fn, true, false", [
-    (sample_std, "for xs in R^n, f(xs) ~= std(xs, ddof=1)",
-     "for xs in R^n, f(xs) ~= std(xs)"),
-    (sample_std, "for xs in R^n, f(xs) ~= sqrt(var(xs, ddof=1))",
-     "for xs in R^n, f(xs) ~= sqrt(var(xs, ddof=0))"),
+    (sample_std, "for xs in R^n, assuming len(xs) >= 2, f(xs) ~= std(xs, ddof=1)",
+     "for xs in R^n, assuming len(xs) >= 2, f(xs) ~= std(xs)"),
+    (sample_std, "for xs in R^n, assuming len(xs) >= 2, "
+                 "f(xs) ~= sqrt(var(xs, ddof=1))",
+     "for xs in R^n, assuming len(xs) >= 2, f(xs) ~= sqrt(var(xs, ddof=0))"),
     (population_var, "for xs in R^n, f(xs) ~= var(xs)",
      "for xs in R^n, f(xs) ~= var(xs, ddof=1)"),
     (running_total, "for xs in R^n, f(xs) ~= cumsum(xs)",
@@ -65,8 +68,10 @@ def _verdict(fn, law):
      "for xs in [0.5, 2]^n, f(xs) ~= cumsum(xs)"),
     (positions, "for xs in R^n, f(xs) == count(xs)",
      "for xs in R^n, f(xs) == count(xs) - 1"),
-    (positions, "for xs in R^n, f(xs) == len(xs)",
-     "for xs in R^n, f(xs) == len(xs) + 1"),
+    (positions, "for xs in R^n \\ {missing}, f(xs) == len(xs)",
+     "for xs in R^n \\ {missing}, f(xs) == len(xs) + 1"),
+    (positions, "for xs in R^n, f(xs) == count(xs)",
+     "for xs in R^n, f(xs) == len(xs)"),
     (running_total, "for xs in R^n, f(xs)[-1] ~= sum(xs)",
      "for xs in R^n, f(xs)[-1] ~= prod(xs)"),
 ])

@@ -59,8 +59,8 @@ polars.Series.cum_prod:
 polars.Series.count:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) == count(a)"
-      note: "The number of elements that are not null; a NaN counts."
+      statement: "for a in (R | {null})^n, f(a) == count(a)"
+      note: "The number of elements that are not null; a NaN counts, so the row admits null holes only."
 
 polars.Series.len:
   claims:

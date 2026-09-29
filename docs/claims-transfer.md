@@ -306,7 +306,7 @@ moved out of its library's `versions` since makes the record stale, and
 Which values a runtime holds as missing is stated once, under the
 runtime's own key, as a **definition**: a row of `defines:`, never of
 `claims:`, written `<word> := {<members>}` with the word `missing` (the
-hole class) or `None` (absence). A definition is taken at face value,
+hole class) or `absent` (absence, also spelled `None`). A definition is taken at face value,
 never adjudicated: its record reads `verdict: trusted`, `route: axiom`,
 and `mathema verify` lists it under `definitions (trusted)`, outside the
 verdict counts. A plain set replaces what the key had, and the word
@@ -335,8 +335,8 @@ pandas.Series:
 The layers apply in order: the runtime type's own built-ins, the
 bundled compendium, a project's compendium files, a project's claims
 files. A claim over a Series then resolves `missing` to those members
-and its record says so (`missing for xs (pandas.Series): nan, null, NA,
-NaT`). A runtime that is not Python states its spellings the same way,
+and its record says so (`meta["mathema.missing"]["admitted"]` lists
+`nan`, `null`, `NA`, `NaT`). A runtime that is not Python states its spellings the same way,
 read by that runtime's adapter:
 
 ```yaml

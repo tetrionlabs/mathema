@@ -101,13 +101,25 @@ def _missing_to(values, missing, fill) -> list:
     return [fill if k in missing else v for k, v in enumerate(values)]
 
 
-def _spelling(options: dict, spellings: dict, default: str):
-    """The value a missing position is realised as: the spelling
-    `options["missing"]` names among the runtime type's own
-    `spellings`, else its default one. Missing is one concept; each
-    spelling is a way a library can hold it."""
-    choice = str((options or {}).get("missing", default)).lower()
+#: the older spellings of the member words, read as the words
+_SPELLING_ALIASES = {"none": "null", "na": "NA"}
+
+
+def _spelling(options: dict, spellings: dict, default: str,
+              member: "str | None" = None):
+    """The value a missing position is realised as: the member the
+    abstract value holds its holes as (`member`), else the spelling
+    `options["missing"]` names, else the runtime type's default, each
+    among the runtime type's own `spellings` (`nan`, `null`, `NA`).
+    Missing is one concept; each spelling is a way a library can hold
+    it."""
+    choice = str(member or (options or {}).get("missing", default))
+    choice = _SPELLING_ALIASES.get(choice.lower(), choice)
+    if choice not in spellings and choice.lower() in spellings:
+        choice = choice.lower()
     if choice not in spellings:
+        if member is not None:
+            return _spelling(options, spellings, default)
         raise ValueError(f"missing spelled {choice!r} is not one of "
                          f"{sorted(spellings)}")
     return spellings[choice]()
@@ -139,7 +151,7 @@ class ListAdapter:
         return None
 
     #: how a list can hold a missing position
-    MISSING = {"none": lambda: None, "nan": lambda: math.nan}
+    MISSING = {"null": lambda: None, "nan": lambda: math.nan}
     #: the spellings a list element can hold a hole as, each with its
     #: realiser and detector, and the ones the class stands for
     SPELLINGS = {"null": (lambda: None, lambda v: v is None),
@@ -150,12 +162,16 @@ class ListAdapter:
 
     def realise(self, abstract, options):
         if isinstance(abstract, AbstractMat):
-            return [list(r) for r in abstract.rows]
+            fill = _spelling(options, self.MISSING, "null", abstract.spelling)
+            return [[fill if (i, j) in abstract.missing else v
+                     for j, v in enumerate(r)]
+                    for i, r in enumerate(abstract.rows)]
         if isinstance(abstract, AbstractTable):
             return {name: self.realise(col, options)
                     for name, col in abstract.columns.items()}
         return _missing_to(abstract.values, abstract.missing,
-                           _spelling(options, self.MISSING, "none"))
+                           _spelling(options, self.MISSING, "null",
+                                     abstract.spelling))
 
     def observe(self, obj):
         from ._abstract import abstract_of
@@ -229,7 +245,8 @@ class NumpyAdapter:
             raise TypeError("numpy.ndarray does not carry a table")
         return np.array(_missing_to(abstract.values, abstract.missing,
                                     _spelling(options, {"nan": lambda:
-                                                        math.nan}, "nan")))
+                                                        math.nan}, "nan",
+                                              abstract.spelling)))
 
     def observe(self, obj):
         import numpy as np
@@ -325,9 +342,9 @@ def _pandas_column(abstract: AbstractVec, options: dict, index):
     as `nan` (a float Series, the default), `None` (an object Series)
     or `pd.NA` (a nullable `Float64` Series)."""
     import pandas as pd
-    spellings = {"nan": lambda: math.nan, "none": lambda: None,
-                 "na": lambda: pd.NA}
-    fill = _spelling(options, spellings, "nan")
+    spellings = {"nan": lambda: math.nan, "null": lambda: None,
+                 "NA": lambda: pd.NA}
+    fill = _spelling(options, spellings, "nan", abstract.spelling)
     values = _missing_to(abstract.values, abstract.missing, fill)
     if fill is None:
         return pd.Series(values, index=index, dtype=object)
@@ -424,7 +441,8 @@ def _polars_values(abstract: AbstractVec, options: "dict | None" = None
     as `null` (the default) or `NaN`, which polars treats as an
     ordinary float and mathema reads as missing all the same."""
     fill = _spelling(options or {}, {"null": lambda: None,
-                                     "nan": lambda: math.nan}, "null")
+                                     "nan": lambda: math.nan}, "null",
+                     abstract.spelling)
     values = _missing_to(abstract.values, abstract.missing, fill)
     if any(isinstance(v, float) for v in values):
         # one dtype for the column: an int among floats is a float

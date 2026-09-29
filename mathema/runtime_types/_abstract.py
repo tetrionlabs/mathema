@@ -20,10 +20,13 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class AbstractVec:
     """A vector of `len(values)` numbers, with `missing` the positions
-    that hold no value. The number stored at a missing position is NaN
-    and carries no meaning."""
+    that hold no value and `spelling` the member they are held as
+    (`nan`, `null`, `NA`), None for the runtime type's own default.
+    The number stored at a missing position is NaN and carries no
+    meaning."""
     values: tuple
     missing: frozenset = frozenset()
+    spelling: "str | None" = None
 
     def __len__(self) -> int:
         return len(self.values)
@@ -36,8 +39,12 @@ class AbstractVec:
 
 @dataclass(frozen=True)
 class AbstractMat:
-    """A matrix as a tuple of equal-length rows of numbers."""
+    """A matrix as a tuple of equal-length rows of numbers, with
+    `missing` the `(row, column)` positions that hold no value (NaN in
+    `rows`) and `spelling` the member they are held as."""
     rows: tuple
+    missing: frozenset = frozenset()
+    spelling: "str | None" = None
 
     @property
     def shape(self) -> tuple:
@@ -79,6 +86,17 @@ def _is_missing_element(v) -> bool:
     return is_missing(v)
 
 
+def _one_spelling(words) -> "str | None":
+    """The member every hole is held as, when they all share one."""
+    found = set(words)
+    return found.pop() if len(found) == 1 else None
+
+
+def _hole_word(v) -> "str | None":
+    from ..domain import member_of
+    return member_of(v)
+
+
 def _is_number(v) -> bool:
     return (isinstance(v, (int, float, complex)) and not isinstance(v, bool)
             or type(v).__module__ == "numpy" and hasattr(v, "item")
@@ -117,20 +135,25 @@ def abstract_of(value):
     if value and all(isinstance(r, (list, tuple)) for r in value):
         widths = {len(r) for r in value}
         if len(widths) != 1 or not all(
-                _is_number(v) for r in value for v in r):
+                _is_number(v) or _is_missing_element(v) for r in value for v in r):
             return None
-        return AbstractMat(tuple(tuple(_number(v) for v in r)
-                                 for r in value))
-    values, missing = [], set()
+        holes = {(i, j): _hole_word(v) for i, r in enumerate(value)
+                 for j, v in enumerate(r) if _is_missing_element(v)}
+        return AbstractMat(tuple(tuple(math.nan if (i, j) in holes else _number(v)
+                                       for j, v in enumerate(r))
+                                 for i, r in enumerate(value)),
+                           frozenset(holes), _one_spelling(holes.values()))
+    values, missing, words = [], set(), []
     for k, v in enumerate(value):
         if _is_missing_element(v):
             values.append(math.nan)
             missing.add(k)
+            words.append(_hole_word(v))
         elif _is_number(v):
             values.append(_number(v))
         else:
             return None
-    return AbstractVec(tuple(values), frozenset(missing))
+    return AbstractVec(tuple(values), frozenset(missing), _one_spelling(words))
 
 
 def plain(value):

@@ -95,9 +95,9 @@ def test_proof_sketch_domain_rendering_states_missing_policy_explicitly():
     # what it excludes is never rendered
     typed_but_included = _dom("for x in [0, 100] \\subset Z ∪ {∅}, True")
     strict = _dom("for x in [0, 100] \\subset Z \\ {missing}, True")
-    assert render_domain(strict, ascii_mode=False) == "[0, 100] \\ {None, ∅} ⊂ ℤ"
+    assert render_domain(strict, ascii_mode=False) == "[0, 100] \\ {absent, ∅} ⊂ ℤ"
     assert render_domain(typed_but_included, ascii_mode=False).endswith("⊂ ℤ ∪ {∅}")
-    assert render_domain(lenient, ascii_mode=False).endswith("⊂ ℝ ∪ {None, ∅}")
+    assert render_domain(lenient, ascii_mode=False).endswith("⊂ ℝ ∪ {absent, ∅}")
     assert lenient != strict
 
 
