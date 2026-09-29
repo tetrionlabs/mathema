@@ -404,13 +404,13 @@ print(mathema.check(mean_np, claims=[mathema.claim(
 mathema.Record(total) · source, no side effects · form dacf931fef1e
   proven  c: for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0
            ∀ xs ∈ [0.0, 1.0]ⁿ ⊂ ℝ, xs of every length; missing for xs (list) means null or nan
-  holds   c[float]: for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0 (53 draws, sizes (1, 1) to (8, 1), 248 entries in all)
+  holds   c[float]: for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0 (248 entries across 53 draws, sizes (1, 1) to (8, 1))
            the float64 computation of c ran at 53 points: null, nan, every corner and 40 interior points; at xs = [null] f raised TypeError; at xs = [nan] f gave nan back
   FALSIFY missing[xs, null]: missing(f, xs, null) propagates   [default for a list slot that may be null; f raises instead: a null slot in, TypeError]
            if the raise is intended, write `missing(f, xs, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept mv.total missing[xs, null] --as discovery --corrected "missing(f, xs, null) raises(TypeError)"
   holds   missing[xs, nan]: missing(f, xs, nan) propagates   [default for a list slot that may be nan; confirmed on the 53 draws of c[float]. Keep it by writing it (mathema claims mv.total --write), or change the word to raises or drops if f should do otherwise]
 mathema.Record(mean_np) · source, no side effects · form ce47d44bdab7
-  holds   c: for xs in ([0.0, 1.0] | {missing})^n : float, 0 <= f(xs) <= 1 (111 draws, sizes (1, 1) to (8, 1), 676 entries in all)
+  holds   c: for xs in ([0.0, 1.0] | {missing})^n : float, 0 <= f(xs) <= 1 (676 entries across 111 draws, sizes (1, 1) to (8, 1))
            every link of the chained comparison holds; at xs = [nan] f gave nan back
   proven  missing[xs]: missing(f, xs) propagates   [from numpy.mean's own policy row, which f calls; confirmed on the 111 draws of c]
 ```
@@ -450,8 +450,7 @@ and the bracket says where it came from:
 - **stated**: yours.
 
 `mathema claims` lists a function's rows by state, and `--write` puts
-the ones the code confirms in your claims file, where changing a policy
-is editing one word:
+them in your claims file, where changing a policy is editing one word:
 
 <!-- example: write file=pricing.py -->
 ```python
@@ -495,12 +494,13 @@ pricing.root:
   claims:
   - name: missing[x]
     statement: missing(f, x) propagates
-    note: from math.sqrt's own policy row, which f calls; confirmed on the 43 draws
-      of nonneg[float]
+    note: 'written by mathema claims --write: from math.sqrt''s own policy row, which
+      f calls'
 ```
 
-A contradicted row is never written: you choose the word, `drops` if
-`1.0` is the answer for a missing `x`, and state it.
+A row the code contradicts is written too, with the contradiction in its
+note, so the next `mathema verify` fails on it until you change the
+word, change the code, or accept it as a discovery.
 
 ## Definitions: which values are holes
 

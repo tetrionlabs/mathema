@@ -711,19 +711,19 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7982b776d687
   holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (32 draws)
-  holds   is_deterministic: f(scores) = f(scores) (156 draws, sizes (1, 1) to (8, 1), 1012 entries in all)
+  holds   is_deterministic: f(scores) = f(scores) (1012 entries across 156 draws, sizes (1, 1) to (8, 1))
            derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; f gives a hole back when every slot is missing (scores = [nan]); at scores = [nan, 4.23, 6.86, 9.76] it introduces a missing value; at scores = [null] f raised TypeError
   holds   is_state_safe: f(scores) = f(scores) (48 draws)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (192 draws, sizes (1, 1) to (8, 1), 949 entries in all)
-  holds   preserves_length: len(f(scores)) = len(scores) (155 draws, sizes (1, 1) to (8, 1), 967 entries in all)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (949 entries across 192 draws, sizes (1, 1) to (8, 1))
+  holds   preserves_length: len(f(scores)) = len(scores) (967 entries across 155 draws, sizes (1, 1) to (8, 1))
            f gives a hole back when every slot is missing (scores = [nan]); at scores = [nan, -8.39, 1.99, 6.61] it introduces a missing value; at scores = [null] f raised TypeError
   FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
            counterexample scores=[0, 0]: [0.5, 0.5] vs [0.0, 0.0]
-  holds   preserves_type: type(f(scores)) = type(scores) (154 draws, sizes (1, 1) to (8, 1), 1001 entries in all)
+  holds   preserves_type: type(f(scores)) = type(scores) (1001 entries across 154 draws, sizes (1, 1) to (8, 1))
            f gives a hole back when every slot is missing (scores = [nan]); at scores = [nan, 3.68, 5.63, -6.09, 5.18] it introduces a missing value; at scores = [null] f raised TypeError
   FALSIFY is_sorted_output: is_sorted_output(f(scores))
            counterexample ([4.86304, 8.4521, -9.06059, -3.61645]): output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
-  holds   sums_to_one: sum(f(scores)) = 1 (154 draws, sizes (1, 1) to (8, 1), 922 entries in all)
+  holds   sums_to_one: sum(f(scores)) = 1 (922 entries across 154 draws, sizes (1, 1) to (8, 1))
            derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; f gives a hole back when every slot is missing (scores = [nan]); at scores = [nan, 9.84] it introduces a missing value; at scores = [null] f raised TypeError
   FALSIFY missing[scores]: f has no single policy for a missing scores
            f gives a hole back when every slot is missing (scores = [nan]); at an all-null container it raises TypeError instead; at scores = [nan, 4.23, 6.86, 9.76] it introduces a missing value

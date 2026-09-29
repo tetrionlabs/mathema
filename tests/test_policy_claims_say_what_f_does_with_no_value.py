@@ -334,25 +334,40 @@ def test_the_claims_command_groups_the_policy_rows_by_state(tmp_path, monkeypatc
            "may" in out
 
 
-def test_write_writes_only_confirmed_rows_under_their_record_names(tmp_path, monkeypatch,
-                                                                     capsys):
-    _pproject(tmp_path, monkeypatch)
-    import yaml
+def test_write_writes_every_row_with_a_true_note(tmp_path, monkeypatch, capsys):
+    import datetime
 
+    import yaml
+    _pproject(tmp_path, monkeypatch)
     from mathema.cli import main
+    today = datetime.date.today().isoformat()
     main(["claims", "pmod.clamp", "--root", str(tmp_path), "--write"])
     assert capsys.readouterr().out.strip() == (
-        "pmod.clamp: wrote 0 policy rows to claims/policies.claims.yaml. Left out 1 the "
-        "code contradicts (missing[x]; choose the word, then state it)")
-    assert not (tmp_path / "claims" / "policies.claims.yaml").exists()
+        "pmod.clamp: wrote 1 policy row to claims/policies.claims.yaml: missing[x]. "
+        "The code contradicts missing[x] (f drops, nan in, 1.0 out): change the word "
+        "in the file, change f, or accept it as a discovery (mathema accept pmod.clamp "
+        "missing[x] --as discovery --corrected \"missing(f, x) drops\")")
     main(["claims", "pmod.lin", "--root", str(tmp_path), "--write"])
     assert capsys.readouterr().out.strip() == (
         "pmod.lin: wrote 1 policy row to claims/policies.claims.yaml: missing[x]")
+    main(["claims", "pmod.root_opt", "--root", str(tmp_path), "--write"])
+    assert capsys.readouterr().out.strip() == (
+        "pmod.root_opt: wrote 1 policy row to claims/policies.claims.yaml: missing[x]. "
+        "Not written: absent[x], f raises TypeError at x = None and no claim says it "
+        "may; state `absent(f, x) raises(TypeError)` yourself, or handle None in f")
     written = yaml.safe_load((tmp_path / "claims" / "policies.claims.yaml").read_text())
-    assert written == {"pmod.lin": {"claims": [{
+    assert written["pmod.clamp"] == {"claims": [{
         "name": "missing[x]", "statement": "missing(f, x) propagates",
-        "note": "default for a float, which may be nan; confirmed on the 43 draws of "
-                "line[float]"}]}}
+        "note": f"written by mathema claims --write: mathema's default for a float; "
+                f"contradicted by the code on {today}: f drops, nan in, 1.0 out"}]}
+    assert written["pmod.lin"] == {"claims": [{
+        "name": "missing[x]", "statement": "missing(f, x) propagates",
+        "note": "written by mathema claims --write: mathema's default for a float, "
+                "which may be nan"}]}
+    assert written["pmod.root_opt"] == {"claims": [{
+        "name": "missing[x]", "statement": "missing(f, x) propagates",
+        "note": "written by mathema claims --write: from math.sqrt's own policy row, "
+                "which f calls"}]}
     # the file mathema wrote loads, and the row is now declared
     assert main(["claims", "pmod.lin", "--root", str(tmp_path)]) == 0
     out = capsys.readouterr().out

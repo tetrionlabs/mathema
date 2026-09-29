@@ -9,7 +9,7 @@ step; a suggestion never lives in any record until someone adopts it.
 mathema claims KEY                  # list the declared claims
 mathema claims KEY --suggest        # render the suggested standard claims
 mathema claims KEY --adopt NAME     # write one into the declared layer
-mathema claims KEY --write          # write the confirmed policy rows
+mathema claims KEY --write          # write the policy rows
 ```
 
 ## Arguments
@@ -19,7 +19,7 @@ mathema claims KEY --write          # write the confirmed policy rows
 | `key` | module-qualified function key (`functions.softmax`) |
 | `--suggest` | render the suggested standard claims with laws and exclusivity groups |
 | `--adopt NAME` | write the named suggestion into `claims/adopted.claims.yaml` |
-| `--write` | write the policy rows mathema suggests, what each parameter does with a value that is not there, into `claims/policies.claims.yaml`: the rows the code confirms, each under the name the record prints |
+| `--write` | write the policy rows mathema suggests, what each parameter does with a value that is not there, into `claims/policies.claims.yaml`, each under the name the record prints, a contradicted one with the contradiction in its note |
 | `--root` | project root (default: the nearest ancestor holding `.mathema/` within the enclosing git repository, else that repository, else `.`; never the home directory) |
 | `--format` | `text` (default) or `json`: emit `--suggest`'s rows columnar, matching the MCP `suggest_claims` tool |
 | `--output FILE` | write the report to a file instead of stdout |
@@ -27,15 +27,15 @@ mathema claims KEY --write          # write the confirmed policy rows
 ## Policy rows
 
 Beside the declared claims, `mathema claims KEY` lists the policy rows
-the record carries: what f does with a missing or absent input, grouped
-by state. A row the code confirms (a default for the type, a row from a
-library f calls or from a guard in its body, what was observed) is
-written by `--write` under its record name (`missing[x]`,
-`missing[xs, null]`, `absent[x]`), with a note saying where it came
-from. A row the code contradicts is listed with the word f actually
-follows, for the author to choose; a raise no claim accounts for is
-listed and never written. Changing a policy is then editing one word in
-`claims/policies.claims.yaml`.
+the record carries: what the function does with a missing or absent
+input, grouped by state. `--write` writes them to
+`claims/policies.claims.yaml` under their record names (`missing[x]`,
+`missing[xs, null]`, `absent[x]`), each with a note saying where it
+came from. A row the code contradicts is written too, its note saying
+so with the date, and the write line names the three ways out: change
+the word, change the code, or accept it as a discovery. A raise no
+claim accounts for has no word to write; the write line names the claim
+to state instead. Changing a policy is then editing one word.
 
 ## Where suggestions live (and where they never do)
 

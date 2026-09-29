@@ -266,15 +266,16 @@ def _shape(value) -> tuple:
 
 
 def count_words(n: int, drawn: "dict | None") -> str:
-    """A row's count: `43 draws`; for a container the sizes drawn, rows
-    then columns, and the entries over every draw: `57 draws, sizes
-    (1, 1) to (8, 1), 224 entries in all`."""
+    """A row's count: `43 draws`; for a container the entries over every
+    draw first, then the draws, then the sizes drawn, rows then columns:
+    `257 entries across 57 draws, sizes (1, 1) to (8, 1)`."""
     draws = f"{n} draw{'s' if n != 1 else ''}"
     if not drawn or not drawn.get("smallest"):
         return draws
     lo, hi = tuple(drawn["smallest"]), tuple(drawn["largest"])
     sizes = f"size {lo}" if lo == hi else f"sizes {lo} to {hi}"
-    return f"{draws}, {sizes}, {drawn['entries']} entries in all"
+    entries = drawn["entries"]
+    return f"{entries} entr{'y' if entries == 1 else 'ies'} across {draws}, {sizes}"
 
 
 def mixed_sentence(param: str, ways_by_member: dict, raised_by_member: dict,

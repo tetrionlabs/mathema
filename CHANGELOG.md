@@ -78,11 +78,15 @@ Notable changes to mathema are recorded here from its first public release onwar
   that are one value are refused at load.
 - A record says in one sentence what the function did at each missing
   input it was called with (`at x = nan f gave nan back`, `at x = None
-  f raised TypeError`) and, where that is not what the parameter's type
-  leads a reader to expect, the claim to write; a declared `Optional`
-  return's `None` is recorded, not judged; a row's count reads
-  `(43 draws)`, or for a container `(57 draws, sizes (1, 1) to (8, 1),
-  224 entries in all)`.
+  f raised TypeError`); what to do about it is said once, on the policy
+  row. A declared `Optional` return's `None` is recorded, not judged; a
+  row's count reads `(43 draws)`, or for a container `(257 entries
+  across 57 draws, sizes (1, 1) to (8, 1))`.
+- A policy row mathema writes that the code contradicts, and a raise no
+  claim accounts for, are falsified and fail `verify` and `check` like
+  any falsified claim; the row's second line names the word to write,
+  and `mathema accept KEY missing[x] --as discovery --corrected "..."`
+  retires it with its witness.
 
 - The wheel now ships the bundled compendium. The 0.6.0 wheel carried
   none of its compendium files (the package-data pattern missed the

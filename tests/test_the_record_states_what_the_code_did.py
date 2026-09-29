@@ -118,3 +118,15 @@ def test_a_propagated_hole_is_stated_on_the_proven_row():
 def test_a_row_that_executed_no_missing_input_states_none():
     (row,) = check_conjectures(plus_one, [claim("for x in {1.0, 2.0}, f(x) == x + 1")])
     assert _executed(row) is None
+
+
+def test_a_count_says_the_entries_then_the_draws_then_the_sizes():
+    from mathema._missing_words import count_words
+    assert count_words(43, None) == "43 draws"
+    assert count_words(57, {"form": "vec", "smallest": [1, 1], "largest": [8, 1],
+                            "entries": 257}) == \
+        "257 entries across 57 draws, sizes (1, 1) to (8, 1)"
+    assert count_words(1, {"form": "vec", "smallest": [30, 1], "largest": [30, 1],
+                           "entries": 30}) == "30 entries across 1 draw, size (30, 1)"
+    assert count_words(4, {"form": "vec", "smallest": [1, 1], "largest": [1, 1],
+                           "entries": 1}) == "1 entry across 4 draws, size (1, 1)"

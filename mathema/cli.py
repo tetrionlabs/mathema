@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from typing import NoReturn
 
@@ -1958,17 +1959,43 @@ def _policy_line(p) -> str:
 
 
 def _policy_note(p) -> str:
-    """The note a written policy row carries: where it came from and what
-    confirmed it, as its bracket says it, without the advice to write it."""
+    """The note a written policy row carries: that mathema wrote it and
+    where the word came from, and, when the code contradicts it, the
+    contradiction and the date; never the evidence of one run."""
+    import datetime
+    pol = p.meta["mathema.policy"]
+    reason = pol.get("reason") or ""
+    source = reason.split("; ", 1)[0].split(". ", 1)[0]
+    if source.startswith("default"):
+        source = "mathema's " + source
+    elif source.startswith("from ") and ", which f calls" not in source \
+            and "policy row" in source:
+        source += ", which f calls"
+    note = f"written by mathema claims --write: {source}"
+    if p.verdict == "falsified":
+        contradiction = reason.split(" instead: ", 1)
+        did = contradiction[0].rsplit("f ", 1)[-1] if len(contradiction) == 2 else ""
+        what = contradiction[1] if len(contradiction) == 2 else ""
+        note += (f"; contradicted by the code on {datetime.date.today().isoformat()}: "
+                 f"f {did}, {what}")
+    return note
+
+
+def _contradiction_words(p) -> str:
+    """`f drops, nan in, 1.0 out` from a contradicted row's reason."""
     reason = p.meta["mathema.policy"].get("reason") or ""
-    return reason.split(". Keep it by writing", 1)[0].split(". Annotate ", 1)[0]
+    parts = reason.split(" instead: ", 1)
+    if len(parts) != 2:
+        return reason
+    return f"f {parts[0].rsplit('f ', 1)[-1]}, {parts[1]}"
 
 
 def _write_policies(args, declared_rows: list, policies: list) -> int:
-    """Write the confirmed policy rows into the declared claims file, each
-    under the name the record prints and with the note saying where it
-    came from; a contradicted row and a raise no claim accounts for are
-    left out, and the write line says so."""
+    """Write every policy row mathema writes for a function into the
+    declared claims file, each under the name the record prints and with
+    a note saying where it came from, the contradicted ones too with the
+    contradiction; a raise or a case no claim accounts for has no word
+    to write, and the write line says what to state instead."""
     import yaml
     path = os.path.join(args.root or ".", "claims", "policies.claims.yaml")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1981,32 +2008,61 @@ def _write_policies(args, declared_rows: list, policies: list) -> int:
     have |= {c.get("statement") for c in rows}
     names = {c.get("name") for c in declared_rows} | {c.get("name") for c in rows}
     written: list = []
+    contradicted: list = []
     for p in policies:
-        if _policy_state(p) != "confirmed" or p.statement in have or p.name in names:
+        if _policy_state(p) == "unaccounted" or p.statement in have or p.name in names:
             continue
         rows.append({"name": p.name, "statement": p.statement, "note": _policy_note(p)})
         written.append(p.name)
+        if _policy_state(p) == "contradicted":
+            contradicted.append(p)
     if not rows:
         doc.pop(args.key, None)
     rel = os.path.relpath(path, args.root or ".")
     if written:
         with open(path, "w") as fh:
             yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
-    left = [p for p in policies if _policy_state(p) != "confirmed"]
-    contradicted = [p.name for p in left if _policy_state(p) == "contradicted"]
-    unaccounted = [p.name for p in left if _policy_state(p) == "unaccounted"]
-    head = (f"{args.key}: wrote {len(written)} policy row"
+    line = (f"{args.key}: wrote {len(written)} policy row"
             f"{'' if len(written) == 1 else 's'} to {rel}"
             + (f": {', '.join(written)}" if written else ""))
-    why = []
-    if contradicted:
-        why.append(f"{len(contradicted)} the code contradicts ({', '.join(contradicted)}; "
-                   f"choose the word, then state it)")
-    if unaccounted:
-        why.append(f"{len(unaccounted)} with no word to write ({', '.join(unaccounted)}; "
-                   f"state what f should do, or change f)")
-    print(head + (f". Left out {' and '.join(why)}" if why else ""))
+    for p in contradicted:
+        corrected = _corrected_text(p)
+        line += (f". The code contradicts {p.name} ({_contradiction_words(p)}): change "
+                 f"the word in the file, change f, or accept it as a discovery "
+                 f"(mathema accept {args.key} {p.name} --as discovery"
+                 + (f" --corrected \"{corrected}\"" if corrected else "") + ")")
+    for p in policies:
+        if _policy_state(p) != "unaccounted":
+            continue
+        pol = p.meta["mathema.policy"]
+        sentence = pol.get("sentence") or ""
+        stated = re.findall(r"`([^`]+)`", pol.get("next") or "")
+        line += (f". Not written: {p.name}, {_unwritten_words(sentence)}"
+                 + (f"; state `{stated[0]}` yourself, or {_alternative(pol)}"
+                    if stated else ""))
+    print(line)
     return 0
+
+
+def _corrected_text(p) -> "str | None":
+    """The corrected row a contradicted row's own remedy names."""
+    found = re.search(r'--corrected "([^"]+)"', p.meta["mathema.policy"].get("next") or "")
+    return found.group(1) if found else None
+
+
+def _unwritten_words(sentence: str) -> str:
+    """`f raises TypeError at x = None and no claim says it may` from the
+    sentence row `f raised TypeError at x = None, and no claim says it
+    may`."""
+    text = sentence.replace("f raised ", "f raises ", 1)
+    return text.replace(", and no claim says it may", " and no claim says it may")
+
+
+def _alternative(pol: dict) -> str:
+    """What else the author can do about a row with no word to write."""
+    if pol.get("kind") == "absent" and pol.get("parameter"):
+        return "handle None in f"
+    return "change f"
 
 
 def _list_policies(key: str, policies: list) -> None:
