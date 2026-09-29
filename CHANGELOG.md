@@ -4,6 +4,9 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## 0.6.1
 
+- `is_memory_safe` is not part of this release: it is named nowhere,
+  and a claim naming it fails as an unknown predicate does, with one
+  sentence saying the family is planned.
 - The wheel now ships the bundled compendium. The 0.6.0 wheel carried
   none of its compendium files (the package-data pattern missed the
   per-library directories), so `is_compendium_safe(numpy)` was `unknown`

@@ -350,7 +350,6 @@ that failed, and the fix is usually one of the ones below.
 | `is_representation_safe(x)` | one number written differently (`1`, `1.0`, `True`) gets one answer | normalize the input type at entry |
 | `is_arbitrary_input_safe(s)` | no string input makes the function crash by accident | validate the input and raise the exception you mean |
 | `is_recursion_safe(f)` | the recursion never runs out of stack (`RecursionError`) over the domain; suggested when the body calls itself | rewrite the recursion as a loop, or narrow the domain |
-| `is_memory_safe(f)` | reserved: `skipped` in this release, since memory safety needs a resource cap | |
 | `is_concurrency_safe(f)` | reserved for a later release: the function runs correctly under concurrent calls | |
 
 **Is the answer right in float64?** The function returns, and the

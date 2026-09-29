@@ -3693,12 +3693,6 @@ def _recursion_probe(fn, facts, cj, domain: dict, rng: random.Random,
                                 f"the recursion limit"})
 
 
-#: why is_memory_safe reports skipped: adjudicating memory use needs a
-#: resource cap around the call, which this release does not provide
-_MEMORY_SAFETY_NOTE = ("memory safety needs a resource cap and is not "
-                       "adjudicated in this release")
-
-
 #: computation-safety families named now and adjudicated in a later
 #: release, with the question each answers
 RESERVED_FAMILIES = {
@@ -3731,22 +3725,6 @@ def _reserved_probe(name: str):
               trials: int):
         return "skipped", 0, _reserved_note(name)
     return probe
-
-
-def _is_memory_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
-                           relation: str, domain: dict | None = None,
-                           tolerance: float | None = None):
-    """Structural half of is_memory_safe: decline; the member is
-    defined and reserved, see `_MEMORY_SAFETY_NOTE`."""
-    return None
-
-
-def _memory_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                  trials: int):
-    """Empirical half of is_memory_safe: skipped, with the reason. The
-    name is registered so a claim stating it is a known claim, not a
-    misspelling."""
-    return "skipped", 0, _MEMORY_SAFETY_NOTE
 
 
 #: the children of is_computation_safe, in the order the roll-up runs
@@ -4004,14 +3982,6 @@ def _register_builtin_claim_families() -> None:
     _families.register("is_state_safe", SafetyFamily(
         "is_state_safe", derive=_is_state_safe_derive,
         probe=_state_probe))
-    # is_memory_safe is defined and reserved (skipped with the reason,
-    # never suggested); is_computation_safe is the roll-up of the
-    # hierarchy, declared by the author and never battery-suggested,
-    # like excluded_outside_domain
-    _families.register("is_memory_safe", SafetyFamily(
-        "is_memory_safe", derive=_is_memory_safe_derive,
-        probe=_memory_probe, whole_function=True,
-        reserved=_MEMORY_SAFETY_NOTE))
     # reserved: named now, adjudicated later, never suggested; a
     # platform (GPU, JIT, distributed) is named in the bracketed
     # computation descriptor, never in a family name

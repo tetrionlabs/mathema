@@ -1388,7 +1388,10 @@ def _claim(law: str, name: str | None, source: str, route: str,
             try:
                 links = split_relation_chain(text)
             except NoRelation as e:
-                raise InvalidConjecture(str(e)) from e
+                planned = families.planned_family_note(text)
+                raise InvalidConjecture(
+                    str(e) if planned is None else f"{e}; {planned}"
+                ) from e
             lhs, rel, rhs = links[0]
             if len(links) == 1:
                 links = []
