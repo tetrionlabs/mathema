@@ -1571,13 +1571,14 @@ def _defines_problem(key: str, value) -> "str | None":
     from .grammar import InvalidDefinition, parse_definition
     from .runtime_types import adapter, spellings
     found = adapter(str(key))
+    holes: list = []
     for row in value:
         text = row.get("definition") if isinstance(row, dict) else row
         if not isinstance(text, str):
             return (f"{row!r} is not a definition row; write it as text, "
                     f"`- \"missing := {{null, nan}}\"`")
         try:
-            _word, members, _extends = parse_definition(text)
+            word, members, extends = parse_definition(text)
         except InvalidDefinition as e:
             return str(e)
         if found is not None:
@@ -1586,6 +1587,48 @@ def _defines_problem(key: str, value) -> "str | None":
                 if spelling not in known:
                     return (f"{found.name} has no spelling {spelling!r}; its "
                             f"spellings are {', '.join(sorted(known)) or 'none'}")
+            if word == "missing":
+                if extends:
+                    holes += [m for m in getattr(found, "MISSING_MEMBERS", ())
+                              if m not in holes]
+                holes += [m for m in members if m not in holes]
+    if found is not None:
+        # one value may be both the absence and a hole member (its
+        # position decides which it is), never two different hole members
+        clash = _same_value_twice(holes, spellings(found))
+        if clash is not None:
+            first, second, shown = clash
+            return (f"{found.name} names one value, {shown}, as two hole "
+                    f"members, {first} and {second}")
+    return None
+
+
+def _same_value_twice(words: list, known: dict) -> "tuple | None":
+    """Intent:
+        The first two of `words` whose realised values are the same value
+        (by identity, or both NaN, or equal), with that value's repr, or
+        None when every word realises a different value.
+    """
+    seen: list = []
+    for word in words:
+        realise = known.get(word, (None, None))[0]
+        if realise is None:
+            continue
+        try:
+            value = realise()
+        except Exception:
+            continue
+        for other, earlier in seen:
+            try:
+                same = (value is earlier
+                        or (isinstance(value, float) and isinstance(earlier, float)
+                            and value != value and earlier != earlier)
+                        or bool(value == earlier))
+            except Exception:
+                same = False
+            if same:
+                return other, word, repr(value)
+        seen.append((word, value))
     return None
 
 

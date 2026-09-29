@@ -52,7 +52,8 @@ from .domain import operational_domain as _operational_domain
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
-                      holds_nan, inputs_missing, missing_class, missing_study, same_infinity,
+                      classified, holds_nan, inputs_missing, missing_class,
+                      same_infinity,
                       is_complex_value, ordering_shortfall,
                       quiet_while_probing, relation_holds_elementwise,
                       values_differ)
@@ -3336,14 +3337,6 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 if not merged["tried"]:
                     merged.pop("tried")
                 probe.meta = {**(probe.meta or {}), "mathema.missing": merged}
-        executed = ((probe.meta or {}).get("mathema.missing") or {}).get("executed")
-        if executed:
-            # what the code did at each missing input it was called with,
-            # in words beside the structured record
-            from .probing import executed_words
-            said = executed_words(executed)
-            if said and said not in (probe.note or ""):
-                probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         if canonical:
             # the renderer is total over everything claim() accepts, so
             # a failure here is a renderer bug worth a loud crash, never
@@ -3907,6 +3900,20 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                 if k.startswith("mathema.corroboration")
                 or k == "mathema.witness_executed"}
 
+    # what every part recorded at its missing inputs, merged per key
+    missing: dict = {}
+    for probe in probes:
+        for key, per_param in ((probe.meta or {}).get("mathema.missing") or {}).items():
+            into = missing.setdefault(key, {})
+            for p, members in (per_param or {}).items():
+                if isinstance(members, dict) and isinstance(into.get(p, {}), dict):
+                    into.setdefault(p, {})
+                    for word, said in members.items():
+                        into[p].setdefault(word, said)
+                else:
+                    into.setdefault(p, members)
+    carried = {"mathema.missing": missing} if missing else {}
+
     for probe, label in zip(probes, labels):
         if probe.verdict == "falsified":
             cx = probe.counterexample
@@ -3916,7 +3923,7 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                          sketch=(f"{label}: {probe.sketch}" if probe.sketch
                                  else None),
                          note=f"{what} falsified at {label}",
-                         meta=corroboration(probe))
+                         meta={**corroboration(probe), **carried})
     verdicts = [p.verdict for p in probes]
     if all(v == "proven" for v in verdicts):
         # the definition rows each part's proof read through, in order
@@ -3936,7 +3943,8 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                      condition=(quantifiers.pop() if len(quantifiers) == 1
                                 else None),
                      note=f"every {unit} of the {what} proven",
-                     meta={"mathema.definitions": rows} if rows else None)
+                     meta=({"mathema.definitions": rows} if rows else {})
+                     | carried or None)
     if all(v in ("proven", "holds") for v in verdicts):
         n = min((p.n for p in probes if p.n), default=0)
         # an engine-bug flag on any part (a derive disproof nothing
@@ -3954,7 +3962,7 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                      route=_conjunction_route(
                          [p.route for p in probes if p.verdict == "holds"],
                          "probe"),
-                     note=note, meta=flagged or None)
+                     note=note, meta={**flagged, **carried} or None)
     weakest = next(p for p, v in zip(probes, verdicts)
                    if v not in ("proven", "holds"))
     label = labels[probes.index(weakest)]
@@ -3962,7 +3970,7 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                  sketch=weakest.sketch,
                  note=f"{what} {weakest.verdict} at {label}: "
                       f"{weakest.note}",
-                 meta=corroboration(weakest))
+                 meta={**corroboration(weakest), **carried})
 
 
 def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
@@ -4190,6 +4198,9 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         lv = eval(code_l, {"__builtins__": {}}, trial_env)
         rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
     except Exception as e:
+        if inputs_missing(args) and cj.relation not in ("in", "not in"):
+            # a raise at a missing input is classified, not judged
+            return None
         return (f"{_fmt(tuple(args), *labels)}: raised {type(e).__name__}, narrow "
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
@@ -4207,15 +4218,15 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         return None
     slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
     missing_in = inputs_missing(args)
-    if not missing_in and (holds_nan(lv) or holds_nan(rv)):
+    if missing_in and inputs_missing([lv]):
+        # a missing output at a missing input is classified, not judged
+        return None
+    if not missing_in and (holds_nan(lv) or holds_nan(rv)
+                           or "absent" in (missing_class(lv), missing_class(rv))):
         return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, and a nan is no value"
     ok = relation_holds_elementwise(lv, rv, cj.relation, slack,
                                     exact_inequality=cj.tolerance is None,
-                                    rel_tol=_declared_rel_tol(cj),
-                                    missing_inputs=missing_in
-                                    or missing_class(lv) == "absent"
-                                    or missing_class(rv) == "absent",
-                                    at_missing_input=missing_in)
+                                    rel_tol=_declared_rel_tol(cj))
     if ok is False:
         return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
     return None
@@ -4989,17 +5000,12 @@ def _admitted_scalar_points(ctx) -> list:
     from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _is_enumerated,
                          admitted, member, realise_sentinel)
     out: list = []
-    study = missing_study()
-    if study == "off":
-        return out
     for p, bound in (ctx.record_domain or {}).items():
         dom = _as_domain(bound)
         if not p.isidentifier() or dom.base_type == "L" or dom.dims \
                 or _is_enumerated(dom):
             continue
         policy = ctx.missing.get(p, NO_ANNOTATION)
-        if study == "annotated" and not policy.annotated:
-            continue
         absent, holes = admitted(dom, dom.policy)
         if absent:
             out += [(p, "None", v) for v in realise_sentinel(
@@ -5008,29 +5014,6 @@ def _admitted_scalar_points(ctx) -> list:
             for word in (policy.members if h.member is None else (h.member,)):
                 out += [(p, word, v) for v in realise_sentinel(member(word))]
     return out
-
-
-def _with_computation_points(sketch: str, record_domain: dict) -> str:
-    """Intent:
-        A proof's sketch with the missing points its domain admits named
-        as the computation's: the proof is over the reals, and the
-        points `x = None`, `x = nan` are executed by the companion.
-    """
-    from .domain import _as_domain, _is_enumerated, admitted
-    points: list = []
-    for p, bound in (record_domain or {}).items():
-        dom = _as_domain(bound)
-        if not p.isidentifier() or dom.base_type == "L" or _is_enumerated(dom):
-            continue
-        absent, holes = admitted(dom, dom.policy)
-        words = (["None"] if absent else []) + [
-            w for h in holes for w in (dom.members if h.member is None
-                                       else (h.member,))]
-        points += [f"{p} = {w}" for w in dict.fromkeys(words)]
-    if not points:
-        return sketch
-    return (f"{sketch}; over the reals; the points {', '.join(points)} are "
-            f"the computation's").lstrip("; ")
 
 
 def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
@@ -5085,9 +5068,9 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                             else 2)
                     failures.append((rank, point))
                     break
-    from .probing import executed_ledger, with_executed
+    from .probing import executed_missing, with_executed
     meta = with_executed({"mathema.missing": {"tried": tried}},
-                         executed_ledger(deps)) or {}
+                         executed_missing(deps)) or {}
     if not failures:
         return Probe(ctx.cj.name, statement, "proven", meta=meta)
     point = sorted(failures, key=lambda f: f[0])[0][1]
@@ -5103,9 +5086,35 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                        "mathema.witness_executed": True})
 
 
+def _asks_missing(cj) -> bool:
+    """Whether a membership claim's right-hand side names a missing value
+    (`in {missing}`, `in {nan}`, `in {None}`)."""
+    from .domain import _as_domain, _set_sentinels
+    bound = getattr(cj, "rhs_bound", None)
+    if cj.relation not in ("in", "not in") or bound is None:
+        return False
+    try:
+        return bool(_set_sentinels(_as_domain(bound)))
+    except Exception:
+        return False
+
+
+def _lists_sentinel(bound) -> bool:
+    """Whether a written binding lists a sentinel in a finite set (`{0.25,
+    None}`, `{missing}`), the claim's own point rather than one its type
+    admits."""
+    from .domain import _as_domain, _is_enumerated, _set_sentinels
+    if bound is None:
+        return False
+    try:
+        dom = _as_domain(bound)
+        return _is_enumerated(dom) and bool(_set_sentinels(dom))
+    except Exception:
+        return False
+
+
 def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
-                  record_domain: "dict | None" = None,
-                  annotated_only: bool = False) -> dict:
+                  record_domain: "dict | None" = None) -> dict:
     """Intent:
         `{param: _SpecialCycle}` for every parameter whose domain admits
         a sentinel: a finite set's listed sentinels, and for a scalar
@@ -5131,9 +5140,7 @@ def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
         if _is_enumerated(dom):
             listed = sorted(set(_set_sentinels(dom)), key=_member_sort_key)
         elif (record_domain or {}).get(p) is not None \
-                and kind not in (*SEQUENCE_KINDS, "dict", "table", "string") \
-                and not (annotated_only
-                         and not resolution.get(p, NO_ANNOTATION).annotated):
+                and kind not in (*SEQUENCE_KINDS, "dict", "table", "string"):
             record = _as_domain(record_domain[p])
             absent, holes = admitted(record, record.policy)
             listed = ([ABSENT] if absent else []) + sorted(set(holes),
@@ -5259,7 +5266,7 @@ def _complete_missing(cj, fn) -> tuple:
         adjudicated (the hole class listed on a string slot, which has
         no hole) or None, and `resolution` is `{param: MissingDefaults}`.
     """
-    from .domain import (MISSING, NO_ANNOTATION, PATH_DEFAULTS, admitted,
+    from .domain import (NO_ANNOTATION, PATH_DEFAULTS, admitted,
                          complete, is_sentinel)
     from .types import missing_policy_from_signature
     policy = missing_policy_from_signature(fn) if fn is not None else {}
@@ -5292,9 +5299,6 @@ def _complete_missing(cj, fn) -> tuple:
         completed[p] = done
         resolution[p] = defaults
         absent, holes = admitted(done)
-        if MISSING in holes:
-            notes.append(f"missing for {p} ({defaults.slot_type}): "
-                         f"{', '.join(defaults.members)}")
         written = (getattr(bound, "explicit_type", False)
                    or getattr(bound, "absent", False)
                    or any(is_sentinel(v) for v in getattr(bound, "excluded", ()))
@@ -5313,9 +5317,9 @@ def _complete_missing(cj, fn) -> tuple:
                 and all(isinstance(pc, frozenset)
                         for pc in getattr(bound, "pieces", ()) or (None,)))
             if widens:
-                notes.append(f"{p}: the claim widens the type {defaults.slot_type}")
+                notes.append(f"the claim widens {p} beyond its type {defaults.slot_type}")
             elif narrows and not enumerated:
-                notes.append(f"{p}: the claim narrows the type {defaults.slot_type}")
+                notes.append(f"the claim narrows {p} within its type {defaults.slot_type}")
     return completed, notes, None, resolution
 
 
@@ -5832,7 +5836,6 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                 if listed.verdict == "falsified":
                     return listed
                 proven.meta = {**(proven.meta or {}), **listed.meta}
-            proven.sketch = _with_computation_points(proven.sketch, ctx.record_domain)
             _spawn_float_companion(ctx, proven, fn, facts,
                                    _bound_callables(cj), assumption or [])
             return proven
@@ -6106,7 +6109,6 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                 if listed.verdict == "falsified":
                     return listed
                 proven.meta = {**(proven.meta or {}), **listed.meta}
-            proven.sketch = _with_computation_points(proven.sketch, ctx.record_domain)
         # a derive proof is exact arithmetic; the computation is the
         # float companion's claim. A proof by executing every point of a
         # finite set already is the computation, and spawns none
@@ -6835,19 +6837,24 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      if (lap := _language_lap(rng, cj_domain.get(p))) is not None}
     # a finite set's listed sentinels: each value they stand for is
     # drawn once, before any random draw
-    study = missing_study()
-    missing_laps = _missing_laps(
-        rng, kinds, cj_domain, ctx.missing,
-        record_domain=ctx.record_domain if study != "off" else None,
-        annotated_only=study == "annotated")
+    missing_laps = _missing_laps(rng, kinds, cj_domain, ctx.missing,
+                                 record_domain=ctx.record_domain)
     # what the record says was tried for each listed sentinel
     missing_meta = ({"mathema.missing": {"tried": {
         p: [repr(v) for v in lap.first_values()]
         for p, lap in missing_laps.items()}}} if missing_laps else {})
     # what the function did at each missing input it was called with
-    from .probing import ExecutionLedger, LastCall, with_executed
-    missing_ledger = ExecutionLedger()
+    from .probing import ExecutedMissing, LastCall, with_executed
+    executed_record = ExecutedMissing()
     f_call = LastCall()
+    # a membership whose right-hand side names a missing value asks
+    # about the missing output itself, and is judged at every point
+    asks_missing = _asks_missing(cj)
+
+    def completed_at(point_args) -> bool:
+        # a missing input the claim's own binding does not list
+        return any(inputs_missing([v]) and not _lists_sentinel(cj_domain.get(p))
+                   for p, v in zip(kinds, point_args))
     lap_floor = None
     longest_lap = max((lap.lap_size() for lap in (*language_laps.values(),
                                                    *missing_laps.values())),
@@ -6986,14 +6993,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return v
 
     fn_tagged = f_call.wrap(_tagged(fn_call, "f", inject=call_pins))
-    bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
+    bound_tagged = {name: f_call.wrap(_tagged(v, name))
+                    for name, v in bound_funcs.items()}
     # the lengths the samples inside the premise region actually had,
     # per sequence parameter, for the sampling note
     sequence_params = [p for p, k in kinds.items() if k in SEQUENCE_KINDS]
     observed_lengths: dict = {}
     args: list = []
     for trial in range(budget + len(pinned)):
-        f_call.record(missing_ledger, dict(zip(kinds, args)))
+        f_call.record(executed_record, dict(zip(kinds, args)))
         call_raised[0] = call_nan[0] = call_inf[0] = None
         outside_draw[0] = False
         trial_sizes: dict = (
@@ -7182,6 +7190,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if isinstance(env.get(p), (list, tuple)) or (
                     _linalg_eval.is_array(env.get(p)) and env[p].ndim >= 1):
                 observed_lengths.setdefault(p, set()).add(len(env[p]))
+        if cj.relation == "raises" and completed_at(args):
+            # a missing input the type admitted and the claim did not
+            # list: what the call does there is classified, not judged
+            try:
+                eval(code_l, {"__builtins__": {}}, env)
+            except Exception:
+                pass
+            executed_record.classified += 1
+            continue
         if cj.relation == "raises":
             # the claim is that the call raises: returning any value is
             # the counterexample, raising the wrong type falsifies a
@@ -7216,6 +7233,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # outside the quantified region, rejected. A raise
                 # from a BOUND function is not excused: is_defined(f)
                 # says nothing about g, and the pedantic reading stands
+                continue
+            if inputs_missing(args) and not asks_missing:
+                # a raise at a missing input is classified into the
+                # executed missing inputs, never judged
+                executed_record.classified += 1
                 continue
             # a raise at a floating-point BOUNDARY: sin(m)^2 + cos(m)^2
             # can round to 1.0000000000000002 and push acos past its
@@ -7328,6 +7350,13 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   "the raising region as its own raises(...) claim")
             cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args), arg_names, shown_names))
             break
+        if cj.relation in ("in", "not in") and not asks_missing \
+                and inputs_missing(args) \
+                and classified(args, f_call.outputs() or [lv]):
+            # membership in a set of values at a missing input that came
+            # back missing: classified, as a value claim's point is
+            executed_record.classified += 1
+            continue
         if cj.relation in ("in", "not in"):
             # membership is exact: a value is in the language or the
             # set, or it is not, and a missing value is in neither
@@ -7351,6 +7380,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 break
             continue
         missing_in = inputs_missing(args)
+        if missing_in and classified(args, f_call.outputs() or [lv]):
+            # a missing output at a missing input: classified into the
+            # executed missing inputs, never judged
+            executed_record.classified += 1
+            continue
         if not missing_in and (holds_nan(lv) or holds_nan(rv)):
             # a NaN computed from inputs that are not missing is no
             # value, like a raise: every value relation fails at this
@@ -7384,19 +7418,22 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "
                   f"infinity for a finite input is no value")
             break
-        if missing_in or "absent" in (missing_class(lv), missing_class(rv)):
-            # a missing value meets the relation by kind: a hole agrees
-            # with a hole and an absence with an absence under `==`,
-            # and against a number every relation fails
+        if not missing_in and "absent" in (missing_class(lv), missing_class(rv)):
+            # a None from present inputs is no value, like a NaN
+            checked += 1
+            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: "
+                  f"{_linalg_eval.shown(lv)!r} vs {_linalg_eval.shown(rv)!r}, "
+                  f"and None is no value")
+            break
+        if missing_in:
+            # the code returned a value at a missing input: judged as
+            # usual, a side the law left without a value failing
             ok = relation_holds_elementwise(
                 lv, rv, cj.relation,
                 cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE,
                 exact_inequality=cj.tolerance is None,
-                rel_tol=_declared_rel_tol(cj), missing_inputs=True,
-                at_missing_input=bool(missing_in))
+                rel_tol=_declared_rel_tol(cj))
             if ok is None:
-                if missing_in:
-                    missing_ledger.unanswered(dict(zip(kinds, args)))
                 continue
             checked += 1
             if ok is False:
@@ -7479,8 +7516,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_fmt(tuple(args), arg_names, shown_names)}{aux_part}: {_sides(lv, rv)}"
             break
-    f_call.record(missing_ledger, dict(zip(kinds, args)))
-    missing_meta = with_executed(missing_meta, missing_ledger) or {}
+    f_call.record(executed_record, dict(zip(kinds, args)))
+    missing_meta = with_executed(missing_meta, executed_record) or {}
     shrunk_meta: dict = {}
     if cx is not None and cx_stratum is None and assum_eval is None and not aux \
             and any(getattr(cj_domain.get(p), "base_type", None) == "L" for p in kinds):
@@ -7505,6 +7542,16 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           "mathema.confidence": _probe_density(risk, checked),
                           "mathema.counterexample_args": _yaml_safe_args(args),
                           **shrunk_meta, **missing_meta})
+    if checked == 0 and executed_record.classified:
+        # every point executed was a missing input the code raised at or
+        # answered with a missing value: nothing left to compare
+        from .probing import nothing_to_compare
+        found = (missing_meta.get("mathema.missing") or {})
+        said = nothing_to_compare(found.get("behaviour") or {},
+                                  found.get("executed") or {})
+        return Probe(cj.name, statement, "unknown", route="probe",
+                     note=f"{note}; {said}".lstrip("; "), sketch=said,
+                     meta={**missing_meta})
     if checked == 0:
         why = ("; no sampled point satisfied the assuming clause"
                if assum_eval is not None else "; no evaluable inputs")

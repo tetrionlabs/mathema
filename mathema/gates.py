@@ -96,7 +96,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                          domain_contains, operational_domain)
     from .probing import (ComplexResult, _bound_is_complex, _fmt_value,
                           _is_matrix_value, _synth, complex_is_a_raise,
-                          ExecutionLedger, execution_outcome,
+                          ExecutedMissing, LastCall, classified,
                           holds_inf, holds_nan, inputs_missing,
                           is_complex_value, missing_class,
                           plain_value, relation_holds_elementwise,
@@ -154,10 +154,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the first callee that returned a nan or an infinity for finite,
     # non-missing arguments, as the witness text ("f returned inf")
     calls_nonfinite: list = [None]
-    # what the function under test last did: ("raised", name) or
-    # ("returned", value), read for the executed-missing-input ledger
-    f_last: list = [None]
-    ledger = ExecutionLedger()
+    # the calls the function under test (or a bound function) made at
+    # the current point, for the executed missing inputs
+    f_calls = LastCall()
+    executed = ExecutedMissing()
 
     def _tag(callee, label):
         # a complex result under a real claim counts as a raise too
@@ -168,11 +168,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 out = callee(*a, **kw)
             except Exception as exc:
                 calls_raised[0] = type(exc).__name__
-                if label == "f":
-                    f_last[0] = ("raised", type(exc).__name__)
+                f_calls.calls.append(("raised", type(exc).__name__))
                 raise
-            if label == "f":
-                f_last[0] = ("returned", out)
+            f_calls.calls.append(("returned", out))
             if complex_raises and is_complex_value(out):
                 calls_raised[0] = "a complex result"
                 raise ComplexResult(label, out)
@@ -203,17 +201,18 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     def _reset():
         calls_raised[0] = None
         calls_nonfinite[0] = None
-        f_last[0] = None
+        f_calls.reset()
+        executed.last_classified = False
 
-    def _record(point):
-        # what f did at a point with a missing input, per parameter
-        if f_last[0] is None or not inputs_missing(point.values()):
-            return
-        kind, value = f_last[0]
-        ledger.add(point, execution_outcome(
-            raised=value if kind == "raised" else None,
-            value=value if kind == "returned" else None,
-            holed_input=True))
+    def _classify(point, raised):
+        # at a missing input, a raise or a missing output is classified
+        # into the executed missing inputs and not judged; True when it was
+        at_missing = classified(point.values(), f_calls.outputs(), raised)
+        f_calls.record(executed, point)
+        if at_missing:
+            executed.classified += 1
+            executed.last_classified = True
+        return at_missing
 
     from .runtime_types import calling
     from ._linalg_eval import FUNCTIONS as _VECTOR_FUNCS
@@ -349,11 +348,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         except Exception:
             # a raise FROM THE FUNCTION at an in-domain point is a
             # genuine failure of a value claim (the pedantic raise
-            # rule), so it reproduces a disproof; a plumbing raise
-            # stays inconclusive
-            _record(point)
+            # rule), so it reproduces a disproof, except at a missing
+            # input, where it is classified; a plumbing raise stays
+            # inconclusive
+            if _classify(point, bool(calls_raised[0])):
+                return None
             return False if calls_raised[0] else None
-        _record(point)
+        if _classify(point, False):
+            return None
         if calls_nonfinite[0] is not None:
             # a nan or an infinity the code returned for finite inputs
             # is no value: against a value every relation fails. Two
@@ -363,17 +365,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if _same_no_value(lv, rv):
                 return cj.relation in ("==", "~=", "<=", ">=")
             return False
-        if inputs_missing(point.values()) or "absent" in (missing_class(lv), missing_class(rv)):
-            # a missing value meets the relation by kind (a hole agrees
-            # with a hole, an absence with an absence, and either fails
-            # against a number)
-            at_missing = inputs_missing(point.values())
-            held = relation_holds_elementwise(
-                lv, rv, cj.relation, slack, exact_inequality=cj.tolerance is None,
-                rel_tol=0.0, missing_inputs=True, at_missing_input=at_missing)
-            if held is None and at_missing:
-                ledger.unanswered(point)
-            return held
+        if not inputs_missing(point.values()) \
+                and "absent" in (missing_class(lv), missing_class(rv)):
+            # a None from present inputs is no value, like a NaN
+            return False
         if _complex_pair(lv, rv) and not (holds_nan(lv) or holds_nan(rv)):
             if (holds_inf(lv) or holds_inf(rv)) and not calls_nonfinite[0]:
                 # an infinity only the law's own arithmetic produced
@@ -414,9 +409,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return None
         return None
 
-    # the executed-missing-input ledger both evaluators write, read by
+    # the executed missing inputs both evaluators record, read by
     # the routes that build a record from this kit
-    evaluate.ledger = ledger  # type: ignore[attr-defined]
+    evaluate.executed = executed  # type: ignore[attr-defined]
 
     def probe_finite(point):
         # a computation failure only: a raise from the code, a NaN
@@ -431,20 +426,28 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             lv, rv = _values(point)
         except Exception:
             # only a raise from the function under test is a
-            # computation failure; the law's own plumbing failing
-            # says nothing about the code
-            _record(point)
+            # computation failure (a raise at a missing input is
+            # classified); the law's own plumbing failing says nothing
+            # about the code
+            if _classify(point, bool(calls_raised[0])):
+                return None
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
             return None
-        _record(point)
-        if inputs_missing(point.values()) or "absent" in (missing_class(lv), missing_class(rv)):
-            # a missing input meets the relation by kind
+        if _classify(point, False):
+            return None
+        if not inputs_missing(point.values()) \
+                and "absent" in (missing_class(lv), missing_class(rv)):
+            return (f"the computation returns None here "
+                    f"({_fmt_value(lv)} {cj.relation} {_fmt_value(rv)})")
+        if inputs_missing(point.values()) and (holds_nan(lv) or holds_nan(rv)
+                                               or None in (lv, rv)):
+            # the code returned a value at a missing input and the law's
+            # side holds no value there
             if relation_holds_elementwise(
-                    lv, rv, cj.relation, slack, exact_inequality=cj.tolerance is None,
-                    rel_tol=0.0, missing_inputs=True,
-                    at_missing_input=inputs_missing(point.values())) is False:
-                return (f"the relation fails at a missing value "
+                    lv, rv, cj.relation, slack,
+                    exact_inequality=cj.tolerance is None, rel_tol=0.0) is False:
+                return (f"the relation fails at a missing input "
                         f"({_fmt_value(lv)} {cj.relation} {_fmt_value(rv)})")
             return None
         if calls_nonfinite[0] is not None:
@@ -1138,8 +1141,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         if missing_corners and p in deps["names"]:
             tried.setdefault(p, []).append(repr(v))
     tried_meta = {"mathema.missing": {"tried": tried}} if tried else {}
-    from .probing import executed_ledger, with_executed
-    tried_meta = with_executed(tried_meta, executed_ledger(deps)) or {}
+    from .probing import executed_missing, with_executed
+    tried_meta = with_executed(tried_meta, executed_missing(deps)) or {}
     what = (f"the computation of {parent.name} in {representation_word}, "
             f"executed at {sweep.checked} points (every domain corner, "
             + (f"{words}, " if words and missing_corners else "")

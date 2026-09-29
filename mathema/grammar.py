@@ -3374,7 +3374,8 @@ class InvalidDefinition(ValueError):
 
 
 #: the words a definition row may define: the hole class and absence
-DEFINABLE_WORDS = ("missing", "None")
+#: (`absent`, with `None` its synonym, both read as the absence word)
+DEFINABLE_WORDS = ("missing", "absent", "None")
 _DEFINITION = re.compile(
     r"^\s*(?P<word>[^\s:=]+)\s*:=\s*\{\s*(?P<members>.*?)\s*\}\s*$")
 _SPELLING = re.compile(r"^[A-Za-z_][\w]*(?:::[A-Za-z_][\w]*)*$")
@@ -3384,7 +3385,8 @@ def parse_definition(text: str) -> tuple:
     """Intent:
         One definition row, `<word> := {<members>}`, as `(word,
         members, extends)`: the word defined (`missing`, the hole class,
-        or `None`, the object's absence), the spellings the set names
+        or `None` for the object's absence, written `absent` or `None`),
+        the spellings the set names
         with the word itself left out, and whether the set extends what
         the key already had (the word appears inside it, `missing :=
         {missing, NaT}`) rather than replacing it. Read only from a
@@ -3406,14 +3408,17 @@ def parse_definition(text: str) -> tuple:
     if word not in DEFINABLE_WORDS:
         raise InvalidDefinition(
             f"{text!r} defines {word!r}; a definition row defines "
-            f"`missing` (the hole class) or `None` (absence)")
+            f"`missing` (the hole class) or `absent` (the object's absence)")
+    synonyms = ("absent", "None") if word in ("absent", "None") else (word, "∅")
+    if word == "absent":
+        word = "None"
     members: list = []
     extends = False
     for part in _split_commas(m.group("members")):
         spelling = part.strip()
         if not spelling:
             continue
-        if spelling == word or (word == "missing" and spelling == "∅"):
+        if spelling in synonyms:
             extends = True
             continue
         if not _SPELLING.match(spelling):

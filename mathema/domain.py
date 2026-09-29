@@ -1143,11 +1143,31 @@ def register_spelling(word: str, realise) -> None:
 
 #: how each spelling of absence is realised; `None` is Python's own
 _ABSENCE_VALUES: dict = {"None": lambda: None}
+#: how each spelling of absence other than `None` is recognised
+_ABSENCE_DETECTORS: dict = {}
 
 
-def register_absence_spelling(word: str, realise) -> None:
-    """Realise the absence spelling `word` by calling `realise()`."""
+def register_absence_spelling(word: str, realise, detect=None) -> None:
+    """Realise the absence spelling `word` by calling `realise()`, and
+    recognise a value as that absence with `detect(value)` when given."""
     _ABSENCE_VALUES[str(word)] = realise
+    if detect is not None:
+        _ABSENCE_DETECTORS[str(word)] = detect
+
+
+def absence_word(value) -> "str | None":
+    """The absence spelling `value` is (`None` for Python's `None`, a
+    defined spelling such as `Option::None`), or None for a value that
+    is not an absence."""
+    if value is None:
+        return "None"
+    for word, detect in _ABSENCE_DETECTORS.items():
+        try:
+            if detect(value):
+                return word
+        except Exception:
+            continue
+    return None
 
 
 def spelling_value(word: str):

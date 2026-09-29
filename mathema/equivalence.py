@@ -616,7 +616,7 @@ def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
 def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     from .conjecture import DEFAULT_TOLERANCE
     from .probing import (_fmt, _fmt_value, _synth, complex_is_a_raise,
-                          inputs_missing, missing_class, missing_relation,
+                          classified, missing_class,
                           same_infinity)
 
     cj = case.cj
@@ -643,6 +643,11 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
         fv, f_exc = _run_side(f_call, args, f_complex)
         gv, g_exc = _run_side(g_call, args, g_complex)
         state.executed += 1
+        if classified(args, [v for v in (fv, gv) if v is not _RAISED],
+                      fv is _RAISED or gv is _RAISED):
+            # a raise or a missing output at a missing input is
+            # classified, not judged
+            continue
         one_sided = _one_sided_raise(args, kinds, fv, f_exc, gv, g_exc,
                                      case.rhs_name)
         if one_sided is not None:
@@ -657,18 +662,15 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
                 break
             both_raised += 1
             continue
-        if inputs_missing(args) or "absent" in (missing_class(fv), missing_class(gv)):
-            # a missing value meets equivalence by kind: a hole agrees
-            # with a hole and an absence with an absence, and either
-            # disagrees with a number
+        if "absent" in (missing_class(fv), missing_class(gv)):
+            # a None from present inputs, or a value against a None at a
+            # missing input, is no value on that side
             checked += 1
-            at_missing = inputs_missing(args)
-            if missing_relation(fv, gv, "==", at_missing) is False:
+            if not (fv is None and gv is None):
                 cx = (_fmt(tuple(args), names=tuple(kinds))
                       + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
                 break
-            if missing_relation(fv, gv, "==", at_missing) is True:
-                continue
+            continue
         if not (_numberlike(fv) and _numberlike(gv)):
             discarded["non_numeric"] += 1
             continue

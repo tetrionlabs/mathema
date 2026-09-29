@@ -29,8 +29,7 @@ from __future__ import annotations
 import itertools
 
 from .domain import _as_domain, _set_sentinels, finite_members
-from .probing import (ExecutionLedger, LastCall, executed_ledger, inputs_missing,
-                      missing_study, with_executed)
+from .probing import ExecutedMissing, LastCall, executed_missing, with_executed
 from .symbolic import ProofResult
 
 __all__ = ["BRUTE_FORCE_POINT_BUDGET", "brute_force_proof"]
@@ -130,17 +129,18 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
         return None
     wanted = cj.relation == "in"
     checked = 0
-    ledger, f_call = ExecutionLedger(), LastCall()
+    executed, f_call = ExecutedMissing(), LastCall()
     recorded = f_call.wrap(fn)
+    bound = {name: f_call.wrap(g) for name, g in (bound_funcs or {}).items()}
     for combo in itertools.product(*(grid[n] for n in names)):
         point = dict(zip(names, combo))
-        env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **(bound_funcs or {}),
+        env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **bound,
                "f": recorded, **point}
         where = _fmt_point(point, names)
         try:
             value = eval(code, {"__builtins__": {}}, env)
         except Exception:
-            f_call.record(ledger, point)
+            f_call.record(executed, point)
             raised = _raised_at(fn, facts, point)
             if raised is None:
                 return None
@@ -149,8 +149,8 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                 counterexample=f"{where}: raised {raised}", witness=dict(point),
                 meta=with_executed({"mathema.derive_route": "brute_force",
                                     **_tried(grid),
-                                    "mathema.witness_executed": True}, ledger))
-        f_call.record(ledger, point)
+                                    "mathema.witness_executed": True}, executed))
+        f_call.record(executed, point)
         if _membership_member(value, cj.rhs_bound) != wanted:
             return ProofResult(
                 "disproven",
@@ -161,7 +161,7 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                 witness=dict(point),
                 meta=with_executed({"mathema.derive_route": "brute_force",
                                     **_tried(grid),
-                                    "mathema.witness_executed": True}, ledger))
+                                    "mathema.witness_executed": True}, executed))
         checked += 1
     if checked == 0:
         return None
@@ -173,7 +173,7 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
         quantifier=f"∀ {', '.join(names)} in the declared finite domain "
                    f"({checked} {plural})",
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
-                           ledger))
+                           executed))
 
 
 def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
@@ -203,7 +203,8 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
     except SyntaxError:
         return None
     checked = 0
-    ledger, f_call = ExecutionLedger(), LastCall()
+    executed, f_call = ExecutedMissing(), LastCall()
+    bound = {name: f_call.wrap(g) for name, g in (bound_funcs or {}).items()}
     for combo in itertools.product(*(grid[n] for n in names)):
         point = dict(zip(names, combo))
         raised: list = []
@@ -215,13 +216,13 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                 raised.append(e)
                 raise
 
-        env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **(bound_funcs or {}),
+        env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **bound,
                "f": f_call.wrap(tagged), **point}
         where = _fmt_point(point, names)
         try:
             value = eval(code, {"__builtins__": {}}, env)
         except Exception:
-            f_call.record(ledger, point)
+            f_call.record(executed, point)
             if not raised:
                 return None
             if wanted is not None and not isinstance(raised[0], wanted):
@@ -233,17 +234,17 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                                    f"{type(raised[0]).__name__}, claimed {cj.rhs}",
                     witness=dict(point),
                     meta=with_executed({"mathema.derive_route": "brute_force",
-                                        **_tried(grid)}, ledger))
+                                        **_tried(grid)}, executed))
             checked += 1
             continue
-        f_call.record(ledger, point)
+        f_call.record(executed, point)
         return ProofResult(
             "disproven",
             sketch=f"at {where} the call returned {value!r} instead of raising",
             counterexample=f"{where}: returned {value!r} instead of raising",
             witness=dict(point),
             meta=with_executed({"mathema.derive_route": "brute_force",
-                                **_tried(grid)}, ledger))
+                                **_tried(grid)}, executed))
     if checked == 0:
         return None
     plural = "point" if checked == 1 else "points"
@@ -254,7 +255,7 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
         quantifier=f"∀ {', '.join(names)} in the declared finite domain "
                    f"({checked} {plural})",
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
-                           ledger))
+                           executed))
 
 
 def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
@@ -323,10 +324,10 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             # premise this point fails), so it is not ours to decide
             continue
         verdict = evaluate(point)
-        if verdict is None and missing_study() == "propagation" \
-                and inputs_missing(point.values()):
-            # an ordering at a missing input has no answer: recorded
-            # as unanswerable and passed over
+        executed = executed_missing(deps)
+        if verdict is None and executed is not None and executed.last_classified:
+            # a raise or a missing output at a missing input: classified
+            # into the executed, not judged
             continue
         if verdict is None:
             return None
@@ -345,7 +346,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                      # reproduced by calling with that same value
                      **({"mathema.witness_executed": True}
                         if _lists_a_sentinel(cj_domain, names) else {})},
-                    executed_ledger(deps)))
+                    executed_missing(deps)))
         checked += 1
     if checked == 0:
         # every point was excluded: nothing was actually verified, and a
@@ -362,4 +363,4 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         quantifier=f"∀ {', '.join(names)} in the declared finite domain "
                    f"({checked} {plural})",
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
-                           executed_ledger(deps)))
+                           executed_missing(deps)))

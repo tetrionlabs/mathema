@@ -68,16 +68,30 @@ def tried(probe) -> dict:
     return ((probe.meta or {}).get("mathema.missing") or {}).get("tried") or {}
 
 
+def behaviour(*probes) -> dict:
+    """What the code did at each missing input the rows executed, `{param:
+    {member: behaviour}}`, over every row given."""
+    out: dict = {}
+    for probe in probes:
+        found = ((probe.meta or {}).get("mathema.missing") or {}).get("behaviour") or {}
+        for p, members in found.items():
+            for member, seen in members.items():
+                out.setdefault(p, {}).setdefault(member, seen)
+    return out
+
+
 def assert_row(fn, text, verdicts, *, member=None, raised=None,
                companion=None, companion_member=None, executed=None,
-               companions_none=False):
+               companions_none=False, behaves=None):
     """Intent:
         Adjudicate `text` over `fn` and check the row: the verdict is
         one of `verdicts`, the witness names `member` and the exception
         `raised` when given, a companion comes to `companion` with its
         witness naming `companion_member` when given, the main claim
-        executed each value in `executed` (`{param: [value, ...]}`), and
-        with `companions_none` no companion was spawned.
+        executed each value in `executed` (`{param: [value, ...]}`),
+        with `companions_none` no companion was spawned, and with
+        `behaves` the behaviour at each missing input the rows executed
+        is the one given (`{param: {member: behaviour}}`).
     """
     probe, companions = run(fn, text)
     assert probe.verdict in verdicts, (probe.verdict, probe.note, witness(probe))
@@ -98,6 +112,9 @@ def assert_row(fn, text, verdicts, *, member=None, raised=None,
             assert any(c.verdict == companion and companion_member in witness(c)
                        for c in companions), \
                 [(c.name, c.verdict, witness(c)) for c in companions]
+    if behaves is not None:
+        assert behaviour(probe, *companions) == behaves, \
+            behaviour(probe, *companions)
     return probe, companions
 
 
@@ -106,78 +123,78 @@ PROVEN_OR_HOLDS = ("proven", "holds")
 FALSIFIED = ("falsified",)
 
 
-@stage(2)
-def test_s1_a_float_proof_carries_a_companion_falsified_at_nan():
+def test_s1_a_float_proof_carries_a_companion_that_holds_on_values():
     assert_row(sqrt_plain, "for x in [0, 1], f(x) >= 0", PROVEN,
-               companion="falsified", companion_member="nan")
+               companion="holds", behaves={"x": {"nan": "propagates"}})
 
 
-def test_s3_a_listed_none_is_executed_by_the_claim_and_raises():
-    assert_row(sqrt_plain, "for x in {0.25, None}, f(x) >= 0", FALSIFIED,
-               member="None", raised="TypeError", executed={"x": ["None"]})
+def test_s3_a_raise_at_a_listed_none_is_classified():
+    assert_row(sqrt_plain, "for x in {0.25, None}, f(x) >= 0", PROVEN,
+               executed={"x": ["None"]}, behaves={"x": {"None": "raises"}})
 
 
-def test_s4_a_listed_nan_is_a_hole_against_an_ordering():
-    assert_row(sqrt_plain, "for x in {0.25, nan}, f(x) >= 0", FALSIFIED,
-               member="nan", executed={"x": ["nan"]})
+def test_s4_a_propagated_listed_nan_is_classified():
+    assert_row(sqrt_plain, "for x in {0.25, nan}, f(x) >= 0", PROVEN,
+               executed={"x": ["nan"]}, behaves={"x": {"nan": "propagates"}})
 
 
-@stage(2)
-def test_s5_a_guarded_float_companion_raises_at_nan():
+def test_s5_a_guarded_float_companion_holds_and_the_guard_raises():
     assert_row(sqrt_guarded, "for x in [0, 1], f(x) >= 0", PROVEN,
-               companion="falsified", companion_member="nan")
+               companion="holds", behaves={"x": {"nan": "raises"}})
 
 
-def test_s6_a_listed_none_raising_valueerror_is_the_witness():
-    assert_row(sqrt_guarded, "for x in {0.25, None}, f(x) >= 0", FALSIFIED,
-               member="None", raised="ValueError")
+def test_s6_a_listed_none_raising_valueerror_is_classified():
+    probe, _ = assert_row(sqrt_guarded, "for x in {0.25, None}, f(x) >= 0", PROVEN,
+                          behaves={"x": {"None": "raises"}})
+    assert probe.meta["mathema.missing"]["executed"]["x"]["None"] == "raised ValueError"
 
 
-@stage(2)
-def test_s7_an_optional_float_companion_fails_at_a_missing_point():
-    probe, companions = assert_row(double_or_missing, "for x in [0, 1], f(x) >= 0",
-                                   PROVEN, companion="falsified")
-    assert any("None" in witness(c) or "nan" in witness(c) for c in companions)
+def test_s7_an_optional_float_companion_holds_and_both_kinds_propagate():
+    assert_row(double_or_missing, "for x in [0, 1], f(x) >= 0", PROVEN,
+               companion="holds",
+               behaves={"x": {"None": "propagates", "nan": "propagates"}})
 
 
-def test_s8_absence_against_a_number_is_not_true():
-    assert_row(double_or_missing, "for x in {0.25, None}, f(x) >= 0", FALSIFIED,
-               member="None", executed={"x": ["None"]})
+def test_s8_a_propagated_absence_is_classified():
+    assert_row(double_or_missing, "for x in {0.25, None}, f(x) >= 0", PROVEN,
+               executed={"x": ["None"]}, behaves={"x": {"None": "propagates"}})
 
 
-@stage(2)
 def test_s9_a_replaced_hole_holds_on_both_halves():
     probe, companions = assert_row(zero_if_missing, "for x in [0, 1], f(x) >= 0",
-                                   PROVEN)
+                                   PROVEN, behaves={"x": {"None": "drops", "nan": "drops"}})
     assert companions and all(c.verdict in PROVEN_OR_HOLDS for c in companions)
     assert any(set(tried(c).get("x", [])) >= {"None", "nan"} for c in companions)
 
 
 def test_s10_a_replaced_absence_is_proven_by_execution_alone():
     assert_row(zero_if_missing, "for x in {0.25, None}, f(x) >= 0", PROVEN,
-               executed={"x": ["None"]}, companions_none=True)
+               executed={"x": ["None"]}, companions_none=True,
+               behaves={"x": {"None": "drops"}})
 
 
-@stage(2)
-def test_s11_propagation_agrees_with_itself():
-    probe, companions = assert_row(ident, "for x in [0, 1], f(x) == x", PROVEN)
+def test_s11_propagation_is_classified_and_the_companion_holds():
+    probe, companions = assert_row(ident, "for x in [0, 1], f(x) == x", PROVEN,
+                                   behaves={"x": {"None": "propagates",
+                                                  "nan": "propagates"}})
     assert companions and all(c.verdict in PROVEN_OR_HOLDS for c in companions)
     assert any("nan" in tried(c).get("x", []) for c in companions)
 
 
-def test_s12_absence_agrees_with_itself():
+def test_s12_absence_propagates_through_the_identity():
     assert_row(ident, "for x in {0.25, None}, f(x) == x", PROVEN,
-               executed={"x": ["None"]})
+               executed={"x": ["None"]}, behaves={"x": {"None": "propagates"}})
 
 
-def test_s13_a_hole_agrees_with_itself():
+def test_s13_a_hole_propagates_through_the_identity():
     assert_row(ident, "for x in {0.25, nan}, f(x) == x", PROVEN,
-               executed={"x": ["nan"]})
+               executed={"x": ["nan"]}, behaves={"x": {"nan": "propagates"}})
 
 
-def test_s16_absence_at_the_second_parameter_raises():
-    assert_row(add, "for x in [0, 1], y in {0.5, None}, f(x, y) >= 0", FALSIFIED,
-               member="None", raised="TypeError", executed={"y": ["None"]})
+def test_s16_a_raise_at_the_second_parameters_absence_is_classified():
+    assert_row(add, "for x in [0, 1], y in {0.5, None}, f(x, y) >= 0", PROVEN,
+               executed={"y": ["None"]},
+               behaves={"y": {"None": "raises"}, "x": {"nan": "propagates"}})
 
 
 def test_p1_a_policy_that_does_not_raise_at_nan_is_falsified():
@@ -192,12 +209,35 @@ def test_p2_the_one_member_raises_the_stated_exception():
 
 def test_p3_a_replacement_policy_is_proven():
     assert_row(zero_if_missing, "for x in {missing}, f(x) == 0", PROVEN,
-               executed={"x": ["nan"]})
+               executed={"x": ["nan"]}, behaves={"x": {"nan": "drops"}})
 
 
 def test_p4_membership_by_class_is_proven():
     assert_row(double_or_missing, "for x in {missing}, f(x) in {missing}", PROVEN,
                executed={"x": ["nan"]})
+
+
+def test_v0_a_value_claim_over_a_propagated_hole_alone_is_unknown():
+    assert_row(sqrt_plain, "for x in {missing}, f(x) >= 0", ("unknown",),
+               behaves={"x": {"nan": "propagates"}})
+
+
+# the policy claims each behaviour above states (stage 4 builds them)
+
+@stage(4)
+@pytest.mark.parametrize("fn, text, verdicts", [
+    (sqrt_plain, "missing(f, x) propagates", PROVEN_OR_HOLDS),
+    (sqrt_plain, "absent(f, x) raises(TypeError)", PROVEN_OR_HOLDS),
+    (sqrt_guarded, "missing(f, x) raises(ValueError)", PROVEN_OR_HOLDS),
+    (double_or_missing, "absent(f, x) propagates", PROVEN_OR_HOLDS),
+    (zero_if_missing, "missing(f, x) drops", PROVEN_OR_HOLDS),
+    (zero_if_missing, "absent(f, x) drops", PROVEN_OR_HOLDS),
+    (ident, "missing(f, x) propagates", PROVEN_OR_HOLDS),
+    (add, "absent(f, y) raises(TypeError)", PROVEN_OR_HOLDS),
+    (sqrt_plain, "missing(f, x) drops", FALSIFIED),
+])
+def test_the_behaviour_is_a_policy_claim(fn, text, verdicts):
+    assert_row(fn, text, verdicts)
 
 
 @stage(5)

@@ -36,6 +36,8 @@ def test_a_definition_row_reads_its_word_and_members():
     assert parse_definition("missing := {null, nan}") == ("missing", ("null", "nan"), False)
     assert parse_definition("missing := {missing, NaT}") == ("missing", ("NaT",), True)
     assert parse_definition("None := {Option::None}") == ("None", ("Option::None",), False)
+    assert parse_definition("absent := {Option::None}") == ("None", ("Option::None",), False)
+    assert parse_definition("absent := {absent, undefined}") == ("None", ("undefined",), True)
     with pytest.raises(InvalidDefinition):
         parse_definition("x := {nan}")
     with pytest.raises(InvalidDefinition):
@@ -200,12 +202,74 @@ def test_a_foreign_runtime_renders_both_kinds_and_states_its_members(toy_runtime
                                                            name="c")])
     probe = next(p for p in report.probes if p.name == "c")
     assert probe.statement == "for x in [0.0, 1.0] : float|None|missing, f(x) >= 0"
-    assert "missing for x (toy.f64): NaN" in probe.note
+    assert probe.meta["mathema.missing"]["admitted"]["x"]["holes"] == ["NaN"]
 
 
-def test_a_foreign_runtime_witness_names_its_own_spelling(toy_runtime):
+def test_a_foreign_runtime_records_its_own_spelling(toy_runtime):
     report = mathema.check(toy_sqrt, claims=[mathema.claim("for x in {0.25, None}, f(x) >= 0",
                                                            name="c")])
     probe = next(p for p in report.probes if p.name == "c")
-    assert probe.verdict == "falsified"
-    assert "x=Option::None" in (probe.counterexample or "")
+    assert probe.verdict == "proven", (probe.verdict, probe.note)
+    assert probe.meta["mathema.missing"]["executed"] == {
+        "x": {"Option::None": "raised ValueError"}}
+
+
+def test_one_value_may_be_both_absence_and_a_hole_member(tmp_path):
+    path = write(tmp_path, "project.claims.yaml", """
+        polars.Series:
+          defines:
+            - "absent := {None}"
+            - "missing := {null, nan}"
+    """)
+    from mathema.spec import read_claims_file
+    assert read_claims_file(str(path), "project.claims.yaml")
+    from mathema._missing_policy import no_value_slots
+    assert [(s.kind, s.member) for s in no_value_slots(None).slots] == [("absent", "None")]
+    assert [(s.kind, s.member) for s in no_value_slots([1.0, None]).slots] == \
+        [("missing", "null")]
+
+
+class ClashVec:
+    """A toy runtime whose two hole spellings are one value."""
+    name = "toy.clash"
+    kinds = frozenset({"vec"})
+    requires: tuple = ()
+    SPELLINGS = {"null": (lambda: None, lambda v: v is None),
+                 "none": (lambda: None, lambda v: v is None)}
+    MISSING_MEMBERS: tuple = ()
+    ABSENCE: tuple = ()
+
+    def detect(self, annotation):
+        return None
+
+    def realise(self, abstract, options):
+        return abstract
+
+    def observe(self, obj):
+        return NotMine
+
+
+class _ClashEntryPoint:
+    name = "clash"
+    value = "tests:ClashVec"
+
+    def load(self):
+        return ClashVec
+
+
+def test_one_value_as_two_hole_members_is_refused_at_load(tmp_path, monkeypatch):
+    from mathema.spec import read_claims_file
+    monkeypatch.setattr(rt, "entry_points", lambda **_: [_ClashEntryPoint()])
+    rt._discovered.cache_clear()
+    clash = write(tmp_path, "clash.claims.yaml", """
+        toy.clash:
+          defines:
+            - "missing := {null, none}"
+    """)
+    try:
+        with pytest.raises(ClaimsFileError, match="names one value, None, as two hole "
+                                                  "members, null and none"):
+            read_claims_file(str(clash), "clash.claims.yaml")
+    finally:
+        monkeypatch.undo()
+        rt._discovered.cache_clear()

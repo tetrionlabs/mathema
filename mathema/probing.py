@@ -20,7 +20,6 @@ import cmath
 import collections
 import dataclasses
 import math
-import os
 import random
 from dataclasses import dataclass
 
@@ -430,8 +429,7 @@ def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
 
 def values_agree(u, v, tolerance: float | None = None,
                  rel_tol: float = DEFAULT_RELATIVE_TOLERANCE,
-                 broadcast: bool = False,
-                 missing_inputs: bool = False) -> "bool | None":
+                 broadcast: bool = False) -> "bool | None":
     """Intent:
         Whether two executed values are equal, the one reading every
         comparison shares: Python numbers, numpy scalars, 0-d arrays,
@@ -446,15 +444,10 @@ def values_agree(u, v, tolerance: float | None = None,
         `None` when the two sides have different shapes. With
         `broadcast`, a number against an array or list is compared
         with every element. A bool, and a value that is not a number,
-        agrees only by exact equality. With `missing_inputs` (an
-        argument was missing), missing values agree by kind
-        (`missing_relation`): a hole with a hole, `None` with `None`.
+        agrees only by exact equality.
     """
     abs_tol = tolerance if tolerance is not None else 1e-9
     u, v = plain_value(u), plain_value(v)
-    if missing_inputs:
-        return _missing_walk(u, v, "==", lambda a, b: values_agree(
-            a, b, tolerance, rel_tol, broadcast))
 
     def walk(x, y):
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
@@ -551,20 +544,6 @@ def _scalar_relation(a, b, relation: str, slack: float,
     return a > b
 
 
-#: how completed missing-value admissions are drawn and compared, read
-#: once at import: `off` (not drawn), `pedantic` (drawn; a missing
-#: value against a number fails every relation), `annotated` (as
-#: pedantic, drawing nothing for a parameter with no annotation), and
-#: `propagation` (drawn; at a missing input a missing output agrees
-#: under `==`/`~=` and leaves an ordering unanswerable)
-MISSING_STUDY = os.environ.get("MATHEMA_MISSING_STUDY", "off").strip().lower() or "off"
-
-
-def missing_study() -> str:
-    """The missing-value study setting in force (`MISSING_STUDY`)."""
-    return MISSING_STUDY
-
-
 def execution_outcome(value=None, raised: "str | None" = None,
                       holed_input: bool = False) -> str:
     """Intent:
@@ -591,128 +570,147 @@ def _short(value) -> str:
     return text if len(text) <= 60 else text[:57] + "..."
 
 
-def missing_word(value) -> "str | None":
-    """The word a missing input is recorded under: `None` for an absent
-    value, the member for a hole (`nan`, `NA`, `NaT`), the member of its
-    first hole for a container that holds one, else None."""
-    from .domain import member_of
-    if value is None:
-        return "None"
-    kind = missing_class(value)
-    if kind == "hole":
-        return member_of(value)
-    if isinstance(value, (list, tuple)):
-        for v in value:
-            word = missing_word(v)
-            if word is not None:
-                return "null" if word == "None" else word
-    return None
-
-
-class ExecutionLedger:
-    """What the code did at each missing input a route executed, `{param:
-    {member: outcome}}`, the first outcome per member kept, and the
-    points an ordering left unanswerable."""
+class ExecutedMissing:
+    """What the code did at each missing input a route executed: `table`,
+    `{param: {member: outcome}}` with the first outcome per member kept;
+    `policy`, the behaviour per (parameter, kind, member) over every
+    call (`_missing_policy.PolicyTable`); and how many points were
+    classified rather than judged."""
 
     def __init__(self) -> None:
+        from ._missing_policy import PolicyTable
         self.table: dict = {}
-        self.unanswerable: list = []
+        self.policy = PolicyTable()
+        self.classified = 0
+        self.last_classified = False
 
-    def add(self, point: dict, outcome: str) -> None:
-        for p, v in point.items():
-            word = missing_word(v)
-            if word is not None:
-                self.table.setdefault(p, {}).setdefault(word, outcome)
-
-    def unanswered(self, point: dict) -> None:
-        """Record a point an ordering left unanswerable, as its text."""
-        said = ", ".join(f"{p}={v!r}" for p, v in point.items())
-        if said not in self.unanswerable:
-            self.unanswerable.append(said)
+    def add_call(self, point: dict, output=None, raised: "str | None" = None) -> None:
+        """File one call at `point` (its arguments by name) that returned
+        `output` or raised `raised`."""
+        from ._missing_policy import keys_of
+        keys = keys_of(point)
+        if not keys:
+            return
+        said = execution_outcome(value=output, raised=raised, holed_input=True)
+        for p, _kind, member in keys:
+            self.table.setdefault(p, {}).setdefault(member, said)
+        self.policy.add(point, output, raised)
 
     def meta(self) -> dict:
         out: dict = {}
         if self.table:
             out["executed"] = {p: dict(v) for p, v in self.table.items()}
-        if self.unanswerable:
-            out["unanswerable"] = list(self.unanswerable[:5])
-            out["unanswerable_count"] = len(self.unanswerable)
+            out["behaviour"] = self.policy.summary()
+            mixed = self.policy.mixed()
+            if mixed:
+                out["mixed"] = mixed
         return out
 
 
 class LastCall:
-    """What a wrapped function last did, for the ledger: `wrap(fn)`
-    returns fn recording each outcome, `outcome()` states the latest one
-    in the record's words (None before any call)."""
+    """The calls a wrapped function made since the last `record`, for the
+    executed missing inputs: `wrap(fn)` returns fn recording each
+    outcome."""
 
     def __init__(self) -> None:
-        self.last: "tuple | None" = None
+        self.calls: list = []
 
     def wrap(self, fn):
         def recorded(*a, **k):
             try:
                 out = fn(*a, **k)
             except Exception as exc:
-                self.last = ("raised", type(exc).__name__)
+                self.calls.append(("raised", type(exc).__name__))
                 raise
-            self.last = ("returned", out)
+            self.calls.append(("returned", out))
             return out
         return recorded
 
     def reset(self) -> None:
-        self.last = None
+        self.calls = []
 
-    def outcome(self) -> "str | None":
-        if self.last is None:
-            return None
-        kind, value = self.last
-        if kind == "raised":
-            return execution_outcome(raised=value)
-        return execution_outcome(value=value, holed_input=True)
+    def raised(self) -> bool:
+        return any(kind == "raised" for kind, _ in self.calls)
 
-    def record(self, ledger: "ExecutionLedger", point: dict) -> None:
-        """Add the latest outcome at `point` when an input is missing."""
-        said = self.outcome()
-        if said is not None and inputs_missing(point.values()):
-            ledger.add(point, said)
-        self.last = None
+    def outputs(self) -> list:
+        return [v for kind, v in self.calls if kind == "returned"]
 
-
-def executed_ledger(kit: dict) -> "ExecutionLedger | None":
-    """The ledger a point-runtime kit's `evaluate` writes, when it has
-    one (a foreign runner's evaluator need not)."""
-    return getattr(kit.get("evaluate"), "ledger", None)
+    def record(self, executed: "ExecutedMissing", point: dict) -> None:
+        """File every call since the last record at `point`, then forget
+        them."""
+        if inputs_missing(point.values()):
+            for kind, value in self.calls:
+                if kind == "raised":
+                    executed.add_call(point, raised=value)
+                else:
+                    executed.add_call(point, output=value)
+        self.calls = []
 
 
-def with_executed(meta: "dict | None", ledger: "ExecutionLedger | None") -> "dict | None":
-    """`meta` with the ledger's executed outcomes and unanswerable points
-    merged under `mathema.missing`; `meta` unchanged when it has none."""
-    extra = ledger.meta() if ledger is not None else {}
+def executed_missing(kit: dict) -> "ExecutedMissing | None":
+    """The executed missing inputs a point-runtime kit's `evaluate`
+    records, when it has them (a foreign runner's evaluator need not)."""
+    return getattr(kit.get("evaluate"), "executed", None)
+
+
+def with_executed(meta: "dict | None", executed: "ExecutedMissing | None") -> "dict | None":
+    """`meta` with the outcomes and behaviours at the executed missing
+    inputs merged under `mathema.missing`; `meta` unchanged when there
+    are none."""
+    extra = executed.meta() if executed is not None else {}
     if not extra:
         return meta
     out = dict(meta or {})
     missing = dict(out.get("mathema.missing") or {})
-    executed = {p: dict(v) for p, v in (missing.get("executed") or {}).items()}
-    for p, members in extra.pop("executed", {}).items():
-        for word, said in members.items():
-            executed.setdefault(p, {}).setdefault(word, said)
-    if executed:
-        missing["executed"] = executed
-    missing.update(extra)
+    for key in ("executed", "behaviour", "mixed"):
+        merged = {p: dict(v) for p, v in (missing.get(key) or {}).items()}
+        for p, members in extra.get(key, {}).items():
+            for word, said in members.items():
+                merged.setdefault(p, {}).setdefault(word, said)
+        if merged:
+            missing[key] = merged
     out["mathema.missing"] = missing
     return out
 
 
+def executed_sentence(param: str, word: str, outcome: str) -> str:
+    """What the function did at one missing input, as a sentence: `at
+    x=nan the function returned nan`, `at x=None the function raised
+    TypeError`."""
+    if outcome.startswith("propagates (") and outcome.endswith(")"):
+        did = f"returned {outcome[len('propagates ('):-1]}"
+    elif outcome == "replaced":
+        did = "returned a value holding no missing value"
+    else:
+        did = outcome
+    return f"at {param}={word} the function {did}"
+
+
 def executed_words(executed: dict) -> str:
-    """The record's sentence for what the code did at its missing
-    inputs: `x=nan propagates; x=None raised TypeError`."""
-    parts = []
-    for p, members in (executed or {}).items():
-        for word, outcome in members.items():
-            verb = ("propagates" if outcome.startswith("propagates")
-                    else outcome)
-            parts.append(f"{p}={word} {verb}")
+    """What the code did at each of its missing inputs, one clause per
+    parameter and member, joined into one sentence."""
+    parts = [executed_sentence(p, word, outcome)
+             for p, members in (executed or {}).items()
+             for word, outcome in members.items()]
     return "; ".join(parts)
+
+
+def nothing_to_compare(behaviour: dict, executed: dict) -> str:
+    """Intent:
+        The note of a value claim with no judged point: what the code
+        did at its missing inputs, that nothing was left to compare, and
+        the two claims that would say something (`f(x) in {missing}`, a
+        policy claim naming the behaviour observed).
+    """
+    said = executed_words(executed)
+    p, members = next(iter((behaviour or {}).items()), (None, {}))
+    member, seen = next(iter(members.items()), (None, None))
+    word = "absent" if member == "None" else "missing"
+    ask = (f" (ask whether `f({p}) in {{{word}}}`, or state "
+           f"`{word}(f, {p}) {seen}`)"
+           if p is not None and seen not in (None, "mixed") else "")
+    lead = said.replace("; ", ", and ") if said else "the function returned no value"
+    return f"{lead}, so the claim had no value to compare{ask}"
 
 
 def missing_class(value) -> "str | None":
@@ -723,8 +721,8 @@ def missing_class(value) -> "str | None":
         value that is not missing. A container is not itself a missing
         value, whatever it holds.
     """
-    from .domain import is_missing
-    if value is None:
+    from .domain import absence_word, is_missing
+    if absence_word(value) is not None:
         return "absent"
     if isinstance(value, (list, tuple, dict, str)) or _is_matrix_value(value):
         return None
@@ -761,59 +759,16 @@ def inputs_missing(args) -> bool:
     return any(holds(a) for a in args)
 
 
-def missing_relation(lv, rv, relation: str,
-                     at_missing_input: bool = True) -> "bool | None":
+def classified(args, outputs, raised: bool = False) -> bool:
     """Intent:
-        The comparison rule where a missing value meets the relation,
-        by kind: two holes agree under `==`/`~=` whatever member each is
-        (a NaN in, a `pd.NA` out, is one hole propagated), two absences
-        agree, an absence against a hole disagrees, and a missing value
-        against a number fails every relation, `!=` included; an
-        ordering at a missing value fails. None when neither side is
-        missing, for the ordinary comparison to decide.
+        Whether a point is classified rather than judged: an argument is
+        missing, and the call raised or returned a missing value (a
+        hole or `None`, or a container holding one). A value claim is
+        judged only where the function returns a value; the behaviour
+        at a missing output is recorded, never compared.
     """
-    kl, kr = missing_class(lv), missing_class(rv)
-    if kl is None and kr is None:
-        return None
-    if MISSING_STUDY == "propagation" and at_missing_input:
-        # a missing output at a missing input is propagation: it agrees
-        # under equality, and an ordering there has no answer
-        return True if relation in ("==", "~=") else None
-    if kl is None or kr is None:
-        return False
-    if relation in ("==", "~="):
-        return kl == kr
-    if relation == "!=":
-        return kl != kr
-    return False
-
-
-def _missing_walk(lv, rv, relation: str, compare, pairs=None,
-                  at_missing_input: bool = True) -> "bool | None":
-    """`lv <relation> rv` element by element where missing values take
-    the kind rule (`missing_relation`) and present ones `compare`; a
-    sequence against a sequence of another length is None. With
-    `pairs`, each leaf pair is judged by `pairs(a, b)` instead."""
-    xs, ys = isinstance(lv, (list, tuple)), isinstance(rv, (list, tuple))
-    if xs and ys:
-        if len(lv) != len(rv):
-            return None
-        parts = [_missing_walk(a, b, relation, compare, pairs, at_missing_input)
-                 for a, b in zip(lv, rv)]
-    elif xs:
-        parts = [_missing_walk(a, rv, relation, compare, pairs, at_missing_input)
-                 for a in lv]
-    elif ys:
-        parts = [_missing_walk(lv, b, relation, compare, pairs, at_missing_input)
-                 for b in rv]
-    else:
-        if pairs is not None:
-            return pairs(lv, rv)
-        decided = missing_relation(lv, rv, relation, at_missing_input)
-        return compare(lv, rv) if decided is None else decided
-    if any(pt is None for pt in parts):
-        return None
-    return all(parts)
+    return inputs_missing(args) and (
+        raised or any(inputs_missing([o]) for o in outputs))
 
 
 def _is_matrix_value(v) -> bool:
@@ -1029,9 +984,7 @@ def same_infinity(lv, rv) -> bool:
 
 def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                                exact_inequality: bool = False,
-                               rel_tol: float = DEFAULT_RELATIVE_TOLERANCE,
-                               missing_inputs: bool = False,
-                               at_missing_input: bool = True):
+                               rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """Whether `lv <relation> rv` holds: a scalar comparison, or, when a
     side is matrix/array-valued, the relation at EVERY element (a scalar
     broadcasts against a matrix), numpy values read as the plain values
@@ -1051,37 +1004,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     different lengths or shapes are unequal outright under `==`, `~=`
     and `!=`; an ordering over them is unanswerable. Leaves that are
     not numbers (a record, a string, `None`) are equal only by their
-    own equality.
-
-    With `missing_inputs` (an argument was `None` or held a hole), a
-    missing value on either side takes the kind rule of
-    `missing_relation`, element by element: holes at the same positions
-    agree and the numbers between them are compared as ever.
-    `at_missing_input` says an argument was missing, as opposed to a
-    missing output from present arguments."""
+    own equality."""
     lv, rv = plain_value(lv), plain_value(rv)
-    if missing_inputs and MISSING_STUDY == "propagation" and at_missing_input \
-            and relation not in ("==", "~=") and inputs_missing([lv, rv]):
-        return None
-    if missing_inputs:
-        def present(a, b):
-            try:
-                return bool(_scalar_relation(a, b, "==" if relation == "!=" else relation,
-                                             slack, exact_inequality, rel_tol))
-            except TypeError:
-                return None
-        if relation == "!=":
-            agree = _missing_walk(lv, rv, "==", present,
-                                  at_missing_input=at_missing_input)
-            if agree is None:
-                return True if (_is_matrix_value(lv) or _is_matrix_value(rv)) else None
-            # a missing value against a number fails `!=` as well
-            mixed = _missing_walk(lv, rv, "~=", lambda a, b: True,
-                                  pairs=lambda a, b: (missing_class(a) is None)
-                                  == (missing_class(b) is None)) is False
-            return False if mixed else not agree
-        return _missing_walk(lv, rv, relation, present,
-                             at_missing_input=at_missing_input)
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,

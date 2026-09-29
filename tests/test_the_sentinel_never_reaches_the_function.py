@@ -85,11 +85,10 @@ def label(s: Optional[str]) -> str:
     return s.strip().upper()
 
 
-def test_s6_absence_raising_is_the_witness():
+def test_s6_a_raise_at_the_listed_absence_is_recorded():
     probe = run(sqrt_guarded, "for x in {0.25, None}, f(x) >= 0")
-    assert probe.verdict == "falsified"
-    assert probe.counterexample == "x=None"
-    assert "ValueError" in (probe.sketch or "")
+    assert probe.verdict == "proven", (probe.verdict, probe.note)
+    assert probe.meta["mathema.missing"]["executed"]["x"] == {"None": "raised ValueError"}
 
 
 def test_s10_a_replaced_absence_is_proven():
@@ -125,7 +124,6 @@ def test_every_row_admitting_a_sentinel_records_what_it_admits_and_tried():
     assert record["tried"]["x"] == ["None", "nan"]
 
 
-def test_a_float_row_records_its_resolved_hole_and_no_note_when_nothing_is_admitted():
+def test_a_float_row_records_nothing_when_nothing_is_admitted():
     probe = run(sqrt_guarded, "for x in [0, 1] : float \\ {missing}, f(x) >= 0")
-    assert "missing for" not in (probe.note or "")
     assert "mathema.missing" not in (probe.meta or {})

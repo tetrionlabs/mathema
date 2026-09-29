@@ -68,11 +68,11 @@ def set_definitions(layer: str, rows) -> None:
         found = _adapter(row.key)
         table = spellings(found) if found is not None else {}
         for word in row.members:
-            realise = table.get(word, (None, None))[0]
+            realise, detect = table.get(word, (None, None))
             if realise is None:
                 continue
             if row.word == "None":
-                register_absence_spelling(word, realise)
+                register_absence_spelling(word, realise, detect)
             else:
                 register_spelling(word, realise)
 
