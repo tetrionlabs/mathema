@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import numpy
     import pandas
 
 LEXICON: dict[str, str] = {
@@ -163,6 +164,43 @@ LEXICON: dict[str, str] = {
     "matrix_frobenius_norm":
         "for A in R^(n,n), norm(A) ~= sqrt(trace(A.T @ A))",
     "matrix_spectral_norm": "for A in R^(n,n), norm(A, 2) <= norm(A)",
+    # the same norms written with double bars, the order a subscript:
+    # bare bars are the Euclidean norm of a vector and the Frobenius
+    # norm of a matrix, `_1`, `_2`, `_inf` (also `_oo`, `_∞`) and an
+    # integer `_p` name the others, `_2` on a matrix the spectral norm,
+    # and `^2` after the bars is the square, never an order
+    "norm_bars_euclidean": "for x in R^n, f(x) ~= ||x||",
+    "norm_bars_two": "for x in R^n, f(x) ~= ||x||_2",
+    "norm_bars_one": "for x in R^n, f(x) ~= ||x||_1",
+    "norm_bars_inf": "for x in R^n, f(x) ~= ||x||_inf",
+    # the Euclidean length lies between the largest magnitude and the
+    # Manhattan length, and scales with its argument
+    "norm_bars_chain": "for x in R^n, ||x||_inf <= f(x) <= ||x||_1",
+    "norm_bars_homogeneous":
+        "for x in R^n, let c be [0, 10], f(c * x) ~= c * ||x||",
+    # a normalisation has unit length away from the zero vector, which
+    # the premise excludes (at the zero vector it divides by zero)
+    "norm_bars_unit_vector": "assuming ||x|| > 0, for x in R^n, ||f(x)|| ~= 1",
+    # a distance: the norm of the difference, symmetric, and zero
+    # between a vector and itself
+    "norm_bars_distance": "for x in R^n, y in R^n, f(x, y) ~= ||x - y||",
+    "norm_bars_distance_symmetric":
+        "for x in R^n, y in R^n, f(y, x) == ||x - y||",
+    "norm_bars_distance_zero": "for x in R^n, f(x, x) == 0",
+    # long-only portfolio weights from positive scores sum to one, so
+    # their L1 norm is one
+    "norm_bars_portfolio_weights":
+        "for scores in [0.1, 10]^n, ||f(scores)||_1 ~= 1",
+    "norm_bars_squared": "for x in R^n, ||x||^2 == dot(x, x)",
+    # the trap: a Manhattan length claimed as the Euclidean norm is
+    # falsified with a witness
+    "norm_bars_order_trap": "for x in [-1, 1]^n, f(x) ~= ||x||_2",
+    "matrix_norm_bars_frobenius": "for A in R^(m,n), f(A) ~= ||A||",
+    # the squared Frobenius norm is the trace of the Gram matrix
+    "matrix_norm_bars_gram_trace": "for A in R^(m,n), ||A||^2 ~= f(A)",
+    "matrix_norm_bars_spectral": "for A in R^(n,n), f(A) ~= ||A||_2",
+    "matrix_norm_bars_spectral_below_frobenius":
+        "for A in R^(n,n), f(A) <= ||A||",
     # the vocabulary words
     "vector_dot": "for x in R^n, y in R^n, dot(x, y) == dot(y, x)",
     "vector_outer": "for x in R^n, y in R^n, outer(x, y).T == outer(y, x)",
@@ -498,7 +536,15 @@ SECTIONS: dict[str, tuple[str, ...]] = {
     "linear_algebra": (
         "matrix_hadamard_trace", "matrix_power_word",
         "matrix_elementwise_abs", "vector_triangle_inequality",
-        "matrix_frobenius_norm", "matrix_spectral_norm", "vector_dot",
+        "matrix_frobenius_norm", "matrix_spectral_norm",
+        "norm_bars_euclidean", "norm_bars_two", "norm_bars_one",
+        "norm_bars_inf", "norm_bars_chain", "norm_bars_homogeneous",
+        "norm_bars_unit_vector", "norm_bars_distance",
+        "norm_bars_distance_symmetric", "norm_bars_distance_zero",
+        "norm_bars_portfolio_weights", "norm_bars_squared",
+        "norm_bars_order_trap", "matrix_norm_bars_frobenius",
+        "matrix_norm_bars_gram_trace", "matrix_norm_bars_spectral",
+        "matrix_norm_bars_spectral_below_frobenius", "vector_dot",
         "vector_outer", "matrix_kron_transpose", "matrix_diag_trace",
         "matrix_rank_transpose", "matrix_eigvals_trace",
         "matrix_eigvalsh_positive", "matrix_cond_at_least_one",
@@ -583,6 +629,30 @@ SECTIONS: dict[str, tuple[str, ...]] = {
 # find `%`, and someone looking for "for all" should find `∀`. Keep it
 # to vocabulary a newcomer would actually type.
 TAGS: dict[str, tuple[str, ...]] = {
+    "norm_bars_euclidean": ("norm", "euclidean", "length", "double bars"),
+    "norm_bars_two": ("norm", "subscript", "euclidean", "L2"),
+    "norm_bars_one": ("norm", "subscript", "manhattan", "taxicab", "L1"),
+    "norm_bars_inf": ("norm", "subscript", "infinity", "max norm",
+                      "largest magnitude"),
+    "norm_bars_chain": ("norm", "subscript", "chain", "norm inequality"),
+    "norm_bars_homogeneous": ("norm", "euclidean", "homogeneous", "scaling"),
+    "norm_bars_unit_vector": ("norm", "euclidean", "unit vector",
+                              "normalisation", "normalization", "premise"),
+    "norm_bars_distance": ("norm", "euclidean", "distance"),
+    "norm_bars_distance_symmetric": ("norm", "distance", "symmetric"),
+    "norm_bars_distance_zero": ("norm", "distance", "zero"),
+    "norm_bars_portfolio_weights": ("norm", "subscript", "portfolio",
+                                    "weights", "long only", "sum to one"),
+    "norm_bars_squared": ("norm", "euclidean", "squared", "dot product"),
+    "norm_bars_order_trap": ("norm", "subscript", "falsified", "trap",
+                             "wrong order", "manhattan"),
+    "matrix_norm_bars_frobenius": ("norm", "frobenius", "matrix"),
+    "matrix_norm_bars_gram_trace": ("norm", "frobenius", "gram", "trace",
+                                    "matrix"),
+    "matrix_norm_bars_spectral": ("norm", "subscript", "spectral",
+                                  "singular value", "matrix"),
+    "matrix_norm_bars_spectral_below_frobenius": ("norm", "spectral",
+                                                  "frobenius", "matrix"),
     "vector_running_maximum": ("cummax", "running maximum", "peak"),
     "vector_drawdown_bounds": ("drawdown", "cummax"),
     "vector_between_least_and_greatest": ("min", "max", "mean bounds"),
@@ -913,6 +983,85 @@ def add_two(x: float, y: float) -> float:
 def matmul(A, B):
     """The matrix product."""
     return A @ B
+
+
+def euclidean_length(x: "numpy.ndarray") -> float:
+    """The Euclidean length of a vector, `||x||`, which is also
+    `||x||_2`; it lies between `||x||_inf` and `||x||_1` and scales
+    with its argument ("norm_bars_euclidean", "norm_bars_two",
+    "norm_bars_chain", "norm_bars_homogeneous")."""
+    import numpy as np
+    return float(np.linalg.norm(x))
+
+
+def manhattan_length(x: "numpy.ndarray") -> float:
+    """The sum of the magnitudes of a vector's entries, `||x||_1`
+    ("norm_bars_one"). Claimed as `||x||_2` it is falsified with a
+    witness ("norm_bars_order_trap")."""
+    import numpy as np
+    return float(np.sum(np.abs(x)))
+
+
+def unit_vector(x: "numpy.ndarray") -> "numpy.ndarray":
+    """A vector scaled to unit length. It divides by zero at the zero
+    vector, which the premise `||x|| > 0` excludes
+    ("norm_bars_unit_vector")."""
+    import numpy as np
+    return x / np.linalg.norm(x)
+
+
+def portfolio_weights(scores: "numpy.ndarray") -> "numpy.ndarray":
+    """Long-only portfolio weights from positive scores: each score's
+    share of the total, so the weights sum to one and their L1 norm is
+    one ("norm_bars_portfolio_weights")."""
+    import numpy as np
+    return scores / np.sum(scores)
+
+
+def gram_trace(A: "numpy.ndarray") -> float:
+    """The trace of the Gram matrix `A @ A.T`, which is the squared
+    Frobenius norm of `A` ("matrix_norm_bars_gram_trace")."""
+    import numpy as np
+    return float(np.trace(A @ A.T))
+
+
+def largest_magnitude(x: "numpy.ndarray") -> float:
+    """The largest magnitude among a vector's entries, `||x||_inf`
+    ("norm_bars_inf")."""
+    import numpy as np
+    return float(np.max(np.abs(x)))
+
+
+def squared_length(x: "numpy.ndarray") -> float:
+    """A vector's squared length, `dot(x, x)`, which is `||x||^2`, the
+    square of the norm ("norm_bars_squared")."""
+    import numpy as np
+    return float(np.dot(x, x))
+
+
+def distance(x: "numpy.ndarray", y: "numpy.ndarray") -> float:
+    """The Euclidean distance between two vectors, `||x - y||`:
+    symmetric, and zero between a vector and itself
+    ("norm_bars_distance", "norm_bars_distance_symmetric",
+    "norm_bars_distance_zero")."""
+    import numpy as np
+    return float(np.linalg.norm(x - y))
+
+
+def frobenius_norm(A: "numpy.ndarray") -> float:
+    """The Frobenius norm of a matrix, the square root of the sum of
+    its squared entries, which is `||A||` ("matrix_norm_bars_frobenius")."""
+    import numpy as np
+    return float(np.sqrt(np.sum(A * A)))
+
+
+def largest_singular_value(A: "numpy.ndarray") -> float:
+    """The largest singular value of a matrix, its spectral norm
+    `||A||_2`, never above its Frobenius norm `||A||`
+    ("matrix_norm_bars_spectral",
+    "matrix_norm_bars_spectral_below_frobenius")."""
+    import numpy as np
+    return float(np.linalg.svd(A, compute_uv=False)[0])
 
 
 def scale_column(df: "pandas.DataFrame", c: float):
@@ -1276,6 +1425,25 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     ]),
     "add_two": (add_two, ["abs_bars_compound"]),
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
+    "euclidean_length": (euclidean_length, [
+        "norm_bars_euclidean", "norm_bars_two", "norm_bars_chain",
+        "norm_bars_homogeneous",
+    ]),
+    "manhattan_length": (manhattan_length, ["norm_bars_one",
+                                            "norm_bars_order_trap"]),
+    "largest_magnitude": (largest_magnitude, ["norm_bars_inf"]),
+    "unit_vector": (unit_vector, ["norm_bars_unit_vector"]),
+    "distance": (distance, ["norm_bars_distance",
+                            "norm_bars_distance_symmetric",
+                            "norm_bars_distance_zero"]),
+    "portfolio_weights": (portfolio_weights, ["norm_bars_portfolio_weights"]),
+    "squared_length": (squared_length, ["norm_bars_squared"]),
+    "frobenius_norm": (frobenius_norm, ["matrix_norm_bars_frobenius"]),
+    "gram_trace": (gram_trace, ["matrix_norm_bars_gram_trace"]),
+    "largest_singular_value": (largest_singular_value, [
+        "matrix_norm_bars_spectral",
+        "matrix_norm_bars_spectral_below_frobenius",
+    ]),
     "scale_column": (scale_column, ["table_column_attribute",
                                     "table_column_item"]),
     "running_peak": (running_peak, ["vector_running_maximum"]),

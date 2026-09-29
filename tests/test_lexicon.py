@@ -252,6 +252,8 @@ def test_search_finds_an_entry_by_a_word_it_does_not_contain():
         "brute force": "finite_domain_pinned",
         "absolute value": "abs_bars",
         "fibonacci": "recurrence_identity",
+        "manhattan": "norm_bars_one",
+        "singular value": "matrix_norm_bars_spectral",
     }
     for query, expected in cases.items():
         hits = [key for key, _law in search(query, limit=5)]

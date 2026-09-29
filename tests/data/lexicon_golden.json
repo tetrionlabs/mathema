@@ -274,6 +274,91 @@
   "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, norm(A, 2) ≤ norm(A)",
   "ascii": "for A in R^(n,n)|missing, norm(A, 2) <= norm(A)"
  },
+ "norm_bars_euclidean": {
+  "input": "for x in R^n, f(x) ~= ||x||",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, f(x) ≈ ‖x‖",
+  "ascii": "for x in R^n|missing, f(x) ~= ||x||"
+ },
+ "norm_bars_two": {
+  "input": "for x in R^n, f(x) ~= ||x||_2",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, f(x) ≈ ‖x‖₂",
+  "ascii": "for x in R^n|missing, f(x) ~= ||x||_2"
+ },
+ "norm_bars_one": {
+  "input": "for x in R^n, f(x) ~= ||x||_1",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, f(x) ≈ ‖x‖₁",
+  "ascii": "for x in R^n|missing, f(x) ~= ||x||_1"
+ },
+ "norm_bars_inf": {
+  "input": "for x in R^n, f(x) ~= ||x||_inf",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, f(x) ≈ ‖x‖∞",
+  "ascii": "for x in R^n|missing, f(x) ~= ||x||_inf"
+ },
+ "norm_bars_chain": {
+  "input": "for x in R^n, ||x||_inf <= f(x) <= ||x||_1",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖∞ ≤ f(x) ≤ ‖x‖₁",
+  "ascii": "for x in R^n|missing, ||x||_inf <= f(x) <= ||x||_1"
+ },
+ "norm_bars_homogeneous": {
+  "input": "for x in R^n, let c be [0, 10], f(c * x) ~= c * ||x||",
+  "unicode": "let c be [0.0, 10.0] ⊂ ℝ ∪ {∅}, ∀ x ∈ ℝⁿ ∪ {∅}, f(c*x) ≈ c*‖x‖",
+  "ascii": "let c be [0.0, 10.0]:float|missing, for x in R^n|missing, f(c*x) ~= c*||x||"
+ },
+ "norm_bars_unit_vector": {
+  "input": "assuming ||x|| > 0, for x in R^n, ||f(x)|| ~= 1",
+  "unicode": "assuming ||x|| > 0, ∀ x ∈ ℝⁿ ∪ {∅}, ‖f(x)‖ ≈ 1",
+  "ascii": "assuming ||x|| > 0, for x in R^n|missing, ||f(x)|| ~= 1"
+ },
+ "norm_bars_distance": {
+  "input": "for x in R^n, y in R^n, f(x, y) ~= ||x - y||",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, y ∈ ℝⁿ ∪ {∅}, f(x, y) ≈ ‖x - y‖",
+  "ascii": "for x in R^n|missing, y in R^n|missing, f(x, y) ~= ||x - y||"
+ },
+ "norm_bars_distance_symmetric": {
+  "input": "for x in R^n, y in R^n, f(y, x) == ||x - y||",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, y ∈ ℝⁿ ∪ {∅}, f(y, x) = ‖x - y‖",
+  "ascii": "for x in R^n|missing, y in R^n|missing, f(y, x) = ||x - y||"
+ },
+ "norm_bars_distance_zero": {
+  "input": "for x in R^n, f(x, x) == 0",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, f(x, x) = 0",
+  "ascii": "for x in R^n|missing, f(x, x) = 0"
+ },
+ "norm_bars_portfolio_weights": {
+  "input": "for scores in [0.1, 10]^n, ||f(scores)||_1 ~= 1",
+  "unicode": "∀ scores ∈ [0.1, 10.0]ⁿ ⊂ ℝ ∪ {∅}, ‖f(scores)‖₁ ≈ 1",
+  "ascii": "for scores in [0.1, 10.0]^n:float|missing, ||f(scores)||_1 ~= 1"
+ },
+ "norm_bars_squared": {
+  "input": "for x in R^n, ||x||^2 == dot(x, x)",
+  "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖^2 = dot(x, x)",
+  "ascii": "for x in R^n|missing, ||x||^2 = dot(x, x)"
+ },
+ "norm_bars_order_trap": {
+  "input": "for x in [-1, 1]^n, f(x) ~= ||x||_2",
+  "unicode": "∀ x ∈ [-1.0, 1.0]ⁿ ⊂ ℝ ∪ {∅}, f(x) ≈ ‖x‖₂",
+  "ascii": "for x in [-1.0, 1.0]^n:float|missing, f(x) ~= ||x||_2"
+ },
+ "matrix_norm_bars_frobenius": {
+  "input": "for A in R^(m,n), f(A) ~= ||A||",
+  "unicode": "∀ A ∈ ℝᵐˣⁿ ∪ {∅}, f(A) ≈ ‖A‖",
+  "ascii": "for A in R^(m,n)|missing, f(A) ~= ||A||"
+ },
+ "matrix_norm_bars_gram_trace": {
+  "input": "for A in R^(m,n), ||A||^2 ~= f(A)",
+  "unicode": "∀ A ∈ ℝᵐˣⁿ ∪ {∅}, ‖A‖^2 ≈ f(A)",
+  "ascii": "for A in R^(m,n)|missing, ||A||^2 ~= f(A)"
+ },
+ "matrix_norm_bars_spectral": {
+  "input": "for A in R^(n,n), f(A) ~= ||A||_2",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, f(A) ≈ ‖A‖₂",
+  "ascii": "for A in R^(n,n)|missing, f(A) ~= ||A||_2"
+ },
+ "matrix_norm_bars_spectral_below_frobenius": {
+  "input": "for A in R^(n,n), f(A) <= ||A||",
+  "unicode": "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, f(A) ≤ ‖A‖",
+  "ascii": "for A in R^(n,n)|missing, f(A) <= ||A||"
+ },
  "vector_dot": {
   "input": "for x in R^n, y in R^n, dot(x, y) == dot(y, x)",
   "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, y ∈ ℝⁿ ∪ {∅}, dot(x, y) = dot(y, x)",
