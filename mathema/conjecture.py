@@ -5417,7 +5417,10 @@ def _complete_missing(cj, fn) -> tuple:
         if written_holes and not defaults.members:
             # a hole written on a slot type that holds none
             what = _NO_HOLE_NAMES.get(defaults.slot_type, defaults.slot_type)
-            return completed, notes, (f"{p}: a {what} has no hole; write `|None`"), \
+            article = "an" if what[:1] in "aeiou" else "a"
+            return completed, notes, (f"{p} is {article} {what}, and {article} {what} "
+                                      f"has no hole; to admit its absence write "
+                                      f"`|absent`"), \
                 resolution
         foreign = sorted({v.member for v in written_holes
                           if v.member is not None and v.member not in defaults.members})

@@ -189,9 +189,13 @@ def test_t1_a_table_dot_is_proven():
     assert_row(weighted, "for df in [0, 1]^n, f(df) ~= dot(df.w, df.r)", PROVEN)
 
 
-def test_t1_an_all_hole_column_falsifies_the_companion_and_names_the_column():
+TABLE_DROPS = {"df": {"nan": "drops", "null": "drops", "NA": "drops"}}
+
+
+def test_t1_the_table_companion_holds_and_every_member_drops():
+    # pandas' sum skips a hole, and `dot` over no shared value is 0
     assert_companion(weighted, "for df in [0, 1]^n, f(df) ~= dot(df.w, df.r)",
-                     "falsified", {"df": {"nan": "drops"}}, members=("'w'",))
+                     "holds", TABLE_DROPS)
 
 
 def test_t2_the_written_element_clause_is_the_same_claim():
@@ -199,10 +203,10 @@ def test_t2_the_written_element_clause_is_the_same_claim():
                PROVEN)
 
 
-def test_t2_an_all_hole_column_falsifies_the_companion_and_names_the_column():
+def test_t2_the_table_companion_holds_and_every_member_drops():
     assert_companion(weighted,
                      "for df in [0, 1]^n | {missing}, f(df) ~= dot(df.w, df.r)",
-                     "falsified", {"df": {"nan": "drops"}}, members=("'w'",))
+                     "holds", TABLE_DROPS)
 
 
 # the policy claims each behaviour above states (stage 4 builds them)

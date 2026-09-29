@@ -323,13 +323,17 @@ def _abs(x):
 def _norm(x, ord=None):
     """The Euclidean norm of a vector, the Frobenius norm of a matrix,
     or `numpy.linalg.norm`'s `ord` norm (`2` spectral, `1`, `inf`); the
-    absolute value of a number."""
+    absolute value of a number. The Euclidean and Frobenius norms read
+    the value slots, 0 over none."""
     if isinstance(x, (int, float, complex)) and not isinstance(x, bool):
         return builtins.abs(x)
     np = _np()
     a = as_array(x) if not is_array(x) else x
     if not is_array(a):
         raise TypeError(f"norm of {type(x).__name__}")
+    if a.dtype.kind in "fc" and np.isnan(a).any() and ord is None:
+        # over the value slots, a hole contributing nothing; 0 over none
+        a = np.where(np.isnan(a), 0.0, a)
     # every norm is homogeneous, so it is computed on the array scaled
     # to its largest magnitude: squaring an entry near the float
     # maximum overflows where the norm itself does not
@@ -348,13 +352,18 @@ def _holes(a) -> bool:
     return bool(a.dtype.kind in "fc" and np.isnan(a).any())
 
 
+#: the reductions with an identity, which they give over no value slot
+_IDENTITY = {"sum": 0.0, "prod": 1.0}
+
+
 def _over_values(numpy_name: str, a, axis=None, **kwargs):
     """A reduction over the value slots of `a`: numpy's NaN-skipping
-    reduction, a hole where every slot it reduces is a hole."""
+    reduction. Over no value slot a reduction with an identity gives it
+    (`sum` 0, `prod` 1) and one without gives a hole."""
     np = _np()
     out = getattr(np, "nan" + numpy_name)(a, axis=axis, **kwargs)
     empty = np.all(np.isnan(a), axis=axis)
-    out = np.where(empty, np.nan, out)
+    out = np.where(empty, _IDENTITY.get(numpy_name, np.nan), out)
     return out.item() if getattr(out, "ndim", 1) == 0 else out
 
 
@@ -542,9 +551,9 @@ def _dot(x, y):
     a, b = _matrix(x), _matrix(y)
     np = _np()
     if a.ndim == 1 and b.ndim == 1 and (_holes(a) or _holes(b)):
-        # over the value slots both vectors hold; a hole where none is
+        # over the value slots both vectors hold; 0 where none is
         both = ~(np.isnan(a) | np.isnan(b))
-        return float(np.dot(a[both], b[both])) if both.any() else math.nan
+        return float(np.dot(a[both], b[both])) if both.any() else 0.0
     out = np.dot(a, b)
     return out.item() if getattr(out, "ndim", 1) == 0 else out
 

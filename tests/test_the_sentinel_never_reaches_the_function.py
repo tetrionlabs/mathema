@@ -114,7 +114,7 @@ def test_g2_a_listed_absence_reaches_a_string_function_as_none():
 def test_g8_a_string_has_no_hole():
     probe = run(label, 'for s in {missing}, f(s) == "-"')
     assert probe.verdict == "skipped:misspecified"
-    assert "a string has no hole" in probe.note
+    assert "s is a string, and a string has no hole" in probe.note
 
 
 def test_every_row_admitting_a_sentinel_records_what_it_admits_and_tried():

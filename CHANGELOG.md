@@ -54,11 +54,10 @@ Notable changes to mathema are recorded here from its first public release onwar
   float companion runs these too.
 - `sum`, `mean`, `std`, `var`, `min`, `max`, `prod`, `median`,
   `quantile`, `dot`, `cumsum`, `cumprod` and `count` in a claim read the
-  values of a vector, a missing value left out; a reduction over no
-  value is missing, and `len` counts every position. The bundled
-  `pandas.Series.sum`, `pandas.Series.prod` and `pandas.DataFrame.sum`
-  rows now assume one value, and `polars.Series.count` admits `null`
-  only.
+  values of a vector, a missing value left out. Over no value `sum` is
+  0, `prod` 1, `count` 0, `dot` and `norm` 0, and `mean`, `std`, `var`,
+  `min`, `max`, `median` and `quantile` are missing; `len` counts every
+  position. The bundled `polars.Series.count` row admits `null` only.
 - A definition row may define `absent` (`absent := {Option::None}`); one
   value may be both the absence and a hole member, and two hole members
   that are one value are refused at load.

@@ -50,14 +50,12 @@ numpy.diff:
 numpy.nansum:
   claims:
     - name: definition
-      statement: "for a in R^n, assuming count(a) >= 1, f(a) ~= sum(a)"
-      note: "Over the values; an array with no value sums to 0."
+      statement: "for a in R^n, f(a) ~= sum(a)"
 
 numpy.nanprod:
   claims:
     - name: definition
-      statement: "for a in R^n, assuming count(a) >= 1, f(a) ~= prod(a)"
-      note: "Over the values; an array with no value has product 1."
+      statement: "for a in R^n, f(a) ~= prod(a)"
 
 numpy.nanmean:
   claims:

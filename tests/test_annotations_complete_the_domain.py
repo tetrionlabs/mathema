@@ -201,14 +201,16 @@ def named(s: str) -> str:
 
 
 @pytest.mark.parametrize("fn, text, what", [
-    (counted, "for n in [0, 5] subset Z|missing, f(n) >= 0", "a int has no hole"),
-    (flagged, "for b in {True, missing}, f(b) == f(b)", "a bool has no hole"),
-    (named, "for s in {missing}, f(s) == s", "a string has no hole"),
+    (counted, "for n in [0, 5] subset Z|missing, f(n) >= 0",
+     "n is an int, and an int has no hole"),
+    (flagged, "for b in {True, missing}, f(b) == f(b)",
+     "b is a bool, and a bool has no hole"),
+    (named, "for s in {missing}, f(s) == s", "s is a string, and a string has no hole"),
 ])
 def test_the_class_on_a_type_with_no_hole_is_refused(fn, text, what):
     probe = run(fn, text)
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
-    assert what in probe.note and "write `|None`" in probe.note
+    assert what in probe.note and "; to admit its absence write `|absent`" in probe.note
 
 
 def test_a_datetime_member_on_a_real_series_is_refused():
@@ -223,7 +225,8 @@ def test_a_datetime_member_on_a_real_series_is_refused():
 def test_any_hole_written_on_a_string_is_refused(text):
     probe = run(named, text)
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
-    assert "s: a string has no hole; write `|None`" in probe.note
+    assert ("s is a string, and a string has no hole; to admit its absence write "
+            "`|absent`") in probe.note
 
 
 def test_a_claim_may_widen_a_float_with_absence_and_the_none_is_executed():

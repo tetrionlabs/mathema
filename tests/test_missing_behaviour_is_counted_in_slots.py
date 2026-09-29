@@ -202,3 +202,33 @@ def test_a_null_slot_returned_as_nan_propagates_and_says_so():
     assert record.meta()["executed"] == {
         "values": {"null": "values[1]=None returned as nan"}}
     assert record.meta()["behaviour"] == {"values": {"null": "propagates"}}
+
+
+# the claim's words over an all-hole vector ---------------------------
+
+@pytest.mark.parametrize("word, expected", [
+    ("sum", 0.0), ("prod", 1.0), ("count", 0), ("norm", 0.0),
+])
+def test_a_reduction_with_an_identity_gives_it_over_no_value(word, expected):
+    np = pytest.importorskip("numpy")
+    from mathema._linalg_eval import FUNCTIONS
+    assert FUNCTIONS[word](np.array([NAN, NAN])) == expected
+
+
+def test_a_dot_over_no_shared_value_is_zero():
+    np = pytest.importorskip("numpy")
+    from mathema._linalg_eval import FUNCTIONS
+    assert FUNCTIONS["dot"](np.array([NAN, NAN]), np.array([0.5, 0.5])) == 0.0
+
+
+@pytest.mark.parametrize("word", ["mean", "std", "var", "min", "max", "median"])
+def test_a_reduction_without_an_identity_is_a_hole_over_no_value(word):
+    np = pytest.importorskip("numpy")
+    from mathema._linalg_eval import FUNCTIONS
+    assert math.isnan(FUNCTIONS[word](np.array([NAN, NAN])))
+
+
+def test_a_quantile_over_no_value_is_a_hole():
+    np = pytest.importorskip("numpy")
+    from mathema._linalg_eval import FUNCTIONS
+    assert math.isnan(FUNCTIONS["quantile"](np.array([NAN, NAN]), 0.5))

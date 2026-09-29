@@ -10,8 +10,8 @@ versions: ">=2,<4"
 pandas.DataFrame.sum:
   claims:
     - name: column_sums
-      statement: "for a in R^n, assuming count(a.x) >= 1, f(a)[0] ~= sum(a.x)"
-      note: "One number per column, in column order; a column with no value sums to 0."
+      statement: "for a in R^n, f(a)[0] ~= sum(a.x)"
+      note: "One number per column, in column order."
 
 pandas.DataFrame.mean:
   claims:

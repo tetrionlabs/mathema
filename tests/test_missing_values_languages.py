@@ -103,7 +103,8 @@ def test_g7_the_empty_string_is_a_value():
 def test_g8_a_string_has_no_hole():
     probe, _ = run(label, 'for s in {missing}, f(s) == "-"')
     assert probe.verdict.startswith("skipped"), (probe.verdict, probe.note)
-    assert "s: a string has no hole; write `|None`" in (probe.note or "")
+    assert ("s is a string, and a string has no hole; to admit its absence write "
+            "`|absent`") in (probe.note or "")
     assert probe.statement == 'for s in {missing}, f(s) = "-"'   # the whole claim
 
 
