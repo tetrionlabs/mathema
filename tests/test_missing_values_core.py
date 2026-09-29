@@ -240,12 +240,10 @@ def test_the_behaviour_is_a_policy_claim(fn, text, verdicts):
     assert_row(fn, text, verdicts)
 
 
-@stage(5)
 def test_m1_nan_propagating_through_a_float_is_missing_safe():
     assert_row(sqrt_plain, "is_missing_safe(f)", PROVEN)
 
 
-@stage(5)
 def test_m3_a_guard_is_read_as_missing_raises():
     assert_row(sqrt_guarded, "is_missing_safe(f)", PROVEN)
 
@@ -262,12 +260,17 @@ def test_m6_an_unannotated_identity_is_missing_safe():
     assert_row(ident, "is_missing_safe(f)", PROVEN)
 
 
-@pytest.mark.parametrize("gate, word", [("is_missing_safe", "missing"),
-                                        ("is_absent_safe", "absent")])
-def test_l1_a_gate_is_not_a_premise(gate, word):
-    probe, _ = run(sqrt_guarded, f"assuming {gate}(f), for x in [0, 1], f(x) >= 0")
+def test_l1_a_gate_is_not_a_premise():
+    probe, _ = run(sqrt_guarded, "assuming is_missing_safe(f), for x in [0, 1], f(x) >= 0")
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
-    assert (f"assuming {gate}(f) is not a premise: a value claim is judged only "
-            f"where the function returns a value, and the {word} behaviour is the "
-            f"policy rows'. To keep {word} values out of the execution, write "
-            f"\\ {{{word}}} in the domain.") in probe.note
+    assert probe.note == (
+        "assuming is_missing_safe(f) is not a premise: mathema never compares a value "
+        "where f returns a missing value, so there is nothing for it to remove. State "
+        "what f does with a missing x as its own claim, e.g. `missing(f, x) "
+        "propagates`, or write `\\ {missing}` in the domain to stop calling f with one.")
+    probe, _ = run(sqrt_guarded, "assuming is_absent_safe(f), for x in [0, 1], f(x) >= 0")
+    assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
+    assert probe.note == (
+        "assuming is_absent_safe(f) is not a premise. State what f does when x is None "
+        "as its own claim, e.g. `absent(f, x) raises(TypeError)`, or write "
+        "`\\ {absent}` in the domain to stop calling f with None.")

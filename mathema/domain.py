@@ -1502,6 +1502,18 @@ def _member_sort_key(v):
         return (5, 0.0, repr(v))
 
 
+def _states_by_type(dom, value_pieces, num_excl, always_show_type: bool) -> bool:
+    """Whether a rendering carries a type clause (`: float`, `⊂ ℝ`,
+    `: int`), which states exactly what the domain admits, so an
+    exclusion beside it would say nothing new."""
+    fully_unbounded = (
+        len(value_pieces) == 1 and not num_excl
+        and isinstance(value_pieces[0], tuple)
+        and value_pieces[0][0] == float("-inf") and value_pieces[0][1] == float("inf"))
+    bare = not value_pieces or fully_unbounded
+    return not bare and (always_show_type or dom.base_type != "R")
+
+
 def _sentinel_word(s: "_Sentinel", *, ascii_mode: bool, words: bool = False) -> str:
     """A sentinel as the grammar spells it: `absent` for absence, the
     class as `missing` (`∅` in unicode), a member as its own word. With
@@ -1659,10 +1671,12 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         # modes
         narrowed.extend(sorted((v for v in dom.excluded if isinstance(v, _Sentinel)),
                                key=_member_sort_key))
-    elif show_missing:
+    elif show_missing and not _states_by_type(dom, value_pieces, num_excl,
+                                              always_show_type):
         # an exclusion is stated where it narrows what the parameter's
-        # annotation would admit, so the text reads back to the same
-        # domain given the same function
+        # annotation would admit and no type clause states it already,
+        # so the text reads back to the same domain given the same
+        # function
         if not absent and policy.absent:
             narrowed.append(ABSENT)
         if not holes and policy.members:

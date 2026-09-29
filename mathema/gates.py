@@ -170,6 +170,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the current point, for the executed missing inputs
     f_calls = LastCall()
     executed = ExecutedMissing()
+    from ._missing_words import DrawTally
+    tally = DrawTally()
+    from ._missing_words import declared_optional_return
+    declared_return = declared_optional_return(fn)
 
     def _tag(callee, label):
         # a complex result under a real claim counts as a raise too
@@ -384,7 +388,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return False
         if not inputs_missing(point.values()) \
                 and "absent" in (missing_class(lv), missing_class(rv)):
-            # a None from present inputs is no value, like a NaN
+            # a None from present inputs is no value, like a NaN, unless
+            # the return type declares it
+            if declared_return and (lv is None or rv is None):
+                executed.returned_absent(dict(point), declared_return)
+                return None
             return False
         if _complex_pair(lv, rv) and not (holds_nan(lv) or holds_nan(rv)):
             if (holds_inf(lv) or holds_inf(rv)) and not calls_nonfinite[0]:
@@ -429,8 +437,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the executed missing inputs both evaluators record, read by
     # the routes that build a record from this kit
     evaluate.executed = executed  # type: ignore[attr-defined]
+    evaluate.drawn = tally  # type: ignore[attr-defined]
 
     def probe_finite(point):
+        tally.add(point)
         # a computation failure only: a raise from the code, a NaN
         # or an inf the code returned where the relation then fails, or
         # a deviation past a MAGNITUDE-SCALED tolerance (so a correct
@@ -455,6 +465,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return None
         if not inputs_missing(point.values()) \
                 and "absent" in (missing_class(lv), missing_class(rv)):
+            if declared_return:
+                return None
             return (f"the computation returns None here "
                     f"({_fmt_value(lv)} {cj.relation} {_fmt_value(rv)})")
         if inputs_missing(point.values()) and (holds_nan(lv) or holds_nan(rv)
@@ -1081,6 +1093,45 @@ def companion_descriptor(name: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in inside.split(",") if part.strip())
 
 
+def _listed_points(names, cj_domain) -> "list | None":
+    """Every point of a claim whose coordinates all range over finite
+    sets, each listed missing value realised as the value it stands for;
+    None when a coordinate is not a finite set."""
+    import itertools
+
+    from .domain import (_as_domain, _is_enumerated, _member_sort_key, is_sentinel,
+                         realise_sentinel)
+    values = []
+    for n in names:
+        bound = (cj_domain or {}).get(n)
+        if bound is None:
+            return None
+        dom = _as_domain(bound)
+        if not _is_enumerated(dom) or dom.dims:
+            return None
+        members = sorted({v for piece in dom.pieces for v in piece},
+                         key=_member_sort_key)
+        realised = []
+        for v in members:
+            realised += realise_sentinel(v) if is_sentinel(v) else [v]
+        values.append(realised)
+    return [dict(zip(names, combo)) for combo in itertools.product(*values)]
+
+
+def _listed_words(points, names) -> str:
+    """`both listed points, 0.25 and None`, `the only listed point,
+    0.25`, `the 3 listed points, 1, 2 and 3`."""
+    from ._missing_words import point_shown, value_shown
+    shown = [value_shown(pt[names[0]]) if len(names) == 1 else point_shown(pt)
+             for pt in points]
+    if len(shown) == 1:
+        return f"the only listed point, {shown[0]}"
+    listing = _and_words(", ".join(shown))
+    if len(shown) == 2:
+        return f"both listed points, {listing}"
+    return f"the {len(shown)} listed points, {listing}"
+
+
 def _and_words(words: str) -> str:
     """`None, nan` as `None and nan`, a list of words said aloud."""
     parts = [w.strip() for w in words.split(",") if w.strip()]
@@ -1197,13 +1248,21 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     corners = missing_corners + corners
     interior = (C._CORROBORATION_BUDGET if budget is None
                 else max(0, int(budget) - len(corners)))
+    # a claim over finite sets only is its listed points, each run once
+    listed = _listed_points(deps["names"], cj_domain)
+    admits = deps["admits"]
+    if listed is not None:
+        corners, interior = listed, 0
+        listed_ids = {id(pt) for pt in listed}
+        admits = (lambda pt: id(pt) in listed_ids)  # noqa: E731
+    corner_count = sum(1 for c in corners if admits(c))
     progress = C.StabilitySweep()
     try:
         sweep = _with_timeout(
             lambda: C.sweep_stability(deps["probe_finite"], deps["names"],
                                       sample=deps["sample"],
                                       corners=corners,
-                                      admits=deps["admits"],
+                                      admits=admits,
                                       budget=interior, progress=progress),
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
@@ -1218,7 +1277,6 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                  + (f" executing {at}" if at else "")
                  + (f"; {reach_text}" if reach_text else ""),
             meta={"mathema.timeout": "fast"})
-    words = ", ".join(dict.fromkeys(w for _p, w, _v in (missing or ()) if w))
     tried: dict = {}
     for p, w, v in (missing or ()):
         if w and missing_corners and p in deps["names"]:
@@ -1229,11 +1287,22 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     tried_meta = {"mathema.missing": {"tried": tried}} if tried else {}
     from .probing import executed_missing, with_executed
     tried_meta = with_executed(tried_meta, executed_missing(deps)) or {}
-    what = (f"the computation of {parent.name} in {representation_word}, "
-            f"executed at {sweep.checked} points ("
-            + (f"{_and_words(words)} first, then " if words and missing_corners else "")
-            + "every domain corner, then sampled interior points)"
-            + (f"; {reach_text}" if reach_text else ""))
+    drawn = getattr(deps["evaluate"], "drawn", None)
+    if drawn is not None and drawn.meta():
+        tried_meta = {**tried_meta, "mathema.drawn": drawn.meta()}
+    if listed is not None:
+        what = (f"the {representation_word} computation of {parent.name} ran at "
+                + _listed_words(listed, deps["names"])
+                + (f"; {reach_text}" if reach_text else ""))
+    else:
+        firsts = [w for w in dict.fromkeys(w for _p, w, _v in (missing or ()) if w)] \
+            if missing_corners else []
+        inner = max(0, sweep.checked - corner_count)
+        listing = firsts + ["every corner",
+                            f"{inner} interior point{'s' if inner != 1 else ''}"]
+        what = (f"the {representation_word} computation of {parent.name} ran at "
+                f"{sweep.checked} points: " + _and_words(", ".join(listing))
+                + (f"; {reach_text}" if reach_text else ""))
     if sweep.fragile_point is not None:
         pt = _fmt_point(sweep.fragile_point, deps["names"])
         remedy = ("narrow the domain, "

@@ -544,32 +544,6 @@ def _scalar_relation(a, b, relation: str, slack: float,
     return a > b
 
 
-def execution_outcome(value=None, raised: "str | None" = None,
-                      holed_input: bool = False) -> str:
-    """Intent:
-        What the code did at a missing input, in the record's words:
-        `raised <Exception>`, `propagates (<value>)` for a missing
-        output, `replaced` for a container input with holes that came
-        back holding none, `returned <value>` for a value that is not
-        missing.
-    """
-    if raised is not None:
-        return f"raised {raised}"
-    if missing_class(value) is not None:
-        return f"propagates ({value!r})"
-    if isinstance(value, (list, tuple)) or _is_matrix_value(value):
-        if inputs_missing([value]):
-            return f"propagates ({_short(value)})"
-        if holed_input:
-            return "replaced"
-    return f"returned {_short(value)}"
-
-
-def _short(value) -> str:
-    text = repr(value)
-    return text if len(text) <= 60 else text[:57] + "..."
-
-
 class ExecutedMissing:
     """What the code did at each missing input a route executed: `table`,
     `{param: {member: outcome}}` with the first outcome per member kept;
@@ -580,6 +554,13 @@ class ExecutedMissing:
     def __init__(self) -> None:
         from ._missing_policy import PolicyTable
         self.table: dict = {}
+        self.said: dict = {}
+        # the first call per (parameter, member): (value, output, raised,
+        # behaviour)
+        self.first: dict = {}
+        # the first point where a declared `Optional` return gave None
+        # from present inputs: `{"at": "x = 0.75", "declared": text}`
+        self.introduced: dict = {}
         self.policy = PolicyTable()
         self.classified = 0
         self.last_classified = False
@@ -587,11 +568,13 @@ class ExecutedMissing:
     def add_call(self, point: dict, output=None, raised: "str | None" = None) -> None:
         """File one call at `point` (its arguments by name) that returned
         `output` or raised `raised`."""
-        from ._missing_policy import keys_of, member_changes, no_value_slots
+        from ._missing_policy import (classify_call, keys_of, member_changes,
+                                      no_value_slots)
+        from ._missing_words import outcome_entry, said, value_shown
         keys = keys_of(point)
         if not keys:
             return
-        said = execution_outcome(value=output, raised=raised, holed_input=True)
+        behaviour = classify_call(point, output, raised)
         # a hole returned in its slot spelled as another member is said
         # slot by slot: `values[1]=None returned as nan`
         respelled: dict = {}
@@ -601,17 +584,38 @@ class ExecutedMissing:
                 word = next(sl.member for sl in no_value_slots(point[p]).slots
                             if sl.position == position)
                 respelled.setdefault((p, word),
-                                     f"{p}{where}={drawn!r} returned as {back}")
+                                     f"{p}{where}={value_shown(drawn, in_slot=True)} "
+                                     f"returned as {back}")
         for p, _kind, member in keys:
-            self.table.setdefault(p, {}).setdefault(
-                member, respelled.get((p, member), said))
+            in_slot = no_value_slots(point[p]).shape != ()
+            entry = (outcome_entry(member, raised=raised) if raised is not None
+                     else outcome_entry(member, output, behaviour=behaviour,
+                                        respelled=respelled.get((p, member)),
+                                        in_slot=in_slot))
+            self.table.setdefault(p, {}).setdefault(member, entry)
+            self.said.setdefault(p, {}).setdefault(
+                member, said(p, member, {p: point[p]}, output, raised, behaviour))
+            self.first.setdefault((p, member), (point[p], output, raised, behaviour))
         self.policy.add(point, output, raised)
+
+    def returned_absent(self, point: dict, declared: str) -> None:
+        """File a None the function returned from present inputs, which
+        its return type declares."""
+        from ._missing_words import point_shown
+        self.introduced = self.introduced or {"at": point_shown(point),
+                                              "declared": declared}
+        self.classified += 1
+        self.last_classified = True
 
     def meta(self) -> dict:
         out: dict = {}
+        if self.introduced:
+            out["returned"] = {"absent": "introduces", "source": "annotation",
+                               **self.introduced}
         if self.table:
             out["executed"] = {p: dict(v) for p, v in self.table.items()}
             out["behaviour"] = self.policy.summary()
+            out["said"] = {p: dict(v) for p, v in self.said.items()}
             mixed = self.policy.mixed()
             if mixed:
                 out["mixed"] = mixed
@@ -673,7 +677,9 @@ def with_executed(meta: "dict | None", executed: "ExecutedMissing | None") -> "d
         return meta
     out = dict(meta or {})
     missing = dict(out.get("mathema.missing") or {})
-    for key in ("executed", "behaviour", "mixed"):
+    if extra.get("returned") and "returned" not in missing:
+        missing["returned"] = extra["returned"]
+    for key in ("executed", "behaviour", "said", "mixed"):
         merged = {p: dict(v) for p, v in (missing.get(key) or {}).items()}
         for p, members in extra.get(key, {}).items():
             for word, said in members.items():
@@ -682,46 +688,6 @@ def with_executed(meta: "dict | None", executed: "ExecutedMissing | None") -> "d
             missing[key] = merged
     out["mathema.missing"] = missing
     return out
-
-
-def executed_sentence(param: str, word: str, outcome: str) -> str:
-    """What the function did at one missing input, as a sentence: `at
-    x=nan the function returned nan`, `at x=None the function raised
-    TypeError`."""
-    if outcome.startswith("propagates (") and outcome.endswith(")"):
-        did = f"returned {outcome[len('propagates ('):-1]}"
-    elif outcome == "replaced":
-        did = "returned a value holding no missing value"
-    else:
-        did = outcome
-    return f"at {param}={word} the function {did}"
-
-
-def executed_words(executed: dict) -> str:
-    """What the code did at each of its missing inputs, one clause per
-    parameter and member, joined into one sentence."""
-    parts = [executed_sentence(p, word, outcome)
-             for p, members in (executed or {}).items()
-             for word, outcome in members.items()]
-    return "; ".join(parts)
-
-
-def nothing_to_compare(behaviour: dict, executed: dict) -> str:
-    """Intent:
-        The note of a value claim with no judged point: what the code
-        did at its missing inputs, that nothing was left to compare, and
-        the two claims that would say something (`f(x) in {missing}`, a
-        policy claim naming the behaviour observed).
-    """
-    said = executed_words(executed)
-    p, members = next(iter((behaviour or {}).items()), (None, {}))
-    member, seen = next(iter(members.items()), (None, None))
-    word = "absent" if member == "None" else "missing"
-    ask = (f" (ask whether `f({p}) in {{{word}}}`, or state "
-           f"`{word}(f, {p}) {seen}`)"
-           if p is not None and seen not in (None, "mixed") else "")
-    lead = said.replace("; ", ", and ") if said else "the function returned no value"
-    return f"{lead}, so the claim had no value to compare{ask}"
 
 
 def missing_class(value) -> "str | None":
@@ -1588,6 +1554,19 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
 
 
+def _annotation_text(param) -> str:
+    """A signature parameter's annotation as source text, or ''."""
+    import inspect
+    ann = getattr(param, "annotation", inspect.Parameter.empty)
+    if ann is inspect.Parameter.empty:
+        return ""
+    if isinstance(ann, str):
+        return ann
+    if isinstance(ann, type):
+        return ann.__name__
+    return repr(ann).replace("typing.", "")
+
+
 def _hides_characters(s: str) -> bool:
     """Whether printing `s` would hide some of its characters from a
     reader: a combining mark, a format character, or a space other than
@@ -1729,7 +1708,8 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
                         premise_drawn: "set[str] | None" = None,
                         runtime_names: "dict[str, str] | None" = None,
                         nested: "set[str] | None" = None,
-                        lap_floor: "tuple[int, int] | None" = None) -> str:
+                        lap_floor: "tuple[int, int] | None" = None,
+                        holes: "dict[str, list] | None" = None) -> str:
     """How a probe actually sampled, in compact mathematical notation: the
     distribution per parameter, the seed, the trial count. Meant to make a
     `holds (n=...)` verdict legible and reproducible from the record alone,
@@ -1791,6 +1771,12 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             draw = "elem~" + element_text(p, element_bound)
         else:
             draw = "shape∈{U,const,sorted,rev,+0,extreme}[p=.3]"
+        admitted = (holes or {}).get(p)
+        if admitted:
+            from ._missing_words import value_shown
+            words = ", ".join(dict.fromkeys(value_shown(h, in_slot=True)
+                                            for h in admitted))
+            draw += f"; holes {{{words}}} at p=.15, degenerate lap first"
         realised = (runtime_names or {}).get(p)
         if realised:
             draw += f"; as {realised}"
@@ -2234,9 +2220,14 @@ def probe(fn, facts, domain: dict | None = None,
             return resolver.synth(
                 p, sizes, lambda: _synth("float", rng, domain.get(p),
                                          specials=specials), rng)
-        return _synth(k, rng, domain.get(p), specials=specials,
-                      extra=critical_hints.get(p),
-                      extra_cycle=extra_cycles.get(p))
+        drawn = _synth(k, rng, domain.get(p), specials=specials,
+                       extra=critical_hints.get(p),
+                       extra_cycle=extra_cycles.get(p))
+        if inputs_missing([drawn]):
+            # the smoke call asks whether f can be called with a value;
+            # a claim's own missing points are its own to execute
+            return _synth(k, rng, None, specials=specials)
+        return drawn
 
     def args_for() -> "tuple[list, dict]":
         sizes = resolver.draw_sizes(rng) if resolver is not None else {}
@@ -2261,10 +2252,13 @@ def probe(fn, facts, domain: dict | None = None,
     else:
         hints = "".join(f"; {h['text']}" for h in
                         (getattr(facts, "runtime_hints", None) or {}).values())
+        shown = ", ".join(
+            f"{name}: {_annotation_text(param)}" if _annotation_text(param)
+            else name for name, param in signature.items())
         return [Probe("callable", callable_statement, "skipped",
-                      note="could not synthesize valid inputs from the "
-                           f"signature ({type(last_exc).__name__}: {last_exc})"
-                           + hints,
+                      note=f"f could not be called with a value mathema built "
+                           f"from the signature ({shown}): "
+                           f"{type(last_exc).__name__}: {last_exc}" + hints,
                       meta={"mathema.probe_gap": "input-synthesis"})]
 
     probes: list[Probe] = []

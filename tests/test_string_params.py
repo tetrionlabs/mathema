@@ -56,7 +56,7 @@ def test_bare_str_declines_honestly_not_a_spurious_gap():
     assert claim_reason_code(p) == ClaimReasonCode.NO_EVALUABLE_INPUTS
     # the old artefact, a float thrown at the str param and the raise
     # recorded as a synthesis failure, must not appear
-    assert not any("could not synthesize valid inputs" in (p.note or "")
+    assert not any("could not be called with a value" in (p.note or "")
                    for p in rec.probes)
 
 
@@ -68,7 +68,7 @@ def test_literal_param_samples_and_adjudicates():
     law = next(p for n, p in by_name.items() if "f_r_scale" in n or
                p.statement.startswith("f(r, scale)"))
     assert law.verdict in ("holds", "proven"), (law.verdict, law.note)
-    assert not any("could not synthesize valid inputs" in (p.note or "")
+    assert not any("could not be called with a value" in (p.note or "")
                    for p in rec.probes)
 
 

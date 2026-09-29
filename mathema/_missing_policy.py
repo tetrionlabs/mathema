@@ -33,7 +33,6 @@ to one behaviour, or to `mixed` with a witness for each behaviour seen.
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 
 BEHAVIOURS = ("raises", "drops", "propagates", "converts", "introduces")
@@ -252,13 +251,6 @@ def keys_of(inputs: dict) -> list:
     return keys
 
 
-def _shown(value) -> str:
-    if isinstance(value, float) and math.isnan(value):
-        return "nan"
-    text = repr(value)
-    return text if len(text) <= 60 else text[:57] + "..."
-
-
 @dataclass
 class PolicyTable:
     """The behaviours seen per (parameter, kind, member) over many calls,
@@ -271,8 +263,9 @@ class PolicyTable:
         keys = keys_of(inputs)
         if not keys:
             return
+        from ._missing_words import point_shown
         behaviour = classify_call(inputs, output, raised)
-        witness = ", ".join(f"{p}={_shown(v)}" for p, v in inputs.items())
+        witness = point_shown(inputs)
         for key in keys:
             self.seen.setdefault(key, {}).setdefault(behaviour, witness)
 

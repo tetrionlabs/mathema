@@ -197,6 +197,7 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if facts.param_kinds.get(target) != "scalar":
         return None
     bounds = domain.get(target)
+    no_value: dict = {}
 
     def trial(args):
         x1 = _synth("float", rng, bounds)
@@ -210,13 +211,47 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
             v2 = _call_with_target(fn, facts, target, args, x2)
         except Exception:
             return None
+        for x, v in ((x1, v1), (x2, v2)):
+            if not _a_value(v):
+                # a point with no value to order is skipped, and said
+                no_value.setdefault("at", (x, v))
+                return None
         ok = (v1 <= v2 + 1e-9) if increasing else (v1 >= v2 - 1e-9)
         if ok:
             return True
         direction = "increasing" if increasing else "decreasing"
         return f"{target}={x1:.6g} -> {v1!r}, {target}={x2:.6g} -> {v2!r} (not {direction})"
 
-    return _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    return _with_no_value_note(result, fn, target, cj, no_value)
+
+
+def _a_value(v) -> bool:
+    """Whether `v` is a real number a probe can compare: not None, not a
+    NaN, not something that is no number at all."""
+    if isinstance(v, bool) or v is None:
+        return False
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return False
+    return f == f
+
+
+def _with_no_value_note(result, fn, target: str, cj, no_value: dict):
+    """A family probe's result with a sentence saying it skipped the
+    points where the function gave no value, when it did."""
+    if not no_value or result is None:
+        return result
+    from ._missing_words import declared_optional_return, value_shown
+    x, v = no_value["at"]
+    declared = declared_optional_return(fn)
+    what = "returns None" if v is None else f"returns {value_shown(v)}"
+    family = (cj.name or "").split("[", 1)[0]
+    said = (f"f {what} at {target} = {value_shown(x)}"
+            + (f" ({declared})" if declared and v is None else "")
+            + f"; the {family} check skipped the points with no value")
+    return (*result, {"mathema.sampled": said})
 
 
 def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
@@ -237,6 +272,7 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return None
     bounds = domain.get(target)
     lo, hi = _interval_ends(bounds) or (None, None)
+    no_value: dict = {}
 
     def trial(args):
         x0 = _synth("float", rng, bounds)
@@ -250,6 +286,10 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
             v_hi = _call_with_target(fn, facts, target, args, x0 + h)
         except Exception:
             return None
+        for x, v in ((x0 - h, v_lo), (x0, v_mid), (x0 + h, v_hi)):
+            if not _a_value(v):
+                no_value.setdefault("at", (x, v))
+                return None
         second_diff = v_lo - 2 * v_mid + v_hi
         # curvature, not the raw second difference: dividing by h*h
         # recovers an actual f''(x0) estimate, scale-independent of h
@@ -275,7 +315,8 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return (f"{target}={x0:.6g}, h={h:.3g}: curvature estimate "
                 f"{curvature:.6g} does not settle {kind}")
 
-    return _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    return _with_no_value_note(result, fn, target, cj, no_value)
 
 
 def _raise_or_nonfinite(out) -> "str | None":
@@ -1916,26 +1957,30 @@ def _is_missing_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                                   "enforced by explicit raising guards for both "
                                   "missing spellings (NaN and None)")
     if included and coverage:
-        sketch = (f"the declared domain admits a missing {param} (missing "
-                  "is included by default; no \\ {∅} exclusion is stated) "
-                  "but the body has a raising guard for it")
+        # a raising guard is a policy: the function rejects the missing
+        # values it tests for, on purpose (R20)
+        from .hazards import _missing_guard_line
         spellings = [(label, value) for key, label, value in
                      (("nan", "nan", float("nan")), ("none", "None", None))
                      if key in coverage]
-        executed = 0
+        raised = []
         for label, value in spellings:
-            what, calls = _executed_family_witness(fn, facts, param, value,
-                                                   domain)
-            executed += calls
-            if what is not None:
-                return ProofResult(
-                    "disproven", sketch=sketch,
-                    counterexample=f"{param} = {label} {what}",
-                    meta={"mathema.corroboration": "reproduced",
-                          "mathema.witness_executed": True})
-        return _uncorroborated_family_disproof(
-            sketch, f"no call with a missing {param} raised ({executed} "
-                    f"call(s) made)")
+            what, _calls = _executed_family_witness(fn, facts, param, value,
+                                                    domain)
+            if what is None or not what.startswith("raised "):
+                return None
+            raised.append(what[len("raised "):])
+        line = _missing_guard_line(facts, param)
+        exc = raised[0] if len(set(raised)) == 1 else " or ".join(dict.fromkeys(raised))
+        words = " and ".join(label for label, _v in spellings)
+        return ProofResult(
+            "proven",
+            sketch=(f"{words} {'are' if len(spellings) > 1 else 'is'} "
+                    f"rejected by the guard"
+                    + (f" on line {line}" if line else "")
+                    + f" (raises {exc}); that counts as a policy, "
+                      f"`missing(f, {param}) raises({exc})`"),
+            meta={"mathema.witness_executed": True})
     return None
 
 
@@ -1953,14 +1998,34 @@ def _missing_probe(fn, facts, cj, domain: dict, rng: random.Random,
     is_builtin_safe. Returns (verdict, n_checked, counterexample) or
     None to decline."""
     from .domain import missing_included
+    from .types import missing_policy_from_signature
+    from ._missing_words import value_shown
     target = cj.lhs
     if target not in facts.params:
         return None
     if facts.param_kinds.get(target) not in ("scalar", "unknown"):
         return None
     included = missing_included(domain.get(target))
-    spellings = (("nan", float("nan")), ("None", None))
+    # only the missing values the parameter's type admits are tried: a
+    # float is never None
+    policy = missing_policy_from_signature(fn).get(target)
+    spellings = [("nan", float("nan"))] if (policy is None or policy.members) else []
+    if policy is None or policy.absent:
+        spellings.append(("None", None))
+    if not spellings:
+        return None
+    annotation = None
+    try:
+        import inspect
+        ann = inspect.signature(fn).parameters[target].annotation
+        if ann is not inspect.Parameter.empty:
+            annotation = ann if isinstance(ann, str) else (
+                getattr(ann, "__name__", None) if isinstance(ann, type)
+                else repr(ann).replace("typing.", ""))
+    except (TypeError, ValueError, KeyError):
+        annotation = None
     state = {"idx": 0}
+    returned: dict = {}
 
     def trial(args):
         label, missing_value = spellings[state["idx"] % len(spellings)]
@@ -1969,29 +2034,83 @@ def _missing_probe(fn, facts, cj, domain: dict, rng: random.Random,
             value = _call_with_target(fn, facts, target, args, missing_value)
         except Exception as exc:
             if included:
-                return (f"{target}={label} raised {type(exc).__name__} but the "
-                        "declared domain admits a missing value (missing is "
-                        "included by default; no \\ {∅} exclusion is stated)")
+                name = type(exc).__name__
+                if label == "None":
+                    why = ("the parameter is unannotated" if annotation is None
+                           else f"{target} is {annotation}")
+                    fix = (f"Annotate {target} as float to exclude None, or state "
+                           f"`absent(f, {target}) raises({name})`."
+                           if annotation is None else
+                           f"Handle None in f, or state `absent(f, {target}) "
+                           f"raises({name})`.")
+                    return (f"f raised {name} at {target} = None, and the claim "
+                            f"admits None for {target} ({why}). {fix}")
+                return (f"f raised {name} at {target} = nan, and {target}'s type "
+                        f"admits nan. State `missing(f, {target}) raises({name})`, "
+                        f"or make f return a value there.")
+            returned.setdefault(label, _Raised(type(exc).__name__))
             return True
         if not included:
-            return (f"{target}={label} returned {value!r} but the declared "
-                    "domain excludes missing; the exclusion is asserted, "
-                    "not enforced")
+            return (f"f returned {value_shown(value)} at {target} = {label}, but "
+                    f"the claim excludes it; guard {target} in f so the exclusion "
+                    f"holds, or remove the exclusion")
+        returned.setdefault(label, value)
         return True
 
     result = _probe_trials(fn, facts, target, domain, rng,
                            max(trials // 4, 8), trial)
     verdict, checked, cx = result
     if verdict == "holds" and len(facts.params) == 1:
-        # exhaustive coverage: the missing hazard class is exactly two
-        # spellings, and with no other parameter to vary, calling this
-        # function at both IS the whole class, an established fact
+        # exhaustive coverage: the missing values the type admits are one
+        # call each, and with no other parameter to vary, calling the
+        # function at each IS every case
         return ("proven", checked, None,
-                "the missing hazard class is exactly two spellings (NaN "
-                "and None); with a single parameter both were called and "
-                "behaved per the declared policy, so the examination is "
-                "exhaustive")
+                _missing_safe_sketch(fn, facts, target, returned, policy))
     return result
+
+
+class _Raised:
+    """What a call at a missing value raised, for a sketch."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+def _missing_safe_sketch(fn, facts, target: str, returned: dict, policy) -> str:
+    """What the function did at each missing value its parameter admits,
+    for a proven `is_missing_safe`: `x: None and nan both return 0.0
+    (the guard on line 2 replaces them), so f drops missing and absent
+    input; every case was called`."""
+    from .hazards import _missing_guard_line
+    from ._missing_words import value_shown
+    values = list(returned.values())
+    labels = list(returned)
+    all_values = values and not any(isinstance(v, _Raised) for v in values) and all(
+        v == v and v is not None for v in values
+        if isinstance(v, (int, float)) or v is None)
+    same = len({value_shown(v) for v in values}) == 1
+    if len(labels) > 1 and same and all_values:
+        line = _missing_guard_line(facts, target, raising=False)
+        where = f" (the guard on line {line} replaces them)" if line else ""
+        return (f"{' and '.join(labels)} both return "
+                f"{value_shown(values[0])}{where}, so f drops missing and absent "
+                f"input; every case was called")
+    parts = []
+    for label, value in returned.items():
+        if isinstance(value, _Raised):
+            parts.append(f"{label} is rejected (f raises {value.name}), as the claim's "
+                         f"exclusion says")
+            continue
+        shown = value_shown(value)
+        if shown == label:
+            pair = "missing in, missing out" if label != "None" else "absent in, absent out"
+            parts.append(f"{label} comes back as {shown} ({pair})")
+        else:
+            parts.append(f"{label} returns {shown}")
+    text = ", and ".join(parts)
+    if policy is not None and not policy.absent:
+        text += f", and {target} is a {policy.slot_type}, so it is never None"
+    return text + "; every case was called"
 
 
 class _NamedClaimFamily:

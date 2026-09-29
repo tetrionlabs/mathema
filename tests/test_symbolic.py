@@ -709,7 +709,8 @@ def test_affine_local_branch_with_no_domain_lifts_piecewise_but_stays_honest():
     # and the actionable domain hint survives in the sketch
     results = check_conjectures(denom_local, [claim("f(x, y) >= 0", route="derive")])
     assert results[0].verdict == "falsified"
-    assert "routes attempted" in results[0].note and "derive: undecided" in results[0].note
+    trail = results[0].meta["mathema.routes_attempted"]
+    assert "routes attempted" in trail and "derive: undecided" in trail
     assert "needs a domain specific enough" in results[0].note
 
 

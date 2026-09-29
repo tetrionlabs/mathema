@@ -169,18 +169,19 @@ def test_a_stated_type_clause_with_no_suffix_excludes_and_says_so_where_it_narro
 def test_a_written_clause_that_admits_more_widens_the_type():
     probe = run(plain, "for x in [0, 1] : float|None|missing, f(x) >= 0")
     assert probe.statement == "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"
-    assert "the claim widens x beyond its type float" in probe.note
+    assert "x = None is outside the type float, and the claim adds it" in probe.note
 
 
 def test_a_written_clause_that_admits_less_narrows_the_type():
     probe = run(optional, "for x in [0, 1] : float, f(x) >= 0")
     assert probe.statement == "for x in [0.0, 1.0] \\ {absent, missing} : float, f(x) >= 0"
-    assert "the claim narrows x within its type float" in probe.note
+    assert ("the claim excludes absence, which x's type Optional[float] admits; the "
+            "claim no longer covers x = None") in probe.note
 
 
 def test_a_listed_absence_on_a_float_widens_the_type():
     probe = run(plain, "for x in {0.25, None}, f(x) >= 0")
-    assert "the claim widens x beyond its type float" in probe.note
+    assert "x = None is outside the type float, and the claim adds it" in probe.note
 
 
 def test_a_datetime_slot_holds_nat():
@@ -231,7 +232,7 @@ def test_any_hole_written_on_a_string_is_refused(text):
 
 def test_a_claim_may_widen_a_float_with_absence_and_the_none_is_executed():
     probe = run(plain_raising, "for x in {0.25, absent}, f(x) >= 0")
-    assert "the claim widens x beyond its type float" in probe.note
+    assert "x = None is outside the type float, and the claim adds it" in probe.note
     assert probe.verdict == "proven", (probe.verdict, probe.note)
     executed = probe.meta["mathema.missing"]["executed"]
     assert executed == {"x": {"None": "raised TypeError"}}

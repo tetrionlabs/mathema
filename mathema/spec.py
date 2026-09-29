@@ -1968,8 +1968,7 @@ def _let_sections(cj) -> list:
     for name in sorted(cj.free_vars or ()):
         bound = (cj.domain or {}).get(name)
         if bound is not None:
-            from .domain import render_domain_bound
-            sections.append(f"let {name} be {render_domain_bound(bound)}")
+            sections.append(f"let {name} be {_render_constant(bound, False, True)}")
     for name, value in sorted((getattr(cj, "param_pins", None) or {}).items()):
         sections.append(f"let {name} be {value!r}")
     return sections
@@ -2513,8 +2512,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
         `render_claim_text`'s rendering, under whatever bar reading
         `grammar.bars_over_matrices` has set.
     """
-    from .conjecture import GRAMMAR
-    from .grammar import display_len, get_unicode_output, render_domain, render_law_expr
+    from .grammar import display_len, get_unicode_output, render_law_expr
     from ._providers import get_provider, report_provider_failure
     from ._scan import sub_outside_strings
 
@@ -2654,7 +2652,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
         # as written, never through the expression renderer
         lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs,
                 mats))
-        statement = f"{lhs} {_REL_GLYPH[cj.relation]} {cj.rhs}"
+        statement = f"{lhs} {_REL_GLYPH[cj.relation]} {_membership_rhs(cj, unicode)}"
     else:
         lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs,
                 mats))
@@ -2665,12 +2663,10 @@ def _render_claim_text(cj, *, unicode: bool | None,
         # the negation is part of the claim, whatever shape the
         # statement took above
         statement = f"not {statement}"
-    # over a language, the length of a value reads as `len(...)`;
-    # `len` is sugar for `dim(..., 0)`, so the text reparses to the
-    # same canonical form
-    language_len = getattr(cj, "grammar", "") == f"{GRAMMAR}/language"
-    if language_len:
-        statement = display_len(statement)
+    # the length of a value reads as `len(...)`; `len` is sugar for
+    # `dim(..., 0)`, so the text reparses to the same canonical form
+    language_len = True
+    statement = display_len(statement)
 
     # let/for's own displayed symbol never reaches ast.parse individually
     # (both are plain f-string text, joined into the final claim string
@@ -2709,8 +2705,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
     let_segments += [f"let {_display_symbol(symbol)} = {name}"
                      for name, symbol in sorted(param_renames.items())]
     let_segments += [
-        f"let {name} be "
-        f"{render_domain(cj.domain[name], ascii_mode=not unicode, show_missing=domain_show_missing)}"
+        f"let {name} be {_render_constant(cj.domain[name], unicode, domain_show_missing)}"
         for name in sorted(cj.free_vars) if name in cj.domain]
     let_segments += [f"let {name} be {value!r}" for name, value in
                      sorted((getattr(cj, "param_pins", None) or {}).items())]
@@ -2762,3 +2757,37 @@ def _render_claim_text(cj, *, unicode: bool | None,
     if not parts:
         return statement
     return sep.join(parts) + sep + statement
+
+
+def _render_constant(bound, unicode: bool, show_missing: bool) -> str:
+    """A claim constant's bound (`let c be [-5.0, 5.0]`): its interval
+    alone when it admits nothing missing, as a constant's bound does
+    unless the claim writes otherwise, else the whole domain."""
+    from .domain import MissingDefaults, _as_domain, admitted, render_domain
+    dom = _as_domain(bound)
+    absent, holes = admitted(dom, dom.policy or MissingDefaults(False, (), "constant",
+                                                                 annotated=False))
+    if not absent and not holes and not dom.explicit_type and dom.base_type == "R":
+        return render_domain(bound, ascii_mode=not unicode, show_missing=False,
+                             always_show_type=False)
+    return render_domain(bound, ascii_mode=not unicode, show_missing=show_missing)
+
+
+def _membership_rhs(cj, unicode: bool) -> str:
+    """A membership's right-hand side as written, except a set of missing
+    words (`{missing}`, `{None}`), which renders in the words of the
+    mode: `{∅}` in unicode, `{absent}` for absence."""
+    from .domain import _as_domain, is_sentinel, render_domain
+    bound = cj.rhs_bound
+    members = bound if isinstance(bound, frozenset) else None
+    if members is None:
+        try:
+            dom = _as_domain(bound)
+        except Exception:
+            return cj.rhs
+        if len(dom.pieces) != 1 or not isinstance(dom.pieces[0], frozenset):
+            return cj.rhs
+        members = dom.pieces[0]
+    if not members or not all(is_sentinel(v) for v in members):
+        return cj.rhs
+    return render_domain(bound, ascii_mode=not unicode)

@@ -247,6 +247,31 @@ def _missing_guard_coverage(facts) -> dict:
     return out
 
 
+def _missing_guard_line(facts, param: str, raising: bool = True) -> "int | None":
+    """The line, counted from the `def`, of the first `if` that tests
+    `param` for a missing value (`x != x`, `x is None`, `isnan(x)`) and
+    raises in its body (or, with `raising` False, returns), else None."""
+    tree = facts.tree
+    if tree is None:
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        acts = any(isinstance(s, ast.Raise if raising else ast.Return)
+                   for s in node.body)
+        if not acts:
+            continue
+        for sub in ast.walk(node.test):
+            if isinstance(sub, ast.Compare) and isinstance(sub.left, ast.Name) \
+                    and sub.left.id == param:
+                return node.lineno
+            if isinstance(sub, ast.Call) and _call_name(sub) in ("isnan", "isna") \
+                    and sub.args and isinstance(sub.args[0], ast.Name) \
+                    and sub.args[0].id == param:
+                return node.lineno
+    return None
+
+
 def _missing_guard_params(facts) -> set:
     """Every real parameter with ANY recognized raising missing-guard
     (whichever spelling), the is_missing_safe suggestion gate."""

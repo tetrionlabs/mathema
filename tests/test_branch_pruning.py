@@ -321,8 +321,9 @@ def test_boolop_condition_with_no_domain_stays_unliftable():
     # derive stays blocked without a domain; the probe fallback then
     # supplies (weak, sampling-limited) empirical evidence
     assert results[0].verdict in ("holds", "falsified")
-    assert "routes attempted" in results[0].note
-    assert "derive: underivable" in results[0].note
+    trail = results[0].meta["mathema.routes_attempted"]
+    assert "routes attempted" in trail
+    assert "derive: underivable" in trail
 
 
 def test_wrong_formula_for_boolop_pinned_branch_is_falsified():

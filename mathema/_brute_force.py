@@ -85,6 +85,44 @@ def _tried(grid: dict) -> dict:
     return {"mathema.missing": {"tried": tried}} if tried else {}
 
 
+def _points(n: int) -> str:
+    return "one point" if n == 1 else f"{n} points"
+
+
+def _point_words(point: dict) -> str:
+    from ._missing_words import point_shown
+    return point_shown(point)
+
+
+def _membership_words(rhs: str, wanted: bool) -> str:
+    """`is missing`, `is absent`, `is in {0, 1}`, or their negations."""
+    text = (rhs or "").strip()
+    word = {"{missing}": "missing", "{∅}": "missing", "{absent}": "absent",
+            "{None}": "absent"}.get(text.replace(" ", ""))
+    if word:
+        return f"is {word}" if wanted else f"is not {word}"
+    return f"is {'' if wanted else 'not '}in {text}"
+
+
+def _holds_at(total: int, judged: list) -> str:
+    """The proof sketch of a claim checked at every point of a finite
+    domain, counting the points where the function gave no value to
+    compare apart from the ones the claim was compared at."""
+    others = total - len(judged)
+    if others == 0:
+        if total == 1:
+            return (f"the declared domain has one point, {_point_words(judged[0])}, "
+                    f"and the claim holds there")
+        return f"the declared domain has {total} points, and the claim holds at every one"
+    where = (_point_words(judged[0]) if len(judged) == 1
+             else f"the {len(judged)} points where f returns a value")
+    rest = ("the other point gives no value, so it is recorded, not compared"
+            if others == 1 else
+            f"the other {others} give no value, so they are recorded, not compared")
+    return (f"the declared domain has {total} points; the claim holds at {where}, "
+            f"and {rest}")
+
+
 def _lists_a_sentinel(cj_domain: dict, names: list) -> bool:
     """Whether any swept parameter's finite set lists a sentinel."""
     return any(cj_domain.get(n) is not None
@@ -163,15 +201,18 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                                     **_tried(grid),
                                     "mathema.witness_executed": True}, executed))
         checked += 1
+        last = point
     if checked == 0:
         return None
-    plural = "point" if checked == 1 else "points"
+    is_in = _membership_words(cj.rhs, wanted)
     return ProofResult(
         "proven",
-        sketch=f"the declared domain admits {checked} {plural}, and the "
-               f"value at every one is {'' if wanted else 'not '}in {cj.rhs}",
+        sketch=(f"at the only point, {_point_words(last)}, f({names[0]}) {is_in}"
+                if checked == 1 and len(names) == 1 else
+                f"the declared domain has {_points(checked)}, and at every one "
+                f"the value {is_in}"),
         quantifier=f"∀ {', '.join(names)} in the declared finite domain "
-                   f"({checked} {plural})",
+                   f"({_points(checked)})",
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
                            executed))
 
@@ -236,6 +277,7 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                     meta=with_executed({"mathema.derive_route": "brute_force",
                                         **_tried(grid)}, executed))
             checked += 1
+            last = point
             continue
         f_call.record(executed, point)
         return ProofResult(
@@ -247,13 +289,14 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                                 **_tried(grid)}, executed))
     if checked == 0:
         return None
-    plural = "point" if checked == 1 else "points"
     return ProofResult(
         "proven",
-        sketch=f"the declared domain admits {checked} {plural}, and the "
-               f"call raises at every one",
+        sketch=(f"the only point, {_point_words(last)}, raises"
+                if checked == 1 else
+                f"the declared domain has {_points(checked)}, and the call "
+                f"raises at every one"),
         quantifier=f"∀ {', '.join(names)} in the declared finite domain "
-                   f"({checked} {plural})",
+                   f"({_points(checked)})",
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
                            executed))
 
@@ -317,12 +360,15 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     evaluate, admits = deps["evaluate"], deps["admits"]
 
     checked = 0
+    total = 0
+    judged: list = []
     for combo in itertools.product(*(grid[n] for n in names)):
         point = dict(zip(names, combo))
         if not admits(point):
             # outside the region the claim covers (an exclusion, or a
             # premise this point fails), so it is not ours to decide
             continue
+        total += 1
         verdict = evaluate(point)
         executed = executed_missing(deps)
         if verdict is None and executed is not None and executed.last_classified:
@@ -348,19 +394,16 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                         if _lists_a_sentinel(cj_domain, names) else {})},
                     executed_missing(deps)))
         checked += 1
+        judged.append(point)
     if checked == 0:
         # every point was excluded: nothing was actually verified, and a
         # clean pass over no points proves nothing while looking like a
         # proof
         return None
-    plural = "point" if checked == 1 else "points"
     return ProofResult(
         "proven",
-        sketch=("the declared domain admits exactly 1 point, and the claim "
-                "holds there" if checked == 1 else
-                f"the declared domain admits {checked} points, and the claim "
-                f"holds at every one"),
+        sketch=_holds_at(total, judged),
         quantifier=f"∀ {', '.join(names)} in the declared finite domain "
-                   f"({checked} {plural})",
+                   f"({_points(total)})",
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
                            executed_missing(deps)))

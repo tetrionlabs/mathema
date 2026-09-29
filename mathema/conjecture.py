@@ -1241,6 +1241,11 @@ def _claim(law: str, name: str | None, source: str, route: str,
             f"`defines:` (`missing := {{null, nan}}`), and a binding "
             f"states its type after a colon, `x in [0, 1] : float`: "
             f"{law.strip()!r}")
+    if re.match(r"^\s*is_absent_safe\s*\(", law) and not re.search(
+            r"\bassuming\b", law):
+        raise InvalidConjecture(
+            "is_absent_safe(f) is not available yet; state the behaviour per "
+            "parameter, e.g. `absent(f, x) raises`")
     try:
         text, ambiguous_diff_vars = extract_diff_fraction_sugar(law.strip())
     except UnreadableSpelling as e:
@@ -1948,14 +1953,21 @@ def _interpret_assumption(cj, conjectures):
     for part in _split_top_and(text):
         gate = re.match(r"^\s*(is_missing_safe|is_absent_safe)\s*\(.*\)\s*$", part)
         if gate is not None:
-            word = "missing" if gate.group(1) == "is_missing_safe" else "absent"
+            param = next((p for p in (cj.domain or {}) if p.isidentifier()), "x")
+            if gate.group(1) == "is_missing_safe":
+                note = (f"assuming {part.strip()} is not a premise: mathema never "
+                        f"compares a value where f returns a missing value, so "
+                        f"there is nothing for it to remove. State what f does "
+                        f"with a missing {param} as its own claim, e.g. "
+                        f"`missing(f, {param}) propagates`, or write `\\ {{missing}}` "
+                        f"in the domain to stop calling f with one.")
+            else:
+                note = (f"assuming {part.strip()} is not a premise. State what f "
+                        f"does when {param} is None as its own claim, e.g. "
+                        f"`absent(f, {param}) raises(TypeError)`, or write "
+                        f"`\\ {{absent}}` in the domain to stop calling f with None.")
             return Probe(cj.name, statement_text(cj.relation, cj.lhs, cj.rhs),
-                         "skipped:misspecified", route=None,
-                         note=(f"assuming {part.strip()} is not a premise: a value "
-                               f"claim is judged only where the function returns a "
-                               f"value, and the {word} behaviour is the policy rows'. "
-                               f"To keep {word} values out of the execution, write "
-                               f"\\ {{{word}}} in the domain."))
+                         "skipped:misspecified", route=None, note=note)
 
     # a matrix STRUCTURE premise (`assuming A is symmetric`,
     # `assuming is_positive_definite(A)`): a conjunct naming a matrix
@@ -3326,7 +3338,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
 
     out: list[Probe] = []
 
-    def _stamped(probe, cj, canonical=True):
+    def _stamped(probe, cj, canonical=True, written=None):
         # one statement, every surface: the row, the display, and the
         # store all carry the canonical ascii text, which re-parses to
         # this claim (sections, quantifier, premise and all). The
@@ -3336,10 +3348,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         if cj.domain:
             # the record states each binding completed from the
             # function's annotations, whichever path produced the row
-            completed = _complete_missing(cj, fn)[0]
+            written = dict(written if written is not None else cj.domain)
+            done = _complete_missing(cj, fn)
+            completed, resolution = done[0], done[3]
             if completed:
                 cj = _dc_replace(cj, domain=completed)
             admitted_now = _missing_record(cj.domain)
+            if not admitted_now and ((probe.meta or {}).get("mathema.missing") or {}).get("returned"):
+                admitted_now = {"admitted": {}}
             if admitted_now:
                 earlier = (probe.meta or {}).get("mathema.missing") or {}
                 merged = {**admitted_now, **earlier,
@@ -3347,7 +3363,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                     **earlier.get("tried", {})}}
                 if not merged["tried"]:
                     merged.pop("tried")
+                means = _missing_means(merged.get("admitted") or {}, resolution or {})
+                if means:
+                    merged["means"] = means
                 probe.meta = {**(probe.meta or {}), "mathema.missing": merged}
+                told = _missing_told(merged, written, resolution or {}, fn)
+                if told and told not in (probe.note or "") \
+                        and not (probe.meta or {}).get("mathema.missing_unknown"):
+                    probe.note = f"{probe.note or ''}; {told}".lstrip("; ")
         if canonical:
             # the renderer is total over everything claim() accepts, so
             # a failure here is a renderer bug worth a loud crash, never
@@ -3690,7 +3713,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # the premise narrows the quantified interval itself
             # (symbolic._prove._tighten_domain_by_assumption), and the
             # premise text rides in the statement.
-            probe = _stamped(probe, cj_record)
+            probe = _stamped(probe, cj_record, written=cj.domain or {})
             if _cap and classify_verdict(probe.verdict) == "proven":
                 # a claim can be no better established than what it
                 # rests on: resting a proof on a lemma that is itself
@@ -3763,7 +3786,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 if derived is not None:
                     out.append(stamp(derived, _cap=verdict_cap))
                     if ctx.companion is not None:
-                        _emit_companion(out, _stamped(ctx.companion, cj_record),
+                        _emit_companion(out, _stamped(ctx.companion, cj_record,
+                                                      written=cj.domain or {}),
                                         derived.name)
                     continue
                 # route == "best" and the derive stage couldn't settle it:
@@ -3915,6 +3939,9 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     missing: dict = {}
     for probe in probes:
         for key, per_param in ((probe.meta or {}).get("mathema.missing") or {}).items():
+            if not isinstance(per_param, dict):
+                missing.setdefault(key, per_param)
+                continue
             into = missing.setdefault(key, {})
             for p, members in (per_param or {}).items():
                 if isinstance(members, dict) and isinstance(into.get(p, {}), dict):
@@ -3924,6 +3951,10 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                 else:
                     into.setdefault(p, members)
     carried = {"mathema.missing": missing} if missing else {}
+    drawn = next(((p.meta or {}).get("mathema.drawn") for p in probes
+                  if (p.meta or {}).get("mathema.drawn")), None)
+    if drawn:
+        carried["mathema.drawn"] = drawn
 
     for probe, label in zip(probes, labels):
         if probe.verdict == "falsified":
@@ -3953,7 +3984,7 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                      sketch="; ".join(sketches) or None,
                      condition=(quantifiers.pop() if len(quantifiers) == 1
                                 else None),
-                     note=f"every {unit} of the {what} proven",
+                     note=f"every {unit} of the {what} is proven",
                      meta=({"mathema.definitions": rows} if rows else {})
                      | carried or None)
     if all(v in ("proven", "holds") for v in verdicts):
@@ -4039,8 +4070,11 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     companion = _combine_conjunction(
         companions, companion_name(cj.name, descriptor), _chain_statement(cj),
         labels, what="float companion")
-    companion.note = (f"the computation of {cj.name} in {representation_word}, "
-                      f"executed link by link; {companion.note}")
+    companion.note = (f"the {representation_word} computation of {cj.name} ran "
+                      f"link by link, and every link holds"
+                      if companion.verdict == "holds" else
+                      f"the {representation_word} computation of {cj.name} ran "
+                      f"link by link; {companion.note}")
     broken = next((p for p in companions if p.verdict == "falsified"), None)
     if broken is not None:
         companion.stratum = broken.stratum
@@ -4124,6 +4158,19 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
                if facts.param_kinds.get(p) not in SEQUENCE_KINDS]
     statement = statement_text(cj.relation, "f", cj.rhs)
     if not numeric:
+        if cj.relation == "is_missing_safe":
+            containers = [p for p in facts.params
+                          if facts.param_kinds.get(p) in SEQUENCE_KINDS
+                          or facts.param_kinds.get(p) == "table"]
+            from .runtime_types import realised_parameters
+            runtime = {p: d.adapter for p, d in realised_parameters(facts).items()}
+            first = containers[0] if containers else "the parameters"
+            typed = f" ({runtime[first]})" if first in runtime else ""
+            return Probe(cj.name, statement, "skipped", route=None,
+                         note=(f"is_missing_safe(f) does not yet check container "
+                               f"parameters such as {first}{typed}; its missing "
+                               f"slots were tried by the claims and are listed in "
+                               f"their records"))
         return Probe(cj.name, statement, "skipped", route=None,
                      note=f"{cj.relation}(f) covers the numeric "
                           f"parameters, and this function has none")
@@ -4132,9 +4179,15 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
     probes = check_conjectures(fn, sub_cjs, domain=domain, trials=trials,
                                trials_scale=trials_scale, facts=facts,
                                extensive=extensive)
-    return _combine_conjunction(probes, cj.name, statement, numeric,
-                                what=f"function-wide {cj.relation}",
-                                unit="parameter")
+    combined = _combine_conjunction(probes, cj.name, statement, numeric,
+                                    what=f"function-wide {cj.relation}",
+                                    unit="parameter")
+    if cj.relation == "is_missing_safe" and combined.verdict == "falsified":
+        at = next((p.name.split("[", 1)[1].rstrip("]") for p in probes
+                   if p.verdict == "falsified" and "[" in p.name), None)
+        if at:
+            combined.note = f"is_missing_safe(f) is false: see {at}."
+    return combined
 
 
 def _derive_attempt_label(fallback: "Probe") -> str:
@@ -4345,10 +4398,24 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
              f"{_probe_attempt_label(probed)}")
     # "proven" from the empirical side exists only for an ESTABLISHED
     # examination (the family verdict contract requires the
-    # exhaustive-coverage sketch), so it supersedes like any evidence
+    # exhaustive-coverage sketch), so it supersedes like any evidence;
+    # a probe that found no value to compare says why, which is the
+    # reason the claim stays open
     winner = (probed if probed.verdict in ("proven", "holds", "falsified")
+              or (probed.meta or {}).get("mathema.missing_unknown")
               else fallback)
-    winner.note = f"{winner.note}; {trail}"
+    # the note leads with the deciding route's own sentence; the route
+    # log is kept on the record's meta
+    if winner is probed and probed.verdict in ("proven", "holds", "falsified"):
+        why = _derive_attempt_label(fallback).split("(", 1)
+        reason = why[1].rsplit(")", 1)[0] if len(why) > 1 else ""
+        branch = re.search(r"line (\d+) \('([^']*)'\)", reason or "")
+        told = (f"derive could not decide the branch at line {branch.group(1)} "
+                f"({branch.group(2)}); the probe decided it" if branch else
+                f"derive could not decide it ({reason}); the probe decided it"
+                if reason else "derive could not decide it; the probe decided it")
+        winner.note = f"{winner.note}; {told}".lstrip("; ")
+    winner.meta = {**(winner.meta or {}), "mathema.routes_attempted": trail}
     carried = {k: v for k, v in (fallback.meta or {}).items()
                if k.startswith("mathema.derive") or k == "mathema.timeout"
                or k.startswith("mathema.corroboration")}
@@ -5322,8 +5389,9 @@ _NO_HOLE_NAMES = {"str": "string"}
 def _missing_record(domain: dict) -> dict:
     """Intent:
         What a record states about the missing values its bindings
-        admit: `{"admitted": {param: {"None": bool, "holes": [member,
-        ...]}}}`; the route that executes a sentinel adds what it tried.
+        admit: `{"admitted": {param: {"absent": bool, "missing": [member,
+        ...]}}}`; the route that executes a missing value adds what it
+        tried.
         Empty when no binding admits one.
     """
     from .domain import _as_domain, admitted
@@ -5339,10 +5407,118 @@ def _missing_record(domain: dict) -> dict:
         words = []
         for h in holes:
             words += list(dom.members) if h.member is None else [h.member]
-        out[p] = {"None": absent, "holes": list(dict.fromkeys(words))}
+        out[p] = {"absent": absent, "missing": list(dict.fromkeys(words))}
     if not out:
         return {}
     return {"admitted": out, **({"tried": tried} if tried else {})}
+
+
+def _missing_means(admitted: dict, resolution: dict) -> str:
+    """`missing for x (float) means nan`, one clause per parameter whose
+    domain admits a hole, naming the slot type and its members."""
+    parts = []
+    for p, entry in admitted.items():
+        members = entry.get("missing") or []
+        if not members:
+            continue
+        slot = getattr(resolution.get(p), "slot_type", None) or "unannotated"
+        words = (" or ".join(members) if len(members) <= 2
+                 else ", ".join(members[:-1]) + " or " + members[-1])
+        parts.append(f"missing for {p} ({slot}) means {words}")
+    return "; ".join(parts)
+
+
+def _annotation_words(fn, param: str) -> "str | None":
+    """A parameter's annotation as it reads in source (`Optional[float]`),
+    or None when it has none."""
+    import inspect
+    try:
+        ann = inspect.signature(fn).parameters[param].annotation
+    except (TypeError, ValueError, KeyError):
+        return None
+    if ann is inspect.Parameter.empty:
+        return None
+    if isinstance(ann, str):
+        return ann
+    text = getattr(ann, "__name__", None) if isinstance(ann, type) else None
+    return text or repr(ann).replace("typing.", "")
+
+
+def _missing_origin(param: str, kind: str, written: dict, resolution: dict) -> str:
+    """Who admitted a kind for a parameter: `listed` (a finite set the
+    claim lists), `written` (a `|missing` or `|absent` the claim
+    writes), `optional` (an `Optional` annotation), else `type`."""
+    from .domain import _as_domain, _is_enumerated
+    bound = written.get(param)
+    if bound is not None:
+        mine = [v for v in _written_sentinels(bound)
+                if v.kind == kind and v not in getattr(bound, "excluded", ())]
+        absent_written = kind == "absent" and bool(getattr(bound, "absent", False))
+        if mine or absent_written:
+            try:
+                enumerated = _is_enumerated(_as_domain(bound))
+            except Exception:
+                enumerated = False
+            return "listed" if enumerated else "written"
+    policy = resolution.get(param)
+    if kind == "absent" and policy is not None and policy.annotated and policy.absent:
+        return "optional"
+    return "type"
+
+
+def _missing_told(missing: dict, written: dict, resolution: dict, fn) -> str:
+    """Intent:
+        One sentence per missing input the row executed, what the
+        function did there and, where that is not what the type leads a
+        reader to expect, the claim or the edit that settles it.
+    """
+    from ._missing_words import kind_of, mixed_sentence, next_step
+    said = missing.get("said") or {}
+    behaviour = missing.get("behaviour") or {}
+    executed = missing.get("executed") or {}
+    mixed = missing.get("mixed") or {}
+    parts = []
+    returned = missing.get("returned") or {}
+    if returned.get("absent") == "introduces":
+        parts.append(f"f returns None at {returned.get('at')}, which its return type "
+                     f"{returned.get('declared')} allows; that point has no value to "
+                     f"compare, so it is recorded, not judged (state `absent(f) "
+                     f"introduces` to make this explicit)")
+    for p, members in said.items():
+        seen = behaviour.get(p, {})
+        hole_behaviours = {b for m, b in seen.items() if kind_of(m) == "missing"}
+        slot_type = getattr(resolution.get(p), "slot_type", "") or ""
+        container = slot_type not in ("", "float", "complex", "datetime", "int",
+                                      "bool", "str", "object", "unannotated")
+        mixed_members = {m: mixed.get(p, {}).get(m, {}) for m, b in seen.items()
+                         if b == "mixed"}
+        if mixed_members:
+            # a parameter treated more than one way is said once, by
+            # behaviour, the member that differs named as the exception
+            raised_by = {m: e[len("raised "):] for m, e in executed.get(p, {}).items()
+                         if e.startswith("raised ")}
+            parts.append(mixed_sentence(p, mixed_members, raised_by,
+                                        _CONTAINER_NOUNS.get(slot_type, "container")
+                                        if container else None))
+        for member, sentence in members.items():
+            b = seen.get(member)
+            kind = "missing" if container and member != "None" else kind_of(member)
+            if b == "mixed":
+                continue
+            entry = executed.get(p, {}).get(member, "")
+            raised = entry[len("raised "):] if entry.startswith("raised ") else None
+            narrow = member if (kind == "missing" and len(hole_behaviours) > 1) else None
+            origin = _missing_origin(p, kind, written, resolution)
+            step = next_step(kind, p, narrow, b or "", raised, origin,
+                             _annotation_words(fn, p))
+            parts.append(f"{sentence}{step}")
+    return "; ".join(parts)
+
+
+#: what a note calls a container of each runtime type
+_CONTAINER_NOUNS = {"pandas.Series": "series", "polars.Series": "series",
+                    "numpy.ndarray": "array", "list": "list",
+                    "pandas.DataFrame": "table", "polars.DataFrame": "table"}
 
 
 def _renders(cj) -> bool:
@@ -5396,7 +5572,7 @@ def _complete_missing(cj, fn) -> tuple:
         adjudicated (the hole class listed on a string slot, which has
         no hole) or None, and `resolution` is `{param: MissingDefaults}`.
     """
-    from .domain import (NO_ANNOTATION, PATH_DEFAULTS, admitted,
+    from .domain import (NO_ANNOTATION, PATH_DEFAULTS, MissingDefaults, admitted,
                          complete, is_sentinel)
     from .types import missing_policy_from_signature
     policy = missing_policy_from_signature(fn) if fn is not None else {}
@@ -5408,7 +5584,12 @@ def _complete_missing(cj, fn) -> tuple:
             completed[p] = complete(_in_field_type(p, bound, cj.domain),
                                     PATH_DEFAULTS)
             continue
-        defaults = NO_ANNOTATION if p in cj.free_vars else policy.get(p, NO_ANNOTATION)
+        # a claim's own constant (`let c be [-5, 5]`) is a number the
+        # claim draws, never a value the function receives, so it admits
+        # nothing missing
+        defaults = (MissingDefaults(False, (), "constant", annotated=False)
+                    if p in (cj.free_vars or ())
+                    else policy.get(p, NO_ANNOTATION))
         defaults = _for_element_domain(defaults, bound)
         # a domain already completed carries the exclusions completion
         # added; only a binding's own text is checked for holes
@@ -5450,10 +5631,17 @@ def _complete_missing(cj, fn) -> tuple:
                 not getattr(bound, "explicit_type", False)
                 and all(isinstance(pc, frozenset)
                         for pc in getattr(bound, "pieces", ()) or (None,)))
+            ann = _annotation_words(fn, p) or defaults.slot_type
             if widens:
-                notes.append(f"the claim widens {p} beyond its type {defaults.slot_type}")
+                added = (f"{p} = None" if absent and not defaults.absent
+                         else f"a missing {p}")
+                notes.append(f"{added} is outside the type {ann}, and the claim adds it")
             elif narrows and not enumerated:
-                notes.append(f"the claim narrows {p} within its type {defaults.slot_type}")
+                lost = ("absence" if defaults.absent and not absent else "a missing value")
+                gone = (f"{p} = None" if defaults.absent and not absent
+                        else f"a missing {p}")
+                notes.append(f"the claim excludes {lost}, which {p}'s type {ann} "
+                             f"admits; the claim no longer covers {gone}")
     return completed, notes, None, resolution
 
 
@@ -6983,6 +7171,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     from .probing import ExecutedMissing, LastCall, with_executed
     executed_record = ExecutedMissing()
     f_call = LastCall()
+    from ._missing_words import declared_optional_return
+    declared_return = declared_optional_return(fn)
     # a membership whose right-hand side names a missing value asks
     # about the missing output itself, and is judged at every point
     asks_missing = _asks_missing(cj)
@@ -7163,7 +7353,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     sequence_params = [p for p, k in kinds.items() if k in SEQUENCE_KINDS]
     observed_lengths: dict = {}
     args: list = []
+    from ._missing_words import DrawTally
+    tally = DrawTally()
     for trial in range(budget + len(pinned)):
+        if f_call.calls:
+            tally.add(dict(zip(kinds, args)))
         f_call.record(executed_record, dict(zip(kinds, args)))
         call_raised[0] = call_nan[0] = call_inf[0] = None
         outside_draw[0] = False
@@ -7587,6 +7781,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "
                   f"infinity for a finite input is no value")
             break
+        if not missing_in and "absent" in (missing_class(lv), missing_class(rv)) \
+                and declared_return and any(o is None for o in f_call.outputs()):
+            # a None the return type declares: recorded, not judged
+            executed_record.returned_absent(dict(zip(kinds, args)), declared_return)
+            continue
         if not missing_in and "absent" in (missing_class(lv), missing_class(rv)):
             # a None from present inputs is no value, like a NaN
             checked += 1
@@ -7685,8 +7884,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_fmt(tuple(args), arg_names, shown_names)}{aux_part}: {_sides(lv, rv)}"
             break
+    if f_call.calls:
+        tally.add(dict(zip(kinds, args)))
     f_call.record(executed_record, dict(zip(kinds, args)))
     missing_meta = with_executed(missing_meta, executed_record) or {}
+    if tally.meta():
+        missing_meta = {**missing_meta, "mathema.drawn": tally.meta()}
     shrunk_meta: dict = {}
     if cx is not None and cx_stratum is None and assum_eval is None and not aux \
             and any(getattr(cj_domain.get(p), "base_type", None) == "L" for p in kinds):
@@ -7707,20 +7910,19 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                kinds, cj_domain, checked, critical_hints,
                                truncated_hints, observed_lengths,
                                set(premise_draws), runtime_names, nested,
-                               lap_floor),
+                               lap_floor, {p: c.holes for p, c in containers.items()}),
                           "mathema.confidence": _probe_density(risk, checked),
                           "mathema.counterexample_args": _yaml_safe_args(args),
                           **shrunk_meta, **missing_meta})
     if checked == 0 and executed_record.classified:
         # every point executed was a missing input the code raised at or
         # answered with a missing value: nothing left to compare
-        from .probing import nothing_to_compare
-        found = (missing_meta.get("mathema.missing") or {})
-        said = nothing_to_compare(found.get("behaviour") or {},
-                                  found.get("executed") or {})
+        from ._missing_words import unknown_reason
+        said = unknown_reason(executed_record.first, f"{cj.relation} {cj.rhs}",
+                              {p for p in kinds if _lists_sentinel(cj_domain.get(p))})
         return Probe(cj.name, statement, "unknown", route="probe",
-                     note=f"{note}; {said}".lstrip("; "), sketch=said,
-                     meta={**missing_meta})
+                     note=f"{note}; {said}".lstrip("; "),
+                     meta={**missing_meta, "mathema.missing_unknown": True})
     if checked == 0:
         why = ("; no sampled point satisfied the assuming clause"
                if assum_eval is not None else "; no evaluable inputs")
@@ -7738,7 +7940,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                            kinds, cj_domain, checked, critical_hints,
                            truncated_hints, observed_lengths,
                            set(premise_draws), runtime_names, nested,
-                           lap_floor),
+                           lap_floor, {p: c.holes for p, c in containers.items()}),
                       "mathema.confidence": _probe_density(risk, checked),
                       **missing_meta})
 

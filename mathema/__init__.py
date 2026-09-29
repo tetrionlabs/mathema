@@ -163,16 +163,17 @@ class Record:
             mark = {"holds": "holds  ", "falsified": "FALSIFY", "proven": "proven ",
                     "skipped": "skip   ", "unknown": "unknown",
                     "invalidated": "INVALID"}.get(p.verdict.split(":", 1)[0], p.verdict)
+            missing = (p.meta or {}).get("mathema.missing") or {}
             if p.verdict == "proven":
-                # a proof has no trial count the way a probe does, the
-                # statement itself gets prettified into ordinary math
-                # notation, and the quantifier (who it holds for) stands
-                # in place of "(n=...)", on its own line since it's
-                # often longer than the statement it qualifies.
-                stmt = p.statement.replace("==", "=").replace("<=", "≤").replace(">=", "≥")
-                line = f"  {mark} {p.name}: {stmt}"
-                if p.condition:
-                    line += f"\n           {p.condition}"
+                # a proof has no trial count the way a probe does: the
+                # quantifier (who it holds for) stands in place of
+                # "(n=...)", on its own line since it's often longer than
+                # the statement it qualifies, with what a missing value
+                # of each parameter means
+                line = f"  {mark} {p.name}: {p.statement}"
+                detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
+                if detail:
+                    line += f"\n           {detail}"
             else:
                 shown = p.statement
                 if (p.condition or "").startswith("let |inf| be ") \
@@ -181,7 +182,17 @@ class Record:
                     shown = f"{p.condition.split(', ', 1)[0]}, {shown}"
                 line = f"  {mark} {p.name}: {shown}"
                 if p.verdict == "holds" and p.n:
-                    line += f" (n={p.n})"
+                    from ._missing_words import count_words
+                    line += f" ({count_words(p.n, (p.meta or {}).get('mathema.drawn'))})"
+            if p.verdict != "proven" and p.note and (
+                    p.verdict.split(":", 1)[0] in ("unknown", "skipped")
+                    or missing.get("said") or missing.get("returned")):
+                # what happened at a missing input, or why the row is
+                # open, said once under the row
+                line += f"\n           {p.note}"
+            elif p.verdict == "proven" and (missing.get("said") or missing.get("returned")) \
+                    and p.note:
+                line += f"\n           {p.note}"
             if p.counterexample:
                 line += f"\n           counterexample {p.counterexample}"
             stratum = getattr(p, "stratum", None)
