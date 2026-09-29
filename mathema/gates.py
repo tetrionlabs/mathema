@@ -96,6 +96,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                          domain_contains, operational_domain)
     from .probing import (ComplexResult, _bound_is_complex, _fmt_value,
                           _is_matrix_value, _synth, complex_is_a_raise,
+                          ExecutionLedger, execution_outcome,
                           holds_inf, holds_nan, inputs_missing,
                           is_complex_value, missing_class,
                           plain_value, relation_holds_elementwise,
@@ -153,6 +154,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the first callee that returned a nan or an infinity for finite,
     # non-missing arguments, as the witness text ("f returned inf")
     calls_nonfinite: list = [None]
+    # what the function under test last did: ("raised", name) or
+    # ("returned", value), read for the executed-missing-input ledger
+    f_last: list = [None]
+    ledger = ExecutionLedger()
 
     def _tag(callee, label):
         # a complex result under a real claim counts as a raise too
@@ -163,7 +168,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 out = callee(*a, **kw)
             except Exception as exc:
                 calls_raised[0] = type(exc).__name__
+                if label == "f":
+                    f_last[0] = ("raised", type(exc).__name__)
                 raise
+            if label == "f":
+                f_last[0] = ("returned", out)
             if complex_raises and is_complex_value(out):
                 calls_raised[0] = "a complex result"
                 raise ComplexResult(label, out)
@@ -194,6 +203,17 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     def _reset():
         calls_raised[0] = None
         calls_nonfinite[0] = None
+        f_last[0] = None
+
+    def _record(point):
+        # what f did at a point with a missing input, per parameter
+        if f_last[0] is None or not inputs_missing(point.values()):
+            return
+        kind, value = f_last[0]
+        ledger.add(point, execution_outcome(
+            raised=value if kind == "raised" else None,
+            value=value if kind == "returned" else None,
+            holed_input=True))
 
     from .runtime_types import calling
     from ._linalg_eval import FUNCTIONS as _VECTOR_FUNCS
@@ -331,7 +351,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # genuine failure of a value claim (the pedantic raise
             # rule), so it reproduces a disproof; a plumbing raise
             # stays inconclusive
+            _record(point)
             return False if calls_raised[0] else None
+        _record(point)
         if calls_nonfinite[0] is not None:
             # a nan or an infinity the code returned for finite inputs
             # is no value: against a value every relation fails. Two
@@ -345,9 +367,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # a missing value meets the relation by kind (a hole agrees
             # with a hole, an absence with an absence, and either fails
             # against a number)
-            return relation_holds_elementwise(
+            at_missing = inputs_missing(point.values())
+            held = relation_holds_elementwise(
                 lv, rv, cj.relation, slack, exact_inequality=cj.tolerance is None,
-                rel_tol=0.0, missing_inputs=True)
+                rel_tol=0.0, missing_inputs=True, at_missing_input=at_missing)
+            if held is None and at_missing:
+                ledger.unanswered(point)
+            return held
         if _complex_pair(lv, rv) and not (holds_nan(lv) or holds_nan(rv)):
             if (holds_inf(lv) or holds_inf(rv)) and not calls_nonfinite[0]:
                 # an infinity only the law's own arithmetic produced
@@ -388,6 +414,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return None
         return None
 
+    # the executed-missing-input ledger both evaluators write, read by
+    # the routes that build a record from this kit
+    evaluate.ledger = ledger  # type: ignore[attr-defined]
+
     def probe_finite(point):
         # a computation failure only: a raise from the code, a NaN
         # or an inf the code returned where the relation then fails, or
@@ -403,14 +433,17 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # only a raise from the function under test is a
             # computation failure; the law's own plumbing failing
             # says nothing about the code
+            _record(point)
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
             return None
+        _record(point)
         if inputs_missing(point.values()) or "absent" in (missing_class(lv), missing_class(rv)):
             # a missing input meets the relation by kind
             if relation_holds_elementwise(
                     lv, rv, cj.relation, slack, exact_inequality=cj.tolerance is None,
-                    rel_tol=0.0, missing_inputs=True) is False:
+                    rel_tol=0.0, missing_inputs=True,
+                    at_missing_input=inputs_missing(point.values())) is False:
                 return (f"the relation fails at a missing value "
                         f"({_fmt_value(lv)} {cj.relation} {_fmt_value(rv)})")
             return None
@@ -1105,6 +1138,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         if missing_corners and p in deps["names"]:
             tried.setdefault(p, []).append(repr(v))
     tried_meta = {"mathema.missing": {"tried": tried}} if tried else {}
+    from .probing import executed_ledger, with_executed
+    tried_meta = with_executed(tried_meta, executed_ledger(deps)) or {}
     what = (f"the computation of {parent.name} in {representation_word}, "
             f"executed at {sweep.checked} points (every domain corner, "
             + (f"{words}, " if words and missing_corners else "")

@@ -662,11 +662,12 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
             # with a hole and an absence with an absence, and either
             # disagrees with a number
             checked += 1
-            if missing_relation(fv, gv, "==") is False:
+            at_missing = inputs_missing(args)
+            if missing_relation(fv, gv, "==", at_missing) is False:
                 cx = (_fmt(tuple(args), names=tuple(kinds))
                       + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
                 break
-            if missing_relation(fv, gv, "==") is True:
+            if missing_relation(fv, gv, "==", at_missing) is True:
                 continue
         if not (_numberlike(fv) and _numberlike(gv)):
             discarded["non_numeric"] += 1
