@@ -1,0 +1,266 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+"""A policy claim states what a function does with a value that is not
+there: `missing(f, x) propagates`, `absent(f, x) raises(TypeError)`,
+`missing(f, xs, null) drops`, `assuming count(xs) >= 1, missing(f, xs)
+drops`. It is decided on the calls the check already made, on a floor of
+its own only where none reached its case, and says where its verdict
+came from. A record carries one for every parameter that admits a kind:
+the default for a kind the type alone admits, the observed behaviour for
+one the author admitted (a raise there unaccounted for until stated), a
+derived one where a guard in the body says it."""
+import math
+from typing import Optional
+
+import pytest
+
+import mathema
+from mathema.conjecture import InvalidConjecture, check_conjectures, claim
+from mathema.policy import Policy, parse_policy, policy_text
+from mathema.spec import ClaimsFileError, canonical_claim_text, declare, entry_claims
+
+
+def root(x: float) -> float:
+    return math.sqrt(x)
+
+
+def clamp01(x: float) -> float:
+    return max(0.0, min(1.0, x))
+
+
+def guarded(x: float) -> float:
+    if x is None or x != x:
+        raise ValueError("missing")
+    return math.sqrt(x)
+
+
+def double(x):
+    return x * 2
+
+
+def opt_root(x: Optional[float]) -> float:
+    return math.sqrt(x)
+
+
+def total(xs: list) -> float:
+    return sum(xs)
+
+
+def mean_pd(xs: "pandas.Series") -> float:
+    return float(xs.mean())
+
+
+# --- the text ----------------------------------------------------------
+
+@pytest.mark.parametrize("text, policy", [
+    ("missing(f, x) propagates", Policy("missing", "x", None, "propagates")),
+    ("absent(f, x) raises(TypeError)", Policy("absent", "x", None, "raises", "TypeError")),
+    ("missing(f, xs, null) raises", Policy("missing", "xs", "null", "raises")),
+    ("absent(f) drops", Policy("absent", None, None, "drops")),
+    ("None(f, x) raises", Policy("absent", "x", None, "raises")),
+    ("assuming count(xs) >= 1, missing(f, xs) drops",
+     Policy("missing", "xs", None, "drops", premise="count(xs) >= 1")),
+])
+def test_a_policy_reads_in_the_selector_form(text, policy):
+    assert parse_policy(text) == policy
+
+
+@pytest.mark.parametrize("sugar, canonical", [
+    ("missing_propagates(f, x)", "missing(f, x) propagates"),
+    ("missing_removed(f, xs, null)", "missing(f, xs, null) drops"),
+    ("absent_raises(f)", "absent(f) raises"),
+    ("None(f, x) raises(TypeError)", "absent(f, x) raises(TypeError)"),
+])
+def test_the_sugar_renders_as_the_selector_form(sugar, canonical):
+    assert policy_text(parse_policy(sugar)) == canonical
+    assert canonical_claim_text(claim(sugar)) == canonical
+
+
+def test_a_policy_claim_round_trips_through_the_store():
+    for text in ("missing(f, x) propagates", "assuming count(xs) >= 1, missing(f, xs) drops",
+                 "absent(f, x) raises(TypeError)"):
+        cj = claim(text)
+        again = entry_claims({"claims": [declare(cj)]})[0]
+        assert canonical_claim_text(again) == text
+        assert again.relation == "policy"
+
+
+def test_a_remedy_a_note_names_is_a_claim_that_parses():
+    rows = check_conjectures(clamp01, [claim("for x in R, 0 <= f(x) <= 1", name="c")],
+                             float_companions=True)
+    note = next(p for p in rows if p.name.startswith("c[")).note
+    remedy = note.split("write `", 1)[1].split("`", 1)[0]
+    assert remedy == "missing(f, x) drops"
+    assert claim(remedy).relation == "policy"
+
+
+# --- a stated policy -----------------------------------------------------
+
+def _rows(fn, *texts):
+    return {p.statement: p for p in check_conjectures(fn, [claim(t) for t in texts],
+                                                      float_companions=True)}
+
+
+def test_a_stated_policy_is_confirmed_on_the_draws_the_check_made():
+    rows = _rows(root, "for x in [0, 1], f(x) >= 0", "missing(f, x) propagates")
+    row = rows["missing(f, x) propagates"]
+    assert row.verdict == "holds", (row.verdict, row.note)
+    assert row.note == "stated; confirmed on the 43 draws of f_x_ge_0[float]"
+
+
+def test_a_policy_alone_runs_its_own_floor():
+    row = _rows(clamp01, "missing(f, x) drops")["missing(f, x) drops"]
+    assert row.verdict == "holds"
+    assert row.note == "stated; confirmed on its own floor (1 draw)"
+
+
+def test_a_contradicted_policy_carries_the_executed_witness_and_the_claim_to_write():
+    row = _rows(clamp01, "missing(f, x) propagates")["missing(f, x) propagates"]
+    assert row.verdict == "falsified"
+    assert row.counterexample == "x = nan: f returned 1.0"
+    assert row.note == ("stated; f drops instead: nan in, 1.0 out; state "
+                        "`missing(f, x) drops` if that is intended, or change f")
+
+
+def test_a_named_exception_must_be_the_one_raised():
+    assert _rows(double, "absent(f, x) raises(TypeError)")[
+        "absent(f, x) raises(TypeError)"].verdict == "holds"
+    assert _rows(double, "absent(f, x) raises(ValueError)")[
+        "absent(f, x) raises(ValueError)"].verdict == "falsified"
+
+
+def test_a_guard_that_states_the_policy_proves_it():
+    row = _rows(guarded, "missing(f, x) raises(ValueError)")["missing(f, x) raises(ValueError)"]
+    assert row.verdict == "proven", (row.verdict, row.note)
+    assert row.note.startswith("stated; derived from the guard on line 2; confirmed")
+
+
+def test_a_member_narrows_the_policy():
+    rows = _rows(total, "for xs in [0, 1]^n, f(xs) >= 0", "missing(f, xs, null) raises(TypeError)",
+                 "missing(f, xs, nan) propagates", "missing(f, xs) propagates")
+    assert rows["missing(f, xs, null) raises(TypeError)"].verdict == "holds"
+    assert rows["missing(f, xs, nan) propagates"].verdict == "holds"
+    whole = rows["missing(f, xs) propagates"]
+    assert whole.verdict == "falsified"
+    assert whole.counterexample.startswith("xs = [") and "TypeError" in whole.counterexample
+
+
+def test_a_premise_decides_on_the_calls_that_meet_it():
+    pytest.importorskip("pandas")
+    rows = _rows(mean_pd, "for xs in [0, 1]^n, f(xs) >= 0",
+                 "assuming count(xs) >= 1, missing(f, xs) drops", "missing(f, xs) drops")
+    assert rows["assuming count(xs) >= 1, missing(f, xs) drops"].verdict == "holds"
+    assert rows["missing(f, xs) drops"].verdict == "falsified"
+
+
+def test_two_behaviours_for_one_case_are_refused():
+    rows = check_conjectures(root, [claim("missing(f, x) drops"),
+                                    claim("missing(f, x) propagates")])
+    assert all(p.verdict == "skipped:misspecified" for p in rows)
+    assert "state two behaviours for one case" in rows[0].note
+
+
+def test_two_behaviours_for_one_case_are_refused_at_load(tmp_path):
+    from mathema.spec import read_claims_file
+    path = tmp_path / "p.claims.yaml"
+    path.write_text("m.root:\n  claims:\n"
+                    "    - statement: \"missing(f, x) drops\"\n"
+                    "    - statement: \"missing(f, x) propagates\"\n")
+    with pytest.raises(ClaimsFileError, match="state two behaviours for one case"):
+        read_claims_file(str(path), "p.claims.yaml")
+
+
+def test_premises_that_tell_the_cases_apart_are_no_contradiction():
+    from mathema.policy import contradicting_policies
+    assert contradicting_policies(["assuming count(xs) >= 1, missing(f, xs) drops",
+                                   "assuming count(xs) == 0, missing(f, xs) propagates"]) is None
+
+
+# --- the rows a record carries ------------------------------------------
+
+def _policy_rows(fn, text):
+    rec = mathema.check(fn, claims=[mathema.claim(text, name="c0")])
+    return [p for p in rec.probes if (p.meta or {}).get("mathema.policy")]
+
+
+def test_a_float_carries_its_default_propagation_row():
+    (row,) = _policy_rows(root, "for x in [0, 1], f(x) >= 0")
+    assert (row.statement, row.verdict) == ("missing(f, x) propagates", "holds")
+    assert row.meta["mathema.policy"]["source"] == "default"
+    assert row.meta["mathema.policy"]["reason"] == (
+        "default for a float: the type admits nan; change the word to raises or drops "
+        "if f should do otherwise")
+    assert row.meta["mathema.surface"] == "mathema"
+
+
+def test_a_silent_drop_contradicts_the_default():
+    (row,) = _policy_rows(clamp01, "for x in R, 0 <= f(x) <= 1")
+    assert (row.statement, row.verdict) == ("missing(f, x) propagates", "falsified")
+    assert row.meta["mathema.policy"]["reason"] == \
+        "default for a float; f drops instead: nan in, 1.0 out"
+    assert row.meta["mathema.policy"]["next"] == (
+        "if 1.0 is the intended answer, write `missing(f, x) drops`; otherwise guard "
+        "with `if x != x: raise ValueError` or return nan")
+
+
+def test_an_unannotated_parameter_raises_on_none_by_default():
+    rows = {p.statement: p for p in _policy_rows(double, "for x in [0, 1], f(x) == 2*x")}
+    row = rows["absent(f, x) raises"]
+    assert row.verdict == "holds"
+    assert row.meta["mathema.policy"]["reason"] == (
+        "default: x has no annotation, so it may be None, and f raises on it; annotate "
+        "x as float to exclude None, or keep this claim")
+
+
+def test_an_author_admitted_absence_that_raises_is_unaccounted_for():
+    rows = {p.statement: p for p in _policy_rows(opt_root, "for x in [0, 1], f(x) >= 0")}
+    row = rows["absent(f, x)"]
+    assert row.verdict == "falsified"
+    assert row.meta["mathema.policy"]["source"] == "observed"
+    assert row.meta["mathema.policy"]["reason"] == (
+        "observed: x is Optional[float], so None is promised; f raised TypeError at x = None")
+    assert row.meta["mathema.policy"]["next"] == (
+        "handle None in f, or state `absent(f, x) raises(TypeError)`, or change the "
+        "annotation to float")
+
+
+def test_a_guard_derives_the_row():
+    (row,) = _policy_rows(guarded, "for x in [0, 1], f(x) >= 0")
+    assert (row.statement, row.verdict) == ("missing(f, x) raises(ValueError)", "proven")
+    assert row.meta["mathema.policy"]["source"] == "derived"
+
+
+def test_members_that_behave_differently_get_a_row_each():
+    rows = {p.statement: p.verdict for p in _policy_rows(total, "for xs in [0, 1]^n, f(xs) >= 0")}
+    # the null row states the default a list slot has, which the raise
+    # contradicts
+    assert rows == {"missing(f, xs, null) propagates": "falsified",
+                    "missing(f, xs, nan) propagates": "holds"}
+
+
+def test_a_stated_policy_replaces_the_default_row():
+    rec = mathema.check(clamp01, claims=[mathema.claim("missing(f, x) drops")])
+    rows = [p for p in rec.probes if (p.meta or {}).get("mathema.policy")]
+    assert [(p.statement, p.verdict) for p in rows] == [("missing(f, x) drops", "holds")]
+
+
+def test_a_default_row_never_gates_verify():
+    from mathema.verify import gate
+    (row,) = _policy_rows(clamp01, "for x in R, 0 <= f(x) <= 1")
+    assert row.verdict == "falsified"
+    assert gate([row], strict=True).problems == []
+
+
+def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():
+    rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
+                                                       name="c0")])
+    text = repr(rec)
+    assert ("  FALSIFY missing(f, x) propagates   [default for a float; f drops instead: "
+            "nan in, 1.0 out]\n           if 1.0 is the intended answer, write "
+            "`missing(f, x) drops`; otherwise guard with `if x != x: raise ValueError` "
+            "or return nan") in text
+
+
+def test_the_absent_word_parses_without_f():
+    with pytest.raises(InvalidConjecture):
+        claim("missing(g, x) propagates")

@@ -176,10 +176,14 @@ def next_step(kind: str, param: str, member: "str | None", behaviour: str,
     if behaviour != "raises":
         return ""
     if origin == "optional":
+        import re
+        plain = re.sub(r"^Optional\[(.+)\]$", r"\1", annotation or "")
+        plain = " | ".join(t.strip() for t in plain.split("|")
+                           if t.strip() not in ("None", "NoneType")) or plain
         return (f". {param} admits absence because it is {annotation}, and no "
                 f"claim says what should happen. Handle None in f, or state "
-                f"{stated} if raising is intended, or annotate {param} without "
-                f"Optional")
+                f"{stated} if raising is intended, or change the annotation to "
+                f"{plain}")
     if origin == "listed":
         word = "None" if kind == ABSENT else (member or "the missing value")
         return (f", a point the claim lists; no claim says what f should do with "
@@ -300,14 +304,14 @@ def _shape(value) -> tuple:
 
 def count_words(n: int, drawn: "dict | None") -> str:
     """A row's count: `43 draws`; for a container the sizes drawn, rows
-    then columns, and the entries the draws reached: `57 draws, sizes
-    (1, 1) to (8, 1), up to 224 entries`."""
+    then columns, and the entries over every draw: `57 draws, sizes
+    (1, 1) to (8, 1), 224 entries in all`."""
     draws = f"{n} draw{'s' if n != 1 else ''}"
     if not drawn or not drawn.get("smallest"):
         return draws
     lo, hi = tuple(drawn["smallest"]), tuple(drawn["largest"])
     sizes = f"size {lo}" if lo == hi else f"sizes {lo} to {hi}"
-    return f"{draws}, {sizes}, up to {drawn['entries']} entries"
+    return f"{draws}, {sizes}, {drawn['entries']} entries in all"
 
 
 def mixed_sentence(param: str, ways_by_member: dict, raised_by_member: dict,

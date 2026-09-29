@@ -170,6 +170,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the current point, for the executed missing inputs
     f_calls = LastCall()
     executed = ExecutedMissing()
+    from .probing import signature_defaults
+    executed.defaults = signature_defaults(fn)
     from ._missing_words import DrawTally
     tally = DrawTally()
     from ._missing_words import declared_optional_return
@@ -1237,6 +1239,9 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     if deps is None:
         return None
     name = companion_name(parent.name, descriptor)
+    # the companion's calls are filed under its own name
+    from .policy import _CLAIM as _policy_claim
+    _policy_claim.set(name)
     top = float(representation.max_magnitude or representation_reach())
     reach = cap if cap is not None else (-top, top)
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)

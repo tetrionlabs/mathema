@@ -688,16 +688,16 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7982b776d687
   holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (32 draws)
-  holds   is_deterministic: f(scores) = f(scores) (192 draws, sizes (1, 1) to (8, 1), up to 1027 entries)
+  holds   is_deterministic: f(scores) = f(scores) (192 draws, sizes (1, 1) to (8, 1), 1027 entries in all)
   holds   is_state_safe: f(scores) = f(scores) (48 draws)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (192 draws, sizes (1, 1) to (8, 1), up to 949 entries)
-  holds   preserves_length: len(f(scores)) = len(scores) (192 draws, sizes (1, 1) to (8, 1), up to 979 entries)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (192 draws, sizes (1, 1) to (8, 1), 949 entries in all)
+  holds   preserves_length: len(f(scores)) = len(scores) (192 draws, sizes (1, 1) to (8, 1), 979 entries in all)
   FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
            counterexample scores=[0, 0]: [0.5, 0.5] vs [0.0, 0.0]
-  holds   preserves_type: type(f(scores)) = type(scores) (192 draws, sizes (1, 1) to (8, 1), up to 1017 entries)
+  holds   preserves_type: type(f(scores)) = type(scores) (192 draws, sizes (1, 1) to (8, 1), 1017 entries in all)
   FALSIFY is_sorted_output: is_sorted_output(f(scores))
            counterexample ([4.86304, 8.4521, -9.06059, -3.61645]): output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
-  holds   sums_to_one: sum(f(scores)) = 1 (192 draws, sizes (1, 1) to (8, 1), up to 938 entries)
+  holds   sums_to_one: sum(f(scores)) = 1 (192 draws, sizes (1, 1) to (8, 1), 938 entries in all)
 ```
 
 `shape` came from the `Annotated[list, Shape("n")]` hints,

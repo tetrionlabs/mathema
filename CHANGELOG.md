@@ -71,7 +71,7 @@ Notable changes to mathema are recorded here from its first public release onwar
   leads a reader to expect, the claim to write; a declared `Optional`
   return's `None` is recorded, not judged; a row's count reads
   `(43 draws)`, or for a container `(57 draws, sizes (1, 1) to (8, 1),
-  up to 224 entries)`.
+  224 entries in all)`.
 
 - The wheel now ships the bundled compendium. The 0.6.0 wheel carried
   none of its compendium files (the package-data pattern missed the

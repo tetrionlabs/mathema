@@ -1480,6 +1480,11 @@ def validate_claims_file(data, rel_path: str) -> None:
             continue
         if not isinstance(claims, list):
             fail(key, f"`claims` is a {type(claims).__name__}, not a list")
+        from .policy import contradicting_policies
+        clash = contradicting_policies(
+            [c.get("statement") for c in claims if isinstance(c, dict)])
+        if clash:
+            fail(key, clash)
         seen: set = set()
         for i, c in enumerate(claims, 1):
             if not isinstance(c, dict):
@@ -2482,6 +2487,11 @@ def render_claim_text(cj, *, unicode: bool | None = None,
 
     Bars around a matrix read as its determinant, so the `abs` of a
     matrix the claim's domain declares keeps its call spelling."""
+    if getattr(cj, "relation", None) == "policy":
+        from .policy import parse_policy, policy_text
+        body = f"{cj.lhs} {cj.rhs}".strip()
+        stated = parse_policy((f"{cj.assuming}, " if cj.assuming else "") + body)
+        return policy_text(stated) if stated is not None else body
     from .grammar import _BAR_MATRICES, bars_over_matrices
     from .linalg import declared_matrix_names
     mats = declared_matrix_names(cj.domain) | _BAR_MATRICES.get()

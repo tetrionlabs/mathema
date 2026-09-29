@@ -555,6 +555,8 @@ class ExecutedMissing:
         from ._missing_policy import PolicyTable
         self.table: dict = {}
         self.said: dict = {}
+        # `{param: default}` of the function called, set by the route
+        self.defaults: dict = {}
         # the first call per (parameter, member): (value, output, raised,
         # behaviour)
         self.first: dict = {}
@@ -571,6 +573,10 @@ class ExecutedMissing:
         from ._missing_policy import (classify_call, keys_of, member_changes,
                                       no_value_slots)
         from ._missing_words import outcome_entry, said, value_shown
+        # a parameter left at its own default (numpy's `axis=None`) is no
+        # missing input
+        point = {p: v for p, v in point.items()
+                 if not (p in self.defaults and v is self.defaults[p])}
         keys = keys_of(point)
         if not keys:
             return
@@ -586,6 +592,8 @@ class ExecutedMissing:
                 shown = "None" if drawn is None else value_shown(drawn)
                 respelled.setdefault((p, word),
                                      f"{p}{where}={shown} returned as {back}")
+        from .policy import record_call
+        record_call(point, output, raised)
         for p, _kind, member in keys:
             in_slot = no_value_slots(point[p]).shape != ()
             entry = (outcome_entry(member, raised=raised) if raised is not None
@@ -660,6 +668,19 @@ class LastCall:
                 else:
                     executed.add_call(point, output=value)
         self.calls = []
+
+
+def signature_defaults(fn) -> dict:
+    """`{param: default}` for every parameter of `fn` that has one."""
+    import inspect
+
+    from ._signatures import callable_signature
+    try:
+        sig = callable_signature(fn)
+    except (TypeError, ValueError):
+        return {}
+    return {p: q.default for p, q in sig.parameters.items()
+            if q.default is not inspect.Parameter.empty}
 
 
 def executed_missing(kit: dict) -> "ExecutedMissing | None":

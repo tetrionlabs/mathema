@@ -19,6 +19,9 @@ polars.Series.mean:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) ~= mean(a)"
+    - name: nan_propagates
+      statement: "missing(f, a, nan) propagates"
+      note: "polars carries nan through as a float."
 
 polars.Series.std:
   claims:

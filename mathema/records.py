@@ -396,6 +396,8 @@ def statement_text(relation: str, lhs: str, rhs: str | None) -> str:
         return f"raises({lhs}, {rhs})" if rhs else f"raises({lhs})"
     if relation in examine_predicates():
         return f"{relation}({lhs})"
+    if relation == "policy":
+        return f"{lhs} {rhs}".strip()
     return f"{lhs} {relation} {rhs}"
 
 

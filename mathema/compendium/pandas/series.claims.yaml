@@ -19,6 +19,12 @@ pandas.Series.mean:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) ~= mean(a)"
+    - name: missing_skipped
+      statement: "assuming count(a) >= 1, missing(f, a) drops"
+      note: "skipna leaves the holes out while a value remains."
+    - name: all_missing_is_missing
+      statement: "assuming count(a) == 0, missing(f, a) propagates"
+      note: "A Series with no value has a missing mean."
 
 pandas.Series.std:
   claims:
@@ -40,6 +46,9 @@ pandas.Series.sum:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) ~= sum(a)"
+    - name: missing_skipped
+      statement: "missing(f, a) drops"
+      note: "skipna leaves the holes out; a Series with no value sums to 0."
 
 pandas.Series.prod:
   claims:

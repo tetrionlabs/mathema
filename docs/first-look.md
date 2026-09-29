@@ -55,7 +55,7 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (192 draws, sizes (2, 1) to (8, 1), up to 968 entries)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (192 draws, sizes (2, 1) to (8, 1), 968 entries in all)
   holds   is_representation_safe[alpha]: is_representation_safe(alpha) (20 draws)
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
            counterexample ([-993714, 311292, -166437, 620054, 0, 999998, -999998], 6.79181): -999998.0 vs -53425523112.88785
@@ -65,10 +65,10 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
            counterexample ([567047, -597790, -1e+06, 223930, 683724, -934060, -933610], -1.67919): 425108676.6026794 vs -181372134.92932475
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
-  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), up to 227 entries)
+  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), 227 entries in all)
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
-  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), up to 227 entries)
+  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), 227 entries in all)
 ```
 
 Every counterexample names the inputs that produced it, so a failure is
@@ -117,17 +117,17 @@ the picture, not just the wording (an excerpt, from the bounds on):
 <!-- example: ema output match=subset -->
 ```text
   proven  bounded_lower: min(x) <= f(x, alpha)
-  holds   bounded_lower[float]: min(x) <= f(x, alpha) (47 draws, sizes (1, 1) to (8, 1), up to 225 entries)
+  holds   bounded_lower[float]: min(x) <= f(x, alpha) (47 draws, sizes (1, 1) to (8, 1), 225 entries in all)
   proven  bounded_upper: f(x, alpha) <= max(x)
-  holds   bounded_upper[float]: f(x, alpha) <= max(x) (47 draws, sizes (1, 1) to (8, 1), up to 225 entries)
+  holds   bounded_upper[float]: f(x, alpha) <= max(x) (47 draws, sizes (1, 1) to (8, 1), 225 entries in all)
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
            counterexample ([-999998, 978369, 111462, -869239, -926712, -999998, -1e+06, 894282], 0.499951): -11445.14869760722 vs -341186.2123510968
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ
-  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), up to 227 entries)
+  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), 227 entries in all)
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ
-  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), up to 227 entries)
+  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha) (51 draws, sizes (1, 1) to (8, 1), 227 entries in all)
 ```
 
 Both bounds flip to `proven`. Inside `[0, 1]` each step of the loop is
@@ -180,10 +180,10 @@ print(mathema.check(ema, claims=collapses))
 <!-- example: ema output -->
 ```text
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
-  holds   collapses_probed: f(x, 1.0) = x[-1] (160 draws, sizes (2, 1) to (8, 1), up to 854 entries)
+  holds   collapses_probed: f(x, 1.0) = x[-1] (160 draws, sizes (2, 1) to (8, 1), 854 entries in all)
   proven  collapses_derived: f(x, 1.0) = x[-1]
            ∀ x ∈ Seq(ℝ)
-  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (45 draws, sizes (1, 1) to (8, 1), up to 208 entries)
+  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (45 draws, sizes (1, 1) to (8, 1), 208 entries in all)
 ```
 
 Both say the claim is true, but they are not the same kind of true.

@@ -14,6 +14,9 @@ numpy.mean:
       note: "Arithmetic mean; the mean of an empty array is nan with a RuntimeWarning, never raises."
     - name: definition
       statement: "for a in R^n, f(a) ~= mean(a)"
+    - name: missing_propagates
+      statement: "missing(f, a) propagates"
+      note: "A hole anywhere makes the mean nan."
 
 numpy.std:
   claims:

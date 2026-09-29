@@ -1241,6 +1241,22 @@ def _claim(law: str, name: str | None, source: str, route: str,
             f"`defines:` (`missing := {{null, nan}}`), and a binding "
             f"states its type after a colon, `x in [0, 1] : float`: "
             f"{law.strip()!r}")
+    from .policy import parse_policy, policy_text
+    stated_policy = parse_policy(law)
+    if stated_policy is not None:
+        # a policy claim: what f does with a value that is not there
+        text = policy_text(stated_policy)
+        body = policy_text(stated_policy, premise=False)
+        selector, _, word = body.partition(") ")
+        return Conjecture(
+            name=name or re.sub(r"\W+", "_", text).strip("_"),
+            lhs=selector + ")" if word else body, rhs=word, relation="policy",
+            source=source,
+            route="probe" if route == "best" else route, grammar=grammar,
+            meta=dict(meta or {}),
+            assuming=(f"assuming {stated_policy.premise}" if stated_policy.premise
+                      else ""),
+            raw=text)
     if re.match(r"^\s*is_absent_safe\s*\(", law) and not re.search(
             r"\bassuming\b", law):
         raise InvalidConjecture(
@@ -3288,14 +3304,48 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     # the signature's matrices read the bars as determinants; those and
     # the matrix runtime types also render as matrices, their products
     # in written order
+    from . import policy as _policy
+    # a policy claim is decided on the calls the other claims make, so
+    # it is adjudicated after them
+    built = [claim(c) if isinstance(c, str) else c for c in conjectures]
+    stated = [c for c in built if getattr(c, "relation", None) == "policy"]
+    values = [c for c in built if getattr(c, "relation", None) != "policy"]
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
-            matrices_in_view(fn_mats | runtime_mats):
-        return _check_conjectures(
-            fn, conjectures, domain=domain, trials=trials,
+            matrices_in_view(fn_mats | runtime_mats), _policy.batch():
+        out = _check_conjectures(
+            fn, values, domain=domain, trials=trials,
             trials_scale=trials_scale, facts=facts, extensive=extensive,
             known_premises=known_premises,
             float_companions=float_companions,
-            pseudo_infinity=pseudo_infinity)
+            pseudo_infinity=pseudo_infinity) if values else []
+        for p in out:
+            _policy.note_draws(p.name, p.n,
+                               ((p.meta or {}).get("mathema.missing") or {}).get("origin"))
+        if stated and facts is None:
+            from . import analyze as _analyze
+            facts = _analyze(fn)
+        if stated:
+            derived = _policy.guard_policies(facts)
+            clash = _policy.contradicting_policies(
+                [_policy.policy_text(_policy.parse_policy(
+                    (f"{c.assuming}, " if c.assuming else "") + f"{c.lhs} {c.rhs}".strip()))
+                 for c in stated])
+            if clash:
+                from .records import statement_text as policy_statement_text
+
+                def policy_statement(c):
+                    return policy_statement_text("policy", c.lhs, c.rhs)
+                for cj in stated:
+                    out.append(Probe(cj.name, policy_statement(cj), "skipped:misspecified",
+                                     route=None, note=clash,
+                                     meta={"mathema.invalid_conjecture": True}))
+                stated = []
+            for cj in stated:
+                row = _policy.adjudicate(cj, fn, facts, domain or {}, derived)
+                row.grammar = cj.grammar
+                row.meta = {**(row.meta or {}), **(cj.meta or {})}
+                out.append(row)
+        return out
 
 
 def _check_conjectures(fn, conjectures: list[Conjecture],
@@ -3472,7 +3522,9 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                        (cj.name for cj in conjectures)
                        if [c.name for c in conjectures].count(name) > 1}
     overflow_links = overflow_safe_links(conjectures)
+    from .policy import _CLAIM as _policy_claim
     for cj in ordered:
+        _policy_claim.set(cj.name)
         if overflow_links and not cj.overflow_safe \
                 and "is_defined" in (region_row_kind(cj.name),
                                      cj.relation):
@@ -7188,6 +7240,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # what the function did at each missing input it was called with
     from .probing import ExecutedMissing, LastCall, with_executed
     executed_record = ExecutedMissing()
+    from .probing import signature_defaults
+    executed_record.defaults = signature_defaults(fn)
     f_call = LastCall()
     from ._missing_words import declared_optional_return
     declared_return = declared_optional_return(fn)

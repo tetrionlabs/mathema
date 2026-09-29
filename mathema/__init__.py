@@ -164,6 +164,17 @@ class Record:
                     "skipped": "skip   ", "unknown": "unknown",
                     "invalidated": "INVALID"}.get(p.verdict.split(":", 1)[0], p.verdict)
             missing = (p.meta or {}).get("mathema.missing") or {}
+            pol = (p.meta or {}).get("mathema.policy")
+            if pol:
+                # a policy row: the claim, why it reads this way, and the
+                # next step when it does not hold
+                line = f"  {mark} {p.statement}"
+                if pol.get("reason"):
+                    line += f"   [{pol['reason']}]"
+                if pol.get("next") and p.verdict != "holds":
+                    line += f"\n           {pol['next']}"
+                lines.append(line)
+                continue
             if p.verdict == "proven":
                 # a proof has no trial count the way a probe does: the
                 # quantifier (who it holds for) stands in place of
@@ -655,14 +666,23 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     all_claims = entry_claims(merged_entry)
     if pseudo_infinity is None and declared is not None:
         pseudo_infinity = declared.get("pseudo_infinity")
-    if all_claims:
-        probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
-                                            trials=trials, trials_scale=trials_scale,
-                                            facts=facts, extensive=extensive,
-                                            known_premises=known_premises,
-                                            float_companions=True,
-                                            pseudo_infinity=pseudo_infinity)
-    else:
+    from . import policy as _policy
+    with _policy.batch():
+        if all_claims:
+            probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
+                                                trials=trials, trials_scale=trials_scale,
+                                                facts=facts, extensive=extensive,
+                                                known_premises=known_premises,
+                                                float_companions=True,
+                                                pseudo_infinity=pseudo_infinity)
+        # what f does with a value that is not there, for every parameter
+        # that admits one and no stated policy row covers
+        covered = {(pol["parameter"], pol["kind"]) for pol in
+                   ((p.meta or {}).get("mathema.policy") for p in probes)
+                   if pol and pol.get("parameter")}
+        probes = probes + _policy.default_rows(
+            fn, facts, parent_domain or {}, covered, _policy.row_name)
+    if not all_claims:
         # a bad function-level or project value refuses even with
         # nothing to adjudicate
         from .records import resolve_pseudo_infinity

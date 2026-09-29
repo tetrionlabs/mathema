@@ -82,7 +82,7 @@ def test_the_numbers_of_rows():
         "numpy/linalg.claims.yaml": (12, 21),
         "numpy/linalg_2_4.claims.yaml": (1, 1),
         "numpy/elementwise.claims.yaml": (6, 7),
-        "numpy/statistics.claims.yaml": (21, 24)}
+        "numpy/statistics.claims.yaml": (21, 27)}
 
 
 def test_no_row_restates_a_function_another_numpy_file_states():

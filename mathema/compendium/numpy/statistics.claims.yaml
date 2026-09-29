@@ -51,6 +51,9 @@ numpy.nansum:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) ~= sum(a)"
+    - name: missing_dropped
+      statement: "missing(f, a) drops"
+      note: "The holes are left out; an array with no value sums to 0."
 
 numpy.nanprod:
   claims:
@@ -61,6 +64,12 @@ numpy.nanmean:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) ~= mean(a)"
+    - name: missing_dropped
+      statement: "assuming count(a) >= 1, missing(f, a) drops"
+      note: "The holes are left out while a value remains."
+    - name: all_missing_is_nan
+      statement: "assuming count(a) == 0, missing(f, a) propagates"
+      note: "An array with no value has mean nan."
 
 numpy.nanstd:
   claims:
