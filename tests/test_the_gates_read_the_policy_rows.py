@@ -115,8 +115,7 @@ def test_a_raise_at_a_list_slot_falsifies_the_missing_gate():
 def test_a_drop_confirmed_by_execution_alone_holds():
     row = _gate(nan_sum, "is_missing_safe(f)", value="for xs in [0, 1]^n, f(xs) >= 0")
     assert row.verdict == "holds", row.note
-    assert row.sketch == ("xs (list): null drops, observed on the draws; nan drops, "
-                          "observed on the draws")
+    assert row.sketch == "xs (list): null and nan: drops, observed on the draws"
 
 
 def test_a_contradicted_stated_row_falsifies_the_gate():

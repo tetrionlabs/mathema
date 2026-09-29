@@ -263,3 +263,24 @@ def test_a_premised_library_row_remedy_keeps_its_premise():
     stated = [p for p in again.probes if p.statement in remedies]
     assert stated and all(p.verdict in ("holds", "proven") for p in stated), \
         [(p.statement, p.verdict, p.note) for p in stated]
+
+
+def test_one_switch_makes_mathemas_policy_rows_gate(monkeypatch):
+    from mathema import verify
+    rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
+                                                       name="c")])
+    assert verify.gate(rec.probes, strict=False).problems == []
+    monkeypatch.setattr(verify, "POLICY_ROWS_GATE", True)
+    report = verify.gate(rec.probes, strict=False)
+    assert report.falsified == 1
+    assert report.problems == [
+        "missing[x]: f drops a missing x (nan in, 1.0 out), the row says propagates; "
+        "change the word or the code"]
+
+
+def test_a_bare_raises_beside_a_named_one_is_no_clash():
+    from mathema.policy import contradicting_policies
+    assert contradicting_policies(["absent(f, x) raises(TypeError)",
+                                   "absent(f, x) raises"]) is None
+    assert contradicting_policies(["absent(f, x) raises(TypeError)",
+                                   "absent(f, x) raises(ValueError)"]) is not None

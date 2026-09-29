@@ -318,6 +318,17 @@ def mixed_sentence(param: str, ways_by_member: dict, raised_by_member: dict,
         clauses.append(f"gives a hole back when every slot is missing ({where(holes)})"
                        if every else f"gives a hole back at {where(holes)}")
     text = "f " + " and ".join(clauses) if clauses else ""
+    # members that each raise the same exception when every slot holds
+    # them are said once
+    whole = [(m, at) for m, at in raises if container_noun
+             and _all_member(at.split(" = ", 1)[-1], m) and at.count(" = ") == 1]
+    excs = {raised_by_member.get(m) for m, _at in whole}
+    if len(whole) > 1 and len(excs) == 1:
+        exc = next(iter(excs)) or "an exception"
+        members = ", ".join(m for m, _at in whole)
+        tail = (f"when every slot is missing ({members}) it raises {exc} instead")
+        text = f"{text}; {tail}" if text else f"f raises {exc} {tail.split(' it raises')[0]}"
+        raises = [r for r in raises if r not in whole]
     for member, at in raises:
         exc = raised_by_member.get(member) or "an exception"
         spot = (f"an all-{member} {container_noun}" if container_noun

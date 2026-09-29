@@ -547,16 +547,17 @@ def _admitted_spelling(value: float, bounds):
 
 
 def _emptiness_guard_params(facts) -> set:
-    """Every sequence parameter fn's own body guards against emptiness
-    with an explicit raising check, `if not xs: raise` or
-    `if len(xs) == 0: raise` (a compound condition counts for the
-    part that matches). The is_empty_safe relevance gate and the
-    deliberate-rejection signal its derive half reads."""
+    """Every container parameter fn's own body guards against emptiness
+    with an explicit raising check, `if not xs: raise`, `if len(xs) ==
+    0: raise`, `if xs.empty: raise` or `if xs.count() == 0: raise` (no
+    value slot, so none when it is empty either); a compound condition
+    counts for the part that matches. The is_empty_safe relevance gate
+    and the deliberate-rejection signal its derive half reads."""
     tree = facts.tree
     if tree is None:
         return set()
     pset = {p for p in facts.params
-            if facts.param_kinds.get(p) in SEQUENCE_KINDS}
+            if facts.param_kinds.get(p) in (*SEQUENCE_KINDS, "table")}
     if not pset:
         return set()
 
@@ -577,6 +578,19 @@ def _emptiness_guard_params(facts) -> set:
                     and isinstance(node.comparators[0], ast.Constant)
                     and node.comparators[0].value in (0, 1)):
                 found.add(node.left.args[0].id)  # len(xs) == 0 / < 1
+            if (isinstance(node, ast.Attribute) and node.attr == "empty"
+                    and isinstance(node.value, ast.Name) and node.value.id in pset):
+                found.add(node.value.id)         # xs.empty
+            if (isinstance(node, ast.Compare) and len(node.ops) == 1
+                    and isinstance(node.ops[0], (ast.Eq, ast.Lt, ast.LtE))
+                    and isinstance(node.left, ast.Call)
+                    and isinstance(node.left.func, ast.Attribute)
+                    and node.left.func.attr in ("count", "size")
+                    and isinstance(node.left.func.value, ast.Name)
+                    and node.left.func.value.id in pset
+                    and isinstance(node.comparators[0], ast.Constant)
+                    and node.comparators[0].value in (0, 1)):
+                found.add(node.left.func.value.id)  # xs.count() == 0
         return found
 
     out: set = set()

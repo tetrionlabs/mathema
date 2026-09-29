@@ -46,7 +46,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from typing import Optional
+
     import pandas
+    import polars
 
 LEXICON: dict[str, str] = {
     # one construct at a time -----------------------------------
@@ -462,6 +465,29 @@ LEXICON: dict[str, str] = {
     "language_length_bound": "for s in L[unicode, len <= 80], len(f(s)) <= 80",
     "containment_absent": 'for s in L[unicode], "<" not in f(s)',
     "membership_interval_reduces_to_chain": "for x in [0, 1], f(x) in [0, 1]",
+    # what a function does with a value that is not there: a policy row
+    # names the kind (`missing`, a hole in a slot; `absent`, the object
+    # not there), the parameter, optionally one member, and one of five
+    # behaviours counted in no-value slots
+    "missing_propagates": "missing(f, x) propagates",
+    "missing_drops": "missing(f, x) drops",
+    "missing_raises": "missing(f, x) raises(ValueError)",
+    "missing_converts": "missing(f, x) converts",
+    "missing_introduces": "missing(f, x) introduces",
+    "absent_raises": "absent(f, x) raises(TypeError)",
+    "absent_drops": "absent(f, scale) drops",
+    "absent_propagates": "absent(f, x) propagates",
+    "absent_converts": "absent(f, x) converts",
+    "missing_member_null": "missing(f, xs, null) raises(TypeError)",
+    "missing_member_nan": "missing(f, xs, nan) propagates",
+    "missing_premise_values_remain": "assuming count(xs) >= 1, missing(f, xs) drops",
+    "missing_premise_no_values": "assuming count(xs) == 0, missing(f, xs, nan) propagates",
+    "missing_member_defined": "assuming count(xs) >= 1, missing(f, xs, null) drops",
+    "missing_trap_comparison": "missing(f, x) drops",
+    "missing_predicate_sugar": "missing_propagates(f, x)",
+    "absent_none_spelling": "None(f, x) raises",
+    "is_missing_safe_gate": "is_missing_safe(f)",
+    "is_absent_safe_gate": "is_absent_safe(f)",
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -567,6 +593,15 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "mixed_backslash_greek_and_unicode_relation",
         "stress_gauge_invariance", "stress_mixed_let_and_types",
         "chained_comparison", "euler_via_exp"),
+    "missing": (
+        "missing_propagates", "missing_drops", "missing_raises",
+        "missing_converts", "missing_introduces", "absent_raises",
+        "absent_drops", "absent_propagates", "absent_converts",
+        "missing_member_null", "missing_member_nan",
+        "missing_premise_values_remain", "missing_premise_no_values",
+        "missing_member_defined", "missing_trap_comparison",
+        "missing_predicate_sugar", "absent_none_spelling",
+        "is_missing_safe_gate", "is_absent_safe_gate"),
     "languages": (
         "language_alphabet", "language_contraction",
         "language_excluding_empty", "language_membership_symbol",
@@ -676,6 +711,30 @@ TAGS: dict[str, tuple[str, ...]] = {
                                      "conformable", "premise", "symmetry"),
     "premise_relates_two_params": ("premise", "relates two parameters",
                                    "ordering premise", "not a box"),
+    "missing_propagates": ("missing", "nan", "hole", "propagates", "policy"),
+    "missing_drops": ("missing", "nan", "hole", "drops", "clamp", "silent"),
+    "missing_raises": ("missing", "nan", "hole", "raises", "guard"),
+    "missing_converts": ("missing", "nan", "converts", "optional", "None out"),
+    "missing_introduces": ("missing", "nan", "introduces", "more holes"),
+    "absent_raises": ("absent", "None", "optional", "raises", "TypeError"),
+    "absent_drops": ("absent", "None", "optional", "drops", "flag", "default"),
+    "absent_propagates": ("absent", "None", "optional", "propagates"),
+    "absent_converts": ("absent", "None", "optional", "converts", "nan out"),
+    "missing_member_null": ("missing", "null", "hole", "member", "raises",
+                            "list", "None element"),
+    "missing_member_nan": ("missing", "nan", "hole", "member", "propagates"),
+    "missing_premise_values_remain": ("missing", "NA", "skipna", "drops",
+                                      "count", "pandas", "mean"),
+    "missing_premise_no_values": ("missing", "nan", "skipna", "propagates",
+                                  "count", "all missing", "mean of nothing"),
+    "missing_member_defined": ("missing", "null", "polars", "axiom",
+                               "definition", "drops"),
+    "missing_trap_comparison": ("missing", "nan", "drops", "comparison",
+                                "trap", "silent"),
+    "missing_predicate_sugar": ("missing", "propagates", "sugar"),
+    "absent_none_spelling": ("absent", "None", "raises", "spelling"),
+    "is_missing_safe_gate": ("missing", "hole", "gate", "safety", "NaT"),
+    "is_absent_safe_gate": ("absent", "None", "optional", "gate", "safety"),
 }
 
 
@@ -1265,6 +1324,78 @@ def unescape_angle(s: str) -> str:
     return s.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
 
 
+def root_of(x: float) -> float:
+    """The square root; a hole comes back as `math.sqrt` gives it."""
+    import math
+    return math.sqrt(x)
+
+
+def root_of_optional(x: "Optional[float]") -> float:
+    """The square root of an input that may be absent, which it does not
+    handle: `math.sqrt(None)` raises TypeError."""
+    import math
+    return math.sqrt(x)
+
+
+def clamp_unit(x: float) -> float:
+    """Clamped into [0, 1]; `min(1.0, nan)` is 1.0, so a hole becomes
+    1.0 (a drop)."""
+    return max(0.0, min(1.0, x))
+
+
+def root_guarded(x: float) -> float:
+    """The square root, rejecting a hole with a guard."""
+    import math
+    if x != x:
+        raise ValueError("x is missing")
+    return math.sqrt(x)
+
+
+def none_for_hole(x: float) -> "Optional[float]":
+    """A hole in, `None` out: a change of kind (converts)."""
+    return None if x != x else x
+
+
+def hole_for_none(x: "Optional[float]") -> float:
+    """`None` in, `nan` out: a change of kind (converts)."""
+    return float("nan") if x is None else x
+
+
+def none_through(x: "Optional[float]") -> "Optional[float]":
+    """`None` passed back as `None` (propagates)."""
+    return None if x is None else 2.0 * x
+
+
+def pair_of(x: float) -> list:
+    """Two copies of x: a hole in, two out (introduces)."""
+    return [x, x]
+
+
+def scaled_by(x: float, scale: "Optional[float]" = None) -> float:
+    """x times scale, `None` meaning no scale: the flag is replaced, so an
+    absent scale is dropped."""
+    if scale is None:
+        scale = 1.0
+    return x * scale
+
+
+def list_total(xs: list) -> float:
+    """`sum` over a list: a `None` element (the member null) raises, a
+    `nan` element propagates."""
+    return sum(xs)
+
+
+def high_or_low(x: float) -> str:
+    """`nan > 0.5` is False, so a hole reads as "low" (a drop)."""
+    return "high" if x > 0.5 else "low"
+
+
+def polars_mean(xs: "polars.Series") -> float:
+    """The mean of a polars Series, which skips its nulls while values
+    remain."""
+    return float(xs.mean())
+
+
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "collapse_spaces": (collapse_spaces, [
         "language_alphabet", "language_contraction",
@@ -1279,7 +1410,22 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "scale_column": (scale_column, ["table_column_attribute",
                                     "table_column_item"]),
     "running_peak": (running_peak, ["vector_running_maximum"]),
-    "series_mean": (series_mean, ["vector_between_least_and_greatest"]),
+    "series_mean": (series_mean, ["vector_between_least_and_greatest",
+                                  "missing_premise_values_remain",
+                                  "missing_premise_no_values"]),
+    "root_of": (root_of, ["missing_propagates", "missing_predicate_sugar",
+                          "is_missing_safe_gate"]),
+    "root_of_optional": (root_of_optional, ["absent_raises", "absent_none_spelling"]),
+    "clamp_unit": (clamp_unit, ["missing_drops"]),
+    "root_guarded": (root_guarded, ["missing_raises"]),
+    "none_for_hole": (none_for_hole, ["missing_converts"]),
+    "hole_for_none": (hole_for_none, ["absent_converts"]),
+    "none_through": (none_through, ["absent_propagates", "is_absent_safe_gate"]),
+    "pair_of": (pair_of, ["missing_introduces"]),
+    "scaled_by": (scaled_by, ["absent_drops"]),
+    "list_total": (list_total, ["missing_member_null", "missing_member_nan"]),
+    "high_or_low": (high_or_low, ["missing_trap_comparison"]),
+    "polars_mean": (polars_mean, ["missing_member_defined"]),
     "max_drawdown": (max_drawdown, ["vector_drawdown_bounds"]),
     "weighted_return": (weighted_return, ["table_columns_dot"]),
     "nearly_identity": (nearly_identity, [

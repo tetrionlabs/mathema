@@ -1149,8 +1149,9 @@ def contradicting_policies(statements: list) -> "str | None":
             continue
         key = (stated.kind, stated.parameter, stated.member, stated.premise)
         other = seen.get(key)
-        if other is not None and (other.behaviour, other.exception) != \
-                (stated.behaviour, stated.exception):
+        if other is not None and (other.behaviour != stated.behaviour or (
+                other.exception and stated.exception
+                and other.exception != stated.exception)):
             return (f"`{policy_text(other)}` and `{policy_text(stated)}` state two "
                     f"behaviours for one case. Keep one (the record shows which f "
                     f"follows), or give each a premise on another parameter or on "
@@ -1311,6 +1312,22 @@ def _library_for(composed: dict, p: str, kind: str, member: str) -> list:
             if pol.kind == kind and pol.member in (member, None)]
 
 
+def _by_member(said: list) -> str:
+    """Per-member clauses (`nan drops, ...`), members saying the same
+    thing said once: `nan, null and NA: drops when values remain, ...`."""
+    groups: dict = {}
+    for clause in said:
+        member, _, rest = clause.partition(" ")
+        groups.setdefault(rest, []).append(member)
+    if len(groups) == len(said):
+        return "; ".join(said)
+    out = []
+    for rest, members in groups.items():
+        out.append(f"{members[0]} {rest}" if len(members) == 1
+                   else f"{_and(members)}: {rest}")
+    return "; ".join(out)
+
+
 def _library_words(policies: list) -> str:
     """What premised library rows say, in words: `drops when values
     remain and propagates when every slot is missing`."""
@@ -1426,9 +1443,34 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
             did = f"raises {call.raised}" if behaviour == "raises" else behaviour
             guard = guard_here
             library = library_here
-            if stated:
+            if stated and not premised:
                 entry["source"] = "stated"
-                said.append(f"{m} {did if not premised else 'as stated'}, stated")
+                said.append(f"{m} {did}, stated")
+                continue
+            if premised:
+                # premised stated rows speak for their calls; a library
+                # row speaks for the calls no stated premise covers
+                stated_pols = [parse_policy(r.statement) for r in premised]
+                stated_pols = [q for q in stated_pols if q is not None]
+                rest = [pol for pol in library
+                        if pol.premise not in {q.premise for q in stated_pols}]
+                uncovered = [c for c in calls
+                             if not any(_premise_holds(q.premise, c.point)
+                                        for q in stated_pols + rest)]
+                broken = next((c for c in calls for pol in rest
+                               if _premise_holds(pol.premise, c.point)
+                               and not _follows(pol, c)), None)
+                if uncovered or broken is not None:
+                    bad = broken or uncovered[0]
+                    failures.append(f"no policy row covers {_witness(bad)}")
+                    witness = witness or _witness(bad)
+                    said.append(f"{m} at {_at(bad, p)} is covered by no row")
+                    continue
+                entry["source"] = "stated"
+                pieces = [f"{_library_words([q])}, from {composed[p][0]}'s own "
+                          f"policy row" for q in rest]
+                pieces += [f"{_library_words([q])}, stated" for q in stated_pols]
+                said.append(f"{m} " + "; ".join(pieces))
                 continue
             if guard is not None:
                 entry["source"] = "guard"
@@ -1476,7 +1518,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
         if guarded and set(guarded) != set(members):
             cover = (f"; the guard covers {_and(guarded)}, not "
                      f"{_and([m for m in members if m not in guarded])}")
-        parts.append(f"{p} ({slot}): {'; '.join(said)}{cover}")
+        parts.append(f"{p} ({slot}): {_by_member(said)}{cover}")
         if guarded:
             table.setdefault(p, [])
             for e in table[p]:

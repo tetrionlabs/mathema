@@ -85,6 +85,13 @@ class GateReport:
         return self.falsified + self.invalidated
 
 
+#: whether a policy row mathema wrote that does not hold (a contradicted
+#: default, a raise no claim accounts for) fails the gate and counts as
+#: falsified, as a declared claim does; off, it is reported beside the
+#: counts and the function passes
+POLICY_ROWS_GATE = False
+
+
 def _unaccounted_text(report) -> str:
     """One clause per policy row mathema wrote that does not hold:
     `; missing[x]: f drops a missing x (nan in, 1.0 out), the row says
@@ -222,10 +229,13 @@ def gate(claims, *, strict: bool,
         pol = meta.get("mathema.policy")
         if pol and classify_verdict(verdict) == "falsified":
             clause = _policy_clause(name, _claim_statement(c), pol)
-            if clause and _volunteered(meta, note) and clause not in r.unaccounted:
-                r.unaccounted.append(clause)
+            if clause and _volunteered(meta, note) and not POLICY_ROWS_GATE:
+                if clause not in r.unaccounted:
+                    r.unaccounted.append(clause)
             elif clause:
                 r.policy_problems.append(clause)
+                if _volunteered(meta, note):
+                    r.falsified += 1
         if _volunteered(meta, note):
             continue
         kind = classify_verdict(verdict)

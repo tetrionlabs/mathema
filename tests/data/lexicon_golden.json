@@ -953,5 +953,100 @@
   "input": "for x in [0, 1], f(x) in [0, 1]",
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, 0 ≤ f(x) ≤ 1",
   "ascii": "for x in [0.0, 1.0] : float|absent|missing, 0 <= f(x) <= 1"
+ },
+ "missing_propagates": {
+  "input": "missing(f, x) propagates",
+  "unicode": "missing(f, x) propagates",
+  "ascii": "missing(f, x) propagates"
+ },
+ "missing_drops": {
+  "input": "missing(f, x) drops",
+  "unicode": "missing(f, x) drops",
+  "ascii": "missing(f, x) drops"
+ },
+ "missing_raises": {
+  "input": "missing(f, x) raises(ValueError)",
+  "unicode": "missing(f, x) raises(ValueError)",
+  "ascii": "missing(f, x) raises(ValueError)"
+ },
+ "missing_converts": {
+  "input": "missing(f, x) converts",
+  "unicode": "missing(f, x) converts",
+  "ascii": "missing(f, x) converts"
+ },
+ "missing_introduces": {
+  "input": "missing(f, x) introduces",
+  "unicode": "missing(f, x) introduces",
+  "ascii": "missing(f, x) introduces"
+ },
+ "absent_raises": {
+  "input": "absent(f, x) raises(TypeError)",
+  "unicode": "absent(f, x) raises(TypeError)",
+  "ascii": "absent(f, x) raises(TypeError)"
+ },
+ "absent_drops": {
+  "input": "absent(f, scale) drops",
+  "unicode": "absent(f, scale) drops",
+  "ascii": "absent(f, scale) drops"
+ },
+ "absent_propagates": {
+  "input": "absent(f, x) propagates",
+  "unicode": "absent(f, x) propagates",
+  "ascii": "absent(f, x) propagates"
+ },
+ "absent_converts": {
+  "input": "absent(f, x) converts",
+  "unicode": "absent(f, x) converts",
+  "ascii": "absent(f, x) converts"
+ },
+ "missing_member_null": {
+  "input": "missing(f, xs, null) raises(TypeError)",
+  "unicode": "missing(f, xs, null) raises(TypeError)",
+  "ascii": "missing(f, xs, null) raises(TypeError)"
+ },
+ "missing_member_nan": {
+  "input": "missing(f, xs, nan) propagates",
+  "unicode": "missing(f, xs, nan) propagates",
+  "ascii": "missing(f, xs, nan) propagates"
+ },
+ "missing_premise_values_remain": {
+  "input": "assuming count(xs) >= 1, missing(f, xs) drops",
+  "unicode": "assuming count(xs) >= 1, missing(f, xs) drops",
+  "ascii": "assuming count(xs) >= 1, missing(f, xs) drops"
+ },
+ "missing_premise_no_values": {
+  "input": "assuming count(xs) == 0, missing(f, xs, nan) propagates",
+  "unicode": "assuming count(xs) == 0, missing(f, xs, nan) propagates",
+  "ascii": "assuming count(xs) == 0, missing(f, xs, nan) propagates"
+ },
+ "missing_member_defined": {
+  "input": "assuming count(xs) >= 1, missing(f, xs, null) drops",
+  "unicode": "assuming count(xs) >= 1, missing(f, xs, null) drops",
+  "ascii": "assuming count(xs) >= 1, missing(f, xs, null) drops"
+ },
+ "missing_trap_comparison": {
+  "input": "missing(f, x) drops",
+  "unicode": "missing(f, x) drops",
+  "ascii": "missing(f, x) drops"
+ },
+ "missing_predicate_sugar": {
+  "input": "missing_propagates(f, x)",
+  "unicode": "missing(f, x) propagates",
+  "ascii": "missing(f, x) propagates"
+ },
+ "absent_none_spelling": {
+  "input": "None(f, x) raises",
+  "unicode": "absent(f, x) raises",
+  "ascii": "absent(f, x) raises"
+ },
+ "is_missing_safe_gate": {
+  "input": "is_missing_safe(f)",
+  "unicode": "f is missing safe",
+  "ascii": "is_missing_safe(f)"
+ },
+ "is_absent_safe_gate": {
+  "input": "is_absent_safe(f)",
+  "unicode": "f is absent safe",
+  "ascii": "is_absent_safe(f)"
  }
 }

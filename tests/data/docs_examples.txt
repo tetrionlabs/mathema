@@ -61,6 +61,17 @@
 [x] docs/matrix-structure.md:lemmas              run verdicts verdicts verdicts verdicts verdicts
 [x] docs/matrix-structure.md:numpy-functions     run verdicts verdicts  (requires)
 [x] docs/matrix-structure.md:enforce-structure   run  (requires)
+[x] docs/mean-of-nothing.md:mean                 file run output run output run output run output file run output
+[x] docs/missing-values.md:kinds                 file run output
+[x] docs/missing-values.md:admits                run output
+[x] docs/missing-values.md:traps                 run output
+[x] docs/missing-values.md:core                  file run output run output run output run output run output run output
+[x] docs/missing-values.md:containers            file run output
+[x] docs/missing-values.md:write                 file session session session
+[x] docs/missing-values.md:defines               run output
+[x] docs/missing-values.md:gates                 file run output
+[x] docs/missing-values.md:enforce               run output
+[-] docs/missing-values.md:429
 [x] docs/modes/accept.md:balance                 file file session session run file session session
 [x] docs/modes/audit.md:branches                 file session
 [x] docs/modes/audit.md:half                     run repl
@@ -97,4 +108,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 82 examples checked, 4 output fences not yet marked
+# 92 examples checked, 4 output fences not yet marked

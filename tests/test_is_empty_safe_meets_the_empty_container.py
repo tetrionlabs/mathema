@@ -39,6 +39,12 @@ def mean_list(xs: list) -> float:
     return statistics.mean(xs)
 
 
+def mean_counted(xs: pd.Series) -> float:
+    if xs.count() == 0:
+        raise ValueError("no values")
+    return float(xs.mean())
+
+
 def mean_guarded(xs: list) -> float:
     if len(xs) == 0:
         raise ValueError("empty")
@@ -101,3 +107,7 @@ def test_a_scalar_parameter_is_misspecified():
     row = _row(scalar, "is_empty_safe(x)")
     assert row.verdict == "skipped:misspecified"
     assert row.note == "x is a scalar; empty applies to a container"
+
+
+def test_a_count_guard_is_an_emptiness_guard():
+    assert _row(mean_counted, "is_empty_safe(xs)").verdict == "proven"

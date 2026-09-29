@@ -117,6 +117,7 @@ nav:
       - A first look: first-look.md
       - The CDD loop, end to end: tutorial.md
       - Case studies: case-studies.md
+      - "Case study: the mean of nothing": mean-of-nothing.md
   - Concepts:
       - Guarantees and limits: guarantees.md
       - The evidence ladder: evidence-ladder.md
@@ -133,6 +134,7 @@ nav:
       - Lemmas: lemmas.md
       - Matrix structure and linear algebra: matrix-structure.md
       - "Runtime types: numpy, pandas, polars": runtime-types.md
+      - Missing values: missing-values.md
       - Language domains: language.md
       - Multi-function claims: multi-function-claims.md
   - Command reference:
