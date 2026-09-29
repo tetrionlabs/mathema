@@ -211,6 +211,14 @@ Notable changes to mathema are recorded here from its first public release onwar
   inside the claim's domain, exclusions included: over `L[unicode] \ {""}`
   a crash on `''` is labelled outside `L[unicode] \ {""}`, not inside
   `L[unicode]`.
+- A norm can be written with double bars, the order a subscript on the
+  closing bars: `||x||` is `norm(x)` (Euclidean for a vector, Frobenius
+  for a matrix), `||x||_1`, `||x||_2`, `||x||_inf` (also `_oo`, `_∞`)
+  and `||x||_p` for an integer `p >= 1` are `norm(x, 1)` and so on, and
+  `||x||^2` is the square of the norm. Unicode reads and writes `‖x‖`,
+  `‖x‖₂`, `‖x‖∞`. A claim renders in the spelling it was written in, a
+  bare `||x||` names the norm it resolved to in the record's note, and
+  any other order is refused naming the accepted ones.
 
 ## 0.6.0
 
