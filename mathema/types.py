@@ -474,17 +474,20 @@ def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: set,
 
 
 def _size_enforced_probe(fn, sig, param_dims: dict, names: set,
-                         rng: random.Random,
+                         rng: random.Random, marker_dims: dict,
                          fixed: "dict | None" = None) -> Probe | None:
     """Does the real function reject a value of the wrong FIXED size (a
-    parameter marked `Mat(30, 15)`, or bound to `^30`, called with one
-    axis a little larger), the fixed-size counterpart of
-    `_dimensions_enforced_probe`. Every other argument is drawn at its
-    declared size. `None` when no parameter fixes an axis."""
+    parameter marked `Mat(30, 15)` called with one axis a little
+    larger), the fixed-size counterpart of `_dimensions_enforced_probe`.
+    Only a size a MARKER states (`marker_dims`, the signature's own
+    shapes) is asked about: a size stated only by a claim's binding is
+    the declared `excluded_outside_domain(p)` claim's question. Every
+    other argument is drawn at its declared size. `None` when no marker
+    fixes an axis."""
     from ._shapes import expected, words
     targets = {p: [k for k, d in enumerate(dims)
                    if isinstance(d, int) and not isinstance(d, bool)]
-               for p, dims in param_dims.items()}
+               for p, dims in marker_dims.items() if p in param_dims}
     targets = {p: axes for p, axes in targets.items() if axes}
     if not targets:
         return None
@@ -555,14 +558,17 @@ def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS,
       data-dependent or not, this is always well-defined: either it
       guards its input or it doesn't. See _dimensions_enforced_probe().
     - `size_enforced`: does the function reject a value of the wrong
-      fixed size, for a parameter whose marker or binding fixes an axis.
-      See _size_enforced_probe().
+      fixed size, for a parameter whose MARKER fixes an axis. A size a
+      claim's binding alone fixes gates nothing here; that question is
+      the declared `excluded_outside_domain(p)` claim. See
+      _size_enforced_probe().
 
     Empty if neither the signature nor a binding shapes a parameter;
     this is purely additive, never a claim about a function that never
     opted in."""
     from ._shapes import dims_of, fixed_size
-    shapes = dict(shapes_from_signature(fn))
+    markers = shapes_from_signature(fn)
+    shapes = dict(markers)
     try:
         sig = callable_signature(fn)
     except (TypeError, ValueError):
@@ -626,6 +632,7 @@ def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS,
         if enforced is not None:
             probes.append(enforced)
     sized = _size_enforced_probe(fn, sig, param_dims, names, rng,
+                                 {p: m.dims for p, m in markers.items()},
                                  fixed_by_binding)
     if sized is not None:
         probes.append(sized)

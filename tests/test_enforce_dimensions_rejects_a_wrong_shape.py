@@ -140,3 +140,59 @@ def test_the_premise_guard_still_applies():
     assert head([1.0, 2.0, 3.0]) == 6.0
     with pytest.raises(ValueError, match=">= 3"):
         head([1.0, 2.0])
+
+
+def test_it_auto_declares_the_exclusion_for_its_parameters():
+    """The decorator that makes wrong-shape rejection true also declares
+    it, as `@enforce_domain()` does: one `excluded_outside_domain(p)`
+    per checked parameter, proven by construction."""
+    import mathema
+    matvec = _matvec()
+    declared = {c["name"]: c["statement"]
+                for c in getattr(matvec, "__mathema_claims__", [])}
+    assert declared == {"excluded_outside_domain[a]": "excluded_outside_domain(a)",
+                        "excluded_outside_domain[x]": "excluded_outside_domain(x)"}
+    rec = mathema.check(matvec, claims=[])
+    rows = {p.name: p for p in rec.probes if p.name.startswith("excluded_outside_domain")}
+    assert set(rows) == set(declared), rows
+    for p in rows.values():
+        assert p.verdict == "proven", (p.name, p.verdict, p.note)
+        assert "enforce_dimensions" in (p.sketch or ""), p.sketch
+    with pytest.raises(ValueError):
+        matvec([1, 2, 3], [1, 2, 3])
+
+
+def test_stacking_in_either_order_gives_the_same_rows_and_errors():
+    import mathema
+
+    def build(outer, inner):
+        @outer()
+        @inner()
+        @claims_decorator("for x in [0, 1]^3, f(x) >= 0")
+        def total(x: Vec(3)) -> float:
+            """Sum of three values in [0, 1]."""
+            return sum(x)
+        return total
+
+    first = build(enforce_dimensions, enforce_domain)
+    second = build(enforce_domain, enforce_dimensions)
+    declared = [sorted((c["name"], c["statement"])
+                       for c in getattr(fn, "__mathema_claims__", []))
+                for fn in (first, second)]
+    assert declared[0] == declared[1], declared
+    assert ("excluded_outside_domain[x]", "excluded_outside_domain(x)") in declared[0]
+    rows = [sorted((p.name, p.verdict) for p in mathema.check(fn, claims=[]).probes)
+            for fn in (first, second)]
+    assert rows[0] == rows[1], rows
+    assert ("excluded_outside_domain[x]", "proven") in rows[0], rows[0]
+    errors = []
+    for fn in (first, second):
+        assert fn([0.5, 0.5, 0.5]) == 1.5
+        with pytest.raises(ValueError) as short:
+            fn([0.5, 0.5])
+        with pytest.raises(ValueError) as outside:
+            fn([0.5, 0.5, 1.5])
+        errors.append((str(short.value), str(outside.value)))
+    assert errors[0] == errors[1], errors
+    assert "x has length 2" in errors[0][0], errors[0]
+    assert "outside its declared domain" in errors[0][1], errors[0]

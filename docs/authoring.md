@@ -239,11 +239,15 @@ absent:
 ∀ x ∈ [0, 100] ⊂ ℤ \ {∅}         # from [0, 100] ⊂ Z \ {∅}: missing excluded
 ```
 
-`enforce_domain()` (and, in `strict=True` probing, the `domain_enforced`
-prober) checks a sequence argument element by element against its
-declared domain, including this missing-value policy, an out-of-bounds
-or unexpectedly-missing element is rejected the same way a scalar
-argument outside its own domain already is.
+`enforce_domain()` checks a sequence argument element by element
+against its declared domain, including this missing-value policy; an
+out-of-bounds or unexpectedly-missing element is rejected the same way
+a scalar argument outside its own domain already is, and
+`enforce_dimensions()` rejects a wrong shape the same way. Whether the
+code rejects what lies outside a declared domain, a value or a shape,
+is the declared claim `excluded_outside_domain(p)`: stated by the
+author (the `excluding` keyword), or auto-declared by either decorator
+for each parameter it guards, and then proven by construction.
 
 ### Language domains
 

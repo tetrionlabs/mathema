@@ -5,7 +5,8 @@ binding as well as from a marker, so `for A in R^(30,15)` with a return
 marker gets the output check and draws the fixed input size. The
 `dimensions_enforced` probe (formerly `shape_enforced`) asks whether the
 function rejects a mismatch on a shared dimension, and the
-`size_enforced` probe whether it rejects a wrong fixed size."""
+`size_enforced` probe whether it rejects a wrong fixed size a marker
+states; a fixed size stated only by a claim's binding emits no row."""
 import importlib.util
 import re
 import textwrap
@@ -48,14 +49,10 @@ def test_the_shape_probe_reads_a_fixed_binding_and_draws_it(tmp_path):
     rec = mathema.check(m.transpose, claims=["for A in R^(30,15), f(A) == f(A)"])
     (shape,) = [p for p in rec.probes if p.name == "shape"]
     assert shape.verdict == "holds", (shape.verdict, shape.note, shape.counterexample)
-    # every draw is 30 by 15, apart from the `size_enforced` probe's own
-    # deliberate mismatches, one axis a little larger
-    assert (30, 15) in set(m.SEEN), sorted(set(m.SEEN))
-    others = set(m.SEEN) - {(30, 15)}
-    assert all(sum(a != b for a, b in zip(s, (30, 15))) == 1
-               and 0 < max(s[0] - 30, s[1] - 15) <= 3 for s in others), sorted(others)
-    (size,) = [p for p in rec.probes if p.name == "size_enforced"]
-    assert size.n == len([s for s in m.SEEN if s != (30, 15)]), (size.n, m.SEEN)
+    # every draw is 30 by 15: a fixed size stated only by the binding
+    # emits no `size_enforced` row, so nothing tries another size
+    assert set(m.SEEN) == {(30, 15)}, sorted(set(m.SEEN))
+    assert not [p for p in rec.probes if p.name == "size_enforced"]
     rec = mathema.check(m.not_transposed,
                         claims=["for A in R^(30,15), f(A) == f(A)"])
     (shape,) = [p for p in rec.probes if p.name == "shape"]
@@ -125,6 +122,40 @@ def test_size_enforced_witnesses_an_accepted_wrong_fixed_size():
     assert all(re.fullmatch(r"A is \d+ by \d+ where the shape fixes 30 by 15", e)
                for e in entries), entries
     assert probe.n == 6, probe.n
+
+
+def test_a_binding_only_fixed_size_emits_no_size_row_and_passes(tmp_path):
+    """A marker gates, a claim binding does not: an unguarded function
+    with a fixed-shape claim passes `check` and `verify` on that claim
+    alone. Whether the code rejects a wrong shape is the declared
+    `excluded_outside_domain(A)` claim's question."""
+    from mathema.verify import gate
+    pytest.importorskip("numpy")
+    m = _load(tmp_path, "binding_only_mod", '''
+        import numpy as np
+
+
+        def frob(A: np.ndarray) -> float:
+            """Sum of squares of every entry, whatever the shape."""
+            return float((A * A).sum())
+    ''')
+    rec = mathema.check(m.frob, claims=["for A in R^(30,15), f(A) >= 0"])
+    names = {p.name for p in rec.probes}
+    assert "size_enforced" not in names, names
+    report = gate(rec.probes, strict=False)
+    assert report.problems == [], (report.problems, [(p.name, p.verdict) for p in rec.probes])
+
+
+def test_a_marker_fixed_size_emits_the_row_and_gates():
+    from mathema.verify import gate
+
+    def diag_sum(A: Mat(30, 15)) -> float:
+        return float(sum(A[i][i] for i in range(15)))
+
+    rec = mathema.check(diag_sum, claims=[])
+    (row,) = [p for p in rec.probes if p.name == "size_enforced"]
+    assert row.verdict == "falsified", (row.verdict, row.note)
+    assert gate(rec.probes, strict=False).problems == ["1 falsified claim(s)"]
 
 
 def test_size_enforced_gates_exactly_as_dimensions_enforced():

@@ -497,23 +497,29 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             return fn(*args, **kwargs)
 
         wrapper.__mathema_enforced_domain__ = merged_domain
-        # the decorator that MAKES out-of-domain rejection true also
-        # DECLARES it: one excluded_outside_domain claim per enforced
-        # parameter joins the decorator claims surface, so check()
-        # adjudicates the enforcement like any other declared claim
-        # (proven structurally, rejection by construction)
-        auto_declared = []
-        for p in sorted(merged_domain):
-            d = _declare(_claim(f"excluded_outside_domain({p})"))
-            d["authored"] = _authored_entry(fn, "decorator",
-                                            ref_surface="enforce_domain")
-            auto_declared.append(d)
-        existing = list(getattr(wrapper, "__mathema_claims__", []) or [])
-        by_name = {c.get("name"): c for c in existing}
-        by_name.update({c.get("name"): c for c in auto_declared})
-        wrapper.__mathema_claims__ = list(by_name.values())
+        _declare_exclusions(wrapper, fn, sorted(merged_domain), "enforce_domain")
         return wrapper
     return decorator
+
+
+def _declare_exclusions(wrapper, fn, params, ref_surface: str) -> None:
+    """The decorator that MAKES out-of-domain rejection true also
+    DECLARES it: one `excluded_outside_domain(p)` claim per guarded
+    parameter joins the decorator claims surface, so `check()`
+    adjudicates the enforcement like any other declared claim (proven
+    structurally, rejection by construction). Claims are merged by
+    name, so a parameter two guards cover is one row, whichever is
+    applied first."""
+    auto_declared = []
+    for p in params:
+        d = _declare(_claim(f"excluded_outside_domain({p})"))
+        d["authored"] = _authored_entry(fn, "decorator",
+                                        ref_surface=ref_surface)
+        auto_declared.append(d)
+    existing = list(getattr(wrapper, "__mathema_claims__", []) or [])
+    by_name = {c.get("name"): c for c in existing}
+    by_name.update({c.get("name"): c for c in auto_declared})
+    wrapper.__mathema_claims__ = list(by_name.values())
 
 
 def enforce_dimensions(key: str | None = None, root: str = "."):
@@ -539,7 +545,9 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     exit, the result matches the return marker with the names this call
     bound (`Vec("m")` after `a` was 3 by 4 means length 3). Each
     failure names the parameter (or the result), the shape found and
-    the shape expected.
+    the shape expected. Like `@enforce_domain`, the decorator declares
+    what it makes true: one `excluded_outside_domain(p)` claim per
+    guarded parameter, proven by construction.
 
     A declared dimension premise is enforced too:
 
@@ -664,6 +672,11 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
             if problem is not None:
                 raise ValueError(f"{fn.__name__}: {problem}")
             return result
+
+        wrapper.__mathema_enforced_dimensions__ = {
+            p: dims for p, (dims, _source) in plan.params.items()}
+        _declare_exclusions(wrapper, fn, sorted(plan.params),
+                            "enforce_dimensions")
         return wrapper
 
     return decorator

@@ -1038,17 +1038,17 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
         The structural half of excluded_outside_domain[param]: the
         function must raise on any input outside param's declared
         domain. Proven when the function is wrapped by
-        @enforce_domain covering this parameter, rejection by
-        construction, the wrapper checks every call before the body
-        runs. Undecided (None) otherwise: the trials at concrete
-        out-of-domain values decide empirically.
+        @enforce_domain (values) or @enforce_dimensions (shape) covering
+        this parameter, rejection by construction, the wrapper checks
+        every call before the body runs. Undecided (None) otherwise:
+        the trials at concrete out-of-domain values decide empirically.
 
     Notes:
         This claim is never battery-suggested: it is DECLARED,
         explicitly, via the `excluding` keyword, or automatically by
-        @enforce_domain itself (the decorator that makes it true also
-        declares it). rhs_src/relation/tolerance kept for protocol
-        uniformity.
+        @enforce_domain or @enforce_dimensions itself (the decorator
+        that makes it true also declares it). rhs_src/relation/tolerance
+        kept for protocol uniformity.
     """
     from .symbolic import ProofResult
     param = lhs_src
@@ -1058,6 +1058,14 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
             "proven",
             sketch=f"rejection by construction: the enforce_domain "
                    f"wrapper checks {param} against its declared domain "
+                   f"before the body ever runs")
+    shaped = getattr(fn, "__mathema_enforced_dimensions__", None)
+    if shaped is not None and param in shaped:
+        from ._shapes import expected
+        return ProofResult(
+            "proven",
+            sketch=f"rejection by construction: the enforce_dimensions "
+                   f"wrapper checks {param}'s shape ({expected(shaped[param])}) "
                    f"before the body ever runs")
     return None
 
