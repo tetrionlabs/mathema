@@ -183,3 +183,11 @@ def test_a_gate_is_no_premise():
 @pytest.mark.parametrize("text", ["is_absent_safe(f)", "is_absent_safe(x)"])
 def test_the_absent_gate_parses(text):
     assert claim(text).relation == "is_absent_safe"
+
+
+def test_the_absent_gate_round_trips_through_the_store():
+    from mathema.spec import canonical_claim_text, declare, entry_claims
+    cj = claim("is_absent_safe(f)")
+    assert canonical_claim_text(cj) == "is_absent_safe(f)"
+    (again,) = entry_claims({"claims": [declare(cj)]})
+    assert again.relation == "is_absent_safe"

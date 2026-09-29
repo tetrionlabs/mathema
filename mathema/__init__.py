@@ -184,6 +184,16 @@ class Record:
                         line += f"\n           {extra}"
                 lines.append(line)
                 continue
+            if (p.meta or {}).get("mathema.gate") and p.sketch:
+                # a gate names each parameter's members, policy and source
+                line = f"  {mark} {p.name}: {p.statement}"
+                if p.verdict == "holds" and p.n:
+                    line += f" ({p.n} calls)"
+                line += f"\n           {p.sketch}"
+                if p.counterexample:
+                    line += f"\n           counterexample {p.counterexample}"
+                lines.append(line)
+                continue
             if p.verdict == "proven":
                 # a proof has no trial count the way a probe does: the
                 # quantifier (who it holds for) stands in place of

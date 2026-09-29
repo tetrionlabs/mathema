@@ -1274,6 +1274,10 @@ def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
         reason = (f"from {key}'s own policy row, which f calls; f {did_words} instead "
                   f"at {_at(wrong, param)}")
         cases = _cases(calls, param, kind, policy.member)
+        if cases is not None and policy.premise:
+            # the calls are the premise's, so each case keeps it
+            cases = [c if c.premise else replace(c, premise=policy.premise)
+                     for c in cases]
         if cases is not None and cases != [replace(policy, source="stated")] and \
                 len(cases) > 1:
             nxt = f"state {_written(cases)} if that is intended, or change f"
@@ -1305,6 +1309,20 @@ def _library_for(composed: dict, p: str, kind: str, member: str) -> list:
         return []
     return [pol for pol in composed[p][1]
             if pol.kind == kind and pol.member in (member, None)]
+
+
+def _library_words(policies: list) -> str:
+    """What premised library rows say, in words: `drops when values
+    remain and propagates when every slot is missing`."""
+    parts = []
+    for pol in policies:
+        word = (f"raises {pol.exception}" if pol.behaviour == "raises" and pol.exception
+                else pol.behaviour)
+        when = ("when values remain" if pol.premise.endswith(">= 1")
+                else "when every slot is missing" if pol.premise.endswith("== 0")
+                else f"where {pol.premise}" if pol.premise else "")
+        parts.append(f"{word} {when}".strip())
+    return " and ".join(parts)
 
 
 def _follows(pol: Policy, call: Call) -> bool:
@@ -1360,7 +1378,9 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
             origin = "optional" if kind == "absent" and sig.annotated and sig.absent \
                 else "type"
         container = facts.param_kinds.get(p) in (*SEQUENCE_KINDS, "table")
-        members = _members_of(fn, p, kind)
+        # a numeric slot holds no NaT; only a datetime one does
+        members = [m for m in _members_of(fn, p, kind)
+                   if m != "NaT" or slot == "datetime"]
         said: list = []
         guarded = [m for m in members if _guard_for(guards, fn, p, kind, m)]
         for m in members:
@@ -1388,7 +1408,11 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                 continue
             premised = [r for r in stated if ((r.meta or {}).get("mathema.policy")
                                                or {}).get("premise")]
-            if len(ways) > 1 and not premised:
+            guard_here = _guard_for(guards, fn, p, kind, m)
+            library_here = [] if guard_here or origin != "type" else \
+                _library_for(composed, p, kind, m)
+            if len(ways) > 1 and not premised \
+                    and not any(pol.premise for pol in library_here):
                 what = "; ".join(f"{b} at {_at(c, p)}" for b, c in ways.items())
                 failures.append(f"f treats {p} = {m} more than one way: {what}")
                 witness = witness or _witness(next(iter(ways.values())))
@@ -1400,8 +1424,8 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
             if behaviour == "raises":
                 entry["exception"] = call.raised
             did = f"raises {call.raised}" if behaviour == "raises" else behaviour
-            guard = _guard_for(guards, fn, p, kind, m)
-            library = [] if guard else _library_for(composed, p, kind, m)
+            guard = guard_here
+            library = library_here
             if stated:
                 entry["source"] = "stated"
                 said.append(f"{m} {did if not premised else 'as stated'}, stated")
@@ -1415,7 +1439,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                     continue
                 said.append(f"{m} {did}, from the guard on line {guard[2]}")
                 continue
-            if library and origin == "type":
+            if library:
                 entry["source"] = "library"
                 broken = next((c for c in calls for pol in library
                                if _premise_holds(pol.premise, c.point)
@@ -1424,9 +1448,13 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                     failures.append(f"{composed[p][0]}'s own policy row does not hold: "
                                     f"{_witness(broken)}")
                     witness = witness or _witness(broken)
+                    b = _behaviour_of(broken)
+                    said.append(f"{m} {'raises ' + broken.raised if b == 'raises' else b} "
+                                f"at {_at(broken, p)}, which {composed[p][0]}'s own "
+                                f"policy row does not say")
                     continue
-                said.append(f"{m} {did if len(ways) == 1 else 'as stated'}, from "
-                            f"{composed[p][0]}'s own policy row")
+                said.append(f"{m} {_library_words(library) if len(ways) > 1 else did}, "
+                            f"from {composed[p][0]}'s own policy row")
                 continue
             default = behaviour == ("raises" if kind == "absent" else "propagates") \
                 and origin == "type"

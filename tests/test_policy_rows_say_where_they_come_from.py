@@ -11,6 +11,8 @@ import re
 from typing import Optional
 
 
+import pytest
+
 import mathema
 from mathema.authoring import _fn_key
 
@@ -242,3 +244,22 @@ def test_a_clash_says_which_premises_tell_cases_apart():
         "one case. Keep one (the record shows which f follows), or give each a premise "
         "on another parameter or on count(...) that tells the cases apart, e.g. "
         "`assuming count(xs) >= 1, ...` beside `assuming count(xs) == 0, ...`")
+
+
+def test_a_premised_library_row_remedy_keeps_its_premise():
+    pd = pytest.importorskip("pandas")
+
+    def mean_pd(xs: pd.Series) -> float:
+        return float(xs.mean())
+    rec = mathema.check(mean_pd, claims=[mathema.claim(
+        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c")])
+    row = _policy(rec)["missing[xs, count == 0]"]
+    nxt = row.meta["mathema.policy"]["next"]
+    remedies = re.findall(r"`([^`]+)`", nxt)
+    assert remedies and all(r.startswith("assuming count(xs) == 0, ") for r in remedies)
+    again = mathema.check(mean_pd, claims=[mathema.claim(
+        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c")] + [
+        mathema.claim(r) for r in remedies])
+    stated = [p for p in again.probes if p.statement in remedies]
+    assert stated and all(p.verdict in ("holds", "proven") for p in stated), \
+        [(p.statement, p.verdict, p.note) for p in stated]
