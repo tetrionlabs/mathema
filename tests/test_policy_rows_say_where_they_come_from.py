@@ -90,7 +90,9 @@ def test_an_unaccounted_raise_is_a_named_sentence_row():
     assert lines[at + 1] == (
         "           x is Optional[float], so f promised to take None. If the raise is "
         "intended, state `absent(f, x) raises(TypeError)`; otherwise handle None in f, "
-        "or annotate x as float")
+        "or annotate x as float; or accept the raise as a discovery (mathema accept "
+        "test_policy_rows_say_where_they_come_from.root_opt absent[x] --as discovery) "
+        "and state `absent(f, x) raises(TypeError)`")
 
 
 def test_a_silent_drop_keeps_its_remedy_on_the_row_only():
@@ -103,7 +105,9 @@ def test_a_silent_drop_keeps_its_remedy_on_the_row_only():
                      "float; f drops instead: nan in, 1.0 out]")
     assert lines[at + 1] == (
         "           if 1.0 is the answer f should give for a missing x, write "
-        "`missing(f, x) drops`; if not, make f raise or give nan back")
+        "`missing(f, x) drops`; if not, make f raise or give nan back; or accept it as "
+        "a discovery: mathema accept test_policy_rows_say_where_they_come_from.clamp01 "
+        "missing[x] --as discovery --corrected \"missing(f, x) drops\"")
 
 
 def test_a_list_slot_row_names_only_its_member():
@@ -116,7 +120,9 @@ def test_a_list_slot_row_names_only_its_member():
         "TypeError")
     assert null.meta["mathema.policy"]["next"] == (
         "if the raise is intended, write `missing(f, xs, null) raises(TypeError)`; if "
-        "not, make f skip or fill the null slot")
+        "not, make f skip or fill the null slot; or accept it as a discovery: mathema "
+        "accept test_policy_rows_say_where_they_come_from.total missing[xs, null] --as "
+        "discovery --corrected \"missing(f, xs, null) raises(TypeError)\"")
     nan = rows["missing[xs, nan]"]
     assert nan.meta["mathema.policy"]["reason"].startswith(
         "default for a list slot that may be nan; confirmed on the ")
@@ -269,13 +275,13 @@ def test_one_switch_makes_mathemas_policy_rows_gate(monkeypatch):
     from mathema import verify
     rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
                                                        name="c")])
-    assert verify.gate(rec.probes, strict=False).problems == []
-    monkeypatch.setattr(verify, "POLICY_ROWS_GATE", True)
     report = verify.gate(rec.probes, strict=False)
     assert report.falsified == 1
     assert report.problems == [
         "missing[x]: f drops a missing x (nan in, 1.0 out), the row says propagates; "
         "change the word or the code"]
+    monkeypatch.setattr(verify, "POLICY_ROWS_GATE", False)
+    assert verify.gate(rec.probes, strict=False).problems == []
 
 
 def test_a_bare_raises_beside_a_named_one_is_no_clash():

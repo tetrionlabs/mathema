@@ -297,15 +297,21 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
         # reads either shape identically
         row_meta = ({**(p.meta or {}), "mathema.stratum": p.stratum}
                     if getattr(p, "stratum", None) else (p.meta or None))
+        if row_meta and isinstance(row_meta.get("mathema.policy"), dict):
+            # a policy row's record states what it has, no empty fields
+            row_meta = {**row_meta, "mathema.policy": {
+                k: v for k, v in row_meta["mathema.policy"].items()
+                if v is not None and v != ""}}
         if row_meta:
             row["meta"] = row_meta
         source = (p.meta or {}).get("mathema.surface")
-        if not include_suggestions and (
+        if not include_suggestions and not (p.meta or {}).get("mathema.policy") and (
                 source == "mathema"
                 or str(p.note or "").startswith("conjectured by mathema")):
             # a suggestion mathema volunteered is an AUTHORING-surface
             # helper, not a record of fact: it never enters the
-            # verified layer at all. Adoption (mathema claims --adopt)
+            # verified layer at all (the missing-value policy rows are
+            # the exception: they are the function's recorded posture). Adoption (mathema claims --adopt)
             # writes it into the declared spec, where it becomes an
             # ordinary claim adjudicated and gated like any other.
             continue

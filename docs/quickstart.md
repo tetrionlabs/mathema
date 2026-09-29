@@ -126,7 +126,7 @@ mathema check pricing.py
 
 <!-- example: docstring output -->
 ```text
-ok   pricing.discounted: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   pricing.discounted: source, no side effects; claims 4/4 adjudicated (1 proven, 3 holds, 0 falsified)
 ```
 
 The second claim is the proof's `[float]` companion: every claim the derive
@@ -161,16 +161,16 @@ pricing.discounted:
   identity:
     form: "d2ab6eef1b84"
   claims:
-    - name: "never_raises_price"
-      statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
-      verdict: "proven"
-      sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative"
-      condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ, y ∈ [0.0, 1.0] ⊂ ℝ"
-      route: "derive"
+    - name: "missing[price]"
+      statement: "missing(f, price) propagates"
+      verdict: "holds"
+      n: 1
+      note: "default for a float, which may be nan; confirmed on the 46 draws of never_raises_price[float]. Keep it by writing it (mathema claims pricing.discounted --write), or change the word to raises or drops if f should do otherwise"
+      route: "probe:classified"
       authored:
-        surface: "docstring"
-        ref: "pricing.discounted:docstring:L1"
-        route: "best"
+        surface: "suggested"
+      meta:
+        mathema.policy:
     - name: "never_raises_price[float]"
       statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "holds"

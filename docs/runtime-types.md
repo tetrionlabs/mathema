@@ -315,7 +315,7 @@ mathema.Record(sharpe) · source, no side effects · form ef276c12c167
   holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns) (43 draws, sizes (2, 1) to (8, 1), 229 entries in all)
            the float64 computation of f_s_returns_c_approx_f_returns ran at 43 points: nan, null, NA, every corner and 37 interior points; at returns = [nan, -0.009, 0.000606] f returned -9.81, so it drops the nan slot; at returns = [NA, -0.009, 0.000606] f returned -9.81, so it drops the NA slot
   FALSIFY missing[returns]: missing(f, returns) propagates   [default for a pandas.Series slot that may be nan, null, NA or NaT; f drops instead: a nan slot in, -9.81 out]
-           if -9.81 is the answer f should give when a slot is nan, write `missing(f, returns) drops`; if not, make f raise or give a hole back
+           if -9.81 is the answer f should give when a slot is nan, write `missing(f, returns) drops`; if not, make f raise or give a hole back; or accept it as a discovery: mathema accept sharpe missing[returns] --as discovery --corrected "missing(f, returns) drops"
 through the pandas.Series.mean definition and pandas.Series.std definition rows, lowered to a sum over returns at a symbolic length; holds for every length
 pandas.Series.mean definition bundled mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std definition bundled mathema/compendium/pandas/series.claims.yaml

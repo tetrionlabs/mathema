@@ -214,7 +214,9 @@ def test_a_silent_drop_contradicts_the_default():
         "default for a float; f drops instead: nan in, 1.0 out"
     assert row.meta["mathema.policy"]["next"] == (
         "if 1.0 is the answer f should give for a missing x, write `missing(f, x) "
-        "drops`; if not, make f raise or give nan back")
+        "drops`; if not, make f raise or give nan back; or accept it as a discovery: "
+        "mathema accept test_policy_claims_say_what_f_does_with_no_value.clamp01 "
+        "missing[x] --as discovery --corrected \"missing(f, x) drops\"")
 
 
 def test_an_unannotated_parameter_raises_on_none_by_default():
@@ -238,7 +240,9 @@ def test_an_author_admitted_absence_that_raises_is_unaccounted_for():
     assert row.meta["mathema.policy"]["next"] == (
         "x is Optional[float], so f promised to take None. If the raise is intended, "
         "state `absent(f, x) raises(TypeError)`; otherwise handle None in f, or annotate "
-        "x as float")
+        "x as float; or accept the raise as a discovery (mathema accept "
+        "test_policy_claims_say_what_f_does_with_no_value.opt_root absent[x] --as "
+        "discovery) and state `absent(f, x) raises(TypeError)`")
 
 
 def test_a_guard_derives_the_row():
@@ -261,11 +265,15 @@ def test_a_stated_policy_replaces_the_default_row():
     assert [(p.statement, p.verdict) for p in rows] == [("missing(f, x) drops", "holds")]
 
 
-def test_a_default_row_never_gates_verify():
+def test_a_contradicted_default_row_gates_verify():
     from mathema.verify import gate
     (row,) = _policy_rows(clamp01, "for x in R, 0 <= f(x) <= 1")
     assert row.verdict == "falsified"
-    assert gate([row], strict=True).problems == []
+    report = gate([row], strict=False)
+    assert report.falsified == 1
+    assert report.problems == [
+        "missing[x]: f drops a missing x (nan in, 1.0 out), the row says propagates; "
+        "change the word or the code"]
 
 
 def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():

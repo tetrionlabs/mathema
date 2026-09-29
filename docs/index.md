@@ -192,7 +192,7 @@ mathema check mid.py:midpoint --claim "for a in [0, 100], b in [0, 100], min(a, 
 
 <!-- example: midpoint output -->
 ```text
-ok   mid.midpoint: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   mid.midpoint: source, no side effects; claims 4/4 adjudicated (1 proven, 3 holds, 0 falsified)
 ```
 
 One claim, two rows: the proof, and its `[float]` companion, which runs the
@@ -421,7 +421,7 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 
 <!-- example: parity output -->
 ```text
-ok   options.put_call_parity_gap: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   options.put_call_parity_gap: source, no side effects; claims 7/7 adjudicated (1 proven, 6 holds, 0 falsified)
 ```
 
 `proven`, over every point of a five-dimensional region of prices, rates,

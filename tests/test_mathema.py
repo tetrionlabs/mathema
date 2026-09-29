@@ -770,7 +770,7 @@ def test_load_claims_parses_authoring_shape_and_skips_derive_route(tmp_path):
 def test_cli_check_ci_gate(tmp_path, capsys):
     f = tmp_path / "m.py"
     f.write_text(
-        "def ema(x: list, alpha: float) -> float:\n"
+        "def ema(x: list[float], alpha: float) -> float:\n"
         "    y = x[0]\n"
         "    for v in x[1:]:\n"
         "        y = alpha * v + (1 - alpha) * y\n"
@@ -790,7 +790,7 @@ def test_cli_check_ci_gate(tmp_path, capsys):
 def test_check_formats(tmp_path, capsys):
     f = tmp_path / "m.py"
     f.write_text(
-        "def ema(x: list, alpha: float) -> float:\n"
+        "def ema(x: list[float], alpha: float) -> float:\n"
         "    y = x[0]\n"
         "    for v in x[1:]:\n"
         "        y = alpha * v + (1 - alpha) * y\n"

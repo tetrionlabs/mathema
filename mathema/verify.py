@@ -85,11 +85,11 @@ class GateReport:
         return self.falsified + self.invalidated
 
 
-#: whether a policy row mathema wrote that does not hold (a contradicted
-#: default, a raise no claim accounts for) fails the gate and counts as
-#: falsified, as a declared claim does; off, it is reported beside the
-#: counts and the function passes
-POLICY_ROWS_GATE = False
+#: whether the missing-value policy rows mathema writes are gated and
+#: counted as claims: a contradicted default or a raise no claim accounts
+#: for is then falsified, and fails as any falsified claim does; off, they
+#: are reported beside the counts and the function passes
+POLICY_ROWS_GATE = True
 
 
 def _unaccounted_text(report) -> str:
@@ -234,9 +234,7 @@ def gate(claims, *, strict: bool,
                     r.unaccounted.append(clause)
             elif clause:
                 r.policy_problems.append(clause)
-                if _volunteered(meta, note):
-                    r.falsified += 1
-        if _volunteered(meta, note):
+        if _volunteered(meta, note) and not (pol and POLICY_ROWS_GATE):
             continue
         kind = classify_verdict(verdict)
         if verdict == "skipped:unknown_but_accepted":
@@ -574,9 +572,11 @@ def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
         stmt = getattr(p, "statement", "") or ""
         if any(n == name and (same is None or same(stmt))
                for n, same in matchers):
-            if (getattr(p, "meta", None) or {}).get("mathema.companion_of"):
-                # a retired float companion is respawned by every proof
-                # of its parent; retirement is the standing disposition
+            if (getattr(p, "meta", None) or {}).get("mathema.companion_of") \
+                    or (getattr(p, "meta", None) or {}).get("mathema.surface") == "mathema":
+                # a retired float companion is respawned by every proof of
+                # its parent, and a retired policy row by every check;
+                # retirement is the standing disposition
                 continue
             if name not in already_noted:
                 notes.append(
@@ -1512,6 +1512,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # phase 3: gate every key through the one policy and render lines
     for key, why, claims_for_gate, rec, deps, accepted, unres, _vinfo in pending:
         is_library = key in library
+        if is_library:
+            # a library's missing-value posture is its compendium's own
+            # policy rows; the rows mathema writes for a user function
+            # are not asked of it
+            claims_for_gate = [c for c in claims_for_gate
+                               if not (_claim_fields(c)[2].get("mathema.policy")
+                                       and _claim_fields(c)[2].get("mathema.surface")
+                                       == "mathema")]
         # a library key gates like the project's own claims: a row
         # neither verified here nor accepted (`--as trusted`) fails.
         # The unresolved-global-name check is the one rule it skips:

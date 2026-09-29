@@ -186,7 +186,7 @@ mathema check gaps.py --claim "for x in [0, 1], abs(f(x) - x) <= ε"
 
 <!-- example: eps output -->
 ```text
-ok   gaps.nearly_identity: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   gaps.nearly_identity: source, no side effects; claims 3/3 adjudicated (1 proven, 2 holds, 0 falsified)
 FAIL gaps.small_gap: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
