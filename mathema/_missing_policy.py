@@ -437,6 +437,43 @@ NOT_READ = "not read"
 #: what a call at a hole is when the filled call, its inputs complete,
 #: raises or gives no value back: it says nothing about the hole
 INCONCLUSIVE = "inconclusive"
+#: what a call at a hole is when the same call made again gives another
+#: answer: no fill can say what f did with the hole there
+NOT_REPEATABLE = "not repeatable at this point"
+
+
+def repeats(first: tuple, second: tuple) -> bool:
+    """Whether two runs of one call, each `(output, raised)`, agree by
+    kind: the same exception type, nan with nan, every other float
+    exactly (the sign of zero included), containers slot by slot."""
+    import math
+    if first[1] is not None or second[1] is not None:
+        return first[1] == second[1]
+
+    def plain(v):
+        for read in (_table_columns, _rows, _cells):
+            got = read(v)
+            if got is not None:
+                return got
+        return v
+
+    def same(x, y) -> bool:
+        if isinstance(x, (list, tuple)) and isinstance(y, (list, tuple)):
+            return len(x) == len(y) and all(same(p, q) for p, q in zip(x, y))
+        if isinstance(x, dict) and isinstance(y, dict):
+            return x.keys() == y.keys() and all(same(x[k], y[k]) for k in x)
+        if isinstance(x, float) and isinstance(y, float):
+            if math.isnan(x) or math.isnan(y):
+                return math.isnan(x) and math.isnan(y)
+            return x == y and math.copysign(1.0, x) == math.copysign(1.0, y)
+        wx, wy = _hole_word(x), _hole_word(y)
+        if wx is not None or wy is not None:
+            return wx == wy
+        try:
+            return bool(x == y)
+        except Exception:
+            return False
+    return same(plain(first[0]), plain(second[0]))
 
 
 def filled(value, members, fill):
@@ -531,7 +568,9 @@ def refill(call_at, point: dict, output, raised: "str | None",
     """Intent:
         What one call at a hole did, read by calling f again with the
         hole filled: `[(point, output, raised, behaviour), ...]`, one per
-        hole member the call held. The fill is a value the same argument
+        hole member the call held. The call is first made once more as
+        it was; an answer that differs by kind (`repeats`) makes it
+        `NOT_REPEATABLE`, one entry for the whole call. The fill is a value the same argument
         holds in another slot, else the parameter's value in `fills` (an
         interior point of its domain). A call holding two members is
         taken one member at a time, the other members filled, and each
@@ -561,6 +600,9 @@ def refill(call_at, point: dict, output, raised: "str | None",
     if any(v is None for v in fill_of.values()):
         return None
     members = list(dict.fromkeys(m for _q, _k, m in keys))
+    if not repeats((output, raised), call_at(point)):
+        # the call made again answers otherwise: f does not repeat here
+        return [(point, output, raised, NOT_REPEATABLE)]
 
     def fill_all(at: dict, which, scale: float = 1.0) -> dict:
         return {q: (filled(v, which, _scaled(fill_of[q], scale)) if q in holding else v)

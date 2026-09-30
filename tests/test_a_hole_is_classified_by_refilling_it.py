@@ -211,3 +211,30 @@ def test_a_policy_row_decided_by_refilling_says_so_on_its_route():
     routes = {p.route for p in rec.probes if (p.meta or {}).get("mathema.policy")
               and p.route and p.route.startswith("probe")}
     assert routes == {"probe:counterfactual"}, routes
+
+
+# --- a function that does not repeat itself -------------------------------
+
+def test_an_unseeded_draw_is_never_read_as_reading_its_hole():
+    import random
+    from mathema._missing_policy import NOT_REPEATABLE
+
+    def noisy(x):
+        return random.random()
+    for _ in range(20):
+        assert _behaviours(noisy, x=NAN) == [NOT_REPEATABLE]
+
+
+def test_a_deterministic_function_is_unaffected_by_the_repeat():
+    assert _behaviours(clamp01, x=NAN) == ["drops"]
+    assert _behaviours(root, x=NAN) == ["propagates"]
+
+
+def test_a_repeat_compares_by_kind():
+    from mathema._missing_policy import repeats
+    assert repeats((NAN, None), (float("nan"), None))
+    assert repeats((None, "ValueError"), (None, "ValueError"))
+    assert not repeats((None, "ValueError"), (None, "TypeError"))
+    assert not repeats((0.0, None), (-0.0, None))
+    assert repeats(([1.0, NAN], None), ([1.0, NAN], None))
+    assert not repeats(([1.0, 2.0], None), ([1.0, 2.5], None))

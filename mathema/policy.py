@@ -346,7 +346,7 @@ def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
     a hole is read by refilling it (`_missing_policy.refill`): one call
     per hole member, and a call whose hole f never read, or whose refill
     is inconclusive, is left out."""
-    from ._missing_policy import INCONCLUSIVE, NOT_READ, refill
+    from ._missing_policy import INCONCLUSIVE, NOT_READ, NOT_REPEATABLE, refill
     from .conjecture import _fill_value
     from .probing import _pinned_float_env
     from .runtime_types import calling
@@ -372,7 +372,7 @@ def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
             continue
         out.extend(Call(at, got, err, None, None, behaviour)
                    for at, got, err, behaviour in pieces
-                   if behaviour not in (NOT_READ, INCONCLUSIVE))
+                   if behaviour not in (NOT_READ, INCONCLUSIVE, NOT_REPEATABLE))
     return out
 
 

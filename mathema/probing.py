@@ -601,6 +601,7 @@ class ExecutedMissing:
         self.fills: dict = {}
         self.not_read: dict = {}
         self.inconclusive: dict = {}
+        self.not_repeatable: dict = {}
 
     def add_call(self, point: dict, output=None, raised: "str | None" = None) -> None:
         """File one call at `point` (its arguments by name) that returned
@@ -620,7 +621,7 @@ class ExecutedMissing:
         if at_default and any(p not in at_default for p, _k, _m in keys):
             point = {p: v for p, v in point.items() if p not in at_default}
             keys = keys_of(point, self.paths)
-        from ._missing_policy import INCONCLUSIVE, NOT_READ, refill
+        from ._missing_policy import INCONCLUSIVE, NOT_READ, NOT_REPEATABLE, refill
         given, refill_at = self.given, self.refill_at
         pieces = (refill(lambda at: refill_at(at, given), point, output, raised,
                          self.fills)
@@ -630,11 +631,12 @@ class ExecutedMissing:
                        classify_call(point, output, raised, unseen_kinds(point, keys)))
             return
         for at, got, err, behaviour in pieces:
-            if behaviour in (NOT_READ, INCONCLUSIVE):
+            if behaviour in (NOT_READ, INCONCLUSIVE, NOT_REPEATABLE):
                 # the fill left the output as it was (f never read the
-                # hole), or the filled call gave no value back: no
-                # evidence of what f does with the hole
-                counted = self.not_read if behaviour == NOT_READ else self.inconclusive
+                # hole), the filled call gave no value back, or the call
+                # did not repeat: no evidence of what f does with the hole
+                counted = {NOT_READ: self.not_read, INCONCLUSIVE: self.inconclusive,
+                           NOT_REPEATABLE: self.not_repeatable}[behaviour]
                 for p, _k, _m in keys_of(at):
                     counted[p] = counted.get(p, 0) + 1
                 continue
@@ -697,6 +699,8 @@ class ExecutedMissing:
             out["not_read"] = dict(self.not_read)
         if self.inconclusive:
             out["inconclusive"] = dict(self.inconclusive)
+        if self.not_repeatable:
+            out["not_repeatable"] = dict(self.not_repeatable)
         if self.introduced:
             out["returned"] = {"absent": "introduces", "source": "annotation",
                                **self.introduced}
@@ -859,7 +863,7 @@ def with_executed(meta: "dict | None", executed: "ExecutedMissing | None") -> "d
     missing = dict(out.get("mathema.missing") or {})
     if extra.get("returned") and "returned" not in missing:
         missing["returned"] = extra["returned"]
-    for key in ("not_read", "inconclusive"):
+    for key in ("not_read", "inconclusive", "not_repeatable"):
         # the calls whose hole f never read, and those whose refill said
         # nothing, per parameter
         if extra.get(key):
