@@ -121,8 +121,8 @@ about.
 
 ## Say what the claim is about
 
-The premise `assuming std(returns, ddof=1) > 0` names the series the
-ratio is defined for:
+A premise, written after `assuming`, names the series the ratio is
+defined for: here `std(returns, ddof=1) > 0`.
 
 <!-- example: pandas run requires=pandas -->
 ```python
