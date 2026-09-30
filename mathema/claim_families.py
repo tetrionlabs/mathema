@@ -27,6 +27,7 @@ from __future__ import annotations
 from ._signatures import module_scope
 import math
 import random
+import sys
 
 from ._sampling import _finite_bounds as _finite_bounds, _synth_scalar as _synth_scalar
 from .f import _is_nonfinite as _is_nonfinite
@@ -1426,21 +1427,60 @@ def _same_float(a: float, b: float) -> bool:
     return a == b and math.copysign(1.0, a) == math.copysign(1.0, b)
 
 
+def _same_complex(a: complex, b: complex) -> bool:
+    return _same_float(a.real, b.real) and _same_float(a.imag, b.imag)
+
+
+def _same_array(first, second) -> "bool | None":
+    import numpy
+    if first.shape != second.shape or first.dtype != second.dtype:
+        return False
+    if first.dtype.kind in "fc":
+        a, b = first.ravel(), second.ravel()
+        return all(_same_complex(complex(x), complex(y))
+                   if first.dtype.kind == "c"
+                   else _same_float(float(x), float(y)) for x, y in zip(a, b))
+    if first.dtype.kind == "O":
+        return _same_kind(first.ravel().tolist(), second.ravel().tolist())
+    return bool(numpy.array_equal(first, second))
+
+
 def _same_kind(first, second) -> "bool | None":
-    """Whether two outcomes of the same call agree by kind: floats
-    exactly (the sign of zero counts, a NaN agrees with a NaN), element
-    by element inside a list, tuple or dict, arrays by their entries the
-    same way, and the same exception type (an outcome that raised is its
-    exception's type). None when the comparison cannot tell: an object
-    with no equality of its own (two equal ones are two identities) or
-    an iterator (comparing it would consume it)."""
+    """Whether two outcomes of the same call agree by kind: floats of
+    any width exactly (the sign of zero counts, a NaN agrees with a NaN),
+    complex numbers part by part, Decimals the same way, element by
+    element inside a list, tuple, dict or array, pandas objects by
+    values, index and dtype, and the same exception type (an outcome
+    that raised is its exception's type). None when the comparison
+    cannot tell: an object with no equality of its own (two equal ones
+    are two identities), an iterator (comparing it would consume it), or
+    a comparison that raises."""
     import collections.abc
+    import decimal
+    import numbers
     first_raised = isinstance(first, type) and issubclass(first, BaseException)
     second_raised = isinstance(second, type) and issubclass(second, BaseException)
     if first_raised or second_raised:
         return first is second
+    try:
+        import numpy
+    except ImportError:
+        numpy = None
+    if numpy is not None:
+        if isinstance(first, numpy.ndarray) and isinstance(second, numpy.ndarray):
+            return _same_array(first, second)
+        if isinstance(first, numpy.generic) and isinstance(second, numpy.generic):
+            if type(first) is not type(second):
+                return False
+            first, second = first.item(), second.item()
+    if isinstance(first, decimal.Decimal) and isinstance(second, decimal.Decimal):
+        if first.is_nan() or second.is_nan():
+            return first.is_nan() and second.is_nan()
+        return first == second and first.is_signed() == second.is_signed()
     if isinstance(first, float) and isinstance(second, float):
         return _same_float(first, second)
+    if isinstance(first, complex) and isinstance(second, complex):
+        return _same_complex(first, second)
     if (isinstance(first, (list, tuple)) and isinstance(second, (list, tuple))
             and type(first) is type(second)):
         if len(first) != len(second):
@@ -1453,24 +1493,34 @@ def _same_kind(first, second) -> "bool | None":
         if first.keys() != second.keys():
             return False
         return _same_kind([first[k] for k in first], [second[k] for k in first])
-    try:
-        import numpy
-        if isinstance(first, numpy.ndarray) and isinstance(second, numpy.ndarray):
-            if first.shape != second.shape or first.dtype != second.dtype:
+    pandas = sys.modules.get("pandas")
+    if pandas is not None and isinstance(first, (pandas.Series, pandas.DataFrame)):
+        if type(first) is not type(second):
+            return False
+        try:
+            if not first.index.equals(second.index):
                 return False
-            if first.dtype.kind in "fc":
-                return bool(numpy.array_equal(first, second, equal_nan=True)
-                            and numpy.array_equal(numpy.signbit(first.real),
-                                                  numpy.signbit(second.real)))
-            return bool(numpy.array_equal(first, second))
-    except ImportError:
-        pass
+            if isinstance(first, pandas.DataFrame) and not (
+                    first.columns.equals(second.columns)
+                    and first.dtypes.equals(second.dtypes)):
+                return False
+            if isinstance(first, pandas.Series) and first.dtype != second.dtype:
+                return False
+            return _same_array(first.to_numpy(), second.to_numpy())
+        except Exception:
+            return None
     if isinstance(first, collections.abc.Iterator) \
             or isinstance(second, collections.abc.Iterator):
         return None
     if type(first) is type(second) and type(first).__eq__ is object.__eq__:
         return None
-    return _same_result(first, second)
+    if isinstance(first, numbers.Number) and isinstance(second, numbers.Number) \
+            and type(first) is not type(second):
+        return False if first != second else None
+    try:
+        return bool(first == second)
+    except Exception:
+        return None
 
 
 def _outcome_text(outcome) -> str:

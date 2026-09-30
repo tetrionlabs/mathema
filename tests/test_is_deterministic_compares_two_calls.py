@@ -13,6 +13,8 @@ import os
 import random
 import time
 
+import pytest
+
 import mathema
 from mathema.conjecture import check_conjectures, claim
 
@@ -231,3 +233,67 @@ def logged_double(x: float) -> float:
 def test_a_module_logger_is_not_named_as_kept_state():
     p = _wide(logged_double)
     assert "module-level" not in (p.note or ""), p.note
+
+
+# --- comparing by kind across numeric types --------------------------------------
+
+from decimal import Decimal  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema.claim_families import _same_kind  # noqa: E402
+
+
+class Touchy:
+    """A value whose equality raises."""
+
+    def __eq__(self, other):
+        raise TypeError("no comparison")
+
+    __hash__ = object.__hash__
+
+
+@pytest.mark.parametrize("a, b", [
+    (np.float32("nan"), np.float32("nan")),
+    (complex(math.nan, 1.0), complex(math.nan, 1.0)),
+    (Decimal("NaN"), Decimal("NaN")),
+    (np.array([math.nan, 1.0], dtype=object),
+     np.array([math.nan, 1.0], dtype=object)),
+    (np.float64(2.5), np.float64(2.5)),
+])
+def test_equal_values_of_every_numeric_kind_agree(a, b):
+    assert _same_kind(a, b) is True
+
+
+@pytest.mark.parametrize("a, b", [
+    (np.float32(-0.0), np.float32(0.0)),
+    (complex(1.0, -0.0), complex(1.0, 0.0)),
+    (Decimal("-0"), Decimal("0")),
+    (np.array([complex(1, 0.0)]), np.array([complex(1, -0.0)])),
+])
+def test_the_sign_of_zero_counts_in_every_numeric_kind(a, b):
+    assert _same_kind(a, b) is False
+
+
+def test_a_comparison_that_raises_is_inconclusive():
+    assert _same_kind(Touchy(), Touchy()) is None
+
+
+def test_pandas_objects_compare_by_values_index_and_dtype():
+    pd = pytest.importorskip("pandas")
+    a = pd.Series([1.0, 2.0]).pct_change()
+    assert _same_kind(a, pd.Series([1.0, 2.0]).pct_change()) is True
+    assert _same_kind(a, pd.Series([math.nan, 2.0])) is False
+    frame = pd.DataFrame({"x": [1.0, math.nan]})
+    assert _same_kind(frame, frame.copy()) is True
+
+
+def price_changes(x: float):
+    pd = pytest.importorskip("pandas")
+    return pd.Series([x, 2 * x]).pct_change()
+
+
+def test_a_deterministic_series_result_holds():
+    pytest.importorskip("pandas")
+    p = _wide(price_changes)
+    assert p.verdict == "holds", (p.verdict, p.counterexample)
