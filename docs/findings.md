@@ -188,7 +188,7 @@ Among the results, all found with no claims written:
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ; missing for x (list) means null or nan; missing for alpha (float) means nan
   FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-           the float64 computation of scale_equivariant ran at 13 points: nan, null, every corner and 0 interior points; unbounded directions (x, alpha) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at alpha = nan f gave nan back; at x = [null, null], alpha = -1.8e+308 f raises TypeError; at x = [null], alpha = -1.8e+308 it converts the null slot to an absent result; at x = [nan] f gave nan back
+           the float64 computation of scale_equivariant ran at 13 points: nan, null, every corner and 0 interior points; unbounded directions (x, alpha) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at alpha = nan f gave nan back; at x = [null, null], alpha = -1.8e+308 f raised TypeError; at x = [null], alpha = -1.8e+308 it converts the null slot to an absent result; at x = [nan] f gave nan back
            counterexample x=[-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha=-1.79769e+308, c=-5
            [mathematics sound, implementation:numerical-instability]
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)

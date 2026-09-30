@@ -263,13 +263,15 @@ def test_l1_a_gate_is_not_a_premise():
     probe, _ = run(sqrt_guarded, "assuming is_missing_safe(f), for x in [0, 1], f(x) >= 0")
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
     assert probe.note == (
-        "assuming is_missing_safe(f) is not a premise: mathema never compares a value "
-        "where f returns a missing value, so there is nothing for it to remove. State "
-        "what f does with a missing x as its own claim, e.g. `missing(f, x) "
-        "propagates`, or write `\\ {missing}` in the domain to stop calling f with one.")
+        "assuming is_missing_safe(f) is not a premise: a value claim is never judged "
+        "where f returns a missing value, so the premise would change nothing. State "
+        "what f does with a missing x as its own claim (`missing(f, x) propagates`, "
+        "`drops` or `raises`), or write `\\ {missing}` in the domain so f is not "
+        "called with one.")
     probe, _ = run(sqrt_guarded, "assuming is_absent_safe(f), for x in [0, 1], f(x) >= 0")
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
     assert probe.note == (
-        "assuming is_absent_safe(f) is not a premise. State what f does when x is None "
-        "as its own claim, e.g. `absent(f, x) raises(TypeError)`, or write "
-        "`\\ {absent}` in the domain to stop calling f with None.")
+        "assuming is_absent_safe(f) is not a premise: a value claim is never judged "
+        "where f returns None, so the premise would change nothing. State what f does "
+        "when x is None as its own claim (`absent(f, x) raises(TypeError)`), or write "
+        "`\\ {absent}` in the domain so f is not called with None.")

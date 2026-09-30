@@ -610,7 +610,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # a table: one equal-length column per name the claim or the
             # body reads
             (length,) = _floor.sizes(cj_domain.get(name), rng)
-            return {c: _floor.gapped(_synth("sequence", rng, b, length=length),
+            from .conjecture import _column_bound
+            return {c: _floor.gapped(_synth("sequence", rng,
+                                            _column_bound(cj_domain.get(f"{name}.{c}"), b),
+                                            length=length),
                                      hole_values.get(name, []), rng, 0)[0]
                     for c in table_columns[name]}
         if name in complex_names:

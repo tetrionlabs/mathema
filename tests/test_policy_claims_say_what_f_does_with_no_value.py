@@ -210,8 +210,9 @@ def test_a_float_carries_its_default_propagation_row():
 def test_a_silent_drop_contradicts_the_default():
     (row,) = _policy_rows(clamp01, "for x in R, 0 <= f(x) <= 1")
     assert (row.statement, row.verdict) == ("missing(f, x) propagates", "falsified")
-    assert row.meta["mathema.policy"]["reason"] == \
-        "default for a float; f drops instead: nan in, 1.0 out"
+    assert row.meta["mathema.policy"]["reason"] == (
+        "mathema's default word for a float, not a claim of yours; f drops instead: nan "
+        "in, 1.0 out")
     assert row.meta["mathema.policy"]["next"] == (
         "if 1.0 is the answer f should give for a missing x, write `missing(f, x) "
         "drops`; if not, make f raise or give nan back; or accept it as a discovery: "
@@ -272,16 +273,16 @@ def test_a_contradicted_default_row_gates_verify():
     report = gate([row], strict=False)
     assert report.falsified == 1
     assert report.problems == [
-        "missing[x]: f drops a missing x (nan in, 1.0 out), the row says propagates; "
-        "change the word or the code"]
+        "1 policy row to settle: missing[x], f drops a missing x (nan in, 1.0 out) where "
+        "mathema's default says propagates; write `missing(f, x) drops` or change f"]
 
 
 def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():
     rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
                                                        name="c0")])
     text = repr(rec)
-    assert ("  FALSIFY missing[x]: missing(f, x) propagates   [default for a float; f "
-            "drops instead: nan in, 1.0 out]\n           if 1.0 is the answer f should "
+    assert ("  FALSIFY missing[x]: missing(f, x) propagates   [mathema's default word "
+            "for a float, not a claim of yours; f drops instead: nan in, 1.0 out]\n           if 1.0 is the answer f should "
             "give for a missing x, write `missing(f, x) drops`; if not, make f raise or "
             "give nan back") in text
 
@@ -322,14 +323,16 @@ def test_the_claims_command_groups_the_policy_rows_by_state(tmp_path, monkeypatc
     assert main(["claims", "pmod.clamp", "--root", str(tmp_path)]) == 0
     out = capsys.readouterr().out.splitlines()
     assert "pmod.clamp: 1 policy row about x" in out
-    at = out.index("  contradicted by the code (choose the word, or change the code; "
-                   "--write leaves these out):")
-    assert out[at + 1] == ("    FALSIFY missing[x]: missing(f, x) propagates   [default "
-                           "for a float; f drops instead: nan in, 1.0 out]")
+    at = out.index("  contradicted by the code (change the word, the code, or accept it "
+                   "as a discovery; --write writes these with the contradiction in the "
+                   "note):")
+    assert out[at + 1] == ("    FALSIFY missing[x]: missing(f, x) propagates   "
+                           "[mathema's default word for a float, not a claim of yours; "
+                           "f drops instead: nan in, 1.0 out]")
     assert main(["claims", "pmod.root_opt", "--root", str(tmp_path)]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert "  a raise or a case no claim accounts for (state it, or change f; --write " \
-           "leaves these out):" in out
+    assert "  not covered by any claim yet (the line beneath says what to write, or " \
+           "what to change; --write leaves these out):" in out
     assert "    FALSIFY absent[x]: f raised TypeError at x = None, and no claim says it " \
            "may" in out
 
@@ -358,8 +361,9 @@ def test_write_writes_every_row_with_a_true_note(tmp_path, monkeypatch, capsys):
     written = yaml.safe_load((tmp_path / "claims" / "policies.claims.yaml").read_text())
     assert written["pmod.clamp"] == {"claims": [{
         "name": "missing[x]", "statement": "missing(f, x) propagates",
-        "note": f"written by mathema claims --write: mathema's default for a float; "
-                f"contradicted by the code on {today}: f drops, nan in, 1.0 out"}]}
+        "note": f"written by mathema claims --write: mathema's default word for a "
+                f"float, not a claim of yours; contradicted by the code on {today}: f "
+                f"drops, nan in, 1.0 out"}]}
     assert written["pmod.lin"] == {"claims": [{
         "name": "missing[x]", "statement": "missing(f, x) propagates",
         "note": "written by mathema claims --write: mathema's default for a float, "

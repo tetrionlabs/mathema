@@ -361,20 +361,21 @@ def _policy_guard(fn, policies: list, arguments: dict) -> "str | None":
             if p not in arguments:
                 continue
             value = arguments[p]
+            tail = (f": raised by enforce_domain before f ran; the stated policy is "
+                    f"{policy_text(pol)}")
             if pol.kind == "absent":
                 if value is None:
-                    return (f"{point_shown({p: value})} is absent, and its policy "
-                            f"says f raises there ({policy_text(pol)})")
+                    return f"{point_shown({p: value})}{tail}"
                 continue
             held = _members_in(value, "missing")
             hit = [m for m in held if pol.member in (None, m)]
             if not hit:
                 continue
             from ._missing_words import _in_slot
-            what = (f"holds a {hit[0]} slot" if _in_slot(value)
-                    else f"is missing ({hit[0]})")
-            return (f"{point_shown({p: value})} {what}, and its policy says f "
-                    f"raises there ({policy_text(pol)})")
+            article = "an" if hit[0][:1] in "aeiouAEIONS" else "a"
+            what = (f" holds {article} {hit[0]} slot" if _in_slot(value)
+                    else " is missing")
+            return f"{point_shown({p: value})}{what}{tail}"
     return None
 
 
@@ -399,10 +400,11 @@ def _policy_exit(policies: list, arguments: dict, output) -> "str | None":
             did = classify_call({p: value}, output)
             if did != pol.behaviour:
                 what = "the hole" if pol.kind == "missing" else "the absence"
-                verb = {"drops": f"drops {what}", "propagates": f"gives {what} back"}.get(
-                    did, did)
-                return (f"{point_shown({p: value})} in, {value_shown(output)} out: f "
-                        f"{verb}, and its policy says {pol.behaviour} "
+                verb = {"drops": f"dropping {what}", "propagates": f"propagating {what}",
+                        "converts": f"converting {what}",
+                        "introduces": "with a missing value it was not given"}.get(did, did)
+                return (f"at {point_shown({p: value})} f returned {value_shown(output)}, "
+                        f"{verb}, but its policy says {pol.behaviour} "
                         f"({policy_text(pol)})")
     return None
 

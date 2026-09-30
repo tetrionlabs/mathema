@@ -101,8 +101,9 @@ def test_a_silent_drop_keeps_its_remedy_on_the_row_only():
     lines = _lines(rec)
     assert ("           the float64 computation of c ran link by link, and every link "
             "holds; at x = nan f returned 1.0, so it drops the hole") in lines
-    at = lines.index("  FALSIFY missing[x]: missing(f, x) propagates   [default for a "
-                     "float; f drops instead: nan in, 1.0 out]")
+    at = lines.index("  FALSIFY missing[x]: missing(f, x) propagates   [mathema's default "
+                     "word for a float, not a claim of yours; f drops instead: nan in, "
+                     "1.0 out]")
     assert lines[at + 1] == (
         "           if 1.0 is the answer f should give for a missing x, write "
         "`missing(f, x) drops`; if not, make f raise or give nan back; or accept it as "
@@ -116,7 +117,8 @@ def test_a_list_slot_row_names_only_its_member():
     rows = _policy(rec)
     null = rows["missing[xs, null]"]
     assert null.meta["mathema.policy"]["reason"] == (
-        "default for a list slot that may be null; f raises instead: a null slot in, "
+        "mathema's default word for a list slot that may be null, not a claim of yours; "
+        "f raises instead: a null slot in, "
         "TypeError")
     assert null.meta["mathema.policy"]["next"] == (
         "if the raise is intended, write `missing(f, xs, null) raises(TypeError)`; if "
@@ -278,8 +280,8 @@ def test_one_switch_makes_mathemas_policy_rows_gate(monkeypatch):
     report = verify.gate(rec.probes, strict=False)
     assert report.falsified == 1
     assert report.problems == [
-        "missing[x]: f drops a missing x (nan in, 1.0 out), the row says propagates; "
-        "change the word or the code"]
+        "1 policy row to settle: missing[x], f drops a missing x (nan in, 1.0 out) where "
+        "mathema's default says propagates; write `missing(f, x) drops` or change f"]
     monkeypatch.setattr(verify, "POLICY_ROWS_GATE", False)
     assert verify.gate(rec.probes, strict=False).problems == []
 

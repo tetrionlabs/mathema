@@ -219,7 +219,8 @@ def _premise_holds(premise: str, point: dict) -> bool:
     if not premise:
         return True
     from ._linalg_eval import FUNCTIONS, as_array
-    env = {**FUNCTIONS, **{p: as_array(v) for p, v in point.items()}}
+    # `len` counts every slot, `count` the value slots
+    env = {"len": len, **FUNCTIONS, **{p: as_array(v) for p, v in point.items()}}
     try:
         return bool(eval(compile(premise, "<premise>", "eval"),
                          {"__builtins__": {}}, env))
@@ -301,7 +302,10 @@ def _floor_points(fn, facts, param: str, kind: str, members: list,
                 values.append(made)
     else:
         values = [v for w in members for v in realise_sentinel(member_sentinel(w))]
-    return [{**others, param: v} for v in values]
+    order = list(facts.params)
+    return [{q: point[q] for q in sorted(point, key=lambda q: order.index(q)
+                                          if q in order else len(order))}
+            for point in ({**others, param: v} for v in values)]
 
 
 def _run_floor(fn, facts, points: list) -> list:
@@ -447,27 +451,40 @@ def _cases(calls: list, param: str, kind: str, member: "str | None" = None,
         some case holds more than one behaviour.
     """
     column = _hole_column(calls, param)
-    seen: dict = {}
-    for c in calls:
-        members = _members_in(c.point.get(param), kind)
-        if len(members) != 1:
-            continue
-        cls = _count_class(c.point.get(param), column) if kind == "missing" else None
-        b = _behaviour_of(c)
-        seen.setdefault(members[0], {}).setdefault(cls, set()).add(
-            (b, c.raised if b == "raises" else None))
-    if not seen or any(len(ways) > 1 for classes in seen.values()
-                       for ways in classes.values()):
-        return None
+
+    def classes_by(classify) -> "dict | None":
+        seen: dict = {}
+        for c in calls:
+            members = _members_in(c.point.get(param), kind)
+            if len(members) != 1:
+                continue
+            cls = classify(c.point.get(param)) if kind == "missing" else None
+            b = _behaviour_of(c)
+            seen.setdefault(members[0], {}).setdefault(cls, set()).add(
+                (b, c.raised if b == "raises" else None))
+        if not seen or any(len(ways) > 1 for classes in seen.values()
+                           for ways in classes.values()):
+            return None
+        return seen
+
+    # a count premise first; where the count cannot tell the cases apart
+    # (`[null]` and `[null, null]` both have no value slot), a length one
+    seen = classes_by(lambda v: _count_class(v, column))
     count = f"count({param}.{column})" if column else f"count({param})"
+    order: tuple = (">= 1", "== 0")
+    if seen is None and not column:
+        seen = classes_by(lambda v: None if _count_class(v, None) is None
+                          else ("== 1" if len(v) == 1 else ">= 2"))
+        count, order = f"len({param})", ("== 1", ">= 2")
+    if seen is None:
+        return None
     per_member: dict = {}
     for m, classes in seen.items():
         ways = {cls: next(iter(w)) for cls, w in classes.items()}
         if len(set(ways.values())) == 1:
             per_member[m] = ((None,) + next(iter(ways.values())),)
         else:
-            per_member[m] = tuple((cls,) + ways[cls] for cls in (">= 1", "== 0")
-                                  if cls in ways)
+            per_member[m] = tuple((cls,) + ways[cls] for cls in order if cls in ways)
     alike = len(set(per_member.values())) == 1
     groups: list
     if member is not None:
@@ -623,7 +640,8 @@ def _why_undecided(stated: Policy, params: list, current: "Batch | None") -> str
         if stated.premise and reached:
             from ._linalg_eval import FUNCTIONS, as_array
             call = reached[0]
-            env = {**FUNCTIONS, **{q: as_array(v) for q, v in call.point.items()}}
+            env = {"len": len, **FUNCTIONS,
+                   **{q: as_array(v) for q, v in call.point.items()}}
             try:
                 eval(compile(stated.premise, "<premise>", "eval"),
                      {"__builtins__": {}}, env)
@@ -842,13 +860,18 @@ def _default_words(p: str, kind: str, member: "str | None", sig, container: bool
         if sig.slot_type == "unannotated":
             return f"default: {p} has no annotation, so it may be None"
         return f"default for a {sig.slot_type}, which may be None"
-    members = [member] if member else (list(sig.members) or ["nan"])
+    # a numeric slot holds no NaT; only a datetime one does
+    members = [member] if member else ([m for m in sig.members
+                                        if m != "NaT" or sig.slot_type == "datetime"]
+                                       or ["nan"])
     if sig.slot_type == "unannotated":
         return f"default: {p} has no annotation, so it may be {_or(members)}"
     if container:
-        return f"default for a {sig.slot_type} slot that may be {_or(members)}"
+        return (f"mathema's default word for a {sig.slot_type} slot that may be "
+                f"{_or(members)}, not a claim of yours" if short else
+                f"default for a {sig.slot_type} slot that may be {_or(members)}")
     if short:
-        return f"default for a {sig.slot_type}"
+        return f"mathema's default word for a {sig.slot_type}, not a claim of yours"
     return f"default for a {sig.slot_type}, which may be {_or(members)}"
 
 
@@ -908,7 +931,7 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
                                      [pol for pol in composed[p][1]
                                       if (pol.member, pol.premise) not in mine
                                       and pol.member not in stated_members],
-                                     name_of)
+                                     name_of, stated=mine)
                 rows += made
                 done_members = {(r.meta or {}).get("mathema.policy", {}).get("member")
                                 for r in made}
@@ -1036,9 +1059,12 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
         what = f"a missing {p}" if kind == "missing" else f"{p} = None"
         if cases:
             nxt = f"to state each case, write {_written(cases)}; or make f treat {what} one way"
+        elif kind == "missing" and container:
+            nxt = (f"no premise on count({p}) or len({p}) tells these cases apart; make "
+                   f"f treat {what} one way")
         else:
-            nxt = (f"give each case a premise on another parameter or on count(...) "
-                   f"that tells them apart, or make f treat {what} one way")
+            nxt = (f"give each case a premise on another parameter that tells them apart, "
+                   f"or make f treat {what} one way")
         return row("falsified", None, None, "observed",
                    f"f has no single policy for {what}",
                    sentence=f"f has no single policy for {what}", said=said, nxt=nxt,
@@ -1244,10 +1270,12 @@ def composed_policies(fn, facts) -> dict:
 
 
 def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
-                  name_of) -> list:
+                  name_of, stated: "set | None" = None) -> list:
     """The rows a parameter carries from a library's composed policy rows,
     each decided on the calls the check made: `proven` where the calls
-    confirm it, `falsified` with the executed witness where they do not."""
+    confirm it, `falsified` with the executed witness where they do not.
+    A class row is decided on the members no stated row with the same
+    premise covers (`stated`, a set of `(member, premise)`)."""
     from .records import Probe
     current = active_batch()
     rows = []
@@ -1256,9 +1284,19 @@ def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
             continue
         calls = _relevant(current.calls if current else [], param, kind,
                           policy.member, policy.premise)
+        apart = sorted({m for m, pr in (stated or set())
+                        if m and pr == policy.premise and policy.member is None})
+        if apart:
+            calls = [c for c in calls
+                     if not set(_members_in(c.point.get(param), kind)) & set(apart)]
         if not calls:
             continue
         evidence = _confirmed(calls, current, False, param)
+        if apart:
+            shown = sorted({m for c in calls for m in _members_in(c.point.get(param), kind)})
+            evidence = (evidence.replace("confirmed ", f"confirmed for {_and(shown)} ", 1)
+                        + f"; {_and(apart)} {'is' if len(apart) == 1 else 'are'} stated "
+                          f"separately")
         meta_policy = {"kind": kind, "parameter": param, "member": policy.member,
                        "behaviour": policy.behaviour, "exception": policy.exception,
                        "premise": policy.premise, "source": "derived",
@@ -1316,39 +1354,75 @@ def _library_for(composed: dict, p: str, kind: str, member: str) -> list:
             if pol.kind == kind and pol.member in (member, None)]
 
 
+#: a behaviour word said of several members at once
+_PLURAL = {"drops": "drop", "propagates": "propagate", "raises": "raise",
+           "converts": "convert", "introduces": "introduce", "follows": "follow",
+           "does": "do"}
+
+
+def _plural(clause: str) -> str:
+    """A clause whose subject is one member, said of several."""
+    word, _, rest = clause.partition(" ")
+    bare = word.rstrip(",;")
+    return f"{_PLURAL.get(bare, bare)}{word[len(bare):]} {rest}".strip()
+
+
 def _by_member(said: list) -> str:
     """Per-member clauses (`nan drops, ...`), members saying the same
-    thing said once: `nan, null and NA: drops when values remain, ...`."""
+    thing said once: `null and nan drop, stated`."""
     groups: dict = {}
     for clause in said:
         member, _, rest = clause.partition(" ")
         groups.setdefault(rest, []).append(member)
-    if len(groups) == len(said):
-        return "; ".join(said)
     out = []
     for rest, members in groups.items():
         out.append(f"{members[0]} {rest}" if len(members) == 1
-                   else f"{_and(members)}: {rest}")
+                   else f"{_and(members)} {_plural(rest)}")
     return "; ".join(out)
 
 
-def _library_words(policies: list) -> str:
+def _library_words(policies: list, sep: str = " and ") -> str:
     """What premised library rows say, in words: `drops when values
     remain and propagates when every slot is missing`."""
     parts = []
     for pol in policies:
         word = (f"raises {pol.exception}" if pol.behaviour == "raises" and pol.exception
                 else pol.behaviour)
-        when = ("when values remain" if pol.premise.endswith(">= 1")
-                else "when every slot is missing" if pol.premise.endswith("== 0")
-                else f"where {pol.premise}" if pol.premise else "")
+        when = _when(pol.premise)
         parts.append(f"{word} {when}".strip())
-    return " and ".join(parts)
+    return sep.join(parts)
+
+
+def _when(premise: str) -> str:
+    """A count premise in words: `when values remain`, `when every slot
+    is missing`."""
+    if premise.endswith(">= 1"):
+        return "when values remain"
+    if premise.endswith("== 0"):
+        return "when every slot is missing"
+    return f"where {premise}" if premise else ""
 
 
 def _follows(pol: Policy, call: Call) -> bool:
     return _behaviour_of(call) == pol.behaviour and (
         pol.behaviour != "raises" or _raised_matches(call.raised, pol.exception))
+
+
+def _did(call: Call) -> str:
+    """What one call did, as a verb phrase: `raises TypeError`, `drops`."""
+    b = _behaviour_of(call)
+    return f"raises {call.raised}" if b == "raises" else b
+
+
+def _where(call: Call, p: str, member: str) -> str:
+    """Where a call put the hole, in words: `when every slot is NA` for a
+    container of that member alone, `at xs = [NA, 0.2]` otherwise."""
+    from ._missing_words import _all_member, value_shown
+    value = call.point.get(p)
+    shown = value_shown(value)
+    if _in_slot(call, p, "missing") and _all_member(shown, member):
+        return f"when every slot is {member}"
+    return f"at {_at(call, p)}"
 
 
 def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
@@ -1363,8 +1437,10 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
         execution alone; `falsified` on a policy the code contradicts, a
         member treated more than one way, a raise no claim accounts for,
         or an absence f returns from present inputs that its return type
-        does not declare. The record names each parameter's members,
-        policy and source.
+        does not declare. The row says, per parameter, what each member
+        does and whose word it is; a falsified one also names its
+        counterexample and the one next step, the same one the policy
+        row gives.
     """
     from ._missing_words import declared_optional_return, point_shown
     from .domain import NO_ANNOTATION
@@ -1383,6 +1459,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
     parts: list = []
     table: dict = {}
     failures: list = []
+    nexts: list = []
     weakest = "proven"
     witness = None
     n = 0
@@ -1403,129 +1480,184 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
         members = [m for m in _members_of(fn, p, kind)
                    if m != "NaT" or slot == "datetime"]
         said: list = []
+        library_follows: list = []
+        library_breaks: list = []
         guarded = [m for m in members if _guard_for(guards, fn, p, kind, m)]
         for m in members:
             calls = _relevant(current.calls if current else [], p, kind, m, "")
+            floor = False
             if not calls:
                 calls = _run_floor(fn, facts, _floor_points(fn, facts, p, kind, [m],
                                                             domain, cj))
+                floor = bool(calls)
             n += len(calls)
-            entry = {"member": m}
+            entry: dict = {"member": m}
             table.setdefault(p, []).append(entry)
             if not calls:
-                entry["source"] = "none"
-                said.append(f"{m} never reached")
+                entry["source"] = "unstated"
+                said.append(f"{m} was never reached")
                 weakest = "unknown" if weakest != "falsified" else weakest
                 continue
             ways = _decide(calls)
             stated = _stated_for(stated_rows, kind, p, m)
             wrong = [r for r in stated if r.verdict == "falsified"]
             if wrong:
-                failures.append(f"{wrong[0].name} ({wrong[0].statement}) is falsified: "
-                                f"{wrong[0].counterexample}")
-                witness = witness or wrong[0].counterexample
-                entry["source"] = "stated"
-                said.append(f"{m} contradicts {wrong[0].statement}")
+                w = wrong[0]
+                did = _did(next(c for c in calls if not _follows(
+                    parse_policy(w.statement) or Policy(kind), c)))
+                entry.update({"source": "stated", "behaviour": did.split(" ")[0]})
+                said.append(f"{m} {did}, contradicting the stated `{w.statement}`")
+                failures.append(f"{w.statement} is falsified: {w.counterexample}")
+                witness = witness or w.counterexample
+                nexts.append(((w.meta or {}).get("mathema.policy") or {}).get("next")
+                             or "")
                 continue
             premised = [r for r in stated if ((r.meta or {}).get("mathema.policy")
                                                or {}).get("premise")]
             guard_here = _guard_for(guards, fn, p, kind, m)
             library_here = [] if guard_here or origin != "type" else \
                 _library_for(composed, p, kind, m)
-            if len(ways) > 1 and not premised \
-                    and not any(pol.premise for pol in library_here):
-                what = "; ".join(f"{b} at {_at(c, p)}" for b, c in ways.items())
-                failures.append(f"f treats {p} = {m} more than one way: {what}")
-                witness = witness or _witness(next(iter(ways.values())))
-                entry["behaviour"] = "mixed"
-                said.append(f"{m} mixed")
+            if stated and not premised:
+                behaviour, call = next(iter(ways.items()))
+                entry.update({"source": "stated", "behaviour": behaviour})
+                said.append(f"{m} {_did(call)}, stated")
+                continue
+            if premised or (library_here and any(pol.premise for pol in library_here)):
+                stated_pols = [q for q in (parse_policy(r.statement) for r in premised)
+                               if q is not None]
+                rest = [pol for pol in library_here
+                        if pol.premise not in {q.premise for q in stated_pols}]
+                broken = next(((pol, c) for c in calls for pol in rest
+                               if _premise_holds(pol.premise, c.point)
+                               and not _follows(pol, c)), None)
+                uncovered = [c for c in calls
+                             if not any(_premise_holds(q.premise, c.point)
+                                        for q in stated_pols + rest)]
+                if broken is not None:
+                    pol, c = broken
+                    entry.update({"source": "library", "behaviour": _behaviour_of(c)})
+                    library_breaks.append((m, c, pol))
+                    continue
+                if uncovered:
+                    c = uncovered[0]
+                    entry.update({"source": "unstated", "behaviour": _behaviour_of(c)})
+                    said.append(f"{m} {_did(c)} {_where(c, p, m)}, and no claim says "
+                                f"it may")
+                    failures.append(f"f {_did(c)} at {_at(c, p)}, and no claim says it may")
+                    witness = witness or _witness(c)
+                    continue
+                if stated_pols:
+                    entry["source"] = "stated"
+                    pieces = []
+                    if rest:
+                        pieces.append(f"{_library_words(rest)}, from "
+                                      f"{composed[p][0]}'s own policy row")
+                    pieces.append(f"{_library_words(stated_pols)}, stated")
+                    said.append(f"{m} " + "; ".join(pieces))
+                else:
+                    entry["source"] = "library"
+                    library_follows.append(m)
+                continue
+            as_member = m if kind == "missing" else None
+            if len(ways) > 1:
+                row = _default_row(fn, p, kind, as_member, calls, origin, sig, guards,
+                                   current, row_name, Probe)
+                cases = _cases(calls, p, kind, m)
+                both = (_split_words(cases, p) if cases and len(cases) > 1
+                        else _and([_did(c) + " " + _where(c, p, m)
+                                   for c in ways.values()]))
+                entry.update({"source": "unstated", "behaviours": {
+                    b: _at(c, None) for b, c in ways.items()}})
+                said.append(f"{m} {both}, and no claim states either")
+                failures.append(f"f has no single policy for {p} = {m}")
+                witness = witness or "; ".join(_witness(c) for c in ways.values())
+                nexts.append(((row.meta or {}).get("mathema.policy") or {}).get("next")
+                             or "")
                 continue
             behaviour, call = next(iter(ways.items()))
             entry["behaviour"] = behaviour
             if behaviour == "raises":
                 entry["exception"] = call.raised
-            did = f"raises {call.raised}" if behaviour == "raises" else behaviour
+            did = _did(call)
             guard = guard_here
-            library = library_here
-            if stated and not premised:
-                entry["source"] = "stated"
-                said.append(f"{m} {did}, stated")
-                continue
-            if premised:
-                # premised stated rows speak for their calls; a library
-                # row speaks for the calls no stated premise covers
-                stated_pols = [parse_policy(r.statement) for r in premised]
-                stated_pols = [q for q in stated_pols if q is not None]
-                rest = [pol for pol in library
-                        if pol.premise not in {q.premise for q in stated_pols}]
-                uncovered = [c for c in calls
-                             if not any(_premise_holds(q.premise, c.point)
-                                        for q in stated_pols + rest)]
-                broken = next((c for c in calls for pol in rest
-                               if _premise_holds(pol.premise, c.point)
-                               and not _follows(pol, c)), None)
-                if uncovered or broken is not None:
-                    bad = broken or uncovered[0]
-                    failures.append(f"no policy row covers {_witness(bad)}")
-                    witness = witness or _witness(bad)
-                    said.append(f"{m} at {_at(bad, p)} is covered by no row")
-                    continue
-                entry["source"] = "stated"
-                pieces = [f"{_library_words([q])}, from {composed[p][0]}'s own "
-                          f"policy row" for q in rest]
-                pieces += [f"{_library_words([q])}, stated" for q in stated_pols]
-                said.append(f"{m} " + "; ".join(pieces))
-                continue
             if guard is not None:
                 entry["source"] = "guard"
                 if guard[0] != behaviour:
+                    said.append(f"{m} {did}, where the guard on line {guard[2]} says "
+                                f"{guard[0]}")
                     failures.append(f"the guard on line {guard[2]} says {guard[0]} for "
                                     f"{p} = {m}, and f {behaviour}")
                     witness = witness or _witness(call)
                     continue
                 said.append(f"{m} {did}, from the guard on line {guard[2]}")
                 continue
-            if library:
-                entry["source"] = "library"
-                broken = next((c for c in calls for pol in library
-                               if _premise_holds(pol.premise, c.point)
-                               and not _follows(pol, c)), None)
-                if broken is not None:
-                    failures.append(f"{composed[p][0]}'s own policy row does not hold: "
-                                    f"{_witness(broken)}")
-                    witness = witness or _witness(broken)
-                    b = _behaviour_of(broken)
-                    said.append(f"{m} {'raises ' + broken.raised if b == 'raises' else b} "
-                                f"at {_at(broken, p)}, which {composed[p][0]}'s own "
-                                f"policy row does not say")
-                    continue
-                said.append(f"{m} {_library_words(library) if len(ways) > 1 else did}, "
-                            f"from {composed[p][0]}'s own policy row")
+            if library_here:
+                if all(_follows(pol, c) for pol in library_here for c in calls):
+                    entry["source"] = "library"
+                    library_follows.append(m)
+                else:
+                    entry["source"] = "library"
+                    bad = next(c for c in calls
+                               if not all(_follows(pol, c) for pol in library_here))
+                    library_breaks.append((m, bad, library_here[0]))
                 continue
             default = behaviour == ("raises" if kind == "absent" else "propagates") \
                 and origin == "type"
             if behaviour == "raises" and not default:
+                row = _default_row(fn, p, kind, as_member, calls, origin, sig, guards,
+                                   current, row_name, Probe)
+                entry["source"] = "unstated"
+                said.append(f"{m} raises {call.raised}, and no claim says it may")
                 failures.append(f"f raised {call.raised} at {_at(call, p)}, and no claim "
                                 f"says it may")
                 witness = witness or _witness(call)
-                entry["source"] = "none"
-                said.append(f"{m} raises {call.raised}, unaccounted")
+                nexts.append(((row.meta or {}).get("mathema.policy") or {}).get("next")
+                             or "")
                 continue
             exhaustive = lone and not container
             entry["source"] = "exhaustive" if exhaustive else (
                 "default" if default else "observed")
-            said.append(f"{m} {did}, " + ("called at every case" if exhaustive
-                                          else "observed on the draws"))
+            said.append(f"{m} {did}, {_confirmed(calls, current, floor or exhaustive, p)}"
+                        f"; no claim states it yet")
             if not exhaustive and weakest == "proven":
                 weakest = "holds"
+        clauses = []
+        if library_follows:
+            key = composed[p][0]
+            words = _library_words(_library_for(composed, p, kind, library_follows[0]),
+                                   sep=", ")
+            clauses.append(f"{_and(library_follows)} follow"
+                           f"{'s' if len(library_follows) == 1 else ''} {key}'s own "
+                           f"policy row ({words})" if len(_library_for(
+                               composed, p, kind, library_follows[0])) > 1 else
+                           f"{_and(library_follows)} "
+                           f"{words if len(library_follows) == 1 else _plural(words)}, "
+                           f"from {key}'s own policy row")
+        for m, c, pol in library_breaks:
+            key = composed[p][0]
+            clauses.append(f"{m} does not: f {_did(c)} {_where(c, p, m)}"
+                           if library_follows else
+                           f"{m} does not follow {key}'s own policy row: f {_did(c)} "
+                           f"{_where(c, p, m)}")
+            failures.append(f"f does not follow {key}'s own policy row at {_at(c, p)}: "
+                            f"f {_did(c).replace('raises', 'raised')} where the row says "
+                            f"{pol.behaviour}")
+            witness = witness or _witness(c)
+            accepted = _cases([c], p, kind, m) or [replace(
+                pol, member=m, behaviour=_behaviour_of(c),
+                exception=c.raised if c.raised else None)]
+            accepted = [replace(a, premise=a.premise or pol.premise) for a in accepted]
+            verb = "the raise is" if c.raised else "that is"
+            nexts.append(f"state {_written(accepted)} if {verb} intended, or change f")
+        if said:
+            clauses.append(_by_member(said))
         cover = ""
         if guarded and set(guarded) != set(members):
             cover = (f"; the guard covers {_and(guarded)}, not "
                      f"{_and([m for m in members if m not in guarded])}")
-        parts.append(f"{p} ({slot}): {_by_member(said)}{cover}")
+        parts.append(f"{p} ({slot}): {'; '.join(clauses)}{cover}")
         if guarded:
-            table.setdefault(p, [])
-            for e in table[p]:
+            for e in table.get(p, []):
                 e["guarded"] = e["member"] in guarded
     if kind == "absent" and whole:
         # what the output may be: a None from present inputs is the
@@ -1538,27 +1670,42 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                       and r.statement == "absent(f) introduces" and r.verdict != "falsified"]
             where = point_shown(back[0].point)
             if declared:
-                parts.append(f"the result: None at {where} from present inputs, as the "
-                             f"return type {declared} declares")
+                parts.append(f"the result may be None, as the return type {declared} "
+                             f"declares (f returned None at {where} from present inputs)")
             elif stated:
-                parts.append(f"the result: None at {where} from present inputs, stated")
+                parts.append(f"the result may be None, as stated (f returned None at "
+                             f"{where} from present inputs)")
             else:
-                failures.append(f"f returned None at {where} from present inputs, which "
-                                f"its return type does not declare")
+                import inspect
+                try:
+                    ann = inspect.signature(fn).return_annotation
+                except (TypeError, ValueError):
+                    ann = inspect.Signature.empty
+                shown = ("no annotation" if ann is inspect.Signature.empty else
+                         ann if isinstance(ann, str) else getattr(ann, "__name__", repr(ann)))
+                sentence = (f"f returned None at {where} from present inputs, and its "
+                            f"return type {shown} does not declare it")
+                parts.append(sentence)
+                failures.append(sentence)
                 witness = witness or f"{where}: f returned None"
-    meta = {"mathema.gate": {"kind": kind, "parameters": table}}
+                nexts.append(f"declare the return type Optional[{shown}] if None is an "
+                             f"answer f gives, or make f return a value there")
     sketch = "; ".join(parts) if parts else f"f has no parameter that admits {word}"
+    meta = {"mathema.gate": {"kind": kind, "parameters": table}}
+    nxt = next((x for x in nexts if x), "")
+    if nxt:
+        meta["mathema.gate"]["next"] = nxt
     if failures:
+        meta["mathema.gate"]["reason"] = failures[0]
         return Probe(cj.name, statement, "falsified", n=n, route="probe:classified",
-                     counterexample=witness, note=f"{failures[0]}; {sketch}",
-                     sketch=sketch, meta=meta)
+                     counterexample=witness, note=sketch, sketch=sketch, meta=meta)
     if not table:
         return Probe(cj.name, statement, "proven", n=0, route="examine",
                      note=f"no parameter admits {word}; {sketch}", sketch=sketch,
                      meta=meta)
     if weakest == "unknown":
         return Probe(cj.name, statement, "unknown", n=n, route="probe:classified",
-                     note=sketch, meta=meta)
+                     note=sketch, sketch=sketch, meta=meta)
     return Probe(cj.name, statement, weakest, n=n,
                  route="examine" if weakest == "proven" else "probe:classified",
                  note=sketch, sketch=sketch, meta=meta)

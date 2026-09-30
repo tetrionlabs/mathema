@@ -336,7 +336,7 @@ def mixed_sentence(param: str, ways_by_member: dict, raised_by_member: dict,
                 and _all_member(at.split(" = ", 1)[-1], member)
                 and at.count(" = ") == 1 else where([at]))
         text = (f"{text}; at {spot} it raises {exc} instead" if text
-                else f"at {spot} f raises {exc}")
+                else f"at {spot} f raised {exc}")
     for member, behaviour, at in other:
         what = f"the {member} slot" if container_noun else "the hole"
         verb = ("converts " + what + " to an absent result" if behaviour == "converts"

@@ -184,14 +184,16 @@ class Record:
                         line += f"\n           {extra}"
                 lines.append(line)
                 continue
-            if (p.meta or {}).get("mathema.gate") and p.sketch:
-                # a gate names each parameter's members, policy and source
+            gate = (p.meta or {}).get("mathema.gate")
+            if gate and p.sketch:
+                # a gate names what each parameter's members do and whose
+                # word it is; a falsified one its witness and next step
                 line = f"  {mark} {p.name}: {p.statement}"
-                if p.verdict == "holds" and p.n:
-                    line += f" ({p.n} calls)"
                 line += f"\n           {p.sketch}"
                 if p.counterexample:
                     line += f"\n           counterexample {p.counterexample}"
+                if gate.get("next") and p.verdict not in ("holds", "proven"):
+                    line += f"\n           {gate['next']}"
                 lines.append(line)
                 continue
             if p.verdict == "proven":

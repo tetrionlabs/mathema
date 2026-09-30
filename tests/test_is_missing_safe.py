@@ -163,8 +163,10 @@ def test_function_wide_spelling_is_the_gate_over_every_parameter():
     (probe,) = check_conjectures(unannotated_mean, [cj])
     assert probe.name == "is_missing_safe[f]"
     assert probe.verdict == "holds"
-    assert probe.note == ("x (unannotated): nan propagates, observed on the draws; "
-                          "y (unannotated): nan propagates, observed on the draws")
+    assert probe.note == ("x (unannotated): nan propagates, confirmed by calling f at "
+                          "x = nan; no claim states it yet; y (unannotated): nan "
+                          "propagates, confirmed by calling f at y = nan; no claim "
+                          "states it yet")
 
 
 def test_function_wide_spelling_holds_when_every_parameter_does():
@@ -175,8 +177,9 @@ def test_function_wide_spelling_holds_when_every_parameter_does():
     (probe,) = check_conjectures(handled,
                                  [claim("f is missing safe", route="best")])
     assert probe.verdict == "holds"
-    assert probe.note == ("x (float): nan propagates, observed on the draws; "
-                          "y (float): nan propagates, observed on the draws")
+    assert probe.note == ("x (float): nan propagates, confirmed by calling f at x = nan; "
+                          "no claim states it yet; y (float): nan propagates, confirmed "
+                          "by calling f at y = nan; no claim states it yet")
 
 
 def test_both_spellings_handled_proves_exhaustively_for_one_param():

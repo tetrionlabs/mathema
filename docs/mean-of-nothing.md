@@ -87,7 +87,7 @@ print(mathema.check(mean_return, claims=[value, mathema.claim("is_missing_safe(f
 ```text
 mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
   FALSIFY is_missing_safe[f]: is_missing_safe(f)
-           xs (pandas.Series): nan and null: drops when values remain and propagates when every slot is missing, from pandas.Series.mean's own policy row; NA raises TypeError at xs = [NA], which pandas.Series.mean's own policy row does not say
+           xs (pandas.Series): nan and null follow pandas.Series.mean's own policy row (drops when values remain, propagates when every slot is missing); NA does not: f raises TypeError when every slot is NA
            counterexample xs = [NA]: f raised TypeError
 ```
 
@@ -109,7 +109,7 @@ print(mathema.check(mean_return, claims=[value, mathema.claim("is_empty_safe(xs)
 ```text
 mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
   FALSIFY is_empty_safe[xs]: is_empty_safe(xs)
-           counterexample xs = []: f returned nan for the empty input; raise, or return a value
+           counterexample xs = [] (an empty float Series): f returned nan for the empty input; raise, or return a value
 ```
 
 The mean of nothing is `nan` in pandas, as in numpy; `statistics.mean`
@@ -157,7 +157,7 @@ mathema.Record(mean_return) · source, no side effects · form 9671b357ded6
   proven  is_empty_safe[xs]: is_empty_safe(xs)
   holds   no_values: assuming count(xs) == 0, missing(f, xs) raises(ValueError)   [stated; confirmed on the 152 draws of bounded]
   proven  is_missing_safe[f]: is_missing_safe(f)
-           xs (pandas.Series): nan, null and NA: drops when values remain, from pandas.Series.mean's own policy row; raises ValueError when every slot is missing, stated
+           xs (pandas.Series): nan, null and NA drop when values remain, from pandas.Series.mean's own policy row; raises ValueError when every slot is missing, stated
   proven  missing[xs, count >= 1]: assuming count(xs) >= 1, missing(f, xs) drops   [from pandas.Series.mean's own policy row, which f calls; confirmed on the 152 draws of bounded]
 ```
 

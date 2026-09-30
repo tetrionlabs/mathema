@@ -47,25 +47,26 @@ def to_none(x: float) -> Optional[float]:
 def test_a_raising_policy_rejects_the_input_at_entry():
     with pytest.raises(MissingValueError) as err:
         root(None)
-    assert str(err.value) == ("root(): x = None is absent, and its policy says f "
-                              "raises there (absent(f, x) raises(TypeError))")
+    assert str(err.value) == ("root(): x = None: raised by enforce_domain before f "
+                              "ran; the stated policy is absent(f, x) raises(TypeError)")
     assert root(4.0) == 2.0
 
 
 def test_a_member_policy_rejects_only_its_member():
     with pytest.raises(MissingValueError) as err:
         total([1.0, None])
-    assert str(err.value) == ("total(): xs = [1.0, null] holds a null slot, and its "
-                              "policy says f raises there (missing(f, xs, null) "
-                              "raises(ValueError))")
+    assert str(err.value) == ("total(): xs = [1.0, null] holds a null slot: raised by "
+                              "enforce_domain before f ran; the stated policy is "
+                              "missing(f, xs, null) raises(ValueError)")
     assert math.isnan(total([1.0, float("nan")]))
 
 
 def test_propagation_is_checked_at_exit():
     with pytest.raises(MissingValueError) as err:
         clamp01(float("nan"))
-    assert str(err.value) == ("clamp01(): x = nan in, 1.0 out: f drops the hole, and "
-                              "its policy says propagates (missing(f, x) propagates)")
+    assert str(err.value) == ("clamp01(): at x = nan f returned 1.0, dropping the "
+                              "hole, but its policy says propagates (missing(f, x) "
+                              "propagates)")
     assert clamp01(0.5) == 0.5
 
 

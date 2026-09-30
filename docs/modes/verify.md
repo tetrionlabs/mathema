@@ -106,7 +106,7 @@ mathema.write_spec(softmax)
 ```
 $ mathema verify --root .
 ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
-FAIL functions.softmax: fresh; missing[scores]: f has no single policy for a missing scores (state `missing(f, scores, null) raises(TypeError)`)
+FAIL functions.softmax: fresh; 1 policy row to settle: missing[scores]: f has no single policy for a missing scores, 3 rows to state (mathema claims functions.softmax)
 1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -176,7 +176,7 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 ```
 $ mathema verify --root .
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-FAIL functions.softmax: form changed; 1 proven, 2 holds, 1 falsified  <- missing[scores]: f has no single policy for a missing scores (state `missing(f, scores, null) raises(TypeError)`)
+FAIL functions.softmax: form changed; 1 proven, 2 holds, 1 falsified  <- 1 policy row to settle: missing[scores]: f has no single policy for a missing scores, 3 rows to state (mathema claims functions.softmax)
 1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -268,15 +268,15 @@ which holds. The second proven claim in the count is
 ```
 $ mathema verify --root .
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 3 holds, 1 falsified, 1 unknown  <- missing[xs, null]: f raises a missing xs (a null slot in, TypeError), the row says propagates; change the word or the code; never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
-FAIL functions.softmax: fresh; missing[scores]: f has no single policy for a missing scores (state `missing(f, scores, null) raises(TypeError)`)
+FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 3 holds, 1 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total); never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
+FAIL functions.softmax: fresh; 1 policy row to settle: missing[scores]: f has no single policy for a missing scores, 3 rows to state (mathema claims functions.softmax)
 2 fresh (form unchanged, skipped), 1 adjudicated, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
-The line also names a policy row that does not hold: running_total
-raises TypeError when a slot of xs is None, and no policy row says it
-may; the clause names the row and the claim that states it.
+The line also names a policy row the code contradicts: running_total
+raises TypeError when a slot of xs is None, where mathema's default row
+says propagates; the clause names the row and the word to write.
 
 The ways out are real evidence (rewrite the claim or the code so a
 route can decide it) or an explicit human decision to own the gap
@@ -290,7 +290,7 @@ accepting balances.running_total :: never_overshoots_much (verdict unknown) as r
   - reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
 written: reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
 $ mathema verify balances.running_total --root . --lenient
-FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 3 holds, 1 falsified, 1 accepted risk  <- missing[xs, null]: f raises a missing xs (a null slot in, TypeError), the row says propagates; change the word or the code
+FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 3 holds, 1 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total)
 0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -301,7 +301,7 @@ pipeline can choose whether owned gaps block it:
 <!-- example: sweep session -->
 ```
 $ mathema verify balances.running_total --root .
-FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 3 holds, 1 falsified, 1 accepted risk  <- missing[xs, null]: f raises a missing xs (a null slot in, TypeError), the row says propagates; change the word or the code; 1 accepted-risk claim(s)
+FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 3 holds, 1 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total); 1 accepted-risk claim(s)
 0 fresh (form unchanged, skipped), 1 adjudicated, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -343,7 +343,7 @@ $ mathema verify --root .
 FAIL balances.running_total: cannot resolve to a live function (declared in .mathema/verified/balances.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total
 FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-FAIL functions.softmax: fresh; missing[scores]: f has no single policy for a missing scores (state `missing(f, scores, null) raises(TypeError)`)
+FAIL functions.softmax: fresh; 1 policy row to settle: missing[scores]: f has no single policy for a missing scores, 3 rows to state (mathema claims functions.softmax)
 2 fresh (form unchanged, skipped), 0 adjudicated, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```

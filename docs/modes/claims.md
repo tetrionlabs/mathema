@@ -96,7 +96,7 @@ $ mathema claims functions.softmax
 functions.softmax: 1 declared claim(s)
   - is_deterministic: f(scores) == f(scores)  [route best]
 functions.softmax: 1 policy row about scores
-  a raise or a case no claim accounts for (state it, or change f; --write leaves these out):
+  not covered by any claim yet (the line beneath says what to write, or what to change; --write leaves these out):
     FALSIFY missing[scores]: f has no single policy for a missing scores
              f gives a hole back when every slot is missing (scores = [nan]); at an all-null container it raises TypeError instead; at scores = [nan, 4.23, 6.86, 9.76] it introduces a missing value
              to state each case, write `missing(f, scores, null) raises(TypeError)`, `assuming count(scores) >= 1, missing(f, scores, nan) introduces` and `assuming count(scores) == 0, missing(f, scores, nan) propagates`; or make f treat a missing scores one way

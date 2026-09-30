@@ -257,7 +257,7 @@ print(mathema.check(label, claims=[mathema.claim(
 mathema.Record(label) · source, no side effects · form ba84c5dc4cc6
   holds   c: for x in [0.0, 1.0] : float|absent|missing, f(x) in {"high", "low"} (34 draws)
            derive could not decide it (`in` is decided by execution: the symbolic lift has no reading of membership in a language or a set, so the probe route adjudicates it); the probe decided it; at x = None f raised TypeError; at x = nan f returned "low", so it drops the hole
-  FALSIFY missing[x]: missing(f, x) propagates   [default for a float; f drops instead: nan in, "low" out]
+  FALSIFY missing[x]: missing(f, x) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, "low" out]
            if "low" is the answer f should give for a missing x, write `missing(f, x) drops`; if not, make f raise or give nan back; or accept it as a discovery: mathema accept mv.label missing[x] --as discovery --corrected "missing(f, x) drops"
   FALSIFY absent[x]: f raised TypeError at x = None, and no claim says it may
            x is Optional[float], so f promised to take None. If the raise is intended, state `absent(f, x) raises(TypeError)`; otherwise handle None in f, or annotate x as float; or accept the raise as a discovery (mathema accept mv.label absent[x] --as discovery) and state `absent(f, x) raises(TypeError)`
@@ -288,7 +288,7 @@ mathema.Record(clamp01) · source, no side effects · form bc9fa73b5bd1
            ∀ x ∈ ℝ; missing for x (float) means nan
   holds   c[float]: for x in R|missing, 0 <= f(x) <= 1 (43 draws)
            the float64 computation of c ran link by link, and every link holds; at x = nan f returned 1.0, so it drops the hole
-  FALSIFY missing[x]: missing(f, x) propagates   [default for a float; f drops instead: nan in, 1.0 out]
+  FALSIFY missing[x]: missing(f, x) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, 1.0 out]
            if 1.0 is the answer f should give for a missing x, write `missing(f, x) drops`; if not, make f raise or give nan back; or accept it as a discovery: mathema accept mv.clamp01 missing[x] --as discovery --corrected "missing(f, x) drops"
 ```
 
@@ -406,7 +406,7 @@ mathema.Record(total) · source, no side effects · form dacf931fef1e
            ∀ xs ∈ [0.0, 1.0]ⁿ ⊂ ℝ, xs of every length; missing for xs (list) means null or nan
   holds   c[float]: for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0 (248 entries across 53 draws, sizes (1, 1) to (8, 1))
            the float64 computation of c ran at 53 points: null, nan, every corner and 40 interior points; at xs = [null] f raised TypeError; at xs = [nan] f gave nan back
-  FALSIFY missing[xs, null]: missing(f, xs, null) propagates   [default for a list slot that may be null; f raises instead: a null slot in, TypeError]
+  FALSIFY missing[xs, null]: missing(f, xs, null) propagates   [mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError]
            if the raise is intended, write `missing(f, xs, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept mv.total missing[xs, null] --as discovery --corrected "missing(f, xs, null) raises(TypeError)"
   holds   missing[xs, nan]: missing(f, xs, nan) propagates   [default for a list slot that may be nan; confirmed on the 53 draws of c[float]. Keep it by writing it (mathema claims mv.total --write), or change the word to raises or drops if f should do otherwise]
 mathema.Record(mean_np) · source, no side effects · form ce47d44bdab7
@@ -476,8 +476,8 @@ def clamp01(x: float) -> float:
 $ mathema claims pricing.clamp01
 pricing.clamp01: no declared claims (mathema claims --suggest lists candidates)
 pricing.clamp01: 1 policy row about x
-  contradicted by the code (choose the word, or change the code; --write leaves these out):
-    FALSIFY missing[x]: missing(f, x) propagates   [default for a float; f drops instead: nan in, 1.0 out]
+  contradicted by the code (change the word, the code, or accept it as a discovery; --write writes these with the contradiction in the note):
+    FALSIFY missing[x]: missing(f, x) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, 1.0 out]
              if 1.0 is the answer f should give for a missing x, write `missing(f, x) drops`; if not, make f raise or give nan back; or accept it as a discovery: mathema accept pricing.clamp01 missing[x] --as discovery --corrected "missing(f, x) drops"
 ```
 
@@ -571,7 +571,7 @@ mathema.Record(root_opt) · source, no side effects · form 04f945e667a0
   proven  is_missing_safe[f]: is_missing_safe(f)
            x (float): nan propagates, from math.sqrt's own policy row
   FALSIFY is_absent_safe[f]: is_absent_safe(f)
-           x (float): None raises TypeError, unaccounted
+           x (float): None raises TypeError, and no claim says it may
            counterexample x = None: f raised TypeError
 ```
 
@@ -605,8 +605,8 @@ for arg in (None, float("nan"), 4.0):
 
 <!-- example: enforce output -->
 ```text
-root(): x = None is absent, and its policy says f raises there (absent(f, x) raises(TypeError))
-root(): x = nan in, 0.0 out: f drops the hole, and its policy says propagates (missing(f, x) propagates)
+root(): x = None: raised by enforce_domain before f ran; the stated policy is absent(f, x) raises(TypeError)
+root(): at x = nan f returned 0.0, dropping the hole, but its policy says propagates (missing(f, x) propagates)
 2.0
 ```
 

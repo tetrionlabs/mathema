@@ -1518,50 +1518,121 @@ def _is_empty_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                           tolerance: float | None = None):
     """Intent:
         The structural half of is_empty_safe[xs]: proven when the
-        sequence parameter carries an explicit raising emptiness guard
-        (`if not xs: raise`, `if len(xs) == 0: raise`), the empty
-        boundary is deliberately rejected, which is safe handling.
-        Undecided (None) otherwise: the probe decides empirically
-        whether an empty input crashes by accident.
+        container parameter carries an explicit raising emptiness guard
+        (`if not xs: raise`, `if len(xs) == 0: raise`) and f, called
+        with the empty container, does raise there: the empty boundary
+        is deliberately rejected. Undecided (None) otherwise: the probe
+        decides what f does at the empty input.
 
     Notes:
         rhs_src/relation/tolerance kept for protocol uniformity;
         `lhs_src` is the parameter itself.
     """
-    from .hazards import _emptiness_guard_params
+    from .hazards import _emptiness_guard_line, _emptiness_guard_params
     from .symbolic import ProofResult
     param = lhs_src
     if facts.param_kinds.get(param) not in (*SEQUENCE_KINDS, "table"):
         return None
-    if param in _emptiness_guard_params(facts):
+    if param not in _emptiness_guard_params(facts):
+        return None
+    value, shown = _empty_value(fn, facts, param, None)
+    args = _synth_other_params(fn, facts, param, domain or {}, random.Random(0))
+    try:
+        with _pinned_float_env():
+            _call_with_target(fn, facts, param, args, value)
+    except Exception as exc:
+        line = _emptiness_guard_line(facts, param)
         return ProofResult(
             "proven",
-            sketch=f"the empty {param} is deliberately rejected by an "
-                   f"explicit raising guard; the boundary is handled, "
-                   f"not stumbled into")
+            sketch=f"{shown}: f raised {type(exc).__name__} behind the guard"
+                   + (f" on line {line}" if line else ""),
+            meta={"mathema.witness_executed": True})
     return None
 
 
-def _realised(fn, facts, target: str, cells: list, cj=None):
-    """A container of `cells` for `target`, through its runtime type:
-    a float numpy array, a float pandas or polars Series, a frame whose
-    columns (the ones the body reads) hold `cells` each, a plain list
-    for a list parameter. An empty matrix is `(0, 0)`."""
+def _uses_as_matrix(facts, target: str) -> bool:
+    """Whether the body reads a parameter as a matrix: a matrix marker,
+    or the parameter handed to a `linalg` function, `trace`, `@`, or
+    `.T`."""
+    import ast
+    if facts.param_kinds.get(target) == "mat":
+        return True
+    tree = getattr(facts, "tree", None)
+    if tree is None:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args and any(
+                isinstance(a, ast.Name) and a.id == target for a in node.args):
+            func = node.func
+            dotted = ast.unparse(func)
+            if ".linalg." in f".{dotted}" or dotted.endswith(("trace", "linalg.det")):
+                return True
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.MatMult) and any(
+                isinstance(side, ast.Name) and side.id == target
+                for side in (node.left, node.right)):
+            return True
+        if isinstance(node, ast.Attribute) and node.attr == "T" \
+                and isinstance(node.value, ast.Name) and node.value.id == target:
+            return True
+    return False
+
+
+def _empty_value(fn, facts, target: str, cj=None) -> tuple:
+    """Intent:
+        `(value, shown)`: the empty container for `target`, realised
+        through its runtime type, and how the record says what was
+        built: `xs = [] (an empty float Series)`, `A = [] (an empty 0 by
+        0 numpy.ndarray)`, `df = {r: []} (a frame with zero rows)`. An
+        empty matrix has zero rows by the column count a claim's binding
+        fixes, else 0 by 0.
+    """
     from .runtime_types import realised_parameters
     adapter = getattr(realised_parameters(facts).get(target), "adapter", None) or ""
     kind = facts.param_kinds.get(target)
-    if adapter == "numpy.ndarray" or kind == "mat":
+    if kind == "table" or adapter in ("pandas.DataFrame", "polars.DataFrame"):
+        from .conjecture import _table_columns
+        columns = _table_columns(target, cj, facts) if cj is not None else ["a"]
+        shown = f"{target} = {{{', '.join(f'{c}: []' for c in columns)}}} (a frame with zero rows)"
+        if adapter == "polars.DataFrame":
+            import polars as pl
+            return pl.DataFrame({c: pl.Series([], dtype=pl.Float64)
+                                 for c in columns}), shown
+        import pandas as pd
+        return pd.DataFrame({c: pd.Series([], dtype=float) for c in columns}), shown
+    if _uses_as_matrix(facts, target):
         import numpy as np
-        if kind == "mat":
-            return np.array(cells, dtype=float).reshape(len(cells) and 1, len(cells)) \
-                if cells else np.zeros((0, 0))
-        return np.array(cells, dtype=float)
+        from ._floor import fixed_sizes
+        bound = (getattr(cj, "domain", None) or {}).get(target) if cj is not None else None
+        fixed = fixed_sizes(bound)
+        cols = fixed[1] if len(fixed) > 1 and fixed[1] is not None else 0
+        value = np.zeros((0, cols))
+        if adapter not in ("numpy.ndarray", ""):
+            value = value.tolist()
+        runtime = "numpy.ndarray" if adapter in ("numpy.ndarray", "") else "matrix"
+        return value, f"{target} = [] (an empty 0 by {cols} {runtime})"
+    if adapter == "numpy.ndarray":
+        import numpy as np
+        return np.array([], dtype=float), f"{target} = [] (an empty numpy.ndarray)"
     if adapter == "pandas.Series":
         import pandas as pd
-        return pd.Series(cells, dtype=float)
+        return pd.Series([], dtype=float), f"{target} = [] (an empty float Series)"
     if adapter == "polars.Series":
         import polars as pl
-        return pl.Series(cells, dtype=pl.Float64)
+        return (pl.Series([], dtype=pl.Float64),
+                f"{target} = [] (an empty Float64 polars Series)")
+    return [], f"{target} = [] (an empty list)"
+
+
+def _realised(fn, facts, target: str, cells: list, cj=None):
+    """A container of `cells` for `target`, through its runtime type: a
+    float numpy array, a float pandas or polars Series, a frame whose
+    columns (the ones the body reads) hold `cells` each, a plain list for
+    a list parameter; the empty container through `_empty_value`."""
+    if not cells:
+        return _empty_value(fn, facts, target, cj)[0]
+    from .runtime_types import realised_parameters
+    adapter = getattr(realised_parameters(facts).get(target), "adapter", None) or ""
+    kind = facts.param_kinds.get(target)
     if kind == "table" or adapter in ("pandas.DataFrame", "polars.DataFrame"):
         from .conjecture import _table_columns
         columns = _table_columns(target, cj, facts) if cj is not None else ["a", "b"]
@@ -1570,6 +1641,20 @@ def _realised(fn, facts, target: str, cells: list, cj=None):
             return pl.DataFrame({c: pl.Series(cells, dtype=pl.Float64) for c in columns})
         import pandas as pd
         return pd.DataFrame({c: pd.Series(cells, dtype=float) for c in columns})
+    if _uses_as_matrix(facts, target):
+        import numpy as np
+        side = int(math.isqrt(len(cells))) or 1
+        grid = np.array(cells[: side * side], dtype=float).reshape(side, side)
+        return grid if adapter in ("numpy.ndarray", "") else grid.tolist()
+    if adapter == "numpy.ndarray":
+        import numpy as np
+        return np.array(cells, dtype=float)
+    if adapter == "pandas.Series":
+        import pandas as pd
+        return pd.Series(cells, dtype=float)
+    if adapter == "polars.Series":
+        import polars as pl
+        return pl.Series(cells, dtype=pl.Float64)
     return list(cells)
 
 
@@ -1607,8 +1692,9 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
     sampled). At the empty input a raise behind a recognized emptiness
     guard passes, an unguarded raise fails, a finite value passes, a
     hole fails, and a None fails unless the return type declares it. A
-    raise or non-finite result on the non-empty inputs fails outright."""
-    from ._missing_words import declared_optional_return
+    raise or non-finite result on the non-empty inputs fails outright.
+    The row says what f did at the empty input."""
+    from ._missing_words import declared_optional_return, value_shown
     from .hazards import _emptiness_guard_params
     target = cj.lhs
     if facts.param_kinds.get(target) not in (*SEQUENCE_KINDS, "table"):
@@ -1616,7 +1702,8 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
     guarded = target in _emptiness_guard_params(facts)
     declared = declared_optional_return(fn)
     shapes = ("empty", "single", "longer")
-    state = {"idx": 0}
+    state: dict = {"idx": 0, "said": None}
+    empty, shown = _empty_value(fn, facts, target, cj)
 
     def trial(args):
         shape = shapes[state["idx"] % len(shapes)]
@@ -1624,21 +1711,28 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
         cells = ([] if shape == "empty"
                  else [rng.uniform(-10, 10)] if shape == "single"
                  else [rng.uniform(-10, 10) for _ in range(5)])
-        value = _realised(fn, facts, target, cells, cj)
+        value = empty if shape == "empty" else _realised(fn, facts, target, cells, cj)
         try:
             with _pinned_float_env():
                 out = _call_with_target(fn, facts, target, args, value)
         except Exception as exc:
+            name = type(exc).__name__
             if shape == "empty":
                 if guarded:
+                    state["said"] = state["said"] or f"{shown}: f raised {name} behind a guard"
                     return True   # deliberate rejection
-                return (f"{target} = [] raised {type(exc).__name__} with no "
-                        f"emptiness guard in the body, the empty boundary "
-                        f"is stumbled into, not handled")
-            return (f"{target} = {cells!r} raised {type(exc).__name__}")
+                return (f"{shown}: f raised {name} with no guard for the empty input; "
+                        f"guard it (`if not {target}: raise ValueError(...)`) so the "
+                        f"raise is deliberate, or return a value")
+            return (f"{target} = {cells!r} raised {name}")
         if shape == "empty":
             why = _empty_outcome(out, declared)
-            return True if why is None else f"{target} = []: {why}"
+            if why is not None:
+                return f"{shown}: {why}"
+            state["said"] = state["said"] or (
+                f"{shown}: f returned None, as its return type {declared} declares"
+                if out is None else f"{shown}: f returned {value_shown(out)}")
+            return True
         try:
             as_float = float(out)
         except (TypeError, ValueError):
@@ -1651,13 +1745,11 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
                            max(trials // 4, 9), trial)
     verdict, checked, cx = result
     if verdict == "holds" and len(facts.params) == 1:
-        # exhaustive coverage: the empty container is one input, and with
-        # no other parameter to vary, observing that one call behave IS
-        # the whole hazard class
-        return ("proven", checked, None,
-                "the empty container is a single input; with one parameter "
-                "the call at it was observed to behave, so the examination is "
-                "exhaustive")
+        # the empty container is one input, and with no other parameter
+        # to vary, calling f with it is the whole case
+        return ("proven", checked, None, state["said"])
+    if verdict == "holds" and state["said"]:
+        return ("holds", checked, None, state["said"])
     return result
 
 

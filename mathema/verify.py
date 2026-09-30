@@ -103,22 +103,62 @@ def _unaccounted_text(report) -> str:
 
 
 def _policy_clause(name: str, statement: str, pol: dict) -> "str | None":
-    """The clause a verify line carries for one policy row that does not
-    hold, from the row's own meta."""
+    """The clause a verify or check line carries for one policy row that
+    does not hold, from the row's own meta: the row, what f does, whose
+    word it contradicts, and the one next step."""
     import re as _re
+    nxt = pol.get("next") or ""
+    first = _re.search(r"`([^`]+)`", nxt)
+    to_write = first.group(1) if first else None
     if pol.get("sentence"):
-        remedy = _re.search(r"`([^`]+)`", pol.get("next") or "")
-        tail = f" (state `{remedy.group(1)}`)" if remedy else ""
-        return f"{name}: {pol['sentence']}{tail}"
-    m = _re.search(r"f (\w+) instead: (.+)$", pol.get("reason") or "")
+        sentence = pol["sentence"]
+        if sentence.startswith("f has no single policy"):
+            rows = len(_re.findall(r"`[^`]+`", nxt.split("; or ", 1)[0]))
+            return (f"{name}: {sentence}" + (f", {rows} rows to state" if rows > 1
+                                              else ""))
+        if "does not declare it" in sentence:
+            return (f"{name}: {sentence}; declare the return type Optional, or return a "
+                    f"value")
+        tail = (f"; state `{to_write}` or handle None" if pol.get("kind") == "absent"
+                and to_write else f"; state `{to_write}` or change f" if to_write else "")
+        return f"{name}: {sentence}{tail}"
+    reason = pol.get("reason") or ""
+    m = _re.search(r"f (\w+) instead: (.+)$", reason)
+    lib = _re.match(r"from (\S+)'s own policy row, which f calls; f (.+?) instead at (.+)$",
+                    reason)
+    if lib:
+        return (f"{name}, {lib.group(1)}'s row says {pol.get('behaviour')} "
+                f"{_when_words(pol.get('premise') or '')} and f {lib.group(2)} at "
+                f"{lib.group(3)}".replace("  ", " ")
+                + (f"; state `{to_write}` or change f" if to_write else ""))
     if not m:
         return None
+    did, entry = m.group(1), m.group(2)
     kind = pol.get("kind") or "missing"
-    what = (f"{pol.get('parameter')} = None" if kind == "absent"
-            else f"a missing {pol.get('parameter') or 'input'}")
+    param = pol.get("parameter") or "input"
     word = statement.split(") ", 1)[-1] if ") " in statement else pol.get("behaviour")
-    return (f"{name}: f {m.group(1)} {what} ({m.group(2)}), the row says {word}; "
-            f"change the word or the code")
+    whose = ("mathema's default says" if pol.get("source") == "default"
+             else "the row says")
+    if did == "raises":
+        exc = entry.rsplit(", ", 1)[-1].replace("raised ", "")
+        slot = _re.match(r"a (\S+) slot in", entry)
+        where = (f"at a {slot.group(1)} slot of {param}" if slot
+                 else f"at {param} = None" if kind == "absent" else f"at a missing {param}")
+        what = f"f raises {exc} {where}"
+    else:
+        what = (f"f {did} {param} = None ({entry})" if kind == "absent"
+                else f"f {did} a missing {param} ({entry})")
+    remedy = (f"; write `{to_write}` or change f" if to_write
+              else "; change the word or the code")
+    return f"{name}, {what} where {whose} {word}{remedy}"
+
+
+def _when_words(premise: str) -> str:
+    if premise.endswith(">= 1"):
+        return "when values remain"
+    if premise.endswith("== 0"):
+        return "when every slot is missing"
+    return ""
 
 
 def summary_counts(counts) -> str:
@@ -206,9 +246,14 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
                 p.note = row.get("note") or p.note
 
 
+#: the short name a summary line gives a falsified gate claim
+_GATE_LABELS = {"is_missing_safe": "gate", "is_absent_safe": "gate",
+                "is_empty_safe": "empty"}
+
+
 def gate(claims, *, strict: bool,
          accepted_risk: frozenset = frozenset(),
-         unresolved=()) -> GateReport:
+         unresolved=(), key: "str | None" = None) -> GateReport:
     """Apply the one gate policy to a set of adjudicated claims (live
     Probes or stored claim dicts, mixed freely).
 
@@ -221,11 +266,22 @@ def gate(claims, *, strict: bool,
     surface).
     """
     r = GateReport()
+    gate_fails: list = []
     for c in claims:
         name, verdict, meta, note = _claim_fields(c)
         if "mathema.foreign_grammar" in meta:
             r.foreign.append(c)
             continue
+        statement = _claim_statement(c)
+        label = next((lab for rel, lab in _GATE_LABELS.items()
+                      if statement.startswith(rel + "(")), None)
+        if label and classify_verdict(verdict) == "falsified":
+            reason = ((meta.get("mathema.gate") or {}).get("reason")
+                      or (c.get("counterexample") if isinstance(c, dict)
+                          else getattr(c, "counterexample", None)) or "")
+            gate_fails.append(f"{label} ({statement}) falsified: {reason}"
+                              + (f"; mathema claims {key} prints the rows to state"
+                                 if key and label == "gate" else ""))
         pol = meta.get("mathema.policy")
         if pol and classify_verdict(verdict) == "falsified":
             clause = _policy_clause(name, _claim_statement(c), pol)
@@ -263,10 +319,17 @@ def gate(claims, *, strict: bool,
     # mode; strictness only governs structurally-skipped claims, never
     # wrong or undecided ones
     if r.falsified:
-        # a policy row names itself and the one-word edit; any other
-        # falsified claim is counted
-        others = r.falsified - len(r.policy_problems)
-        r.problems.extend(r.policy_problems)
+        # a falsified gate names itself and its reason, and the policy
+        # rows under it are the same fact; else the policy rows name
+        # themselves and the one-word edit; any other falsified claim is
+        # counted
+        r.problems.extend(gate_fails)
+        if r.policy_problems and not gate_fails:
+            n = len(r.policy_problems)
+            r.problems.append(f"{n} policy row{'s' if n != 1 else ''} to settle: "
+                              + "; ".join(r.policy_problems)
+                              + (f" (mathema claims {key})" if key else ""))
+        others = r.falsified - len(r.policy_problems) - len(gate_fails)
         if others > 0:
             r.problems.append(f"{others} falsified claim(s)")
     if r.invalidated:
@@ -525,6 +588,14 @@ def _born_falsified_hint(key: str, probes: list,
         return []
     lines = []
     for p in list(fresh):
+        gate_meta = (getattr(p, "meta", None) or {}).get("mathema.gate") or {}
+        if gate_meta.get("reason"):
+            lines.append(f"note {key}: gate ({p.statement}) falsified on first "
+                         f"adjudication: {gate_meta['reason']}. State the rows mathema "
+                         f"claims {key} prints, or change f; the claim is kept until "
+                         f"you do.")
+            fresh.remove(p)
+            continue
         pol = (getattr(p, "meta", None) or {}).get("mathema.policy") or {}
         clause = _policy_clause(p.name, p.statement, pol) if pol else None
         if clause:
@@ -1527,7 +1598,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # function, and a library's body is not what its rows are about
         report = gate(claims_for_gate, strict=strict,
                       accepted_risk=accepted,
-                      unresolved=() if is_library else unres)
+                      unresolved=() if is_library else unres, key=key)
         hints = (_unsettled_library_hints(key, claims_for_gate)
                  if is_library and report.problems else [])
         standing = [

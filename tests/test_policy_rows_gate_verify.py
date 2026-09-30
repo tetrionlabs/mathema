@@ -58,8 +58,8 @@ def test_a_contradicted_default_fails_verify_and_is_counted(project, capsys):
     line = _line(capsys, "pv.clamp01")
     assert line.startswith("FAIL pv.clamp01:")
     assert "1 falsified" in line
-    assert ("missing[x]: f drops a missing x (nan in, 1.0 out), the row says "
-            "propagates") in line
+    assert ("1 policy row to settle: missing[x], f drops a missing x (nan in, 1.0 out) "
+            "where mathema's default says propagates") in line
 
 
 def test_an_unaccounted_raise_fails_verify_in_lenient_mode_too(project, capsys):

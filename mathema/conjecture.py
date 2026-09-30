@@ -1973,19 +1973,7 @@ def _interpret_assumption(cj, conjectures):
     for part in _split_top_and(text):
         gate = re.match(r"^\s*(is_missing_safe|is_absent_safe)\s*\(.*\)\s*$", part)
         if gate is not None:
-            param = next((p for p in (cj.domain or {}) if p.isidentifier()), "x")
-            if gate.group(1) == "is_missing_safe":
-                note = (f"assuming {part.strip()} is not a premise: mathema never "
-                        f"compares a value where f returns a missing value, so "
-                        f"there is nothing for it to remove. State what f does "
-                        f"with a missing {param} as its own claim, e.g. "
-                        f"`missing(f, {param}) propagates`, or write `\\ {{missing}}` "
-                        f"in the domain to stop calling f with one.")
-            else:
-                note = (f"assuming {part.strip()} is not a premise. State what f "
-                        f"does when {param} is None as its own claim, e.g. "
-                        f"`absent(f, {param}) raises(TypeError)`, or write "
-                        f"`\\ {{absent}}` in the domain to stop calling f with None.")
+            note = _gate_premise_refusal(cj)
             return Probe(cj.name, statement_text(cj.relation, cj.lhs, cj.rhs),
                          "skipped:misspecified", route=None, note=note)
 
@@ -3388,6 +3376,29 @@ def _empty_on_a_scalar(cj, fn, facts) -> bool:
     return cj.lhs in facts.params and kind in ("scalar", "int")
 
 
+def _gate_premise_refusal(cj) -> "str | None":
+    """Why `assuming is_missing_safe(f)` (or `is_absent_safe(f)`) is no
+    premise, with what to write instead; None when the claim has none."""
+    raw = re.sub(r"^\s*assuming\s+", "", (cj.assuming or "").strip())
+    for part in _split_top_and(raw) if raw else ():
+        gate = re.match(r"^\s*(is_missing_safe|is_absent_safe)\s*\(.*\)\s*$", part)
+        if gate is None:
+            continue
+        param = next((p for p in (cj.domain or {}) if p.isidentifier()), "x")
+        if gate.group(1) == "is_missing_safe":
+            return (f"assuming {part.strip()} is not a premise: a value claim is never "
+                    f"judged where f returns a missing value, so the premise would "
+                    f"change nothing. State what f does with a missing {param} as its "
+                    f"own claim (`missing(f, {param}) propagates`, `drops` or `raises`), "
+                    f"or write `\\ {{missing}}` in the domain so f is not called with one.")
+        return (f"assuming {part.strip()} is not a premise: a value claim is never "
+                f"judged where f returns None, so the premise would change nothing. "
+                f"State what f does when {param} is None as its own claim "
+                f"(`absent(f, {param}) raises(TypeError)`), or write `\\ {{absent}}` in "
+                f"the domain so f is not called with None.")
+    return None
+
+
 def _policy_gate(cj, fn, facts) -> bool:
     """Whether a claim is one of the gates the policy rows decide:
     `is_missing_safe(f)`, `is_absent_safe(f)` or `is_absent_safe(x)`;
@@ -3602,6 +3613,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # the opt-out adjudicates exactly as a derive claim; only the
             # companion it would spawn is withheld
             cj = _dc_replace(cj, route="derive")
+        gate_premise = _gate_premise_refusal(cj)
+        if cj.links and gate_premise is not None:
+            # a gate written as a premise is refused once for the claim,
+            # never once per link
+            out.append(_stamped(Probe(cj.name, statement_text(cj.relation, cj.lhs, cj.rhs),
+                                      "skipped:misspecified", route=None,
+                                      note=gate_premise), cj))
+            continue
         if cj.links and region_row_kind(cj.name) is None:
             # a chained comparison is the conjunction of its links: run
             # each link through the full ordinary adjudication (same
@@ -4279,6 +4298,17 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
 
     numeric = [p for p in facts.params
                if facts.param_kinds.get(p) not in SEQUENCE_KINDS]
+    if cj.relation == "is_empty_safe":
+        # the empty input belongs to the containers: they are the
+        # parameters this one asks about
+        numeric = [p for p in facts.params
+                   if facts.param_kinds.get(p) in (*SEQUENCE_KINDS, "table")]
+        if not numeric:
+            scalar = facts.params[0] if facts.params else "the parameter"
+            return Probe(cj.name, statement_text(cj.relation, "f", cj.rhs),
+                         "skipped:misspecified", route=None,
+                         note=(f"is_empty_safe(f) has no container parameter to test: "
+                               f"{scalar} is a scalar; empty applies to a container"))
     statement = statement_text(cj.relation, "f", cj.rhs)
     if not numeric:
         if cj.relation == "is_missing_safe":
@@ -5360,7 +5390,9 @@ def _admitted_container_points(ctx, facts) -> tuple:
         fixed = _floor.fixed_sizes(bound)
         if kind == "table":
             (length,) = _floor.sizes(bound, rng, (3, 3))
-            base = {c: [_synth("float", rng, bound) for _ in range(length)]
+            base = {c: [_synth("float", rng,
+                               _column_bound((ctx.cj_domain or {}).get(f"{p}.{c}"), bound))
+                        for _ in range(length)]
                     for c in _table_columns(p, ctx.cj, facts)}
             floor = _floor.table_floor(holes, absent=absent)
         elif len(dims) >= 2:

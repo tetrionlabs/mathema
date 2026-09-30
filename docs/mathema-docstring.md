@@ -44,10 +44,10 @@ print(mathema.check(ema, claims=[]))
 ```text
 mathema.Record(ema) · source, no side effects · form 0a80d14e175f
   holds   bounded: for x in ([0.0, 1.0] | {missing})^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1 (780 entries across 132 draws, sizes (1, 1) to (8, 1))
-           derive could not decide it (sympy could not settle the sign of -Piecewise((x[0] - 1, Eq(L, 1)), (alpha*x[L - 1] + alpha*Sum((1 - alpha)^(L - k - 1)*x[k], (k, 1, L - 2)) + (1 - alpha)^(L - 1)*x[0] - 1, True))); the probe decided it; at x = [null, null], alpha = 0.747 f raises TypeError; at x = [null], alpha = 0.988 it converts the null slot to an absent result; at x = [nan] f gave nan back
+           derive could not decide it (sympy could not settle the sign of -Piecewise((x[0] - 1, Eq(L, 1)), (alpha*x[L - 1] + alpha*Sum((1 - alpha)^(L - k - 1)*x[k], (k, 1, L - 2)) + (1 - alpha)^(L - 1)*x[0] - 1, True))); the probe decided it; at x = [null, null], alpha = 0.747 f raised TypeError; at x = [null], alpha = 0.988 it converts the null slot to an absent result; at x = [nan] f gave nan back
   FALSIFY missing[x]: f has no single policy for a missing x
            f gives a hole back at x = [nan], alpha = 1; at x = [null, null], alpha = 0.747 it raises TypeError instead; at x = [null], alpha = 0.988 it converts the null slot to an absent result
-           give each case a premise on another parameter or on count(...) that tells them apart, or make f treat a missing x one way
+           to state each case, write `assuming len(x) == 1, missing(f, x, null) converts`, `assuming len(x) >= 2, missing(f, x, null) raises(TypeError)` and `missing(f, x, nan) propagates`; or make f treat a missing x one way
 ```
 
 This is additive, a docstring with none of these sections behaves

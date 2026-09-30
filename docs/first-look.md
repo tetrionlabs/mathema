@@ -185,10 +185,10 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   proven  collapses_derived: f(x, 1.0) = x[-1]
            ∀ x ∈ Seq(ℝ); missing for x (list) means null or nan
   holds   collapses_derived[float]: f(x, 1.0) = x[-1] (245 entries across 53 draws, sizes (1, 1) to (8, 1))
-           the float64 computation of collapses_derived ran at 53 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raises TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back
+           the float64 computation of collapses_derived ran at 53 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raised TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back
   FALSIFY missing[x]: f has no single policy for a missing x
            f gives a hole back at x = [nan, nan, nan, nan, nan, nan], alpha = 1.0; at x = [null, null], alpha = 1.0 it raises TypeError instead; at x = [null] it converts the null slot to an absent result
-           give each case a premise on another parameter or on count(...) that tells them apart, or make f treat a missing x one way
+           to state each case, write `assuming len(x) == 1, missing(f, x, null) converts`, `assuming len(x) >= 2, missing(f, x, null) raises(TypeError)` and `missing(f, x, nan) propagates`; or make f treat a missing x one way
 ```
 
 Both say the claim is true, but they are not the same kind of true.
@@ -256,7 +256,7 @@ ema:
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
       n: 53
-      note: "the float64 computation of collapses_derived ran at 53 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raises TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back"
+      note: "the float64 computation of collapses_derived ran at 53 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raised TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back"
       route: "probe"
     - name: "collapses_probed"
       statement: "f(x, 1.0) = x[-1]"

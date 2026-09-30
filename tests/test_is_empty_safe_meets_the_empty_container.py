@@ -71,7 +71,8 @@ def _row(fn, text):
 def test_a_hole_for_the_empty_input_fails():
     row = _row(mean_np, "is_empty_safe(xs)")
     assert row.verdict == "falsified"
-    assert row.counterexample == ("xs = []: f returned nan for the empty input; raise, "
+    assert row.counterexample == ("xs = [] (an empty numpy.ndarray): f returned nan for "
+                                  "the empty input; raise, "
                                   "or return a value")
 
 
@@ -83,7 +84,8 @@ def test_an_undeclared_none_fails_and_a_declared_one_passes():
     row = _row(mean_pl, "is_empty_safe(xs)")
     assert row.verdict == "falsified"
     assert row.counterexample == (
-        "xs = []: f returned None for the empty input; declare the return type "
+        "xs = [] (an empty Float64 polars Series): f returned None for the empty "
+        "input; declare the return type "
         "Optional[float], raise, or return a value")
     assert _row(mean_pl_declared, "is_empty_safe(xs)").verdict in ("proven", "holds")
 

@@ -353,7 +353,11 @@ def test_adjudicate_target_include_selects_the_row_set(tmp_path):
     suggested = _with_path(root, lambda: run(include="suggested"))
     every = _with_path(root, lambda: run(include="all"))
 
-    assert {r["source"] for r in declared["claims"]} == {"docstring"}
+    # beside the declared claims, the policy rows mathema writes for the
+    # function's parameters, which gate as the declared claims do
+    assert {r["source"] for r in declared["claims"]} == {"docstring", "default"}
+    assert [r["claim"] for r in declared["claims"] if r["source"] == "default"] == \
+        ["missing[x]"]
     assert {r["source"] for r in suggested["claims"]} == {"suggested"}
     assert len(every["claims"]) == len(declared["claims"]) + len(suggested["claims"])
     # the default is strictly cheaper than what it replaced

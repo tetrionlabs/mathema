@@ -157,7 +157,7 @@ def _check_rows(args) -> list[dict]:
         accepted = _accepted_risk((verified_store.get(name) or {}).get("entry"))
         report = gate(rec.probes, strict=args.strict,
                       accepted_risk=accepted,
-                      unresolved=rec.facts.unresolved)
+                      unresolved=rec.facts.unresolved, key=name)
         proven, holds = report.proven, report.holds
         total = (proven + holds + report.refuted + report.skipped
                  + report.unknown + report.owned)
@@ -263,8 +263,6 @@ def _format_check(rows: list[dict], fmt: str) -> str:
         line = (f'{state:4} {r["name"]}: {tier_word(r["tier"])}; '
                 f'claims {r["coverage"]} '
                 f'adjudicated ({summary_counts(r)})')
-        for clause in r.get("policy") or ():
-            line += f"; {clause} (mathema claims {r['name']} lists it)"
         if r["problems"]:
             line += "  <- " + "; ".join(r["problems"])
         lines.append(line)
@@ -2036,10 +2034,18 @@ def _write_policies(args, declared_rows: list, policies: list) -> int:
             continue
         pol = p.meta["mathema.policy"]
         sentence = pol.get("sentence") or ""
-        stated = re.findall(r"`([^`]+)`", pol.get("next") or "")
-        line += (f". Not written: {p.name}, {_unwritten_words(sentence)}"
-                 + (f"; state `{stated[0]}` yourself, or {_alternative(pol)}"
-                    if stated else ""))
+        stated = re.findall(r"`([^`]+)`", (pol.get("next") or "").split("; or ", 1)[0])
+        if sentence.startswith("f has no single policy"):
+            line += (f". Not written: {p.name}, {sentence}; mathema claims {args.key} "
+                     f"prints the {len(stated)} rows to state, or change f")
+        elif "does not declare it" in sentence:
+            line += (f". Not written: {p.name}, f returns None from present inputs and "
+                     f"its return type does not declare it; declare `-> Optional[...]`, "
+                     f"or make f return a value")
+        else:
+            line += (f". Not written: {p.name}, {_unwritten_words(sentence)}"
+                     + (f"; state `{stated[0]}` yourself, or {_alternative(pol)}"
+                        if stated else ""))
     print(line)
     return 0
 
@@ -2073,10 +2079,11 @@ def _list_policies(key: str, policies: list) -> None:
     print(f"{key}: {n} policy row{'' if n == 1 else 's'} about {', '.join(params)}")
     groups = (("confirmed", f"confirmed by the code (mathema claims {key} --write "
                             f"writes these):"),
-              ("contradicted", "contradicted by the code (choose the word, or change "
-                               "the code; --write leaves these out):"),
-              ("unaccounted", "a raise or a case no claim accounts for (state it, or "
-                              "change f; --write leaves these out):"))
+              ("contradicted", "contradicted by the code (change the word, the code, "
+                               "or accept it as a discovery; --write writes these "
+                               "with the contradiction in the note):"),
+              ("unaccounted", "not covered by any claim yet (the line beneath says what "
+                              "to write, or what to change; --write leaves these out):"))
     for state, title in groups:
         rows = [p for p in policies if _policy_state(p) == state]
         if rows:

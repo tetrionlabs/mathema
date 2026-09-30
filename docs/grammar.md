@@ -345,7 +345,8 @@ that failed, and the fix is usually one of the ones below.
 | `is_compendium_safe(numpy)` | every library call a [compendium](claims-transfer.md#in-the-compendium) covers returns a value on the domain | keep the call's argument inside the region the compendium states |
 | `is_overflow_safe(x)` | no result overflows to infinity and nothing raises `OverflowError` from a finite input; the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range | narrow the domain below the overflow point, or rescale (work in logarithms) |
 | `is_extremity_safe(x)` | the function still returns at the extremes of its domain, the largest and smallest magnitudes it admits, out to float64's maximum along an unbounded direction | bound the domain, or declare how far the code has to reach with <code>let &#124;inf&#124; be ...</code> |
-| `is_missing_safe(f)` | a missing value (`None`, `NaN`) meets a deliberate policy, raised or passed through, rather than an accidental crash or a wrong number | check for a missing value at entry and handle it on purpose |
+| `is_missing_safe(f)` | every hole a parameter admits (`nan`, `null`, `NA`) has a policy the code follows: it raises, drops it or gives a hole back, on purpose | state the policy, or guard the hole at entry |
+| `is_absent_safe(f)` | every parameter that may be None has a policy the code follows, and a None result is declared by the return type | state the policy, or annotate the parameter |
 | `is_empty_safe(xs)` | an empty sequence gets an answer or a deliberate error, not an `IndexError` or a division by a zero length | handle the empty case first |
 | `is_representation_safe(x)` | one number written differently (`1`, `1.0`, `True`) gets one answer | normalize the input type at entry |
 | `is_arbitrary_input_safe(s)` | no string input makes the function crash by accident | validate the input and raise the exception you mean |

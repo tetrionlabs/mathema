@@ -601,6 +601,25 @@ def _emptiness_guard_params(facts) -> set:
     return out
 
 
+def _emptiness_guard_line(facts, param: str) -> "int | None":
+    """The line (from the def) of the raising emptiness guard on `param`,
+    or None."""
+    tree = facts.tree
+    if tree is None:
+        return None
+    fdef = next((n for n in ast.walk(tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))), None)
+    first = getattr(fdef, "lineno", 1)
+    probe = type("F", (), {"tree": None, "params": facts.params,
+                            "param_kinds": facts.param_kinds})
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and any(isinstance(s, ast.Raise) for s in node.body):
+            probe.tree = ast.Module(body=[node], type_ignores=[])
+            if param in _emptiness_guard_params(probe):
+                return node.lineno - first + 1
+    return None
+
+
 # machine type names a raising type guard can meaningfully name for a
 # numeric parameter, the v1 spelling vocabulary
 _SPELLING_TYPES = frozenset({"int", "float", "bool", "complex"})

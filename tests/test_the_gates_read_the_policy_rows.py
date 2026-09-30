@@ -88,7 +88,8 @@ def test_a_guard_proves_the_missing_gate():
 def test_a_lone_scalar_called_at_every_case_proves_it():
     row = _gate(ident, "is_missing_safe(f)")
     assert row.verdict == "proven", row.note
-    assert row.sketch == "x (unannotated): nan propagates, called at every case"
+    assert row.sketch == ("x (unannotated): nan propagates, confirmed by calling f at "
+                          "x = nan; no claim states it yet")
     row = _gate(ident, "is_absent_safe(f)")
     assert row.verdict == "proven", row.note
 
@@ -97,7 +98,9 @@ def test_an_unaccounted_raise_falsifies_the_absent_gate():
     row = _gate(root_opt, "is_absent_safe(f)")
     assert row.verdict == "falsified"
     assert row.counterexample == "x = None: f raised TypeError"
-    assert row.note.startswith("f raised TypeError at x = None, and no claim says it may")
+    assert row.note == "x (float): None raises TypeError, and no claim says it may"
+    assert row.meta["mathema.gate"]["reason"] == (
+        "f raised TypeError at x = None, and no claim says it may")
 
 
 def test_a_stated_raise_accounts_for_it():
@@ -115,28 +118,32 @@ def test_a_raise_at_a_list_slot_falsifies_the_missing_gate():
 def test_a_drop_confirmed_by_execution_alone_holds():
     row = _gate(nan_sum, "is_missing_safe(f)", value="for xs in [0, 1]^n, f(xs) >= 0")
     assert row.verdict == "holds", row.note
-    assert row.sketch == "xs (list): null and nan: drops, observed on the draws"
+    assert row.sketch == ("xs (list): null and nan drop, confirmed on the 160 draws of "
+                          "c; no claim states it yet")
 
 
 def test_a_contradicted_stated_row_falsifies_the_gate():
     row = _gate(clamp01, "is_missing_safe(f)", "missing(f, x) propagates")
     assert row.verdict == "falsified"
-    assert row.note.startswith("missing_f_x_propagates (missing(f, x) propagates) is "
-                               "falsified")
+    assert row.sketch == ("x (float): nan drops, contradicting the stated "
+                          "`missing(f, x) propagates`")
+    assert row.meta["mathema.gate"]["reason"].startswith(
+        "missing(f, x) propagates is falsified")
 
 
 def test_a_declared_optional_return_accounts_for_its_none():
     row = _gate(pick, "is_absent_safe(f)", value="for x in [0, 1], f(x) <= 1")
     assert row.verdict == "proven", row.note
-    assert "the result: None at x = " in row.sketch
-    assert row.sketch.endswith("from present inputs, as the return type "
-                               "Optional[float] declares")
+    assert "the result may be None, as the return type Optional[float] declares (f " \
+        "returned None at x = " in row.sketch
+    assert row.sketch.endswith("as the return type Optional[float] declares (f returned "
+                               "None at x = 1.0 from present inputs)")
 
 
 def test_an_undeclared_none_falsifies_the_absent_gate():
     row = _gate(pick_undeclared, "is_absent_safe(f)", value="for x in [0, 1], f(x) <= 1")
     assert row.verdict == "falsified"
-    assert "which its return type does not declare" in row.note
+    assert "and its return type float does not declare it" in row.note
 
 
 def test_guard_coverage_is_reported_per_member():
