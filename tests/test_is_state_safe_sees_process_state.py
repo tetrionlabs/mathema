@@ -391,3 +391,55 @@ def test_a_check_run_inside_the_function_is_no_change():
 def test_a_c_environment_write_names_the_variable_as_text():
     p = _state_safe(put_env)
     assert "'MATHEMA_T'" in p.counterexample and "b'" not in p.counterexample
+
+
+# --- every logger, and a write before a raise -----------------------------------
+
+def named_logger_level(x: float) -> float:
+    logging.getLogger("mathema.t.level").setLevel(5)
+    return x
+
+
+def child_logger_handler(x: float) -> float:
+    logging.getLogger("mathema.t.child").addHandler(logging.NullHandler())
+    return x
+
+
+def silence_logger(x: float) -> float:
+    logging.getLogger("mathema.t.quiet").propagate = False
+    return x
+
+
+def write_then_raise(x: float) -> float:
+    os.environ["MATHEMA_T8"] = "1"
+    raise ValueError("after the write")
+
+
+def chdir_then_raise(x: float) -> float:
+    os.chdir("/")
+    raise ValueError("after the move")
+
+
+@pytest.mark.parametrize("fn, logger", [
+    (named_logger_level, "mathema.t.level"),
+    (child_logger_handler, "mathema.t.child"),
+    (silence_logger, "mathema.t.quiet"),
+])
+def test_a_named_logger_configuration_falsifies_and_is_restored(fn, logger):
+    target = logging.getLogger(logger)
+    kept = (target.level, list(target.handlers), target.propagate)
+    p = _state_safe(fn)
+    assert p.verdict == "falsified", (fn.__name__, p.verdict, p.note)
+    assert logger in str(p.counterexample), p.counterexample
+    assert (target.level, list(target.handlers), target.propagate) == kept
+
+
+@pytest.mark.parametrize("fn, named", [
+    (write_then_raise, "os.environ"), (chdir_then_raise, "working directory")])
+def test_a_write_before_a_raise_falsifies(fn, named):
+    cwd, env = os.getcwd(), dict(os.environ)
+    p = _state_safe(fn)
+    assert p.verdict == "falsified", (fn.__name__, p.verdict, p.note)
+    assert named in str(p.counterexample)
+    assert "ValueError" in str(p.counterexample)
+    assert os.getcwd() == cwd and dict(os.environ) == env

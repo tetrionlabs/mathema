@@ -1002,26 +1002,31 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except Exception:
             before_copy = None
         isolation = None
+        raised = None
         try:
             with _process_state.isolated(fn) as isolation, \
                     _pinned_float_env():
                 fn(*call_args)
-        except Exception:
-            return None   # a raising point says nothing about mutation
+        except Exception as exc:
+            raised = exc
         finally:
             if isolation is not None and isolation.restore_failed:
                 restore_failed.extend(isolation.restore_failed)
         env_calls = isolation.c_environ_calls
         changed = isolation.changes()
+        then = (f", and then raised {type(raised).__name__}"
+                if raised is not None else "")
         if changed:
             return (f"calling the function changed process-wide state: "
-                    f"{'; '.join(changed)}")
+                    f"{'; '.join(changed)}{then}")
+        if raised is not None and not env_calls:
+            return None   # a raising point that changed nothing says nothing
         if env_calls:
             # a direct os.putenv or os.unsetenv: a write to the C
             # environment, which os.environ does not show
             writer, name = env_calls[0]
             return (f"calling the function called {writer}({name!r}), "
-                    f"which changes the process environment")
+                    f"which changes the process environment{then}")
         for p, original, after in zip(facts.params, originals, call_args):
             same = (original == after
                     or (isinstance(original, float) and original != original

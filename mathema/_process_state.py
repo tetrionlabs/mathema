@@ -2,8 +2,9 @@
 # Copyright 2026 Tetrion Ltd
 """State a function can change for the whole process, beyond its own
 module's globals: the environment, the working directory, `sys.path`,
-the global state of `random` and `numpy.random`, and logging's root
-configuration.
+the global state of `random` and `numpy.random`, and logging's
+configuration (the root logger and every named logger: level, handlers,
+propagation, disabled).
 
 `isolated(fn)` owns one trial: it reads that state (`snapshot()`),
 records every call to `os.putenv` and `os.unsetenv` (they change the C
@@ -63,6 +64,7 @@ def snapshot() -> dict:
         "logging's root configuration": lambda: (
             logging.getLogger().level, tuple(logging.getLogger().handlers),
             logging.root.manager.disable),
+        "_loggers": _loggers,
     }
     npr = _numpy_random()
     if npr is not None:
@@ -73,6 +75,48 @@ def snapshot() -> dict:
         except Exception:
             continue
     return state
+
+
+def _logger_state(logger) -> tuple:
+    return (logger.level, tuple(logger.handlers), logger.propagate,
+            logger.disabled)
+
+
+_UNCONFIGURED = (logging.NOTSET, (), True, False)
+
+
+def _loggers() -> dict:
+    """Every named logger that exists, by name, as (level, handlers,
+    propagate, disabled)."""
+    return {name: _logger_state(logger)
+            for name, logger in list(logging.Logger.manager.loggerDict.items())
+            if isinstance(logger, logging.Logger)}
+
+
+def _logger_changes(before: dict, after: dict) -> list[str]:
+    """The loggers whose configuration differs; a logger created
+    meanwhile counts only when it was configured."""
+    out = []
+    for name, state in after.items():
+        was = before.get(name, _UNCONFIGURED)
+        if state[0] != was[0] or state[2:] != was[2:] \
+                or len(state[1]) != len(was[1]) \
+                or any(a is not b for a, b in zip(state[1], was[1])):
+            out.append(f"the logger {name!r}")
+    return out
+
+
+def _restore_loggers(before: dict) -> None:
+    for name, logger in list(logging.Logger.manager.loggerDict.items()):
+        if not isinstance(logger, logging.Logger):
+            continue
+        level, handlers, propagate, disabled = before.get(name, _UNCONFIGURED)
+        if _logger_state(logger) == (level, tuple(handlers), propagate, disabled):
+            continue
+        logger.setLevel(level)
+        logger.handlers[:] = list(handlers)
+        logger.propagate = propagate
+        logger.disabled = disabled
 
 
 def _same(name: str, a, b) -> bool:
@@ -97,6 +141,8 @@ def changes(before: dict, after: dict) -> list[str]:
         snapshots, naming it and, where it reads short, how it changed.
     """
     out = []
+    if "_loggers" in before and "_loggers" in after:
+        out += _logger_changes(before["_loggers"], after["_loggers"])
     for name, value in before.items():
         if name.startswith("_") or name not in after:
             continue
@@ -176,6 +222,9 @@ def restore(before: dict, c_environ_names=()) -> list[str]:
     if "the global state of random" in before:
         steps.append(("the global state of random",
                       lambda: random.setstate(before["the global state of random"])))
+    if "_loggers" in before:
+        steps.append(("the named loggers",
+                      lambda: _restore_loggers(before["_loggers"])))
     if "logging's root configuration" in before:
         steps.append(("logging's root configuration",
                       lambda: _restore_logging(before["logging's root configuration"])))
@@ -336,7 +385,8 @@ def writer_calls(fn, facts) -> list[str]:
         random.seed, numpy.random.seed, a draw from the global
         generator, ...), and any call of a configuration method
         (`setLevel`, `addHandler`, `seed`, `set_state`, ...) on any
-        object, a call's result included.
+        object, a call's result included, and a store into an object a
+        call returned (`getLogger(name).propagate = False`).
     """
     from ._signatures import module_scope
     tree = getattr(facts, "tree", None)
@@ -346,6 +396,20 @@ def writer_calls(fn, facts) -> list[str]:
     writers = _writers()
     found = []
     for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                root = t
+                while isinstance(root, (ast.Attribute, ast.Subscript)):
+                    root = root.value
+                if root is not t and isinstance(root, ast.Call):
+                    # a store into an object a call returned
+                    # (`getLogger(name).propagate = False`,
+                    # `getcontext().prec = 7`)
+                    label = ast.unparse(t)
+                    if label not in found:
+                        found.append(label)
+            continue
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and node.func.attr in _CONFIG_METHODS):
             # a configuration method on anything, including an object a
