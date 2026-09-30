@@ -87,9 +87,15 @@ def claims(*items, source: str = "decorator"):
         tag = _authored_entry(fn, "decorator")
         mats = matrix_param_names(fn)
         declared = []
+        from .conjecture import InvalidConjecture
         for item in items:
-            cj = (_claim(item, source=source, matrix_names=mats)
-                  if isinstance(item, str) else item)
+            try:
+                cj = (_claim(item, source=source, matrix_names=mats)
+                      if isinstance(item, str) else item)
+            except InvalidConjecture as e:
+                raise InvalidConjecture(
+                    f"{e} (declared on {fn.__module__}.{fn.__qualname__})"
+                ) from e
             d = _declare(cj)
             d["authored"] = tag
             declared.append(d)

@@ -2575,11 +2575,14 @@ def _render_claim_text(cj, *, unicode: bool | None,
     language_len = getattr(cj, "grammar", "") == f"{GRAMMAR}/language"
     if language_len:
         statement = display_len(statement)
-    # a norm the author wrote with double bars keeps them, the order a
-    # subscript (`||x||_2`, `‖x‖₂`); `norm(...)` written as the call
-    # stays the call. `display_norm_bars` is the inverse of the bar
-    # fold, so the text reparses to the same canonical form
-    if norm_bars_written(getattr(cj, "raw", "")):
+    # a norm the author wrote with double bars is displayed with them,
+    # the order a subscript (`||x||_2`, `‖x‖₂`); `norm(...)` written as
+    # the call stays the call. The canonical text keeps the call in
+    # every case, so the two spellings are one claim with one
+    # fingerprint, and the bars are stored beside the claim (`declare`)
+    # for the display. `display_norm_bars` is the inverse of the bar
+    # fold, so the displayed text reparses to the same canonical form
+    if not canonical and norm_bars_written(getattr(cj, "raw", "")):
         statement = display_norm_bars(statement, unicode)
 
     # let/for's own displayed symbol never reaches ast.parse individually

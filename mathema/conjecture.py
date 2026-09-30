@@ -1236,7 +1236,10 @@ def _claim(law: str, name: str | None, source: str, route: str,
     try:
         text, ambiguous_diff_vars = extract_diff_fraction_sugar(law.strip())
     except UnreadableSpelling as e:
-        raise InvalidConjecture(str(e)) from e
+        said = str(e)
+        if law.strip() not in said:
+            said = f"{said}, in the claim {law.strip()!r}"
+        raise InvalidConjecture(said) from e
     # outcome section: stripped first, on raw text, extract_outcome_
     # clause recognizes any accepted "implies" spelling directly rather
     # than relying on normalize() to have unified them, so it never has
@@ -1292,7 +1295,10 @@ def _claim(law: str, name: str | None, source: str, route: str,
         try:
             text = normalize(text)
         except UnreadableSpelling as e:
-            raise InvalidConjecture(str(e)) from e
+            said = str(e)
+            if law.strip() not in said:
+                said = f"{said}, in the claim {law.strip()!r}"
+            raise InvalidConjecture(said) from e
         try:
             new_dom, text = split_quantifier(text)
         except DuplicateBinding as e:
@@ -4562,10 +4568,17 @@ def _validate_claim(cj, statement: str, note: str, facts,
         if not src:
             continue
         try:
-            claim_names |= {n.id for n in ast.walk(ast.parse(src, mode="eval"))
-                            if isinstance(n, ast.Name)}
+            tree = ast.parse(src, mode="eval")
         except SyntaxError:
-            pass
+            continue
+        # a norm's order (`norm(x, inf)`, the sugar's `||x||_inf`) is
+        # not a bare name in the law, so it earns no constant note
+        orders = {id(n.args[1]) for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                  and n.func.id == "norm" and len(n.args) == 2
+                  and isinstance(n.args[1], ast.Name)}
+        claim_names |= {n.id for n in ast.walk(tree)
+                        if isinstance(n, ast.Name) and id(n) not in orders}
     from ._math_vocab import _MATH_ATTRS
     from .grammar import reserved_names
     vocab_names = set(_MATH_ATTRS) | set(reserved_names()) | {"f"}

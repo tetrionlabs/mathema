@@ -2168,52 +2168,86 @@ def _bars_hold_matrix(content: str, names: frozenset) -> bool:
 _NORM_ORDER_SUFFIX = re.compile(r"_([-\w.∞]+)")
 
 #: the unicode norm glyph, with the order glyphs a closing one carries
-_DOUBLE_BAR_GLYPH = re.compile(rf"‖([{_SUBSCRIPT_DIGITS}]+|∞)?")
+_DOUBLE_BAR_GLYPH = re.compile(rf"‖([{_SUBSCRIPT_DIGITS}∞]*)")
+
+#: a run of order glyphs after ascii bars (`||x||₂`, `||x||_∞`)
+_GLYPH_ORDER_AFTER_BARS = re.compile(rf"\|\|_?([{_SUBSCRIPT_DIGITS}∞]+)")
 
 #: the spellings of an infinite order, each lowered to `inf`
 _INFINITE_ORDERS = frozenset({"inf", "oo", "∞"})
 
 
-def _norm_order(token: str) -> str:
+def _order_refusal(written: str, inner: str) -> str:
+    """The message for an order the bars do not read: what the author
+    wrote after the closing bars, the orders that are read, and the
+    call to write for any other order."""
+    return (f"`{written}` after the closing bars is not an order the norm "
+            f"reads. Write 1, 2, a whole number such as _3, or inf (also oo "
+            f"or ∞). For a fractional or zero order write the call "
+            f"norm({inner}, 0.5); for an order held in a name bind it "
+            f"first, let p be 3, then write norm({inner}, p)")
+
+
+def _norm_order(token: str, inner: str) -> str:
     """Intent:
-        The second argument `norm(e, ...)` takes for the subscript
+        The second argument `norm(inner, ...)` takes for the subscript
         `token` written after a norm's closing bars: `inf` for `inf`,
         `oo` and `∞`, the integer itself for an integer literal of one
         or more.
 
     Raises:
         UnreadableSpelling: any other token (`0`, `0.5`, `-1`, a name),
-        naming the orders the bars read.
+        naming the token as written and the orders the bars read.
     """
     if token in _INFINITE_ORDERS:
         return "inf"
     if token.isascii() and token.isdigit() and int(token) >= 1:
         return str(int(token))
-    raise UnreadableSpelling(
-        f"`_{token}` is not an order the norm bars read: the order "
-        f"after `||...||` is 1, 2, an integer p >= 1, or inf (also "
-        f"spelled oo and ∞); for any other order write the call, "
-        f"norm(..., {token})")
+    raise UnreadableSpelling(_order_refusal(f"_{token}", inner))
+
+
+def _glyph_order(run: str, inner: str) -> str:
+    """The ascii subscript for a run of order glyphs on the closing bars
+    (`₂` -> `_2`, `₁₂` -> `_12`, `∞` -> `_inf`); a run that is neither
+    digits nor a single `∞` is refused naming the glyphs written."""
+    if not run:
+        return ""
+    if run == "∞":
+        return "_inf"
+    if "∞" not in run:
+        return "_" + run.translate(_SUBSCRIPT_TO_DIGIT)
+    raise UnreadableSpelling(_order_refusal(run, inner))
 
 
 def _double_bar_glyphs(text: str) -> str:
     """`‖e‖` -> `||e||`, and the order glyphs on a closing `‖` (`‖x‖₂`,
     `‖x‖₁₂`, `‖x‖∞`) -> the ascii subscript `||x||_2`, `||x||_12`,
-    `||x||_inf`, for `_fold_bars` to read. The first step of
+    `||x||_inf`, for `_fold_bars` to read; the same glyphs after ascii
+    bars (`||x||₂`, `||x||_∞`) read the same way. The first step of
     `apply_unicode_synonyms`, ahead of its symbol table, so the `∞`
-    here is the norm's order rather than the constant `oo`."""
-    if "‖" not in text:
+    here is the norm's order rather than the constant `oo`. Doubled
+    glyphs (`‖‖x‖‖`) are refused: they are more bars than a norm
+    reads."""
+    if "‖" not in text and not _GLYPH_ORDER_AFTER_BARS.search(text):
         return text
+    doubled = re.search(r"‖‖(.*?)‖‖", text)
+    if doubled is not None:
+        raise UnreadableSpelling(
+            f"`{doubled.group(0)}` has more bars than a norm reads: write "
+            f"‖{doubled.group(1)}‖ for the norm of {doubled.group(1)}")
+
+    def inner_before(start: int, opening: str) -> str:
+        at = text.rfind(opening, 0, start)
+        return text[at + len(opening):start] if at >= 0 else "..."
+
+    def glyph_bars(m):
+        return "||" + _glyph_order(m.group(1), inner_before(m.start(), "‖"))
 
     def ascii_bars(m):
-        order = m.group(1)
-        if order is None:
-            return "||"
-        if order == "∞":
-            return "||_inf"
-        return "||_" + order.translate(_SUBSCRIPT_TO_DIGIT)
+        return "||" + _glyph_order(m.group(1), inner_before(m.start(), "||"))
 
-    return _DOUBLE_BAR_GLYPH.sub(ascii_bars, text)
+    text = _DOUBLE_BAR_GLYPH.sub(glyph_bars, text)
+    return _GLYPH_ORDER_AFTER_BARS.sub(ascii_bars, text)
 
 
 def _fold_bars(text: str) -> str:
@@ -2240,11 +2274,19 @@ def _fold_bars(text: str) -> str:
             continue
         inner = close_of.get(o + 1)
         if inner is not None and inner == c - 1:
+            if close_of.get(o + 2) == c - 2:
+                content = text[o + 3:c - 2]
+                raise UnreadableSpelling(
+                    f"`{text[o:c + 1]}` has more bars than a norm reads: "
+                    f"write ||{content}|| for the norm of {content}, or "
+                    f"|| |{content}| || with a space for the norm of its "
+                    f"absolute value")
             replace[o], replace[c] = "norm(", ")"
             replace[o + 1] = replace[c - 1] = ""
             suffix = _NORM_ORDER_SUFFIX.match(text, c + 1)
             if suffix is not None:
-                replace[c] = f", {_norm_order(suffix.group(1))})"
+                order = _norm_order(suffix.group(1), text[o + 2:c - 1].strip())
+                replace[c] = f", {order})"
                 for k in range(c + 1, suffix.end()):
                     replace[k] = ""
         else:
@@ -3286,6 +3328,17 @@ class _CanonicalPrinter(StrPrinter):
         # read back as an ordinary variable, never the unit.
         return "\U0001d456" if self._unicode else "1j"
 
+    def _infinity_word(self) -> str:
+        # `inf` is the one ascii spelling, the same the domain grammar
+        # writes for an infinite bound; unicode prints the glyph. A real
+        # parameter named `oo`, `inf` or `infinity` is the same sympy
+        # object as the constant by render time (see `_print_Pi`), so it
+        # prints under its own name in both modes
+        named = sorted(self._suppress_glyphs & {"oo", "inf", "infinity"})
+        if named:
+            return named[0]
+        return "∞" if self._unicode else "inf"
+
     def _print_Infinity(self, expr):
         return self._infinity_word()
 
@@ -3324,17 +3377,6 @@ class _CanonicalPrinter(StrPrinter):
             f"∂{var}{str(count).translate(_DIGIT_TO_SUPERSCRIPT) if count > 1 else ''}"
             for var, count in expr.variable_count)
         return f"∂{order_marker}({self._print(expr.expr)}/{denom})"
-    def _infinity_word(self) -> str:
-        # `inf` is the one ascii spelling, the same the domain grammar
-        # writes for an infinite bound; unicode prints the glyph. A real
-        # parameter named `oo`, `inf` or `infinity` is the same sympy
-        # object as the constant by render time (see `_print_Pi`), so it
-        # prints under its own name in both modes
-        named = sorted(self._suppress_glyphs & {"oo", "inf", "infinity"})
-        if named:
-            return named[0]
-        return "∞" if self._unicode else "inf"
-
 
     def _print_Subs(self, expr):
         inner, variables, points = expr.args

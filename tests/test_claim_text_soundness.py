@@ -331,7 +331,7 @@ def test_a_norm_and_an_absolute_value_are_different_claims():
     norm_law = "for x in [-1, 1], ||f(x)|| >= 0"
     abs_law = "for x in [-1, 1], |f(x)| >= 0"
     assert fingerprint_text(claim(norm_law)) != fingerprint_text(claim(abs_law))
-    assert "||f(x)||" in assert_round_trips(norm_law, magnitude)
+    assert "norm(f(x))" in assert_round_trips(norm_law, magnitude)
     assert "|f(x)|" in assert_round_trips(abs_law, magnitude)
 
 

@@ -353,6 +353,8 @@ class Lowering:
         if name in EXTREMA and node.args and not keywords:
             values = [self.lower(a) for a in node.args]
             if len(values) == 1 and isinstance(values[0], Vec):
+                # the least or greatest element needs an element
+                self.obligations.need_length(values[0].length, 1)
                 return self.bounds.extremum(name, values[0],
                                             ast.unparse(node.args[0]))
             if len(values) > 1 and not any(isinstance(v, Vec)
@@ -402,9 +404,9 @@ class Lowering:
         """`norm(v)` and `norm(v, 2)` as `sqrt(Sum(v[i]**2))`, the
         Euclidean norm; `norm(v, 1)` as `Sum(Abs(v[i]))`, the sum of
         magnitudes; `norm(v, inf)` as the greatest element of `abs(v)`,
-        a number known through its bounds like `max`. The order is the
-        second argument or `ord=`; any other order is outside the
-        lowering."""
+        a number known through its bounds like `max`, defined for a
+        vector with at least one element. The order is the second
+        argument or `ord=`; any other order is outside the lowering."""
         v = self.lower(node.args[0])
         if not isinstance(v, Vec):
             raise NotSymbolic(f"{ast.unparse(node.args[0])!r} is not a "
@@ -416,12 +418,14 @@ class Lowering:
         if order == "1":
             return _reduce("sum", sympy.Abs(v.elem), v.length)
         if order == "inf":
+            # the largest magnitude needs an element
+            self.obligations.need_length(v.length, 1)
             return self.bounds.extremum(
                 "max", Vec(sympy.Abs(v.elem), v.length),
                 f"abs({ast.unparse(node.args[0])})")
-        raise NotSymbolic(f"{ast.unparse(node)!r}: the norms lowered are "
-                          f"the Euclidean (2), the sum of magnitudes (1) "
-                          f"and the largest magnitude (inf)")
+        raise NotSymbolic(f"{ast.unparse(node)!r}: the derive route reads the "
+                          f"orders 1, 2 and inf, so order {order} is left to "
+                          f"sampling")
 
     def _reduction(self, name: str, v: Vec, ddof_node, node):
         length = v.length

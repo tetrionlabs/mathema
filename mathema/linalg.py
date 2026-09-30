@@ -471,9 +471,15 @@ def norm_notes(cj, ranks: dict) -> list:
                     and node.func.id == "norm" and len(node.args) == 1
                     and not node.keywords):
                 continue
-            arg = ast.unparse(node.args[0])
+            arg_node = node.args[0]
+            arg = ast.unparse(arg_node)
             shown = display_norm_bars(f"norm({arg})")
-            rank = static_rank(node.args[0], ranks)
+            # a name declared over `R^(m,n)` is a matrix whatever its
+            # column count, so one column is still a Frobenius norm
+            declared = (cj.domain or {}).get(arg_node.id) \
+                if isinstance(arg_node, ast.Name) else None
+            rank = 2 if len(getattr(declared, "dims", ()) or ()) == 2 \
+                else static_rank(arg_node, ranks)
             if rank == 1:
                 said = f"{shown} is the Euclidean norm of {arg}"
             elif rank == 2:
@@ -481,8 +487,8 @@ def norm_notes(cj, ranks: dict) -> list:
             elif rank == 0:
                 said = f"{shown} is the absolute value of the number {arg}"
             else:
-                said = (f"{shown} is the Euclidean norm of {arg} as a vector, "
-                        f"the Frobenius norm as a matrix")
+                said = (f"{shown} is the Euclidean norm if {arg} is a vector "
+                        f"and the Frobenius norm if it is a matrix")
             if said not in out:
                 out.append(said)
     return out

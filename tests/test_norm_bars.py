@@ -85,7 +85,8 @@ def test_double_bars_around_a_matrix_are_its_norm_not_its_determinant():
     "for x in R^n, ||x||_-1 >= 0",
 ])
 def test_an_order_the_bars_do_not_read_is_refused_naming_the_accepted_ones(bad):
-    with pytest.raises(InvalidConjecture, match=r"1, 2, an integer p >= 1, or inf"):
+    with pytest.raises(InvalidConjecture,
+                       match=r"Write 1, 2, a whole number such as _3, or inf"):
         claim(bad)
 
 
@@ -143,13 +144,17 @@ def test_a_norm_renders_as_the_author_spelled_it(law, ascii_form, unicode_form):
     cj = claim(law)
     assert render_claim_text(cj, unicode=False) == ascii_form
     assert render_claim_text(cj, unicode=True) == unicode_form
-    assert canonical_claim_text(cj) == ascii_form
+    # the canonical text, the claim's identity, keeps the call in every
+    # case, and the display reparses to it
+    canonical = canonical_claim_text(cj)
+    assert "||" not in canonical and "‖" not in canonical, canonical
+    assert canonical_claim_text(claim(ascii_form)) == canonical
 
 
 def test_the_canonical_text_writes_every_infinity_spelling_as_inf():
     texts = {canonical_claim_text(claim(f"for x in R^n, ||x||_{spelling} <= ||x||_1"))
              for spelling in ("inf", "oo", "∞")}
-    assert texts == {"for x in R^n|missing, ||x||_inf <= ||x||_1"}
+    assert texts == {"for x in R^n|missing, norm(x, inf) <= norm(x, 1)"}
 
 
 def test_a_norm_of_a_bar_term_keeps_the_call_spelling():
@@ -177,11 +182,54 @@ def test_render_parse_render_is_a_fixed_point_in_both_modes(law):
         assert render_claim_text(claim(shown), unicode=unicode) == shown
 
 
-def test_the_two_spellings_are_two_canonical_texts():
+def test_the_two_spellings_are_one_claim_with_one_fingerprint():
+    from mathema.spec import fingerprint_text
     bars = claim("for x in R^n, ||x||_2 <= 1")
     words = claim("for x in R^n, norm(x, 2) <= 1")
     assert (bars.lhs, bars.rhs) == (words.lhs, words.rhs)
-    assert canonical_claim_text(bars) != canonical_claim_text(words)
+    assert canonical_claim_text(bars) == canonical_claim_text(words) \
+        == "for x in R^n|missing, norm(x, 2) <= 1"
+    assert fingerprint_text(bars) == fingerprint_text(words)
+    # the display keeps each author's spelling
+    assert render_claim_text(bars, unicode=False).endswith("||x||_2 <= 1")
+    assert render_claim_text(words, unicode=False).endswith("norm(x, 2) <= 1")
+
+
+@pytest.mark.parametrize("bad, shown", [
+    ("for x in R^n, |||x||| >= 0", "|||x|||"),
+    ("for x in R^n, ‖‖x‖‖ >= 0", "‖‖x‖‖"),
+])
+def test_three_bars_are_refused_not_read(bad, shown):
+    with pytest.raises(InvalidConjecture, match="more bars than a norm reads") as e:
+        claim(bad)
+    assert shown in str(e.value)
+
+
+@pytest.mark.parametrize("bad, written", [
+    ("for x in R^n, ||x||_0 >= 0", "`_0`"),
+    ("for x in R^n, ||x||_0.5 >= 0", "`_0.5`"),
+    ("for x in R^n, ||x||_p >= 0", "`_p`"),
+    ("for x in R^n, ‖x‖∞∞ >= 0", "`∞∞`"),
+    ("for x in R^n, ‖x‖₂∞ >= 0", "`₂∞`"),
+    ("for x in R^n, ||x||_∞∞ >= 0", "`∞∞`"),
+])
+def test_the_refusal_names_what_was_written_and_the_claim(bad, written):
+    with pytest.raises(InvalidConjecture) as e:
+        claim(bad)
+    said = str(e.value)
+    assert said.startswith(written + " after the closing bars is not an order"), said
+    assert "norm(x, 0.5)" in said and "let p be 3, then write norm(x, p)" in said
+    assert bad in said, said
+
+
+def test_a_bad_order_on_a_decorated_function_names_the_function():
+    from mathema import claims_decorator
+
+    with pytest.raises(InvalidConjecture, match="declared on") as e:
+        @claims_decorator("for x in R^n, f(x) ~= ||x||_0")
+        def badly_claimed(x: np.ndarray) -> float:
+            return float(np.linalg.norm(x))
+    assert "badly_claimed" in str(e.value) and "`_0` after the closing bars" in str(e.value)
 
 
 # --- an infinite order in the call form ------------------------------------
@@ -198,6 +246,7 @@ def test_a_nested_norm_order_is_lowered_too():
     assert normalize("norm(norm(x, oo) * y, oo)") == "norm(norm(x, inf) * y, inf)"
 
 
+@pytest.mark.needs_full_proof_budget
 def test_the_call_form_with_oo_reaches_the_verdict_of_inf():
     # the control is the old failure: `oo` was unbound in the probe's
     # namespace and sampled as a free variable, so numpy computed a
@@ -208,6 +257,51 @@ def test_the_call_form_with_oo_reaches_the_verdict_of_inf():
         == ("proven", "derive"), (with_oo.note, with_inf.note)
     assert "oo" not in claim("for x in R^n, f(x) ~= norm(x, oo)").lhs
     assert _norm(_V, 2.7) != _norm(_V, np.inf)
+    # a norm's order is not a bare infinity in the law, so no note says
+    # it reads as the constant
+    for p in (with_oo, with_inf):
+        assert "reads as the mathematical constant" not in (p.note or ""), p.note
+
+
+_DECORATED = '''\
+import numpy as np
+from mathema import claims_decorator
+
+
+@claims_decorator("for x in R^n, f(x) ~= {law}")
+def largest_magnitude(x: np.ndarray) -> float:
+    return float(np.max(np.abs(x)))
+'''
+
+
+@pytest.mark.needs_full_proof_budget
+@pytest.mark.parametrize("law, expected", [
+    ("||x||_inf", "proven"),
+    ("‖x‖∞", "proven"),
+    ("norm(x, oo)", "proven"),
+    # the control: the wrong order is caught on the same path
+    ("||x||_1", "falsified"),
+])
+def test_the_cli_reads_the_infinite_order_on_the_decorator_path(
+        tmp_path, monkeypatch, capsys, law, expected):
+    # at e9172e8 `mathema check` on this module printed a probe record
+    # falsified with the witness `inf=-1.13166e+162`: the decorator path
+    # never bound `inf`, which was sampled as a free variable
+    from mathema.cli import main
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    (tmp_path / "normdeco.py").write_text(_DECORATED.format(law=law))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    main(["check", "normdeco.py"])
+    out = capsys.readouterr().out
+    # the summary counts the mathematics record and its [float]
+    # companion; nothing is falsified and no witness names `inf`
+    assert "inf=" not in out, out
+    if expected == "proven":
+        assert "1 proven" in out and "0 falsified" in out, out
+    else:
+        assert "0 proven" in out and "falsified)" in out \
+            and "0 falsified" not in out, out
 
 
 # --- the evaluation path: numpy's norm, both ranks, the matrix orders ------
@@ -218,35 +312,36 @@ _RANK_ONE = np.array([[1.0, 2.0], [2.0, 4.0]])
 
 
 @pytest.mark.parametrize("value, order, expected", [
-    (_V, None, 13.0),                              # Euclidean
-    (_V, 2, 13.0),
-    (_V, 1, 19.0),                                 # sum of magnitudes
-    (_V, np.inf, 12.0),                            # largest magnitude
-    (_M, None, np.sqrt(30.0)),                     # Frobenius
-    (_M, 1, 6.0),                                  # max column sum
-    (_M, 2, np.linalg.svd(_M, compute_uv=False)[0]),   # spectral
-    (_M, np.inf, 7.0),                             # max row sum
-    # the boundaries: the zero vector, one entry, one cell, rank one
+    # the dispatch on rank: a number is its magnitude whatever the
+    # order, a vector its Euclidean length, a matrix its Frobenius norm
+    (-2.5, None, 2.5),
+    (-2.5, 1, 2.5),
+    (_V, None, 13.0),
+    (_M, None, np.sqrt(30.0)),
+    # the matrix orders as numpy reads `ord`: the largest column sum,
+    # the largest singular value, the largest row sum
+    (_M, 1, 6.0),
+    (_M, 2, np.linalg.svd(_M, compute_uv=False)[0]),
+    (_M, np.inf, 7.0),
+    # the scale-out branch at a zero largest magnitude
     (np.zeros(3), None, 0.0),
-    (np.zeros(3), 1, 0.0),
     (np.zeros(3), np.inf, 0.0),
-    (np.array([-3.0]), None, 3.0),
-    (np.array([-3.0]), 1, 3.0),
-    (np.array([-3.0]), np.inf, 3.0),
-    (np.array([[-2.0]]), None, 2.0),
-    (np.array([[-2.0]]), 1, 2.0),
-    (np.array([[-2.0]]), 2, 2.0),
-    (np.array([[-2.0]]), np.inf, 2.0),
-    (_RANK_ONE, None, 5.0),                        # Frobenius equals spectral at rank one
+    (np.zeros((2, 2)), 1, 0.0),
+    # rank one: the Frobenius norm equals the spectral norm
+    (_RANK_ONE, None, 5.0),
     (_RANK_ONE, 2, 5.0),
-    (_RANK_ONE, 1, 6.0),
-    (_RANK_ONE, np.inf, 6.0),
 ])
-def test_the_norm_agrees_with_numpy_for_both_ranks_and_every_order(value, order, expected):
+def test_the_norm_dispatches_on_rank_and_order(value, order, expected):
     got = _norm(value) if order is None else _norm(value, order)
     assert got == pytest.approx(expected)
-    assert got == pytest.approx(np.linalg.norm(value) if order is None
-                                else np.linalg.norm(value, order))
+
+
+def test_the_norm_scales_out_entries_near_the_float_maximum():
+    # the square of an entry near the float maximum overflows; the norm
+    # itself does not, since every norm is homogeneous
+    big = np.array([1e308, 1e308])
+    assert _norm(big) == pytest.approx(1e308 * np.sqrt(2.0))
+    assert _norm(big, np.inf) == 1e308
 
 
 def test_the_matrix_orders_are_three_different_numbers():
@@ -348,6 +443,7 @@ def _adjudicate(fn, law):
     (max_column_sum, "for A in R^(m,n), f(A) ~= ||A||_inf",
      "for A in R^(m,n), f(A) ~= norm(A, inf)", "falsified", "probe"),
 ])
+@pytest.mark.needs_full_proof_budget
 def test_the_sugar_reaches_the_verdict_of_the_words(fn, sugar, words, verdict, route):
     a, b = _adjudicate(fn, sugar), _adjudicate(fn, words)
     assert (a.verdict, a.route) == (b.verdict, b.route) == (verdict, route), \
@@ -373,16 +469,57 @@ def test_a_false_norm_identity_is_not_proven_and_is_falsified(fn, law):
     p = _adjudicate(fn, law)
     assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
     assert p.counterexample, p.note
-    assert p.meta.get("mathema.derive_status") != "proven"
+    # the derive route was attempted and did not prove it
+    assert "routes attempted, derive:" in (p.note or ""), p.note
 
 
 def test_an_order_outside_the_lowering_is_named_and_left_to_the_probe():
     p = _adjudicate(euclidean_length, "for x in R^n, f(x) ~= norm(x, 3)")
     assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
-    assert "the norms lowered are the Euclidean (2), the sum of magnitudes (1) " \
-           "and the largest magnitude (inf)" in (p.note or ""), p.note
+    assert "the derive route reads the orders 1, 2 and inf, so order 3 is left " \
+           "to sampling" in (p.note or ""), p.note
 
 
+@pytest.mark.parametrize("law", [
+    "for x in R^0, f(x) ~= ||x||_inf",
+    "for x in R^n, assuming len(x) == 0, f(x) ~= ||x||_inf",
+])
+def test_the_largest_magnitude_of_the_empty_vector_is_left_to_the_probe(law):
+    # `largest_magnitude([])` raises; a proof over a domain that admits
+    # the empty vector would be wrong, so the derive route declines and
+    # says so, and the probe decides
+    p = _adjudicate(largest_magnitude, law)
+    assert p.verdict != "proven", (p.verdict, p.note)
+    assert "holds for every length of at least one, and the empty vector is " \
+           "left to the probe" in (p.note or ""), p.note
+
+
+def test_the_empty_vector_falsifies_the_largest_magnitude_with_a_witness():
+    p = _adjudicate(largest_magnitude, "for x in R^0, f(x) ~= ||x||_inf")
+    assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
+    assert "x=[]" in str(p.counterexample), p.counterexample
+
+
+@pytest.mark.parametrize("fn, law", [
+    (euclidean_length, "for x in R^0, f(x) ~= ||x||"),
+    (manhattan_length, "for x in R^0, f(x) ~= ||x||_1"),
+])
+def test_the_euclidean_and_manhattan_lengths_of_the_empty_vector_are_zero(fn, law):
+    # numpy's norm and sum of an empty vector are 0, as the sums say
+    p = _adjudicate(fn, law)
+    assert p.verdict != "falsified", (p.verdict, p.note)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_proof_through_a_largest_magnitude_says_at_least_one():
+    p = _adjudicate(largest_magnitude, "for x in R^n, f(x) ~= ||x||_inf")
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+    assert "for every length of at least one" in (p.sketch or ""), p.sketch
+    q = _adjudicate(euclidean_length, "for x in R^n, f(x) ~= ||x||")
+    assert "of at least one" not in (q.sketch or ""), q.sketch
+
+
+@pytest.mark.needs_full_proof_budget
 def test_a_matrix_frobenius_identity_proves_through_the_trace():
     from mathema._lexicon_numpy import frobenius_norm, gram_trace
     for fn, law in [(frobenius_norm, "for A in R^(m,n), ||A|| ~= sqrt(trace(A.T @ A))"),
@@ -416,8 +553,14 @@ def test_a_bare_norm_of_a_call_is_noted_for_either_rank():
     # what the bars mean for a vector and for a matrix
     from mathema._lexicon_numpy import unit_vector
     p = _adjudicate(unit_vector, "assuming ||x|| > 0, for x in R^n, ||f(x)|| ~= 1")
-    assert ("||f(x)|| is the Euclidean norm of f(x) as a vector, "
-            "the Frobenius norm as a matrix") in (p.note or ""), p.note
+    assert ("||f(x)|| is the Euclidean norm if f(x) is a vector and the "
+            "Frobenius norm if it is a matrix") in (p.note or ""), p.note
+
+
+def test_a_one_column_matrix_is_noted_as_frobenius():
+    from mathema._lexicon_numpy import frobenius_norm
+    p = _adjudicate(frobenius_norm, "for A in R^(n,1), f(A) ~= ||A||")
+    assert "||A|| is the Frobenius norm of A" in (p.note or ""), p.note
 
 
 def test_a_written_order_needs_no_note():
@@ -439,22 +582,36 @@ _LEXICON_ROWS = {
     "norm_bars_two": ("proven", "derive"),
     "norm_bars_one": ("proven", "derive"),
     "norm_bars_inf": ("proven", "derive"),
+    # a whole-number order other than 1 and 2 has no lowering
+    "norm_bars_integer_order": ("holds", "probe"),
     # a chain of orders and the triangle inequality need Cauchy-Schwarz
     # or a bound on a root of a sum of squares, which no lemma states
     "norm_bars_chain": ("holds", "probe"),
     "norm_bars_homogeneous": ("proven", "derive"),
+    "norm_bars_homogeneous_sign_trap": ("falsified", "probe"),
     "norm_bars_unit_vector": ("proven", "derive"),
+    "norm_bars_direction": ("proven", "derive"),
     "norm_bars_distance": ("proven", "derive"),
     "norm_bars_distance_symmetric": ("proven", "derive"),
-    "norm_bars_distance_zero": ("proven", "derive"),
     "norm_bars_triangle": ("holds", "probe"),
+    # a boolean equality: the derive route does not read a comparison
+    # inside a body
+    "norm_bars_stopping_criterion": ("holds", "probe"),
+    "norm_bars_nearest_distance": ("holds", "probe"),
+    "norm_bars_nearest_distance_trap": ("falsified", "probe"),
+    "norm_bars_series_tracking_error": ("proven", "derive"),
+    "norm_bars_rmse": ("proven", "derive"),
     "norm_bars_portfolio_weights": ("proven", "derive"),
     "norm_bars_squared": ("proven", "derive"),
+    "norm_bars_squared_trap": ("falsified", "probe"),
     "norm_bars_order_trap": ("falsified", "probe"),
     "matrix_norm_bars_frobenius": ("proven", "derive"),
     "matrix_norm_bars_gram_trace": ("proven", "derive"),
-    # a singular value decomposition has no definition row, and the
-    # matrix orders stay with the probe
+    # the matrix orders stay with the probe, and a singular value
+    # decomposition has no definition row
+    "matrix_norm_bars_one": ("holds", "probe"),
+    "matrix_norm_bars_inf": ("holds", "probe"),
+    "matrix_norm_bars_order_trap": ("falsified", "probe"),
     "matrix_norm_bars_spectral": ("holds", "probe"),
     "matrix_norm_bars_spectral_below_frobenius": ("holds", "probe"),
 }
@@ -466,6 +623,7 @@ def test_every_sugar_row_of_the_lexicon_is_pinned_here():
     assert sugar_rows == set(_LEXICON_ROWS)
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("key, verdict, route", sorted(
     (key, *want) for key, want in _LEXICON_ROWS.items()))
 def test_each_lexicon_row_reaches_its_pinned_verdict(key, verdict, route):
@@ -496,6 +654,7 @@ def test_the_triangle_inequality_fails_with_the_wrong_norms():
     assert p.verdict == "falsified" and p.counterexample, (p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_the_unit_vector_row_needs_its_premise_for_the_zero_vector():
     # without the premise the zero vector divides by zero; the probe
     # over R^n does not draw that one point, so the row states the

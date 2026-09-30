@@ -978,6 +978,18 @@ def _length_premise(a, b, rel: str, lengths: set):
     return None
 
 
+def _exact_length(a, b, rel: str, lengths: set):
+    """`(L, k)` when `a rel b` fixes the length `L` to the whole number
+    `k` (`dim(x) == 0`, `len(x) == 3`), else None."""
+    if rel != "==":
+        return None
+    for length, number in ((a, b), (b, a)):
+        if length in lengths and getattr(number, "is_number", False) \
+                and number.is_real and int(number) == number:
+            return length, int(number)
+    return None
+
+
 def _implied_nonzero(expr, provided: list, min_length: dict,
                      bases: "dict | None" = None) -> bool:
     """Intent:
@@ -1148,6 +1160,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     seqs: dict = {}
     lengths: dict = {}
     elements: dict = {}
+    fixed_lengths: dict = {}
     for n in sorted(names):
         table = n.split(".", 1)[0] if "." in n else None
         r = 1 if table in tables else ranks.get(n)
@@ -1164,6 +1177,9 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             dim = str(dims[0]) if dims else (table or n)
             length = lengths.setdefault(dim, sympy.Symbol(
                 f"L_{dim}", integer=True, positive=True))
+            if dim.isdigit():
+                # a literal dimension (`R^0`, `R^3`) fixes the length
+                fixed_lengths[length] = int(dim)
             element = _element_bound(bound)
             base = sympy.IndexedBase(n, real=True,
                                      **_element_sign(element))
@@ -1195,6 +1211,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
 
     def decide():
         required, provided = Obligations(), Obligations()
+        known_lengths = dict(fixed_lengths)
         lv = lower(lhs, required)
         rv = lower(rhs, required)
         provided_nonzero: list = []
@@ -1209,6 +1226,9 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             provided_nonzero.extend(e for e, _t in own.nonzero)
             if isinstance(a, Vec) or isinstance(b, Vec):
                 continue
+            exact = _exact_length(a, b, rel, length_symbols)
+            if exact is not None:
+                known_lengths[exact[0]] = exact[1]
             as_length = _length_premise(a, b, rel, length_symbols)
             if as_length is not None:
                 provided.need_length(*as_length)
@@ -1250,9 +1270,16 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                 unstated.append((row, _premise_text(p_lhs, rel, p_rhs)))
         unmet: list = []
         for length, least in sorted(required.min_length.items(), key=str):
-            have = provided.min_length.get(length, 1)
+            have = known_lengths.get(length,
+                                     provided.min_length.get(length, 1))
             if have < least:
                 unmet.append(("length", length, least, have))
+        if unmet and not unstated and all(
+                item[0] == "length" and item[2] == 1 for item in unmet):
+            # a least or greatest element over a domain that admits the
+            # empty vector: the relation is decided for every length of
+            # at least one, and the empty vector is left to sampling
+            return {"empty": True}
         for expr, text in required.nonzero:
             if not _implied_nonzero(expr, provided_nonzero,
                                     {L: max(provided.min_length.get(L, 1), k)
@@ -1325,11 +1352,20 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
         return ProofResult("undecided", sketch=f"{through}: "
                            f"{outcome['undecided']}", meta=meta)
     vectors = ", ".join(sorted(seqs))
+    if outcome.get("empty"):
+        return ProofResult(
+            "undecided", meta=meta,
+            sketch=f"{through}, lowered to sums over {vectors}: the "
+                   f"relation holds for every length of at least one, "
+                   f"and the empty vector is left to the probe")
     if outcome.get("proven"):
         spans = ", ".join(
             f"{by_length.get(L, L)} of every length"
-            + (f" from {shortest[L]}" if shortest.get(L, 1) > 1 else "")
+            + (f" from {shortest[L]}" if shortest.get(L, 1) > 1
+               else " of at least one" if shortest.get(L) == 1 else "")
             for L in sorted(set(lengths_of(seqs)), key=str))
+        at_least_one = (" of at least one"
+                        if shortest and min(shortest.values()) == 1 else "")
         detail = outcome.get("result")
         lemma = (f" ({detail.sketch})" if detail is not None
                  and getattr(detail, "status", None) == "proven"
@@ -1337,7 +1373,8 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
         return ProofResult(
             "proven", meta=meta,
             sketch=f"{through}, lowered to sums over {vectors} at a symbolic "
-                   f"length: the relation holds for every length{lemma}",
+                   f"length: the relation holds for every length"
+                   f"{at_least_one}{lemma}",
             quantifier=(f"∀ {_over(seqs, elements)} with nothing "
                         f"missing, {spans}" if seqs else None))
     detail = outcome.get("result")
