@@ -270,6 +270,8 @@ stronger than you mean. The `for` clause narrows it:
 | `for scale in {"info", "linear"}, f(r, scale) >= 0` | a finite set of strings |
 | `for v in R^n, f(v) >= 0` | a real vector of length `n`, never empty |
 | `for A in R^(m,n), f(A) == f(A)` | an `m`-by-`n` real matrix, rows then columns |
+| `for c in [0, 1]^3, f(c) in [0, 1]` | a vector of exactly 3 elements, each in `[0, 1]`; a number written as a dimension is fixed |
+| `for A in R^(n,3), f(A) in R^(3,3)` | a matrix with 3 columns and any number of rows; the output's space, judged by the output's shape |
 | `for s in L[unicode], f(f(s)) == f(s)` | every string, the empty string included: a language |
 | `for s in L[unicode] \ {""}, len(f(s)) >= 1` | a language with the empty string excluded |
 

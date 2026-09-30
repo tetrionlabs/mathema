@@ -7,33 +7,39 @@ Notable changes to mathema are recorded here from its first public release onwar
 - `is_memory_safe` is not part of this release: it is named nowhere,
   and a claim naming it fails as an unknown predicate does, with one
   sentence saying the family is planned.
-- A dimension written as a number in a claim's binding (`for A in
-  R^(30,15)`, `for xs in [0, 1]^30`) or in a marker (`Mat(30, 15)`,
-  `Vec(30)`) is drawn at that size by every route on every runtime
-  type: the probe, the built-in battery's call, and the companion a
-  proof spawns; a fixed axis and a shared name mix in one binding
-  (`R^(n,15)`). A value of another shape or rank is outside the
-  domain, so `f(A) in R^(4,3)` is judged by the output's shape and
-  `excluded_outside_domain(A)` tries a wrong-shaped value. The sketch
-  names the fixed size (`xs of length 30`, `A of shape 30 by 15`), the
-  sampling note prints a matrix's size, and a premise contradicting a
-  fixed dimension is reported as the vacuous premise it is.
-- `@enforce_dimensions()` enforces a function's dimensions at entry and
-  at exit: each shaped argument has the rank and the fixed sizes its
-  marker or claim binding states, a dimension name shared across
-  parameters agrees across the actual arguments, and the result
-  matches the return marker with the names the call bound, each
-  failure a `ValueError` naming the parameter (or the result), the
-  shape found and the shape expected. It stacks with
-  `@enforce_domain()`, which stays about values, and like it
-  auto-declares `excluded_outside_domain(p)` for each parameter it
-  guards. The row `shape` is renamed `result_dimensions` and reads a
-  claim's binding as well as a marker, the row `shape_enforced` is
-  renamed `dimensions_enforced`, and a new
-  row `size_enforced` asks whether a function rejects a value of the
-  wrong fixed size a marker states (`Mat(30, 15)`); a fixed size stated
-  only by a claim's binding gates nothing on its own, that question
-  being the declared `excluded_outside_domain(p)` claim's.
+- A dimension written as a number (`for A in R^(30,15)`, `for xs in
+  [0, 1]^30`, `Mat(30, 15)`, `Vec(30)`) is drawn at that size on every
+  route and every runtime type. A fixed axis and a name mix in one
+  binding (`R^(n,15)`), and a name a binding fixes is that size wherever
+  a marker shares it.
+- A value of another shape or rank is outside the domain: `f(A) in
+  R^(4,3)` is judged by the output's shape (a named axis by the size the
+  trial bound, a missing entry as no member), and
+  `excluded_outside_domain(A)` tries every shape just outside the
+  space.
+- The sketch adds one clause for a fixed size (`the binding fixes xs at
+  length 30`), the sampling note prints a matrix's size, a premise
+  contradicting a fixed dimension is reported as vacuous, and one name
+  fixed to two sizes is a conflict.
+- `@enforce_dimensions()` checks rank, fixed sizes and shared names at
+  entry and the return marker at exit, each failure a `ValueError`
+  naming the parameter (or the result), the shape found and the shape
+  expected. It stacks with `@enforce_domain()`, declares
+  `excluded_outside_domain(p)` for each parameter it guards, and the
+  engine draws what the guard admits.
+- Rows renamed: `shape` is `result_dimensions` (it now reads a claim's
+  binding, and a raise at a consistent input is its counterexample),
+  `shape_enforced` is `dimensions_enforced`. New row `size_enforced`:
+  does the function reject a wrong fixed size a marker states. A size
+  fixed only by a binding adds no row; that question is the declared
+  `excluded_outside_domain(p)` claim's. Both rejection rows need one
+  in-shape call to return before they say anything.
+- A vector or matrix witness above sixteen entries prints its shape, a
+  first row and a count; the full value stays in the record's
+  counterexample arguments.
+- The lexicon gains twelve rows on fixed sizes, output spaces and the
+  exclusion over a space, each with a function, and every row with a
+  function now carries a pinned verdict.
 - The wheel now ships the bundled compendium. The 0.6.0 wheel carried
   none of its compendium files (the package-data pattern missed the
   per-library directories), so `is_compendium_safe(numpy)` was `unknown`
