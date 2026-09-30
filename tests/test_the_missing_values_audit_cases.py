@@ -94,3 +94,35 @@ def test_a_stated_row_is_tried_with_the_other_parameter_at_its_corners():
     assert rows["missing_f_x_propagates"].counterexample == \
         "x = nan, y = 1.0: f returned 0.0"
     assert rows["is_missing_safe[f]"].verdict != "proven"
+
+
+# --- the empty input -------------------------------------------------------
+
+def empty_unless_half(xs: np.ndarray, y: float) -> float:
+    if len(xs) == 0 and y != 0.5:
+        raise ValueError("empty")
+    return float(np.mean(xs))
+
+
+def mean_in_an_array(xs: np.ndarray):
+    return np.array([np.mean(xs)])
+
+
+def standardised(xs: np.ndarray):
+    return (xs - xs.mean()) / xs.std()
+
+
+def test_an_emptiness_check_that_also_reads_another_parameter_is_no_guard():
+    from mathema.hazards import _emptiness_guard_params
+    assert "xs" not in _emptiness_guard_params(analyze(empty_unless_half))
+
+
+def test_an_array_holding_a_hole_for_the_empty_input_fails():
+    (row,) = check_conjectures(mean_in_an_array, [claim("is_empty_safe(xs)")])
+    assert row.verdict == "falsified", row.note
+    assert "for the empty input" in row.counterexample
+
+
+def test_an_empty_array_for_the_empty_input_passes():
+    (row,) = check_conjectures(standardised, [claim("is_empty_safe(xs)")])
+    assert row.verdict == "proven", (row.verdict, row.counterexample)

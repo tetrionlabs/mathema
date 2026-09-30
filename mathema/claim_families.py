@@ -1724,6 +1724,12 @@ def _empty_outcome(out, declared: "str | None") -> "str | None":
     try:
         as_float = float(out)
     except (TypeError, ValueError):
+        # a container: each slot is read as a returned value is
+        from ._missing_policy import no_value_slots
+        from .probing import holds_inf
+        if no_value_slots(out).count() or holds_inf(out):
+            return (f"f returned {value_shown(out)} for the empty input; raise, or "
+                    f"return a value")
         return None
     if math.isinf(as_float):
         return (f"f returned {value_shown(as_float)} for the empty input; raise, or "

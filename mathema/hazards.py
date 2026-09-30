@@ -550,9 +550,11 @@ def _emptiness_guard_params(facts) -> set:
     """Every container parameter fn's own body guards against emptiness
     with an explicit raising check, `if not xs: raise`, `if len(xs) ==
     0: raise`, `if xs.empty: raise` or `if xs.count() == 0: raise` (no
-    value slot, so none when it is empty either); a compound condition
-    counts for the part that matches. The is_empty_safe relevance gate
-    and the deliberate-rejection signal its derive half reads."""
+    value slot, so none when it is empty either); checks joined by `or`
+    count each, and a condition that also reads anything else guards
+    nothing, since the raise then depends on more than the container. The
+    is_empty_safe relevance gate and the deliberate-rejection signal its
+    derive half reads."""
     tree = facts.tree
     if tree is None:
         return set()
@@ -593,11 +595,25 @@ def _emptiness_guard_params(facts) -> set:
                 found.add(node.left.func.value.id)  # xs.count() == 0
         return found
 
+    def guard_of(test) -> set:
+        parts = test.values if isinstance(test, ast.BoolOp) \
+            and isinstance(test.op, ast.Or) else [test]
+        found: set = set()
+        for part in parts:
+            if isinstance(part, ast.BoolOp):
+                return set()
+            names = guarded_names(part)
+            read = {n.id for n in ast.walk(part) if isinstance(n, ast.Name)}
+            if len(names) != 1 or read - names - {"len"}:
+                return set()
+            found |= names
+        return found
+
     out: set = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and any(isinstance(s, ast.Raise)
                                             for s in node.body):
-            out |= guarded_names(node.test)
+            out |= guard_of(node.test)
     return out
 
 
