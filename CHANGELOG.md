@@ -11,10 +11,25 @@ Notable changes to mathema are recorded here from its first public release onwar
   admits a kind, from a library's row, from a guard in the code, from
   what the code did, or as the default for the type (propagates for a
   hole, raises for absence), and checks each; `mathema claims KEY` lists
-  them and `--write` puts the confirmed ones in
-  claims/policies.claims.yaml, where changing a policy is editing one
-  word. The bundled math, numpy, pandas and polars compendiums carry
-  their policy rows.
+  them and `--write` puts every one in claims/policies.claims.yaml, a
+  contradicted one with the contradiction in its note, where changing a
+  policy is editing one word. The bundled math, numpy, pandas and polars
+  compendiums carry their policy rows.
+- `is_missing_safe(f)` is about holes only and `is_absent_safe(f)` about
+  absence (before, `is_missing_safe(f)` covered `None` too); `mathema
+  claims KEY --suggest` offers both. A gate is proven only when every
+  admitted member's policy is derived (a guard in the code, a library's
+  own row) or stated and confirmed; what the code was only seen to do
+  holds, and a row the code contradicts keeps the gate from proven.
+  `is_absent_safe(f)` also calls the function at inputs with nothing
+  missing, so an undeclared `None` return fails it.
+- `@enforce_domain()` reads the policy rows. A `raises` row refuses the
+  input before the function runs, with the exception the row names
+  (`absent(f, x) raises(TypeError)` gives a `TypeError`: "enforce_domain
+  is active and raised TypeError because x is None"), or mathema's
+  `DomainError` where it names none; a `drops` or `propagates` row is
+  checked on the result and raises `MissingValueError`, a kind of
+  `DomainError`.
 - Fingerprints move once in 0.6.1: the rendered domain now states what
   it admits. A value can be not there in two ways: absent (`absent`;
   Python spells it `None`), the object itself not there, and missing
