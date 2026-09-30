@@ -58,7 +58,7 @@ def test_a_body_that_does_not_lift_is_sampled_not_left_unknown():
     for probe in (_wide, _named):
         p = probe(noisy)
         assert p.verdict == "falsified", (p.verdict, p.note)
-        assert "second" in str(p.counterexample), p.counterexample
+        assert "two calls returned" in str(p.counterexample), p.counterexample
 
 
 def test_nan_agrees_with_nan():
@@ -151,3 +151,17 @@ def test_a_value_claim_reads_minus_zero_as_zero():
     assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
     (p,) = check_conjectures(zero_price, [claim("f(x) == 0", route="probe")])
     assert p.verdict == "holds", (p.verdict, p.counterexample)
+
+
+def test_the_witness_names_the_inputs_once_and_both_outcomes():
+    import re
+    p = _wide(noisy)
+    assert re.fullmatch(r"at x = \S+, two calls returned \S+ and \S+",
+                        p.counterexample), p.counterexample
+
+
+def test_the_hidden_read_caveat_reads_as_one_sentence():
+    p = _wide(read_env)
+    assert ("the body reads os.environ, which does not change between two "
+            "back-to-back calls, so this holds only while it stays as it is"
+            ) in p.note, p.note

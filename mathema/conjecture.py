@@ -3760,9 +3760,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     ctx.derive_undecided = Probe(
                         cj.name, statement, "unknown", route="derive",
                         sketch=derived.sketch,
-                        note=f"{ctx.note}; the derive route found the call "
-                             f"has no value somewhere, which two calls "
-                             f"agree on",
+                        note=f"{ctx.note}; the derive route found inputs "
+                             f"where the call raises or returns NaN; two "
+                             f"calls there agree, so the paired calls "
+                             f"decide",
                         meta={"mathema.derive_status": "undecided"})
                     derived = None
                 if derived is not None:
@@ -3930,7 +3931,12 @@ def _combine_conjunction(probes: list, name: str, statement: str,
             cx = probe.counterexample
             return Probe(name, statement, "falsified", n=probe.n,
                          route=probe.route,
-                         counterexample=(f"{label}: {cx}" if cx else None),
+                         counterexample=(
+                             None if not cx
+                             # a witness that already names the part
+                             # (`at x = 1, ...`) needs no label before it
+                             else cx if f"{label} = " in str(cx)
+                             else f"{label}: {cx}"),
                          sketch=(f"{label}: {probe.sketch}" if probe.sketch
                                  else None),
                          note=with_caveats(f"{what} falsified at {label}",

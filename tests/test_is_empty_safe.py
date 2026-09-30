@@ -85,4 +85,4 @@ def test_deterministic_falls_to_paired_calls_for_stateful_bodies():
     assert probe.verdict == "falsified"
     # the family's paired calls, compared by kind, decided this
     assert probe.route == "probe:algorithmic"
-    assert "the second returned" in probe.counterexample
+    assert "two calls returned" in probe.counterexample

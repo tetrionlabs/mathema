@@ -943,7 +943,7 @@ _TIER_WORDS = {0: "no source",
                3: "source, side effects"}
 
 
-def tier_word(tier: int) -> str:
+def tier_word(tier: int, rows=()) -> str:
     """The word a record shows in place of its tier number.
 
     Intent:
@@ -954,9 +954,22 @@ def tier_word(tier: int) -> str:
         the only evidence there is; `pure` and `impure` both mean the
         source was read, and say whether effects were found. An
         unrecognised value renders as the bare number rather than
-        guessing at a word for it.
+        guessing at a word for it. `rows` (Probes or claim-row dicts)
+        can overrule "no side effects": a falsified `is_state_safe` row
+        is an observed side effect.
     """
+    if tier == 2 and any(_state_write_observed(r) for r in rows):
+        return _TIER_WORDS[3]
     return _TIER_WORDS.get(tier, f"tier {tier}")
+
+
+def _state_write_observed(row) -> bool:
+    name = ((row.get("name") or row.get("claim")) if isinstance(row, dict)
+            else getattr(row, "name", ""))
+    verdict = (row.get("verdict") if isinstance(row, dict)
+               else getattr(row, "verdict", "")) or ""
+    return (str(name or "").split("[", 1)[0] == "is_state_safe"
+            and verdict.split(":", 1)[0] == "falsified")
 
 
 def looks_like_wrapper(facts) -> bool:

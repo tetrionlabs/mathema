@@ -256,7 +256,8 @@ def _format_check(rows: list[dict], fmt: str) -> str:
     lines = []
     for r in rows:
         state = "FAIL" if r["problems"] else "ok"
-        line = (f'{state:4} {r["name"]}: {tier_word(r["tier"])}; '
+        line = (f'{state:4} {r["name"]}: '
+                f'{tier_word(r["tier"], r.get("claim_rows") or ())}; '
                 f'claims {r["coverage"]} '
                 f'adjudicated ({summary_counts(r)})')
         if r["problems"]:

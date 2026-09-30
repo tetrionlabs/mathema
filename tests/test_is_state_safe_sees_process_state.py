@@ -443,3 +443,40 @@ def test_a_write_before_a_raise_falsifies(fn, named):
     assert named in str(p.counterexample)
     assert "ValueError" in str(p.counterexample)
     assert os.getcwd() == cwd and dict(os.environ) == env
+
+
+# --- what the rows say ---------------------------------------------------------
+
+def test_a_state_witness_names_the_function_its_input_and_the_change():
+    p = _state_safe(set_item)
+    assert p.counterexample.startswith("calling set_item with x = "), \
+        p.counterexample
+    assert "changed os.environ (MATHEMA_T set to '" in p.counterexample
+
+
+def test_a_c_environment_witness_says_where_the_write_went():
+    p = _state_safe(put_env)
+    assert p.counterexample.startswith("calling put_env with x = ")
+    assert "ran os.putenv('MATHEMA_T')" in p.counterexample
+    assert "passes to its subprocesses, where os.environ cannot see it" \
+        in p.counterexample
+
+
+def test_the_record_header_does_not_say_no_side_effects_beside_a_state_write():
+    import mathema
+    header = repr(mathema.check(set_item)).splitlines()[0]
+    assert "source, side effects" in header, header
+    header = repr(mathema.check(pure)).splitlines()[0]
+    assert "source, no side effects" in header, header
+
+
+def test_the_check_line_does_not_say_no_side_effects_beside_a_state_write(
+        tmp_path, capsys):
+    from mathema.cli import main
+    (tmp_path / "svc.py").write_text(
+        "import os\n\n\ndef remember_rate(rate: float) -> float:\n"
+        "    os.environ['MATHEMA_FX'] = str(rate)\n    return rate\n")
+    main(["check", str(tmp_path / "svc.py") + ":remember_rate",
+          "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "remember_rate: source, side effects;" in out, out

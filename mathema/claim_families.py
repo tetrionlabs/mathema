@@ -1016,17 +1016,20 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
         changed = isolation.changes()
         then = (f", and then raised {type(raised).__name__}"
                 if raised is not None else "")
+        called = (f"calling {getattr(fn, '__name__', 'f')} with "
+                  + ", ".join(f"{p} = {_witness_value(v)}"
+                              for p, v in zip(facts.params, originals)))
         if changed:
-            return (f"calling the function changed process-wide state: "
-                    f"{'; '.join(changed)}{then}")
+            return f"{called} changed {'; '.join(changed)}{then}"
         if raised is not None and not env_calls:
             return None   # a raising point that changed nothing says nothing
         if env_calls:
             # a direct os.putenv or os.unsetenv: a write to the C
             # environment, which os.environ does not show
             writer, name = env_calls[0]
-            return (f"calling the function called {writer}({name!r}), "
-                    f"which changes the process environment{then}")
+            return (f"{called} ran {writer}({name!r}), which changes the "
+                    f"environment this process passes to its subprocesses, "
+                    f"where os.environ cannot see it{then}")
         for p, original, after in zip(facts.params, originals, call_args):
             same = (original == after
                     or (isinstance(original, float) and original != original
@@ -1487,7 +1490,11 @@ def _deterministic_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return True
         shown = ", ".join(f"{p} = {_witness_value(v)}"
                           for p, v in zip(facts.params, second_args))
-        return (f"{shown}: the first call {_outcome_text(first)}, the "
+        returned = [not (isinstance(o, type) and issubclass(o, BaseException))
+                    for o in (first, second)]
+        if all(returned):
+            return f"at {shown}, two calls returned {first!r} and {second!r}"
+        return (f"at {shown}, the first call {_outcome_text(first)} and the "
                 f"second {_outcome_text(second)}")
 
     uncomparable: list = []
@@ -1500,8 +1507,9 @@ def _deterministic_probe(fn, facts, cj, domain: dict, rng: random.Random,
     reads = hidden_reads(fn, facts)
     if result[0] == "holds" and reads:
         return (*result, None, {"mathema.caveat": (
-            f"the body reads {', '.join(reads)}; two back-to-back calls "
-            f"cannot see that input change")})
+            f"the body reads {', '.join(reads)}, which does not change "
+            f"between two back-to-back calls, so this holds only while it "
+            f"stays as it is")})
     return result
 
 
