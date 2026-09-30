@@ -6,8 +6,6 @@ engine emits placed, a definition row's `axiom` with trusted testimony."""
 import os
 import re
 
-import pytest
-
 from mathema.conjecture import EVIDENCE_LADDER, evidence_rank
 
 
