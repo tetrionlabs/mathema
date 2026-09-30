@@ -101,12 +101,11 @@ _SAFETY_SOURCE = {
 # read from the callee's own record, not from a check at the call site
 # (is_compendium_safe); a roll-up's children credit their own sources
 # (is_computation_safe, is_repeatable); and a family this release does
-# not adjudicate settles nothing (is_memory_safe, and the reserved
-# families, claim_families.RESERVED_FAMILIES)
+# not adjudicate settles nothing (the reserved families,
+# claim_families.RESERVED_FAMILIES)
 _NO_SOURCE = frozenset({
     "is_compendium_safe",
     "is_computation_safe", "is_repeatable",
-    "is_memory_safe",
     "is_precision_safe", "is_order_invariant", "is_concurrency_safe",
     "is_representation_consistent"})
 

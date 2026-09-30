@@ -1021,9 +1021,17 @@ def domain_contains(value, bound) -> bool:
     exempt (never evaluated against `pieces`/`base_type`) unless
     `MISSING` is itself in `excluded`, included by default, the same
     as `parse_binding()` resolves at parse time, unless the domain's
-    own text explicitly excluded it."""
+    own text explicitly excluded it. A space domain (`dims` set) judges
+    a container value by its shape first, the rank and every fixed
+    axis, then every element against the element domain; a single
+    number is judged as an element."""
     dom = _as_domain(bound)
     _require_known_base_type(dom.base_type)
+    if dom.dims:
+        from ._shapes import contains_shaped
+        shaped = contains_shaped(value, dom)
+        if shaped is not None:
+            return shaped
     if is_missing(value):
         return MISSING not in dom.excluded
     if _safe_in(value, dom.excluded):

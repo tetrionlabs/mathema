@@ -16,6 +16,7 @@ module at load, this module reaches back only when a gate actually
 runs, so the import graph stays acyclic."""
 from __future__ import annotations
 
+from . import _shapes
 from ._math_vocab import MATH_CONSTANTS
 from .records import Probe
 from .runtime_types import SEQUENCE_KINDS
@@ -106,6 +107,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # reproducible this way, and a sequence parameter only when the
     # caller asked for list-valued points
     seq_names = {p for p, k in kinds.items() if k in SEQUENCE_KINDS}
+    # a parameter whose binding states a space is a container whatever
+    # kind the body suggested
+    seq_names |= {p for p in kinds if _shapes.dims_of(cj_domain.get(p))}
     if seq_names and not sequences:
         return None
     if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">"):
@@ -505,6 +509,37 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     dict_keys = {name: (_dict_key_tree(facts.tree, name) if facts.tree is not None else {})
                  for name in names if kinds.get(name) == "dict"}
 
+    from . import dimensions as _dims
+    from .types import shapes_from_signature
+    try:
+        resolver = _dims.resolve(facts, shapes_from_signature(fn),
+                                 claim_domain=cj_domain)
+    except _dims.DimensionConflict:
+        resolver = None
+    # the sequence coordinates whose axes a marker or a binding names or
+    # fixes are drawn to the plan: a fixed size is that size and a shared
+    # name agrees across the point; an anonymous 1-D axis keeps the
+    # free draw
+    planned = {n for n in seq_names if resolver is not None
+               and resolver.shapes.get(n) is not None
+               and resolver.shapes[n].ndim >= 1
+               and any(a is not None for a in resolver.shapes[n].axes)}
+    first_planned = next((n for n in names if n in planned), None)
+    point_sizes: dict = {}
+
+    def _planned_draw(name, rng, b):
+        # a point's coordinates are drawn in `names` order, so the first
+        # planned coordinate draws the point's sizes and the rest reuse
+        # them
+        if name == first_planned or not point_sizes:
+            point_sizes.clear()
+            point_sizes.update(resolver.draw_sizes(rng))
+        if resolver.shapes[name].ndim == 1:
+            return _synth("sequence", rng, b,
+                          length=point_sizes.get(resolver.key(name, 0)))
+        return resolver.synth(name, point_sizes,
+                              lambda: _synth("float", rng, b), rng)
+
     def sample(name, rng):
         # an unbounded parameter samples within the pseudo-infinity
         # range (or the reach), so a declared range bounds the draws
@@ -512,6 +547,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         b = sample_domain.get(name)
         if name in seq_names:
             # a sequence's declared bound is per element
+            if name in planned:
+                return _planned_draw(name, rng, b)
             return _synth("sequence", rng, b)
         if name in complex_names:
             # both components, each inside the pseudo-infinity range
@@ -547,15 +584,24 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
     def admits(point):
         for n in seq_names:
-            # a sequence coordinate is a list, each element inside the
-            # declared per-element bound
+            # a sequence coordinate is a container of the shape its
+            # binding states, each element inside the declared
+            # per-element bound
             v = point.get(n)
-            if not isinstance(v, (list, tuple)):
-                return False
             bound = cj_domain.get(n)
+            dims = _shapes.dims_of(bound)
+            if dims:
+                shape = _shapes.observed_shape(v)
+                if shape is None or not _shapes.fits(shape, dims):
+                    return False
+                elements = list(_shapes.leaves(v))
+            elif isinstance(v, (list, tuple)):
+                elements = list(v)
+            else:
+                return False
             if bound is not None and not all(
                     isinstance(e, (int, float)) and domain_contains(e, bound)
-                    for e in v):
+                    for e in elements):
                 return False
         for n in names:
             bound = cj_domain.get(n)
@@ -612,8 +658,19 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             val = math.nextafter(val, math.inf if which == "lo" else -math.inf)
         return val
 
+    import random as _random
+    # a corner's sizes: a fixed axis at its size, every other axis at the
+    # corner length 3, shared names agreeing
+    corner_sizes = ({k: (int(k) if isinstance(k, str) and k.isdigit() else 3)
+                     for k in resolver.distinct_keys()}
+                    if resolver is not None else {})
+
     def _corner_value(name, value):
-        # a sequence's corner is a short list at the per-element edge
+        # a sequence's corner is a short constant list at the
+        # per-element edge; a planned coordinate is nested to its axes
+        if name in planned:
+            return resolver.synth(name, corner_sizes, lambda: value,
+                                  _random.Random(0))
         return [value] * 3 if name in seq_names else value
 
     def _language_edges(name):
@@ -688,6 +745,13 @@ def _fmt_point(point, names):
         if isinstance(v, str):
             from .probing import spell_text
             parts.append(f"{n}={spell_text(v)}")
+            continue
+        capped = _shapes.witness_text(v)
+        if capped is not None:
+            # a large vector or matrix prints its shape, a first row and
+            # a count; the full value rides in the counterexample's
+            # arguments
+            parts.append(f"{n} = {capped}")
             continue
         parts.append(f"{n}={v:.6g}" if isinstance(v, (int, float))
                      and not isinstance(v, bool) else f"{n}={v!r}")

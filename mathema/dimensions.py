@@ -64,6 +64,9 @@ class DimResolver:
     # name for the same axis: `Shape("n")` with a claim `R^k` reads as
     # "k is n", so both resolve to one dimension rather than clashing.
     aliases: dict = field(default_factory=dict)    # claim name -> canonical
+    # a dimension name a binding fixes at a size: `Shape("n")` with a
+    # claim `[0, 1]^30` pins n at 30, everywhere n appears
+    fixed: dict = field(default_factory=dict)      # canonical name -> size
 
     def canonical(self, name):
         """A dimension name resolved through the alias map to the
@@ -154,6 +157,10 @@ class DimResolver:
                 # a fixed numeric dimension (`R^2`) is exactly that size
                 out[k] = int(k)
                 continue
+            if k in self.fixed:
+                # a name a binding fixes is exactly that size
+                out[k] = self.fixed[k]
+                continue
             # the default range matches the free sequence draw (2..8);
             # a premise bound narrows or lowers it (a `>= 1` floor lets
             # a length-1 vector through, the default never does), and a
@@ -185,16 +192,16 @@ class DimResolver:
         return build(0)
 
 
-def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> dict:
+def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> tuple:
     """Reconcile a claim's space form with the signature's `Shape`
-    marker for `param`. A RANK mismatch is a real conflict (a 2-D
-    matrix cannot also be a 1-D vector) and raises. A NAME mismatch at
-    the same axis is not a conflict: the claim introduces its own name
-    for a dimension the signature already named, so the two are the
-    SAME dimension, returned as an alias (`claim name -> marker name`).
-    A fixed numeric claim size names no dimension and is left alone;
-    a bound the code must actually satisfy is the sampler's concern,
-    not an aliasing one."""
+    marker for `param`: `(aliases, fixed)`. A RANK mismatch is a real
+    conflict (a 2-D matrix cannot also be a 1-D vector) and raises. A
+    NAME mismatch at the same axis is not a conflict: the claim
+    introduces its own name for a dimension the signature already
+    named, so the two are the SAME dimension, returned as an alias
+    (`claim name -> marker name`). A fixed numeric claim size on an
+    axis the marker names pins that name (`fixed`: marker name ->
+    size), so every parameter sharing the name is drawn at it."""
     if len(marker_dims) != len(claim_dims):
         raise DimensionConflict(
             f"{param}: the claim gives it {len(claim_dims)} dimension"
@@ -204,12 +211,17 @@ def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> dict:
             f"({', '.join(map(str, marker_dims))}); the signature is "
             f"authoritative on how many axes a parameter has")
     aliases: dict = {}
+    fixed: dict = {}
     for md, cd in zip(marker_dims, claim_dims):
         if not isinstance(cd, str) or cd.isdigit():
+            size = _axis(cd)
+            if size is not None and size.isdigit() and isinstance(md, str) \
+                    and not md.isdigit():
+                fixed[md] = int(size)
             continue
         if isinstance(md, str) and md != cd:
             aliases[cd] = md      # the claim's cd is the marker's md
-    return aliases
+    return aliases, fixed
 
 
 def _axis(dim):
@@ -233,6 +245,8 @@ def resolve(facts, shapes: "dict | None" = None,
     measures correctly even before the sampler synthesises it)."""
     out: dict = {}
     aliases: dict = {}
+    fixed: dict = {}
+    fixed_by: dict = {}
     shapes = shapes or {}
     claim_domain = claim_domain or {}
     for p in getattr(facts, "params", ()):
@@ -240,7 +254,16 @@ def resolve(facts, shapes: "dict | None" = None,
         declared = getattr(claim_domain.get(p), "dims", ())
         marker_dims = getattr(marker, "dims", ()) if marker is not None else ()
         if marker_dims and declared:
-            aliases.update(_reconcile_dims(p, marker_dims, declared))
+            new_aliases, new_fixed = _reconcile_dims(p, marker_dims, declared)
+            aliases.update(new_aliases)
+            for name, size in new_fixed.items():
+                if name in fixed and fixed[name] != size:
+                    raise DimensionConflict(
+                        f"{name} is fixed to two sizes: {fixed[name]} by "
+                        f"{fixed_by[name]}'s binding and {size} by {p}'s "
+                        f"binding; one shared dimension has one size")
+                fixed[name] = size
+                fixed_by[name] = p
         if marker_dims:
             out[p] = ParamShape(axes=tuple(_axis(d) for d in marker_dims))
         elif declared:
@@ -251,4 +274,4 @@ def resolve(facts, shapes: "dict | None" = None,
             out[p] = ParamShape(axes=(None,))
         else:
             out[p] = ParamShape(axes=())
-    return DimResolver(shapes=out, aliases=aliases)
+    return DimResolver(shapes=out, aliases=aliases, fixed=fixed)

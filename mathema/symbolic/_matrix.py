@@ -589,7 +589,7 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
             "proven",
             sketch=f"matrix relation: {lhs_src.strip()} {relation} "
                    f"{rhs_src.strip()} holds in sympy's matrix algebra{prem}"
-                   f"{_lemmas_text(table)}",
+                   f"{_lemmas_text(table)}{_fixed_shapes_text(mat_syms, domain)}",
             meta=_lemmas_meta(table))
     # a definite non-relation (a false identity or inequality): a matrix
     # disproof needs a witness (a concrete counterexample matrix), which
@@ -597,6 +597,20 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
     return ProofResult("undecided",
                        sketch="matrix relation did not hold symbolically; "
                               "left to empirical checking")
+
+
+def _fixed_shapes_text(mat_syms: dict, domain: dict) -> str:
+    """The clause the sketch adds for the operands whose binding fixes
+    an axis: "; the binding fixes A at 30 by 15 and b at length 30";
+    empty when no axis is fixed."""
+    from .._shapes import dims_of, expected, fixed_size
+    parts = []
+    for p in sorted(mat_syms):
+        dims = dims_of((domain or {}).get(p))
+        if not dims or not any(fixed_size(d) is not None for d in dims):
+            continue
+        parts.append(f"{p} at {expected(dims)}")
+    return f"; the binding fixes {' and '.join(parts)}" if parts else ""
 
 
 def _lemma_table(mat_syms: dict, structures: dict, invertible) -> LemmaTable:

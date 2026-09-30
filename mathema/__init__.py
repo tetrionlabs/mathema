@@ -595,8 +595,9 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     if scale < 1.0:
         type_trials = max(_RISK.min_trials_floor_when_scaled, len(_SPECIALS),
                           round(type_trials * scale))
-    probes = probes + _stamp_surface(type_probes(fn, trials=type_trials),
-                                     "types")
+    probes = probes + _stamp_surface(
+        type_probes(fn, trials=type_trials, domain=battery_domain or None),
+        "types")
 
     # whether this list is the caller's or mathema's own matters for
     # precedence below: a call-site claim is the MOST deliberate

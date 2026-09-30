@@ -33,7 +33,7 @@ import sys
 from dataclasses import dataclass, field
 from dataclasses import replace as _dc_replace
 
-from . import families, routes
+from . import _shapes, families, routes
 from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
 from .analysis import analyze_source
 from .grammar import (Domain, InvalidDomain, NoRelation,
@@ -1403,7 +1403,10 @@ def _claim(law: str, name: str | None, source: str, route: str,
             try:
                 links = split_relation_chain(text)
             except NoRelation as e:
-                raise InvalidConjecture(str(e)) from e
+                planned = families.planned_family_note(text)
+                raise InvalidConjecture(
+                    str(e) if planned is None else f"{e}; {planned}"
+                ) from e
             lhs, rel, rhs = links[0]
             if len(links) == 1:
                 links = []
@@ -3693,6 +3696,22 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # technique rather than the generic sampling loop
         ctx.family = _claim_family(cj, fn, facts)
         emptied = _empty_premise_parameter(ctx, facts)
+        clash = None if emptied is not None else _fixed_dim_clash(ctx)
+        if clash is not None:
+            # a literal dimension in the binding and a premise on the same
+            # dimension that refuses it: the same vacuous premise, naming
+            # both
+            emptied, premise_text, axis_words = clash
+            out.append(stamp(Probe(
+                cj.name, statement, "skipped", route=None,
+                note=f"{ctx.note}; the premise ({premise_text}) admits no "
+                     f"value of {emptied} in its declared domain "
+                     f"{_shapes.domain_text(ctx.cj_domain[emptied])}: "
+                     f"{emptied} {axis_words} by its binding, so the "
+                     f"claim quantifies over nothing and is vacuous; "
+                     f"state a premise the binding can satisfy",
+                meta={"mathema.empty_premise": emptied})))
+            continue
         if emptied is not None:
             out.append(stamp(Probe(
                 cj.name, statement, "skipped", route=None,
@@ -4157,7 +4176,6 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         a membership, or a comparison, in the claim loop's own words),
         or None when it holds there or cannot be evaluated.
     """
-    from .domain import domain_contains
     trial_env = dict(env)
     for p, v in zip(kinds, args):
         trial_env[p] = v
@@ -4170,7 +4188,8 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
                 "the raising region as its own raises(...) claim")
     if cj.relation in ("in", "not in"):
         if cj.rhs_bound is not None:
-            member = (not is_missing(lv)) and domain_contains(lv, cj.rhs_bound)
+            sizes = _shapes.axis_sizes(cj.domain or {}, dict(zip(kinds, args)))
+            member = (not is_missing(lv)) and _shapes.in_space(lv, cj.rhs_bound, sizes)
         else:
             try:
                 member = lv in rv  # type: ignore[operator]
@@ -5058,6 +5077,22 @@ def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
     except AttributeError:
         return None
     return premise_empties_domain(ctx.cj_domain, set(facts.params), premises)
+
+
+def _fixed_dim_clash(ctx: "_ClaimContext") -> "tuple | None":
+    """Intent:
+        `(param, premise_text, axis_words)` for the first premise that
+        bounds a dimension the claim's own binding fixes to a size the
+        premise refuses (`assuming len(xs) == 5` over `[0, 1]^30`), or
+        None when no premise contradicts a fixed dimension.
+    """
+    if not ctx.assumption:
+        return None
+    try:
+        premises = [(a.lhs, a.relation, a.rhs) for a in ctx.assumption]
+    except AttributeError:
+        return None
+    return _shapes.premise_against_fixed_dim(premises, ctx.cj_domain)
 
 
 def _family_owns_claim(family) -> bool:
@@ -6578,7 +6613,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
     # the lengths the samples inside the premise region actually had,
     # per sequence parameter, for the sampling note
-    sequence_params = [p for p, k in kinds.items() if k in SEQUENCE_KINDS]
+    sequence_params = [p for p, k in kinds.items()
+                       if k in SEQUENCE_KINDS or k == "table"]
     observed_lengths: dict = {}
     for trial in range(budget + len(pinned)):
         call_raised[0] = call_nan[0] = call_inf[0] = None
@@ -6642,10 +6678,13 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # claim or the body reads (a table language draws
                     # its own members below); a vector domain on the
                     # table (`for df in [0, 1]^n`) bounds every column
-                    length = rng.randint(2, 8)
                     bound = cj_domain.get(p)
                     column = bound if len(getattr(bound, "dims", ())
                                           or ()) == 1 else None
+                    # a fixed dimension on the table's vector domain is
+                    # every column's length
+                    length = (trial_sizes.get(resolver.key(p, 0))
+                              or rng.randint(2, 8))
                     v = {c: _synth("sequence", rng, column,
                                    specials=specials, length=length)
                          for c in table_columns[p]}
@@ -6765,7 +6804,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         for p in sequence_params:
             if isinstance(env.get(p), (list, tuple)) or (
                     _linalg_eval.is_array(env.get(p)) and env[p].ndim >= 1):
-                observed_lengths.setdefault(p, set()).add(len(env[p]))
+                observed_lengths.setdefault(p, set()).add(
+                    _shapes.observed_shape(env[p]) or (len(env[p]),))
         if cj.relation == "raises":
             # the claim is that the call raises: returning any value is
             # the counterexample, raising the wrong type falsifies a
@@ -6922,8 +6962,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # set, or it is not, and a missing value is in neither
             # unless the right-hand side admits it in so many words
             if cj.rhs_bound is not None:
-                from .domain import domain_contains
-                member = (not is_missing(lv)) and domain_contains(lv, cj.rhs_bound)
+                # a named axis of the output's space takes the size this
+                # trial bound to the name
+                sizes = _shapes.axis_sizes(cj_domain, {p: env[p] for p in kinds if p in env})
+                member = (not is_missing(lv)) and _shapes.in_space(lv, cj.rhs_bound, sizes)
             else:
                 try:
                     member = bool(lv in rv)  # type: ignore[operator]
