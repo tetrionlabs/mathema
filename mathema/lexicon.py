@@ -804,7 +804,7 @@ TAGS: dict[str, tuple[str, ...]] = {
     "missing_raises": ("missing", "nan", "hole", "raises", "guard", "log return"),
     "missing_converts": ("missing", "nan", "converts", "optional", "None out"),
     "missing_introduces": ("missing", "nan", "introduces", "weights",
-                           "normalise", "portfolio"),
+                           "diff", "portfolio"),
     "missing_introduces_by_shape": ("missing", "nan", "introduces", "rolling",
                                     "moving average", "window", "pandas"),
     "absent_raises": ("absent", "None", "optional", "raises", "TypeError"),
@@ -1524,11 +1524,12 @@ def converted_amount(amount: "Optional[float]") -> "Optional[float]":
     return None if amount is None else 1.1 * amount
 
 
-def normalise_weights(weights: "numpy.ndarray"):
-    """Portfolio weights scaled to sum to one: a single `nan` weight
-    makes the total `nan`, so every weight comes back a hole
+def weight_changes(weights: "numpy.ndarray"):
+    """Each portfolio weight's change since the one before it: the first
+    has nothing before it, so it is a hole whatever the input
     (introduces)."""
-    return weights / weights.sum()
+    import numpy
+    return numpy.diff(weights, prepend=numpy.nan)
 
 
 def rolling_average(prices: "pandas.Series"):
@@ -1632,7 +1633,7 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "price_or_none": (price_or_none, ["missing_converts"]),
     "price_as_float": (price_as_float, ["absent_converts"]),
     "converted_amount": (converted_amount, ["absent_propagates", "is_absent_safe_gate"]),
-    "normalise_weights": (normalise_weights, ["missing_introduces"]),
+    "weight_changes": (weight_changes, ["missing_introduces"]),
     "rolling_average": (rolling_average, ["missing_introduces_by_shape"]),
     "in_base_currency": (in_base_currency, ["absent_drops"]),
     "total_exposure": (total_exposure, ["missing_member_null", "missing_member_nan",
