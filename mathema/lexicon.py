@@ -1302,7 +1302,12 @@ def quadratic_root_plus(a: float, b: float, c: float) -> float:
     """(-b + sqrt(b^2 - 4ac)) / 2a, what the `assuming_*` entries
     demonstrate: the unconditional monotonicity claim falsifies (the
     sqrt raises where the discriminant goes negative), while the same
-    claim under `assuming b^2 - 4*a*c >= 0.01` proves."""
+    claim under `assuming b^2 - 4*a*c >= 0.01` proves, and so does the
+    claim resting on `real_roots` below, which borrows its relation.
+
+    Claims:
+        real_roots: b^2 - 4*a*c >= 0.01
+    """
     import math
     return (-b + math.sqrt(b * b - 4 * a * c)) / (2 * a)
 

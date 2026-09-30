@@ -41,7 +41,7 @@ PINNED: dict = {
     "assuming_is_defined": "proven",
     "assuming_is_defined_pinned": "proven",
     "assuming_is_defined_postfix": "proven",
-    "assuming_named_claim": "skipped",
+    "assuming_named_claim": "proven",
     "bound_function_nested_in_f": "proven",
     "certificate_convex_lower": "proven",
     "certificate_convex_upper": "proven",
