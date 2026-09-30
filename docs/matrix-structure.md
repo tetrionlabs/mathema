@@ -125,8 +125,9 @@ own runtime type: a list-of-lists matrix is evaluated as an array, so
 | `A + B`, `A - B`, `-A` | elementwise; `A + c` shifts every element |
 | `abs(A)` | elementwise absolute value |
 | <code>&#124;A&#124;</code> | the determinant of a declared matrix (sugar, below) |
-| `norm(x)` | Euclidean on a vector, Frobenius on a matrix |
+| `norm(x)`, <code>&#124;&#124;x&#124;&#124;</code> | Euclidean on a vector, Frobenius on a matrix |
 | `norm(A, 2)`, `norm(A, 1)`, `norm(A, inf)` | spectral, largest column sum, largest row sum |
+| <code>&#124;&#124;A&#124;&#124;_2</code>, <code>&#124;&#124;A&#124;&#124;_1</code>, <code>&#124;&#124;A&#124;&#124;_inf</code> | the same orders with double bars, the order a subscript |
 | `A ~= B` | element by element, with the scalar tolerance |
 
 An ordering between a matrix or vector and anything (`A >= 0`,
@@ -161,8 +162,10 @@ matrix_power(A, 2) == A * A   # falsified
 <!-- example: semantics verdicts fn=vecs -->
 ```
 norm(x + y) <= norm(x) + norm(y)   # holds
+‖x + y‖ ≤ ‖x‖ + ‖y‖   # holds
 norm(x + y)**2 == norm(x)**2 + norm(y)**2   # falsified
-norm(x + y)**2 == norm(x)**2 + norm(y)**2 + 2*dot(x, y)   # holds
+||x + y||^2 == ||x||^2 + ||y||^2 + 2*dot(x, y)   # proven
+||x||_inf <= ||x||_2 <= ||x||_1   # holds
 ```
 
 ### The vocabulary

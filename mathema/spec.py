@@ -1993,11 +1993,18 @@ def declare(cj) -> dict:
     # duplicate it and re-type it on reparse.
     statement = _chain_text(cj) if cj.links else statement_text(
         cj.relation, cj.lhs, cj.rhs)
+    from .grammar import display_norm_bars, norm_bars_written
+    with_bars = norm_bars_written(getattr(cj, "raw", ""))
+    if with_bars:
+        # a norm the author wrote with double bars is stored with them,
+        # so the claim read back keeps the spelling it was written in
+        statement = display_norm_bars(statement)
     if getattr(cj, "negated", False) and not statement.startswith("not "):
         statement = f"not {statement}"
     if getattr(cj, "outcome", ""):
         statement = f"{statement} => {cj.outcome}"
-    sections = ([cj.assuming] if cj.assuming else []) + _let_sections(cj)
+    premise = display_norm_bars(cj.assuming) if with_bars else cj.assuming
+    sections = ([premise] if premise else []) + _let_sections(cj)
     if sections:
         statement = ", ".join(sections + [statement])
     out = {"name": cj.name, "statement": statement, "route": cj.route,
@@ -2165,10 +2172,11 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     parameter or func alias, `f` itself), so neither mechanism ever
     reassigns a symbol something else in the same claim already uses.
 
-    `suppress_glyphs` handles a real parameter named exactly `pi`/`oo`
-    (`_math_vocab._MATH_ATTRS`' keys, minus `e`, which has no distinct
-    unicode glyph at all, `_print_Exp1` always prints `"e"`, so
-    there's nothing to suppress). Renaming was tried here first and
+    `suppress_glyphs` handles a real parameter named exactly `pi`, `oo`,
+    `inf` or `infinity` (`_math_vocab._MATH_ATTRS`' keys, minus `e`,
+    which has no distinct unicode glyph at all, `_print_Exp1` always
+    prints `"e"`, so there's nothing to suppress; the printer then
+    writes the parameter's own name). Renaming was tried here first and
     rejected: `grammar._node_to_sympy` has no concept of any one
     function's real parameter names, so it always resolves a bare
     `pi`/`oo` to the math constant regardless, by the time a claim
@@ -2208,7 +2216,9 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     # explicit domain declaration is the actual, reliable signal that
     # "pi" was meant as a genuine varying quantity here.
     declared = {n for n in cj.domain if n not in cj.free_vars}
-    suppress_glyphs = frozenset({"pi", "oo"} & declared) if unicode else frozenset()
+    # in both modes: a parameter named for infinity prints under its
+    # own name, where the constant would print `inf` in ascii
+    suppress_glyphs = frozenset({"pi", "oo", "inf", "infinity"} & declared)
 
     # A "symbology" capability, if one is registered, gets first pick of a symbol
     # for every real parameter and function name, ahead of the Greek-
@@ -2401,6 +2411,19 @@ def render_claim_text(cj, *, unicode: bool | None = None,
                                   canonical=canonical)
 
 
+def _domain_text(bound, unicode: bool, show_missing: bool) -> str:
+    """Intent:
+        One binding's domain as the claim displays it: the domain
+        renderer's text, with an infinite bound spelled `∞` in unicode
+        so a line spells infinity one way in its domain and its law.
+    """
+    import re as _re
+
+    from .grammar import render_domain
+    text = render_domain(bound, ascii_mode=not unicode, show_missing=show_missing)
+    return _re.sub(r"\binf\b", "∞", text) if unicode else text
+
+
 def _render_claim_text(cj, *, unicode: bool | None,
                        long_param_threshold: int,
                        canonical: bool) -> str:
@@ -2409,7 +2432,8 @@ def _render_claim_text(cj, *, unicode: bool | None,
         `grammar.bars_over_matrices` has set.
     """
     from .conjecture import GRAMMAR
-    from .grammar import display_len, get_unicode_output, render_domain, render_law_expr
+    from .grammar import (display_len, display_norm_bars, get_unicode_output,
+                          norm_bars_written, render_law_expr)
     from ._providers import get_provider, report_provider_failure
     from ._scan import sub_outside_strings
 
@@ -2566,6 +2590,15 @@ def _render_claim_text(cj, *, unicode: bool | None,
     language_len = getattr(cj, "grammar", "") == f"{GRAMMAR}/language"
     if language_len:
         statement = display_len(statement)
+    # a norm the author wrote with double bars is displayed with them,
+    # the order a subscript (`||x||_2`, `‖x‖₂`); `norm(...)` written as
+    # the call stays the call. The canonical text keeps the call in
+    # every case, so the two spellings are one claim with one
+    # fingerprint, and the bars are stored beside the claim (`declare`)
+    # for the display. `display_norm_bars` is the inverse of the bar
+    # fold, so the displayed text reparses to the same canonical form
+    if not canonical and norm_bars_written(getattr(cj, "raw", "")):
+        statement = display_norm_bars(statement, unicode)
 
     # let/for's own displayed symbol never reaches ast.parse individually
     # (both are plain f-string text, joined into the final claim string
@@ -2605,7 +2638,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
                      for name, symbol in sorted(param_renames.items())]
     let_segments += [
         f"let {name} be "
-        f"{render_domain(cj.domain[name], ascii_mode=not unicode, show_missing=domain_show_missing)}"
+        f"{_domain_text(cj.domain[name], unicode, domain_show_missing)}"
         for name in sorted(cj.free_vars) if name in cj.domain]
     let_segments += [f"let {name} be {value!r}" for name, value in
                      sorted((getattr(cj, "param_pins", None) or {}).items())]
@@ -2621,7 +2654,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
     for_segments = [
         f"{_display_symbol(param_renames[name]) if name in param_renames else name} "
         f"{membership} "
-        f"{render_domain(bound, ascii_mode=not unicode, show_missing=domain_show_missing)}"
+        f"{_domain_text(bound, unicode, domain_show_missing)}"
         for name, bound in cj.domain.items() if name not in cj.free_vars]
 
     parts = []
@@ -2634,6 +2667,14 @@ def _render_claim_text(cj, *, unicode: bool | None,
         # already canonical (grammar._canonical_assuming spells the
         # definedness premise `f is defined`), so nothing to rewrite
         assuming_text = display_len(cj.assuming) if language_len else cj.assuming
+        # the premise is canonical text (`norm(x) > 0`, `abs(x) > 0`); it
+        # is displayed the way the statement is, with the author's norm
+        # bars and a single-term absolute value as bars
+        if not canonical:
+            from .grammar import _abs_calls_to_bars
+            if norm_bars_written(getattr(cj, "raw", "")):
+                assuming_text = display_norm_bars(assuming_text, unicode)
+            assuming_text = _abs_calls_to_bars(assuming_text)
         if unicode:
             for joined in sorted(examine_predicates()):
                 assuming_text = assuming_text.replace(

@@ -375,12 +375,12 @@ print(textwrap.fill(proof.sketch, 78))
 <!-- example: rt-drawdown output -->
 ```text
 proven derive
-∀ prices over [1.0, 100.0] with nothing missing, prices of every length
+∀ prices over [1.0, 100.0] with nothing missing, prices of every length of at least one
 through the definition rows pandas.Series.cummax definition, pandas.Series.min
 definition, lowered to sums over prices at a symbolic length: the relation
-holds for every length (every element of prices / cummax(prices) - 1.0 is <= 0
-(0 < prices[i] / cummax(prices)[i] <= 1), so min(prices / cummax(prices) -
-1.0) is too)
+holds for every length of at least one (every element of prices /
+cummax(prices) - 1.0 is <= 0 (0 < prices[i] / cummax(prices)[i] <= 1), so
+min(prices / cummax(prices) - 1.0) is too)
 ```
 
 A DataFrame's columns are vectors on the derive route too, read by

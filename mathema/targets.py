@@ -127,6 +127,12 @@ def _import_module(dotted: str, root: str):
         try:
             return importlib.import_module(dotted)
         except Exception as e:
+            from .conjecture import InvalidConjecture
+            if isinstance(e, InvalidConjecture):
+                # a claim declared in the module does not parse: the
+                # message names the claim, not the import
+                raise TargetError(
+                    f"a claim declared in {dotted!r} does not parse: {e}") from e
             raise TargetError(
                 f"could not import {dotted!r}: {type(e).__name__}: {e}") from e
 

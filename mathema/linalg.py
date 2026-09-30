@@ -443,6 +443,57 @@ def static_rank(node, ranks: dict):
     return None
 
 
+def norm_notes(cj, ranks: dict) -> list:
+    """Intent:
+        One line per bare norm the claim spells with double bars
+        (`||x||`, no order), naming the norm it resolves to: the
+        Euclidean norm of a vector, the Frobenius norm of a matrix, the
+        absolute value of a number, and either norm when the argument's
+        rank cannot be read from the claim (a call of `f`, a bound
+        function).
+
+    Notes:
+        `ranks` is `array_ranks`' `{name: rank}`. A norm written as the
+        call `norm(x)`, or with an order written, gets no line.
+    """
+    from .grammar import display_norm_bars, norm_bars_written
+    if not norm_bars_written(getattr(cj, "raw", "")):
+        return []
+    sides = [cj.lhs, cj.rhs] + [rhs for _lhs, _rel, rhs in (cj.links or [])]
+    out: list = []
+    for side in sides:
+        try:
+            tree = ast.parse(side or "", mode="eval")
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "norm" and len(node.args) == 1
+                    and not node.keywords):
+                continue
+            arg_node = node.args[0]
+            arg = ast.unparse(arg_node)
+            shown = display_norm_bars(f"norm({arg})")
+            # a name declared over `R^(m,n)` is a matrix whatever its
+            # column count, so one column is still a Frobenius norm
+            declared = (cj.domain or {}).get(arg_node.id) \
+                if isinstance(arg_node, ast.Name) else None
+            rank = 2 if len(getattr(declared, "dims", ()) or ()) == 2 \
+                else static_rank(arg_node, ranks)
+            if rank == 1:
+                said = f"{shown} is the Euclidean norm of {arg}"
+            elif rank == 2:
+                said = f"{shown} is the Frobenius norm of {arg}"
+            elif rank == 0:
+                said = f"{shown} is the absolute value of the number {arg}"
+            else:
+                said = (f"{shown} is the Euclidean norm if {arg} is a vector "
+                        f"and the Frobenius norm if it is a matrix")
+            if said not in out:
+                out.append(said)
+    return out
+
+
 def matrix_ordering_reason(relation: str, sides, ranks: dict) -> "str | None":
     """Intent:
         Why an ordering claim over a vector or matrix side is refused,

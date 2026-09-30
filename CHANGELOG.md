@@ -247,6 +247,43 @@ Notable changes to mathema are recorded here from its first public release onwar
   inside the claim's domain, exclusions included: over `L[unicode] \ {""}`
   a crash on `''` is labelled outside `L[unicode] \ {""}`, not inside
   `L[unicode]`.
+- A norm can be written with double bars, the order a subscript on the
+  closing bars: `||x||` is `norm(x)` (Euclidean for a vector, Frobenius
+  for a matrix); `||x||_1`, `||x||_2`, `||x||_inf` (also `_oo`, `_∞`)
+  and `||x||_p` for a whole number `p >= 1` are `norm(x, 1)` and so on;
+  `||x||^2` is the square of the norm. Unicode reads and writes `‖x‖`,
+  `‖x‖₂`, `‖x‖∞`. Any other order is refused with the accepted ones
+  named.
+- A claim written with the bars is displayed and stored in the claims
+  file with them; its record's statement is the call form, so a claim
+  written with the bars and one written with `norm(...)` are one claim
+  with one fingerprint. A bare `||x||` names the norm it resolved to in
+  the record's note.
+- In the call form every infinite order (`norm(x, oo)`, `norm(x,
+  infinity)`, `norm(x, ∞)`) is `norm(x, inf)`, the largest magnitude;
+  before, `oo` there was sampled as a free variable and the claim
+  falsified.
+- The derive route reads a norm over a vector: `||x||` and `||x||_2` as
+  the root of the sum of squares, `||x||_1` as the sum of magnitudes,
+  `||x||_inf` as the largest magnitude, and `||A||` on a matrix as the
+  root of the trace of `A @ A.T`. A length, a distance, a normalisation,
+  a root mean square error, a weight vector's `||w||_1`, a tracking
+  error over two pandas Series and a Gram trace are proven for every
+  length through the numpy definition rows; a largest magnitude, like a
+  least or greatest element, is proven for every length of at least one,
+  and the empty vector is left to the probe. A matrix `_1`, `_2` or
+  `_inf` norm, a chain of norm orders, the triangle inequality and a
+  stopping criterion's boolean stay with the probe.
+- A bare `oo`, `inf`, `infinity` or `∞` anywhere in a claim is infinity
+  on the probe route as well, bound to the float infinity, and `-oo` its
+  negative. Before, the probe sampled the name as a free variable, so
+  `f(x) < oo` on a finite function could be falsified at a random value;
+  now it holds, and `f(x) > oo` is falsified with a witness. The
+  canonical text writes every spelling `inf`, as a domain already wrote
+  an infinite bound (`[0, inf)`), so a claim with a limit or an integral
+  bound at `oo` re-fingerprints once. A parameter named `oo`, `inf` or
+  `infinity` is read as the parameter on both routes and keeps its own
+  name in the rendered text.
 
 ## 0.6.0
 
