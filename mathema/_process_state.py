@@ -340,6 +340,39 @@ def isolated(fn):
                           "a trial: " + "; ".join(trial.restore_failed))
 
 
+def _body_scope(fn, tree) -> dict:
+    """Intent:
+        The names the body can reach: the function's module scope, with
+        what an `import` or `from ... import` inside the body binds laid
+        over it (a module already imported is looked up, never imported
+        here).
+    """
+    from ._signatures import module_scope
+    scope = dict(module_scope(fn))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module = sys.modules.get(alias.name)
+                if module is None:
+                    continue
+                if alias.asname:
+                    scope[alias.asname] = module
+                else:
+                    top = alias.name.split(".")[0]
+                    scope[top] = sys.modules.get(top, module)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            module = sys.modules.get(node.module)
+            if module is None:
+                continue
+            for alias in node.names:
+                value = getattr(module, alias.name, None)
+                if value is None:
+                    value = sys.modules.get(f"{node.module}.{alias.name}")
+                if value is not None:
+                    scope[alias.asname or alias.name] = value
+    return scope
+
+
 #: method names that configure process-wide state, whatever object they
 #: are called on (a logger from `getLogger()`, a generator, a module)
 _CONFIG_METHODS = frozenset({
@@ -388,11 +421,10 @@ def writer_calls(fn, facts) -> list[str]:
         object, a call's result included, and a store into an object a
         call returned (`getLogger(name).propagate = False`).
     """
-    from ._signatures import module_scope
     tree = getattr(facts, "tree", None)
     if tree is None:
         return []
-    scope = module_scope(fn)
+    scope = _body_scope(fn, tree)
     writers = _writers()
     found = []
     for node in ast.walk(tree):
@@ -480,13 +512,14 @@ def hidden_reads(fn, facts) -> list[str]:
         back-to-back calls cannot see change: the clock (`time.time`,
         `datetime.now`, ...), the environment (`os.environ`,
         `os.getenv`), the working directory and files (`open`), by the
-        name mathema resolves them to, in the order first read.
+        name mathema resolves them to, in the order first read; a name
+        imported inside the body resolves like one imported at module
+        level.
     """
-    from ._signatures import module_scope
     tree = getattr(facts, "tree", None)
     if tree is None:
         return []
-    scope = module_scope(fn)
+    scope = _body_scope(fn, tree)
     found: list = []
     # a store into the environment (`os.environ[k] = v`, `del
     # os.environ[k]`, `os.environ.update(...)`) writes it, it reads

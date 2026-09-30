@@ -493,3 +493,26 @@ def test_the_check_line_does_not_say_no_side_effects_beside_a_state_write(
           "--root", str(tmp_path)])
     out = capsys.readouterr().out
     assert "remember_rate: source, side effects;" in out, out
+
+
+def local_put_env(x: float) -> float:
+    from os import putenv as set_c_env
+    set_c_env("MATHEMA_T", str(x))
+    return x
+
+
+def local_numpy_seed(x: float) -> float:
+    import numpy.random as npr
+    npr.seed(3)
+    return x
+
+
+def test_a_writer_imported_inside_the_body_is_a_write_site(monkeypatch):
+    monkeypatch.delenv("MATHEMA_T", raising=False)
+    from mathema._process_state import writer_calls
+    from mathema.analysis import analyze_source
+    assert writer_calls(local_put_env, analyze_source(local_put_env))
+    p = _state_safe(local_put_env)
+    assert p.verdict == "falsified", (p.verdict, p.route, p.note)
+    p = _state_safe(local_numpy_seed)
+    assert p.verdict == "falsified", (p.verdict, p.route, p.note)
