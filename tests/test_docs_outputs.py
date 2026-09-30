@@ -6,7 +6,8 @@ A page that shows code next to its output makes two promises: the code
 runs, and it prints what the page says. This module holds the pages to
 the second one. It reads the markdown, runs each marked example in a
 fresh temporary directory, and compares what came out with what the
-page shows, allowing only timing figures and absolute paths to differ.
+page shows, allowing only timing figures, absolute paths and the date
+a run writes to differ.
 
 Marking an example
 ------------------
@@ -196,17 +197,20 @@ def inventory():
 # --- comparison ----------------------------------------------------------
 
 _DURATION = re.compile(r"\b\d+(?:\.\d+)?\s?(?:ms|s|sec|seconds)\b")
+_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 def normalise(text, workdir):
     """Intent:
         The text with what legitimately differs between runs replaced:
-        the working directory's absolute path and timing figures.
-        Trailing whitespace and surrounding blank lines are dropped.
+        the working directory's absolute path, timing figures and the
+        ISO date a run writes. Trailing whitespace and surrounding blank
+        lines are dropped.
     """
     for d in {workdir, os.path.realpath(workdir)}:
         text = text.replace(d, "<tmp>")
     text = _DURATION.sub("<time>", text)
+    text = _DATE.sub("<date>", text)
     lines = [ln.rstrip() for ln in text.splitlines()]
     return "\n".join(lines).strip("\n")
 
@@ -563,6 +567,12 @@ def test_only_timing_and_paths_are_allowed_to_differ():
     assert normalise("wrote /t/w/x.yaml in 0.42s", "/t/w") == shown
     assert normalise("wrote /t/w/x.yaml in 3 ms", "/t/w") == shown
     assert normalise("proven, n=12", "/t/w") != normalise("proven, n=13", "/t/w")
+
+
+def test_the_date_a_run_writes_is_allowed_to_differ():
+    assert normalise("contradicted on 2026-09-30: f drops", "/t/w") == \
+        normalise("contradicted on 2026-10-01: f drops", "/t/w")
+    assert normalise("form 2026abc", "/t/w") != normalise("form 2027abc", "/t/w")
 
 
 def test_an_excerpt_keeps_each_detail_under_its_own_entry():
