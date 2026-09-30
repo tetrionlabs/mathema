@@ -284,3 +284,78 @@ def test_restore_reports_a_failed_step_and_runs_the_rest():
     failed = _process_state.restore(before_bad)
     assert any(f.startswith("the working directory") for f in failed)
     assert "MATHEMA_T6" not in os.environ
+
+
+# --- the structural half declines every watched write ------------------------
+
+from logging import getLogger  # noqa: E402
+from sys import setrecursionlimit  # noqa: E402
+from warnings import simplefilter  # noqa: E402
+
+from numpy.random import seed as numpy_seed  # noqa: E402
+from numpy.random import set_state as numpy_set_state  # noqa: E402
+
+
+def bare_numpy_seed(x: float) -> float:
+    numpy_seed(3)
+    return x
+
+
+def bare_numpy_set_state(x: float) -> float:
+    numpy_set_state(np.random.get_state())
+    return x
+
+
+def root_level_by_call(x: float) -> float:
+    getLogger().setLevel(10)
+    return x
+
+
+def named_logger_handler(x: float) -> float:
+    logging.getLogger("mathema.t").addHandler(logging.NullHandler())
+    return x
+
+
+def ignore_warnings(x: float) -> float:
+    simplefilter("ignore")
+    return x
+
+
+def deeper_recursion(x: float) -> float:
+    setrecursionlimit(1500)
+    return x
+
+
+def local_sort(a: float, b: float) -> float:
+    vals = [a, b]
+    vals.sort()
+    return vals[0]
+
+
+@pytest.fixture
+def warnings_and_recursion_kept():
+    import warnings
+    limit, filters = sys.getrecursionlimit(), list(warnings.filters)
+    yield
+    sys.setrecursionlimit(limit)
+    warnings.filters[:] = filters
+
+
+@pytest.mark.parametrize("fn, verdict", [
+    (bare_numpy_seed, "falsified"), (bare_numpy_set_state, "holds"),
+    (root_level_by_call, "falsified"),
+    # outside the watched state: the structure declines a proof and the
+    # trials, which do not read warnings filters or the recursion limit,
+    # hold; a module-level bound method (`draw`, imported from random)
+    # is not data and is not reported as mutated
+    (ignore_warnings, "holds"), (deeper_recursion, "holds"),
+])
+def test_a_watched_write_through_a_bare_name_or_a_call_result_is_not_proven(
+        fn, verdict, warnings_and_recursion_kept):
+    p = _state_safe(fn)
+    assert p.verdict == verdict, (fn.__name__, p.route, p.counterexample)
+
+
+def test_a_method_call_on_a_local_is_still_proven():
+    p = _state_safe(local_sort)
+    assert (p.verdict, p.route) == ("proven", "examine")

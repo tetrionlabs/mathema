@@ -284,11 +284,26 @@ def isolated(fn):
                           "a trial: " + "; ".join(trial.restore_failed))
 
 
+#: method names that configure process-wide state, whatever object they
+#: are called on (a logger from `getLogger()`, a generator, a module)
+_CONFIG_METHODS = frozenset({
+    "setLevel", "addHandler", "removeHandler", "addFilter", "removeFilter",
+    "setFormatter", "disable", "basicConfig", "seed", "set_state",
+    "setstate", "chdir", "putenv", "unsetenv", "simplefilter",
+    "filterwarnings", "setrecursionlimit"})
+
+
 def _writers() -> set:
+    import warnings
     writers = {os.putenv, os.unsetenv, os.chdir, random.seed,
-               random.setstate, logging.basicConfig, logging.disable}
+               random.setstate, logging.basicConfig, logging.disable,
+               warnings.simplefilter, warnings.filterwarnings,
+               sys.setrecursionlimit}
     if hasattr(os, "fchdir"):
         writers.add(os.fchdir)
+    npr = _numpy_random()
+    if npr is not None:
+        writers |= {npr.seed, npr.set_state}
     return writers
 
 
@@ -308,11 +323,13 @@ def _draws_global_rng(obj) -> bool:
 
 def writer_calls(fn, facts) -> list[str]:
     """Intent:
-        The bare-name calls in the body that resolve, through the
-        function's module, to a writer of process-wide state (os.putenv,
-        os.chdir, random.seed, a draw from the global generator, ...),
-        by the name the body calls. An attribute call (`os.putenv`) is
-        already an external write site for `hazards._state_writes`.
+        The calls in the body that write process-wide state, by the name
+        the body calls: a bare name that resolves, through the
+        function's module, to a writer (os.putenv, os.chdir,
+        random.seed, numpy.random.seed, a draw from the global
+        generator, ...), and any call of a configuration method
+        (`setLevel`, `addHandler`, `seed`, `set_state`, ...) on any
+        object, a call's result included.
     """
     from ._signatures import module_scope
     tree = getattr(facts, "tree", None)
@@ -322,6 +339,14 @@ def writer_calls(fn, facts) -> list[str]:
     writers = _writers()
     found = []
     for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in _CONFIG_METHODS):
+            # a configuration method on anything, including an object a
+            # call returned (`getLogger().setLevel(10)`), which no write
+            # site rooted at a name can see
+            if node.func.attr not in found:
+                found.append(node.func.attr)
+            continue
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
             continue
         obj = scope.get(node.func.id)

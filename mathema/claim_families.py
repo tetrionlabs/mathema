@@ -977,7 +977,8 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
             if name.startswith("__"):
                 continue
             if isinstance(value, (types.ModuleType, types.FunctionType,
-                                  types.BuiltinFunctionType, type)):
+                                  types.BuiltinFunctionType, types.MethodType,
+                                  type)):
                 continue
             out[name] = value
         return out
