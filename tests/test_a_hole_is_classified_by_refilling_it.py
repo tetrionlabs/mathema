@@ -198,3 +198,16 @@ def test_an_overflow_under_complete_inputs_is_inconclusive_not_introduced():
     rows = {p.name: p for p in rec.probes}
     assert rows["missing[x]"].verdict != "falsified", rows["missing[x]"].note
     assert rows["missing[alpha]"].verdict != "falsified", rows["missing[alpha]"].note
+
+
+def test_a_policy_row_decided_by_refilling_says_so_on_its_route():
+    import mathema
+
+    def clamp(x: float) -> float:
+        return max(0.0, min(1.0, x))
+    rec = mathema.check(clamp, claims=[
+        mathema.claim("for x in [0, 1], f(x) >= 0", name="c"),
+        mathema.claim("missing(f, x) drops", name="p")])
+    routes = {p.route for p in rec.probes if (p.meta or {}).get("mathema.policy")
+              and p.route and p.route.startswith("probe")}
+    assert routes == {"probe:counterfactual"}, routes

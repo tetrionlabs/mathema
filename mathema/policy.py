@@ -619,7 +619,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
 
     def unknown(reason: str):
         meta["mathema.policy"]["reason"] = reason
-        return Probe(cj.name, statement, "unknown", route="probe:classified",
+        return Probe(cj.name, statement, "unknown", route="probe:counterfactual",
                      note=reason, meta=meta)
 
     if stated.kind == "absent" and stated.parameter is None \
@@ -672,7 +672,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
             nxt = (f"state {_stated_word(stated, did, wrong, calls)} if that is "
                    f"intended, or change f")
         meta["mathema.policy"].update({"reason": reason, "next": nxt})
-        return Probe(cj.name, statement, "falsified", n=len(calls), route="probe:classified",
+        return Probe(cj.name, statement, "falsified", n=len(calls), route="probe:counterfactual",
                      counterexample=_witness(wrong, p), note=f"{reason}; {nxt}",
                      meta=meta)
     guard = None
@@ -690,7 +690,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
                      note=reason, meta=meta)
     reason = f"stated; {evidence}"
     meta["mathema.policy"]["reason"] = reason
-    return Probe(cj.name, statement, "holds", n=len(calls), route="probe:classified",
+    return Probe(cj.name, statement, "holds", n=len(calls), route="probe:counterfactual",
                  note=reason, meta=meta)
 
 
@@ -777,7 +777,7 @@ def _adjudicate_return(cj, fn, stated, statement, current, meta, unknown):
               f"inputs{as_declared}")
     meta["mathema.policy"].update({"reason": reason,
                                    "evidence": _confirmed(calls, current, False)})
-    return Probe(cj.name, statement, "holds", n=len(calls), route="probe:classified",
+    return Probe(cj.name, statement, "holds", n=len(calls), route="probe:counterfactual",
                  note=reason, meta=meta)
 
 
@@ -1150,7 +1150,7 @@ def _return_rows(fn, covered: set, current: "Batch | None", name_of) -> list:
                                    "sentence": sentence, "next": nxt},
                 "mathema.surface": "mathema"}
         return [Probe(name_of(policy), policy_text(policy), "falsified", n=len(calls),
-                      route="probe:classified",
+                      route="probe:counterfactual",
                       counterexample=f"{point_shown(calls[0].point)}: f returned None",
                       note=f"{sentence}. {nxt}", meta=meta)]
     policy = Policy(kind="absent", behaviour="introduces", source="annotation")
@@ -1179,7 +1179,7 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
     key = _function_key(fn)
 
     def row(verdict, behaviour, exception, source, bracket, cx=None,
-            route="probe:classified", nxt=None, sentence=None, said=None,
+            route="probe:counterfactual", nxt=None, sentence=None, said=None,
             shown=None):
         stated = replace(policy, behaviour=behaviour, exception=exception, source=source)
         shown = shown or stated
@@ -1496,7 +1496,7 @@ def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
                    f"intended, or change f")
         meta_policy.update({"reason": reason, "next": nxt})
         rows.append(Probe(name_of(policy), statement, "falsified", n=len(calls),
-                          route="probe:classified", counterexample=_witness(wrong),
+                          route="probe:counterfactual", counterexample=_witness(wrong),
                           note=f"{reason}; {nxt}", meta=meta))
     return rows
 
@@ -2175,15 +2175,15 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
         meta["mathema.gate"]["next"] = nxt
     if failures:
         meta["mathema.gate"]["reason"] = failures[0]
-        return Probe(cj.name, statement, "falsified", n=n, route="probe:classified",
+        return Probe(cj.name, statement, "falsified", n=n, route="probe:counterfactual",
                      counterexample=witness, note=sketch, sketch=sketch, meta=meta)
     if not table:
         return Probe(cj.name, statement, "proven", n=0, route="examine",
                      note=f"no parameter admits {word}; {sketch}", sketch=sketch,
                      meta=meta)
     if weakest == "unknown":
-        return Probe(cj.name, statement, "unknown", n=n, route="probe:classified",
+        return Probe(cj.name, statement, "unknown", n=n, route="probe:counterfactual",
                      note=sketch, sketch=sketch, meta=meta)
     return Probe(cj.name, statement, weakest, n=n,
-                 route="examine" if weakest == "proven" else "probe:classified",
+                 route="examine" if weakest == "proven" else "probe:counterfactual",
                  note=sketch, sketch=sketch, meta=meta)

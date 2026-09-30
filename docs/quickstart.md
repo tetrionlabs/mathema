@@ -166,7 +166,7 @@ pricing.discounted:
       verdict: "holds"
       n: 1
       note: "default for a float, which may be nan; confirmed on the 46 draws of never_raises_price[float]. Keep it by writing it (mathema claims pricing.discounted --write), or change the word to raises or drops if f should do otherwise"
-      route: "probe:classified"
+      route: "probe:counterfactual"
       authored:
         surface: "suggested"
       meta:
