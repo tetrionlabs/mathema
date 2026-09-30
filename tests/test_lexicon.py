@@ -169,6 +169,12 @@ PINNED: dict = {
     "matrix_norm_bars_order_trap": "falsified",
     "matrix_norm_bars_spectral": "holds",
     "matrix_norm_bars_spectral_below_frobenius": "holds",
+    "let_scale_seq_sharpe_premise": "proven",
+    "let_scale_seq_sharpe_trap": ("falsified", "returns=[0.0]"),
+    "let_shift_seq_range": "holds",
+    "let_shift_seq_mean_moves": "falsified",
+    "assuming_spread_positive": "proven",
+    "dim_call_premise": "holds",
 }
 if importlib.util.find_spec("mathema_language") is None:
     PINNED.update({key: "skipped" for key in _LANGUAGE_ROWS})

@@ -42,6 +42,11 @@ Options:
 - `match=subset`: the shown output is an excerpt. Every shown line
   appears in the real output in the same order, and a detail line
   indented under an entry follows that entry directly.
+- `wrap=N` (on an `output` block): the shown text is the real output
+  re-flowed at spaces to N columns, a line wider than N continued on
+  the next line four spaces further in. The real run is re-flowed the
+  same way before the comparison, so the shown block is the real
+  output with only its line breaks changed and nothing cut.
 - `after=ID`: first replay example ID's files and Python silently, for
   a page that builds one example on another.
 - `route=ROUTE` (on `verdicts`): the route each claim is adjudicated on.
@@ -51,6 +56,10 @@ Options:
 
 A fence that looks like output but shows no run (a diagram, a
 figure drawn for the page) is marked `<!-- illustration -->` instead.
+A command a reader runs by hand, which this harness cannot (it writes
+to a tool's configuration, reaches the network, or prompts at a
+terminal), is marked `<!-- checked by hand -->`; the checklist lists it
+so the hand check is on record.
 
 `tests/data/docs_examples.txt` is the checklist: every marked example
 by page, and every page's fenced blocks that look like output but are
@@ -65,6 +74,7 @@ import re
 import shlex
 import subprocess
 import sys
+import textwrap
 
 import pytest
 
@@ -77,6 +87,7 @@ _MARK = re.compile(r"^<!-- example: (.+?) -->\n```(\w*)\n(.*?)^```",
 _FENCE = re.compile(r"^```(\w*)\n(.*?)^```", re.M | re.S)
 _ROLES = {"file", "run", "output", "repl", "session", "verdicts"}
 _ILLUSTRATION = "<!-- illustration -->"
+_HAND = "<!-- checked by hand -->"
 
 
 def _pages():
@@ -163,8 +174,9 @@ def inventory():
              "# [x] page:id  roles         a marked example, run and compared",
              "# [ ] page:line               an unmarked fence that shows output",
              "# [-] page:line               marked as an illustration, not a run",
+             "# [h] page:line               a command checked by hand, not run here",
              ""]
-    covered = unchecked = 0
+    covered = unchecked = hand = 0
     for page in _pages():
         text = open(page, encoding="utf-8").read()
         marked_at = {m.start(0) + len(m.group(0).split("\n", 1)[0]) + 1
@@ -180,16 +192,21 @@ def inventory():
         for m in _FENCE.finditer(text):
             if m.start() in marked_at:
                 continue
+            line = text.count("\n", 0, m.start()) + 1
+            before = text[:m.start()]
+            if before.endswith(_HAND + "\n"):
+                rows.append(f"[h] {_rel(page)}:{line}")
+                hand += 1
+                continue
             if _looks_like_output(m.group(1), m.group(2)):
-                line = text.count("\n", 0, m.start()) + 1
-                if text[:m.start()].endswith(_ILLUSTRATION + "\n"):
+                if before.endswith(_ILLUSTRATION + "\n"):
                     rows.append(f"[-] {_rel(page)}:{line}")
                     continue
                 rows.append(f"[ ] {_rel(page)}:{line}")
                 unchecked += 1
         lines += rows
     lines += ["", f"# {covered} examples checked, {unchecked} output fences "
-                  "not yet marked", ""]
+                  f"not yet marked, {hand} commands checked by hand", ""]
     return "\n".join(lines)
 
 
@@ -209,6 +226,25 @@ def normalise(text, workdir):
     text = _DURATION.sub("<time>", text)
     lines = [ln.rstrip() for ln in text.splitlines()]
     return "\n".join(lines).strip("\n")
+
+
+def rewrap(text, width):
+    """Intent:
+        The text with every line wider than `width` re-flowed at spaces
+        to fit, each continuation line indented four spaces past the
+        line it continues. Words are never split, so a token wider than
+        `width` stays whole. Only the line breaks change, which is what
+        `wrap=N` shows a reader in place of a line that would scroll.
+    """
+    out = []
+    for ln in text.splitlines():
+        if len(ln) <= width:
+            out.append(ln)
+            continue
+        indent = ln[:len(ln) - len(ln.lstrip())]
+        out.extend(textwrap.wrap(ln, width=width, subsequent_indent=indent + "    ",
+                                 break_long_words=False, break_on_hyphens=False))
+    return "\n".join(out)
 
 
 def _indent(line):
@@ -550,6 +586,9 @@ def test_the_output_shown_is_the_output_a_run_gives(example, tmp_path):
         if shown is None:
             continue
         compared += 1
+        wrap = part["options"].get("wrap")
+        if wrap:
+            actual = rewrap(actual, int(wrap))
         shown_n, actual_n = normalise(shown, workdir), normalise(actual, workdir)
         subset = part["options"].get("match") == "subset"
         assert matches(shown_n, actual_n, subset), (
@@ -574,6 +613,18 @@ def test_an_excerpt_keeps_each_detail_under_its_own_entry():
     # order matters, and an excerpt is not a whole
     assert not matches("rec\n  C\n  A", real, subset=True)
     assert not matches("rec\n  A", real)
+
+
+def test_a_wrapped_block_changes_only_where_lines_break():
+    long = "FAIL k: a line of output that is wider than the width  <- and its remedy clause"
+    short = "  - kept"
+    out = rewrap(f"{long}\n{short}", 40)
+    assert all(len(ln) <= 40 for ln in out.splitlines())
+    assert out.split() == f"{long} {short}".split()
+    assert out.splitlines()[-1] == short
+    assert out.splitlines()[1].startswith("    ")
+    # a token wider than the width stays whole rather than being cut
+    assert rewrap("x" * 50, 40) == "x" * 50
 
 
 def test_every_marker_is_well_formed():

@@ -70,4 +70,4 @@ library's rows come from a [compendium](claims-transfer.md) claims file,
 verified).
 
 [`mathema badges`](modes/badges.md) documents how each score is computed, and
-[`mathema coverage`](modes/check.md) the implementation layer on its own.
+[`mathema coverage`](modes/coverage.md) the implementation layer on its own.

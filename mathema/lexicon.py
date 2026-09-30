@@ -572,6 +572,36 @@ LEXICON: dict[str, str] = {
     "language_length_bound": "for s in L[unicode, len <= 80], len(f(s)) <= 80",
     "containment_absent": 'for s in L[unicode], "<" not in f(s)',
     "membership_interval_reduces_to_chain": "for x in [0, 1], f(x) in [0, 1]",
+    # a series of returns: a transform bound by `let`, a statistic as a
+    # premise, and a length premise on a call -------------------------
+    # `mathema.f.scale_seq` scales every entry by `c`; a Sharpe ratio
+    # is unchanged by that, proven through the pandas definition rows
+    # for every length from 2
+    "let_scale_seq_sharpe_premise": (
+        "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "
+        "let c be [0.1, 10], assuming std(returns, ddof=1) > 0, "
+        "f(s(returns, c)) ~= f(returns)"),
+    # the same claim without its premise is falsified at `returns=[0.0]`,
+    # where the sample standard deviation is undefined and the ratio is
+    # NaN: the premise names the series the ratio is about
+    "let_scale_seq_sharpe_trap": (
+        "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "
+        "let c be [0.1, 10], f(s(returns, c)) ~= f(returns)"),
+    # `mathema.f.shift_seq` adds `c` to every entry; a range does not
+    # move (holds on the probe route)
+    "let_shift_seq_range": ("for a in [-100, 100]^n, let s = mathema.f.shift_seq, "
+                            "let c be [-5, 5], f(s(a, c)) == f(a)"),
+    # a mean does move under a shift: falsified, with the witness
+    "let_shift_seq_mean_moves": ("for xs in [-1, 1]^n, let s = mathema.f.shift_seq, "
+                                 "let c be [0.1, 1], f(s(xs, c)) ~= f(xs)"),
+    # a statistic of the vector as the premise; `std` is computed
+    # exactly, so a constant vector is outside however float rounds it
+    "assuming_spread_positive": ("for returns in [-0.1, 0.1]^n, "
+                                 "assuming std(returns, ddof=1) > 0, is_defined(f)"),
+    # a length premise written on the parameter's `dim`, beside the
+    # marker form `assuming n >= 2` ("dim_marker_premise")
+    "dim_call_premise": ("assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n, "
+                         "f(returns) >= 0"),
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -701,6 +731,10 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "language_section", "language_missing_excluded",
         "language_closure", "language_length_bound", "containment_absent",
         "membership_interval_reduces_to_chain"),
+    "series": (
+        "let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap",
+        "let_shift_seq_range", "let_shift_seq_mean_moves",
+        "assuming_spread_positive", "dim_call_premise"),
 }
 
 
@@ -1508,6 +1542,25 @@ def unescape_angle(s: str) -> str:
     return s.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
 
 
+def sharpe(returns: "pandas.Series") -> float:
+    """The Sharpe ratio of a series of returns at a zero risk-free rate,
+    unannualised: the mean over the sample standard deviation
+    ("let_scale_seq_sharpe_premise", "assuming_spread_positive")."""
+    return returns.mean() / returns.std(ddof=1)
+
+
+def spread(a) -> float:
+    """The range of a sequence: its greatest element minus its least
+    ("let_shift_seq_range")."""
+    return max(a) - min(a)
+
+
+def sample_std(returns: "pandas.Series") -> float:
+    """The sample standard deviation of a series of returns
+    ("dim_call_premise")."""
+    return returns.std(ddof=1)
+
+
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "collapse_spaces": (collapse_spaces, [
         "language_alphabet", "language_contraction",
@@ -1604,6 +1657,11 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "fifth_element": (fifth_element, ["dim_premise_vector_bound"]),
     "third_diagonal": (third_diagonal, ["dim_premise_square_matrix",
                                         "dim_premise_rectangular_matrix"]),
+    "sharpe": (sharpe, ["let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap",
+                        "assuming_spread_positive"]),
+    "spread": (spread, ["let_shift_seq_range"]),
+    "series_mean_shifted": (series_mean, ["let_shift_seq_mean_moves"]),
+    "sample_std": (sample_std, ["dim_call_premise"]),
 }
 
 
