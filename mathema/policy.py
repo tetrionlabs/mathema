@@ -1366,6 +1366,10 @@ def composed_policies(fn, facts) -> dict:
         expr = expr.args[0]
     if not isinstance(expr, ast.Call) or not isinstance(expr.func, ast.Attribute):
         return {}
+    if expr.keywords:
+        # a library's rows state its call at the defaults; a call passing
+        # anything more is a different call
+        return {}
     from .runtime_types import realised_parameters
     scope = getattr(fn, "__globals__", {}) or {}
     rows = library_policies()
@@ -1374,7 +1378,7 @@ def composed_policies(fn, facts) -> dict:
     key = param = None
     if isinstance(owner, ast.Name) and owner.id in runtime and not expr.args:
         param, key = owner.id, f"{runtime[owner.id]}.{expr.func.attr}"
-    elif isinstance(owner, ast.Name) and expr.args \
+    elif isinstance(owner, ast.Name) and len(expr.args) == 1 \
             and isinstance(expr.args[0], ast.Name) and expr.args[0].id in facts.params:
         module = getattr(scope.get(owner.id), "__name__", None)
         if module:

@@ -273,6 +273,25 @@ def test_a_premised_library_row_remedy_keeps_its_premise():
         [(p.statement, p.verdict, p.note) for p in stated]
 
 
+def test_a_library_row_speaks_only_for_the_call_it_states():
+    pd = pytest.importorskip("pandas")
+
+    def mean_all(xs: pd.Series) -> float:
+        return float(xs.mean(skipna=False))
+
+    def sum_some(xs: pd.Series) -> float:
+        return float(xs.sum(min_count=1))
+    for fn in (mean_all, sum_some):
+        rec = mathema.check(fn, claims=[mathema.claim(
+            "for xs in [0, 1]^n, f(xs) >= 0", name="c")])
+        rows = [p for p in _policy(rec).values() if p.name.startswith("missing[xs")]
+        assert rows, fn.__name__
+        for row in rows:
+            assert "own policy row" not in (row.note or ""), (fn.__name__, row.note)
+            assert row.meta["mathema.policy"].get("source") != "derived", \
+                (fn.__name__, row.name)
+
+
 def test_one_switch_makes_mathemas_policy_rows_gate(monkeypatch):
     from mathema import verify
     rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
