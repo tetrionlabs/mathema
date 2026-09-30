@@ -290,7 +290,8 @@ implementation coverage: 100%
 `late_fee` has no claim of its own, so it reads `probe` alone:
 `coverage` runs mathema's standard claims about a function while tracing
 it, and the lines they ran count, but a proof counts the body as
-modelled only for a claim included for the function.
+modelled only for a claim included for the function and recorded by the
+sweep, as `discounted`'s and `settle`'s are.
 [`mathema coverage`](modes/coverage.md) explains the three sources and
 what happens to a test report when the code moves on. From here, [Gate a
 pipeline with mathema verify](gate-a-pipeline.md) puts the sweep in CI,

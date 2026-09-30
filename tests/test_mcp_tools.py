@@ -547,6 +547,12 @@ def test_implementation_coverage_tool_reports_sources_and_staleness(tmp_path):
 
     sys.path.insert(0, str(tmp_path))
     try:
+        # the docstring claim counts once verify has recorded it
+        import importlib
+
+        import mathema
+        mathema.write_spec(importlib.import_module("icp.mod").clamp01,
+                           root=str(tmp_path))
         out = tools.implementation_coverage(["icp.mod"], root=str(tmp_path))
     finally:
         sys.path.remove(str(tmp_path))

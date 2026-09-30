@@ -13,11 +13,11 @@ unioned:
 - **derive**: a derive-route proof modeled it: a symbolic proof never
   runs the code, so tracing cannot see it, but a body the lift closed is
   established more strongly than execution. A proof is a `derive` or an
-  `examine` row. Only a claim included for the function counts: one
-  declared on it, a claims-file claim once `verify` has recorded it, or
-  a suggestion adopted into the claims files or accepted as evidence;
-  the standard claims mathema checks while tracing, and suggestions
-  nobody included, never do. A proof counts the lines its own
+  `examine` row. Only a claim included for the function counts (declared
+  on it, in a claims file, or a suggestion adopted into the claims files
+  or accepted as evidence), and only once `verify` has recorded it; the
+  standard claims mathema checks while tracing, and suggestions nobody
+  included, never do. A proof counts the lines its own
   per-branch attribution names, else the whole body.
 
 A STALE external test report does NOT count toward the score: its lines
@@ -186,12 +186,12 @@ def _derive_covered_lines(record, statements: set, recorded=frozenset(),
     a domain-restricted proof) when it recorded one, else the whole body
     for a proven claim (a straight-line proof reasons about all of it).
     A proof is a `derive` or an `examine` row (`routes.is_proof_route`).
-    Only a claim included for the function counts: one authored on it
-    (`records.row_source` names the surface); a claims-file claim once
-    `verify` has recorded it (its name in `recorded`), since this pass's
-    own proof does not verify it; and a suggestion accepted as evidence
-    (its name in `accepted`). The structural battery, other suggestions
-    and compendium rows are left out. A proof never executes the code,
+    Only a claim included for the function counts (one authored on it or
+    in a claims file, as `records.row_source` names the surface, or a
+    suggestion accepted as evidence, its name in `accepted`), and only
+    once `verify` has recorded it (its name in `recorded`): this pass's
+    own proof never verifies a claim. The structural battery, other
+    suggestions and compendium rows are left out. A proof never executes the code,
     so this is added on top of the traced probe/test lines."""
     from .records import row_source
     from .routes import is_proof_route
@@ -206,10 +206,11 @@ def _derive_covered_lines(record, statements: set, recorded=frozenset(),
         surface = row_source(getattr(p, "meta", None),
                              getattr(p, "note", "") or "")
         name = getattr(p, "name", None)
-        included = (surface in _INCLUDED_SURFACES
-                    or (surface == "declared" and name in recorded)
+        included = (surface in _INCLUDED_SURFACES or surface == "declared"
                     or (surface == "suggested" and name in accepted))
-        if not included:
+        if not included or name not in recorded:
+            # coverage never certifies itself: this pass's proof counts
+            # only for a claim verify has recorded
             continue
         lines = (getattr(p, "meta", None) or {}).get("mathema.derive_lines")
         covered |= set(lines) if lines is not None else set(statements)
