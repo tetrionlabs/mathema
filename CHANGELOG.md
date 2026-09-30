@@ -4,6 +4,42 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## 0.6.1
 
+- `is_memory_safe` is not part of this release: it is named nowhere,
+  and a claim naming it fails as an unknown predicate does, with one
+  sentence saying the family is planned.
+- A dimension written as a number (`for A in R^(30,15)`, `for xs in
+  [0, 1]^30`, `Mat(30, 15)`, `Vec(30)`) is drawn at that size on every
+  route and every runtime type. A fixed axis and a name mix in one
+  binding (`R^(n,15)`), and a name a binding fixes is that size wherever
+  a marker shares it.
+- A value of another shape or rank is outside the domain: `f(A) in
+  R^(4,3)` is judged by the output's shape (a named axis by the size the
+  trial bound, a missing entry as no member), and
+  `excluded_outside_domain(A)` tries every shape just outside the
+  space.
+- The sketch adds one clause for a fixed size (`the binding fixes xs at
+  length 30`), the sampling note prints a matrix's size, a premise
+  contradicting a fixed dimension is reported as vacuous, and one name
+  fixed to two sizes is a conflict.
+- `@enforce_dimensions()` checks rank, fixed sizes and shared names at
+  entry and the return marker at exit, each failure a `ValueError`
+  naming the parameter (or the result), the shape found and the shape
+  expected. It stacks with `@enforce_domain()`, declares
+  `excluded_outside_domain(p)` for each parameter it guards, and the
+  engine draws what the guard admits.
+- Rows renamed: `shape` is `result_dimensions` (it now reads a claim's
+  binding, and a raise at a consistent input is its counterexample),
+  `shape_enforced` is `dimensions_enforced`. New row `size_enforced`:
+  does the function reject a wrong fixed size a marker states. A size
+  fixed only by a binding adds no row; that question is the declared
+  `excluded_outside_domain(p)` claim's. Both rejection rows need one
+  in-shape call to return before they say anything.
+- A vector or matrix witness above sixteen entries prints its shape, a
+  first row and a count; the full value stays in the record's
+  counterexample arguments.
+- The lexicon gains twelve rows on fixed sizes, output spaces and the
+  exclusion over a space, each with a function, and every row with a
+  function now carries a pinned verdict.
 - The wheel now ships the bundled compendium. The 0.6.0 wheel carried
   none of its compendium files (the package-data pattern missed the
   per-library directories), so `is_compendium_safe(numpy)` was `unknown`
@@ -51,9 +87,9 @@ Notable changes to mathema are recorded here from its first public release onwar
   `is_recursion_safe`, and two roll-ups, `is_computation_safe(f)` for
   the first two questions and `is_repeatable(f)` for the third, where a
   function taking a seed or generator is held to `is_reproducible`.
-  `is_memory_safe`, `is_precision_safe`, `is_order_invariant`,
-  `is_concurrency_safe` and `is_representation_consistent` are reserved:
-  `skipped` in this release.
+  `is_precision_safe`, `is_order_invariant`, `is_concurrency_safe` and
+  `is_representation_consistent` are reserved: `skipped` in this
+  release.
 - The clarity score reads each call's hazard from the callee's own
   record (`CLARITY_ALGO` entropy-dimensions@1.2), so clarity scores move
   once with this release.

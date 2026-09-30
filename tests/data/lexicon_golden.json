@@ -84,6 +84,56 @@
   "unicode": "∀ x ∈ ℝⁿ ∪ {∅}, y ∈ ℝⁿ ∪ {∅}, f(x, y) = f(y, x)",
   "ascii": "for x in R^n|missing, y in R^n|missing, f(x, y) = f(y, x)"
  },
+ "space_vector_fixed": {
+  "input": "for c in [0, 1]^3, f(c) in [0, 1]",
+  "unicode": "∀ c ∈ [0.0, 1.0]³ ⊂ ℝ ∪ {∅}, 0 ≤ f(c) ≤ 1",
+  "ascii": "for c in [0.0, 1.0]^3:float|missing, 0 <= f(c) <= 1"
+ },
+ "space_vector_fixed_trap": {
+  "input": "for r in [-0.1, 0.1]^12, f(r) <= 0.1",
+  "unicode": "∀ r ∈ [-0.1, 0.1]¹² ⊂ ℝ ∪ {∅}, f(r) ≤ 0.100000000000000",
+  "ascii": "for r in [-0.1, 0.1]^12:float|missing, f(r) <= 0.100000000000000"
+ },
+ "space_vector_fixed_sketch": {
+  "input": "for r in [-0.1, 0.1]^12, f(r) >= -1.2",
+  "unicode": "∀ r ∈ [-0.1, 0.1]¹² ⊂ ℝ ∪ {∅}, f(r) ≥ -1.20000000000000",
+  "ascii": "for r in [-0.1, 0.1]^12:float|missing, f(r) >= -1.20000000000000"
+ },
+ "space_matrix_fixed": {
+  "input": "for A in [-1, 1]^(3,3), f(A) >= 0",
+  "unicode": "∀ A ∈ [-1.0, 1.0]³ˣ³ ⊂ ℝ ∪ {∅}, f(A) ≥ 0",
+  "ascii": "for A in [-1.0, 1.0]^(3,3):float|missing, f(A) >= 0"
+ },
+ "space_matrix_mixed": {
+  "input": "for A in R^(n,3), f(A) in R^(3,3)",
+  "unicode": "∀ A ∈ ℝⁿˣ³ ∪ {∅}, f(A) ∈ R**(3,3)",
+  "ascii": "for A in R^(n,3)|missing, f(A) in R**(3,3)"
+ },
+ "space_output_wrong_shape": {
+  "input": "for A in R^(n,3), f(A) in R^(n,3)",
+  "unicode": "∀ A ∈ ℝⁿˣ³ ∪ {∅}, f(A) ∈ R**(n,3)",
+  "ascii": "for A in R^(n,3)|missing, f(A) in R**(n,3)"
+ },
+ "space_output_named": {
+  "input": "for A in R^(n,15), x in R^n, f(A, x) in R^15",
+  "unicode": "∀ A ∈ ℝⁿˣ¹⁵ ∪ {∅}, x ∈ ℝⁿ ∪ {∅}, f(A, x) ∈ R**15",
+  "ascii": "for A in R^(n,15)|missing, x in R^n|missing, f(A, x) in R**15"
+ },
+ "space_excluded_fixed": {
+  "input": "for A in R^(30,15), excluded_outside_domain(A)",
+  "unicode": "∀ A ∈ ℝ³⁰ˣ¹⁵ ∪ {∅}, A excluded outside domain",
+  "ascii": "for A in R^(30,15)|missing, excluded_outside_domain(A)"
+ },
+ "space_excluded_by_construction": {
+  "input": "for A in R^(30,15), A excluded outside domain",
+  "unicode": "∀ A ∈ ℝ³⁰ˣ¹⁵ ∪ {∅}, A excluded outside domain",
+  "ascii": "for A in R^(30,15)|missing, excluded_outside_domain(A)"
+ },
+ "dim_premise_against_fixed": {
+  "input": "for r in [0, 1]^12, assuming len(r) == 5, f(r) >= 0",
+  "unicode": "assuming dim(r, 0) == 5, ∀ r ∈ [0.0, 1.0]¹² ⊂ ℝ ∪ {∅}, f(r) ≥ 0",
+  "ascii": "assuming dim(r, 0) == 5, for r in [0.0, 1.0]^12:float|missing, f(r) >= 0"
+ },
  "domain_closed_interval": {
   "input": "for x in [0, 1], f(x) >= 0",
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",

@@ -119,8 +119,8 @@ A few consequences worth knowing:
   credits the accidental-crash source beside `is_arbitrary_input_safe`,
   and `is_empty_safe` the missing-value source beside `is_missing_safe`.
   `is_computation_safe` and `is_repeatable` credit nothing themselves,
-  since their children do. `is_memory_safe` and the reserved families
-  (`is_precision_safe`, `is_order_invariant`, `is_concurrency_safe`,
+  since their children do. The reserved families (`is_precision_safe`,
+  `is_order_invariant`, `is_concurrency_safe`,
   `is_representation_consistent`) are not adjudicated in this release and
   credit nothing either. No weight moves.
 - **A call is only as clear as its callee's own record.** Every

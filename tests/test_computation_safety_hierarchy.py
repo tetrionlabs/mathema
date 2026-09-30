@@ -5,15 +5,17 @@ child is a fact about one implementation, adjudicated by execution, and
 a child's restriction form states the region where the implementation
 is safe in that respect. `is_overflow_safe` carries overflow (an
 infinity or an OverflowError from finite inputs), `is_recursion_safe`
-carries the recursion limit, `is_memory_safe` is defined and reserved,
-and the roll-up runs every relevant child and names each verdict."""
+carries the recursion limit, and the roll-up runs every relevant child
+and names each verdict. Memory safety is planned and not part of this
+release: a claim naming it fails as any unknown predicate does, with
+one sentence saying so."""
 import math
 import textwrap
 
 import pytest
 
 import mathema
-from mathema.conjecture import check_conjectures, claim
+from mathema.conjecture import InvalidConjecture, check_conjectures, claim
 
 
 def _load(tmp_path, body, name):
@@ -165,20 +167,22 @@ def test_recursion_safety_is_suggested_for_a_recursive_body(down, tmp_path):
                    for n in {c.name for c in suggest_claims(flat)})
 
 
-# --- is_memory_safe ---------------------------------------------------
+# --- memory safety is not part of this release ------------------------
 
 
-def test_memory_safety_is_defined_and_skipped_with_the_reason(down):
-    p = _one(down, "is_memory_safe(f)")
-    assert p.verdict == "skipped", (p.verdict, p.note)
-    assert ("memory safety needs a resource cap and is not adjudicated in "
-            "this release") in (p.note or "")
+def test_a_claim_naming_memory_safety_fails_as_an_unknown_predicate():
+    from mathema.families import families
+    assert "is_memory_safe" not in families()
+    with pytest.raises(InvalidConjecture) as err:
+        claim("is_memory_safe(f)", route="best")
+    text = str(err.value)
+    assert "no relation" in text, text
+    assert "is_memory_safe is planned and is not part of this release" in text
 
 
-def test_memory_safety_and_the_roll_up_are_never_suggested(down):
+def test_the_roll_up_is_never_suggested(down):
     from mathema.suggest import suggest_claims
     names = {c.name.split("[", 1)[0] for c in suggest_claims(down)}
-    assert "is_memory_safe" not in names
     assert "is_computation_safe" not in names
 
 
@@ -239,7 +243,7 @@ def test_the_roll_up_never_reaches_proven(tmp_path):
 def test_the_hierarchy_is_registered():
     from mathema.families import families
     have = families()
-    for name in ("is_overflow_safe", "is_recursion_safe", "is_memory_safe",
+    for name in ("is_overflow_safe", "is_recursion_safe",
                  "is_computation_safe"):
         assert name in have, name
 
@@ -252,7 +256,6 @@ def test_the_computation_safe_group_lists_the_children():
     assert not members & {"is_deterministic", "is_reproducible",
                           "is_state_safe"}
     assert "is_computation_safe" not in members
-    assert "is_memory_safe" not in members
     assert "is_defined" not in members
     # the existing groups are untouched
     assert "defined_within_domain" in GROUPS and "stateless" in GROUPS
@@ -263,7 +266,6 @@ def test_the_new_families_credit_existing_clarity_buckets_only():
     assert _SAFETY_SOURCE["is_overflow_safe"] == "is_representation_safe"
     assert _SAFETY_SOURCE["is_recursion_safe"] == "is_arbitrary_input_safe"
     assert "is_computation_safe" not in _SAFETY_SOURCE
-    assert "is_memory_safe" not in _SAFETY_SOURCE
     assert set(_SAFETY_SOURCE.values()) == {
         "is_state_safe", "is_deterministic", "is_numerically_stable",
         "is_representation_safe", "is_missing_safe",

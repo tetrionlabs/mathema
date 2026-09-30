@@ -1326,10 +1326,20 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                            f"{outcome['undecided']}", meta=meta)
     vectors = ", ".join(sorted(seqs))
     if outcome.get("proven"):
+        # the proof is over every length, so it covers the length a
+        # binding fixes (`xs in [0, 1]^30`): the sketch keeps saying so
+        # and adds the one clause every route adds for a fixed size
+        fixed_at = {L: int(dim) for dim, L in lengths.items()
+                    if str(dim).isdigit()}
         spans = ", ".join(
             f"{by_length.get(L, L)} of every length"
             + (f" from {shortest[L]}" if shortest.get(L, 1) > 1 else "")
             for L in sorted(set(lengths_of(seqs)), key=str))
+        fixed_clause = ""
+        if fixed_at:
+            fixed_clause = "; the binding fixes " + " and ".join(
+                f"{by_length.get(L, L)} at length {k}"
+                for L, k in sorted(fixed_at.items(), key=lambda kv: str(kv[0])))
         detail = outcome.get("result")
         lemma = (f" ({detail.sketch})" if detail is not None
                  and getattr(detail, "status", None) == "proven"
@@ -1337,7 +1347,8 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
         return ProofResult(
             "proven", meta=meta,
             sketch=f"{through}, lowered to sums over {vectors} at a symbolic "
-                   f"length: the relation holds for every length{lemma}",
+                   f"length: the relation holds for every length{lemma}"
+                   f"{fixed_clause}",
             quantifier=(f"∀ {_over(seqs, elements)} with nothing "
                         f"missing, {spans}" if seqs else None))
     detail = outcome.get("result")
