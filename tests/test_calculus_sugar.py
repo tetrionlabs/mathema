@@ -229,7 +229,7 @@ def test_pi_and_infinity_render_as_glyphs_in_unicode_only():
 
     for expr, unicode_glyph, ascii_word in (
         ("pi", "π", "pi"), ("-pi", "-π", "-pi"), ("pi/2", "π/2", "pi/2"),
-        ("-pi/2", "-π/2", "-pi/2"), ("oo", "∞", "oo"), ("-oo", "-∞", "-oo"),
+        ("-pi/2", "-π/2", "-pi/2"), ("oo", "∞", "inf"), ("-oo", "-∞", "-inf"),
     ):
         assert render_law_expr(expr, unicode=True) == unicode_glyph
         assert render_law_expr(expr, unicode=False) == ascii_word

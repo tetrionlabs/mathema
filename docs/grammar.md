@@ -70,7 +70,7 @@ symbol, and a claim pasted out of a PDF is a common way to meet one.
 | `×` | U+00D7 | times | `*` |
 | `−` | U+2212 | minus | `-` |
 | `√` | U+221A | the square root of | `sqrt` |
-| `∞` | U+221E | infinity | `oo` |
+| `∞` | U+221E | infinity, also written `oo` or `infinity` | `inf` |
 | `∂` | U+2202 | the partial derivative of | `d(` |
 | `∫` | U+222B | the integral of | `integrate(` |
 | `→` | U+2192 | tends to, inside a limit | `->` |

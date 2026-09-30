@@ -104,19 +104,22 @@ _SYMPY_FUNCS = {
     # code instead; both bounds must be real expressions here.
     "clip": lambda x, lo, hi: sympy.Min(sympy.Max(x, lo), hi),
 }
-_MATH_ATTRS = {"pi": sympy.pi, "e": sympy.E, "oo": sympy.oo, "infinity": sympy.oo}
+_MATH_ATTRS = {"pi": sympy.pi, "e": sympy.E, "oo": sympy.oo, "inf": sympy.oo,
+               "infinity": sympy.oo}
 
 # The probe route's float mirror of the derive route's _MATH_ATTRS
 # constants: a bare `pi`/`e` (one that is NOT a real parameter, a
 # parameter of that name always wins, on both routes) evaluates to its
 # real value, so probe agrees with derive instead of sampling it as a
 # random free variable (a live soundness bug: it falsified true claims).
-# oo/infinity stay out; a float inf in a probe COMPARISON is a
-# separate question, and they appear only in limit/domain positions the
-# derive route owns.
+# Every spelling of infinity (`oo`, `inf`, `infinity`; the unicode `∞`
+# is `oo` by the time a law is read) is the float infinity for the same
+# reason: `f(x) < oo` is a claim that a value is finite, and `-oo` is
+# its negation through the ordinary unary minus.
 import math as _math   # noqa: E402
 
-MATH_CONSTANTS = {"pi": _math.pi, "e": _math.e}
+MATH_CONSTANTS = {"pi": _math.pi, "e": _math.e, "oo": _math.inf,
+                  "inf": _math.inf, "infinity": _math.inf}
 # "infinity" is a second, independent spelling of "oo" (both map to the
 # identical sympy.oo object) rather than something "oo" gets normalized
 # to first, unlike tau below, "infinity" isn't a plausible ordinary

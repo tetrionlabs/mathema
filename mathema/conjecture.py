@@ -6724,8 +6724,6 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             for p in array_names:
                 if p in env:
                     env[p] = _linalg_eval.as_array(env[p])
-            if "inf" in aux:
-                env["inf"] = math.inf
         # marker dim names (Shape("m","n")) become real quantities the
         # premise and law can reference, read off this trial's shapes
         resolver.bind_env(env, {p: env[p] for p in kinds if p in env})

@@ -2170,10 +2170,11 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     parameter or func alias, `f` itself), so neither mechanism ever
     reassigns a symbol something else in the same claim already uses.
 
-    `suppress_glyphs` handles a real parameter named exactly `pi`/`oo`
-    (`_math_vocab._MATH_ATTRS`' keys, minus `e`, which has no distinct
-    unicode glyph at all, `_print_Exp1` always prints `"e"`, so
-    there's nothing to suppress). Renaming was tried here first and
+    `suppress_glyphs` handles a real parameter named exactly `pi`, `oo`,
+    `inf` or `infinity` (`_math_vocab._MATH_ATTRS`' keys, minus `e`,
+    which has no distinct unicode glyph at all, `_print_Exp1` always
+    prints `"e"`, so there's nothing to suppress; the printer then
+    writes the parameter's own name). Renaming was tried here first and
     rejected: `grammar._node_to_sympy` has no concept of any one
     function's real parameter names, so it always resolves a bare
     `pi`/`oo` to the math constant regardless, by the time a claim
@@ -2213,7 +2214,9 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     # explicit domain declaration is the actual, reliable signal that
     # "pi" was meant as a genuine varying quantity here.
     declared = {n for n in cj.domain if n not in cj.free_vars}
-    suppress_glyphs = frozenset({"pi", "oo"} & declared) if unicode else frozenset()
+    # in both modes: a parameter named for infinity prints under its
+    # own name, where the constant would print `inf` in ascii
+    suppress_glyphs = frozenset({"pi", "oo", "inf", "infinity"} & declared)
 
     # A "symbology" capability, if one is registered, gets first pick of a symbol
     # for every real parameter and function name, ahead of the Greek-

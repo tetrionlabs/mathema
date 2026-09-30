@@ -2301,10 +2301,11 @@ _NORM_CALL = re.compile(r"\bnorm\(")
 
 
 def _display_order(order: str) -> "str | None":
-    """The ascii subscript for a rendered order (`inf`, `2`, `12`), or
-    None for an order the bars do not spell (`oo`, `0.5`, a name)."""
-    if order == "inf":
-        return order
+    """The ascii subscript for a rendered order (`inf` for the infinite
+    order however the printer spelled it, `2`, `12`), or None for an
+    order the bars do not spell (`0.5`, a name)."""
+    if order in ("inf", "∞", "oo"):
+        return "inf"
     if order.isascii() and order.isdigit() and int(order) >= 1:
         return order
     return None
@@ -3286,14 +3287,10 @@ class _CanonicalPrinter(StrPrinter):
         return "\U0001d456" if self._unicode else "1j"
 
     def _print_Infinity(self, expr):
-        if "oo" in self._suppress_glyphs:
-            return super()._print_Infinity(expr)
-        return "∞" if self._unicode else super()._print_Infinity(expr)
+        return self._infinity_word()
 
     def _print_NegativeInfinity(self, expr):
-        if "oo" in self._suppress_glyphs:
-            return super()._print_NegativeInfinity(expr)
-        return "-∞" if self._unicode else super()._print_NegativeInfinity(expr)
+        return "-" + self._infinity_word()
 
     def _print_Derivative(self, expr):
         var_args = [a for spec in expr.variable_count for a in ((spec[0],) * spec[1])]
@@ -3327,6 +3324,17 @@ class _CanonicalPrinter(StrPrinter):
             f"∂{var}{str(count).translate(_DIGIT_TO_SUPERSCRIPT) if count > 1 else ''}"
             for var, count in expr.variable_count)
         return f"∂{order_marker}({self._print(expr.expr)}/{denom})"
+    def _infinity_word(self) -> str:
+        # `inf` is the one ascii spelling, the same the domain grammar
+        # writes for an infinite bound; unicode prints the glyph. A real
+        # parameter named `oo`, `inf` or `infinity` is the same sympy
+        # object as the constant by render time (see `_print_Pi`), so it
+        # prints under its own name in both modes
+        named = sorted(self._suppress_glyphs & {"oo", "inf", "infinity"})
+        if named:
+            return named[0]
+        return "∞" if self._unicode else "inf"
+
 
     def _print_Subs(self, expr):
         inner, variables, points = expr.args

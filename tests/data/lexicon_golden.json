@@ -727,7 +727,7 @@
  "limit_call": {
   "input": "lim(f(x), x, oo) == 0",
   "unicode": "lim(f(x), x, ∞) = 0",
-  "ascii": "lim(f(x), x, oo) = 0"
+  "ascii": "lim(f(x), x, inf) = 0"
  },
  "limit_arrow": {
   "input": "lim(f(x), x -> 0) == 0",
@@ -852,17 +852,17 @@
  "sigmoid_limit_upper": {
   "input": "lim(f(x), x -> oo) == 1",
   "unicode": "lim(f(x), x, ∞) = 1",
-  "ascii": "lim(f(x), x, oo) = 1"
+  "ascii": "lim(f(x), x, inf) = 1"
  },
  "sigmoid_limit_lower": {
   "input": "lim(f(x), x -> -oo) == 0",
   "unicode": "lim(f(x), x, -∞) = 0",
-  "ascii": "lim(f(x), x, -oo) = 0"
+  "ascii": "lim(f(x), x, -inf) = 0"
  },
  "sigmoid_density_integrates": {
   "input": "∫(d(f(x), x), x, -oo, oo) == 1",
   "unicode": "∫(f'(x), x, -∞, ∞) = 1",
-  "ascii": "integrate(d(f(x), x), x, -oo, oo) = 1"
+  "ascii": "integrate(d(f(x), x), x, -inf, inf) = 1"
  },
  "sigmoid_bounded_below": {
   "input": "for x in [-30, 30], f(x) > 0",
