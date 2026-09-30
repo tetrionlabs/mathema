@@ -229,6 +229,16 @@ def test_a_column_bound_holds_on_the_classified_calls():
         assert "-1e+06" not in cx and "2.0" not in cx, (p.name, cx)
 
 
+def col_total(df: pd.DataFrame) -> float:
+    return float(df["w"].sum())
+
+
+def test_a_column_bound_bounds_the_companions_corners():
+    rec = _record(col_total, "for df.w in [0, 1]^n, f(df) >= 0")
+    companion = _row(rec, "c0[float, pandas.DataFrame]")
+    assert companion.verdict == "holds", companion.counterexample
+
+
 # --- the runtime guard ------------------------------------------------------
 
 def test_enforce_domain_says_it_raised_before_f_ran():

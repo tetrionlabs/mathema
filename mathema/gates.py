@@ -692,6 +692,15 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # computed exactly; the law itself stays in float
     premise_words = premise_functions(_VECTOR_FUNCS)
 
+    def column_bound(name, column):
+        # the element domain a path binding (`for df.w in [0, 1]^n`)
+        # states for one column of a table, None when it states none
+        bound = cj_domain.get(f"{name}.{column}")
+        if bound is None:
+            return None
+        from .conjecture import _column_bound
+        return _column_bound(bound, None)
+
     def _element_ok(n, e, bound):
         # an element inside the declared per-element bound, or a hole
         # the slot admits
@@ -716,6 +725,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             elif n in table_names:
                 if not isinstance(v, dict):
                     return False
+                # a column its own binding bounds holds its elements there
+                for c, col in v.items():
+                    col_bound = column_bound(n, c)
+                    if col_bound is not None and not all(
+                            _element_ok(n, e, col_bound) for e in col):
+                        return False
                 elements = [e for col in v.values() for e in col]
             elif isinstance(v, (list, tuple)):
                 elements = list(v)
@@ -801,8 +816,23 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             n_cols = 2 if len(set(dims[:2])) == 1 else 3
             return [[value] * n_cols for _ in range(2)]
         if name in table_names:
-            return {c: [value] * 3 for c in table_columns[name]}
+            return {c: [_column_end(name, c, value)] * 3 for c in table_columns[name]}
         return [value] * 3 if name in seq_names else value
+
+    def _column_end(name, column, value):
+        # a column its own binding bounds takes that binding's edge on the
+        # side the table's corner takes
+        bound = column_bound(name, column)
+        ends = _ends(bound) if bound is not None else None
+        if ends is None:
+            return value
+        which = 0 if value == edges[name][0] else 1
+        end = ends[which]
+        if end != end or math.isinf(end):
+            return value
+        if not domain_contains(end, bound):
+            end = math.nextafter(end, math.inf if which == 0 else -math.inf)
+        return end
 
     def _language_edges(name):
         # a language coordinate has no numeric ends: its corners are the
