@@ -287,12 +287,16 @@ def check_examples(src: LexiconSource, *, every_row: bool = True) -> list:
 
 def check_verdicts(src: LexiconSource, expected: dict) -> list:
     """Every row against its example function lands on `expected[key]`,
-    a verdict or `(verdict, text the witness contains)`."""
+    a verdict or `(verdict, text the witness contains)`; a row two
+    example functions demonstrate to different ends pins one of those
+    per function, `{function name: verdict or (verdict, text)}`."""
     from .conjecture import check_conjectures, claim
     out = [f"{key}: no pinned verdict" for key in sorted(set(src.rows) - set(expected))]
     for fn, keys in src.example_functions.values():
         for key in keys:
             want = expected.get(key)
+            if isinstance(want, dict):
+                want = want.get(getattr(fn, "__name__", ""))
             if want is None:
                 continue
             verdict, witness = (want, None) if isinstance(want, str) else want

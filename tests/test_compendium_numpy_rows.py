@@ -32,13 +32,11 @@ _FROM_2_4 = pytest.mark.skipif(
 _FILES = ["numpy/linalg.claims.yaml", "numpy/linalg_2_4.claims.yaml",
           "numpy/elementwise.claims.yaml", "numpy/statistics.claims.yaml"]
 
-#: the rows of verify's own call battery that come back skipped: it
-#: draws `a` (and `b`) of numpy.linalg.solve and numpy.linalg.pinv as
-#: flat lists, since their bodies read them as sequences, and neither
-#: function takes one
-_BATTERY_SKIPS = {"numpy/linalg.claims.yaml": [
-    "numpy.linalg.pinv: 1 skipped claim(s)",
-    "numpy.linalg.solve: 1 skipped claim(s)"]}
+#: the `callable` skips the built-in battery is expected to report per
+#: bundled file, as `<key>: 1 skipped claim(s)`. Empty: a vector or
+#: matrix argument is drawn to the row's space (`R^(n,n)`, `R^n`), so
+#: every bundled function can be called
+_BATTERY_SKIPS: dict = {}
 
 
 def _load(relative: str) -> dict:

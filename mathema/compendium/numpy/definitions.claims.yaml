@@ -68,3 +68,9 @@ numpy.ndarray.T:
     - name: definition
       statement: "for a in R^(m,n), f(a) == transpose(a)"
       note: "The attribute `a.T`, the transpose."
+
+numpy.sum:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) ~= sum(a)"
+      note: "Stated for a vector: the sum of its elements. Holds by execution on every numpy the file covers."

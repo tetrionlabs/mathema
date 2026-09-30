@@ -16,6 +16,7 @@ module at load, this module reaches back only when a gate actually
 runs, so the import graph stays acyclic."""
 from __future__ import annotations
 
+from . import _shapes
 from ._math_vocab import MATH_CONSTANTS
 from .records import Probe
 from .runtime_types import SEQUENCE_KINDS
@@ -113,6 +114,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # reproducible this way, and a sequence parameter only when the
     # caller asked for list-valued points
     seq_names = {p for p, k in kinds.items() if k in SEQUENCE_KINDS}
+    # a parameter whose binding states a space is a container whatever
+    # kind the body suggested; a table stays a table, its space bounding
+    # every column
+    seq_names |= {p for p, k in kinds.items()
+                  if k != "table" and _shapes.dims_of(cj_domain.get(p))}
     if seq_names and not sequences:
         return None
     # a table coordinate is a container too when list-valued points were
@@ -591,12 +597,43 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     dict_keys = {name: (_dict_key_tree(facts.tree, name) if facts.tree is not None else {})
                  for name in names if kinds.get(name) == "dict"}
 
+    from . import dimensions as _dims
+    from .types import shapes_from_signature
+    try:
+        resolver = _dims.resolve(facts, shapes_from_signature(fn),
+                                 claim_domain=cj_domain)
+    except _dims.DimensionConflict:
+        resolver = None
+    # the sequence coordinates whose axes a marker or a binding names or
+    # fixes are drawn to the plan: a fixed size is that size and a shared
+    # name agrees across the point; an anonymous 1-D axis keeps the
+    # free draw
+    planned = {n for n in seq_names if resolver is not None
+               and resolver.shapes.get(n) is not None
+               and resolver.shapes[n].ndim >= 1
+               and any(a is not None for a in resolver.shapes[n].axes)}
+    first_planned = next((n for n in names if n in planned), None)
+    point_sizes: dict = {}
+
+    def _planned_draw(name, rng, b):
+        # a point's coordinates are drawn in `names` order, so the first
+        # planned coordinate draws the point's sizes and the rest reuse
+        # them
+        if name == first_planned or not point_sizes:
+            point_sizes.clear()
+            point_sizes.update(resolver.draw_sizes(rng))
+        if resolver.shapes[name].ndim == 1:
+            return _synth("sequence", rng, b,
+                          length=point_sizes.get(resolver.key(name, 0)))
+        return resolver.synth(name, point_sizes,
+                              lambda: _synth("float", rng, b), rng)
+
     def sample(name, rng):
         # an unbounded parameter samples within the pseudo-infinity
         # range (or the reach), so a declared range bounds the draws
         # too, not only the corners
         b = sample_domain.get(name)
-        if name in mat_names:
+        if name in mat_names and name not in planned:
             # a matrix: rows of element draws, square when its two axes
             # share a name
             n_rows, n_cols = _floor.sizes(cj_domain.get(name), rng, (2, 4), ndim=2)
@@ -605,6 +642,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return _floor.gapped_rows(rows, hole_values.get(name, []), rng, 0)[0]
         if name in seq_names:
             # a sequence's declared bound is per element
+            if name in planned:
+                v = _planned_draw(name, rng, b)
+                if resolver.shapes[name].ndim == 1:
+                    return _floor.gapped(v, hole_values.get(name, []), rng, 0)[0]
+                return _floor.gapped_rows(v, hole_values.get(name, []), rng, 0)[0]
             (length,) = _floor.sizes(cj_domain.get(name), rng)
             return _floor.gapped(_synth("sequence", rng, b, length=length),
                                  hole_values.get(name, []), rng, 0)[0]
@@ -659,24 +701,26 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
     def admits(point):
         for n in seq_names | table_names:
-            # a sequence coordinate is a list (a matrix a list of rows, a
-            # table a dict of columns), each element inside the
-            # declared per-element bound
+            # a sequence coordinate is a container of the shape its
+            # binding states (a matrix a list of rows, a table a dict of
+            # columns), each element inside the declared per-element
+            # bound or a hole the slot admits
             v = point.get(n)
-            if n in table_names:
+            bound = cj_domain.get(n)
+            dims = _shapes.dims_of(bound)
+            if dims:
+                shape = _shapes.observed_shape(v)
+                if shape is None or not _shapes.fits(shape, dims):
+                    return False
+                elements = list(_shapes.leaves(v))
+            elif n in table_names:
                 if not isinstance(v, dict):
                     return False
                 elements = [e for col in v.values() for e in col]
-            elif n in mat_names:
-                if not isinstance(v, (list, tuple)) or not all(
-                        isinstance(r, (list, tuple)) for r in v):
-                    return False
-                elements = [e for r in v for e in r]
-            else:
-                if not isinstance(v, (list, tuple)):
-                    return False
+            elif isinstance(v, (list, tuple)):
                 elements = list(v)
-            bound = cj_domain.get(n)
+            else:
+                return False
             if bound is not None and not all(_element_ok(n, e, bound)
                                              for e in elements):
                 return False
@@ -738,9 +782,20 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             val = math.nextafter(val, math.inf if which == "lo" else -math.inf)
         return val
 
+    import random as _random
+    # a corner's sizes: a fixed axis at its size, every other axis at the
+    # corner length 3, shared names agreeing
+    corner_sizes = ({k: (int(k) if isinstance(k, str) and k.isdigit() else 3)
+                     for k in resolver.distinct_keys()}
+                    if resolver is not None else {})
+
     def _corner_value(name, value):
-        # a sequence's corner is a short list at the per-element edge, a
+        # a sequence's corner is a short constant list at the
+        # per-element edge, a planned coordinate nested to its axes, a
         # matrix's a small one, a table's short columns
+        if name in planned:
+            return resolver.synth(name, corner_sizes, lambda: value,
+                                  _random.Random(0))
         if name in mat_names:
             dims = tuple(getattr(cj_domain.get(name), "dims", ()) or ())
             n_cols = 2 if len(set(dims[:2])) == 1 else 3
@@ -821,6 +876,13 @@ def _fmt_point(point, names):
         if isinstance(v, str):
             from .probing import spell_text
             parts.append(f"{n} = {spell_text(v)}")
+            continue
+        capped = _shapes.witness_text(v)
+        if capped is not None:
+            # a large vector or matrix prints its shape, a first row and
+            # a count; the full value rides in the counterexample's
+            # arguments
+            parts.append(f"{n} = {capped}")
             continue
         parts.append(f"{n} = {v:.6g}" if isinstance(v, (int, float))
                      and not isinstance(v, bool) else f"{n} = {v!r}")

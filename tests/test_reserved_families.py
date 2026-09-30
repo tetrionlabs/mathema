@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Four computation-safety families are named now and adjudicated in a
-later release, exactly as `is_memory_safe` is: a claim naming one is a
+later release: a claim naming one (`is_concurrency_safe(f)`, say) is a
 known claim, `skipped` with a note saying it is reserved, and none is
 ever suggested. Platforms (a GPU, a JIT, a distributed runtime) are
 named in the bracketed computation descriptor, never in a family

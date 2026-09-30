@@ -246,6 +246,17 @@ render_claim_text(claim("for x in [0, 1] : float|None, f(x) >= 0"), unicode=True
 render_claim_text(claim("for xs in [0, 1]^n : float|missing, f(xs) >= 0"), unicode=False)  # 'for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0'
 ```
 
+`enforce_domain()` checks a sequence argument element by element
+against its declared domain, including this missing-value policy; an
+out-of-bounds or unexpectedly-missing element is rejected the same way
+a scalar argument outside its own domain already is.
+`enforce_dimensions()` (see [shape
+markers](#shape-markers-and-their-shorthand)) rejects a wrong shape the
+same way. Both decorators declare what they make true: one
+`excluded_outside_domain(p)` claim per guarded parameter, proven by
+construction. The author can state the same claim with the `excluding`
+keyword.
+
 ### Language domains
 
 A function over text has a domain too: not an interval of numbers but
@@ -692,7 +703,7 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 ```
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7982b776d687
-  holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (32 draws)
+  holds   result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
   holds   is_deterministic: f(scores) = f(scores) (1012 entries across 156 draws, sizes (1, 1) to (8, 1))
            derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; f gives a hole back when every slot is missing (scores = [nan]); at scores = [nan, 4.23, 6.86, 9.76] it introduces a missing value; at scores = [null] f raised TypeError
   holds   is_state_safe: f(scores) = f(scores) (48 draws)
@@ -712,7 +723,7 @@ mathema.Record(softmax) · source, no side effects · form 7982b776d687
            to state each case, write `missing(f, scores, null) raises(TypeError)`, `assuming count(scores) >= 1, missing(f, scores, nan) introduces` and `assuming count(scores) == 0, missing(f, scores, nan) propagates`; or make f treat a missing scores one way
 ```
 
-`shape` came from the `Annotated[list, Shape("n")]` hints,
+`result_dimensions` came from the `Annotated[list, Shape("n")]` hints,
 `sums_to_one` came from the docstring `Claims:` block, and the rest are
 mathema's built-in battery: every function gets the determinism, state
 and stability probes, and a list-in, list-out function also gets the
@@ -745,3 +756,76 @@ the same parameter, the marker is authoritative on RANK: a claim that
 gives it a different number of axes is a conflict, skipped with the
 reason. A different NAME at the same axis is not a conflict, it aliases
 the claim's name to the signature's, so the two are one dimension.
+
+A dimension written as a number is fixed: `for A in R^(30,15)` draws a
+30 by 15 matrix on every trial, on every runtime type the parameter is
+realised as, and `Mat(30, 15)` or `Vec(30)` fixes a marker the same
+way. A fixed axis and a name mix in one binding (`R^(n,15)`).
+
+A value of another shape (another size on a fixed axis, or another
+rank) is outside the domain. So a claim stating the output's space,
+`f(A) in R^(4,3)`, is judged by the output's shape, and
+`excluded_outside_domain(A)` has a wrong-shaped value to try. The proof
+sketch adds one clause for what was fixed: `the binding fixes A at 30
+by 15`, `the binding fixes xs at length 30`.
+
+<!-- example: fixed-shape run requires=numpy -->
+```python
+import numpy as np
+
+def gram_trace(A: np.ndarray) -> float:
+    return float(np.trace(A @ A.T))
+
+def same(A: np.ndarray) -> np.ndarray:
+    return A
+```
+
+<!-- example: fixed-shape verdicts fn=gram_trace -->
+```
+for A in [-1, 1]^(30,15), f(A) >= 0   # proven
+```
+
+<!-- example: fixed-shape verdicts fn=same -->
+```
+for A in R^(3,4), f(A) in R^(3,4)   # holds
+for A in R^(3,4), f(A) in R^(4,3)   # falsified
+```
+
+Over `R^(30,15)` with no bound on the entries, the companion's corners
+run to the largest float and `trace(A @ A.T)` overflows, so the example
+bounds the entries; the companion says so when they are not.
+
+`@enforce_dimensions()` makes these dimensions a runtime guard, the
+way `@enforce_domain()` guards values, and the two stack. At entry,
+every shaped argument has the rank and the fixed sizes its marker or
+binding states, and a dimension name shared across parameters agrees
+across the actual arguments; at exit, the result matches the return
+marker with the names the call bound. Each failure is a
+`DimensionError` (a `ValueError`) naming the parameter (or the result),
+the shape found and the shape expected:
+
+<!-- example: enforce-dimensions-shapes run inline -->
+```python
+from mathema import enforce_dimensions, enforce_domain
+from mathema.types import Mat, Vec
+
+@enforce_dimensions()
+@enforce_domain()
+def matvec(a: Mat("m", "n"), x: Vec("n")) -> Vec("m"):
+    return [sum(a[i][j] * x[j] for j in range(len(x)))
+            for i in range(len(a))]
+
+matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1])   # [10, 10, 10]
+matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1, 1])   # DimensionError: matvec: x has length 5; a is 3 by 4, so x must have length 4
+```
+
+From the same markers, `mathema.check` adds three rows.
+`result_dimensions` checks the output's shape against the return
+marker, reading a claim's binding as well as a marker; a raise at a
+consistent input is its counterexample. `dimensions_enforced` asks
+whether the function rejects a mismatch on a shared dimension.
+`size_enforced` asks whether it rejects a wrong fixed size a marker
+states; a size fixed only by a claim's binding adds no row, since
+whether the code rejects it is the declared `excluded_outside_domain(p)`
+claim's question. A guarded function declares those dimensions to every
+row, so the engine never draws what the guard rejects.

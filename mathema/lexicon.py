@@ -45,6 +45,13 @@ import functools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .authoring import claims as claims_decorator, enforce_dimensions
+
+try:
+    import numpy as np
+except ImportError:   # numpy is optional; the example functions over arrays need it
+    np = None  # type: ignore[assignment]
+
 if TYPE_CHECKING:
     from typing import Optional
 
@@ -90,6 +97,41 @@ LEXICON: dict[str, str] = {
     "space_vector_bounded": "for xs in [0, 1]^n, f(xs) <= 1",
     "space_matrix": "for A in R^(m,n), f(A) == f(A)",
     "space_shared_dim": "for x in R^n, y in R^n, f(x, y) == f(y, x)",
+    # a dimension written as a number is fixed: every draw has exactly
+    # that size, on every route and every runtime type. An RGB triple's
+    # luma stays in [0, 1] because its weights sum to one
+    "space_vector_fixed": "for c in [0, 1]^3, f(c) in [0, 1]",
+    # a per-element bound is not a bound on the sum: twelve monthly
+    # returns each within 0.1 add up past it, and the probe finds a
+    # twelve-vector that does
+    "space_vector_fixed_trap": "for r in [-0.1, 0.1]^12, f(r) <= 0.1",
+    # true at the fixed length and false for every other: the proof is
+    # made at length 12 and the sketch says so
+    "space_vector_fixed_sketch": "for r in [-0.1, 0.1]^12, f(r) >= -1.2",
+    # a fixed matrix shape; the matrix algebra proves the trace of a
+    # product with its own transpose non-negative, at 3 by 3
+    "space_matrix_fixed": "for A in [-1, 1]^(3,3), f(A) >= 0",
+    # a name and a fixed axis in one binding (n observations of 3
+    # features), and the OUTPUT's space: judged by the output's shape
+    "space_matrix_mixed": "for A in R^(n,3), f(A) in R^(3,3)",
+    # the trap: a 3 by 3 Gram matrix is not n by 3, so a wrong output
+    # shape is outside the space it was said to be in
+    "space_output_wrong_shape": "for A in R^(n,3), f(A) in R^(n,3)",
+    # a shared name draws x to A's rows; the output is A's other axis
+    "space_output_named": "for A in R^(n,15), x in R^n, f(A, x) in R^15",
+    # a fixed shape has an outside (a wrong size on a fixed axis, a
+    # wrong rank); an unguarded function accepts it and the exclusion
+    # claim says so with the shape it accepted
+    "space_excluded_fixed": "for A in R^(30,15), excluded_outside_domain(A)",
+    # the same claim on a function `enforce_dimensions()` guards: the
+    # decorator makes it true and declares it, so it is proven by
+    # construction; the postfix spelling reads as a sentence
+    "space_excluded_by_construction":
+        "for A in R^(30,15), A excluded outside domain",
+    # a premise the binding cannot satisfy is a vacuous claim and is
+    # reported as one, naming the premise and the fixed length
+    "dim_premise_against_fixed":
+        "for r in [0, 1]^12, assuming len(r) == 5, f(r) >= 0",
     "domain_closed_interval": "for x in [0, 1], f(x) >= 0",
     "domain_open_interval": "for x in (0, 1), f(x) >= 0",
     "domain_subset_integer": "for n in [0, 100] subset Z, f(n) >= 0",
@@ -514,7 +556,11 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "factorial_postfix", "dim_length_premise",
         "dim_conformability", "dim_marker_premise",
         "space_vector_real", "space_vector_bounded", "space_matrix",
-        "space_shared_dim",
+        "space_shared_dim", "space_vector_fixed", "space_vector_fixed_trap",
+        "space_vector_fixed_sketch", "space_matrix_fixed",
+        "space_matrix_mixed", "space_output_wrong_shape",
+        "space_output_named", "space_excluded_fixed",
+        "space_excluded_by_construction", "dim_premise_against_fixed",
         "domain_closed_interval",
         "domain_open_interval", "domain_subset_integer",
         "relation_indexing", "relation_boolean_rhs",
@@ -671,6 +717,23 @@ TAGS: dict[str, tuple[str, ...]] = {
     "dim_conformability": ("shape", "conformable", "matching lengths"),
     "space_vector_real": ("vector space", "free dimension", "R^n"),
     "space_matrix": ("matrix space", "shape", "R^(m,n)"),
+    "space_vector_fixed": ("fixed size", "exactly", "fixed length", "RGB"),
+    "space_vector_fixed_trap": ("fixed size", "length 12", "sum bound",
+                                "monthly returns"),
+    "space_vector_fixed_sketch": ("fixed size", "length 12", "sketch",
+                                  "true at one length"),
+    "space_matrix_fixed": ("fixed size", "3 by 3", "fixed shape", "trace"),
+    "space_matrix_mixed": ("output shape", "mixed dimensions", "Gram matrix",
+                           "features"),
+    "space_output_wrong_shape": ("output shape", "wrong shape",
+                                 "outside the space"),
+    "space_output_named": ("output shape", "shared dimension", "named axis"),
+    "space_excluded_fixed": ("fixed size", "wrong shape", "rejects",
+                             "exclusion"),
+    "space_excluded_by_construction": ("fixed size", "enforce_dimensions",
+                                       "by construction", "guard"),
+    "dim_premise_against_fixed": ("fixed size", "length 12", "vacuous",
+                                  "contradiction"),
     "dim_premise_vector_bound": ("minimum length", "at least", "vector size"),
     "dim_premise_square_matrix": ("square matrix", "minimum size", "at least"),
     "dim_premise_rectangular_matrix": ("rectangular matrix", "rows", "columns",
@@ -1005,6 +1068,59 @@ def add_two(x: float, y: float) -> float:
 def matmul(A, B):
     """The matrix product."""
     return A @ B
+
+
+def luma(c: list) -> float:
+    """The luma of an RGB triple, a weighted sum whose weights add to
+    one; "space_vector_fixed": a vector of exactly three entries."""
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def year_total(r: list) -> float:
+    """The total of twelve monthly returns ("space_vector_fixed_trap",
+    "space_vector_fixed_sketch", "dim_premise_against_fixed")."""
+    return sum(r)
+
+
+def energy(v: list) -> float:
+    """The sum of squares of a vector's entries, never negative over
+    any length ("space_vector_real")."""
+    return sum(x * x for x in v)
+
+
+def gram_trace(A: "numpy.ndarray") -> float:
+    """The trace of A times its transpose, the sum of squares of every
+    entry; "space_matrix_fixed" proves it non-negative at 3 by 3 through
+    the matrix algebra."""
+    return float(np.trace(A @ A.T))
+
+
+def gram(A: "numpy.ndarray") -> "numpy.ndarray":
+    """The Gram matrix of n observations of 3 features, a 3 by 3 matrix
+    ("space_matrix", "space_matrix_mixed", "space_output_wrong_shape")."""
+    return A.T @ A
+
+
+def atx(A: "numpy.ndarray", x: "numpy.ndarray") -> "numpy.ndarray":
+    """A transposed times x: a vector as long as A has columns
+    ("space_output_named")."""
+    return A.T @ x
+
+
+def frob(A: "numpy.ndarray") -> float:
+    """The sum of squares of every entry, whatever the shape: an
+    unguarded function, so "space_excluded_fixed" falsifies with the
+    shape it accepted."""
+    return float((A * A).sum())
+
+
+@enforce_dimensions()
+@claims_decorator("for A in R^(30,15), f(A) >= 0")
+def frob_guarded(A: "numpy.ndarray") -> float:
+    """The sum of squares of every entry, guarded to 30 by 15 by
+    `enforce_dimensions()`, which declares the exclusion it makes true
+    ("space_excluded_by_construction")."""
+    return float((A * A).sum())
 
 
 def scale_column(df: "pandas.DataFrame", c: float):
@@ -1457,6 +1573,18 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     ]),
     "add_two": (add_two, ["abs_bars_compound"]),
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
+    "luma": (luma, ["space_vector_fixed"]),
+    "year_total": (year_total, [
+        "space_vector_fixed_trap", "space_vector_fixed_sketch",
+        "dim_premise_against_fixed",
+    ]),
+    "energy": (energy, ["space_vector_real"]),
+    "gram_trace": (gram_trace, ["space_matrix_fixed"]),
+    "gram": (gram, ["space_matrix", "space_matrix_mixed",
+                    "space_output_wrong_shape"]),
+    "atx": (atx, ["space_output_named"]),
+    "frob": (frob, ["space_excluded_fixed"]),
+    "frob_guarded": (frob_guarded, ["space_excluded_by_construction"]),
     "scale_column": (scale_column, ["table_column_attribute",
                                     "table_column_item"]),
     "running_peak": (running_peak, ["vector_running_maximum"]),

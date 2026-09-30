@@ -55,44 +55,44 @@ def plain(x: float) -> float:
 
 def test_shape_marker_holds_for_correct_implementation():
     results = type_probes(matmul)
-    shape = next(p for p in results if p.name == "shape")
+    shape = next(p for p in results if p.name == "result_dimensions")
     assert shape.verdict == "holds"
 
 
 def test_shape_marker_falsified_for_wrong_implementation():
     results = type_probes(bad_matmul)
-    shape = next(p for p in results if p.name == "shape")
+    shape = next(p for p in results if p.name == "result_dimensions")
     assert shape.verdict == "falsified"
     assert "expected shape" in shape.counterexample
 
 
-def test_shape_enforced_flags_matmul_accepting_a_mismatched_n():
+def test_dimensions_enforced_flags_matmul_accepting_a_mismatched_n():
     # a real, confirmed finding, not a hypothetical: neither matmul nor
     # bad_matmul guards against a's column count disagreeing with b's
     # row count; one truth, no mode: a declared shared dim the code
     # silently accepts a mismatch on is a witnessed policy violation
-    probe = next(p for p in type_probes(matmul) if p.name == "shape_enforced")
+    probe = next(p for p in type_probes(matmul) if p.name == "dimensions_enforced")
     assert probe.verdict == "falsified"
     assert probe.n > 0
     assert probe.counterexample
 
 
-def test_shape_enforced_absent_when_no_dim_is_shared_across_parameters():
+def test_dimensions_enforced_absent_when_no_dim_is_shared_across_parameters():
     def single_vector(x: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
         return list(x)
 
     names = [p.name for p in type_probes(single_vector)]
-    assert "shape_enforced" not in names
+    assert "dimensions_enforced" not in names
 
 
 def test_no_markers_produces_no_type_probes():
     assert type_probes(plain) == []
 
 
-def test_check_picks_up_shape_probe_automatically():
+def test_check_picks_up_the_result_dimensions_row_automatically():
     rec = mathema.check(matmul)
     names = [p.name for p in rec.probes]
-    assert "shape" in names
+    assert "result_dimensions" in names
 
 
 def test_mat_marker_resolves_wrapped_and_bare():

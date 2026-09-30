@@ -1416,13 +1416,21 @@ def domain_contains(value, bound, slot: bool = False) -> bool:
     class (and, once the class is resolved, the hole is one of its
     members) or admits that member by name. A kind the domain does not
     state reads as admitted, the default of a parameter with no
-    annotation."""
+    annotation. A space domain (`dims` set) judges a container value by
+    its shape first, the rank and every fixed axis, then every element
+    against the element domain; a single number is judged as an
+    element."""
     dom = _as_domain(bound)
     _require_known_base_type(dom.base_type)
     if isinstance(value, _Sentinel):
         return admits(dom, value)
     if value is None and not slot:
         return admits(dom, ABSENT)
+    if dom.dims:
+        from ._shapes import contains_shaped
+        shaped = contains_shaped(value, dom)
+        if shaped is not None:
+            return shaped
     if is_missing(value):
         word = member_of(value)
         return admits(dom, member(word)) if word else admits(dom, MISSING)

@@ -1,22 +1,171 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Coverage over `mathema.lexicon`: every entry parses and renders
-without raising, and both rendered forms match a golden snapshot
-(`data/lexicon_golden.json`). The snapshot is a characterization net;
-it pins current behavior so refactors can't shift rendered output
-unnoticed, not a sign-off of the spellings, which are still under
-review; a deliberate rendering change regenerates it (see
+without raising, both rendered forms match a golden snapshot
+(`data/lexicon_golden.json`), and every row with an example function
+lands on its pinned verdict (`PINNED`). The snapshot is a
+characterization net; it pins current behavior so refactors can't shift
+rendered output unnoticed, not a sign-off of the spellings, which are
+still under review; a deliberate rendering change regenerates it (see
 `test_rendered_output_matches_golden_snapshot`) with the diff reviewed
-as part of that change."""
+as part of that change. The verdict table is the same kind of net for
+adjudication: a row whose verdict moves is a change to review."""
+import importlib.util
+
 import pytest
 
 from mathema import lexicon_checks
 from mathema.conjecture import claim
-from mathema.lexicon import LEXICON, get, render_both, show, sources
+from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON, get, render_both, show, sources
 from mathema.spec import render_claim_text
 
 #: mathema's own lexicon, never a registered package's
 CORE = sources(extensions=False)[0]
+
+#: the rows over a language, adjudicated only with `mathema-language`
+#: installed; without it each is skipped with the reason
+_LANGUAGE_ROWS = (
+    "containment_absent", "language_alphabet", "language_closure",
+    "language_contraction", "language_excluding_empty",
+    "language_length_bound", "language_membership_symbol",
+    "language_missing_excluded", "language_section",
+)
+
+#: the verdict every row with an example function lands on, or
+#: `(verdict, text the witness contains)`
+PINNED: dict = {
+    "abs_bars": "falsified",
+    "abs_bars_compound": "proven",
+    "assuming_inequality": "proven",
+    "assuming_is_defined": "proven",
+    "assuming_is_defined_pinned": "proven",
+    "assuming_is_defined_postfix": "proven",
+    "assuming_named_claim": "skipped",
+    "bound_function_nested_in_f": "proven",
+    "certificate_convex_lower": "proven",
+    "certificate_convex_upper": "proven",
+    "ceil_div_lower_bound": "proven",
+    "certificate_quadratic": "proven",
+    "chained_comparison": "proven",
+    "descent_converges": "proven",
+    "dim_premise_pins_length": "proven",
+    "dim_premise_rectangular_matrix": "holds",
+    "dim_premise_square_matrix": "holds",
+    "dim_premise_ties_two_lengths": "holds",
+    "dim_premise_vector_bound": "holds",
+    "domain_blackboard_reals": "proven",
+    "domain_closed_interval": "proven",
+    "domain_open_interval": "proven",
+    "domain_subset_integer": "skipped",
+    "domain_subset_symbol": "skipped",
+    "finite_domain_discrete_set": "proven",
+    "finite_domain_pinned": "proven",
+    "finite_domain_small_range": "proven",
+    "floor_brackets_unicode": "holds",
+    "floor_div_evaluable": "proven",
+    "forall_symbol": "proven",
+    "greek_delta_lower": "proven",
+    "greek_delta_upper": "proven",
+    "inferred_literal_domain": "proven",
+    "infinity_symbol": "proven",
+    # two functions demonstrate the same row to opposite ends: numpy.clip
+    # never leaks a nan, numpy.arcsin does past 1
+    "is_compendium_safe": {"clipped_ratio": "holds",
+                           "unguarded_arcsin": ("falsified", "output nan")},
+    "is_compendium_safe_scoped": "holds",
+    "latex_command_forall": "proven",
+    "latex_equiv": "proven",
+    "latex_geqslant": "proven",
+    "latex_left_right_bars": "proven",
+    "latex_leqslant": "proven",
+    "latex_varepsilon": "proven",
+    "latex_varphi": "proven",
+    "let_alias": "proven",
+    "let_alias_for_under_test": "proven",
+    "let_free_var_closed": "skipped",
+    "let_free_var_typed": "skipped",
+    "matrix_determinant_bars_compound": "proven",
+    "membership_interval_reduces_to_chain": "proven",
+    "multiply_dot": "proven",
+    "named_under_test": "proven",
+    "odd_function": "proven",
+    "parity_identity": "proven",
+    "power_caret": "proven",
+    "power_superscript": "proven",
+    "power_superscript_negative": "proven",
+    "premise_relates_two_params": "proven",
+    "raises_typed": "skipped:misspecified",
+    "real_domain_is_not_finite": "holds",
+    "recurrence_identity": "proven",
+    "relation_approx_unicode": "proven",
+    "relation_eq": "falsified",
+    "relation_le_unicode": "falsified",
+    "sigmoid_bounded_above": "proven",
+    "sigmoid_bounded_below": "proven",
+    "sigmoid_density_integrates": "proven",
+    "sigmoid_derivative": "proven",
+    "sigmoid_limit_lower": "proven",
+    "sigmoid_limit_upper": "proven",
+    "sigmoid_symmetry": "proven",
+    "sqrt_bare_radical": "proven",
+    "sqrt_symbol": "proven",
+    "stress_gauge_invariance": "proven",
+    "table_column_attribute": "holds",
+    "table_column_item": "holds",
+    "table_columns_dot": "proven",
+    "tolerance_eps_ascii": "proven",
+    "tolerance_epsilon": "proven",
+    "tolerance_epsilon_latex": "proven",
+    "tolerance_epsilon_word": "proven",
+    "vector_between_least_and_greatest": "proven",
+    "vector_drawdown_bounds": "proven",
+    "vector_running_maximum": "proven",
+    # the space rows: a fixed size in a binding, the output's space, the
+    # exclusion over a space, a premise against a fixed length
+    "space_vector_real": "proven",
+    "space_matrix": "proven",
+    "space_vector_fixed": "holds",
+    "space_vector_fixed_trap": "falsified",
+    "space_vector_fixed_sketch": "proven",
+    "space_matrix_fixed": "proven",
+    "space_matrix_mixed": "holds",
+    "space_output_wrong_shape": "falsified",
+    "space_output_named": "holds",
+    "space_excluded_fixed": ("falsified", "A of shape (31, 15)"),
+    "space_excluded_by_construction": "proven",
+    "dim_premise_against_fixed": "skipped",
+    # the missing section: a policy row per behaviour and kind, the
+    # member and premise forms, the traps and the gates
+    "missing_propagates": "holds",
+    "missing_drops": "holds",
+    "missing_trap_silent_drop": ("falsified", "rate = nan: f returned 1.0"),
+    "missing_raises": "proven",
+    "missing_converts": "holds",
+    "missing_introduces": "holds",
+    "missing_introduces_by_shape": "holds",
+    "absent_raises": "holds",
+    "absent_drops": "proven",
+    "absent_propagates": "holds",
+    "absent_converts": "holds",
+    "missing_member_null": "holds",
+    "missing_member_nan": "holds",
+    "missing_class_row_contradicted": ("falsified", "positions = [null]: f raised TypeError"),
+    "missing_premise_values_remain": "holds",
+    "missing_premise_no_values": "holds",
+    "missing_premise_all_na_raises": "holds",
+    "missing_member_defined": "holds",
+    "missing_trap_comparison": "holds",
+    "missing_predicate_sugar": "holds",
+    "absent_none_spelling": "holds",
+    "is_missing_safe_gate": "proven",
+    "is_missing_safe_gate_falsified": ("falsified", "positions = [null]: f raised TypeError"),
+    "is_absent_safe_gate": "proven",
+    "is_absent_safe_gate_falsified": ("falsified", "score = None: f raised TypeError"),
+    "is_empty_safe_hole": ("falsified", "returns = [] (an empty numpy.ndarray)"),
+    "is_empty_safe_identity": "proven",
+}
+if importlib.util.find_spec("mathema_language") is None:
+    PINNED.update({key: "skipped" for key in _LANGUAGE_ROWS})
 
 
 @pytest.mark.parametrize("key", list(LEXICON))
@@ -323,3 +472,23 @@ def test_the_canonical_form_reaches_the_same_verdict_everywhere():
     diverged = lexicon_checks.check_same_verdict(CORE)
     assert not diverged, ("a canonical form changed the verdict:\n"
                           + "\n".join(diverged))
+
+
+def test_every_row_with_a_function_has_a_pinned_verdict():
+    with_function = {key for _fn, keys in EXAMPLE_FUNCTIONS.values() for key in keys}
+    unpinned = sorted(key for key in with_function
+                      if key not in PINNED and key not in _LANGUAGE_ROWS)
+    assert not unpinned, unpinned
+    assert not sorted(set(PINNED) - set(LEXICON)), sorted(set(PINNED) - set(LEXICON))
+
+
+@pytest.mark.needs_full_proof_budget
+def test_every_row_lands_on_its_pinned_verdict():
+    """The verdict table over the whole lexicon: a row with no example
+    function is unpinned (None), one over a language is pinned only
+    without `mathema-language`, every other row must land where the
+    table says."""
+    pytest.importorskip("numpy")
+    expected = {**{key: None for key in LEXICON}, **PINNED}
+    assert lexicon_checks.check_verdicts(CORE, expected) == []
+

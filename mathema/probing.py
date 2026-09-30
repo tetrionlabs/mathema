@@ -1797,17 +1797,21 @@ def _fmt_value_of(v) -> str:
 def _fmt(args: tuple, names: tuple[str, ...] | None = None,
          shown: "set[str] | None" = None) -> str:
     """A counterexample's argument tuple, legible on its own: labeled
-    `name=value` pairs when the caller's own parameter names are known,
+    `name = value` pairs when the caller's own parameter names are known,
     a bare positional tuple otherwise. Unlabeled, a two-element
     counterexample like `([...], -5.54)` reads as (input, output);
     it's actually (x, alpha), both inputs. With `shown`, only the named
     arguments in it appear (all of them when none is)."""
+    from ._shapes import witness_text
     if names is not None and len(names) == len(args):
         pairs = list(zip(names, args))
         if shown is not None and any(n in shown for n, _ in pairs):
             pairs = [(n, a) for n, a in pairs if n in shown]
-        return ", ".join(f"{n} = {_fmt_value(a)}" for n, a in pairs)
-    return "(" + ", ".join(_fmt_value(a) for a in args) + ")"
+        # a large vector or matrix prints its shape, a first row and a
+        # count; the full value rides in the counterexample's arguments
+        return ", ".join(f"{n} = {capped}" if (capped := witness_text(a)) is not None
+                         else f"{n} = {_fmt_value(a)}" for n, a in pairs)
+    return "(" + ", ".join(witness_text(a) or _fmt_value(a) for a in args) + ")"
 
 
 def _sampling_shorthand(kinds: dict, domain: dict, n: int,
@@ -1865,14 +1869,26 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
     lengths_seen = observed_lengths or {}
     premise_drawn = premise_drawn or set()
 
+    def size_text(p: str, free: str) -> str:
+        # the sizes the checked samples had: one length as `len=20`,
+        # several as their range, a matrix as `size=(30,15)` or the
+        # range of the sizes seen; none recorded is the free draw
+        seen = sorted({(s,) if isinstance(s, int) else tuple(s)
+                       for s in (lengths_seen.get(p) or ())})
+        if not seen:
+            return free
+        if all(len(s) == 1 for s in seen):
+            lengths = [s[0] for s in seen]
+            if len(lengths) == 1:
+                return f"len={lengths[0]}"
+            return f"len∈[{lengths[0]},{lengths[-1]}]"
+        compact = ["(" + ",".join(str(n) for n in s) + ")" for s in seen]
+        if len(compact) == 1:
+            return f"size={compact[0]}"
+        return f"size∈[{compact[0]},{compact[-1]}]"
+
     def sequence_text(p: str) -> str:
-        lengths = sorted(lengths_seen.get(p) or ())
-        if not lengths:
-            size = "len∈[2,8]"
-        elif len(lengths) == 1:
-            size = f"len={lengths[0]}"
-        else:
-            size = f"len∈[{lengths[0]},{lengths[-1]}]"
+        size = size_text(p, "len∈[2,8]")
         element_bound = domain.get(p)
         if p in premise_drawn:
             draw = "drawn on the premise"
@@ -1912,8 +1928,8 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
 
     def one(p: str, k: str, bounds) -> str:
         if k == "table":
-            return ("Table(equal-length columns, len∈[2,8], each drawn "
-                    "as a free Seq)")
+            return (f"Table(equal-length columns, {size_text(p, 'len∈[2,8]')}, "
+                    f"each drawn as a free Seq)")
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
                 and not numeric_excluded(bounds)):
@@ -2317,25 +2333,35 @@ def probe(fn, facts, domain: dict | None = None,
         if (param is not None and p not in domain
                 and _keeps_default(fn, param)):
             return param.default
+        shape = resolver.shapes.get(p) if resolver is not None else None
         if k == "table":
-            # a table: equal-length columns, each drawn as a sequence
-            n = rng.randint(2, 8)
+            # a table: equal-length columns, each drawn as a sequence,
+            # at the length a vector domain on the table fixes
+            n = (sizes.get(resolver.key(p, 0)) if shape is not None
+                 else None) or rng.randint(2, 8)
             return {c: _synth("sequence", rng, None, specials=specials,
                               length=n) for c in ("a", "b")}
-        shape = resolver.shapes.get(p) if resolver is not None else None
-        if shape is not None and k not in SEQUENCE_KINDS and shape.ndim >= 1:
-            # a space binding (`R^n`, `R^(n,n)`) from the claims shapes
-            # a parameter whose kind the signature does not state
+        if shape is not None and shape.ndim >= 1 and (
+                shape.ndim >= 2 or k not in SEQUENCE_KINDS):
+            # a matrix-shaped parameter (a marker, or a space binding
+            # such as `R^(m,n)`), or a space binding on a parameter
+            # whose kind the signature does not state: nested to its
+            # axes, sizes from the plan, so a fixed size is that size
             return resolver.synth(
                 p, sizes, lambda: _synth("float", rng, domain.get(p),
                                          specials=specials), rng)
+        # a 1-D sequence takes the length its marker or binding fixes
+        # or shares; an anonymous axis keeps the sampler's own draw
+        length = None
+        if shape is not None and shape.ndim == 1 and shape.axes[0] is not None:
+            length = sizes.get(resolver.key(p, 0))
         drawn = _synth(k, rng, domain.get(p), specials=specials,
                        extra=critical_hints.get(p),
-                       extra_cycle=extra_cycles.get(p))
+                       extra_cycle=extra_cycles.get(p), length=length)
         if inputs_missing([drawn]):
             # the smoke call asks whether f can be called with a value;
             # a claim's own missing points are its own to execute
-            return _synth(k, rng, None, specials=specials)
+            return _synth(k, rng, None, specials=specials, length=length)
         return drawn
 
     def args_for() -> "tuple[list, dict]":
@@ -2361,6 +2387,13 @@ def probe(fn, facts, domain: dict | None = None,
     else:
         hints = "".join(f"; {h['text']}" for h in
                         (getattr(facts, "runtime_hints", None) or {}).values())
+        if getattr(last_exc, "at_exit", False):
+            # a shape guard refused the RESULT: the inputs were fine,
+            # the body's answer was not
+            return [Probe("callable", callable_statement, "skipped",
+                          note=f"the call raised after the body returned: "
+                               f"{last_exc}" + hints,
+                          meta={"mathema.probe_gap": "result-shape"})]
         shown = ", ".join(
             f"{name}: {_annotation_text(param)}" if _annotation_text(param)
             else name for name, param in signature.items())
