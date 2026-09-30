@@ -76,3 +76,74 @@ def test_a_plain_dict_is_reached_only_through_a_claim_and_says_so():
     row = _gate(note_of, "is_absent_safe(f)")
     assert ("d is a plain dict, which states nothing about its keys, so the gate "
             "reaches a key only through a claim that binds it") in row.note, row.note
+
+
+@dataclass
+class Inner:
+    note: Optional[str] = None
+
+
+@dataclass
+class Outer:
+    inner: Inner
+    qty: float = 1.0
+
+
+def nested_note(o: Outer) -> int:
+    return len(o.inner.note)
+
+
+@dataclass
+class Prices:
+    prices: list[Optional[float]]
+
+
+def price_total(o: Prices) -> float:
+    return sum(o.prices)
+
+
+class Memo(TypedDict, total=False):
+    note: str
+
+
+class Envelope(TypedDict):
+    inner: Memo
+
+
+def envelope_note(d: Envelope) -> int:
+    return len(d["inner"]["note"])
+
+
+@dataclass
+class Either:
+    x: Optional[float]
+    y: Optional[float]
+
+
+def one_of(o: Either) -> float:
+    if o.x is None and o.y is None:
+        raise ValueError("need one")
+    return (o.x or 0.0) + (o.y or 0.0)
+
+
+def test_the_absent_gate_reaches_a_nested_record_field():
+    row = _gate(nested_note, "is_absent_safe(f)")
+    assert row.verdict == "falsified", row.note
+    assert "o.inner.note" in row.note
+
+
+def test_the_missing_gate_reaches_a_list_of_optional_values():
+    row = _gate(price_total, "is_missing_safe(f)")
+    assert row.verdict == "falsified", row.note
+    assert "o.prices[*]" in row.note
+
+
+def test_the_absent_gate_reaches_a_nested_typed_dict_key():
+    row = _gate(envelope_note, "is_absent_safe(f)")
+    assert row.verdict == "falsified", row.note
+    assert "d.inner.note" in row.note
+
+
+def test_the_absent_gate_meets_two_optional_fields_absent_together():
+    row = _gate(one_of, "is_absent_safe(f)")
+    assert row.verdict == "falsified", row.note

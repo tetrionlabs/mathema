@@ -1581,15 +1581,16 @@ def _path_calls(fn, facts, params: list, kind: str, domain: dict,
                     found = _run_floor(fn, facts, [point])
                     if found:
                         out[path] = found
-    floors = _typed_key_floor if kind == "absent" else _list_field_floor
     for p in params:
-        for path, point, member in floors(fn, facts, p, domain):
-            if path not in out:
-                found = _run_floor(fn, facts, [point])
-                for c in found:
-                    c.keys = [(path, kind, member)]
-                if found:
-                    out[path] = found
+        for keys, point in _type_floor(fn, facts, p, domain, kind):
+            paths = [q for q, _k, _m in keys]
+            if len(keys) == 1 and paths[0] in out:
+                continue
+            found = _run_floor(fn, facts, [point])
+            for c in found:
+                c.keys = list(keys)
+            for q in paths:
+                out.setdefault(q, []).extend(found)
     return out
 
 
@@ -1621,74 +1622,149 @@ def _others(fn, facts, param: str, domain: dict) -> dict:
             for q in facts.params if q != param and q not in defaulted}
 
 
-def _typed_key_floor(fn, facts, param: str, domain: dict) -> list:
-    """`[(path, point, member), ...]` for a TypedDict parameter: each key
-    it marks NotRequired left out (`unset`), and each key whose value
-    type admits None holding None (`null`)."""
+_UNSET = object()
+
+
+def _type_cases(cls, depth: int = 0, element: bool = False) -> list:
+    """Intent:
+        `[(steps, kind, member, leaf), ...]`: every place inside a value
+        of record type `cls` (a dataclass, a pydantic model, a TypedDict)
+        where its type states a no-value, with the value that puts it
+        there: an Optional field or key holding None (`absent`, `null`),
+        a TypedDict key its type does not require left out (`absent`,
+        `unset`), a list element that is a float (`missing`, `nan`) or
+        admits None (`missing`, `null`), and a float field of a record
+        that is a list's element (`missing`, `nan`, `o.lines[*].qty`).
+        `steps` walks from the value,
+        `"*"` for a list's element; nested records are walked three
+        levels deep.
+    """
     import typing
-    cls = _annotation(fn, param)
-    if not (isinstance(cls, type) and typing.is_typeddict(cls)):
+    if depth > 3 or not _is_record_type(cls):
         return []
     try:
         hints = typing.get_type_hints(cls)
     except Exception:
         return []
-    base = {k: _plain_value(ann) for k, ann in hints.items()}
-    others = _others(fn, facts, param, domain)
-    out = []
-    for key in hints:
-        if key in getattr(cls, "__optional_keys__", ()):
-            left = {k: v for k, v in base.items() if k != key}
-            out.append((f"{param}.{key}", {**others, param: left}, "unset"))
-        if _admits_none(hints[key]):
-            out.append((f"{param}.{key}", {**others, param: {**base, key: None}}, "null"))
+    optional_keys = getattr(cls, "__optional_keys__", ()) if typing.is_typeddict(cls) else ()
+    out: list = []
+    for name, ann in hints.items():
+        if name in optional_keys:
+            out.append(([name], "absent", "unset", _UNSET))
+        inner = ann
+        if _admits_none(ann):
+            out.append(([name], "absent", "null", None))
+            inner = next((a for a in typing.get_args(ann) if a is not type(None)), ann)
+        if element and inner is float:
+            out.append(([name], "missing", "nan", float("nan")))
+        out += [([name, *steps], k, m, leaf) for steps, k, m, leaf in _inner_cases(inner, depth)]
     return out
 
 
-def _list_field_floor(fn, facts, param: str, domain: dict) -> list:
-    """`[(path, point, member), ...]` for a record parameter's list
-    fields: a list of floats holding a `nan` (`o.prices[*]`), and a list
-    of records whose float field holds `nan` (`o.lines[*].qty`)."""
+def _inner_cases(ann, depth: int) -> list:
+    """The cases inside a field's own type: a list's elements, a nested
+    record's fields."""
+    import typing
+    if typing.get_origin(ann) is list and typing.get_args(ann):
+        (element,) = typing.get_args(ann)[:1]
+        out: list = []
+        if element is float:
+            out.append((["*"], "missing", "nan", float("nan")))
+        inner = element
+        if _admits_none(element):
+            out.append((["*"], "missing", "null", None))
+            inner = next((a for a in typing.get_args(element) if a is not type(None)),
+                         element)
+        out += [(["*", *steps], k, m, leaf) for steps, k, m, leaf
+                in _type_cases(inner, depth + 1, element=True)]
+        return out
+    return _type_cases(ann, depth + 1)
+
+
+def _is_record_type(cls) -> bool:
     import dataclasses
     import typing
-    cls = _annotation(fn, param)
-    base = _plain_record(cls)
-    if base is None:
-        return []
-    try:
-        hints = typing.get_type_hints(cls)
-    except Exception:
-        return []
-    others = _others(fn, facts, param, domain)
-    nan = float("nan")
+    return isinstance(cls, type) and (dataclasses.is_dataclass(cls)
+                                      or typing.is_typeddict(cls)
+                                      or isinstance(getattr(cls, "model_fields", None),
+                                                    dict))
 
-    def with_field(name: str, value):
-        if hasattr(base, "model_copy"):
-            return base.model_copy(update={name: value})
-        return dataclasses.replace(base, **{name: value})
-    out = []
-    for name, ann in hints.items():
-        if typing.get_origin(ann) is not list or not typing.get_args(ann):
-            continue
-        (element,) = typing.get_args(ann)[:1]
-        if element is float:
-            out.append((f"{param}.{name}[*]",
-                        {**others, param: with_field(name, [nan, 1.0])}, "nan"))
-            continue
-        inner = _plain_record(element)
-        if inner is None:
-            continue
-        for sub, sub_ann in typing.get_type_hints(element).items():
-            if sub_ann is not float:
-                continue
-            if hasattr(inner, "model_copy"):
-                held = inner.model_copy(update={sub: nan})
+
+def _set_at(value, steps: list, leaf):
+    """A deep copy of `value` with `leaf` at `steps` (`_UNSET` leaves a
+    key out); a list on the way holds one element, built if empty."""
+    import copy
+    out = copy.deepcopy(value)
+    target = out
+    for k, step in enumerate(steps):
+        last = k == len(steps) - 1
+        if step == "*":
+            if not isinstance(target, list):
+                return None
+            if not target:
+                return None
+            if last:
+                target[0] = leaf
             else:
-                held = dataclasses.replace(inner, **{sub: nan})
-            out.append((f"{param}.{name}[*].{sub}",
-                        {**others, param: with_field(name, [held])}, "nan"))
+                target = target[0]
+            continue
+        if isinstance(target, dict):
+            if last:
+                if leaf is _UNSET:
+                    target.pop(step, None)
+                else:
+                    target[step] = leaf
+            else:
+                target = target.get(step)
+        else:
+            if last:
+                object.__setattr__(target, step, leaf)
+            else:
+                target = getattr(target, step, None)
+        if target is None and not last:
+            return None
     return out
 
+
+def _path_text(param: str, steps: list) -> str:
+    return param + "".join("[*]" if s == "*" else f".{s}" for s in steps)
+
+
+def _type_floor(fn, facts, param: str, domain: dict, kind: str) -> list:
+    """Intent:
+        `[(keys, point), ...]` for a record parameter: one point per place
+        its type states a no-value of `kind`, the value there, and for
+        absence one more with every Optional field of the record itself
+        None together; the other parameters drawn inside their domains.
+        `keys` are `(path, kind, member)` for the calls' filing.
+    """
+    cls = _annotation(fn, param)
+    if not _is_record_type(cls):
+        return []
+    base = _plain_value(cls)
+    if base is None:
+        return []
+    others = _others(fn, facts, param, domain)
+    out: list = []
+    top_null: list = []
+    for steps, k, member, leaf in _type_cases(cls):
+        if k != kind:
+            continue
+        made = _set_at(base, steps, leaf)
+        if made is None:
+            continue
+        path = _path_text(param, steps)
+        out.append(([(path, k, member)], {**others, param: made}))
+        if len(steps) == 1 and member == "null" and k == "absent":
+            top_null.append(steps)
+    if len(top_null) > 1:
+        made = base
+        for steps in top_null:
+            made = _set_at(made, steps, None)
+        if made is not None:
+            out.append(([(_path_text(param, st), "absent", "null") for st in top_null],
+                        {**others, param: made}))
+    return out
 
 def _optional_fields(cls) -> list:
     """The fields of a record type (a pydantic model, a dataclass) whose
@@ -1726,8 +1802,18 @@ def _plain_value(ann, depth: int = 0):
     simple = {str: "a", int: 1, float: 1.0, bool: True, list: [], dict: {}}
     if ann in simple:
         return simple[ann]
+    if origin is list and typing.get_args(ann) and depth < 3:
+        # one element, so a floor can put a no-value inside it
+        element = _plain_value(typing.get_args(ann)[0], depth + 1)
+        return [element] if element is not None else []
     if origin in (list, dict, tuple, set):
         return origin()
+    if isinstance(ann, type) and typing.is_typeddict(ann) and depth < 3:
+        try:
+            hints = typing.get_type_hints(ann)
+        except Exception:
+            return None
+        return {k: _plain_value(v, depth + 1) for k, v in hints.items()}
     if depth < 3:
         made = _plain_record(ann, depth + 1)
         if made is not None:
@@ -1748,10 +1834,11 @@ def _plain_record(cls, depth: int = 0):
             return cls.model_construct(**values)
         if isinstance(cls, type) and dataclasses.is_dataclass(cls):
             hints = typing.get_type_hints(cls)
+            # a field its type defaults by a factory (an empty list) is built
+            # too, so a floor can reach inside it
             values = {f.name: _plain_value(hints.get(f.name), depth)
                       for f in dataclasses.fields(cls)
-                      if f.default is dataclasses.MISSING
-                      and f.default_factory is dataclasses.MISSING}
+                      if f.default is dataclasses.MISSING}
             return cls(**values)
     except Exception:
         return None
