@@ -19,10 +19,17 @@ import pytest
 
 from mathema._linalg_eval import _norm
 from mathema.claims import check_conjectures, claim
+from mathema.compendium import _installed_version, _version_in_range
 from mathema.conjecture import InvalidConjecture
 from mathema.grammar import normalize
 from mathema.spec import canonical_claim_text, render_claim_text
 from tests.test_claim_text_soundness import assert_round_trips
+
+
+# `numpy.dot`'s definition row applies from numpy 2.4, so below it a
+# squared length computed with `np.dot` has no derivation and is sampled
+_NUMPY_DOT_ROW = _version_in_range(_installed_version("numpy") or "0", ">=2.4")
+_SQUARED = ("proven", "derive") if _NUMPY_DOT_ROW else ("holds", "probe")
 
 
 def _spaceless(text: str) -> str:
@@ -455,7 +462,7 @@ def _adjudicate(fn, law):
     (largest_magnitude, "for x in R^n, f(x) ~= ||x||_oo",
      "for x in R^n, f(x) ~= norm(x, inf)", "proven", "derive"),
     (squared_length, "for x in R^n, f(x) ~= ||x||^2",
-     "for x in R^n, f(x) ~= norm(x)**2", "proven", "derive"),
+     "for x in R^n, f(x) ~= norm(x)**2", *_SQUARED),
     (distance, "for x in R^n, y in R^n, f(x, y) ~= ||x - y||",
      "for x in R^n, y in R^n, f(x, y) ~= norm(x - y)", "proven", "derive"),
     # a sum over every entry of a matrix, a singular value decomposition
@@ -647,7 +654,8 @@ _LEXICON_ROWS = {
     "norm_bars_series_tracking_error": ("proven", "derive"),
     "norm_bars_rmse": ("proven", "derive"),
     "norm_bars_portfolio_weights": ("proven", "derive"),
-    "norm_bars_squared": ("proven", "derive"),
+    # proven from numpy 2.4, where `numpy.dot` has a definition row
+    "norm_bars_squared": _SQUARED,
     "norm_bars_squared_trap": ("falsified", "probe"),
     "norm_bars_order_trap": ("falsified", "probe"),
     "matrix_norm_bars_frobenius": ("proven", "derive"),

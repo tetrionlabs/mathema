@@ -15,6 +15,7 @@ import importlib.util
 import pytest
 
 from mathema import lexicon_checks
+from mathema.compendium import _installed_version, _version_in_range
 from mathema.conjecture import claim
 from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON, get, render_both, show, sources
 from mathema.spec import render_claim_text
@@ -155,7 +156,10 @@ PINNED: dict = {
     "norm_bars_series_tracking_error": "proven",
     "norm_bars_rmse": "proven",
     "norm_bars_portfolio_weights": "proven",
-    "norm_bars_squared": "proven",
+    # `numpy.dot`'s definition row applies from numpy 2.4; below it the
+    # squared length is sampled
+    "norm_bars_squared": ("proven" if _version_in_range(
+        _installed_version("numpy") or "0", ">=2.4") else "holds"),
     "norm_bars_squared_trap": "falsified",
     "norm_bars_order_trap": "falsified",
     "matrix_norm_bars_frobenius": "proven",
