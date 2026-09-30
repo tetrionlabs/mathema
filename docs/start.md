@@ -49,21 +49,19 @@ to the tests they have, where a claim goes, and how to reach a passing
 1. [Quick start](quickstart.md): the shape of a claim, the record it
    produces, and the docstring `Claims:` block, which is where a claim goes
    when it lives beside its function.
-2. [A first look](first-look.md): what mathema reports about a function
-   with no claims written, how declaring a domain changes that, and how to
-   read the stored record.
-3. [`mathema audit`](modes/audit.md): one line per function under a
-   package: whether it has claims, whether it could be proven, what state
-   outside its parameters it touches, and whether a test report covers it.
-4. [`mathema claims`](modes/claims.md): the standard claims mathema
-   suggests for one function, and the step that adopts one into the
-   declared layer.
-5. [Authoring claims](authoring.md): the four places a claim can live, and
+2. [From a pytest test to a claim](from-a-pytest-test.md): one real test
+   read as a sentence, that sentence stated as a claim and run, and what
+   each of the two still does that the other cannot.
+3. [Add claims to an existing codebase](existing-codebase.md): where to
+   start in a package with none, the stubs and suggestions that get the
+   first claims written, one claim tried before the sweep writes anything,
+   and the first green sweep.
+4. [Authoring claims](authoring.md): the four places a claim can live, and
    which one wins when two disagree.
-6. [`mathema coverage`](modes/coverage.md): which lines of each function
+5. [`mathema coverage`](modes/coverage.md): which lines of each function
    your tests, mathema's probes and its proofs have exercised, and the one
    action that would raise the figure.
-7. [Gate a pipeline with mathema verify](gate-a-pipeline.md): the sweep
+6. [Gate a pipeline with mathema verify](gate-a-pipeline.md): the sweep
    in CI, from the first red run to a green one.
 
 First command:

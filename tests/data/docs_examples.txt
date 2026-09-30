@@ -36,10 +36,12 @@
 [x] docs/derive-route.md:finite-set              run verdicts
 [x] docs/derive-route.md:linspace                run verdicts  (requires)
 [x] docs/evidence-ladder.md:companion            run output
+[x] docs/existing-codebase.md:codebase           file file file run output run output run output run output run output run output file file run output run output
 [ ] docs/extending.md:287
 [x] docs/findings.md:finds                       file run output run run output run output run run output
 [x] docs/findings.md:parity                      file run output
 [x] docs/first-look.md:ema                       run run output run output run output run output run output
+[x] docs/from-a-pytest-test.md:ptp               file run output run output run output file run output
 [x] docs/gate-a-pipeline.md:gate                 file file run output run output run output file run output run output
 [x] docs/grammar.md:eps                          file run output
 [x] docs/grammar.md:just-below                   run output
@@ -99,4 +101,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 84 examples checked, 4 output fences not yet marked
+# 86 examples checked, 4 output fences not yet marked

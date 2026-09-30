@@ -122,6 +122,8 @@ nav:
       - How-to guides:
           - Gate a pipeline with mathema verify: gate-a-pipeline.md
           - See what mathema knows about a library you call: library-claims.md
+          - Add claims to an existing codebase: existing-codebase.md
+          - From a pytest test to a claim: from-a-pytest-test.md
   - Concepts:
       - Guarantees and limits: guarantees.md
       - Verdicts and exit codes: verdicts.md
