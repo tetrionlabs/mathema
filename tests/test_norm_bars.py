@@ -184,6 +184,32 @@ def test_the_two_spellings_are_two_canonical_texts():
     assert canonical_claim_text(bars) != canonical_claim_text(words)
 
 
+# --- an infinite order in the call form ------------------------------------
+
+@pytest.mark.parametrize("spelling", ["oo", "infinity", "∞", "inf", "\\infty"])
+def test_every_infinite_order_in_the_call_form_lowers_to_inf(spelling):
+    cj = claim(f"for x in R^n, norm(x, {spelling}) <= norm(x, 1)")
+    assert cj.lhs == "norm(x, inf)"
+    assert canonical_claim_text(cj) == \
+        "for x in R^n|missing, norm(x, inf) <= norm(x, 1)"
+
+
+def test_a_nested_norm_order_is_lowered_too():
+    assert normalize("norm(norm(x, oo) * y, oo)") == "norm(norm(x, inf) * y, inf)"
+
+
+def test_the_call_form_with_oo_reaches_the_verdict_of_inf():
+    # the control is the old failure: `oo` was unbound in the probe's
+    # namespace and sampled as a free variable, so numpy computed a
+    # random-order norm and the claim was falsified
+    with_oo = _adjudicate(largest_magnitude, "for x in R^n, f(x) ~= norm(x, oo)")
+    with_inf = _adjudicate(largest_magnitude, "for x in R^n, f(x) ~= norm(x, inf)")
+    assert (with_oo.verdict, with_oo.route) == (with_inf.verdict, with_inf.route) \
+        == ("proven", "derive"), (with_oo.note, with_inf.note)
+    assert "oo" not in claim("for x in R^n, f(x) ~= norm(x, oo)").lhs
+    assert _norm(_V, 2.7) != _norm(_V, np.inf)
+
+
 # --- the evaluation path: numpy's norm, both ranks, the matrix orders ------
 
 _V = np.array([3.0, -4.0, 12.0])
@@ -289,41 +315,83 @@ def _adjudicate(fn, law):
     return p
 
 
-@pytest.mark.parametrize("fn, sugar, words, verdict", [
+@pytest.mark.parametrize("fn, sugar, words, verdict, route", [
+    # a norm over a vector is lowered on the derive route, so these
+    # prove for every length through the numpy definition rows
     (euclidean_length, "for x in R^n, f(x) ~= ||x||",
-     "for x in R^n, f(x) ~= norm(x)", "holds"),
+     "for x in R^n, f(x) ~= norm(x)", "proven", "derive"),
     (euclidean_length, "for x in R^n, f(x) ~= ||x||_2",
-     "for x in R^n, f(x) ~= norm(x, 2)", "holds"),
+     "for x in R^n, f(x) ~= norm(x, 2)", "proven", "derive"),
     (manhattan_length, "for x in R^n, f(x) ~= ||x||_1",
-     "for x in R^n, f(x) ~= norm(x, 1)", "holds"),
+     "for x in R^n, f(x) ~= norm(x, 1)", "proven", "derive"),
     (largest_magnitude, "for x in R^n, f(x) ~= ||x||_inf",
-     "for x in R^n, f(x) ~= norm(x, inf)", "holds"),
+     "for x in R^n, f(x) ~= norm(x, inf)", "proven", "derive"),
     (largest_magnitude, "for x in R^n, f(x) ~= ||x||_oo",
-     "for x in R^n, f(x) ~= norm(x, inf)", "holds"),
+     "for x in R^n, f(x) ~= norm(x, inf)", "proven", "derive"),
     (squared_length, "for x in R^n, f(x) ~= ||x||^2",
-     "for x in R^n, f(x) ~= norm(x)**2", "holds"),
+     "for x in R^n, f(x) ~= norm(x)**2", "proven", "derive"),
     (distance, "for x in R^n, y in R^n, f(x, y) ~= ||x - y||",
-     "for x in R^n, y in R^n, f(x, y) ~= norm(x - y)", "holds"),
+     "for x in R^n, y in R^n, f(x, y) ~= norm(x - y)", "proven", "derive"),
+    # a sum over every entry of a matrix, a singular value decomposition
+    # and the matrix orders have no lowering, so these stay sampled
     (frobenius, "for A in R^(m,n), f(A) ~= ||A||",
-     "for A in R^(m,n), f(A) ~= norm(A)", "holds"),
+     "for A in R^(m,n), f(A) ~= norm(A)", "holds", "probe"),
     (largest_singular_value, "for A in R^(n,n), f(A) ~= ||A||_2",
-     "for A in R^(n,n), f(A) ~= norm(A, 2)", "holds"),
+     "for A in R^(n,n), f(A) ~= norm(A, 2)", "holds", "probe"),
     (max_column_sum, "for A in R^(m,n), f(A) ~= ||A||_1",
-     "for A in R^(m,n), f(A) ~= norm(A, 1)", "holds"),
+     "for A in R^(m,n), f(A) ~= norm(A, 1)", "holds", "probe"),
     (max_row_sum, "for A in R^(m,n), f(A) ~= ||A||_inf",
-     "for A in R^(m,n), f(A) ~= norm(A, inf)", "holds"),
+     "for A in R^(m,n), f(A) ~= norm(A, inf)", "holds", "probe"),
     # a false sibling falsifies in either spelling, with a witness
     (manhattan_length, "for x in R^n, f(x) ~= ||x||_2",
-     "for x in R^n, f(x) ~= norm(x, 2)", "falsified"),
+     "for x in R^n, f(x) ~= norm(x, 2)", "falsified", "probe"),
     (max_column_sum, "for A in R^(m,n), f(A) ~= ||A||_inf",
-     "for A in R^(m,n), f(A) ~= norm(A, inf)", "falsified"),
+     "for A in R^(m,n), f(A) ~= norm(A, inf)", "falsified", "probe"),
 ])
-def test_the_sugar_reaches_the_verdict_of_the_words(fn, sugar, words, verdict):
+def test_the_sugar_reaches_the_verdict_of_the_words(fn, sugar, words, verdict, route):
     a, b = _adjudicate(fn, sugar), _adjudicate(fn, words)
-    assert (a.verdict, a.route) == (b.verdict, b.route) == (verdict, "probe"), \
+    assert (a.verdict, a.route) == (b.verdict, b.route) == (verdict, route), \
         (a.verdict, a.note, b.verdict, b.note)
     if verdict == "falsified":
         assert a.counterexample and b.counterexample
+    if route == "derive":
+        assert "every length" in (a.sketch or ""), a.sketch
+
+
+# --- the derive route: what the lowering proves and what it refuses -------
+
+@pytest.mark.parametrize("fn, law", [
+    (euclidean_length, "for x in R^n, f(x) ~= ||x||_1"),
+    (largest_magnitude, "for x in R^n, f(x) ~= ||x||_2"),
+    (manhattan_length, "for x in R^n, f(x) ~= ||x||_inf"),
+    (squared_length, "for x in R^n, ||x||^2 == 2 * dot(x, x)"),
+    (distance, "for x in R^n, y in R^n, f(x, y) ~= ||x|| - ||y||"),
+])
+def test_a_false_norm_identity_is_not_proven_and_is_falsified(fn, law):
+    # the control for the lowering: the derive route proves none of
+    # these, and sampling finds the witness
+    p = _adjudicate(fn, law)
+    assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
+    assert p.counterexample, p.note
+    assert p.meta.get("mathema.derive_status") != "proven"
+
+
+def test_an_order_outside_the_lowering_is_named_and_left_to_the_probe():
+    p = _adjudicate(euclidean_length, "for x in R^n, f(x) ~= norm(x, 3)")
+    assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
+    assert "the norms lowered are the Euclidean (2), the sum of magnitudes (1) " \
+           "and the largest magnitude (inf)" in (p.note or ""), p.note
+
+
+def test_a_matrix_frobenius_identity_proves_through_the_trace():
+    from mathema._lexicon_numpy import frobenius_norm, gram_trace
+    for fn, law in [(frobenius_norm, "for A in R^(m,n), ||A|| ~= sqrt(trace(A.T @ A))"),
+                    (gram_trace, "for A in R^(m,n), ||A||^2 ~= trace(A @ A.T)"),
+                    (gram_trace, "for A in R^(m,n), ||A|| ~= sqrt(f(A))")]:
+        p = _adjudicate(fn, law)
+        assert (p.verdict, p.route) == ("proven", "derive"), (law, p.verdict, p.note)
+    p = _adjudicate(gram_trace, "for A in R^(m,n), ||A||^2 ~= 2 * f(A)")
+    assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
 
 
 # --- the note names the resolved norm -------------------------------------
@@ -346,7 +414,7 @@ def test_a_bare_norm_of_a_difference_is_noted_from_its_operands():
 def test_a_bare_norm_of_a_call_is_noted_for_either_rank():
     # the rank of f(x) cannot be read from the claim, so the note says
     # what the bars mean for a vector and for a matrix
-    from mathema.lexicon import unit_vector
+    from mathema._lexicon_numpy import unit_vector
     p = _adjudicate(unit_vector, "assuming ||x|| > 0, for x in R^n, ||f(x)|| ~= 1")
     assert ("||f(x)|| is the Euclidean norm of f(x) as a vector, "
             "the Frobenius norm as a matrix") in (p.note or ""), p.note
@@ -367,22 +435,26 @@ def test_the_call_spelling_gets_no_note():
 #: every row of the sugar, with the verdict and route it reaches
 #: against its example function; the trap row falsifies with a witness
 _LEXICON_ROWS = {
-    "norm_bars_euclidean": ("holds", "probe"),
-    "norm_bars_two": ("holds", "probe"),
-    "norm_bars_one": ("holds", "probe"),
-    "norm_bars_inf": ("holds", "probe"),
+    "norm_bars_euclidean": ("proven", "derive"),
+    "norm_bars_two": ("proven", "derive"),
+    "norm_bars_one": ("proven", "derive"),
+    "norm_bars_inf": ("proven", "derive"),
+    # a chain of orders and the triangle inequality need Cauchy-Schwarz
+    # or a bound on a root of a sum of squares, which no lemma states
     "norm_bars_chain": ("holds", "probe"),
-    "norm_bars_homogeneous": ("holds", "probe"),
-    "norm_bars_unit_vector": ("holds", "probe"),
-    "norm_bars_distance": ("holds", "probe"),
-    "norm_bars_distance_symmetric": ("holds", "probe"),
-    "norm_bars_distance_zero": ("holds", "probe"),
+    "norm_bars_homogeneous": ("proven", "derive"),
+    "norm_bars_unit_vector": ("proven", "derive"),
+    "norm_bars_distance": ("proven", "derive"),
+    "norm_bars_distance_symmetric": ("proven", "derive"),
+    "norm_bars_distance_zero": ("proven", "derive"),
     "norm_bars_triangle": ("holds", "probe"),
-    "norm_bars_portfolio_weights": ("holds", "probe"),
-    "norm_bars_squared": ("holds", "probe"),
+    "norm_bars_portfolio_weights": ("proven", "derive"),
+    "norm_bars_squared": ("proven", "derive"),
     "norm_bars_order_trap": ("falsified", "probe"),
-    "matrix_norm_bars_frobenius": ("holds", "probe"),
-    "matrix_norm_bars_gram_trace": ("holds", "probe"),
+    "matrix_norm_bars_frobenius": ("proven", "derive"),
+    "matrix_norm_bars_gram_trace": ("proven", "derive"),
+    # a singular value decomposition has no definition row, and the
+    # matrix orders stay with the probe
     "matrix_norm_bars_spectral": ("holds", "probe"),
     "matrix_norm_bars_spectral_below_frobenius": ("holds", "probe"),
 }
@@ -418,7 +490,7 @@ def test_the_trap_row_names_the_two_numbers_that_differ():
 def test_the_triangle_inequality_fails_with_the_wrong_norms():
     # the control for the triangle row: the same distance is not bounded
     # by the sum of the largest magnitudes, and a witness says so
-    from mathema.lexicon import distance as lexicon_distance
+    from mathema._lexicon_numpy import distance as lexicon_distance
     p = _adjudicate(lexicon_distance,
                     "for x in R^n, y in R^n, f(x, y) <= ||x||_inf + ||y||_inf")
     assert p.verdict == "falsified" and p.counterexample, (p.verdict, p.note)
@@ -428,11 +500,12 @@ def test_the_unit_vector_row_needs_its_premise_for_the_zero_vector():
     # without the premise the zero vector divides by zero; the probe
     # over R^n does not draw that one point, so the row states the
     # premise rather than leaning on the draw
-    from mathema.lexicon import LEXICON, unit_vector
+    from mathema._lexicon_numpy import unit_vector
+    from mathema.lexicon import LEXICON
     law = LEXICON["norm_bars_unit_vector"]
     assert law.startswith("assuming ||x|| > 0, ")
     p = _adjudicate(unit_vector, law)
-    assert p.verdict == "holds", (p.verdict, p.note)
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
     with pytest.raises(FloatingPointError):
         with np.errstate(all="raise"):
             unit_vector(np.zeros(3))

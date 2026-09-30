@@ -46,7 +46,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import numpy
     import pandas
 
 LEXICON: dict[str, str] = {
@@ -989,86 +988,6 @@ def matmul(A, B):
     return A @ B
 
 
-def euclidean_length(x: "numpy.ndarray") -> float:
-    """The Euclidean length of a vector, `||x||`, which is also
-    `||x||_2`; it lies between `||x||_inf` and `||x||_1` and scales
-    with its argument ("norm_bars_euclidean", "norm_bars_two",
-    "norm_bars_chain", "norm_bars_homogeneous")."""
-    import numpy as np
-    return float(np.linalg.norm(x))
-
-
-def manhattan_length(x: "numpy.ndarray") -> float:
-    """The sum of the magnitudes of a vector's entries, `||x||_1`
-    ("norm_bars_one"). Claimed as `||x||_2` it is falsified with a
-    witness ("norm_bars_order_trap")."""
-    import numpy as np
-    return float(np.sum(np.abs(x)))
-
-
-def unit_vector(x: "numpy.ndarray") -> "numpy.ndarray":
-    """A vector scaled to unit length. It divides by zero at the zero
-    vector, which the premise `||x|| > 0` excludes
-    ("norm_bars_unit_vector")."""
-    import numpy as np
-    return x / np.linalg.norm(x)
-
-
-def portfolio_weights(scores: "numpy.ndarray") -> "numpy.ndarray":
-    """Long-only portfolio weights from positive scores: each score's
-    share of the total, so the weights sum to one and their L1 norm is
-    one ("norm_bars_portfolio_weights")."""
-    import numpy as np
-    return scores / np.sum(scores)
-
-
-def gram_trace(A: "numpy.ndarray") -> float:
-    """The trace of the Gram matrix `A @ A.T`, which is the squared
-    Frobenius norm of `A` ("matrix_norm_bars_gram_trace")."""
-    import numpy as np
-    return float(np.trace(A @ A.T))
-
-
-def largest_magnitude(x: "numpy.ndarray") -> float:
-    """The largest magnitude among a vector's entries, `||x||_inf`
-    ("norm_bars_inf")."""
-    import numpy as np
-    return float(np.max(np.abs(x)))
-
-
-def squared_length(x: "numpy.ndarray") -> float:
-    """A vector's squared length, `dot(x, x)`, which is `||x||^2`, the
-    square of the norm ("norm_bars_squared")."""
-    import numpy as np
-    return float(np.dot(x, x))
-
-
-def distance(x: "numpy.ndarray", y: "numpy.ndarray") -> float:
-    """The Euclidean distance between two vectors, `||x - y||`:
-    symmetric, zero between a vector and itself, and at most the sum
-    of the two lengths ("norm_bars_distance",
-    "norm_bars_distance_symmetric", "norm_bars_distance_zero",
-    "norm_bars_triangle")."""
-    import numpy as np
-    return float(np.linalg.norm(x - y))
-
-
-def frobenius_norm(A: "numpy.ndarray") -> float:
-    """The Frobenius norm of a matrix, the square root of the sum of
-    its squared entries, which is `||A||` ("matrix_norm_bars_frobenius")."""
-    import numpy as np
-    return float(np.sqrt(np.sum(A * A)))
-
-
-def largest_singular_value(A: "numpy.ndarray") -> float:
-    """The largest singular value of a matrix, its spectral norm
-    `||A||_2`, never above its Frobenius norm `||A||`
-    ("matrix_norm_bars_spectral",
-    "matrix_norm_bars_spectral_below_frobenius")."""
-    import numpy as np
-    return float(np.linalg.svd(A, compute_uv=False)[0])
-
-
 def scale_column(df: "pandas.DataFrame", c: float):
     """The `returns` column of a pandas DataFrame, scaled by `c`."""
     return df["returns"] * c
@@ -1430,25 +1349,6 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     ]),
     "add_two": (add_two, ["abs_bars_compound"]),
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
-    "euclidean_length": (euclidean_length, [
-        "norm_bars_euclidean", "norm_bars_two", "norm_bars_chain",
-        "norm_bars_homogeneous",
-    ]),
-    "manhattan_length": (manhattan_length, ["norm_bars_one",
-                                            "norm_bars_order_trap"]),
-    "largest_magnitude": (largest_magnitude, ["norm_bars_inf"]),
-    "unit_vector": (unit_vector, ["norm_bars_unit_vector"]),
-    "distance": (distance, ["norm_bars_distance",
-                            "norm_bars_distance_symmetric",
-                            "norm_bars_distance_zero", "norm_bars_triangle"]),
-    "portfolio_weights": (portfolio_weights, ["norm_bars_portfolio_weights"]),
-    "squared_length": (squared_length, ["norm_bars_squared"]),
-    "frobenius_norm": (frobenius_norm, ["matrix_norm_bars_frobenius"]),
-    "gram_trace": (gram_trace, ["matrix_norm_bars_gram_trace"]),
-    "largest_singular_value": (largest_singular_value, [
-        "matrix_norm_bars_spectral",
-        "matrix_norm_bars_spectral_below_frobenius",
-    ]),
     "scale_column": (scale_column, ["table_column_attribute",
                                     "table_column_item"]),
     "running_peak": (running_peak, ["vector_running_maximum"]),
@@ -1523,6 +1423,17 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "third_diagonal": (third_diagonal, ["dim_premise_square_matrix",
                                         "dim_premise_rectangular_matrix"]),
 }
+
+
+# the numpy examples import numpy at the top of their own module, so
+# the derive route reads them; numpy is an extra, so the module is
+# imported only when it is installed and the rows stay text without it
+try:
+    from . import _lexicon_numpy as _numpy_examples
+except ImportError:
+    _numpy_examples = None
+if _numpy_examples is not None:
+    EXAMPLE_FUNCTIONS.update(_numpy_examples.EXAMPLE_FUNCTIONS)
 
 
 def get(key: str | int) -> str:
