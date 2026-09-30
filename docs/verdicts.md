@@ -1,0 +1,62 @@
+# Verdicts and exit codes
+
+Every claim mathema adjudicates ends in one verdict, and every command
+ends in one of four exit codes. This page is the reference for both.
+[Guarantees and limits](guarantees.md) gives the reasoning behind each
+verdict, [the evidence ladder](evidence-ladder.md) ranks them, and
+[`mathema verify`](modes/verify.md) lists everything that fails the gate.
+
+## Verdicts
+
+| Verdict | Route | What it establishes | What it does not |
+|---|---|---|---|
+| `proven` | derive | The claim holds for every input in the declared domain, established by algebra in exact real arithmetic. On a finite integer domain, `derive:brute_force` has instead evaluated every point. The record keeps the route and a sketch naming the mechanism. | That floating point reproduces what the reals prove: every proof spawns a `<name>[float]` companion, the same relation run through the real code, whose verdict is its own. A point inside the domain where the mathematics is undefined, or where the source raises, falsifies the claim itself. |
+| `holds (n=...)` | probe | The real function survived exactly `n` executed trials without a counterexample, on seeded inputs biased toward domain edges, corners, poles and special values. The record keeps `n`, the sampling plan with its seed, and the confidence breakdown. | A probability of failure. No statistical bound is computed or implied. |
+| `falsified` | either | The real function, called at an in-domain point, violates the claim. That point is the **witness**, and a `falsified` always has one; it is kept permanently and replayed on every later run. A raise, a NaN computed from inputs that are not missing, or an infinity returned for a finite input is no value, so it falsifies every relation, `!=` included. | Why. A falsification may mean the code is wrong or the claim is, and [the CDD loop](tutorial.md) exists to tell those apart. |
+| `invalidated` | either | The claim was `proven` or `holds` in the previous record and the current code no longer supports it. The record keeps the previous verdict, what it regressed to, and the last commit where it was supported. | That it can be re-adjudicated away. It stays `invalidated` until the claim is supported again, or a person accepts it as a discovery or as history. |
+| `unknown` | either | Adjudication ran and decided nothing; the record keeps why each route stopped (unliftable, undecided, timed out). A symbolic disproof that no executed point reproduces lands here, flagged as a probable engine fault rather than reported as a bug in your code. | A pass. `verify` fails on an `unknown` in every mode until a person accepts it as risk. |
+| `skipped` | either | The claim could not be adjudicated as stated: misspecified, or a form the chosen route cannot evaluate. The record keeps the reason, with a [reason code](reason-codes.md). | A pass in strict mode. `--lenient` reports it and proceeds. |
+| `documented` | none | Of intent, not of a claim: stated intent a person has accepted with `mathema accept --intent`. | Anything about behaviour; it is the human rung of the evidence ladder. |
+| `declared` | none | Of a claim: authored and stored, awaiting adjudication. Of intent: stated, not yet accepted by a person. | Anything at all yet; it is the lowest rung. |
+
+A verdict may carry a colon subroute refining its base family,
+`skipped:misspecified` when the claim itself is malformed rather than
+the function unadjudicable. Everything before the colon is the base
+family, and the fold into supported, refuted, blocked and undecided uses
+only the base, so a subroute never changes what a verdict counts as, only
+says more precisely why. The `route` field follows the same convention:
+`derive:extensive`, `probe:semi_analytical` and `derive:brute_force` name
+the mechanism that decided.
+
+**Accepted risk** is not a verdict. It is a person's recorded decision to
+own an `unknown` or `skipped` gap, with their name, the date and their
+note. It stays visible in every report, and strict `verify` still refuses
+it. See [`mathema accept`](modes/accept.md).
+
+## What fails the gate
+
+`falsified`, `invalidated` and an unaccepted `unknown` fail `mathema
+verify` in every mode. `skipped` and accepted risk fail in the default
+strict mode and are reported, not failed, under `--lenient`. The full
+table, including tripped locks, unresolved names and acceptances the
+policy rejects, is on [`mathema verify`](modes/verify.md#what-fails-the-run).
+
+## Exit codes
+
+Every verb uses the same four, so a CI step can tell a failing gate
+apart from a broken invocation without parsing output:
+
+| Code | Meaning |
+|---|---|
+| 0 | ran, and nothing gated: claims adjudicated as stated, or the verb only reports |
+| 1 | ran, and the gate failed: a claim is falsified, invalidated or unknown, a claim is skipped or accepted as risk in strict mode, a lock is tripped, or an acceptance fails the policy |
+| 2 | could not run: a target that does not resolve, an unreadable or malformed file, a bad argument, a missing optional dependency |
+| 130 | interrupted (Ctrl-C or EOF) |
+
+The distinction that matters in CI is 1 against 2. A 1 is a real finding
+about your code, and the report says which claim; a 2 means mathema never
+got far enough to have an opinion, so treating the two alike hides a
+broken invocation as a failing test. `--lenient` moves accepted risk and
+skipped claims out of the gate and so can turn a 1 into a 0, but it never
+turns a 2 into either. [Gate a pipeline with mathema
+verify](gate-a-pipeline.md) shows each code from a real run.

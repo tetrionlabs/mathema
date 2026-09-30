@@ -57,8 +57,11 @@ to the tests they have, where a claim goes, and how to reach a passing
    declared layer.
 5. [Authoring claims](authoring.md): the four places a claim can live, and
    which one wins when two disagree.
-6. [`mathema verify`](modes/verify.md): the sweep that re-checks what
-   changed, and the table of what fails it.
+6. [`mathema coverage`](modes/coverage.md): which lines of each function
+   your tests, mathema's probes and its proofs have exercised, and the one
+   action that would raise the figure.
+7. [Gate a pipeline with mathema verify](gate-a-pipeline.md): the sweep
+   in CI, from the first red run to a green one.
 
 First command:
 
@@ -71,15 +74,14 @@ mathema audit mypkg
 For a platform engineer who wants the workflow file, the exit codes, and
 what to do when the gate fails on a claim nobody on the team wrote.
 
-1. [`mathema init`, the CI gate](modes/init.md#the-ci-gate-ci): `init
-   --ci` writes the GitHub Actions workflow, or the GitLab fragment, that
-   runs `mathema verify` on pushes to main and on pull requests, with the
-   install step marked for you to edit.
-2. [`mathema verify`](modes/verify.md): what fails the run in strict and in
-   lenient mode, and what an `unknown` claim on a library row means for the
-   gate.
-3. [Exit codes](cdd.md#exit-codes): the four codes every verb shares, and
-   why 1 and 2 are kept apart.
+1. [Gate a pipeline with mathema verify](gate-a-pipeline.md): the
+   workflow `init --ci` writes, the first red run read line by line, the
+   decision a library row nobody wrote asks of the team, strict against
+   lenient, and each exit code from a real run.
+2. [Verdicts and exit codes](verdicts.md): what each verdict establishes
+   and does not, and the four exit codes every verb shares.
+3. [`mathema verify`](modes/verify.md): the full table of what fails the
+   run in strict and in lenient mode.
 4. [Governance and audit](governance.md): who can decide what, what each
    decision records, and the integrity checksum that catches an edit made
    outside mathema.
