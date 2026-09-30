@@ -600,7 +600,7 @@ def _born_falsified_hint(key: str, probes: list,
         clause = _policy_clause(p.name, p.statement, pol) if pol else None
         if clause:
             lines.append(f"note {key}: {p.name} falsified on first adjudication; "
-                         + clause.split(": ", 1)[1].replace(
+                         + clause[len(str(p.name)):].lstrip(":,").strip().replace(
                              "; change the word or the code",
                              ". Change the word in the claims file, or change f."))
             fresh.remove(p)

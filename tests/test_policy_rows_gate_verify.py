@@ -101,3 +101,28 @@ def test_accepting_an_unaccounted_raise_as_a_discovery_retires_it(project, capsy
 
 def test_the_switch_is_on():
     assert verify.POLICY_ROWS_GATE is True
+
+
+def test_verify_after_write_names_the_contradicted_row(tmp_path, monkeypatch, capsys):
+    (tmp_path / "pw.py").write_text(textwrap.dedent('''
+        # SPDX-License-Identifier: BUSL-1.1
+        # Copyright 2026 Tetrion Ltd
+
+
+        def clamp(x: float) -> float:
+            return max(0.0, min(1.0, x))
+    '''))
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "pw.claims.yaml").write_text(
+        'pw.clamp:\n  claims:\n    - name: unit\n'
+        '      statement: "for x in R, 0 <= f(x) <= 1"\n')
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.chdir(tmp_path)
+    assert main(["claims", "pw.clamp", "--write", "--root", str(tmp_path)]) == 0
+    capsys.readouterr()
+    assert main(["verify", "--root", str(tmp_path)]) == 1
+    out = capsys.readouterr().out
+    note = next(ln for ln in out.splitlines() if ln.startswith("note pw.clamp:"))
+    assert note.startswith("note pw.clamp: missing[x] falsified on first adjudication; "
+                           "f drops a missing x (nan in, 1.0 out)")
