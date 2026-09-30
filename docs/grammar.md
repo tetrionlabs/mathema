@@ -457,6 +457,8 @@ readable and lets you talk about things that are not parameters:
 | `let c be [-1e6,1e6], for x in [0,10], f(x) + c >= 0` | a free variable over a range |
 | `let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0` | a typed free variable |
 | `let compute_square_root = numpy.sqrt, for x in [0, 100], compute_square_root(x) >= 0` | a long name, kept readable |
+| `for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], assuming std(returns, ddof=1) > 0, f(s(returns, c)) ~= f(returns)` | a transform of a sequence, by dotted path: `s(returns, c)` scales every entry by `c` |
+| `for a in [-100, 100]^n, let s = mathema.f.shift_seq, let c be [-5, 5], f(s(a, c)) == f(a)` | the shift of a sequence: `s(a, c)` adds `c` to every entry |
 
 A function the claim names takes keyword arguments the way its own
 callers pass them, each a literal or a name, and the record keeps them
@@ -659,6 +661,8 @@ watered down:
 | `assuming n >= 5, for xs in R^n, f(xs) == xs[4]` | a vector at least five long |
 | `assuming n >= 3, for a in R^(n,n), f(a) == a[2][2]` | a square matrix at least 3 by 3 |
 | `assuming min(m, n) >= 3, for a in R^(m,n), f(a) == a[2][2]` | a rectangular matrix with at least three rows and three columns |
+| `assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n, f(returns) >= 0` | a vector at least two long, by the parameter's `dim` |
+| `for returns in [-0.1, 0.1]^n, assuming std(returns, ddof=1) > 0, is_defined(f)` | a statistic of the vector; the premise's `std` is computed exactly, so a constant vector is outside |
 
 A vector or matrix space is never empty, since `R^n` already means at
 least one element, so a dimension premise is needed only for a bound

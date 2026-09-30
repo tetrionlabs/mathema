@@ -69,6 +69,9 @@ names.
 
 ## Verdict vocabulary
 
+The reference page for verdicts is [Verdicts and exit
+codes](verdicts.md); the method's own account of them follows.
+
 | Verdict | Route | Means |
 |---|---|---|
 | `proven` | derive | Established by algebra over the whole declared domain, in exact real arithmetic. That is all it says: the computation in float64 is its own claim, the `<name>[float]` companion every proof spawns (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)). A point inside the domain where the mathematics is undefined, or where the function's own source raises, still falsifies the claim itself; a failure of the computation there, an overflow say, falsifies the `[float]` companion instead; see [the sigmoid case study](case-studies.md#the-sigmoid-calculus-as-a-specification). |
@@ -200,7 +203,8 @@ silently.
 ## Exit codes
 
 Every verb uses the same four, so a CI step can tell a failing gate
-apart from a broken invocation without parsing output:
+apart from a broken invocation without parsing output (the reference
+page is [Verdicts and exit codes](verdicts.md#exit-codes)):
 
 | Code | Meaning |
 |---|---|

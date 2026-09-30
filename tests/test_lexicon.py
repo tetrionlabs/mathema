@@ -134,6 +134,12 @@ PINNED: dict = {
     "space_excluded_fixed": ("falsified", "A of shape (31, 15)"),
     "space_excluded_by_construction": "proven",
     "dim_premise_against_fixed": "skipped",
+    "let_scale_seq_sharpe_premise": "proven",
+    "let_scale_seq_sharpe_trap": ("falsified", "returns=[0.0]"),
+    "let_shift_seq_range": "holds",
+    "let_shift_seq_mean_moves": "falsified",
+    "assuming_spread_positive": "proven",
+    "dim_call_premise": "holds",
 }
 if importlib.util.find_spec("mathema_language") is None:
     PINNED.update({key: "skipped" for key in _LANGUAGE_ROWS})
