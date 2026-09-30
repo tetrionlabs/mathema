@@ -1209,6 +1209,8 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                      if isinstance(value, Vec) else value.subs(pins))
         return value
 
+    empty_only = [False]
+
     def decide():
         required, provided = Obligations(), Obligations()
         known_lengths = dict(fixed_lengths)
@@ -1274,12 +1276,12 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                                      provided.min_length.get(length, 1))
             if have < least:
                 unmet.append(("length", length, least, have))
-        if unmet and not unstated and all(
-                item[0] == "length" and item[2] == 1 for item in unmet):
-            # a least or greatest element over a domain that admits the
-            # empty vector: the relation is decided for every length of
-            # at least one, and the empty vector is left to sampling
-            return {"empty": True}
+        for length, fixed in sorted(known_lengths.items(), key=str):
+            # a domain or premise that fixes the length at 0 names the
+            # empty vector, where a division by the length has no value
+            if fixed == 0 and not any(item[0] == "length" and item[1] == length
+                                      for item in unmet):
+                unmet.append(("length", length, 1, 0))
         for expr, text in required.nonzero:
             if not _implied_nonzero(expr, provided_nonzero,
                                     {L: max(provided.min_length.get(L, 1), k)
@@ -1287,9 +1289,14 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                                     {ib: L for ib, L in seqs.values()}):
                 unmet.append(("nonzero", expr, text,
                               max(provided.min_length.values() or [1])))
-        if unstated or unmet:
+        # only the empty vector unmet: the relation is decided for every
+        # length of at least one, and the empty vector is left to sampling
+        empty_only[0] = bool(unmet) and not unstated and all(
+            item[0] == "length" and item[2] == 1 for item in unmet)
+        if (unstated or unmet) and not empty_only[0]:
             return {"unmet": unmet, "unstated": unstated}
-        shortest.update(required.min_length)
+        if not empty_only[0]:
+            shortest.update(required.min_length)
         rel = cj.relation
         if isinstance(lv, Vec) or isinstance(rv, Vec):
             if not (isinstance(lv, Vec) and isinstance(rv, Vec)) \
@@ -1326,6 +1333,8 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     through = f"through the definition rows {_rows_text(inlined.uses)}"
     try:
         outcome = _with_timeout(decide, cap)
+        if empty_only[0] and outcome.get("proven"):
+            outcome = {"empty": True}
     except TimeoutError:
         return ProofResult(
             "undecided", sketch=f"{through}, the sequence lowering "

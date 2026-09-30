@@ -86,7 +86,7 @@ def test_double_bars_around_a_matrix_are_its_norm_not_its_determinant():
 ])
 def test_an_order_the_bars_do_not_read_is_refused_naming_the_accepted_ones(bad):
     with pytest.raises(InvalidConjecture,
-                       match=r"Write 1, 2, a whole number such as _3, or inf"):
+                       match=r"Write _1, _2, a whole number such as _3, or _inf"):
         claim(bad)
 
 
@@ -197,16 +197,26 @@ def test_the_two_spellings_are_one_claim_with_one_fingerprint():
 
 @pytest.mark.parametrize("bad, shown", [
     ("for x in R^n, |||x||| >= 0", "|||x|||"),
+    ("for x in R^n, ||||x|||| >= 0", "||||x||||"),
     ("for x in R^n, ‖‖x‖‖ >= 0", "‖‖x‖‖"),
 ])
 def test_three_bars_are_refused_not_read(bad, shown):
     with pytest.raises(InvalidConjecture, match="more bars than a norm reads") as e:
         claim(bad)
-    assert shown in str(e.value)
+    assert f"`{shown}`" in str(e.value), str(e.value)
+
+
+def test_an_order_glyph_on_the_opening_bars_is_refused():
+    with pytest.raises(InvalidConjecture) as e:
+        claim("for x in R^n, ‖₂x‖ >= 0")
+    assert str(e.value).startswith(
+        "`₂` after the opening bars is not read; the order goes after the "
+        "closing bars, ‖x‖₂"), str(e.value)
 
 
 @pytest.mark.parametrize("bad, written", [
     ("for x in R^n, ||x||_0 >= 0", "`_0`"),
+    ("for x in R^n, ||x||_02 >= 0", "`_02`"),
     ("for x in R^n, ||x||_0.5 >= 0", "`_0.5`"),
     ("for x in R^n, ||x||_p >= 0", "`_p`"),
     ("for x in R^n, ‖x‖∞∞ >= 0", "`∞∞`"),
@@ -218,8 +228,25 @@ def test_the_refusal_names_what_was_written_and_the_claim(bad, written):
         claim(bad)
     said = str(e.value)
     assert said.startswith(written + " after the closing bars is not an order"), said
+    assert "Write _1, _2, a whole number such as _3, or _inf (also _oo or _∞)" in said
     assert "norm(x, 0.5)" in said and "let p be 3, then write norm(x, p)" in said
     assert bad in said, said
+
+
+def test_the_premise_spellings_are_one_fingerprint():
+    from mathema.spec import fingerprint_text
+    bars = claim("assuming ||x|| > 0, for x in R^n, ||x||_2 > 0")
+    words = claim("assuming norm(x) > 0, for x in R^n, norm(x, 2) > 0")
+    assert bars.assuming == words.assuming == "assuming norm(x) > 0"
+    assert fingerprint_text(bars) == fingerprint_text(words)
+    # the display keeps the author's spelling in the premise too, in the
+    # mode of the statement
+    assert render_claim_text(bars, unicode=False).startswith("assuming ||x|| > 0, ")
+    assert render_claim_text(bars, unicode=True).startswith("assuming ‖x‖ > 0, ")
+    assert render_claim_text(words, unicode=True).startswith("assuming norm(x) > 0, ")
+    # the same fold takes an absolute value in a premise
+    assert fingerprint_text(claim("assuming |x| > 0, for x in [-1, 1], f(x) >= 0")) \
+        == fingerprint_text(claim("assuming abs(x) > 0, for x in [-1, 1], f(x) >= 0"))
 
 
 def test_a_bad_order_on_a_decorated_function_names_the_function():
@@ -327,6 +354,10 @@ _RANK_ONE = np.array([[1.0, 2.0], [2.0, 4.0]])
     (np.zeros(3), None, 0.0),
     (np.zeros(3), np.inf, 0.0),
     (np.zeros((2, 2)), 1, 0.0),
+    # the boundaries: a vector of one entry, a 1 by 1 matrix (which is
+    # not a matrix to the lift, and still a matrix to numpy's `ord`)
+    (np.array([-3.0]), np.inf, 3.0),
+    (np.array([[-2.0]]), 1, 2.0),
     # rank one: the Frobenius norm equals the spectral norm
     (_RANK_ONE, None, 5.0),
     (_RANK_ONE, 2, 5.0),
@@ -492,6 +523,20 @@ def test_the_largest_magnitude_of_the_empty_vector_is_left_to_the_probe(law):
     assert p.verdict != "proven", (p.verdict, p.note)
     assert "holds for every length of at least one, and the empty vector is " \
            "left to the probe" in (p.note or ""), p.note
+
+
+@pytest.mark.parametrize("law", [
+    "for pred in R^0, actual in R^0, f(pred, actual) ~= ||pred - actual|| / sqrt(len(pred))",
+    "for pred in R^n, actual in R^n, assuming len(pred) == 0, "
+    "f(pred, actual) ~= ||pred - actual|| / sqrt(len(pred))",
+])
+def test_the_root_mean_square_error_of_the_empty_vector_is_left_to_the_probe(law):
+    # `rmse([], [])` is nan (a division by the length); at 7dcd05c the
+    # sequence route proved this over the explicit empty domain
+    from mathema._lexicon_numpy import rmse
+    p = _adjudicate(rmse, law)
+    assert p.verdict != "proven", (p.verdict, p.note)
+    assert "the empty vector is left to the probe" in (p.note or ""), p.note
 
 
 def test_the_empty_vector_falsifies_the_largest_magnitude_with_a_witness():

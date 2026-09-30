@@ -262,8 +262,8 @@ name the other orders; on a matrix `_1` is the largest column sum, `_2`
 the spectral norm and `_inf` the largest row sum, numpy's `ord`. The
 order is never a superscript, so <code>&#124;&#124;x&#124;&#124;^2</code>
 is the square of the norm. A claim written with the bars and one
-written with `norm(...)` are one claim; the record shows the spelling
-you wrote.
+written with `norm(...)` are one claim: the claims file keeps the
+spelling you wrote, and the record's statement is the call form.
 
 ## Domains: where the claim applies
 

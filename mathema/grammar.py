@@ -2105,6 +2105,11 @@ def bars_over_matrices(names):
 _ORDERED_MATRICES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
     "ordered_matrices", default=frozenset())
 
+#: math-constant names (`pi`, `oo`, `inf`, `infinity`) that a real
+#: parameter shadows while a claim is rendered: each stays a symbol
+_SHADOWED_CONSTANTS: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "shadowed_constants", default=frozenset())
+
 #: calls whose value is a matrix when their argument is one
 _MATRIX_VALUED_CALLS = frozenset({"inv", "transpose", "matrix_power", "pinv",
                                   "kron", "outer", "I", "abs", "Abs"})
@@ -2182,8 +2187,8 @@ def _order_refusal(written: str, inner: str) -> str:
     wrote after the closing bars, the orders that are read, and the
     call to write for any other order."""
     return (f"`{written}` after the closing bars is not an order the norm "
-            f"reads. Write 1, 2, a whole number such as _3, or inf (also oo "
-            f"or ∞). For a fractional or zero order write the call "
+            f"reads. Write _1, _2, a whole number such as _3, or _inf (also "
+            f"_oo or _∞). For a fractional or zero order write the call "
             f"norm({inner}, 0.5); for an order held in a name bind it "
             f"first, let p be 3, then write norm({inner}, p)")
 
@@ -2201,8 +2206,9 @@ def _norm_order(token: str, inner: str) -> str:
     """
     if token in _INFINITE_ORDERS:
         return "inf"
-    if token.isascii() and token.isdigit() and int(token) >= 1:
-        return str(int(token))
+    if token.isascii() and token.isdigit() and token == str(int(token)) \
+            and int(token) >= 1:
+        return token
     raise UnreadableSpelling(_order_refusal(f"_{token}", inner))
 
 
@@ -2241,7 +2247,18 @@ def _double_bar_glyphs(text: str) -> str:
         return text[at + len(opening):start] if at >= 0 else "..."
 
     def glyph_bars(m):
-        return "||" + _glyph_order(m.group(1), inner_before(m.start(), "‖"))
+        run = m.group(1)
+        after = text[m.end():m.end() + 1]
+        if run and after and (after.isalnum() or after in "_("):
+            # a glyph run on an OPENING bar (`‖₂x‖`): the order belongs
+            # after the closing bars
+            rest = text[m.end():]
+            close = rest.find("‖")
+            inner = rest[:close] if close >= 0 else rest
+            raise UnreadableSpelling(
+                f"`{run}` after the opening bars is not read; the order goes "
+                f"after the closing bars, ‖{inner}‖{run}")
+        return "||" + _glyph_order(run, inner_before(m.start(), "‖"))
 
     def ascii_bars(m):
         return "||" + _glyph_order(m.group(1), inner_before(m.start(), "||"))
@@ -2275,9 +2292,13 @@ def _fold_bars(text: str) -> str:
         inner = close_of.get(o + 1)
         if inner is not None and inner == c - 1:
             if close_of.get(o + 2) == c - 2:
-                content = text[o + 3:c - 2]
+                # the whole run of bars the author wrote, however many
+                lo, hi = o, c
+                while lo > 0 and close_of.get(lo - 1) == hi + 1:
+                    lo, hi = lo - 1, hi + 1
+                content = text[lo:hi + 1].strip("|")
                 raise UnreadableSpelling(
-                    f"`{text[o:c + 1]}` has more bars than a norm reads: "
+                    f"`{text[lo:hi + 1]}` has more bars than a norm reads: "
                     f"write ||{content}|| for the norm of {content}, or "
                     f"|| |{content}| || with a space for the norm of its "
                     f"absolute value")
@@ -2553,9 +2574,12 @@ def _canonical_assuming(clause: str) -> str:
     and an authored `assuming f is defined` are the same claim
     everywhere downstream, same statement, same fingerprint. The
     dimension sugar (`len`/`rows`/`cols`) folds to canonical `dim`
-    here too, for the same reason: a length premise has one identity
-    however it was spelled."""
-    return _fold_dim_sugar(_DEFINED_CALL.sub(r"\1 is defined", clause))
+    here too, and the bars fold to their calls (`||x||` to `norm(x)`,
+    `|x|` to `abs(x)`, an infinite order to `inf`), for the same
+    reason: a premise has one identity however it was spelled; the
+    display puts the author's bars back."""
+    folded = _norm_call_order(_fold_bars(apply_unicode_synonyms(clause)))
+    return _fold_dim_sugar(_DEFINED_CALL.sub(r"\1 is defined", folded))
 
 
 _OUTCOME_MARKER = re.compile(r"=>|-->|⟹|\\implies")
@@ -2817,7 +2841,7 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         # either already-adjudicated Conjecture text (misspecification
         # would have been caught earlier) or a caller's own direct,
         # exploratory use, not itself a claim-validation surface.
-        if node.id in _MATH_ATTRS:
+        if node.id in _MATH_ATTRS and node.id not in _SHADOWED_CONSTANTS.get():
             return _MATH_ATTRS[node.id]
         if node.id in matrix_names:
             return sympy.MatrixSymbol(node.id, _MATRIX_RENDER_DIM,
@@ -3573,10 +3597,15 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     written, never as `A*B = A*B`."""
     funcs = funcs | {"f"}
     token = _ORDERED_MATRICES.set(frozenset(matrix_names))
+    # a real parameter named for a constant (`pi`, `inf`) is a symbol
+    # here, so `inf + 1` stays `inf + 1` rather than folding into the
+    # constant; `suppress_glyphs` names exactly those parameters
+    shadow = _SHADOWED_CONSTANTS.set(frozenset(suppress_glyphs) & set(_MATH_ATTRS))
     try:
         expr = _node_to_sympy(ast.parse(text, mode="eval"), funcs)
     finally:
         _ORDERED_MATRICES.reset(token)
+        _SHADOWED_CONSTANTS.reset(shadow)
     def respell(s: str) -> str:
         s = _abs_calls_to_bars(s.replace("**", "^"))
         if not unicode:

@@ -316,12 +316,12 @@
  },
  "norm_bars_unit_vector": {
   "input": "assuming ||x|| > 0, for x in R^n, ||f(x)|| ~= 1",
-  "unicode": "assuming ||x|| > 0, ∀ x ∈ ℝⁿ ∪ {∅}, ‖f(x)‖ ≈ 1",
+  "unicode": "assuming ‖x‖ > 0, ∀ x ∈ ℝⁿ ∪ {∅}, ‖f(x)‖ ≈ 1",
   "ascii": "assuming ||x|| > 0, for x in R^n|missing, ||f(x)|| ~= 1"
  },
  "norm_bars_direction": {
   "input": "assuming ||x|| > 0, for x in R^n, f(x) ~= x / ||x||",
-  "unicode": "assuming ||x|| > 0, ∀ x ∈ ℝⁿ ∪ {∅}, f(x) ≈ x/‖x‖",
+  "unicode": "assuming ‖x‖ > 0, ∀ x ∈ ℝⁿ ∪ {∅}, f(x) ≈ x/‖x‖",
   "ascii": "assuming ||x|| > 0, for x in R^n|missing, f(x) ~= x/||x||"
  },
  "norm_bars_distance": {
@@ -581,7 +581,7 @@
  },
  "infinity_symbol": {
   "input": "∀ x ∈ [0, ∞), f(x) ≥ 0",
-  "unicode": "∀ x ∈ [0.0, inf) ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "unicode": "∀ x ∈ [0.0, ∞) ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
   "ascii": "for x in [0.0, inf):float|missing, f(x) >= 0"
  },
  "floor_brackets_unicode": {
@@ -656,7 +656,7 @@
  },
  "let_pseudo_infinity": {
   "input": "let |inf| be 1e12, for x in [0, oo], f(x) >= 0",
-  "unicode": "let |∞| be 1e+12, ∀ x ∈ [0.0, inf] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "unicode": "let |∞| be 1e+12, ∀ x ∈ [0.0, ∞] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
   "ascii": "let |inf| be 1e+12, for x in [0.0, inf]:float|missing, f(x) >= 0"
  },
  "stress_gauge_invariance": {

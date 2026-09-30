@@ -1268,7 +1268,13 @@ def _claim(law: str, name: str | None, source: str, route: str,
     let_pseudo_inf: float | None = None
     while True:
         prev = text
-        new_assuming, text = extract_assuming_clause(text)
+        try:
+            new_assuming, text = extract_assuming_clause(text)
+        except UnreadableSpelling as e:
+            said = str(e)
+            if law.strip() not in said:
+                said = f"{said}, in the claim {law.strip()!r}"
+            raise InvalidConjecture(said) from e
         if new_assuming is not None:
             if not new_assuming.strip()[len("assuming"):].strip():
                 raise InvalidConjecture(
@@ -2052,6 +2058,9 @@ def _interpret_assumption(cj, conjectures):
 _CONSTANT_SPELLINGS = {
     "e": "write exp(1) for Euler's number",
     "pi": "write acos(-1) for pi",
+    "oo": "write inf for infinity",
+    "inf": "write oo for infinity",
+    "infinity": "write inf for infinity",
 }
 
 
@@ -4581,7 +4590,11 @@ def _validate_claim(cj, statement: str, note: str, facts,
                         if isinstance(n, ast.Name) and id(n) not in orders}
     from ._math_vocab import _MATH_ATTRS
     from .grammar import reserved_names
-    vocab_names = set(_MATH_ATTRS) | set(reserved_names()) | {"f"}
+    # a parameter shadowing a math constant (`pi`, `inf`) is noted once,
+    # by `_shadowed_constants` with the spelling that still reaches the
+    # constant, so those names are left out here
+    vocab_names = (set(_MATH_ATTRS) | set(reserved_names()) | {"f"}) \
+        - set(MATH_CONSTANTS)
     for name in sorted(claim_names & param_set & vocab_names):
         if name == "f":
             note = (f"{note}; 'f' names both the function under test and "
