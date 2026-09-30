@@ -3043,7 +3043,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             except Exception:
                 summary = None
             sketch = "function body is not derivable"
-            if summary:
+            if facts.tree is None:
+                sketch = ("function body could not be read: a builtin "
+                          "or compiled function has no Python source")
+            elif summary:
                 sketch = f"{sketch}, {summary}"
             else:
                 sketch = (f"{sketch} in v1: contains a loop, branch, recursion, "
