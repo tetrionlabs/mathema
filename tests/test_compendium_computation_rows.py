@@ -178,7 +178,7 @@ def test_the_companion_sketch_names_the_covered_calls_overflow_region(ex):
     assert parent.verdict == "proven", (parent.verdict, parent.note)
     assert companion.verdict == "falsified", (companion.verdict,
                                               companion.note)
-    assert "x=1000" in (companion.counterexample or "")
+    assert "x = 1000" in (companion.counterexample or "")
     assert ("the covered call numpy.exp is overflow-safe only for "
             "x <= 709.78") in (companion.sketch or ""), companion.sketch
 

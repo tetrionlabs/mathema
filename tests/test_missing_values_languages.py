@@ -15,7 +15,7 @@ import mathema
 
 from tests.test_missing_values_core import (FALSIFIED, PROVEN,
                                             PROVEN_OR_HOLDS, assert_row,
-                                            run, stage, witness)
+                                            run, witness)
 
 needs_language = pytest.mark.skipif(
     importlib.util.find_spec("mathema_language") is None,

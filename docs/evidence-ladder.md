@@ -82,7 +82,7 @@ derive           one        proven
 derive           one[float] holds
 derive           missing[x] holds
 derive           one        proven
-derive           one[float] falsified x=-1.79769e+308
+derive           one[float] falsified x = -1.79769e+308
 derive           missing[x] holds
 derive:math_only one        proven
 ```

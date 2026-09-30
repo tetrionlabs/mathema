@@ -1806,7 +1806,7 @@ def _fmt(args: tuple, names: tuple[str, ...] | None = None,
         pairs = list(zip(names, args))
         if shown is not None and any(n in shown for n, _ in pairs):
             pairs = [(n, a) for n, a in pairs if n in shown]
-        return ", ".join(f"{n}={_fmt_value(a)}" for n, a in pairs)
+        return ", ".join(f"{n} = {_fmt_value(a)}" for n, a in pairs)
     return "(" + ", ".join(_fmt_value(a) for a in args) + ")"
 
 

@@ -1425,7 +1425,7 @@ def total_exposure(positions: list) -> float:
 def risk_label(score: "Optional[float]") -> str:
     """"high" above one half, else "low": `nan > 0.5` is False, so a
     missing score reads as "low" (a drop), and `None` raises."""
-    return "high" if score > 0.5 else "low"
+    return "high" if score > 0.5 else "low"  # type: ignore[operator]
 
 
 def average_return(returns: "numpy.ndarray") -> float:

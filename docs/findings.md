@@ -36,7 +36,7 @@ mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
            for a in [0, 100] : int, b in [0, 100] : int
   FALSIFY between_reals: for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)
            chained comparison falsified at link 1: min(a, b) <= f(a, b); at a = nan f gave nan back; at b = nan f gave nan back
-           counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
+           counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
   holds   missing[a]: missing(f, a) propagates   [default for a float, which may be nan; confirmed on the 46 draws of between_reals. Keep it by writing it (mathema claims mid.midpoint --write), or change the word to raises or drops if f should do otherwise]
   holds   missing[b]: missing(f, b) propagates   [default for a float, which may be nan; confirmed on the 46 draws of between_reals. Keep it by writing it (mathema claims mid.midpoint --write), or change the word to raises or drops if f should do otherwise]
 ```
@@ -181,15 +181,15 @@ Among the results, all found with no claims written:
 ```text
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
            derive could not decide it (claim statement not derivable against the recognized fold: 'x' (a sequence) has no single scalar value outside indexing or an f(...) call); the probe decided it; at alpha = nan f gave nan back; at x = [nan, nan, nan, nan, nan, nan, ...] f gave nan back
-           counterexample ([-3.66547, 0.948403, 5.79621, -0.912667, -8.49899, 0.624936, -0.968484, -2.57127], -2.12558e+211): f returned -inf, and an infinity for a finite input is no value
+           counterexample x = [-3.66547, 0.948403, 5.79621, -0.912667, -8.49899, 0.624936, -0.968484, -2.57127], alpha = -2.12558e+211: f returned -inf, and an infinity for a finite input is no value
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
            at alpha = nan f gave nan back; at x = [null, null, null, null, null] f raised TypeError; at x = [nan, nan, nan, nan, nan, nan, ...] f gave nan back
-           counterexample ([1.52658, -6.42162, -9.58658, 8.28692, -6.47385, 8.5393, 5.14559, -0.57719], -9.78935): 137842172.74570563 vs -100740237.52213857
+           counterexample x = [1.52658, -6.42162, -9.58658, 8.28692, -6.47385, 8.5393, 5.14559, -0.57719], alpha = -9.78935: 137842172.74570563 vs -100740237.52213857
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ; missing for x (list) means null or nan; missing for alpha (float) means nan
   FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
            the float64 computation of scale_equivariant ran at 13 points: nan, null, every corner and 0 interior points; unbounded directions (x, alpha) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at alpha = nan f gave nan back; at x = [null, null], alpha = -1.8e+308 f raised TypeError; at x = [null], alpha = -1.8e+308 it converts the null slot to an absent result; at x = [nan] f gave nan back
-           counterexample x=[-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha=-1.79769e+308, c=-5
+           counterexample x = [-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha = -1.79769e+308, c = -5
            [mathematics sound, implementation:numerical-instability]
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ; missing for x (list) means null or nan; missing for alpha (float) means nan

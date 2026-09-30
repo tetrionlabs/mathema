@@ -227,8 +227,8 @@ for route in ["probe", "derive"]:
 <!-- example: just-below output -->
 ```text
 probe   holds
-        fails by 1e-10 at (0), within the default tolerance (1e-09); at x = nan f returned -1e-10, so it drops the hole
-derive  falsified x=0.0616333
+        fails by 1e-10 at x = 0, within the default tolerance (1e-09); at x = nan f returned -1e-10, so it drops the hole
+derive  falsified x = 0.0616333
         reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
 ```
 
@@ -438,7 +438,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: half-power output -->
 ```text
-falsified (-1): f returned the complex value 6.12323e-17+1j, which a real claim reads as a raise; narrow the claim's domain to where every call is real, or annotate the function complex
+falsified x = -1: f returned the complex value 6.12323e-17+1j, which a real claim reads as a raise; narrow the claim's domain to where every call is real, or annotate the function complex
 ```
 
 The derive route falsifies it too, with an executed witness. A function
@@ -544,7 +544,7 @@ for law in ["∫(f(x), x, -oo, oo) == 1",
 ```text
 ∫(f(x), x, -oo, oo) == 1        proven
 f(x) >= 0                       proven    ∀ x ∈ ℝ
-  [float]                       falsified x=-1.79769e+308
+  [float]                       falsified x = -1.79769e+308
 let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ ℝ
   [float]                       holds
 ```

@@ -99,26 +99,26 @@ def ema(x: list, alpha: float) -> float:
 >>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (-10, 10)})
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
-           counterexample alpha=-5.44324 -> -504886.9526187774, alpha=10 -> -2491080.279764588 (not increasing)
+           counterexample alpha = -5.44324 -> -504886.9526187774, alpha = 10 -> -2491080.279764588 (not increasing)
   FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
-           counterexample alpha=-8.34575 -> 1100.270649780719, alpha=10 -> 1138.3250235869998 (not decreasing)
+           counterexample alpha = -8.34575 -> 1100.270649780719, alpha = 10 -> 1138.3250235869998 (not decreasing)
   FALSIFY affine[alpha]: d(f(x, alpha), alpha, alpha) = 0
-           counterexample alpha=8.52571, h=0.02: curvature estimate 3.64706e+06 does not settle affine
+           counterexample alpha = 8.52571, h = 0.02: curvature estimate 3.64706e+06 does not settle affine
   FALSIFY convex[alpha]: d(f(x, alpha), alpha, alpha) >= 0
-           counterexample alpha=1.55438, h=0.02: curvature estimate -49.227 does not settle convex
+           counterexample alpha = 1.55438, h = 0.02: curvature estimate -49.227 does not settle convex
   FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
-           counterexample alpha=7.32889, h=0.02: curvature estimate 4463.56 does not settle concave
+           counterexample alpha = 7.32889, h = 0.02: curvature estimate 4463.56 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (968 entries across 192 draws, sizes (2, 1) to (8, 1))
   holds   is_representation_safe[alpha]: is_representation_safe(alpha) (20 draws)
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([-993714, 311292, -166437, 620054, 0, 999998, -999998], 6.79181): -999998.0 vs -53425523112.88785
+           counterexample x = [-993714, 311292, -166437, 620054, 0, 999998, -999998], alpha = 6.79181: -999998.0 vs -53425523112.88785
   FALSIFY bounded_upper: f(x, alpha) <= max(x)
-           counterexample ([551081, 0, 0, 937864, -860102, -288141, 726070], -4.23217): 10840391161.550304 vs 937863.7282631358
+           counterexample x = [551081, 0, 0, 937864, -860102, -288141, 726070], alpha = -4.23217: 10840391161.550304 vs 937863.7282631358
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([567047, -597790, -1e+06, 223930, 683724, -934060, -933610], -1.67919): 425108676.6026794 vs -181372134.92932475
+           counterexample x = [567047, -597790, -1e+06, 223930, 683724, -934060, -933610], alpha = -1.67919: 425108676.6026794 vs -181372134.92932475
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
   holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha) (227 entries across 51 draws, sizes (1, 1) to (8, 1))

@@ -112,7 +112,7 @@ def test_a_false_claim_over_a_finite_domain_is_falsified_with_its_point(
     # the witness came from executing the function at an admitted point,
     # so the route says so rather than being flattened to a probe label
     assert p.route == "derive:brute_force", p.route
-    assert "n=2" in (p.counterexample or ""), p.counterexample
+    assert "n = 2" in (p.counterexample or ""), p.counterexample
 
 
 def test_a_real_domain_never_takes_this_route(divisor_count):

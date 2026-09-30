@@ -657,7 +657,7 @@ def test_conjecture_pipeline_core():
     assert by["odd"].verdict == "proven"
     assert by["nonnegative"].verdict == "falsified" and by["nonnegative"].counterexample
     assert by["shift_aux"].verdict == "falsified"     # aux var sampled and reported
-    assert "c=" in by["shift_aux"].counterexample
+    assert "c = " in by["shift_aux"].counterexample
     assert by["evil"].verdict == "skipped" and "disallowed" in by["evil"].note
     assert "funcs=" not in by["evil"].note   # never suggest binding a dunder
     assert by["attr"].verdict == "skipped"

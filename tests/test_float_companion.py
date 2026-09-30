@@ -322,7 +322,7 @@ def test_a_numpy_overflow_falsifies_the_companion_at_the_corner(
     comp = probes["law[float]"]
     assert comp.verdict == "falsified", comp.note
     assert "f returned inf" in comp.sketch
-    assert comp.counterexample and "x=" in comp.counterexample
+    assert comp.counterexample and "x = " in comp.counterexample
 
 
 def add(a: float, b: float) -> float:

@@ -220,7 +220,7 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if ok:
             return True
         direction = "increasing" if increasing else "decreasing"
-        return f"{target}={x1:.6g} -> {v1!r}, {target}={x2:.6g} -> {v2!r} (not {direction})"
+        return f"{target} = {x1:.6g} -> {v1!r}, {target} = {x2:.6g} -> {v2!r} (not {direction})"
 
     result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
     return _with_no_value_note(result, fn, target, cj, no_value)
@@ -312,7 +312,7 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
              curvature <= tol)
         if ok:
             return True
-        return (f"{target}={x0:.6g}, h={h:.3g}: curvature estimate "
+        return (f"{target} = {x0:.6g}, h = {h:.3g}: curvature estimate "
                 f"{curvature:.6g} does not settle {kind}")
 
     result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
@@ -3591,7 +3591,7 @@ def _matrix_output_probe(prop):
                 if raised and not any(is_missing(v) for v in filled):
                     checked += 1
                     return ("falsified", checked,
-                            f"{_fmt(tuple(filled))}: f raised "
+                            f"{_fmt(tuple(filled), tuple(facts.params))}: f raised "
                             f"{type(raised[0]).__name__}, no value", None)
                 continue
             got = prop.check(value)
@@ -3600,7 +3600,7 @@ def _matrix_output_probe(prop):
             checked += 1
             if got is not True:
                 return ("falsified", checked,
-                        f"{_fmt(tuple(filled))}: result is not "
+                        f"{_fmt(tuple(filled), tuple(facts.params))}: result is not "
                         f"{prop.name[3:]}", None)
         if checked == 0:
             return ("skipped", 0, None, None)
@@ -3637,7 +3637,7 @@ def _matrix_guard_probe(prop):
                 continue     # a graceful decline is a guard too
             return ("falsified", checked,
                     f"{prop.name[3:]} not enforced: accepted "
-                    f"{_fmt(tuple([bad]))}", None)
+                    f"{_fmt((bad,), (target,))}", None)
         if checked == 0:
             return ("skipped", 0, None, None)
         return ("holds", checked, None, None)
@@ -3742,14 +3742,14 @@ def _output_predicate_probe(check):
                 if any(is_missing(v) for v in filled):
                     # a raise at a missing input is classified, not judged
                     return None
-                return (f"{_fmt(tuple(filled))}: f raised "
+                return (f"{_fmt(tuple(filled), tuple(facts.params))}: f raised "
                         f"{type(exc).__name__}, no output")
             got = check(out)
             if got is None:
                 return None
             if got is True:
                 return True
-            return f"{_fmt(tuple(filled))}: output {out!r} fails {cj.relation}"
+            return f"{_fmt(tuple(filled), tuple(facts.params))}: output {out!r} fails {cj.relation}"
         target = facts.params[0] if facts.params else ""
         return _probe_trials(fn, facts, target, domain, rng, trials, trial)
     return probe
@@ -3857,12 +3857,12 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
                 out = fn(*filled)
         except Exception as e:
             if _raised_by_library(e, library):
-                return diagnosed(f"{_fmt(tuple(filled))}: raised "
+                return diagnosed(f"{_fmt(tuple(filled), tuple(facts.params))}: raised "
                                  f"{type(e).__name__} inside {library}",
                                  filled)
             return None
         if _is_nonfinite(out):
-            return diagnosed(f"{_fmt(tuple(filled))}: output {out!r} is a "
+            return diagnosed(f"{_fmt(tuple(filled), tuple(facts.params))}: output {out!r} is a "
                              f"silent non-finite value from an unguarded "
                              f"{library} call", filled)
         return True

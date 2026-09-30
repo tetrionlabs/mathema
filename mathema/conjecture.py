@@ -1119,6 +1119,9 @@ class Conjecture:
     # the function's signature reveals a matrix the claim text alone did
     # not). Empty for a Conjecture built directly rather than via claim().
     scope_bound: frozenset = field(default_factory=frozenset)
+    # the call names that are the function under test itself
+    # (`midpoint(a, b)` for f = midpoint): no `let` renders for them
+    under_test: frozenset = field(default_factory=frozenset)
     # the `funcs` names check_conjectures resolved from f's module or the
     # calling scope rather than from an explicit `funcs=`/`let` binding.
     # Their text stays the bare call name, which resolves the same way
@@ -2556,6 +2559,8 @@ def _bind_scope_functions(cj, fn) -> str:
     # exists to fill in; a real binding (callable or dotted ref) is
     # never rescanned
     really_bound = {n for n, v in cj.funcs.items() if v != n}
+    cj.under_test = cj.under_test | {n for n, v in cj.funcs.items()
+                                     if v != n and _is_under_test(v, fn)}
     wanted = [n for n, v in cj.funcs.items() if v == n]
     wanted += [n for n in _unbound_call_names(cj.lhs, cj.rhs, really_bound)
                if n not in wanted]
@@ -2578,6 +2583,10 @@ def _bind_scope_functions(cj, fn) -> str:
         if target is not None:
             cj.funcs[name] = target
             cj.scope_bound = cj.scope_bound | {name}
+            if _is_under_test(target, fn):
+                # the function under test by its own name is f
+                cj.under_test = cj.under_test | {name}
+                continue
             bound.append(f"{name} = {getattr(target, '__module__', '?')}"
                          f".{getattr(target, '__qualname__', name)} ({where})")
     return "; bound " + ", ".join(bound) if bound else ""
@@ -3300,6 +3309,12 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     # a policy claim is decided on the calls the other claims make, so
     # it is adjudicated after them
     built = [claim(c) if isinstance(c, str) else c for c in conjectures]
+    for c in built:
+        # a name bound to the function under test is f: nothing to `let`
+        funcs = getattr(c, "funcs", None) or {}
+        mine = {n for n, v in funcs.items() if v != n and _is_under_test(v, fn)}
+        if mine:
+            c.under_test = c.under_test | mine
     stated = [c for c in built if getattr(c, "relation", None) == "policy"]
     # the function's gates read every policy row, so they come last
     gates = [c for c in built if _policy_gate(c, fn, facts)]
@@ -4407,13 +4422,29 @@ _WITNESS_SHRINK_EVALUATIONS = 400
 
 def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set | None]":
     """Intent:
-        `(names, shown)` for `_fmt` on a witness: over a language, every
-        parameter by name with only the ones the claim reads shown;
-        `(None, None)` otherwise, the positional tuple.
+        `(names, shown)` for `_fmt` on a witness: every parameter by
+        name, with only the ones the claim reads shown.
     """
-    if any(getattr(cj_domain.get(p), "base_type", None) == "L" for p in kinds):
-        return tuple(kinds), _names_in_claim(cj)
-    return None, None
+    shown = set(_names_in_claim(cj))
+    # a parameter the claim fills with a literal (`f(values, "info")`) is
+    # shown too: its value is part of the point
+    names = list(kinds)
+    sides = [cj.lhs, cj.rhs] + [t for link in (cj.links or ()) for t in (link[0], link[2])]
+    for side in sides:
+        try:
+            tree = ast.parse(side or "", mode="eval")
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                    and node.func.id == "f":
+                for i, arg in enumerate(node.args):
+                    if isinstance(arg, ast.Constant) and i < len(names):
+                        shown.add(names[i])
+                for kw in node.keywords:
+                    if kw.arg and isinstance(kw.value, ast.Constant):
+                        shown.add(kw.arg)
+    return tuple(kinds), shown
 
 
 def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "str | None":
@@ -8164,8 +8195,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 absorbed, absorbed_at = gap, _fmt(tuple(args), arg_names, shown_names)
         if not ok:
             aux_part = ("; " + ", ".join(
-                f"{a}={env[a]:.3g}" if isinstance(env[a], (int, float))
-                else f"{a}={env[a]!r}" for a in aux) if aux else "")
+                f"{a} = {env[a]:.3g}" if isinstance(env[a], (int, float))
+                else f"{a} = {env[a]!r}" for a in aux) if aux else "")
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_fmt(tuple(args), arg_names, shown_names)}{aux_part}: {_sides(lv, rv)}"

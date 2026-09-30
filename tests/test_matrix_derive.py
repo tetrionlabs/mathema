@@ -115,7 +115,7 @@ def test_false_identity_best_falsifies_with_witness(mats):
     assert pr.verdict == "falsified"
     assert pr.route == "probe"
     assert pr.counterexample
-    assert "A=" in pr.counterexample and "B=" in pr.counterexample
+    assert "A = " in pr.counterexample and "B = " in pr.counterexample
 
 
 def test_true_identity_best_prefers_proof(mats):

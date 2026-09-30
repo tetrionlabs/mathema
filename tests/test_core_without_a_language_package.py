@@ -59,7 +59,7 @@ def _text(p):
 @pytest.mark.parametrize("fn, law, verdict, witness", [
     (shout, 'for s in {"a", " b ", ""}, f(f(s)) == f(s)', "proven", None),
     (rank, 'for c in {"red", "green", "blue"}, 1 <= f(c) <= 3', "proven", None),
-    (rank, 'for c in {"red", "mauve"}, f(c) >= 1', "falsified", "c='mauve'"),
+    (rank, 'for c in {"red", "mauve"}, f(c) >= 1', "falsified", "c = 'mauve'"),
 ])
 def test_finite_sets_of_strings_adjudicate(fn, law, verdict, witness):
     p = _one(fn, law)

@@ -63,7 +63,7 @@ def test_a_falsified_companion_says_the_mathematics_is_proven():
     comp = probes["law[float]"]
     assert comp.verdict == "falsified"
     assert comp.sketch.startswith("law is mathematically proven, but its "
-                                  "computation fails at x=")
+                                  "computation fails at x = ")
     assert "fix the code" in comp.sketch
     assert "implementation" not in _text(comp)
     # the public stratum vocabulary is unchanged

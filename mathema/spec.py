@@ -2710,8 +2710,10 @@ def _render_claim_text(cj, *, unicode: bool | None,
     # display symbol for it is introduced as an alias of that name
     # (`let g = numpy.exp, let E = g`), which the reparse resolves back
     # to the same function under the same name, so the claim is the same
+    under_test: frozenset = getattr(cj, "under_test", frozenset())
     let_segments = [f"let {name} = {ref}"
                     for name, ref in func_refs.items()
+                    if name not in under_test
                     # a parse-time placeholder (a bare call name awaiting
                     # scope resolution, value == its own name) and a
                     # scope-bound name have no binding to state

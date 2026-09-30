@@ -100,7 +100,7 @@ def assert_row(fn, text, verdicts, *, member=None, raised=None,
     if companions_none:
         assert not companions, [(c.name, c.verdict) for c in companions]
     if member is not None:
-        assert f"={member}" in witness(probe) or f"({member}" in witness(probe), \
+        assert f"= {member}" in witness(probe) or f"({member}" in witness(probe), \
             witness(probe)
     if raised is not None:
         said = f"{witness(probe)} {probe.note or ''} {probe.sketch or ''}"

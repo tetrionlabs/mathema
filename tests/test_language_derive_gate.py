@@ -217,7 +217,7 @@ def test_a_raise_inside_the_language_falsifies_with_the_member(tmp_path):
     ''')
     p = _one(mod.first, "for s in L[letters], len(f(s)) == 1")
     assert p.verdict == "falsified"
-    assert p.counterexample.startswith("s='':") and "IndexError" in p.counterexample
+    assert p.counterexample.startswith("s = '':") and "IndexError" in p.counterexample
     q = _one(mod.first, 'for s in L[letters] \\ {""}, len(f(s)) == 1')
     assert q.verdict == "holds"
 

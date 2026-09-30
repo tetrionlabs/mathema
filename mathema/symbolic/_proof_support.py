@@ -2217,7 +2217,7 @@ def _decide_equality(lhs, rhs, diff, relation, domain, bound_context, params,
                                                bound_context, tolerance)
         if counterexample is not None:
             detail = (", confirmed nonzero at "
-                     + ", ".join(f"{s}={v:.6g}" for s, v in counterexample.items())
+                     + ", ".join(f"{s} = {v:.6g}" for s, v in counterexample.items())
                      if counterexample else "")
             return ProofResult("disproven", sketch=f"{_humanize(lhs)} ≠ {_humanize(rhs)}: "
                                f"difference simplifies to {_humanize(diff)}{detail}",

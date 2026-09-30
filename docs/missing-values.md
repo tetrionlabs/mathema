@@ -297,7 +297,7 @@ print(mathema.check(risk_label, claims=[mathema.claim(
 ```text
 mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
   holds   labels: for score in [0.0, 1.0] : float|absent|missing, risk_label(score) in {"high", "low"} (34 draws)
-           bound risk_label = pricing.risk_label (f's module); derive could not decide it (`in` is decided by execution: the symbolic lift has no reading of membership in a language or a set, so the probe route adjudicates it); the probe decided it; at score = None f raised TypeError; at score = nan f returned "low", so it drops the hole
+           derive could not decide it (`in` is decided by execution: the symbolic lift has no reading of membership in a language or a set, so the probe route adjudicates it); the probe decided it; at score = None f raised TypeError; at score = nan f returned "low", so it drops the hole
   FALSIFY missing[score]: missing(f, score) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, "low" out]
            if "low" is the answer f should give for a missing score, write `missing(f, score) drops`; if not, make f raise or give nan back; or accept it as a discovery: mathema accept pricing.risk_label missing[score] --as discovery --corrected "missing(f, score) drops"
   FALSIFY absent[score]: f raised TypeError at score = None, and no claim says it may
@@ -360,7 +360,7 @@ print(mathema.check(fee_rate, claims=[mathema.claim(
 mathema.Record(fee_rate) · source, no side effects · form c1cba0e35dda
   proven  below_one: for tier in [0, 3] : int, fee_rate(tier) < 1
            ∀ tier in the declared finite domain (4 points)
-           bound fee_rate = pricing.fee_rate (f's module); f returns None at tier = 0, which its return type Optional[float] allows; that point has no value to compare, so it is recorded, not judged
+           f returns None at tier = 0, which its return type Optional[float] allows; that point has no value to compare, so it is recorded, not judged
   proven  absent[f]: absent(f) introduces   [from the return type Optional[float]: f returned None at tier = 0 from present inputs; confirmed on the draws of below_one]
 ```
 
