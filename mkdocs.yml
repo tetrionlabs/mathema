@@ -164,6 +164,7 @@ nav:
       - Security and execution: security.md
   - Coding agents:
       - Working with coding agents: agents.md
+      - Set up mathema for a coding agent: agent-setup.md
       - The MCP interface: modes/mcp.md
   - Project:
       - Licensing: licensing-policy.md

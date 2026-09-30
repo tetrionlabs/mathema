@@ -11,7 +11,9 @@ mathema mcp serve [--root .]
 ```
 
 `serve` runs the server on stdio. Without the optional extra installed
-the command prints the install hint and exits 2.
+the command prints the install hint and exits 2. [Set up mathema for a
+coding agent](../agent-setup.md) has the configuration block for each
+client and the PIN and policy that go with it.
 
 ## Tools
 
@@ -35,12 +37,10 @@ the command prints the install hint and exits 2.
 
 ## Which row set you get
 
-`adjudicate_target` defaults to `include="declared"`. That is the set a
-re-check after editing a claim is actually asking about, and it is
-much cheaper: on a real fixture, 3483 bytes of every-row output
-becomes 959 (and 3481 becomes 480), because the suggestion battery is
-not just serialized but fully *adjudicated*; skipping it is 5x-26x
-faster as well as ~75-85% smaller.
+`adjudicate_target` defaults to `include="declared"`, the set a re-check
+after editing a claim is asking about. `include="all"` adds the
+suggestion battery, which is adjudicated in full, not only listed, so
+the call is slower and its payload larger.
 
 A function with no declared claims returns no rows plus a `hint`
 naming `include="suggested"`, rather than silently handing back a
@@ -120,17 +120,10 @@ only a person may unlock.
 
 ## Wire format
 
-Tool payloads go over the wire as compact JSON. The SDK pretty-prints
-a returned dict with a hardcoded `indent=2`, which roughly doubles the
-column-oriented payloads that exist precisely to stop repeating key
-names, so the server serializes compactly at the boundary instead:
-`audit_targets` 1468 -> 738 bytes, `reason_code` 4242 -> 2627. Prose-
-heavy payloads gain little (`claim_grammar`, 9%), which is expected;
-the saving is concentrated where the shape was already compact.
-
-The tools themselves still return dicts, so they stay directly
-callable and testable, and nothing is duplicated into a structured
-content block.
+Tool payloads go over the wire as compact JSON, serialised at the
+server boundary without indentation. The tools themselves return
+dicts, so they stay directly callable from Python, and nothing is
+duplicated into a structured content block.
 
 ## What is deliberately absent
 

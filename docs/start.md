@@ -101,15 +101,15 @@ mathema init --ci
 For a developer whose agent should write claims and run checks without
 deciding what counts as correct.
 
-1. [Working with coding agents](agents.md): what an agent can do, what only
-   a person can do, and the PIN that keeps the two apart.
-2. [`mathema mcp`](modes/mcp.md): the server your agent connects to over
-   stdio, and each tool it exposes.
-3. [`mathema init`, the agent skills](modes/init.md#the-agent-skills-agents):
-   `init --agents` vendors the skills that teach your agent the claim loop,
-   placed where your tool reads them.
-4. [`mathema pin`](modes/pin.md): a PIN only a person knows, so an
-   acceptance in the record was made at a keyboard.
+1. [Set up mathema for a coding agent](agent-setup.md): the server block
+   for Claude Code, Cursor and Claude Desktop, the skills `init --agents`
+   vendors, the PIN and the policy, in the order to do them.
+2. [Working with coding agents](agents.md): what an agent can do, what only
+   a person can do, and why the PIN keeps the two apart.
+3. [`mathema mcp`](modes/mcp.md): each tool, resource and prompt the server
+   exposes, and the shape of what they return.
+4. [`mathema pin`](modes/pin.md): what the PIN stamps into a record, and
+   the policy file that makes a missing stamp fail the sweep.
 5. [`mathema lock`](modes/lock.md): settling a finished function so the
    agent's next pass cannot change its body.
 
