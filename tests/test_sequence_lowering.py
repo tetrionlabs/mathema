@@ -104,7 +104,8 @@ def test_a_constant_base_to_a_rational_power_lowers():
 
 
 @pytest.mark.parametrize("src", ["k ** 0.5", "std(x) ** 0.5", "x ** 0.5",
-                                 "(-8) ** (1 / 3)", "c ** k"])
+                                 "(-8) ** (1 / 3)", "c ** k", "0 ** 0.5",
+                                 "(1 - 1) ** 0.5"])
 def test_a_variable_base_or_a_negative_constant_to_a_fractional_power_does_not(
         src):
     with pytest.raises(NotSymbolic, match="power"):

@@ -556,3 +556,12 @@ def test_an_included_examine_claim_covers_the_body_end_to_end(tmp_path):
     ''', name="examined")
     fc = function_coverage(mod.fee, root=str(tmp_path), coverage_data={})
     assert "derive" in fc.by_source
+
+
+def test_a_falsified_included_claim_credits_nothing():
+    import types
+
+    from mathema.impl_coverage import _derive_covered_lines
+    row = types.SimpleNamespace(name="c", route="derive", verdict="falsified",
+                                meta={"mathema.surface": "docstring"}, note="")
+    assert _derive_covered_lines(types.SimpleNamespace(probes=[row]), {2}) == set()

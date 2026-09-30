@@ -9,7 +9,7 @@ and it never lets a weaker result be reported as a stronger one.
 <div class="mx-figure">
 <svg class="mx-diagram" viewBox="0 0 640 330" role="img" aria-labelledby="ladder-title ladder-desc" xmlns="http://www.w3.org/2000/svg">
   <title id="ladder-title">The evidence ladder</title>
-  <desc id="ladder-desc">Six rungs, strongest at the top: derive, derive extensive, informed probing, probing, documented, declared.</desc>
+  <desc id="ladder-desc">Six rungs, strongest at the top: derive and examine, derive extensive, informed probing, probing, documented, declared.</desc>
   <g class="mx-d-rail"><line x1="40" y1="20" x2="40" y2="310"/><line x1="600" y1="20" x2="600" y2="310"/></g>
   <g class="mx-d-rung mx-d-strong"><rect x="60" y="20" width="520" height="40" rx="3"/><text x="80" y="45" class="mx-d-label">derive · examine</text><text x="560" y="45" class="mx-d-verdict" text-anchor="end">proven</text></g>
   <g class="mx-d-rung mx-d-strong"><rect x="60" y="70" width="520" height="40" rx="3"/><text x="80" y="95" class="mx-d-label">derive:extensive</text><text x="560" y="95" class="mx-d-verdict" text-anchor="end">proven</text></g>
@@ -24,19 +24,22 @@ and it never lets a weaker result be reported as a stronger one.
 
 | Rung | Verdict | What established it |
 |---|---|---|
-| `derive`, `examine`, `derive:brute_force`, `derive:math_only` | `proven` | The function's body was lifted to a symbolic expression and the claim settled over the whole declared domain; or the function's structure settles it by construction (`examine`: a guard that rejects before the body runs, no state touched); or every point of a finite domain was checked (`derive:brute_force`); or the mathematics was proven with no float companion asked for (`derive:math_only`). |
+| `derive`, `derive:brute_force`, `derive:math_only` | `proven` | A proof. The body was lifted to a symbolic expression and the claim settled over the whole declared domain (`derive`); every point of a finite domain was checked (`brute_force`); or the mathematics was proven and no float companion was asked for (`math_only`). |
+| `examine` | `proven` | A proof from the function's structure, with nothing lifted: a guard that rejects before the body runs, or a body that writes nothing outside itself. |
 | `derive:extensive` | `proven` | The same, reached only by the deeper search you opt into with `extensive=True`. |
 | `probe:semi_analytical`, `probe:algorithmic`, `probe:minimal_example`, `probe:counterfactual` | `holds (n=...)` | The real function survived `n` trials whose inputs were chosen by analysis, such as the points where a denominator vanishes, by a technique specific to the claim, by fuzzing that shrinks what it finds, or by refilling a missing value to see what the function would have done. |
-| `probe`, `probe:lifted_numeric` | `holds (n=...)` | The real function survived `n` seeded random trials; or, for a derivative, integral, sum or limit the code cannot be run for, `n` trials of mathema's own symbolic reconstruction did (`probe:lifted_numeric`, whose note says so). |
+| `probe`, `probe:lifted_numeric` | `holds (n=...)` | The real function survived `n` seeded random trials; or, where the claim takes a derivative, integral, sum or limit that running the code cannot give, mathema's own symbolic reconstruction of the function survived `n` trials (`probe:lifted_numeric`, and the note says so). |
 | `documented` | none | Stated intent that a person has accepted with `mathema accept --intent`. |
 | `declared` | none | Stated intent (a docstring summary, an `Intent:` block, an `intent:` field) that no person has accepted yet, the weakest rung there is. |
 
-The informed probing routes share a rung because they draw on different
-sources of information without any being stronger than another. A
-language's own derive strategy reports `derive:` with its mechanism's name and ranks
-with `derive`. The
-ladder is defined in the engine as `mathema.conjecture.EVIDENCE_LADDER`, and
-a route mathema does not recognise, such as one from a verification
+`derive` and `examine` share the top rung, a proof either way; the
+informed probing routes share a rung too: they draw on different
+information, and none is stronger than another. A language's own derive
+strategy reports `derive:` followed by its mechanism's name, and ranks as
+the default path ranks a wider mechanism, with `derive:extensive`; one
+that names no mechanism (`derive:language`) ranks with `derive`. The
+ladder is defined in the engine as `mathema.conjecture.EVIDENCE_LADDER`,
+and a route mathema does not recognise, such as one from a verification
 technique you have plugged in yourself, ranks below everything it does.
 
 <a id="a-proof-is-the-mathematics-float-is-the-code"></a>
@@ -118,6 +121,10 @@ reported alongside it, and none of them is a weak form of support:
 | `unknown` | An adjudication ran and decided nothing either way, for instance a proof attempt that could not close. |
 | `skipped` | The claim could not be adjudicated at all, for a reason the record names. |
 | `invalidated` | A claim that was once `proven` or `holds` could no longer be established after the code changed, and the record says what it used to be. |
+
+A definition row, the route `axiom`, is not on the ladder either: a
+definition is trusted, not adjudicated, and `evidence_rank` raises
+`NotOnTheLadder` for it.
 
 A `falsified` verdict is knowledge rather than failure: it tells you exactly
 where the function and the claim part ways, and the

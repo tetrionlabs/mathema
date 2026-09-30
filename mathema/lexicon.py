@@ -42,10 +42,13 @@ this module exercises."""
 from __future__ import annotations
 
 import functools
+import math
+import os
+import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .authoring import claims as claims_decorator, enforce_dimensions
+from .authoring import claims as claims_decorator, enforce_dimensions, enforce_domain
 
 try:
     import numpy as np
@@ -130,6 +133,10 @@ LEXICON: dict[str, str] = {
     "dim_premise_against_fixed":
         "for r in [0, 1]^12, assuming len(r) == 5, f(r) >= 0",
     "domain_closed_interval": "for x in [0, 1], f(x) >= 0",
+    # a function @enforce_domain() guards is checked over the domain its
+    # guard admits: a blend of x with 1 never exceeds x when x is at
+    # least 1
+    "enforce_domain_guard": "for alpha in [0, 1], x in [1, 10], f(x, alpha) <= x",
     "domain_open_interval": "for x in (0, 1), f(x) >= 0",
     "domain_subset_integer": "for n in [0, 100] subset Z, f(n) >= 0",
     # a subscripted sequence element: no algebraic reading, carried
@@ -144,6 +151,8 @@ LEXICON: dict[str, str] = {
     # adjudicate it yet)
     "outcome_reference": "f(x) > 0 => self.stays_positive",
     "raises_typed": "raises(f(x), ValueError)",
+    # the same claim over a region where the function does raise
+    "raises_typed_region": "for x in [-10, -1], raises(f(x), ValueError)",
     "is_pole_safe": "is_pole_safe(x)",
     "negated_predicate": "not is_pole_safe(x)",
     "is_extremity_safe": "is_extremity_safe(x)",
@@ -157,6 +166,16 @@ LEXICON: dict[str, str] = {
     # the function-wide spelling: the predicate over f is the
     # conjunction over every numeric parameter
     "safety_predicate_function_wide": "is_missing_safe(f)",
+    # state safety watches the process too: an environment write, a draw
+    # from the global random generator
+    "state_safe_env_write": "is_state_safe(f)",
+    "state_safe_global_rng": "is_state_safe(f)",
+    # determinism is two calls at the same inputs, compared by kind: a
+    # global draw differs, NaN agrees with NaN, and a read of the
+    # environment holds with a note saying two calls cannot see it change
+    "deterministic_trap": "is_deterministic(f)",
+    "deterministic_nan_agrees": "is_deterministic(f)",
+    "deterministic_hidden_read": "is_deterministic(f)",
     # matrix structure predicates: a property of a matrix VALUE, on a
     # bare parameter (a precondition) or an f(...) output. The postfix
     # `A is symmetric` is sugar folding to the canonical call form.
@@ -625,13 +644,16 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "domain_closed_interval",
         "domain_open_interval", "domain_subset_integer",
         "relation_indexing", "relation_boolean_rhs",
-        "outcome_reference", "raises_typed",
+        "outcome_reference", "raises_typed", "raises_typed_region",
         "is_pole_safe", "negated_predicate", "is_extremity_safe",
         "is_representation_safe", "is_empty_safe",
         "is_arbitrary_input_safe", "is_arbitrary_input_safe_postfix",
         "is_compendium_safe", "is_compendium_safe_scoped",
         "is_sorted_output", "output_never_none",
-        "safety_predicate_function_wide", "matrix_symmetric",
+        "safety_predicate_function_wide", "state_safe_env_write",
+        "state_safe_global_rng", "deterministic_trap",
+        "deterministic_nan_agrees", "deterministic_hidden_read",
+        "matrix_symmetric",
         "matrix_symmetric_postfix", "matrix_symmetric_output",
         "matrix_positive_definite", "matrix_finite",
         "matrix_determinant_product", "matrix_transpose_product",
@@ -682,7 +704,8 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "latex_geqslant", "latex_varepsilon", "latex_varphi",
         "latex_left_right_bars"),
     "domains": (
-        "domain_excluded_point", "domain_discrete_strings",
+        "domain_excluded_point", "enforce_domain_guard",
+        "domain_discrete_strings",
         "domain_natural_numbers", "domain_complex", "relation_approx",
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex",
@@ -1242,10 +1265,49 @@ def double(x: float) -> float:
     return 2 * x
 
 
-def as_float(x: float) -> float:
-    """A number coerced to float; a float passes through unchanged,
-    what "relation_eq" demonstrates: `f(x) == x`, an exact equality."""
-    return float(x)
+def celsius_round_trip(x: float) -> float:
+    """A temperature in Celsius converted to Fahrenheit and back, what
+    "relation_eq" demonstrates: `f(x) == x`, an exact equality, proven as
+    mathematics, while its `[float]` companion is the computation."""
+    return ((x * 9 / 5) + 32 - 32) * 5 / 9
+
+
+def checked_sqrt(x: float) -> float:
+    """A square root that refuses a negative input, the second function
+    for "raises_typed": it raises only below zero, so the unbounded claim
+    is falsified at zero, and "raises_typed_region" proves it over the
+    negative numbers."""
+    if x < 0:
+        raise ValueError("negative")
+    return math.sqrt(x)
+
+
+def remember_fx_rate(rate: float) -> float:
+    """Stores an exchange rate in the environment for later calls, what
+    "state_safe_env_write" demonstrates: a write to os.environ."""
+    os.environ["FX_RATE"] = str(rate)
+    return rate
+
+
+def noisy_quote(price: float) -> float:
+    """A price with a little noise from the global random generator, what
+    "state_safe_global_rng" and "deterministic_trap" demonstrate: the
+    draw advances shared state, and two calls disagree."""
+    return price * (1 + 0.001 * random.gauss(0, 1))
+
+
+def log_return(p0: float, p1: float) -> float:
+    """The log return from p0 to p1, NaN where either price is not
+    positive, what "deterministic_nan_agrees" demonstrates: NaN from two
+    calls agrees."""
+    return math.log(p1 / p0) if p0 > 0 and p1 > 0 else math.nan
+
+
+def price_in_fx(price: float) -> float:
+    """A price converted at the rate the environment holds, what
+    "deterministic_hidden_read" demonstrates: a read two back-to-back
+    calls cannot see change."""
+    return price * float(os.environ.get("FX_RATE", "1"))
 
 
 def triangular_number(n: int) -> int:
@@ -1284,6 +1346,14 @@ def center_of_mass_two_body(m1: float, x1: float, m2: float, x2: float) -> float
     forcing m1 == m2 via a shared free name covers the equal-masses
     boundary case with one claim instead of a separate one."""
     return (m1 * x1 + m2 * x2) / (m1 + m2)
+
+
+@enforce_domain()
+@claims_decorator("for alpha in [0, 1], f(x, alpha) <= max(x, 1)")
+def blend(x: float, alpha: float) -> float:
+    """A blend of x with 1, weighted by alpha, which its guard keeps in
+    [0, 1], what "enforce_domain_guard" demonstrates."""
+    return alpha * x + (1 - alpha) * 1.0
 
 
 def gibbs_free_energy(dh: float, t: float, ds: float) -> float:
@@ -1575,6 +1645,13 @@ def unescape_angle(s: str) -> str:
     return s.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
 
 
+def sharpe_annualised(returns: "pandas.Series") -> float:
+    """The Sharpe ratio annualised over 252 trading days, written with a
+    power, the second function for the "let_scale_seq_sharpe_*" entries:
+    `252 ** 0.5` lowers as `sqrt(252)` does."""
+    return returns.mean() / returns.std(ddof=1) * 252 ** 0.5
+
+
 def sharpe(returns: "pandas.Series") -> float:
     """The Sharpe ratio of a series of returns at a zero risk-free rate,
     unannualised: the mean over the sample standard deviation
@@ -1627,7 +1704,16 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex", "latex_varepsilon",
     ]),
-    "as_float": (as_float, ["relation_eq"]),
+    "celsius_round_trip": (celsius_round_trip, ["relation_eq"]),
+    "checked_sqrt": (checked_sqrt, ["raises_typed", "raises_typed_region"]),
+    "remember_fx_rate": (remember_fx_rate, ["state_safe_env_write"]),
+    "noisy_quote": (noisy_quote, ["state_safe_global_rng",
+                                  "deterministic_trap"]),
+    "log_return": (log_return, ["deterministic_nan_agrees"]),
+    "price_in_fx": (price_in_fx, ["deterministic_hidden_read"]),
+    "blend": (blend, ["enforce_domain_guard"]),
+    "sharpe_annualised": (sharpe_annualised, [
+        "let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap"]),
     "triangular_number": (triangular_number, [
         "domain_subset_integer", "domain_subset_symbol",
     ]),

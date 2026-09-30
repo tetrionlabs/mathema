@@ -107,15 +107,28 @@ def test_a_process_state_write_falsifies_with_the_state_named(
 
 def test_checking_leaves_the_process_as_it_found_it(monkeypatch):
     monkeypatch.setenv("MATHEMA_T3", "present")
+    monkeypatch.delenv("MATHEMA_T", raising=False)
+    _state_safe(pure)   # imports made by a first check are not the trial's
+    root = logging.getLogger()
     env, cwd, path = dict(os.environ), os.getcwd(), list(sys.path)
-    level = logging.getLogger().level
+    state, np_state = random.getstate(), np.random.get_state()
+    level, handlers = root.level, list(root.handlers)
+    disabled = logging.root.manager.disable
     for fn in (set_item, update_env, pop_env, change_dir, extend_path,
-               configure_logging):
+               configure_logging, put_env, bare_put_env, reseed, bare_draw,
+               numpy_reseed, write_then_raise, chdir_then_raise,
+               delete_own_cwd, rebind_path):
         _state_safe(fn)
     assert dict(os.environ) == env
     assert os.getcwd() == cwd
     assert sys.path == path
-    assert logging.getLogger().level == level
+    assert random.getstate() == state
+    after = np.random.get_state()
+    assert after[0] == np_state[0] and (after[1] == np_state[1]).all()
+    assert tuple(after[2:]) == tuple(np_state[2:])
+    assert (root.level, list(root.handlers)) == (level, handlers)
+    assert logging.root.manager.disable == disabled
+    assert "MATHEMA_T=" not in _child_environ()
 
 
 def test_a_bare_writer_call_is_a_write_site_for_the_structural_half():

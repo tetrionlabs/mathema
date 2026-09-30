@@ -35,9 +35,9 @@ def test_no_row_is_falsified_by_the_guard_itself():
 
 def test_the_standard_rows_hold_inside_the_guarded_domain():
     rows = _by_name(check(blend))
-    assert rows["is_numerically_stable"].verdict in ("proven", "holds")
-    assert rows["is_representation_safe[alpha]"].verdict in ("proven", "holds")
-    assert rows["is_representation_safe[x]"].verdict in ("proven", "holds")
+    assert rows["is_numerically_stable"].verdict == "holds"
+    assert rows["is_representation_safe[alpha]"].verdict == "holds"
+    assert rows["is_representation_safe[x]"].verdict == "holds"
 
 
 def test_the_exclusion_row_is_still_proven_by_construction():
@@ -57,3 +57,19 @@ def test_a_failure_inside_the_guarded_domain_still_falsifies():
     row = _by_name(check(reciprocal))["is_numerically_stable"]
     assert row.verdict == "falsified"
     assert str(row.counterexample) == "x = 0 raised ZeroDivisionError"
+
+
+@enforce_domain(domain={"weights": (0, 1)})
+def mean_weight(weights: list) -> float:
+    """The mean of portfolio weights, each guarded to [0, 1]."""
+    return sum(weights) / len(weights)
+
+
+def test_a_row_that_scales_the_argument_out_of_the_guard_is_falsified_by_it():
+    # the draws stay inside the guard, but scale_equivariant calls f at
+    # c * weights, which leaves [0, 1]; the guard's own DomainError is
+    # the witness (the pedantic rule: a raise in the claim's domain)
+    rows = _by_name(check(mean_weight))
+    row = rows["scale_equivariant"]
+    assert row.verdict == "falsified", (row.verdict, row.note)
+    assert "DomainError" in str(row.counterexample), row.counterexample

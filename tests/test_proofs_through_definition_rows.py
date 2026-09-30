@@ -97,6 +97,7 @@ def sharpe_power(returns: pd.Series):
     return returns.mean() / returns.std(ddof=1) * 252 ** 0.5
 
 
+@pytest.mark.needs_full_proof_budget
 def test_an_annualised_sharpe_written_with_a_power_proves_as_with_sqrt():
     p = _one(sharpe_power, _LEVERAGE)
     assert p.verdict == "proven", (p.verdict, p.note, p.sketch)

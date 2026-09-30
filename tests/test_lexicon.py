@@ -95,7 +95,18 @@ PINNED: dict = {
     "power_superscript": "proven",
     "power_superscript_negative": "proven",
     "premise_relates_two_params": "proven",
-    "raises_typed": "holds",
+    # a function that always raises holds; one that raises only below
+    # zero is falsified at zero, and proves over the negative numbers
+    "raises_typed": {"removed_endpoint": "holds",
+                     "checked_sqrt": ("falsified",
+                                      "returned 0.0 instead of raising")},
+    "raises_typed_region": "proven",
+    "state_safe_env_write": ("falsified", "os.environ (FX_RATE set to"),
+    "state_safe_global_rng": ("falsified", "the global state of random"),
+    "deterministic_trap": ("falsified", "two calls returned"),
+    "deterministic_nan_agrees": "holds",
+    "deterministic_hidden_read": "holds",
+    "enforce_domain_guard": "proven",
     "real_domain_is_not_finite": "holds",
     "recurrence_identity": "proven",
     "relation_approx_unicode": "proven",
@@ -505,3 +516,22 @@ def test_every_row_lands_on_its_pinned_verdict():
     expected = {**{key: None for key in LEXICON}, **PINNED}
     assert lexicon_checks.check_verdicts(CORE, expected) == []
 
+
+
+def test_the_equality_row_is_proven_and_its_float_companion_is_the_computation():
+    import mathema
+    from mathema.lexicon import celsius_round_trip
+    rows = {p.name: p for p in mathema.check(
+        celsius_round_trip, claims=[LEXICON["relation_eq"]]).probes}
+    (name,) = [n for n in rows if n.endswith("[float]")]
+    main = rows[name[:-len("[float]")]]
+    assert (main.verdict, main.route) == ("proven", "derive")
+    assert rows[name].verdict == "falsified", rows[name].note
+
+
+def test_the_hidden_read_row_names_the_read():
+    from mathema.conjecture import check_conjectures, claim
+    from mathema.lexicon import price_in_fx
+    (p,) = check_conjectures(price_in_fx,
+                             [claim(LEXICON["deterministic_hidden_read"])])
+    assert "the body reads os.environ" in p.note, p.note
