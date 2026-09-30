@@ -651,7 +651,7 @@ print(mathema.check(risk_label, claims=[mathema.claim(
 <!-- example: core output match=subset -->
 ```text
 mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
-  proven  is_missing_safe[f]: is_missing_safe(f)
+  holds   is_missing_safe[f]: is_missing_safe(f)
            score (float): nan drops, confirmed by calling f at score = nan; no claim states it yet
   FALSIFY is_absent_safe[f]: is_absent_safe(f)
            score (float): None raises TypeError, and no claim says it may
@@ -659,9 +659,10 @@ mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
            score is Optional[float], so f promised to take None. If the raise is intended, state `absent(f, score) raises(TypeError)`; otherwise handle None in f, or annotate score as float; or accept the raise as a discovery (mathema accept pricing.risk_label absent[score] --as discovery) and state `absent(f, score) raises(TypeError)`
 ```
 
-`is_missing_safe` is proven: the one hole a float holds was tried, and
-what the code does with it is known, though no claim states it yet.
-`is_absent_safe` is falsified by the raise on `None`, with the claim to
+`is_missing_safe` holds, not proven: the one hole a float holds was
+tried and f drops it, but that is what the code did, not what anyone
+said it should do. Writing `missing(f, score) drops` makes it a stated
+policy, and the gate proven. `is_absent_safe` is falsified by the raise on `None`, with the claim to
 state beneath it.
 
 `@enforce_domain()` turns the policy rows into a runtime check. It is

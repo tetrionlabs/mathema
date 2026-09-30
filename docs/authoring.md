@@ -475,8 +475,8 @@ enforce nothing.
 rows: every parameter that admits the kind has a policy the code
 follows at every member. Proven when each member's policy is derived
 (a guard in the body, a library's own policy row f calls) or stated
-and confirmed, or f was called at every case; holds when some member
-is confirmed by execution alone; falsified on a policy the code
+and confirmed; holds when some member is confirmed by execution alone,
+even when f was called at every case; falsified on a policy the code
 contradicts, a member treated more than one way, a raise no claim
 accounts for, or a None from present inputs the return type does not
 declare. mathema never asserts them for you; `mathema claims KEY

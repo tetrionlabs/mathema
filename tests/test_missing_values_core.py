@@ -119,6 +119,7 @@ def assert_row(fn, text, verdicts, *, member=None, raised=None,
 
 
 PROVEN = ("proven",)
+HOLDS = ("holds",)
 PROVEN_OR_HOLDS = ("proven", "holds")
 FALSIFIED = ("falsified",)
 
@@ -248,7 +249,7 @@ def test_m3_a_guard_is_read_as_missing_raises():
 
 
 def test_m4_an_optional_float_is_missing_safe():
-    assert_row(double_or_missing, "is_missing_safe(f)", PROVEN)
+    assert_row(double_or_missing, "is_missing_safe(f)", HOLDS)
 
 
 def test_m5_a_replacing_function_is_missing_safe():
@@ -256,7 +257,7 @@ def test_m5_a_replacing_function_is_missing_safe():
 
 
 def test_m6_an_unannotated_identity_is_missing_safe():
-    assert_row(ident, "is_missing_safe(f)", PROVEN)
+    assert_row(ident, "is_missing_safe(f)", HOLDS)
 
 
 def test_l1_a_gate_is_not_a_premise():

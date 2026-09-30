@@ -4,8 +4,9 @@
 of what f does with a value that is not there: every parameter that
 admits the kind has a policy the code follows at every member. Proven
 when each member's policy is derived (a guard in the body, a library's
-own policy row) or stated and confirmed, or was called at every case;
-holds when some member is confirmed by execution alone; falsified on a
+own policy row) or stated and confirmed; holds when some member is
+confirmed by execution alone, a scalar called at every member included,
+and never proven beside a row the code contradicts; falsified on a
 contradiction, a member treated more than one way, a raise no claim
 accounts for, or a None from present inputs the return type does not
 declare. The record names each parameter's members, policy and source.
@@ -85,13 +86,31 @@ def test_a_guard_proves_the_missing_gate():
     assert row.sketch == "x (float): nan raises ValueError, from the guard on line 2"
 
 
-def test_a_lone_scalar_called_at_every_case_proves_it():
+def test_a_lone_scalar_called_at_every_case_holds():
     row = _gate(ident, "is_missing_safe(f)")
-    assert row.verdict == "proven", row.note
+    assert row.verdict == "holds", row.note
     assert row.sketch == ("x (unannotated): nan propagates, confirmed by calling f at "
                           "x = nan; no claim states it yet")
     row = _gate(ident, "is_absent_safe(f)")
+    assert row.verdict == "holds", row.note
+
+
+def test_a_row_the_code_contradicts_leaves_the_gate_at_holds():
+    row = _gate(clamp01, "is_missing_safe(f)")
+    assert row.verdict == "holds", row.note
+
+
+def test_a_stated_and_confirmed_row_proves_the_gate():
+    row = _gate(clamp01, "is_missing_safe(f)", "missing(f, x) drops")
     assert row.verdict == "proven", row.note
+    assert row.sketch == "x (float): nan drops, stated"
+
+
+def test_the_absent_gate_calls_f_at_present_inputs_itself():
+    row = _gate(pick_undeclared, "is_absent_safe(f)")
+    assert row.verdict == "falsified", row.note
+    assert row.counterexample.startswith("x = ")
+    assert row.counterexample.endswith(": f returned None")
 
 
 def test_an_unaccounted_raise_falsifies_the_absent_gate():

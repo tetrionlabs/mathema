@@ -193,6 +193,9 @@ def verified_record_verdicts(src: LexiconSource) -> dict:
     out = {}
     for fn, keys in src.example_functions.values():
         laws = [claim(src.rows[k], name=k) for k in keys]
+        # a function's record rows are repopulated together, as `verify`
+        # does, so a gate reads the stated rows beside it
+        first, rebuilt_all = {}, []
         for p in check_conjectures(fn, laws):
             row = {"name": p.name, "statement": p.statement,
                    "route": (p.route or "best").split(":", 1)[0]}
@@ -207,8 +210,14 @@ def verified_record_verdicts(src: LexiconSource) -> dict:
                 out[p.name] = (p.verdict, f"will not reconstruct ({type(exc).__name__}: {exc})",
                                None, p.statement)
                 continue
-            (p2,) = check_conjectures(fn, [rebuilt])
-            out[p.name] = (p.verdict, p2.verdict, p2, p.statement)
+            first[p.name] = p
+            rebuilt_all.append(rebuilt)
+        again = {p2.name: p2 for p2 in check_conjectures(fn, rebuilt_all)} \
+            if rebuilt_all else {}
+        for name, p in first.items():
+            p2 = again.get(name)
+            out[name] = (p.verdict, p2.verdict if p2 is not None else "not adjudicated",
+                         p2, p.statement)
     return out
 
 

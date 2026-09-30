@@ -353,6 +353,25 @@ def _run_floor(fn, facts, points: list) -> list:
     return out
 
 
+def _present_calls(fn, facts, domain: dict, draws: int = 24) -> list:
+    """Calls of f at inputs with nothing missing, each parameter drawn
+    inside its domain, for what the result may be."""
+    import random
+
+    from ._sampling import _RNG_SEED
+    from .probing import _synth, inputs_missing, signature_defaults
+    rng = random.Random(_RNG_SEED + 3)
+    defaulted = signature_defaults(fn)
+    kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params
+             if p not in defaulted}
+    points = []
+    for _ in range(draws):
+        point = {q: _synth(k, rng, (domain or {}).get(q)) for q, k in kinds.items()}
+        if not inputs_missing(point.values()):
+            points.append(point)
+    return _run_floor(fn, facts, points)
+
+
 def _base_claim(name: str) -> str:
     """A row's claim name as its author wrote it: `c0[float]` for the
     companion of a chained comparison's link `c0[link1][float]`."""
@@ -1680,12 +1699,13 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
         the kind has a policy the code follows at every member, reaching
         into a container's slots. `proven` when each member's policy is
         derived (a guard in the body, a library's own policy row f
-        calls) or stated and confirmed, or was called at every case (a
-        lone scalar parameter); `holds` when some member is confirmed by
-        execution alone; `falsified` on a policy the code contradicts, a
+        calls) or stated and confirmed; `holds` when some member is
+        confirmed by execution alone (a lone scalar called at every
+        member included); `falsified` on a policy the code contradicts, a
         member treated more than one way, a raise no claim accounts for,
         or an absence f returns from present inputs that its return type
-        does not declare. The row says, per parameter, what each member
+        does not declare. The absence gate also calls f at inputs with
+        nothing missing, for the absence the result may carry. The row says, per parameter, what each member
         does and whose word it is; a falsified one also names its
         counterexample and the one next step, the same one the policy
         row gives.
@@ -1875,7 +1895,8 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                 "default" if default else "observed")
             said.append(f"{m} {did}, {_confirmed(calls, current, floor or exhaustive, p)}"
                         f"; no claim states it yet")
-            if not exhaustive and weakest == "proven":
+            if weakest == "proven":
+                # what the code did, with no claim saying it should
                 weakest = "holds"
         clauses = []
         if library_follows:
@@ -1978,6 +1999,9 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
         # what the output may be: a None from present inputs is the
         # return type's to declare
         back = list(current.introduced) if current else []
+        own = _present_calls(fn, facts, domain)
+        n += len(own)
+        back += [c for c in own if c.raised is None and c.output is None]
         if back:
             declared = declared_optional_return(fn)
             stated = [r for r in stated_rows
