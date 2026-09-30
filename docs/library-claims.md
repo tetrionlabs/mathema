@@ -53,16 +53,12 @@ risk.spread:
 mathema compendium status --root .
 ```
 
-<!-- example: library output -->
+<!-- example: library output match=subset -->
 ```text
-numpy 2.5.3: 4 calls
   claims files:
     mathema/compendium/numpy/bounds.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/definitions.claims.yaml (bundled, >=1.24,<3, in range)
-    mathema/compendium/numpy/definitions_2_4.claims.yaml (bundled, >=2.4,<3, in range)
-    mathema/compendium/numpy/elementwise.claims.yaml (bundled, >=2.4,<3, in range)
     mathema/compendium/numpy/linalg.claims.yaml (bundled, >=1.24,<3, in range)
-    mathema/compendium/numpy/linalg_2_4.claims.yaml (bundled, >=2.4,<3, in range)
     mathema/compendium/numpy/reductions.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/scalars.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/statistics.claims.yaml (bundled, >=1.24,<3, in range)
@@ -70,16 +66,16 @@ numpy 2.5.3: 4 calls
   numpy.sqrt        1 call, 2 rows: 0 verified locally, 0 trusted, 0 falsified, 2 unsettled
   numpy.std         1 call, 3 rows: 0 verified locally, 0 trusted, 0 falsified, 3 unsettled
   no claims: numpy.ptp
-
-(standard library calls are left out)
 ```
 
 One block per library, headed by its installed version and the number of
 calls, a call counted once per function that makes it. The claims files
 are the ones mathema ships for numpy: a compendium is a claims file whose
 keys are a library's functions rather than your own, with the range of
-library versions it applies to, and each file is in range for the numpy
-installed here. Then each called function that has rows, with how many
+library versions it applies to, and each file is marked in range or out
+of range for the numpy installed. The excerpts on this page leave out the
+heading, which names your numpy's version, and the three files for numpy
+2.4 and later, which are out of range on an older numpy. Then each called function that has rows, with how many
 are settled: none yet, since nothing has run. `numpy.ptp` has no rows at
 all, so what it does under your inputs is a black box to mathema until
 someone states a claim about it.
@@ -121,7 +117,6 @@ mathema compendium status --root .
 
 <!-- example: library output match=subset -->
 ```text
-numpy 2.5.3: 4 calls
   numpy.percentile  1 call, 1 row: 1 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.sqrt        1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.std         1 call, 3 rows: 3 verified locally, 0 trusted, 0 falsified, 0 unsettled
@@ -173,16 +168,12 @@ ok   numpy.ptp: library claims from claims/numpy.claims.yaml; no baseline record
 mathema compendium status --root .
 ```
 
-<!-- example: library output -->
+<!-- example: library output match=subset -->
 ```text
-numpy 2.5.3: 4 calls
   claims files:
     mathema/compendium/numpy/bounds.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/definitions.claims.yaml (bundled, >=1.24,<3, in range)
-    mathema/compendium/numpy/definitions_2_4.claims.yaml (bundled, >=2.4,<3, in range)
-    mathema/compendium/numpy/elementwise.claims.yaml (bundled, >=2.4,<3, in range)
     mathema/compendium/numpy/linalg.claims.yaml (bundled, >=1.24,<3, in range)
-    mathema/compendium/numpy/linalg_2_4.claims.yaml (bundled, >=2.4,<3, in range)
     mathema/compendium/numpy/reductions.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/scalars.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/statistics.claims.yaml (bundled, >=1.24,<3, in range)
@@ -191,8 +182,6 @@ numpy 2.5.3: 4 calls
   numpy.ptp         1 call, 1 row: 1 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.sqrt        1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.std         1 call, 3 rows: 3 verified locally, 0 trusted, 0 falsified, 0 unsettled
-
-(standard library calls are left out)
 ```
 
 Your file is listed beside the bundled ones as `project`, and `ptp` has
