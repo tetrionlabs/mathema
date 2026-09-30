@@ -1434,6 +1434,12 @@ def composed_policies(fn, facts) -> dict:
         # a library's rows state its call at the defaults; a call passing
         # anything more is a different call
         return {}
+    rebound = {t.id for n in ast.walk(tree)
+               for t in (n.targets if isinstance(n, ast.Assign)
+                         else [n.target] if isinstance(n, (ast.AugAssign, ast.AnnAssign,
+                                                             ast.For, ast.NamedExpr))
+                         else [])
+               if isinstance(t, ast.Name)}
     from .runtime_types import realised_parameters
     scope = getattr(fn, "__globals__", {}) or {}
     rows = library_policies()
@@ -1447,7 +1453,9 @@ def composed_policies(fn, facts) -> dict:
         module = getattr(scope.get(owner.id), "__name__", None)
         if module:
             param, key = expr.args[0].id, f"{module}.{expr.func.attr}"
-    if key is None or key not in rows:
+    if key is None or key not in rows or param in rebound:
+        # a parameter the body gives another value may reach the call
+        # changed, so the call's rows do not speak for it
         return {}
     restated = []
     for policy in rows[key]:

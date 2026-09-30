@@ -4,6 +4,8 @@
 than the calls showed: each pins the verdict the calls support."""
 from typing import Optional
 
+import pytest
+
 from mathema import analyze
 from mathema.conjecture import check_conjectures, claim
 from mathema.policy import guard_policies
@@ -40,3 +42,19 @@ def test_a_guard_joined_by_or_covers_each_of_its_tests():
     guards = guard_policies(analyze(either_missing))
     assert guards[("x", "absent", "None")][0] == "raises"
     assert guards[("x", "missing", "nan")][0] == "raises"
+
+
+# --- a library row speaks for a parameter only while the body leaves it be
+
+np = pytest.importorskip("numpy")
+
+
+def mean_after_fill(xs: np.ndarray) -> float:
+    if len(xs) > 20:
+        xs = np.nan_to_num(xs)
+    return float(np.mean(xs))
+
+
+def test_no_library_row_is_composed_when_the_body_rebinds_the_parameter():
+    from mathema.policy import composed_policies
+    assert composed_policies(mean_after_fill, analyze(mean_after_fill)) == {}
