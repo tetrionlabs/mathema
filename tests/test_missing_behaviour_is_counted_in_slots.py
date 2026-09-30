@@ -57,6 +57,16 @@ def test_a_moved_hole_is_not_propagation():
     assert classify_call({"xs": [1.0, NAN]}, [NAN, 2.0]) == "introduces"
 
 
+def test_holes_at_the_same_positions_in_two_arguments_are_one_union():
+    assert classify_call({"xs": [NAN, 1.0], "ys": [NAN, 1.0]}, [NAN, 2.0]) == "propagates"
+    assert classify_call({"xs": [NAN, 1.0], "ys": [1.0, NAN]}, [NAN, NAN]) == "propagates"
+
+
+def test_the_union_is_a_control_on_position_and_count():
+    assert classify_call({"xs": [NAN, 1.0], "ys": [NAN, 1.0]}, [NAN, NAN]) == "introduces"
+    assert classify_call({"xs": [NAN, 1.0], "ys": [1.0, NAN]}, [NAN, 2.0]) == "introduces"
+
+
 def test_a_reduction_carries_one_hole_into_its_one_slot():
     assert classify_call({"xs": [NAN, NAN, 1.0]}, NAN) == "propagates"
     assert classify_call({"xs": [NAN, 1.0]}, 1.0) == "drops"
@@ -233,3 +243,15 @@ def test_a_quantile_over_no_value_is_a_hole():
     np = pytest.importorskip("numpy")
     from mathema._linalg_eval import FUNCTIONS
     assert math.isnan(FUNCTIONS["quantile"](np.array([NAN, NAN]), 0.5))
+
+
+def test_two_vectors_added_elementwise_propagate_each_hole():
+    np = pytest.importorskip("numpy")
+    import mathema
+
+    def added(xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+        return xs + ys
+    rec = mathema.check(added, claims=[mathema.claim(
+        "for xs in [0, 1]^n, ys in [0, 1]^n, f(xs, ys) >= 0", name="c")])
+    rows = {p.name: p for p in rec.probes}
+    assert (rows["missing[xs]"].verdict, rows["missing[ys]"].verdict) == ("holds", "holds")

@@ -221,17 +221,20 @@ def classify_call(inputs: dict, output=None, raised: "str | None" = None,
             return "introduces"
         return "propagates" if kinds_out <= set(unseen) else "converts"
     total_in = sum(s.count() for s in ins)
-    # one holding argument of the output's own shape keeps its count and
-    # positions; anything else carries at most as many as the output has
-    aligned = len(ins) == 1 and ins[0].shape == out.shape
-    carried = total_in if aligned else min(total_in, out.capacity())
+    # holding arguments of the output's own shape carry the union of
+    # their hole positions, count and place; anything else carries at
+    # most as many as the output has
+    aligned = bool(ins) and all(s.shape == out.shape for s in ins) and (
+        len(ins) == 1 or out.shape != ())
+    union = {sl.position for s in ins for sl in s.slots}
+    carried = (len(union) if len(ins) > 1 else total_in) if aligned \
+        else min(total_in, out.capacity())
     if total_in == 0 or out.count() != carried:
         return "introduces"
     kinds_in = {sl.kind for s in ins for sl in s.slots}
     kinds_out = {sl.kind for sl in out.slots}
     if kinds_out <= kinds_in and len(kinds_in) == 1:
-        if aligned and out.shape != () and \
-                {sl.position for sl in ins[0].slots} != {sl.position for sl in out.slots}:
+        if aligned and out.shape != () and union != {sl.position for sl in out.slots}:
             return "introduces"
         return "propagates"
     if not (kinds_out & kinds_in):
