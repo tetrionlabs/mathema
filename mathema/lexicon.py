@@ -1236,9 +1236,37 @@ def nearly_identity(x: float) -> float:
 
 
 def double(x: float) -> float:
-    """f(x) = 2x, the plain function every single-construct LEXICON
-    entry above (relation/power/abs/domain shapes) is checked against."""
+    """f(x) = 2x, the plain function most single-construct LEXICON
+    entries above (power and domain shapes, the notation) are checked
+    against."""
     return 2 * x
+
+
+def as_float(x: float) -> float:
+    """A number coerced to float; a float passes through unchanged,
+    what "relation_eq" demonstrates: `f(x) == x`, an exact equality."""
+    return float(x)
+
+
+def triangular_number(n: int) -> int:
+    """The n-th triangular number, 0 + 1 + ... + n, the count of pairs
+    among n + 1 items; what "domain_subset_integer" and its symbol
+    spelling demonstrate: a domain of whole numbers."""
+    return n * (n + 1) // 2
+
+
+def removed_endpoint(x: float) -> float:
+    """A function kept only to point callers at its replacement: every
+    call raises, what "raises_typed" demonstrates, a claim that the
+    function raises one named exception."""
+    raise ValueError("removed_endpoint was retired, call rate() instead")
+
+
+def simple_interest_balance(x: float) -> float:
+    """A million at five percent simple interest, after `x` years; what
+    the "let_free_var_*" entries demonstrate: `c`, a free variable the
+    claim quantifies over, with nothing in the function to alias."""
+    return 1_000_000 * (1 + 0.05 * x)
 
 
 def discount(price: float, code: float) -> float:
@@ -1594,11 +1622,18 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex", "latex_varepsilon",
     ]),
+    "as_float": (as_float, ["relation_eq"]),
+    "triangular_number": (triangular_number, [
+        "domain_subset_integer", "domain_subset_symbol",
+    ]),
+    "removed_endpoint": (removed_endpoint, ["raises_typed"]),
+    "simple_interest_balance": (simple_interest_balance, [
+        "let_free_var_closed", "let_free_var_typed",
+    ]),
     "double": (double, [
-        "relation_eq", "relation_le_unicode", "power_caret", "abs_bars",
+        "power_caret",
         "domain_closed_interval", "domain_open_interval",
-        "domain_subset_integer",
-        "forall_symbol", "domain_subset_symbol",
+        "forall_symbol",
         "domain_blackboard_reals", "relation_approx_unicode",
         "power_superscript", "sqrt_symbol", "multiply_dot",
         "infinity_symbol", "floor_brackets_unicode",
@@ -1607,11 +1642,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "latex_geqslant", "latex_left_right_bars",
     ]),
     "cosine_phase": (cosine_phase, ["latex_varphi"]),
-    "discount": (discount, ["raises_typed", "inferred_literal_domain"]),
+    "discount": (discount, ["inferred_literal_domain"]),
     "center_of_mass_two_body": (center_of_mass_two_body, ["let_alias"]),
-    "gibbs_free_energy": (gibbs_free_energy, [
-        "let_free_var_closed", "let_free_var_typed", "stress_gauge_invariance",
-    ]),
+    "gibbs_free_energy": (gibbs_free_energy, ["stress_gauge_invariance"]),
     "quadratic_root_plus": (quadratic_root_plus, [
         "assuming_inequality", "assuming_named_claim",
     ]),
@@ -1632,6 +1665,7 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     ]),
     "put_call_parity_gap": (put_call_parity_gap, ["parity_identity"]),
     "logistic_standard": (logistic_standard, [
+        "relation_le_unicode", "abs_bars",
         "sigmoid_derivative", "sigmoid_symmetry", "sigmoid_limit_upper",
         "sigmoid_limit_lower", "sigmoid_density_integrates",
         "sigmoid_bounded_below", "sigmoid_bounded_above",
