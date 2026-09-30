@@ -351,8 +351,11 @@ def keys_of(inputs: dict, paths: "dict | None" = None) -> list:
 
 def unseen_kinds(inputs: dict, keys: list) -> tuple:
     """The kinds of the keys no slot of the arguments shows: a path's
-    `unset`."""
-    return tuple(k for _q, k, m in keys if m == "unset")
+    `unset`, and a no-value a path reaches below the fields the
+    arguments show (`o.lines[*].qty`)."""
+    shown = set(keys_of(inputs))
+    return tuple(k for q, k, m in keys
+                 if m == "unset" or (is_path(q) and (q, k, m) not in shown))
 
 
 def value_at(inputs: dict, name: str):

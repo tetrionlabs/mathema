@@ -1500,6 +1500,112 @@ def _path_calls(fn, facts, params: list, kind: str, domain: dict,
                     found = _run_floor(fn, facts, [point])
                     if found:
                         out[path] = found
+    floors = _typed_key_floor if kind == "absent" else _list_field_floor
+    for p in params:
+        for path, point, member in floors(fn, facts, p, domain):
+            if path not in out:
+                found = _run_floor(fn, facts, [point])
+                for c in found:
+                    c.keys = [(path, kind, member)]
+                if found:
+                    out[path] = found
+    return out
+
+
+def _annotation(fn, param: str):
+    import typing
+    try:
+        return typing.get_type_hints(fn).get(param)
+    except Exception:
+        return None
+
+
+def _admits_none(ann) -> bool:
+    import types
+    import typing
+    return ann is type(None) or (
+        typing.get_origin(ann) in (typing.Union, types.UnionType)
+        and type(None) in typing.get_args(ann))
+
+
+def _others(fn, facts, param: str, domain: dict) -> dict:
+    """The parameters beside `param`, drawn inside their domains."""
+    import random
+
+    from ._sampling import _RNG_SEED
+    from .probing import _synth, signature_defaults
+    rng = random.Random(_RNG_SEED)
+    defaulted = signature_defaults(fn)
+    return {q: _synth(facts.param_kinds.get(q, "unknown"), rng, (domain or {}).get(q))
+            for q in facts.params if q != param and q not in defaulted}
+
+
+def _typed_key_floor(fn, facts, param: str, domain: dict) -> list:
+    """`[(path, point, member), ...]` for a TypedDict parameter: each key
+    it marks NotRequired left out (`unset`), and each key whose value
+    type admits None holding None (`null`)."""
+    import typing
+    cls = _annotation(fn, param)
+    if not (isinstance(cls, type) and typing.is_typeddict(cls)):
+        return []
+    try:
+        hints = typing.get_type_hints(cls)
+    except Exception:
+        return []
+    base = {k: _plain_value(ann) for k, ann in hints.items()}
+    others = _others(fn, facts, param, domain)
+    out = []
+    for key in hints:
+        if key in getattr(cls, "__optional_keys__", ()):
+            left = {k: v for k, v in base.items() if k != key}
+            out.append((f"{param}.{key}", {**others, param: left}, "unset"))
+        if _admits_none(hints[key]):
+            out.append((f"{param}.{key}", {**others, param: {**base, key: None}}, "null"))
+    return out
+
+
+def _list_field_floor(fn, facts, param: str, domain: dict) -> list:
+    """`[(path, point, member), ...]` for a record parameter's list
+    fields: a list of floats holding a `nan` (`o.prices[*]`), and a list
+    of records whose float field holds `nan` (`o.lines[*].qty`)."""
+    import dataclasses
+    import typing
+    cls = _annotation(fn, param)
+    base = _plain_record(cls)
+    if base is None:
+        return []
+    try:
+        hints = typing.get_type_hints(cls)
+    except Exception:
+        return []
+    others = _others(fn, facts, param, domain)
+    nan = float("nan")
+
+    def with_field(name: str, value):
+        if hasattr(base, "model_copy"):
+            return base.model_copy(update={name: value})
+        return dataclasses.replace(base, **{name: value})
+    out = []
+    for name, ann in hints.items():
+        if typing.get_origin(ann) is not list or not typing.get_args(ann):
+            continue
+        (element,) = typing.get_args(ann)[:1]
+        if element is float:
+            out.append((f"{param}.{name}[*]",
+                        {**others, param: with_field(name, [nan, 1.0])}, "nan"))
+            continue
+        inner = _plain_record(element)
+        if inner is None:
+            continue
+        for sub, sub_ann in typing.get_type_hints(element).items():
+            if sub_ann is not float:
+                continue
+            if hasattr(inner, "model_copy"):
+                held = inner.model_copy(update={sub: nan})
+            else:
+                held = dataclasses.replace(inner, **{sub: nan})
+            out.append((f"{param}.{name}[*].{sub}",
+                        {**others, param: with_field(name, [held])}, "nan"))
     return out
 
 
@@ -1710,6 +1816,8 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
         counterexample and the one next step, the same one the policy
         row gives.
     """
+    import typing
+
     from ._missing_words import declared_optional_return, point_shown
     from .domain import NO_ANNOTATION
     from .records import Probe
@@ -1995,6 +2103,14 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                 weakest = "holds"
         if said:
             parts.append(f"{path} (field): {_by_member(said)}")
+    from ._missing_policy import path_root
+    for p in params:
+        ann = _annotation(fn, p)
+        if (ann is dict or typing.get_origin(ann) is dict) \
+                and not any(path_root(q) == p for q in path_calls):
+            parts.append(f"{p} is a plain dict, which states nothing about its keys, so "
+                         f"the gate reaches a key only through a claim that binds it "
+                         f"(`for {p}.key in ... | {{unset}}`)")
     if kind == "absent" and whole:
         # what the output may be: a None from present inputs is the
         # return type's to declare
