@@ -64,3 +64,25 @@ def test_the_trials_do_not_count_a_draw_on_the_passed_in_generator():
     p = _one(simulated_return_scaled, "is_state_safe(f)")
     assert (p.verdict, p.route) == ("holds", "probe:algorithmic"), (
         p.verdict, p.route, p.counterexample, p.note)
+
+
+def draw_then_reseed(mu: float, rng) -> float:
+    # an unannotated generator parameter: drawn from, then the global
+    # generator is reseeded, a real state change
+    value = mu + 0.01 * rng.random()
+    random.seed(1)
+    return value
+
+
+def test_an_unannotated_rng_gets_a_real_generator_and_a_global_write_falsifies():
+    p = _one(draw_then_reseed, "is_state_safe(f)")
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "the global state of random" in p.counterexample
+
+
+def test_the_generator_in_a_witness_is_the_call_that_rebuilds_it():
+    import re
+    p = _one(draw_then_reseed, "is_state_safe(f)")
+    assert re.search(r"rng = numpy\.random\.default_rng\(\d+\)",
+                     p.counterexample), p.counterexample
+    assert " at 0x" not in p.counterexample

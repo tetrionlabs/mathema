@@ -1020,9 +1020,10 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if placed is None:
             return None
         call_args = [placed[p] for p in facts.params]
+        seed = None
         if build_generator is not None:
-            call_args[facts.params.index(generator)] = build_generator(
-                rng.randint(0, 2 ** 31 - 1))
+            seed = rng.randint(0, 2 ** 31 - 1)
+            call_args[facts.params.index(generator)] = build_generator(seed)
         try:
             originals = copy.deepcopy(call_args)
         except Exception:
@@ -1051,8 +1052,11 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
         then = (f", and then raised {type(raised).__name__}"
                 if raised is not None else "")
         called = (f"calling {getattr(fn, '__name__', 'f')} with "
-                  + ", ".join(f"{p} = {_witness_value(v)}"
-                              for p, v in zip(facts.params, originals)))
+                  + ", ".join(
+                      f"{p} = "
+                      + ((_generator_text(v, seed) if p == generator else None)
+                         or _witness_value(v))
+                      for p, v in zip(facts.params, originals)))
         if changed:
             return f"{called} changed {'; '.join(changed)}{then}"
         if raised is not None and not env_calls:
@@ -1752,7 +1756,28 @@ def _seed_factory(fn, param: str):
         return numpy.random.RandomState
     if kind == "random":
         return random.Random
+    if param in ("rng", "random_state"):
+        # a generator parameter no annotation names: a numpy Generator,
+        # or the standard library's when numpy is absent
+        try:
+            import numpy
+            return numpy.random.default_rng
+        except ImportError:
+            return random.Random
     return lambda s: s
+
+
+def _generator_text(value, seed: int) -> "str | None":
+    """Intent:
+        The call that rebuilds a generator a trial passed in
+        (`numpy.random.default_rng(1234)`), so a witness naming it can be
+        rerun; None for a value that is not one.
+    """
+    kinds = {"Generator": "numpy.random.default_rng",
+             "RandomState": "numpy.random.RandomState",
+             "Random": "random.Random"}
+    name = kinds.get(type(value).__name__)
+    return f"{name}({seed})" if name else None
 
 
 def _same_result(first, second) -> bool:
