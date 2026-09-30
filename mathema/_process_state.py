@@ -204,15 +204,18 @@ def _restore_logging(saved) -> None:
     logging.disable(disable)
 
 
-def restore(before: dict, c_environ_names=()) -> list[str]:
+def restore(before: dict, c_environ_names=(), failed: "list | None" = None
+            ) -> list[str]:
     """Intent:
         Put the process-wide state back as `before` read it, and reset
         each name in `c_environ_names` (written through os.putenv or
         os.unsetenv) to its value in `before`, or unset it. Every step
         runs whatever an earlier one did; a step that raises is
-        returned as a phrase. An exception that is not an ordinary error
-        (a wall-clock alarm, an interrupt) interrupting a step runs that
-        step once more, and is raised again once every step has run.
+        returned as a phrase (appended to `failed` when given, so a
+        caller holds them even when the call raises). An exception that
+        is not an ordinary error (a wall-clock alarm, an interrupt)
+        interrupting a step runs that step once more, and is raised
+        again once every step has run.
     """
     steps = [("os.environ", lambda: _restore_environ(before["os.environ"])),
              ("the C environment",
@@ -233,7 +236,7 @@ def restore(before: dict, c_environ_names=()) -> list[str]:
     if npr is not None and "the global state of numpy.random" in before:
         steps.append(("the global state of numpy.random",
                       lambda: npr.set_state(before["the global state of numpy.random"])))
-    failed: list = []
+    failed = [] if failed is None else failed
     pending: "BaseException | None" = None
     for name, step in steps:
         for attempt in (1, 2):
@@ -315,6 +318,28 @@ def back_to_pristine() -> list[str]:
         return restore(reading)
 
 
+def _handlers_added(before: dict, after: "dict | None") -> list:
+    """Intent:
+        The logging handlers present after the call that no logger had
+        before it, which restoring detaches and which are closed.
+    """
+    if after is None:
+        return []
+    def handlers(state: dict) -> list:
+        found = list((state.get("logging's root configuration") or
+                      (0, (), 0))[1])
+        for _level, hs, _prop, _dis in (state.get("_loggers") or {}).values():
+            found.extend(hs)
+        return found
+    kept = {id(h) for h in handlers(before)}
+    out, seen = [], set()
+    for h in handlers(after):
+        if id(h) not in kept and id(h) not in seen:
+            seen.add(id(h))
+            out.append(h)
+    return out
+
+
 class Trial:
     """One isolated call: the state before (`before`) and after
     (`after`, None when it could not be read), the putenv and unsetenv
@@ -371,20 +396,57 @@ def isolated(fn):
             scope[k] = wrapped[label]
         yield trial
     finally:
-        with _alarm_blocked():
+        pending: "BaseException | None" = None
+
+        def unwind():
             for label, o in originals.items():
                 setattr(os, label, o)
             for k, v in rebound.items():
                 scope[k] = v
-            try:
-                trial.after = snapshot()
-            except Exception:
-                trial.after = None
-            names = sorted({name for _w, name in trial.c_environ_calls})
-            trial.restore_failed = restore(trial.before, names)
-        if trial.restore_failed:
-            warnings.warn("mathema could not put the process back after "
-                          "a trial: " + "; ".join(trial.restore_failed))
+
+        def read_after():
+            trial.after = None
+            trial.after = snapshot()
+
+        try:
+            with _alarm_blocked():
+                # each step runs once more if a signal interrupts it
+                # (another thread can take the alarm the block holds
+                # back here), and the restore is always reached
+                for label, step in (("the putenv recorder", unwind),
+                                    ("the reading after the call",
+                                     read_after)):
+                    for attempt in (1, 2):
+                        try:
+                            step()
+                            break
+                        except Exception:
+                            break
+                        except BaseException as exc:
+                            pending = pending or exc
+                            if attempt == 2:
+                                trial.restore_failed.append(
+                                    f"{label} ({type(exc).__name__})")
+                added = _handlers_added(trial.before, trial.after)
+                names = sorted({name for _w, name in trial.c_environ_calls})
+                try:
+                    restore(trial.before, names, trial.restore_failed)
+                except BaseException as exc:
+                    pending = pending or exc
+                for handler in added:
+                    try:
+                        handler.close()
+                    except Exception:
+                        pass
+        finally:
+            if trial.restore_failed:
+                warnings.warn(
+                    "mathema could not restore "
+                    + "; ".join(trial.restore_failed) + " after a trial; "
+                    "this process may differ from before the check, so "
+                    "restart it before trusting later results")
+        if pending is not None:
+            raise pending
 
 
 def _body_scope(fn, tree) -> dict:

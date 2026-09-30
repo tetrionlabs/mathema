@@ -1118,8 +1118,11 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
         said = sorted(set(restore_failed))
         return (*result, None, {
             "mathema.restore_failed": said,
-            "mathema.caveat": ("mathema could not put the process back "
-                               "after a trial: " + "; ".join(said))})
+            "mathema.caveat": ("mathema could not restore "
+                               + "; ".join(said) + " after a trial; this "
+                               "process may differ from before the check, "
+                               "so restart it before trusting later "
+                               "results")})
     return result
 
 

@@ -262,12 +262,12 @@ def test_a_restore_step_that_fails_is_recorded_on_the_row(monkeypatch):
     _state_safe(pure)   # imports made by a first check are not the trial's
     level, env = logging.getLogger().level, dict(os.environ)
     monkeypatch.setattr(random, "setstate", broken)
-    with pytest.warns(UserWarning, match="could not put the process back"):
+    with pytest.warns(UserWarning, match="could not restore the global state"):
         p = _state_safe(draw_and_configure)
     assert p.verdict == "falsified"
     assert "the global state of random" in str(
         p.meta.get("mathema.restore_failed")), p.meta
-    assert "could not put the process back" in (p.note or "")
+    assert "restart it before trusting later results" in (p.note or "")
     # every other part was still put back
     assert logging.getLogger().level == level
     assert dict(os.environ) == env
@@ -550,3 +550,73 @@ def test_an_idempotent_write_is_falsified_through_check_and_does_not_leak(fn):
     assert pricing_log.level == level
     assert "MATHEMA_PRICING_MODE" not in os.environ
     assert "/opt/mathema-pricing" not in sys.path
+
+
+# --- the trial's own ending is interruption proof -------------------------------
+
+def test_an_alarm_during_the_after_reading_still_restores_the_process(
+        monkeypatch):
+    import threading
+    stop = threading.Event()
+    idle = threading.Thread(target=stop.wait, daemon=True)
+    idle.start()
+    state, env = random.getstate(), dict(os.environ)
+    real = _process_state.snapshot
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) == 2:          # the reading after the call
+            raise _WallClockExpired("cap")
+        return real()
+    monkeypatch.setattr(_process_state, "snapshot", flaky)
+    try:
+        with pytest.raises(_WallClockExpired):
+            with _process_state.isolated(draw_and_configure):
+                draw_and_configure(1.0)
+    finally:
+        stop.set()
+    assert random.getstate() == state
+    assert dict(os.environ) == env
+
+
+def test_a_step_interrupted_twice_is_recorded_and_warned(monkeypatch):
+    real = random.setstate
+
+    def refuses(saved):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(random, "setstate", refuses)
+    trial = None
+    with pytest.warns(UserWarning, match="global state of random"):
+        with pytest.raises(KeyboardInterrupt):
+            with _process_state.isolated(draw_and_configure) as trial:
+                draw_and_configure(1.0)
+    monkeypatch.setattr(random, "setstate", real)
+    assert any(f.startswith("the global state of random")
+               for f in trial.restore_failed), trial.restore_failed
+
+
+class ClosingHandler(logging.Handler):
+    """A handler that remembers being closed."""
+
+    closed = False
+
+    def emit(self, record):
+        pass
+
+    def close(self):
+        ClosingHandler.closed = True
+        super().close()
+
+
+def adds_a_handler(x: float) -> float:
+    logging.getLogger("mathema.t.closing").addHandler(ClosingHandler())
+    return x
+
+
+def test_a_handler_the_function_added_is_closed():
+    ClosingHandler.closed = False
+    _state_safe(adds_a_handler)
+    assert ClosingHandler.closed
+    assert not logging.getLogger("mathema.t.closing").handlers
