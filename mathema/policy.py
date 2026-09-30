@@ -852,7 +852,22 @@ def guard_policies(facts) -> dict:
     out: dict = {}
 
     def covered(test) -> list:
+        # a test covers a parameter only when it depends on that parameter
+        # alone: one check, or checks joined by `or`, each on one parameter
+        parts = test.values if isinstance(test, ast.BoolOp) \
+            and isinstance(test.op, ast.Or) else [test]
         keys: list = []
+        for part in parts:
+            found = checks(part)
+            if not found:
+                return []
+            keys += found
+        return keys
+
+    def checks(test, compound: bool = False) -> list:
+        keys: list = []
+        if isinstance(test, ast.BoolOp) and not compound:
+            return []
         for node in ast.walk(test):
             if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) \
                     and node.left.id in params and len(node.ops) == 1:
@@ -894,10 +909,17 @@ def guard_policies(facts) -> dict:
                 return "value"
         return None
 
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.If) or isinstance(node.test, ast.UnaryOp):
+    # a check that also reads something else decides only part of a
+    # case, and a later guard for the same case sees only what is left
+    shadowed: set = set()
+    ifs = sorted((n for n in ast.walk(tree) if isinstance(n, ast.If)),
+                 key=lambda n: (n.lineno, n.col_offset))
+    for node in ifs:
+        if isinstance(node.test, ast.UnaryOp):
             continue
-        keys = covered(node.test)
+        keys = [k for k in covered(node.test) if k not in shadowed]
+        if not covered(node.test):
+            shadowed.update(checks(node.test, compound=True))
         if not keys:
             continue
         raise_stmt = next((s for s in node.body if isinstance(s, ast.Raise)), None)
