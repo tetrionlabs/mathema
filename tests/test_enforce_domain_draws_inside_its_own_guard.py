@@ -5,6 +5,8 @@ guard admits: the guard declares its domain to every row, the way
 `@enforce_dimensions()` declares its shapes, so the engine never draws a
 value the guard rejects and no row is falsified by the guard's own
 `DomainError`."""
+import pytest
+
 from mathema import check, claims_decorator, enforce_domain
 from mathema.types import domain_from_signature
 
@@ -107,3 +109,31 @@ def test_a_raise_at_a_transformed_argument_inside_the_domain_still_falsifies():
         "doubled"]
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "ValueError" in str(p.counterexample), p.counterexample
+
+
+@pytest.mark.parametrize("route", ["best", "derive"])
+def test_derive_skips_a_claim_whose_transformed_argument_always_leaves(route):
+    from mathema.conjecture import claim
+    p = _by_name(check(unit_root, claims=[claim(
+        "for x in [0, 1], f(x + 2) >= 0", name="shifted", route=route)]))[
+        "shifted"]
+    assert p.verdict == "skipped", (route, p.verdict, p.route, p.note)
+    assert "left the declared domain" in (p.note or ""), p.note
+
+
+def test_derive_still_proves_where_the_transformed_argument_stays_inside():
+    from mathema.conjecture import claim
+    p = _by_name(check(unit_root, claims=[claim(
+        "for x in [0, 0.25], f(2 * x) >= 0", name="doubled")]))["doubled"]
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+
+
+def test_derive_proves_over_the_part_that_stays_inside_and_says_so():
+    # x - 0.5 is inside [0, 1] only for x in [0.5, 1]; the proof covers
+    # that part and the note names what was left out
+    from mathema.conjecture import claim
+    p = _by_name(check(unit_root, claims=[claim(
+        "for x in [0, 1], f(x - 0.5) >= 0", name="half", route="derive")]))[
+        "half"]
+    assert p.verdict == "proven", (p.verdict, p.note)
+    assert "x - 0.5 leaves" in (p.note or ""), p.note
