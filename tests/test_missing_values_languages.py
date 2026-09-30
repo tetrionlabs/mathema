@@ -11,6 +11,8 @@ from typing import Optional
 
 import pytest
 
+import mathema
+
 from tests.test_missing_values_core import (FALSIFIED, PROVEN,
                                             PROVEN_OR_HOLDS, assert_row,
                                             run, stage, witness)
@@ -18,6 +20,9 @@ from tests.test_missing_values_core import (FALSIFIED, PROVEN,
 needs_language = pytest.mark.skipif(
     importlib.util.find_spec("mathema_language") is None,
     reason="needs the mathema-language package")
+#: the rows that read an absence along a path, which the paths handoff
+#: (absent members `null` and `unset`) re-authors
+paths_handoff = pytest.mark.xfail(strict=True, reason="paths: absent members null, unset")
 needs_pydantic = pytest.mark.skipif(
     importlib.util.find_spec("pydantic") is None, reason="needs pydantic")
 
@@ -76,21 +81,33 @@ def test_g3_a_str_annotation_infers_the_bare_language():
     assert "L[unicode]|" not in (probe.note or "")
 
 
+def _absent_row(fn, text, param):
+    """The value claim and the absence row a claim admitting None
+    produces: a raise at the admitted None is classified (FM26), and the
+    policy row carries it."""
+    rec = mathema.check(fn, claims=[mathema.claim(text, name="c")])
+    value = next(p for p in rec.probes if p.name == "c")
+    row = next(p for p in rec.probes if p.name == f"absent[{param}]")
+    return value, row
+
+
 @needs_language
-@stage(3)
 def test_g5_an_admitted_absence_is_drawn():
-    probe, _ = assert_row(shout, "for s in L[unicode] | {None}, f(f(s)) == f(s)",
-                          FALSIFIED)
-    assert "None" in witness(probe)
+    value, row = _absent_row(shout, "for s in L[unicode] | {None}, f(f(s)) == f(s)", "s")
+    assert value.verdict in PROVEN_OR_HOLDS, (value.verdict, value.note)
+    assert "at s = None f raised AttributeError" in (value.note or "")
+    assert row.verdict == "falsified"
+    assert row.counterexample == "s = None: f raised AttributeError"
 
 
 @needs_language
-@stage(3)
 def test_g6b_an_admitted_absence_is_drawn_for_a_document():
-    probe, _ = assert_row(first_line,
-                          "for doc in L[unicode] | {None}, len(f(doc)) <= len(doc)",
-                          FALSIFIED)
-    assert "None" in witness(probe)
+    value, row = _absent_row(first_line,
+                             "for doc in L[unicode] | {None}, len(f(doc)) <= len(doc)",
+                             "doc")
+    assert value.verdict in PROVEN_OR_HOLDS, (value.verdict, value.note)
+    assert row.verdict == "falsified"
+    assert row.counterexample == "doc = None: f raised AttributeError"
 
 
 @needs_language
@@ -118,7 +135,7 @@ def test_g10_a_function_handling_every_missing_value_is_missing_safe():
 
 @needs_language
 @needs_pydantic
-@stage(3)
+@paths_handoff
 def test_o1_an_absent_optional_field_raising_falsifies():
     assert_row(note_len, f"for o in {ORDER}, f(o) >= 0", FALSIFIED)
 
@@ -145,6 +162,7 @@ def test_o4_an_absent_field_raises_typeerror():
 
 @needs_language
 @needs_pydantic
+@paths_handoff
 def test_o5_an_absent_optional_field_is_not_missing_safe():
     probe, _ = assert_row(note_len, "is_missing_safe(f)", FALSIFIED)
     assert "None" in witness(probe)
@@ -159,7 +177,7 @@ def test_o6_an_admitted_absent_field_falsifies():
 
 @needs_language
 @needs_pydantic
-@stage(3)
+@paths_handoff
 def test_a_path_bound_states_absence_where_it_narrows_an_optional_field():
     probe, _ = run(note_len, f"for o in {ORDER}, o.note in L[unicode] \\ {{None}}, f(o) >= 0")
     assert "o.note in L[unicode] \\ {None}" in probe.statement

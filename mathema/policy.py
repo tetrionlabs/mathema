@@ -1500,11 +1500,19 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                 continue
             ways = _decide(calls)
             stated = _stated_for(stated_rows, kind, p, m)
-            wrong = [r for r in stated if r.verdict == "falsified"]
+            # a stated row falsified at this member (not only at another)
+            wrong = []
+            for r in stated:
+                pol = parse_policy(r.statement) if r.verdict == "falsified" else None
+                bad = [c for c in calls if pol is not None
+                       and _premise_holds(pol.premise, c.point) and not _follows(pol, c)]
+                if bad:
+                    wrong.append((r, bad[0]))
+            stated = [r for r in stated if r.verdict != "falsified"
+                      or any(r is w for w, _c in wrong)]
             if wrong:
-                w = wrong[0]
-                did = _did(next(c for c in calls if not _follows(
-                    parse_policy(w.statement) or Policy(kind), c)))
+                w, bad_call = wrong[0]
+                did = _did(bad_call)
                 entry.update({"source": "stated", "behaviour": did.split(" ")[0]})
                 said.append(f"{m} {did}, contradicting the stated `{w.statement}`")
                 failures.append(f"{w.statement} is falsified: {w.counterexample}")

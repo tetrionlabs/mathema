@@ -3376,6 +3376,20 @@ def _empty_on_a_scalar(cj, fn, facts) -> bool:
     return cj.lhs in facts.params and kind in ("scalar", "int")
 
 
+def _is_under_test(candidate, fn) -> bool:
+    """Whether a function a claim binds by name is the function under
+    test itself."""
+    for c in (candidate, getattr(candidate, "__wrapped__", None)):
+        if c is None:
+            continue
+        if c is fn:
+            return True
+        if getattr(c, "__module__", None) == getattr(fn, "__module__", None) \
+                and getattr(c, "__qualname__", None) == getattr(fn, "__qualname__", 0):
+            return True
+    return False
+
+
 def _gate_premise_refusal(cj) -> "str | None":
     """Why `assuming is_missing_safe(f)` (or `is_absent_safe(f)`) is no
     premise, with what to write instead; None when the claim has none."""
@@ -5524,7 +5538,14 @@ def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
         if bound is None:
             continue
         dom = _as_domain(bound)
-        if dom.base_type == "L" or dom.dims:
+        if dom.dims:
+            continue
+        if dom.base_type == "L":
+            # a language admits no hole of its own; an absence it admits
+            # (`L[unicode] | {None}`) is drawn first
+            record = _as_domain((record_domain or {}).get(p) or bound)
+            if admitted(record, record.policy)[0] or getattr(dom, "absent", False):
+                out[p] = _SpecialCycle(rng, values=[], first=[None])
             continue
         if _is_enumerated(dom):
             listed = sorted(set(_set_sentinels(dom)), key=_member_sort_key)
@@ -7398,6 +7419,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # drawn once, before any random draw
     missing_laps = _missing_laps(rng, kinds, cj_domain, ctx.missing,
                                  record_domain=ctx.record_domain)
+    from .probing import _SpecialCycle
+    for _p in list(language_laps):
+        if _p in missing_laps:
+            # the absence a language binding admits comes before its hazards
+            lap = language_laps[_p]
+            first = missing_laps.pop(_p).first_values() + list(lap._first)
+            language_laps[_p] = _SpecialCycle(rng, values=lap._values[len(lap._first):],
+                                              first=first)
     # what the record says was tried for each listed sentinel
     missing_meta = ({"mathema.missing": {"tried": {
         p: [repr(v) for v in lap.first_values()]
@@ -7588,7 +7617,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return v
 
     fn_tagged = f_call.wrap(_tagged(fn_call, "f", inject=call_pins))
-    bound_tagged = {name: _tagged(v, name) for name, v in bound_funcs.items()}
+    # a claim that names the function under test (`clamp(rate)`) calls f
+    bound_tagged = {name: (f_call.wrap(_tagged(v, name)) if _is_under_test(v, fn)
+                           else _tagged(v, name))
+                    for name, v in bound_funcs.items()}
     # the lengths the samples inside the premise region actually had,
     # per sequence parameter, for the sampling note
     sequence_params = [p for p, k in kinds.items() if k in SEQUENCE_KINDS]

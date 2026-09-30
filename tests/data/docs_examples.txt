@@ -63,15 +63,16 @@
 [x] docs/matrix-structure.md:enforce-structure   run  (requires)
 [x] docs/mean-of-nothing.md:mean                 file run output run output run output run output file run output
 [x] docs/missing-values.md:kinds                 file run output
-[x] docs/missing-values.md:admits                run output
+[x] docs/missing-values.md:admits                file run output
 [x] docs/missing-values.md:traps                 run output
-[x] docs/missing-values.md:core                  file run output run output run output run output run output run output
+[x] docs/missing-values.md:core                  file run output run output run output run output run output
 [x] docs/missing-values.md:containers            file run output
+[x] docs/missing-values.md:strings               file run output  (requires)
 [x] docs/missing-values.md:write                 file session session session
-[x] docs/missing-values.md:defines               run output
-[x] docs/missing-values.md:gates                 file run output
+[x] docs/missing-values.md:defines               file run output
 [x] docs/missing-values.md:enforce               run output
-[-] docs/missing-values.md:429
+[-] docs/missing-values.md:17
+[-] docs/missing-values.md:473
 [x] docs/modes/accept.md:balance                 file file session session run file session session
 [x] docs/modes/audit.md:branches                 file session
 [x] docs/modes/audit.md:half                     run repl

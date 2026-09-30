@@ -182,16 +182,18 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     def _tag(callee, label):
         # a complex result under a real claim counts as a raise too
         complex_raises = complex_is_a_raise(callee, cj_domain)
+        from .conjecture import _is_under_test
+        under_test = label == "f" or _is_under_test(callee, fn)
 
         def _wrapped(*a, **kw):
             try:
                 out = callee(*a, **kw)
             except Exception as exc:
                 calls_raised[0] = type(exc).__name__
-                if label == "f":
+                if under_test:
                     f_calls.calls.append(("raised", type(exc).__name__, a, kw))
                 raise
-            if label == "f":
+            if under_test:
                 f_calls.calls.append(("returned", out, a, kw))
             if complex_raises and is_complex_value(out):
                 calls_raised[0] = "a complex result"

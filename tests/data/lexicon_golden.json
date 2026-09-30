@@ -955,59 +955,74 @@
   "ascii": "for x in [0.0, 1.0] : float|absent|missing, 0 <= f(x) <= 1"
  },
  "missing_propagates": {
-  "input": "missing(f, x) propagates",
-  "unicode": "missing(f, x) propagates",
-  "ascii": "missing(f, x) propagates"
+  "input": "missing(f, variance) propagates",
+  "unicode": "missing(f, variance) propagates",
+  "ascii": "missing(f, variance) propagates"
  },
  "missing_drops": {
-  "input": "missing(f, x) drops",
-  "unicode": "missing(f, x) drops",
-  "ascii": "missing(f, x) drops"
+  "input": "missing(f, rate) drops",
+  "unicode": "missing(f, rate) drops",
+  "ascii": "missing(f, rate) drops"
+ },
+ "missing_trap_silent_drop": {
+  "input": "missing(f, rate) propagates",
+  "unicode": "missing(f, rate) propagates",
+  "ascii": "missing(f, rate) propagates"
  },
  "missing_raises": {
-  "input": "missing(f, x) raises(ValueError)",
-  "unicode": "missing(f, x) raises(ValueError)",
-  "ascii": "missing(f, x) raises(ValueError)"
+  "input": "missing(f, ratio) raises(ValueError)",
+  "unicode": "missing(f, ratio) raises(ValueError)",
+  "ascii": "missing(f, ratio) raises(ValueError)"
  },
  "missing_converts": {
-  "input": "missing(f, x) converts",
-  "unicode": "missing(f, x) converts",
-  "ascii": "missing(f, x) converts"
+  "input": "missing(f, price) converts",
+  "unicode": "missing(f, price) converts",
+  "ascii": "missing(f, price) converts"
  },
  "missing_introduces": {
-  "input": "missing(f, x) introduces",
-  "unicode": "missing(f, x) introduces",
-  "ascii": "missing(f, x) introduces"
+  "input": "assuming count(weights) >= 1, missing(f, weights) introduces",
+  "unicode": "assuming count(weights) >= 1, missing(f, weights) introduces",
+  "ascii": "assuming count(weights) >= 1, missing(f, weights) introduces"
+ },
+ "missing_introduces_by_shape": {
+  "input": "assuming count(prices) >= 1, missing(f, prices) introduces",
+  "unicode": "assuming count(prices) >= 1, missing(f, prices) introduces",
+  "ascii": "assuming count(prices) >= 1, missing(f, prices) introduces"
  },
  "absent_raises": {
-  "input": "absent(f, x) raises(TypeError)",
-  "unicode": "absent(f, x) raises(TypeError)",
-  "ascii": "absent(f, x) raises(TypeError)"
+  "input": "absent(f, score) raises(TypeError)",
+  "unicode": "absent(f, score) raises(TypeError)",
+  "ascii": "absent(f, score) raises(TypeError)"
  },
  "absent_drops": {
-  "input": "absent(f, scale) drops",
-  "unicode": "absent(f, scale) drops",
-  "ascii": "absent(f, scale) drops"
+  "input": "absent(f, fx_rate) drops",
+  "unicode": "absent(f, fx_rate) drops",
+  "ascii": "absent(f, fx_rate) drops"
  },
  "absent_propagates": {
-  "input": "absent(f, x) propagates",
-  "unicode": "absent(f, x) propagates",
-  "ascii": "absent(f, x) propagates"
+  "input": "absent(f, amount) propagates",
+  "unicode": "absent(f, amount) propagates",
+  "ascii": "absent(f, amount) propagates"
  },
  "absent_converts": {
-  "input": "absent(f, x) converts",
-  "unicode": "absent(f, x) converts",
-  "ascii": "absent(f, x) converts"
+  "input": "absent(f, price) converts",
+  "unicode": "absent(f, price) converts",
+  "ascii": "absent(f, price) converts"
  },
  "missing_member_null": {
-  "input": "missing(f, xs, null) raises(TypeError)",
-  "unicode": "missing(f, xs, null) raises(TypeError)",
-  "ascii": "missing(f, xs, null) raises(TypeError)"
+  "input": "missing(f, positions, null) raises(TypeError)",
+  "unicode": "missing(f, positions, null) raises(TypeError)",
+  "ascii": "missing(f, positions, null) raises(TypeError)"
  },
  "missing_member_nan": {
-  "input": "missing(f, xs, nan) propagates",
-  "unicode": "missing(f, xs, nan) propagates",
-  "ascii": "missing(f, xs, nan) propagates"
+  "input": "missing(f, positions, nan) propagates",
+  "unicode": "missing(f, positions, nan) propagates",
+  "ascii": "missing(f, positions, nan) propagates"
+ },
+ "missing_class_row_contradicted": {
+  "input": "missing(f, positions) propagates",
+  "unicode": "missing(f, positions) propagates",
+  "ascii": "missing(f, positions) propagates"
  },
  "missing_premise_values_remain": {
   "input": "assuming count(xs) >= 1, missing(f, xs) drops",
@@ -1019,27 +1034,37 @@
   "unicode": "assuming count(xs) == 0, missing(f, xs, nan) propagates",
   "ascii": "assuming count(xs) == 0, missing(f, xs, nan) propagates"
  },
+ "missing_premise_all_na_raises": {
+  "input": "assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)",
+  "unicode": "assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)",
+  "ascii": "assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)"
+ },
  "missing_member_defined": {
   "input": "assuming count(xs) >= 1, missing(f, xs, null) drops",
   "unicode": "assuming count(xs) >= 1, missing(f, xs, null) drops",
   "ascii": "assuming count(xs) >= 1, missing(f, xs, null) drops"
  },
  "missing_trap_comparison": {
-  "input": "missing(f, x) drops",
-  "unicode": "missing(f, x) drops",
-  "ascii": "missing(f, x) drops"
+  "input": "missing(f, score) drops",
+  "unicode": "missing(f, score) drops",
+  "ascii": "missing(f, score) drops"
  },
  "missing_predicate_sugar": {
-  "input": "missing_propagates(f, x)",
-  "unicode": "missing(f, x) propagates",
-  "ascii": "missing(f, x) propagates"
+  "input": "missing_propagates(f, variance)",
+  "unicode": "missing(f, variance) propagates",
+  "ascii": "missing(f, variance) propagates"
  },
  "absent_none_spelling": {
-  "input": "None(f, x) raises",
-  "unicode": "absent(f, x) raises",
-  "ascii": "absent(f, x) raises"
+  "input": "None(f, score) raises",
+  "unicode": "absent(f, score) raises",
+  "ascii": "absent(f, score) raises"
  },
  "is_missing_safe_gate": {
+  "input": "is_missing_safe(f)",
+  "unicode": "f is missing safe",
+  "ascii": "is_missing_safe(f)"
+ },
+ "is_missing_safe_gate_falsified": {
   "input": "is_missing_safe(f)",
   "unicode": "f is missing safe",
   "ascii": "is_missing_safe(f)"
@@ -1048,5 +1073,20 @@
   "input": "is_absent_safe(f)",
   "unicode": "f is absent safe",
   "ascii": "is_absent_safe(f)"
+ },
+ "is_absent_safe_gate_falsified": {
+  "input": "is_absent_safe(f)",
+  "unicode": "f is absent safe",
+  "ascii": "is_absent_safe(f)"
+ },
+ "is_empty_safe_hole": {
+  "input": "is_empty_safe(returns)",
+  "unicode": "returns is empty safe",
+  "ascii": "is_empty_safe(returns)"
+ },
+ "is_empty_safe_identity": {
+  "input": "is_empty_safe(volumes)",
+  "unicode": "volumes is empty safe",
+  "ascii": "is_empty_safe(volumes)"
  }
 }
