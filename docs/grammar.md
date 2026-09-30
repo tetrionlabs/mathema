@@ -77,8 +77,8 @@ symbol, and a claim pasted out of a PDF is a common way to meet one.
 | `⌊ ⌋` | U+230A, U+230B | the floor of | `floor(` |
 | `⌈ ⌉` | U+2308, U+2309 | the ceiling of | `ceil(` |
 | <code>&#124; &#124;</code> | U+007C | the absolute value of | `abs(` |
-| <code>&#124;&#124; &#124;&#124;</code> | U+007C | the norm of, the order a subscript on the closing bars: <code>&#124;&#124;x&#124;&#124;_1</code>, <code>&#124;&#124;x&#124;&#124;_2</code>, <code>&#124;&#124;x&#124;&#124;_inf</code> | `norm(` |
-| `‖ ‖` | U+2016 | the norm of, the order a subscript glyph: `‖x‖₁`, `‖x‖₂`, `‖x‖∞` | <code>&#124;&#124; &#124;&#124;</code> |
+| <code>&#124;&#124; &#124;&#124;</code> | U+007C | the norm of; `_1`, `_2` or `_inf` after the closing bars is the order | `norm(` |
+| `‖ ‖` | U+2016 | the norm of; `₁`, `₂` or `∞` after the closing glyph is the order | <code>&#124;&#124; &#124;&#124;</code> |
 | `²` | U+00B2 | squared, and likewise `³` and the rest | `^2` |
 
 Greek letters are accepted as themselves (`α`, `σ`, `Δ`), and so are the
@@ -250,11 +250,20 @@ engine bug.
 | `f(x)^2 >= 0` | powers with a caret |
 | <code>&#124;f(x)&#124; &lt;= 1</code> | absolute value with bars |
 | <code>for x in [0, 1], y in [0, 1], &#124;x + y - f(x, y)&#124; &lt;= ε</code> | bars around any expression; on matrices, the determinant |
-| <code>for x in R^n, f(x) ~= &#124;&#124;x&#124;&#124;_1</code> | a norm with double bars, the order a subscript: bare bars are the Euclidean norm of a vector and the Frobenius norm of a matrix, `_1`, `_2`, `_inf` and an integer `_p` the other orders, and `^2` after the bars is the square |
+| <code>for x in R^n, f(x) ~= &#124;&#124;x&#124;&#124;_1</code> | a norm with double bars, the order a subscript; `^2` after the bars is the square |
 | `for n in [1, 5] subset Z, f(n) <= n!` | postfix factorial |
 | `f(x, 1.0) == x[-1]` | indexing into a sequence parameter |
 | `f(\alpha) ≤ 1` | a Greek name written as a LaTeX escape |
 | `for x in [1, 5], f(x) == exp(1)` | the mathematical constants and functions |
+
+Bare bars are the Euclidean norm of a vector and the Frobenius norm of a
+matrix. `_1`, `_2`, `_inf` (also `_oo`, `_∞`) and a whole number `_p`
+name the other orders; on a matrix `_1` is the largest column sum, `_2`
+the spectral norm and `_inf` the largest row sum, numpy's `ord`. The
+order is never a superscript, so <code>&#124;&#124;x&#124;&#124;^2</code>
+is the square of the norm. A claim written with the bars and one
+written with `norm(...)` are one claim; the record shows the spelling
+you wrote.
 
 ## Domains: where the claim applies
 

@@ -213,25 +213,39 @@ Notable changes to mathema are recorded here from its first public release onwar
   `L[unicode]`.
 - A norm can be written with double bars, the order a subscript on the
   closing bars: `||x||` is `norm(x)` (Euclidean for a vector, Frobenius
-  for a matrix), `||x||_1`, `||x||_2`, `||x||_inf` (also `_oo`, `_∞`)
-  and `||x||_p` for an integer `p >= 1` are `norm(x, 1)` and so on, and
+  for a matrix); `||x||_1`, `||x||_2`, `||x||_inf` (also `_oo`, `_∞`)
+  and `||x||_p` for a whole number `p >= 1` are `norm(x, 1)` and so on;
   `||x||^2` is the square of the norm. Unicode reads and writes `‖x‖`,
-  `‖x‖₂`, `‖x‖∞`. A claim renders in the spelling it was written in, a
-  bare `||x||` names the norm it resolved to in the record's note, and
-  any other order is refused naming the accepted ones. In the call
-  form every infinite order (`norm(x, oo)`, `norm(x, infinity)`,
-  `norm(x, ∞)`) is `norm(x, inf)`, which the probe evaluates as the
-  largest magnitude; before, `oo` there was sampled as a free variable
-  and the claim falsified. A claim written with the bars before 0.6.1
-  stored `norm(x)` as its statement and re-fingerprints once.
-- The derive route reads a norm over a vector: `||x||` and `||x||_2`
-  as the root of the sum of squares, `||x||_1` as the sum of
-  magnitudes, `||x||_inf` as the largest magnitude, and `||A||` on a
-  matrix as the root of the trace of `A @ A.T`. A length, a distance,
-  a normalisation, a weight vector's `||w||_1` and a Gram trace are
-  proven for every length through the numpy definition rows; a matrix
-  `_1`, `_2` or `_inf` norm, a chain of norm orders and the triangle
-  inequality stay with the probe.
+  `‖x‖₂`, `‖x‖∞`. Any other order is refused with the accepted ones
+  named.
+- A claim renders in the spelling it was written in, and a bare `||x||`
+  names the norm it resolved to in the record's note. A claim written
+  with the bars and one written with `norm(...)` are one claim with one
+  fingerprint.
+- In the call form every infinite order (`norm(x, oo)`, `norm(x,
+  infinity)`, `norm(x, ∞)`) is `norm(x, inf)`, the largest magnitude;
+  before, `oo` there was sampled as a free variable and the claim
+  falsified.
+- The derive route reads a norm over a vector: `||x||` and `||x||_2` as
+  the root of the sum of squares, `||x||_1` as the sum of magnitudes,
+  `||x||_inf` as the largest magnitude, and `||A||` on a matrix as the
+  root of the trace of `A @ A.T`. A length, a distance, a normalisation,
+  a stopping criterion's step, a weight vector's `||w||_1`, a tracking
+  error over two pandas Series and a Gram trace are proven for every
+  length through the numpy definition rows; a largest magnitude, like a
+  least or greatest element, is proven for every length of at least one,
+  and the empty vector is left to the probe. A matrix `_1`, `_2` or
+  `_inf` norm, a chain of norm orders and the triangle inequality stay
+  with the probe.
+- A bare `oo`, `inf`, `infinity` or `∞` anywhere in a claim is infinity
+  on the probe route as well, bound to the float infinity, and `-oo` its
+  negative. Before, the probe sampled the name as a free variable, so
+  `f(x) < oo` on a finite function could be falsified at a random value;
+  now it holds, and `f(x) > oo` is falsified with a witness. The
+  canonical text writes every spelling `inf`, as a domain already wrote
+  an infinite bound (`[0, inf)`), so a claim with a limit or an integral
+  bound at `oo` re-fingerprints once. A parameter named `oo`, `inf` or
+  `infinity` keeps its own name in the rendered text.
 
 ## 0.6.0
 

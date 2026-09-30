@@ -20,6 +20,7 @@ f(x) == g(x)                        # relate two implementations (funcs={"g": ot
 ```
 
 Shorthand: `|x|`/`||x||`/`⌊x⌋`/`⌈x⌉` for `abs`/`norm`/`floor`/`ceil`,
+the norm's order a subscript on the closing bars (`||x||_1`, `||x||_inf`),
 each wrapping any expression, so `|x + y - f(x, y)|` is the absolute value
 of the whole difference; `!=`/`≈` as their own relations. Every claim renders to LaTeX
 exactly (`mathema.grammar.to_latex`), going *through* sympy so it's
