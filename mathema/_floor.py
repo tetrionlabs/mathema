@@ -8,12 +8,14 @@ The floor, once per claim and parameter, in order:
 - a vector: the zero vector (when the element domain holds 0), a
   constant vector, a vector of length 1; per admitted hole member, an
   all-hole vector of length 1 and of length 2, and a vector with one
-  hole at the first position and one at the last;
+  hole at the first position and one at the last; per two admitted
+  members, a vector holding both;
 - a matrix: the zero matrix (when the entries may be 0), a constant
   matrix, a rank-deficient one (its second row a copy of its first);
-  per admitted member, one hole entry and an all-hole row;
+  per admitted member, one hole entry and an all-hole row; per two
+  members, a first row holding both;
 - a table: per admitted member, one hole in every column and an
-  all-hole first column;
+  all-hole first column; per two members, a first column holding both;
 - the container itself absent, when its domain admits that.
 
 A length the claim's shape plan fixes, or a literal size in the
@@ -76,9 +78,20 @@ def vector_floor(holes: list, admits_zero: bool, length_free: bool,
             items.append(lambda base, h=h: [h] * len(base) if base else None)
         items.append(lambda base, h=h: [h, *base[1:]] if base else None)
         items.append(lambda base, h=h: [*base[:-1], h] if len(base) > 1 else None)
+    for h, g in _pairs(holes):
+        if length_free:
+            items.append(lambda base, h=h, g=g: [h, g, base[0]] if base else None)
+        else:
+            items.append(lambda base, h=h, g=g: [h, g, *base[2:]] if len(base) > 1
+                         else None)
     if absent:
         items.append(lambda base: _ABSENT)
     return items
+
+
+def _pairs(holes: list) -> list:
+    """Every two of the admitted hole values, in order."""
+    return [(h, g) for i, h in enumerate(holes) for g in holes[i + 1:]]
 
 
 def matrix_floor(holes: list, admits_zero: bool, absent: bool = False) -> list:
@@ -98,6 +111,9 @@ def matrix_floor(holes: list, admits_zero: bool, absent: bool = False) -> list:
                      if base and base[0] else None)
         items.append(lambda base, h=h: [[h] * len(base[0]), *map(list, base[1:])]
                      if base and base[0] else None)
+    for h, g in _pairs(holes):
+        items.append(lambda base, h=h, g=g: [[h, g, *base[0][2:]], *map(list, base[1:])]
+                     if base and len(base[0]) > 1 else None)
     if absent:
         items.append(lambda base: _ABSENT)
     return items
@@ -115,6 +131,10 @@ def table_floor(holes: list, absent: bool = False) -> list:
         items.append(lambda base, h=h: {c: ([h] * len(col) if k == 0 else list(col))
                                         for k, (c, col) in enumerate(base.items())}
                      if base else None)
+    for h, g in _pairs(holes):
+        items.append(lambda base, h=h, g=g: {c: ([h, g, *col[2:]] if k == 0 else list(col))
+                                             for k, (c, col) in enumerate(base.items())}
+                     if base and len(next(iter(base.values()))) > 1 else None)
     if absent:
         items.append(lambda base: _ABSENT)
     return items

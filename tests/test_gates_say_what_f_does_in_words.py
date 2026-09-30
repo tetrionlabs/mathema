@@ -116,7 +116,7 @@ def test_a_falsified_gate_prints_its_reason_and_next_step():
     under = _lines_under(rec, "c1")
     assert under[1] == (
         "           xs (list): null raises TypeError, and no claim says it may; nan "
-        "propagates, confirmed on the 53 draws of c0[float]; no claim states it yet")
+        "propagates, confirmed on the 54 draws of c0[float]; no claim states it yet")
     assert under[2] == "           counterexample xs = [null]: f raised TypeError"
     assert under[3].startswith(
         "           if the raise is intended, write `missing(f, xs, null) "

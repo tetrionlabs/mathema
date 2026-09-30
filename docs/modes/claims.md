@@ -99,7 +99,7 @@ functions.softmax: 1 declared claim(s)
   - is_deterministic: f(scores) == f(scores)  [route best]
 functions.softmax: 2 policy rows about scores
   confirmed by the code (mathema claims functions.softmax --write writes these):
-    holds   missing[scores, nan]: missing(f, scores, nan) propagates   [default for a list slot that may be nan; confirmed on the 156 draws of is_deterministic. Keep it by writing it (mathema claims functions.softmax --write), or change the word to raises or drops if f should do otherwise]
+    holds   missing[scores, nan]: missing(f, scores, nan) propagates   [default for a list slot that may be nan; confirmed on the 155 draws of is_deterministic. Keep it by writing it (mathema claims functions.softmax --write), or change the word to raises or drops if f should do otherwise]
   contradicted by the code (change the word, the code, or accept it as a discovery; --write writes these with the contradiction in the note):
     FALSIFY missing[scores, null]: missing(f, scores, null) propagates   [mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError]
              if the raise is intended, write `missing(f, scores, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept functions.softmax missing[scores, null] --as discovery --corrected "missing(f, scores, null) raises(TypeError)"

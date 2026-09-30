@@ -408,11 +408,11 @@ print(mathema.check(average_return, claims=[mathema.claim(
 <!-- example: containers output match=subset -->
 ```text
 mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
-  holds   nonneg[float]: for positions in ([0.0, 1.0] | {missing})^n : float, total_exposure(positions) >= 0 (248 entries across 53 draws, sizes (1, 1) to (8, 1))
-           the float64 computation of nonneg ran at 53 points: null, nan, every corner and 40 interior points; at positions = [null] f raised TypeError; at positions = [nan] f gave nan back
+  holds   nonneg[float]: for positions in ([0.0, 1.0] | {missing})^n : float, total_exposure(positions) >= 0 (251 entries across 54 draws, sizes (1, 1) to (8, 1))
+           the float64 computation of nonneg ran at 54 points: null, nan, every corner and 40 interior points; at positions = [null] f raised TypeError; at positions = [nan] f gave nan back
   FALSIFY missing[positions, null]: missing(f, positions, null) propagates   [mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError]
            if the raise is intended, write `missing(f, positions, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept portfolio.total_exposure missing[positions, null] --as discovery --corrected "missing(f, positions, null) raises(TypeError)"
-  holds   missing[positions, nan]: missing(f, positions, nan) propagates   [default for a list slot that may be nan; confirmed on the 53 draws of nonneg[float]. Keep it by writing it (mathema claims portfolio.total_exposure --write), or change the word to raises or drops if f should do otherwise]
+  holds   missing[positions, nan]: missing(f, positions, nan) propagates   [default for a list slot that may be nan; confirmed on the 54 draws of nonneg[float]. Keep it by writing it (mathema claims portfolio.total_exposure --write), or change the word to raises or drops if f should do otherwise]
 mathema.Record(average_return) · source, no side effects · form ce47d44bdab7
   holds   unit: for returns in ([0.0, 1.0] | {missing})^n : float, 0 <= average_return(returns) <= 1 (474 entries across 100 draws, sizes (1, 1) to (8, 1))
            every link of the chained comparison holds; at returns = [nan] f gave nan back
