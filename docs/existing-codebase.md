@@ -183,13 +183,13 @@ print(p.verdict, p.counterexample)
 
 <!-- example: codebase output -->
 ```text
-falsified rate=-2.72559 -> -32.66347642639832, rate=4.92258 -> 34.39055087522713 (not decreasing)
+falsified rate=-2.72559 -> -32.66347642639832, rate=4.92258 -> 34.39055087522713 at price = -8.76733 (not decreasing)
 ```
 
 The derivative of `price * (1 - rate)` in `rate` is `-price`, which is
 positive when the price is negative, and the claim said nothing about
-prices. Both values were computed at the same price, which the witness
-does not print; either one solves to -8.77. (`d(f(price, rate), rate)` is
+prices. Both values were computed at the same price, the one the witness
+prints after `at`. (`d(f(price, rate), rate)` is
 the derivative in `rate`; [the claim grammar](grammar.md#calculus) lists
 the calculus forms.) The suggestion was right about the function and silent about its
 domain, which is the usual state of a suggestion. Say what the function

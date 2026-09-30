@@ -181,6 +181,17 @@ def _interval_ends(bounds) -> "tuple[float, float] | None":
     return None
 
 
+def _held_text(facts, target: str, args: list) -> str:
+    """Intent:
+        The parameters a pairwise trial held fixed while it moved
+        `target`, as `name = value` pairs (a large container by its
+        shape and a first row); empty for a one-parameter function.
+    """
+    from ._shapes import witness_text
+    return ", ".join(f"{p} = {witness_text(v) or _witness_value(v)}"
+                     for p, v in zip(facts.params, args) if p != target)
+
+
 def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     trials: int, *, increasing: bool):
     """Pairwise-sampling monotonicity: per trial, two ordered values of
@@ -214,7 +225,9 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if ok:
             return True
         direction = "increasing" if increasing else "decreasing"
-        return f"{target}={x1:.6g} -> {v1!r}, {target}={x2:.6g} -> {v2!r} (not {direction})"
+        held = _held_text(facts, target, args)
+        return (f"{target}={x1:.6g} -> {v1!r}, {target}={x2:.6g} -> {v2!r}"
+                f"{f' at {held}' if held else ''} (not {direction})")
 
     return _probe_trials(fn, facts, target, domain, rng, trials, trial)
 

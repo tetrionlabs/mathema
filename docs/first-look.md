@@ -43,9 +43,9 @@ scalar parameter. This is the real, unedited result:
 ```text
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
-           counterexample alpha=-5.44324 -> -504886.9526187774, alpha=10 -> -2491080.279764588 (not increasing)
+           counterexample alpha=-5.44324 -> -504886.9526187774, alpha=10 -> -2491080.279764588 at x = [-7.60421, -1.92616, 7.114, 7.35796, -0.810053, -2.44243, 6.11837] (not increasing)
   FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
-           counterexample alpha=-8.34575 -> 1100.270649780719, alpha=10 -> 1138.3250235869998 (not decreasing)
+           counterexample alpha=-8.34575 -> 1100.270649780719, alpha=10 -> 1138.3250235869998 at x = [3.64108, -9.70633, -3.0172] (not decreasing)
   FALSIFY affine[alpha]: d(f(x, alpha), alpha, alpha) = 0
            counterexample alpha=8.52571, h=0.02: curvature estimate 3.64706e+06 does not settle affine
   FALSIFY convex[alpha]: d(f(x, alpha), alpha, alpha) >= 0
