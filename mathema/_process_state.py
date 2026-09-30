@@ -570,10 +570,11 @@ def log_emissions_only(fn, facts) -> bool:
         owner = node.func.value
         if isinstance(owner, ast.Name) and _is_logger(scope.get(owner.id)):
             emitted.add(f"{owner.id}.{node.func.attr}")
-        elif (isinstance(owner, ast.Call) and _dotted(owner.func) is not None
-              and _dotted(owner.func).split(".")[-1] == "getLogger"
-              and scope.get(_dotted(owner.func).split(".")[0]) in (
-                  logging, logging.getLogger)):
-            emitted.add(_dotted(owner.func))
+        elif isinstance(owner, ast.Call):
+            called = _dotted(owner.func) or ""
+            head = scope.get(called.split(".")[0])
+            if called.split(".")[-1] == "getLogger" and (
+                    head is logging or head is logging.getLogger):
+                emitted.add(called)
     return all(w.get("kind") == "external_method_call"
                and w.get("target") in emitted for w in writes)
