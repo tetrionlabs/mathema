@@ -279,9 +279,15 @@ class Lowering:
             if isinstance(right, Vec):
                 raise NotSymbolic(f"{ast.unparse(node)!r}: a vector "
                                   f"exponent is outside the lowering")
-            if not (right.is_integer and right.is_nonnegative):
+            # a whole, nonnegative power of anything, or a rational
+            # power of a positive constant (`252 ** 0.5` is sqrt(252))
+            constant_root = (not isinstance(left, Vec) and left.is_number
+                             and left.is_positive and right.is_Rational)
+            if not (right.is_integer and right.is_nonnegative) \
+                    and not constant_root:
                 raise NotSymbolic(f"{ast.unparse(node)!r}: only a whole, "
-                                  f"nonnegative power is lowered")
+                                  f"nonnegative power, or a rational power "
+                                  f"of a positive constant, is lowered")
         if isinstance(left, Vec) or isinstance(right, Vec):
             length = self._same_length(left, right, node)
             le = left.elem if isinstance(left, Vec) else left

@@ -94,3 +94,18 @@ def test_a_least_element_and_an_elementwise_quotient_lower():
     _lower("min(x)")
     _, obligations = _lower("x / x")
     assert [text for _e, text in obligations.nonzero] == ["x"]
+
+
+def test_a_constant_base_to_a_rational_power_lowers():
+    assert _zero("mean(x) * 252 ** 0.5", "mean(x) * sqrt(252)")
+    assert not _zero("mean(x) * 252 ** 0.5", "mean(x) * 252")
+    root, _ = _lower("8 ** (1 / 3)")
+    assert root == 2
+
+
+@pytest.mark.parametrize("src", ["k ** 0.5", "std(x) ** 0.5", "x ** 0.5",
+                                 "(-8) ** (1 / 3)", "c ** k"])
+def test_a_variable_base_or_a_negative_constant_to_a_fractional_power_does_not(
+        src):
+    with pytest.raises(NotSymbolic, match="power"):
+        _lower(src)
