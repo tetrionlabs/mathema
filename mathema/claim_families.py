@@ -927,13 +927,29 @@ def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         uniformity.
     """
     from ._process_state import log_emissions_only, writer_calls
-    from .hazards import _write_free
+    from .hazards import _state_writes, _write_free
     from .symbolic import ProofResult, lift
     if writer_calls(fn, facts):
         # a bare call of a process-state writer (os.putenv, random.seed,
         # a draw from the global generator) is a write site the
         # certificate below does not see
         return None
+    generator = _generator_parameter(fn, facts)
+    if generator is not None:
+        writes = _state_writes(facts)
+        draws = [w for w in writes if w.get("kind") == "argument_method_call"
+                 and w.get("target") == generator]
+        if (draws and len(draws) == len(writes)
+                and not getattr(facts, "unresolved", None)
+                and not getattr(facts, "global_vars", None)):
+            return ProofResult(
+                "proven",
+                sketch=f"the only calls that could write are draws from the "
+                       f"generator passed in as {generator}, which belongs to "
+                       f"the caller and is expected to move; there is no "
+                       f"other argument mutation, no global or module write "
+                       f"and no dynamic escape (is_reproducible judges the "
+                       f"draws)")
     if _write_free(facts):
         return ProofResult(
             "proven",
@@ -976,6 +992,11 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return None
     target = facts.params[0]
     module_dict = module_scope(fn)
+    # a generator passed in is drawn fresh for each call and its moving
+    # is not counted: it belongs to the caller
+    generator = _generator_parameter(fn, facts)
+    build_generator = (_seed_factory(fn, generator)
+                       if generator is not None else None)
 
     def data_globals():
         out = {}
@@ -998,6 +1019,9 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if placed is None:
             return None
         call_args = [placed[p] for p in facts.params]
+        if build_generator is not None:
+            call_args[facts.params.index(generator)] = build_generator(
+                rng.randint(0, 2 ** 31 - 1))
         try:
             originals = copy.deepcopy(call_args)
         except Exception:
@@ -1037,6 +1061,8 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     f"environment this process passes to its subprocesses, "
                     f"where os.environ cannot see it{then}")
         for p, original, after in zip(facts.params, originals, call_args):
+            if p == generator:
+                continue
             same = (original == after
                     or (isinstance(original, float) and original != original
                         and isinstance(after, float) and after != after))
@@ -1566,6 +1592,28 @@ def _seed_annotation_kind(annotation) -> "str | None":
     if last == "Random" and ("random" in text.lower()):
         return "random"
     return None
+
+
+def _generator_parameter(fn, facts) -> "str | None":
+    """Intent:
+        The parameter that passes in a random generator (a numpy
+        `Generator` or `RandomState`, or a `random.Random`, by annotation,
+        or a parameter named `rng` or `random_state`), or None. Drawing
+        from it moves the caller's own generator, which is not a state
+        change for is_state_safe.
+    """
+    import inspect
+    param = seed_parameter(fn, facts)
+    if param is None:
+        return None
+    try:
+        annotation = callable_signature(fn).parameters[param].annotation
+    except (TypeError, ValueError, KeyError):
+        annotation = inspect.Parameter.empty
+    if annotation is not inspect.Parameter.empty \
+            and _seed_annotation_kind(annotation) is not None:
+        return param
+    return param if param in ("rng", "random_state") else None
 
 
 def seed_parameter(fn, facts) -> "str | None":
