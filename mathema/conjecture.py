@@ -5522,6 +5522,94 @@ def _column_bound(bound, table_bound):
     return bound
 
 
+def _call_by_name(fn, point: dict, extra: "dict | None" = None):
+    """`fn` called at the arguments `point` names, and `extra` for the
+    parameters it does not: a positional-only parameter (`math.sqrt`'s
+    `x`), or any argument of a callable with no signature, is passed by
+    position in the point's order, the rest by name."""
+    import inspect
+    rest = {p: v for p, v in (extra or {}).items() if p not in point}
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return fn(*point.values(), **rest)
+    positional = [p for p, prm in params.items()
+                  if prm.kind is inspect.Parameter.POSITIONAL_ONLY and p in point]
+    return fn(*[point[p] for p in positional],
+              **{p: v for p, v in point.items() if p not in positional}, **rest)
+
+
+def _refill_caller(fn_call, pins: "dict | None" = None):
+    """`call_at(point, given)`: f called at its arguments by name, each
+    argument the original call gave (`given`, its positional and keyword
+    arguments) and the point does not name passed as given, and each
+    pinned parameter at its pin, giving `(output, raised)`; for reading
+    what f did with a hole by filling it."""
+    import inspect
+
+    def call_at(point: dict, given: "tuple | None" = None):
+        extra = dict(pins or {})
+        if given is not None:
+            try:
+                sig = inspect.signature(fn_call)
+                named = {n for n, prm in sig.parameters.items()
+                         if prm.kind not in (prm.VAR_POSITIONAL, prm.VAR_KEYWORD)}
+                extra.update({n: v for n, v in sig.bind_partial(
+                    *given[0], **given[1]).arguments.items() if n in named})
+            except (TypeError, ValueError):
+                pass
+        try:
+            return _call_by_name(fn_call, point, extra), None
+        except Exception as exc:
+            return None, type(exc).__name__
+    return call_at
+
+
+def _fill_value(bound):
+    """Intent:
+        An interior point of a parameter's domain (a container's element
+        domain), for filling a hole whose argument holds no present value
+        to read what f did with it: the midpoint of a bounded domain, one
+        in from the finite end of a half-bounded one, 1.0 on the whole
+        line, the smallest member of a finite set. None for a domain with
+        no real value (a language, `{missing}` alone).
+    """
+    import math
+    from dataclasses import replace as _replace
+
+    from .domain import bound_to_sympy_set, domain_contains
+    if bound is not None and getattr(bound, "base_type", None) == "L":
+        return None
+    if bound is not None and getattr(bound, "dims", ()):
+        bound = _replace(bound, dims=())
+    if bound is None:
+        return 1.0
+    try:
+        import sympy
+        region = bound_to_sympy_set(bound)
+        lo, hi = float(region.inf), float(region.sup)
+        integral = bool(region.is_subset(sympy.S.Integers))
+    except Exception:
+        return None
+    if math.isinf(lo) and math.isinf(hi):
+        point = 1.0
+    elif math.isinf(hi):
+        point = lo + 1.0
+    elif math.isinf(lo):
+        point = hi - 1.0
+    else:
+        point = (lo + hi) / 2.0
+    if integral:
+        point = float(math.floor(point))
+        for candidate in (point, point + 1.0, lo, hi):
+            if domain_contains(int(candidate), bound):
+                return int(candidate)
+        return None
+    if domain_contains(point, bound):
+        return point
+    return lo if domain_contains(lo, bound) else None
+
+
 def _container_draws(p: str, kind: str, bound, record, resolution: dict,
                      resolver, shared: bool, structured: bool):
     """Intent:
@@ -7707,6 +7795,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         fn_call = _linalg_eval.law_callable(fn_call)
         bound_funcs = {name: _bound_for_arrays(v)
                        for name, v in bound_funcs.items()}
+    executed_record.refill_at = _refill_caller(fn_call, call_pins)
+    executed_record.fills = {
+        p: fill for p in kinds
+        if (fill := _fill_value((ctx.record_domain or {}).get(p) or cj_domain.get(p)
+                                )) is not None}
     from .domain import path_bindings_hold
     path_bound = {p for p in kinds
                   if any(key.startswith(p + ".") or key.startswith(p + "[")

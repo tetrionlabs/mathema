@@ -97,11 +97,12 @@ adopted is_deterministic into ./claims/adopted.claims.yaml: f(scores) == f(score
 $ mathema claims functions.softmax
 functions.softmax: 1 declared claim(s)
   - is_deterministic: f(scores) == f(scores)  [route best]
-functions.softmax: 1 policy row about scores
-  not covered by any claim yet (the line beneath says what to write, or what to change; --write leaves these out):
-    FALSIFY missing[scores]: f has no single policy for a missing scores
-             f gives a hole back when every slot is missing (scores = [nan]); at an all-null container it raises TypeError instead; at scores = [nan, 4.23, 6.86, 9.76] it introduces a missing value
-             to state each case, write `missing(f, scores, null) raises(TypeError)`, `assuming count(scores) >= 1, missing(f, scores, nan) introduces` and `assuming count(scores) == 0, missing(f, scores, nan) propagates`; or make f treat a missing scores one way
+functions.softmax: 2 policy rows about scores
+  confirmed by the code (mathema claims functions.softmax --write writes these):
+    holds   missing[scores, nan]: missing(f, scores, nan) propagates   [default for a list slot that may be nan; confirmed on the 156 draws of is_deterministic. Keep it by writing it (mathema claims functions.softmax --write), or change the word to raises or drops if f should do otherwise]
+  contradicted by the code (change the word, the code, or accept it as a discovery; --write writes these with the contradiction in the note):
+    FALSIFY missing[scores, null]: missing(f, scores, null) propagates   [mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError]
+             if the raise is intended, write `missing(f, scores, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept functions.softmax missing[scores, null] --as discovery --corrected "missing(f, scores, null) raises(TypeError)"
 ```
 
 The adopted stanza is plain declared-claims YAML, so it's yours to

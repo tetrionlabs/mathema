@@ -10,10 +10,10 @@ import math
 
 import pytest
 
-from mathema._missing_policy import NOT_READ, refill
+from mathema._missing_policy import INCONCLUSIVE, NOT_READ, refill
 
 NAN = math.nan
-UNIT = {"x": (0.0, 1.0), "y": (0.0, 1.0), "xs": (0.0, 1.0), "A": (0.0, 1.0)}
+UNIT = {"x": 0.5, "y": 0.5, "xs": 0.5, "A": 0.5}
 
 
 def _calls(fn):
@@ -60,8 +60,22 @@ def test_a_raise_raises():
     assert _behaviours(strict, x=NAN) == ["raises"]
 
 
-def test_a_hole_that_stays_after_the_fill_was_introduced():
-    assert _behaviours(zero_over_zero, xs=[NAN, 0.5]) == ["introduces"]
+def test_a_filled_call_that_gives_no_value_is_inconclusive():
+    assert _behaviours(zero_over_zero, xs=[NAN, 0.5]) == [INCONCLUSIVE]
+
+
+def test_a_hole_that_stays_beside_values_after_the_fill_was_introduced():
+    def shifted(xs):
+        return [NAN] + list(xs[:-1])
+    assert _behaviours(shifted, xs=[1.0, NAN, 0.5]) == ["introduces"]
+
+
+def test_a_replacement_equal_to_the_fill_is_still_read():
+    # clamp(nan) is 1.0, and so is clamp(1.0) and clamp(2.0); clamp(0.9) is not
+    def call_at(point):
+        return clamp01(**point), None
+    out = refill(call_at, {"x": NAN}, 1.0, None, {"x": 1.0})
+    assert [b for *_r, b in out] == ["drops"]
 
 
 def test_a_hole_that_goes_with_the_fill_propagates():
@@ -135,3 +149,52 @@ def test_two_members_are_filled_one_at_a_time():
 def test_an_absence_is_not_refilled():
     assert refill(_calls(root), {"x": None}, None, "TypeError", UNIT) is None
 
+
+
+# --- end to end -----------------------------------------------------------
+
+def _rows(fn, text):
+    import mathema
+    rec = mathema.check(fn, claims=[mathema.claim(text, name="c")])
+    return {p.name: p for p in rec.probes}
+
+
+def test_a_running_total_propagates_its_holes():
+    np = pytest.importorskip("numpy")
+
+    def running_total(xs: np.ndarray) -> np.ndarray:
+        return np.cumsum(xs)
+    rows = _rows(running_total, "for xs in [0, 1]^n, len(f(xs)) >= 1")
+    assert rows["missing[xs]"].verdict == "holds", rows["missing[xs]"].note
+
+
+def test_a_gram_matrix_propagates_its_holes():
+    np = pytest.importorskip("numpy")
+
+    def gram(A: np.ndarray) -> np.ndarray:
+        return A.T @ A
+    rows = _rows(gram, "for A in [0, 1]^(n,n), f(A) >= 0")
+    assert rows["missing[A]"].verdict == "holds", rows["missing[A]"].note
+
+
+def test_a_trace_leaves_holes_off_the_diagonal_unread_and_counts_them():
+    np = pytest.importorskip("numpy")
+
+    def trace_of(A: np.ndarray) -> float:
+        return float(np.trace(A))
+    rows = _rows(trace_of, "for A in [0, 1]^(n,n), f(A) >= 0")
+    assert rows["missing[A]"].verdict == "holds", rows["missing[A]"].note
+    assert rows["c"].meta["mathema.missing"]["not_read"]["A"] >= 1
+
+
+def test_an_overflow_under_complete_inputs_is_inconclusive_not_introduced():
+    def ema(x: list[float], alpha: float) -> float:
+        y = x[0]
+        for v in x[1:]:
+            y = alpha * v + (1 - alpha) * y
+        return y
+    import mathema
+    rec = mathema.check(ema)
+    rows = {p.name: p for p in rec.probes}
+    assert rows["missing[x]"].verdict != "falsified", rows["missing[x]"].note
+    assert rows["missing[alpha]"].verdict != "falsified", rows["missing[alpha]"].note

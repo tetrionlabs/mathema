@@ -28,6 +28,15 @@ a vector) has as many slots as its own shape: the count the inputs
 carry into it is capped at that many, so a vector with two holes whose
 mean is one `nan` propagates.
 
+Where a route can call f again, a call at a hole is read by refilling
+the hole with a present value of the same argument, else a point inside
+its domain (`refill`): a filled call that raises or gives no value back
+is inconclusive; a hole that stays in the output was introduced, one
+that goes with the fill propagated however far it spread, a value the
+fill changes dropped the hole, and a value it leaves the same shows f
+never read the hole. An inconclusive or unread call is no evidence of
+any behaviour. The counts above decide what a route cannot refill.
+
 Over many calls the behaviours per (parameter, kind, member) aggregate
 to one behaviour, or to `mixed` with a witness for each behaviour seen.
 """
@@ -372,14 +381,16 @@ class PolicyTable:
     raised: dict = field(default_factory=dict)
 
     def add(self, inputs: dict, output=None, raised: "str | None" = None,
-            paths: "dict | None" = None) -> None:
-        """Classify one call and file it under every missing member its
-        arguments hold, and every path in `paths` reaches."""
+            paths: "dict | None" = None, behaviour: "str | None" = None) -> None:
+        """Classify one call (or take the `behaviour` read by refilling
+        it) and file it under every missing member its arguments hold,
+        and every path in `paths` reaches."""
         keys = keys_of(inputs, paths)
         if not keys:
             return
         from ._missing_words import point_shown
-        behaviour = classify_call(inputs, output, raised, unseen_kinds(inputs, keys))
+        behaviour = behaviour or classify_call(inputs, output, raised,
+                                               unseen_kinds(inputs, keys))
         witness = point_shown(inputs)
         for key in keys:
             self.seen.setdefault(key, {}).setdefault(behaviour, witness)
@@ -423,6 +434,9 @@ class PolicyTable:
 #: what a call at a hole is when filling the hole leaves the output as it
 #: was: f never read the hole
 NOT_READ = "not read"
+#: what a call at a hole is when the filled call, its inputs complete,
+#: raises or gives no value back: it says nothing about the hole
+INCONCLUSIVE = "inconclusive"
 
 
 def filled(value, members, fill):
@@ -498,65 +512,103 @@ def _same_output(a, b) -> bool:
     return same(plain(a), plain(b))
 
 
+def present_value(value):
+    """A value one of `value`'s slots holds, the first that is not a
+    hole, or None for a scalar or a container holding none."""
+    for read in (_cells, lambda v: [c for r in (_rows(v) or []) for c in r],
+                 lambda v: [c for col in (_table_columns(v) or {}).values() for c in col]):
+        cells = read(value)
+        if cells:
+            found = next((c for c in cells if _hole_word(c) is None
+                          and isinstance(c, (int, float)) and not isinstance(c, bool)), None)
+            if found is not None:
+                return found
+    return None
+
+
 def refill(call_at, point: dict, output, raised: "str | None",
            fills: dict) -> "list | None":
     """Intent:
         What one call at a hole did, read by calling f again with the
-        hole filled by a value inside its parameter's domain:
-        `[(point, output, raised, behaviour), ...]`, one per hole member
-        the call held. A call holding two members is taken one member at
-        a time, the other members filled, and each member's behaviour
-        read from that call. Per member, in order: a raise `raises`; a
-        hole in the output that stays when the input's hole is filled
-        `introduces` (it does not come from the input); a hole that goes
-        with it `propagates`, however far it spread; a value that the
-        fill leaves the same is `NOT_READ` (f never read the hole); a
-        value the fill changes `drops`. A no-value of the other kind in
-        the output `converts`, by the count rule. None when the call
-        cannot be refilled: it holds an absence or a path, or a holding
-        parameter has no fill values.
+        hole filled: `[(point, output, raised, behaviour), ...]`, one per
+        hole member the call held. The fill is a value the same argument
+        holds in another slot, else the parameter's value in `fills` (an
+        interior point of its domain). A call holding two members is
+        taken one member at a time, the other members filled, and each
+        member's behaviour read from that call. Per member, in order: a
+        raise `raises`; the filled call, whose inputs are complete,
+        raising or giving back no value at all is `INCONCLUSIVE` (the
+        value rule reports that no-value); a hole in the output that
+        stays when the input's hole is filled `introduces` (it does not
+        come from the input); a hole that goes with it `propagates`,
+        however far it spread; a value every fill leaves the same (the
+        fill, twice it, and 0.9 of it) is `NOT_READ` (f never read the
+        hole); a value a fill changes `drops`. A no-value of the other kind in the output `converts`,
+        by the count rule. None when the call cannot be refilled: it
+        holds an absence or a path, or a holding parameter has neither
+        a present value nor a fill.
 
     Notes:
         `call_at(point)` calls f at the arguments by name and returns
-        `(output, raised)`. `fills` maps a parameter to two values of its
-        domain: a replacing function that happens to return one fill for
-        the hole still returns a different value for the other.
+        `(output, raised)`.
     """
     keys = keys_of(point)
     if not keys or any(k != MISSING or is_path(q) for q, k, _m in keys):
         return None
     holding = list(dict.fromkeys(q for q, _k, _m in keys))
-    if any(q not in fills for q in holding):
+    fill_of = {q: (present_value(point[q]) if present_value(point[q]) is not None
+                   else fills.get(q)) for q in holding}
+    if any(v is None for v in fill_of.values()):
         return None
     members = list(dict.fromkeys(m for _q, _k, m in keys))
 
-    def fill_all(at: dict, which, pick: int) -> dict:
-        return {q: (filled(v, which, fills[q][pick]) if q in holding else v)
+    def fill_all(at: dict, which, scale: float = 1.0) -> dict:
+        return {q: (filled(v, which, _scaled(fill_of[q], scale)) if q in holding else v)
                 for q, v in at.items()}
     out = []
     for m in members:
         others = [o for o in members if o != m]
         if others:
-            at = fill_all(point, others, 0)
+            at = fill_all(point, others)
             got, err = call_at(at)
         else:
             at, got, err = point, output, raised
         if err is not None:
             out.append((at, got, err, "raises"))
             continue
-        counted = classify_call(at, got)
-        if counted == "converts":
+        if classify_call(at, got) == "converts":
             out.append((at, got, None, "converts"))
             continue
-        after, after_err = call_at(fill_all(at, [m], 0))
-        if no_value_slots(got).count():
-            behaviour = (counted if after_err is not None else
-                         "introduces" if no_value_slots(after).count() else "propagates")
-        elif after_err is not None or not _same_output(after, got):
-            behaviour = "drops"
+        after, after_err = call_at(fill_all(at, [m]))
+        after_slots = no_value_slots(after)
+        if after_err is not None or (after_slots.count()
+                                     and after_slots.count() >= after_slots.capacity()):
+            behaviour = INCONCLUSIVE
+        elif no_value_slots(got).count():
+            behaviour = "introduces" if after_slots.count() else "propagates"
         else:
-            again, again_err = call_at(fill_all(at, [m], 1))
-            behaviour = ("drops" if again_err is not None
-                         or not _same_output(again, got) else NOT_READ)
+            behaviour = NOT_READ if _unread(call_at, fill_all, at, m, got, after) \
+                else "drops"
         out.append((at, got, None, behaviour))
     return out
+
+
+def _scaled(v, scale: float):
+    """A fill `v` scaled: `2v` is 1 where `v` is 0."""
+    if scale == 1.0:
+        return v
+    if scale == 2.0 and v == 0:
+        return 1
+    return v * scale
+
+
+def _unread(call_at, fill_all, at: dict, member: str, got, after) -> bool:
+    """Whether every fill leaves f's value as it was: the fill `v`, then
+    `2v`, and when those two outputs agree `0.9v` too."""
+    if not _same_output(after, got):
+        return False
+    doubled, err = call_at(fill_all(at, [member], 2.0))
+    if err is not None or not _same_output(doubled, got):
+        return False
+    shrunk, err = call_at(fill_all(at, [member], 0.9))
+    return err is None and _same_output(shrunk, got)

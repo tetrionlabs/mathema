@@ -137,6 +137,8 @@ class Call:
     # `[(param or path, kind, member), ...]` the call held, when the
     # route that made it knew the paths its claim binds
     keys: "list | None" = None
+    # the behaviour read by refilling the hole, when the route did
+    behaviour: "str | None" = None
 
 
 @dataclass
@@ -186,13 +188,13 @@ def claim_scope(name: "str | None"):
 
 
 def record_call(point: dict, output=None, raised: "str | None" = None,
-                keys: "list | None" = None) -> None:
+                keys: "list | None" = None, behaviour: "str | None" = None) -> None:
     """File one call at a missing input into the active batch."""
     current = _BATCH.get()
     if current is None:
         return
     current.calls.append(Call(dict(point), output, raised, _CLAIM.get(),
-                              list(keys) if keys is not None else None))
+                              list(keys) if keys is not None else None, behaviour))
 
 
 def record_introduced(point: dict) -> None:
@@ -266,6 +268,8 @@ def _relevant(calls: list, param: str, kind: str, member: "str | None",
 
 def _behaviour_of(call: Call) -> str:
     from ._missing_policy import classify_call, unseen_kinds
+    if call.behaviour is not None:
+        return call.behaviour
     return classify_call(call.point, call.output, call.raised,
                          unseen_kinds(call.point, _keys(call)))
 
@@ -337,19 +341,38 @@ def _floor_points(fn, facts, param: str, kind: str, members: list,
             for point in ({**others, param: v} for v in values)]
 
 
-def _run_floor(fn, facts, points: list) -> list:
+def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
+    """The calls f makes at `points`; with the claim's `domain`, a call at
+    a hole is read by refilling it (`_missing_policy.refill`): one call
+    per hole member, and a call whose hole f never read, or whose refill
+    is inconclusive, is left out."""
+    from ._missing_policy import INCONCLUSIVE, NOT_READ, refill
+    from .conjecture import _fill_value
     from .probing import _pinned_float_env
     from .runtime_types import calling
     call = calling(fn, facts)
-    out = []
-    for point in points:
+
+    from .conjecture import _call_by_name
+
+    def call_at(point: dict):
         try:
             with _pinned_float_env():
-                value = call(**point)
+                return _call_by_name(call, point), None
         except Exception as exc:
-            out.append(Call(point, None, type(exc).__name__, None))
+            return None, type(exc).__name__
+    fills = ({p: fill for p in facts.params
+              if (fill := _fill_value((domain or {}).get(p))) is not None}
+             if domain is not None else {})
+    out = []
+    for point in points:
+        value, raised = call_at(point)
+        pieces = refill(call_at, point, value, raised, fills) if fills else None
+        if pieces is None:
+            out.append(Call(point, value, raised, None))
             continue
-        out.append(Call(point, value, None, None))
+        out.extend(Call(at, got, err, None, None, behaviour)
+                   for at, got, err, behaviour in pieces
+                   if behaviour not in (NOT_READ, INCONCLUSIVE))
     return out
 
 
@@ -622,7 +645,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
             points = [pt for pt in _floor_points(fn, facts, p, stated.kind, members,
                                                  domain, cj)
                       if _premise_holds(stated.premise, pt)]
-            found = _run_floor(fn, facts, points)
+            found = _run_floor(fn, facts, points, domain or {})
             floor = floor or bool(found)
         rows_calls += [(p, c) for c in found]
     if not rows_calls:
@@ -1864,7 +1887,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
             floor = False
             if not calls:
                 calls = _run_floor(fn, facts, _floor_points(fn, facts, p, kind, [m],
-                                                            domain, cj))
+                                                            domain, cj), domain or {})
                 floor = bool(calls)
             n += len(calls)
             entry: dict = {"member": m}

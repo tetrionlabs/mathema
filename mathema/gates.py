@@ -262,6 +262,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         fn_call = law_callable(fn_call)
         bound_funcs = {name: _bound_for_arrays(v)
                        for name, v in bound_funcs.items()}
+    from .conjecture import _fill_value, _refill_caller
+    executed.refill_at = _refill_caller(fn_call)
+    executed.fills = {p: fill for p in kinds
+                      if (fill := _fill_value(cj_domain.get(p))) is not None}
     base_env = {"f": _tag(fn_call, "f"), **_SAFE_FUNCS,
                 **_VECTOR_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},

@@ -125,7 +125,7 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 <!-- example: softmax session -->
 ```
 $ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"
-FAIL functions.softmax: source, no side effects; claims 4/4 adjudicated (0 proven, 3 holds, 1 falsified)  <- 1 policy row to settle: missing[scores]: f has no single policy for a missing scores, 3 rows to state (mathema claims functions.softmax)
+FAIL functions.softmax: source, no side effects; claims 5/5 adjudicated (0 proven, 4 holds, 1 falsified)  <- 1 policy row to settle: missing[scores, null], f raises TypeError at a null slot of scores where mathema's default says propagates; write `missing(f, scores, null) raises(TypeError)` or change f (mathema claims functions.softmax)
 ```
 
 Break it on purpose (drop the normalization, `return exps` instead of

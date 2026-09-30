@@ -592,13 +592,20 @@ class ExecutedMissing:
         # `{param: [path, ...]}`: the paths the claim binds, whose
         # absences and holes are missing inputs too
         self.paths: dict = {}
+        # how to call f again with a hole filled (`call_at(point)` gives
+        # `(output, raised)`), the fill per parameter where the argument
+        # holds no present value, and per parameter the calls whose hole
+        # f never read and those whose refill was inconclusive
+        self.refill_at = None
+        self.given: "tuple | None" = None
+        self.fills: dict = {}
+        self.not_read: dict = {}
+        self.inconclusive: dict = {}
 
     def add_call(self, point: dict, output=None, raised: "str | None" = None) -> None:
         """File one call at `point` (its arguments by name) that returned
         `output` or raised `raised`."""
-        from ._missing_policy import (classify_call, is_path, keys_of, member_changes,
-                                      no_value_slots, unseen_kinds)
-        from ._missing_words import outcome_entry, path_said, said, value_shown
+        from ._missing_policy import classify_call, keys_of, unseen_kinds
         # a parameter left at its own default (numpy's `axis=None`) is no
         # missing input
         point = {p: v for p, v in point.items()
@@ -613,7 +620,31 @@ class ExecutedMissing:
         if at_default and any(p not in at_default for p, _k, _m in keys):
             point = {p: v for p, v in point.items() if p not in at_default}
             keys = keys_of(point, self.paths)
-        behaviour = classify_call(point, output, raised, unseen_kinds(point, keys))
+        from ._missing_policy import INCONCLUSIVE, NOT_READ, refill
+        given, refill_at = self.given, self.refill_at
+        pieces = (refill(lambda at: refill_at(at, given), point, output, raised,
+                         self.fills)
+                  if refill_at is not None and not self.paths else None)
+        if pieces is None:
+            self._file(point, output, raised, keys,
+                       classify_call(point, output, raised, unseen_kinds(point, keys)))
+            return
+        for at, got, err, behaviour in pieces:
+            if behaviour in (NOT_READ, INCONCLUSIVE):
+                # the fill left the output as it was (f never read the
+                # hole), or the filled call gave no value back: no
+                # evidence of what f does with the hole
+                counted = self.not_read if behaviour == NOT_READ else self.inconclusive
+                for p, _k, _m in keys_of(at):
+                    counted[p] = counted.get(p, 0) + 1
+                continue
+            self._file(at, got, err, keys_of(at, self.paths), behaviour)
+
+    def _file(self, point: dict, output, raised: "str | None", keys: list,
+              behaviour: str) -> None:
+        """File one call's behaviour under every key it holds."""
+        from ._missing_policy import is_path, member_changes, no_value_slots
+        from ._missing_words import outcome_entry, path_said, said, value_shown
         # a hole returned in its slot spelled as another member is said
         # slot by slot: `values[1]=None returned as nan`
         respelled: dict = {}
@@ -626,7 +657,7 @@ class ExecutedMissing:
                 respelled.setdefault((p, word),
                                      f"{p}{where}={shown} returned as {back}")
         from .policy import record_call
-        record_call(point, output, raised, keys=keys)
+        record_call(point, output, raised, keys=keys, behaviour=behaviour)
         for p, kind, member in keys:
             if is_path(p):
                 # a field's or key's no-value, said by its path
@@ -647,7 +678,7 @@ class ExecutedMissing:
             self.said.setdefault(p, {}).setdefault(
                 member, said(p, member, {p: point[p]}, output, raised, behaviour))
             self.first.setdefault((p, member), (point[p], output, raised, behaviour))
-        self.policy.add(point, output, raised, paths=self.paths)
+        self.policy.add(point, output, raised, paths=self.paths, behaviour=behaviour)
 
     def returned_absent(self, point: dict, declared: str) -> None:
         """File a None the function returned from present inputs, which
@@ -662,6 +693,10 @@ class ExecutedMissing:
 
     def meta(self) -> dict:
         out: dict = {}
+        if self.not_read:
+            out["not_read"] = dict(self.not_read)
+        if self.inconclusive:
+            out["inconclusive"] = dict(self.inconclusive)
         if self.introduced:
             out["returned"] = {"absent": "introduces", "source": "annotation",
                                **self.introduced}
@@ -717,6 +752,8 @@ class LastCall:
         for kind, value, *given in self.calls:
             actual = (_called_at(point, given[0], given[1], self.defaults)
                       if len(given) == 2 else point)
+            # the arguments as given, for calling f again with a hole filled
+            executed.given = tuple(given) if len(given) == 2 else None
             if not inputs_missing(actual.values()) and not (
                     executed.paths and _paths_reach(actual, executed.paths)):
                 continue
@@ -822,6 +859,14 @@ def with_executed(meta: "dict | None", executed: "ExecutedMissing | None") -> "d
     missing = dict(out.get("mathema.missing") or {})
     if extra.get("returned") and "returned" not in missing:
         missing["returned"] = extra["returned"]
+    for key in ("not_read", "inconclusive"):
+        # the calls whose hole f never read, and those whose refill said
+        # nothing, per parameter
+        if extra.get(key):
+            counted = dict(missing.get(key) or {})
+            for p, n in extra[key].items():
+                counted[p] = counted.get(p, 0) + n
+            missing[key] = counted
     for key in ("executed", "behaviour", "said", "mixed", "raised"):
         merged = {p: dict(v) for p, v in (missing.get(key) or {}).items()}
         for p, members in extra.get(key, {}).items():
