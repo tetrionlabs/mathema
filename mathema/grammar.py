@@ -2340,6 +2340,30 @@ def display_norm_bars(text: str, unicode: bool = False) -> str:
         lambda masked: _rewrite_balanced_calls(masked, _NORM_CALL, rewrite), text)
 
 
+#: an infinite order as a call's second argument: `oo`, `infinity` (`∞`
+#: and `\infty` are `oo` by this point) or `inf`
+_INFINITE_ORDER_ARG = re.compile(r"^(oo|infinity|inf)$")
+
+
+def _norm_call_order(text: str) -> str:
+    """`norm(e, oo)` and `norm(e, infinity)` -> `norm(e, inf)`: the one
+    spelling of an infinite order in the call form, the same the bar
+    sugar lowers `_inf`/`_oo`/`_∞` to, so every spelling evaluates and
+    renders alike. Runs after the unicode synonyms, so `∞` and
+    `\\infty` arrive here as `oo`; a nested norm inside the argument is
+    rewritten too."""
+    if "norm(" not in text:
+        return text
+
+    def rewrite(m, args, call_end):
+        parts = _split_commas(args)
+        if len(parts) != 2 or _INFINITE_ORDER_ARG.match(parts[1].strip()) is None:
+            return None
+        return f"norm({_norm_call_order(parts[0].strip())}, inf)"
+
+    return _rewrite_balanced_calls(text, _NORM_CALL, rewrite)
+
+
 def _floor_bars(text: str) -> str:
     return _fold_brackets(text, "⌊", "⌋", "floor")
 
@@ -2438,6 +2462,8 @@ _NORMALIZE_PASSES: tuple = (
     # bars fold below sees `||x||_inf` for a written `‖x‖∞`
     apply_unicode_synonyms,
     _fold_bars,
+    # an infinite order in the call form spelled as the sugar lowers it
+    _norm_call_order,
     _floor_bars,
     _ceil_bars,
     # after the bar sugars (so `|x|!` sees the already-folded
