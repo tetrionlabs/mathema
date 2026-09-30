@@ -11,10 +11,10 @@ and it never lets a weaker result be reported as a stronger one.
   <title id="ladder-title">The evidence ladder</title>
   <desc id="ladder-desc">Six rungs, strongest at the top: derive, derive extensive, informed probing, probing, documented, declared.</desc>
   <g class="mx-d-rail"><line x1="40" y1="20" x2="40" y2="310"/><line x1="600" y1="20" x2="600" y2="310"/></g>
-  <g class="mx-d-rung mx-d-strong"><rect x="60" y="20" width="520" height="40" rx="3"/><text x="80" y="45" class="mx-d-label">derive</text><text x="560" y="45" class="mx-d-verdict" text-anchor="end">proven</text></g>
+  <g class="mx-d-rung mx-d-strong"><rect x="60" y="20" width="520" height="40" rx="3"/><text x="80" y="45" class="mx-d-label">derive · examine</text><text x="560" y="45" class="mx-d-verdict" text-anchor="end">proven</text></g>
   <g class="mx-d-rung mx-d-strong"><rect x="60" y="70" width="520" height="40" rx="3"/><text x="80" y="95" class="mx-d-label">derive:extensive</text><text x="560" y="95" class="mx-d-verdict" text-anchor="end">proven</text></g>
-  <g class="mx-d-rung"><rect x="60" y="120" width="520" height="40" rx="3"/><text x="80" y="145" class="mx-d-label">probe:semi_analytical · probe:algorithmic</text><text x="560" y="145" class="mx-d-verdict" text-anchor="end">holds (n=…)</text></g>
-  <g class="mx-d-rung"><rect x="60" y="170" width="520" height="40" rx="3"/><text x="80" y="195" class="mx-d-label">probe</text><text x="560" y="195" class="mx-d-verdict" text-anchor="end">holds (n=…)</text></g>
+  <g class="mx-d-rung"><rect x="60" y="120" width="520" height="40" rx="3"/><text x="80" y="145" class="mx-d-label">informed probing (four techniques)</text><text x="560" y="145" class="mx-d-verdict" text-anchor="end">holds (n=…)</text></g>
+  <g class="mx-d-rung"><rect x="60" y="170" width="520" height="40" rx="3"/><text x="80" y="195" class="mx-d-label">probe · probe:lifted_numeric</text><text x="560" y="195" class="mx-d-verdict" text-anchor="end">holds (n=…)</text></g>
   <g class="mx-d-rung mx-d-weak"><rect x="60" y="220" width="520" height="40" rx="3"/><text x="80" y="245" class="mx-d-label">documented</text><text x="560" y="245" class="mx-d-verdict" text-anchor="end">stated deliberately</text></g>
   <g class="mx-d-rung mx-d-weak"><rect x="60" y="270" width="520" height="40" rx="3"/><text x="80" y="295" class="mx-d-label">declared</text><text x="560" y="295" class="mx-d-verdict" text-anchor="end">inferred from a summary</text></g>
 </svg>
@@ -24,15 +24,17 @@ and it never lets a weaker result be reported as a stronger one.
 
 | Rung | Verdict | What established it |
 |---|---|---|
-| `derive` | `proven` | The function's body was lifted to a symbolic expression and the claim settled over the whole declared domain. |
+| `derive`, `examine`, `derive:brute_force`, `derive:math_only` | `proven` | The function's body was lifted to a symbolic expression and the claim settled over the whole declared domain; or the function's structure settles it by construction (`examine`: a guard that rejects before the body runs, no state touched); or every point of a finite domain was checked (`derive:brute_force`); or the mathematics was proven with no float companion asked for (`derive:math_only`). |
 | `derive:extensive` | `proven` | The same, reached only by the deeper search you opt into with `extensive=True`. |
-| `probe:semi_analytical`, `probe:algorithmic` | `holds (n=...)` | The real function survived `n` trials whose inputs were chosen by analysis, such as the points where a denominator vanishes, or by a technique specific to the claim. |
-| `probe` | `holds (n=...)` | The real function survived `n` seeded random trials. |
+| `probe:semi_analytical`, `probe:algorithmic`, `probe:minimal_example`, `probe:counterfactual` | `holds (n=...)` | The real function survived `n` trials whose inputs were chosen by analysis, such as the points where a denominator vanishes, by a technique specific to the claim, by fuzzing that shrinks what it finds, or by refilling a missing value to see what the function would have done. |
+| `probe`, `probe:lifted_numeric` | `holds (n=...)` | The real function survived `n` seeded random trials; or, for a derivative, integral, sum or limit the code cannot be run for, `n` trials of mathema's own symbolic reconstruction did (`probe:lifted_numeric`, whose note says so). |
 | `documented` | none | Stated intent that a person has accepted with `mathema accept --intent`. |
 | `declared` | none | Stated intent (a docstring summary, an `Intent:` block, an `intent:` field) that no person has accepted yet, the weakest rung there is. |
 
-The two informed probing routes share a rung because they draw on different
-sources of information without either being stronger than the other. The
+The informed probing routes share a rung because they draw on different
+sources of information without any being stronger than another. A
+language's own derive strategy reports `derive:` with its mechanism's name and ranks
+with `derive`. The
 ladder is defined in the engine as `mathema.conjecture.EVIDENCE_LADDER`, and
 a route mathema does not recognise, such as one from a verification
 technique you have plugged in yourself, ranks below everything it does.

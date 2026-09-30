@@ -7154,7 +7154,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
 check = check_conjectures
 
 EVIDENCE_LADDER = (
-    ("derive",),
+    # a proof: from the lifted body, from the function's structure
+    # (`examine`), over every point of a finite region (brute force),
+    # and a mathematics-only proof with no float companion
+    ("derive", "examine", "derive:brute_force", "derive:math_only"),
     ("derive:extensive",),
     # A reserved, not-yet-built "numerical" evidence tier belongs here,
     # between derive:extensive and the informed-probing rung below,
@@ -7163,8 +7166,9 @@ EVIDENCE_LADDER = (
     # stronger than sampling but still short of a symbolic proof. Named
     # here so the slot isn't accidentally claimed by something smaller
     # first.
-    ("probe:semi_analytical", "probe:algorithmic"),
-    ("probe",),
+    ("probe:semi_analytical", "probe:algorithmic", "probe:minimal_example",
+     "probe:counterfactual"),
+    ("probe", "probe:lifted_numeric"),
     ("documented",),
     ("declared",),
 )
@@ -7175,10 +7179,15 @@ EVIDENCE_LADDER = (
 # intent-provenance classes ("Where intent comes from"), included on
 # the same scale since both answer "how much should a reader trust
 # this." Each element is a tuple of one or more routes tied at that
-# rank, `probe:semi_analytical` (critical-point-informed sampling)
-# and `probe:algorithmic` (a family-provided technique, e.g. pairwise
-# monotonicity) are both "informed rather than blind" probing, from
-# different information sources, neither stronger than the other.
+# rank. `probe:semi_analytical` (critical-point-informed sampling),
+# `probe:algorithmic` (a family-provided technique, e.g. pairwise
+# monotonicity), `probe:minimal_example` (fuzzing with shrinking) and
+# `probe:counterfactual` (a policy row decided by refilling) are all
+# "informed rather than blind" probing, from different information
+# sources, none stronger than another. `probe:lifted_numeric` is
+# sampling of a numerically lifted body, level with `probe`. A
+# definition row's `axiom` route is not on the ladder: a definition is
+# trusted, not adjudicated.
 #
 # This ranks *how a positive verdict was reached*, not how much to
 # trust a `falsified` verdict: a claim proven true by derive is
@@ -7188,6 +7197,14 @@ EVIDENCE_LADDER = (
 # sampler, or symbolic._proof_support._corroborate_disproof for the
 # derive route) is equally definitive either way. `evidence_rank` below
 # is for comparing routes, not for judging a falsified/skipped verdict.
+
+
+class NotOnTheLadder(ValueError):
+    """A route that names no evidence at all: `axiom`, a definition
+    row, is trusted rather than adjudicated, so it has no rank."""
+
+
+_OFF_THE_LADDER = {"axiom": "a definition row is trusted, not adjudicated"}
 
 
 def evidence_rank(route_or_class: str) -> int:
@@ -7209,8 +7226,15 @@ def evidence_rank(route_or_class: str) -> int:
         different verification technique, per record-schema.md's "Open
         for extension") ranks last, weaker than every known value,
         never stronger.
+
+    Raises:
+        NotOnTheLadder: for `axiom`, which is not evidence of any
+            strength.
     """
     base = route_or_class.split(":", 1)[0]
+    if base in _OFF_THE_LADDER:
+        raise NotOnTheLadder(f"{route_or_class!r} is not on the evidence "
+                             f"ladder: {_OFF_THE_LADDER[base]}")
     for candidate in (route_or_class, base):
         for rank, rung in enumerate(EVIDENCE_LADDER):
             if candidate in rung:
