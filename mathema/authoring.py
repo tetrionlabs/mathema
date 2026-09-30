@@ -335,11 +335,10 @@ class DomainError(ValueError):
 
 
 class MissingValueError(DomainError):
-    """A missing or absent input that a function's policy claim says it
-    raises on, rejected at entry by `enforce_domain()`, or an output that
-    does not carry the input's holes the way the policy says (`drops`,
-    `propagates`), found at exit. The message names the parameter and
-    the member."""
+    """An output that does not carry the input's holes the way a
+    function's policy claim says (`drops`, `propagates`), found at exit
+    by `enforce_domain()`. The message names the parameter and the
+    member."""
 
 
 def _policies_from_declared_claims(fn, key: str | None, root: str) -> list:
@@ -359,11 +358,12 @@ def _policies_from_declared_claims(fn, key: str | None, root: str) -> list:
     return out
 
 
-def _policy_guard(fn, policies: list, arguments: dict) -> "str | None":
-    """Why a call's arguments meet a policy that says f raises there, or
-    None."""
-    from ._missing_words import point_shown
-    from .policy import _members_in, _premise_holds, policy_text
+def _policy_guard(fn, policies: list, arguments: dict) -> "BaseException | None":
+    """The exception a policy that says f raises on a missing or absent
+    input raises for a call's arguments, or None: the type the policy
+    names (`DomainError` where it names none), with one sentence naming
+    the parameter and the member."""
+    from .policy import _members_in, _premise_holds
     for pol in policies:
         if pol.behaviour != "raises" or not _premise_holds(pol.premise, arguments):
             continue
@@ -371,11 +371,9 @@ def _policy_guard(fn, policies: list, arguments: dict) -> "str | None":
             if p not in arguments:
                 continue
             value = arguments[p]
-            tail = (f": raised by enforce_domain before f ran; the stated policy is "
-                    f"{policy_text(pol)}")
             if pol.kind == "absent":
                 if value is None:
-                    return f"{point_shown({p: value})}{tail}"
+                    return _refusal(fn, pol.exception, f"{p} is None")
                 continue
             held = _members_in(value, "missing")
             hit = [m for m in held if pol.member in (None, m)]
@@ -383,10 +381,24 @@ def _policy_guard(fn, policies: list, arguments: dict) -> "str | None":
                 continue
             from ._missing_words import _in_slot
             article = "an" if hit[0][:1] in "aeiouAEIONS" else "a"
-            what = (f" holds {article} {hit[0]} slot" if _in_slot(value)
-                    else " is missing")
-            return f"{point_shown({p: value})}{what}{tail}"
+            what = (f"{p} holds {article} {hit[0]} slot" if _in_slot(value)
+                    else f"{p} is {hit[0]}")
+            return _refusal(fn, pol.exception, what)
     return None
+
+
+def _refusal(fn, exception: "str | None", because: str) -> BaseException:
+    """The exception `enforce_domain` raises for a refused input: the
+    named type, looked up among the builtins and then f's module, or
+    `DomainError` when none is named or the name is not an exception."""
+    import builtins
+    kind = None
+    if exception:
+        kind = getattr(builtins, exception, None) or \
+            (getattr(fn, "__globals__", {}) or {}).get(exception)
+    if not (isinstance(kind, type) and issubclass(kind, BaseException)):
+        kind = DomainError
+    return kind(f"enforce_domain is active and raised {kind.__name__} because {because}")
 
 
 def _policy_exit(policies: list, arguments: dict, output) -> "str | None":
@@ -598,7 +610,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
                 arguments = dict(bound.arguments)
                 refused = _policy_guard(fn, policies, arguments)
                 if refused is not None:
-                    raise MissingValueError(f"{fn.__name__}(): {refused}")
+                    raise refused
                 out = fn(*args, **kwargs)
                 broken = _policy_exit(policies, arguments, out)
                 if broken is not None:

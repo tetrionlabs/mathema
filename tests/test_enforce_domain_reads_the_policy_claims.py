@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """`@enforce_domain()` reads a function's policy claims: a `raises` row
-rejects the missing or absent input at entry with a `MissingValueError`
+rejects the missing or absent input at entry with the exception the row
+names (mathema's `DomainError` where it names none), in one sentence
 naming the parameter and the member; a `drops` or `propagates` row is
 checked at exit, by counting the output's no-value slots; `converts` and
 `introduces` enforce nothing. Opt-in, like every enforcement."""
@@ -45,20 +46,37 @@ def to_none(x: float) -> Optional[float]:
 
 
 def test_a_raising_policy_rejects_the_input_at_entry():
-    with pytest.raises(MissingValueError) as err:
+    with pytest.raises(TypeError) as err:
         root(None)
-    assert str(err.value) == ("root(): x = None: raised by enforce_domain before f "
-                              "ran; the stated policy is absent(f, x) raises(TypeError)")
+    assert type(err.value) is TypeError
+    assert str(err.value) == "enforce_domain is active and raised TypeError because x is None"
     assert root(4.0) == 2.0
 
 
 def test_a_member_policy_rejects_only_its_member():
-    with pytest.raises(MissingValueError) as err:
+    with pytest.raises(ValueError) as err:
         total([1.0, None])
-    assert str(err.value) == ("total(): xs = [1.0, null] holds a null slot: raised by "
-                              "enforce_domain before f ran; the stated policy is "
-                              "missing(f, xs, null) raises(ValueError)")
+    assert type(err.value) is ValueError
+    assert str(err.value) == ("enforce_domain is active and raised ValueError because "
+                              "xs holds a null slot")
     assert math.isnan(total([1.0, float("nan")]))
+
+
+def test_a_raise_naming_no_exception_is_a_domain_error():
+    @enforce_domain()
+    @claims_decorator("absent(f, x) raises")
+    def root_any(x: Optional[float]) -> float:
+        return math.sqrt(x)
+    with pytest.raises(mathema.DomainError) as err:
+        root_any(None)
+    assert str(err.value) == ("enforce_domain is active and raised DomainError because "
+                              "x is None")
+
+
+def test_the_stated_raise_holds_under_the_decorator():
+    rec = mathema.check(root)
+    (row,) = [p for p in rec.probes if p.statement == "absent(f, x) raises(TypeError)"]
+    assert row.verdict != "falsified", row.note
 
 
 def test_propagation_is_checked_at_exit():

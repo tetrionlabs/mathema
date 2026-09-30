@@ -662,14 +662,15 @@ mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
 `is_missing_safe` holds, not proven: the one hole a float holds was
 tried and f drops it, but that is what the code did, not what anyone
 said it should do. Writing `missing(f, score) drops` makes it a stated
-policy, and the gate proven. `is_absent_safe` is falsified by the raise on `None`, with the claim to
-state beneath it.
+policy, and the gate proven. `is_absent_safe` is falsified by the raise
+on `None`, with the claim to state beneath it.
 
 `@enforce_domain()` turns the policy rows into a runtime check. It is
 opt-in. A `raises` row refuses the input before the function runs, with
-a `MissingValueError` (a kind of `DomainError`) that names the parameter
-and the member; a `drops` or `propagates` row is checked on the result;
-`converts` and `introduces` enforce nothing:
+the exception the row names (mathema's `DomainError` where it names
+none) and one sentence naming the parameter and the member; a `drops` or
+`propagates` row is checked on the result, with a `MissingValueError` (a
+kind of `DomainError`); `converts` and `introduces` enforce nothing:
 
 <!-- example: enforce run -->
 ```python
@@ -689,13 +690,13 @@ def volatility(variance: Optional[float]) -> float:
 for arg in (None, float("nan"), 4.0):
     try:
         print(volatility(arg))
-    except mathema.MissingValueError as exc:
+    except (TypeError, mathema.DomainError) as exc:
         print(exc)
 ```
 
 <!-- example: enforce output -->
 ```text
-volatility(): variance = None: raised by enforce_domain before f ran; the stated policy is absent(f, variance) raises(TypeError)
+enforce_domain is active and raised TypeError because variance is None
 volatility(): at variance = nan f returned 0.0, dropping the hole, but its policy says propagates (missing(f, variance) propagates)
 2.0
 ```

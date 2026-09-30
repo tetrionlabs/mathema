@@ -246,10 +246,9 @@ def test_enforce_domain_says_it_raised_before_f_ran():
     @mathema.claims_decorator("absent(f, x) raises(TypeError)")
     def root(x: Optional[float]) -> float:
         return math.sqrt(x)
-    with pytest.raises(mathema.MissingValueError) as err:
+    with pytest.raises(TypeError) as err:
         root(None)
-    assert str(err.value) == ("root(): x = None: raised by enforce_domain before f "
-                              "ran; the stated policy is absent(f, x) raises(TypeError)")
+    assert str(err.value) == "enforce_domain is active and raised TypeError because x is None"
 
 
 def test_enforce_domain_at_exit_reads_as_a_sentence():

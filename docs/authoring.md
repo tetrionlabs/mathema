@@ -462,10 +462,12 @@ opted into with the `excluding` keyword, or auto-declared by
 `@enforce_domain` also reads the function's policy claims, what it
 does with a value that is not there. It is opt-in, like every
 enforcement. A `raises` row rejects the input at entry: under
-`absent(f, x) raises(TypeError)`, `f(None)` raises
-`mathema.MissingValueError` (a `DomainError`) naming `x` and `None`;
-under `missing(f, xs, null) raises(ValueError)`, `f([1.0, None])` names
-`xs` and its `null` slot, while a `nan` slot passes through. A `drops`
+`absent(f, x) raises(TypeError)`, `f(None)` raises the `TypeError` the
+row names ("enforce_domain is active and raised TypeError because x is
+None"; a row naming no exception raises mathema's `DomainError`); under
+`missing(f, xs, null) raises(ValueError)`, `f([1.0, None])` raises
+`ValueError` because `xs` holds a `null` slot, while a `nan` slot passes
+through. A `drops`
 or `propagates` row is checked at exit, by counting the output's
 no-value slots: under `missing(f, x) propagates`, a function that
 returns `1.0` for `nan` raises there. `converts` and `introduces`
