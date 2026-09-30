@@ -49,13 +49,6 @@ team shares one configuration.
 }
 ```
 
-The same entry from the command line:
-
-<!-- checked by hand -->
-```bash
-claude mcp add --scope project --transport stdio mathema -- /path/to/project/.venv/bin/mathema mcp serve --root /path/to/project
-```
-
 **Cursor** reads `.cursor/mcp.json` in the project, or `~/.cursor/mcp.json`
 for every project. **Claude Desktop** reads
 `~/Library/Application Support/Claude/claude_desktop_config.json` on
