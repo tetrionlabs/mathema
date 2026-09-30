@@ -7319,7 +7319,9 @@ EVIDENCE_LADDER = (
     # first.
     ("probe:semi_analytical", "probe:algorithmic", "probe:minimal_example",
      "probe:counterfactual"),
-    ("probe", "probe:lifted_numeric"),
+    # a compendium definition row (`axiom`) is trusted testimony, as
+    # strong as a plain holds and never stronger
+    ("probe", "probe:lifted_numeric", "axiom"),
     ("documented",),
     ("declared",),
 )
@@ -7337,8 +7339,8 @@ EVIDENCE_LADDER = (
 # "informed rather than blind" probing, from different information
 # sources, none stronger than another. `probe:lifted_numeric` is
 # sampling of a numerically lifted body, level with `probe`. A
-# definition row's `axiom` route is not on the ladder: a definition is
-# trusted, not adjudicated.
+# definition row's `axiom` route ranks with trusted testimony, level
+# with `probe`: a definition is trusted, not adjudicated.
 #
 # This ranks *how a positive verdict was reached*, not how much to
 # trust a `falsified` verdict: a claim proven true by derive is
@@ -7348,14 +7350,6 @@ EVIDENCE_LADDER = (
 # sampler, or symbolic._proof_support._corroborate_disproof for the
 # derive route) is equally definitive either way. `evidence_rank` below
 # is for comparing routes, not for judging a falsified/skipped verdict.
-
-
-class NotOnTheLadder(ValueError):
-    """A route that names no evidence at all: `axiom`, a definition
-    row, is trusted rather than adjudicated, so it has no rank."""
-
-
-_OFF_THE_LADDER = {"axiom": "a definition row is trusted, not adjudicated"}
 
 
 def evidence_rank(route_or_class: str) -> int:
@@ -7379,16 +7373,10 @@ def evidence_rank(route_or_class: str) -> int:
         this ladder doesn't recognize at all (a custom route from a
         different verification technique, per record-schema.md's "Open
         for extension") ranks last, weaker than every known value,
-        never stronger.
-
-    Raises:
-        NotOnTheLadder: for `axiom`, which is not evidence of any
-            strength.
+        never stronger. A definition row's `axiom` ranks with trusted
+        testimony, level with `probe`.
     """
     base, _, sub = route_or_class.partition(":")
-    if base in _OFF_THE_LADDER:
-        raise NotOnTheLadder(f"{route_or_class!r} is not on the evidence "
-                             f"ladder: {_OFF_THE_LADDER[base]}")
     candidates = [route_or_class]
     if base == "derive" and sub and sub not in ("language", "domain_split"):
         # a language strategy's `derive:<mechanism>`: ranked as the

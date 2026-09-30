@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """mathema/conjecture.py's EVIDENCE_LADDER/evidence_rank(): route
-strength ordering, the routes tied on one rung, every route the engine
-emits placed, and the routes that are not on the ladder at all."""
+strength ordering, the routes tied on one rung, and every route the
+engine emits placed, a definition row's `axiom` with trusted testimony."""
 import os
 import re
 
 import pytest
 
-from mathema.conjecture import EVIDENCE_LADDER, NotOnTheLadder, evidence_rank
+from mathema.conjecture import EVIDENCE_LADDER, evidence_rank
 
 
 def test_derive_outranks_derive_extensive():
@@ -69,7 +69,7 @@ def test_every_route_the_engine_emits_is_on_the_ladder():
     listed = {route for rung in EVIDENCE_LADDER for route in rung}
     emitted = _emitted_routes()
     assert {"derive", "probe", "examine"} <= emitted
-    assert sorted(emitted - listed - {"axiom"}) == []
+    assert sorted(emitted - listed) == []
 
 
 def test_examine_ranks_with_derive():
@@ -88,17 +88,16 @@ def test_lifted_numeric_is_level_with_probe():
     assert evidence_rank("probe:lifted_numeric") == evidence_rank("probe")
 
 
-def test_an_axiom_is_not_on_the_ladder():
-    assert "axiom" not in {r for rung in EVIDENCE_LADDER for r in rung}
-    with pytest.raises(NotOnTheLadder, match="trusted, not adjudicated"):
-        evidence_rank("axiom")
+def test_an_axiom_ranks_with_trusted_testimony_level_with_probe():
+    # a definition row is trusted, not adjudicated: it ranks with the
+    # plain holds of a probe, never above
+    assert evidence_rank("axiom") == evidence_rank("probe")
+    assert evidence_rank("axiom") > evidence_rank("probe:algorithmic")
 
 
-
-def test_the_public_evidence_rank_raises_for_an_axiom():
+def test_the_public_evidence_rank_ranks_an_axiom_too():
     from mathema.interfaces.extension import evidence_rank as public
-    with pytest.raises(NotOnTheLadder):
-        public("axiom")
+    assert public("axiom") == public("probe")
 
 
 def test_a_language_strategy_route_ranks_as_the_default_path_would():

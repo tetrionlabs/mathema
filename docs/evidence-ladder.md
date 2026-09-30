@@ -29,6 +29,7 @@ and it never lets a weaker result be reported as a stronger one.
 | `derive:extensive` | `proven` | The same, reached only by the deeper search you opt into with `extensive=True`. |
 | `probe:semi_analytical`, `probe:algorithmic`, `probe:minimal_example`, `probe:counterfactual` | `holds (n=...)` | The real function survived `n` trials whose inputs were chosen by analysis, such as the points where a denominator vanishes, by a technique specific to the claim, by fuzzing that shrinks what it finds, or by refilling a missing value to see what the function would have done. |
 | `probe`, `probe:lifted_numeric` | `holds (n=...)` | The real function survived `n` seeded random trials; or, where the claim takes a derivative, integral, sum or limit that running the code cannot give, mathema's own symbolic reconstruction of the function survived `n` trials (`probe:lifted_numeric`, and the note says so). |
+| `axiom` | `trusted` | A definition row in a compendium, trusted rather than adjudicated: it counts as much as a plain `holds`, never more. |
 | `documented` | none | Stated intent that a person has accepted with `mathema accept --intent`. |
 | `declared` | none | Stated intent (a docstring summary, an `Intent:` block, an `intent:` field) that no person has accepted yet, the weakest rung there is. |
 
@@ -121,10 +122,6 @@ reported alongside it, and none of them is a weak form of support:
 | `unknown` | An adjudication ran and decided nothing either way, for instance a proof attempt that could not close. |
 | `skipped` | The claim could not be adjudicated at all, for a reason the record names. |
 | `invalidated` | A claim that was once `proven` or `holds` could no longer be established after the code changed, and the record says what it used to be. |
-
-A definition row, the route `axiom`, is not on the ladder either: a
-definition is trusted, not adjudicated, and `evidence_rank` raises
-`NotOnTheLadder` for it.
 
 A `falsified` verdict is knowledge rather than failure: it tells you exactly
 where the function and the claim part ways, and the
