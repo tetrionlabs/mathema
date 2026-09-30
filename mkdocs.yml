@@ -110,6 +110,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Start here: start.md
   - Get started:
       - Install: install.md
       - Quick start: quickstart.md
