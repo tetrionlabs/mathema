@@ -241,6 +241,14 @@ def resolve(target: str, root: str = ".", *,
                     else "module")
             return Target(kind, found, target if kind == "module" else None,
                           root, skipped)
+        walked = _prefix_walk(f"{mod_part}.{qual_part}", root)
+        if (walked is not None and callable(walked[2])
+                and not inspect.isclass(walked[2])
+                and not inspect.isfunction(walked[2])):
+            # a callable discovery never lists (a C builtin, a ufunc,
+            # a library's dispatcher object) found at the named
+            # attribute: the same function the dotted spelling names
+            return _walked_target(walked, target, root, skipped)
         if "." not in qual_part:
             # bare-suffix search: `pkg:name` matches `name` anywhere
             # under the package when that suffix is unique

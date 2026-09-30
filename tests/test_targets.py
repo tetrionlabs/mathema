@@ -115,3 +115,23 @@ def test_import_time_crash_is_printable_error(tmp_path):
 def test_resolve_function_rejects_many(tmp_path):
     with pytest.raises(TargetError, match="not one"):
         resolve_function("relpkg.geometry", root=DATA)
+
+
+def test_colon_form_names_a_library_callable_that_is_not_a_plain_function():
+    # numpy.clip is a dispatcher object, not a Python function; the
+    # colon form resolves it by attribute, as the dotted form does,
+    # without importing every submodule of numpy (some of which run a
+    # program when imported)
+    pytest.importorskip("numpy")
+    import subprocess
+    import sys
+    script = ("import sys\n"
+              "from mathema.targets import resolve\n"
+              "t = resolve('numpy:clip')\n"
+              "print('KEYS', sorted(t.functions))\n"
+              "print('WALKED', 'numpy.f2py' in sys.modules)\n")
+    r = subprocess.run([sys.executable, "-c", script],
+                       capture_output=True, text=True, timeout=120)
+    assert "KEYS ['numpy.clip']" in r.stdout, r.stdout + r.stderr
+    assert "WALKED False" in r.stdout
+    assert "I made it!" not in r.stdout
