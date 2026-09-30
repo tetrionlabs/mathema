@@ -76,3 +76,21 @@ def test_a_raise_at_two_members_together_is_recorded():
     assert rows["missing_f_xs_drops"].verdict == "falsified"
     assert rows["missing_f_xs_drops"].counterexample.endswith("f raised ValueError")
     assert rows["is_missing_safe[f]"].verdict == "falsified"
+
+
+# --- the floor meets every other parameter at its corners -----------------
+
+def zero_at_the_top(x: float, y: float) -> float:
+    z = x * y
+    return 0.0 if (z != z and y >= 0.99) else z
+
+
+def test_a_stated_row_is_tried_with_the_other_parameter_at_its_corners():
+    # the function's domain bounds y; the row's own floor meets y at 0 and 1
+    space = claim("for x in [0, 1], y in [0, 1], f(x, y) >= 0").domain
+    rows = {r.name: r for r in check_conjectures(zero_at_the_top, [
+        claim("missing(f, x) propagates"), claim("is_missing_safe(f)")], domain=space)}
+    assert rows["missing_f_x_propagates"].verdict == "falsified"
+    assert rows["missing_f_x_propagates"].counterexample == \
+        "x = nan, y = 1.0: f returned 0.0"
+    assert rows["is_missing_safe[f]"].verdict != "proven"

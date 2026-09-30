@@ -336,9 +336,37 @@ def _floor_points(fn, facts, param: str, kind: str, members: list,
     else:
         values = [v for w in members for v in realise_sentinel(member_sentinel(w))]
     order = list(facts.params)
+    # the other parameters as drawn, then each scalar one at its corners
+    variants = [others] + [{**others, q: end} for q in others
+                           for end in _corners((domain or {}).get(q))
+                           if kinds.get(q) not in SEQUENCE_KINDS]
     return [{q: point[q] for q in sorted(point, key=lambda q: order.index(q)
                                           if q in order else len(order))}
-            for point in ({**others, param: v} for v in values)]
+            for point in ({**base, param: v} for v in values for base in variants)]
+
+
+def _corners(bound) -> list:
+    """The finite ends of a scalar domain that lie inside it."""
+    import math
+
+    from .domain import bound_to_sympy_set, domain_contains
+    if bound is None or getattr(bound, "dims", ()):
+        return []
+    try:
+        import sympy
+        region = bound_to_sympy_set(bound)
+        ends = [float(region.inf), float(region.sup)]
+        integral = bool(region.is_subset(sympy.S.Integers))
+    except Exception:
+        return []
+    out = []
+    for end in ends:
+        if math.isinf(end):
+            continue
+        value = int(end) if integral else end
+        if domain_contains(value, bound) and value not in out:
+            out.append(value)
+    return out
 
 
 def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
