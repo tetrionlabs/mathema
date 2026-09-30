@@ -265,7 +265,7 @@ _BOUND_CONSTS = {"pi": math.pi, "-pi": -math.pi, "e": math.e,
 _INTEGER_MEMBER = re.compile(r"^[+-]?\d+$")
 
 
-def _set_value(s: str, *, in_element: bool = False):
+def _set_value(s: str, *, in_element: bool = False, on_field: bool = False):
     """One element of a discrete-set domain (`x in {...}`): a sentinel
     (`None`/`absent` for absence, `∅`/`missing` for the hole class,
     `nan`/`NA`/`null`/`NaT` or a defined spelling for one hole member;
@@ -290,7 +290,7 @@ def _set_value(s: str, *, in_element: bool = False):
     themselves, and rendering them back as `{1.0, 2.0, 3.0}` would
     describe a different set than the one written."""
     s = s.strip()
-    sentinel = _sentinel_of(s, in_element=in_element)
+    sentinel = _sentinel_of(s, in_element=in_element, on_field=on_field)
     if sentinel is not None:
         return sentinel
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
@@ -416,9 +416,13 @@ class _Sentinel:
     hole in a slot, an element-wise value with no computable content.
     A hole sentinel names either the whole class (`member` None, spelled
     `missing` or `∅`) or one member of it (`nan`, `NA`, `null`, `NaT`,
-    or a spelling a definition row adds). Equal and hashed by
-    `(kind, member)`, so `MISSING in dom.excluded` is a plain membership
-    test whichever spelling produced it."""
+    or a spelling a definition row adds). An absence sentinel names the
+    class (`member` None, spelled `absent` or `None`) or one of its two
+    members: `null`, the field or key is there holding `None`, and
+    `unset`, no key, no attribute, an index past the end, or a step
+    below an absent object. Equal and hashed by `(kind, member)`, so
+    `MISSING in dom.excluded` is a plain membership test whichever
+    spelling produced it."""
     __slots__ = ("kind", "member")
 
     def __init__(self, kind: str, member: "str | None" = None) -> None:
@@ -429,7 +433,7 @@ class _Sentinel:
     def word(self) -> str:
         """The canonical ascii word: `None`, `missing`, or the member."""
         if self.kind == "absent":
-            return "None"
+            return self.member if self.member is not None else "None"
         return self.member if self.member is not None else "missing"
 
     def __repr__(self) -> str:
@@ -455,6 +459,11 @@ _MissingType = _Sentinel
 MISSING = _Sentinel("missing")
 #: the absence of the object
 ABSENT = _Sentinel("absent")
+#: the absence member `null`: the field or key is there, holding `None`
+ABSENT_NULL = _Sentinel("absent", "null")
+#: the absence member `unset`: no key, no attribute, an index past the
+#: end, or a step below an absent object
+ABSENT_UNSET = _Sentinel("absent", "unset")
 
 
 def member(name: str) -> _Sentinel:
@@ -477,7 +486,7 @@ _MISSING_TOKENS = _HOLE_TOKENS | _ABSENCE_TOKENS
 def sentinel_tokens() -> frozenset:
     """Every word read as a sentinel: the absence words and the hole
     words, defined spellings included."""
-    return frozenset(_ABSENCE_TOKENS | _HOLE_TOKENS)
+    return frozenset(_ABSENCE_TOKENS | _HOLE_TOKENS | {"unset"})
 
 
 def add_hole_spelling(word: str) -> None:
@@ -486,12 +495,20 @@ def add_hole_spelling(word: str) -> None:
     _HOLE_TOKENS.add(str(word))
 
 
-def _sentinel_of(token: str, *, in_element: bool = False) -> "_Sentinel | None":
+def _sentinel_of(token: str, *, in_element: bool = False,
+                 on_field: bool = False) -> "_Sentinel | None":
     """The sentinel a word spells, or None when it spells none. A `None`
-    inside an element clause is the `null` member of the hole class."""
+    inside an element clause is the `null` member of the hole class.
+    `unset` is always the absence member; `null` is the absence member
+    on a path that ends at a field (`on_field`), and the hole member
+    anywhere else."""
     token = token.strip()
     if token in _ABSENCE_TOKENS:
         return member("null") if in_element else ABSENT
+    if token == "unset":
+        return ABSENT_UNSET
+    if token == "null" and on_field and not in_element:
+        return ABSENT_NULL
     if token in _CLASS_TOKENS:
         return MISSING
     if token in _HOLE_TOKENS:
@@ -539,9 +556,9 @@ def is_missing(value) -> bool:
 
 
 def is_absent(value) -> bool:
-    """Whether `value` is the absence of an object: `None`, or the
-    absence sentinel."""
-    return value is None or value == ABSENT
+    """Whether `value` is the absence of an object: `None`, or an
+    absence sentinel (the class or a member)."""
+    return value is None or (isinstance(value, _Sentinel) and value.kind == "absent")
 
 
 def member_of(value) -> "str | None":
@@ -681,47 +698,117 @@ def path_steps(path: str) -> "list[str | int]":
     return steps
 
 
-def path_values(value, steps) -> list:
+def path_leaves(value, steps) -> list:
     """Intent:
-        Every value a path reaches from `value`: one, or one per element
-        where a step is `"*"`. A step through an absent field, a `None`,
-        or an index past the end reaches `None`, the absence of what
-        the path names; a hole the path reaches (a NaN field) is the
-        value itself. Walked with an explicit stack, never by
-        recursion.
+        Every `(where, leaf)` a path reaches from `value`, `where` the
+        concrete steps taken (an index in place of each `"*"`): one
+        leaf, or one per element where a step is `"*"`. Where the `None`
+        sits decides the kind: a field, attribute or key holding `None`
+        reaches `ABSENT_NULL`; a key or attribute not there, an index
+        past the end, or a step below an absent object reaches
+        `ABSENT_UNSET`; an element holding `None` reaches the hole
+        member `null`, and so does every step below it; a NaN is a hole
+        wherever it sits and is reached as itself, as is a step below
+        it. Walked with an explicit stack, never by recursion.
     """
     out: list = []
-    stack = [(value, 0)]
+    # (current value, next step, steps taken, reached as an element)
+    stack = [(value, 0, (), False)]
     while stack:
-        current, i = stack.pop()
+        current, i, where, element = stack.pop()
         if i == len(steps):
-            out.append(current)
+            if current is None:
+                current = member("null") if element else ABSENT_NULL
+            out.append((where, current))
             continue
         step = steps[i]
-        if current is None or is_missing(current):
-            out.append(None)
+        if current is None:
+            out.append((where, member("null") if element else ABSENT_UNSET))
+            continue
+        if isinstance(current, _Sentinel) or is_missing(current):
+            out.append((where, current))
             continue
         if step == "*":
             try:
                 items = list(current)
             except TypeError:
-                out.append(None)
+                out.append((where, ABSENT_UNSET))
                 continue
-            stack.extend((item, i + 1) for item in reversed(items))
+            stack.extend((item, i + 1, where + (k,), True)
+                         for k, item in reversed(list(enumerate(items))))
             continue
         if isinstance(step, int):
             try:
-                stack.append((current[step], i + 1))
+                stack.append((current[step], i + 1, where + (step,), True))
             except (IndexError, KeyError, TypeError):
-                out.append(None)
+                out.append((where + (step,), ABSENT_UNSET))
             continue
         if isinstance(current, dict):
-            stack.append((current[step], i + 1) if step in current else (None, len(steps)))
+            if step in current:
+                stack.append((current[step], i + 1, where + (step,), False))
+            else:
+                out.append((where + (step,), ABSENT_UNSET))
         elif hasattr(current, step):
-            stack.append((getattr(current, step), i + 1))
+            stack.append((getattr(current, step), i + 1, where + (step,), False))
         else:
-            out.append(None)
+            out.append((where + (step,), ABSENT_UNSET))
     return out
+
+
+def path_values(value, steps) -> list:
+    """Every value a path reaches from `value` (`path_leaves` without
+    where each was reached)."""
+    return [leaf for _where, leaf in path_leaves(value, steps)]
+
+
+def without_sentinels(bound):
+    """`bound` with every sentinel left out, the values alone a value is
+    drawn from: a set's sentinel members, a domain's sentinel pieces
+    and its absence."""
+    from dataclasses import replace
+    if isinstance(bound, frozenset):
+        return frozenset(v for v in bound if not isinstance(v, _Sentinel))
+    if not isinstance(bound, Domain):
+        return bound
+    pieces = []
+    for p in bound.pieces:
+        if isinstance(p, frozenset):
+            p = frozenset(v for v in p if not isinstance(v, _Sentinel))
+            if not p:
+                continue
+        pieces.append(p)
+    return replace(bound, pieces=tuple(pieces), absent=False,
+                   excluded=frozenset(v for v in bound.excluded
+                                      if not isinstance(v, _Sentinel)))
+
+
+def absence_members(bound) -> tuple:
+    """The members of absence a binding states it admits, `("null",
+    "unset")` for `| {None}`, one of them when the other is excluded;
+    `()` where the binding does not state absence."""
+    dom = _as_domain(bound)
+    if not (_absence_decided(dom) or _is_enumerated(dom)):
+        return ()
+    return tuple(m.member for m in (ABSENT_NULL, ABSENT_UNSET) if admits(dom, m))
+
+
+def path_text(root: str, where: tuple) -> str:
+    """The concrete path `where` spells from `root`: `o.lines[1].qty`."""
+    return root + "".join(f"[{s}]" if isinstance(s, int) else f".{s}" for s in where)
+
+
+def leaf_words(path: str, leaf) -> "str | None":
+    """How a witness names what a path reached when it is not a value:
+    `d.note = null (absent)`, `d.note unset`, `o.lines[1] = null
+    (hole)`, `o.lines[0].qty = nan`; None for a value."""
+    if leaf == ABSENT_UNSET:
+        return f"{path} unset"
+    if leaf == ABSENT_NULL:
+        return f"{path} = null (absent)"
+    word = member_of(leaf)
+    if word is None:
+        return None
+    return f"{path} = null (hole)" if word == "null" else f"{path} = {word}"
 
 
 def path_bindings_hold(value, root: str, bindings: dict) -> bool:
@@ -961,11 +1048,16 @@ def admitted(bound, defaults: "MissingDefaults | None" = None) -> tuple:
     listed = _set_sentinels(dom)
     holes = tuple(s for s in listed if s.kind == "missing")
     if _is_enumerated(dom) or dom.base_type == "L":
-        return dom.absent or ABSENT in listed, holes
+        absent = (dom.absent or ABSENT in listed) and ABSENT not in dom.excluded
+        return absent, holes
     if _absence_decided(dom):
         absent = dom.absent or ABSENT in listed
     else:
         absent = defaults.absent
+    if ABSENT in dom.excluded or (ABSENT_NULL in dom.excluded
+                                  and ABSENT_UNSET in dom.excluded):
+        # an excluded class, or both members excluded, leave no absence
+        absent = False
     if not _holes_decided(dom):
         holes = (MISSING,) if defaults.members else ()
     return absent, holes
@@ -978,6 +1070,9 @@ def admits(bound, sentinel) -> bool:
     absent, holes = admitted(bound)
     if sentinel == ABSENT:
         return absent
+    if isinstance(sentinel, _Sentinel) and sentinel.kind == "absent":
+        # a member of absence: admitted with the class unless excluded
+        return absent and sentinel not in _as_domain(bound).excluded
     if sentinel in holes:
         return True
     if isinstance(sentinel, _Sentinel) and sentinel.member is not None \
@@ -1425,7 +1520,7 @@ def domain_contains(value, bound, slot: bool = False) -> bool:
     if isinstance(value, _Sentinel):
         return admits(dom, value)
     if value is None and not slot:
-        return admits(dom, ABSENT)
+        return admits(dom, ABSENT_NULL)
     if dom.dims:
         from ._shapes import contains_shaped
         shaped = contains_shaped(value, dom)
@@ -1493,7 +1588,7 @@ def _member_sort_key(v):
     would interleave the sentinels with real values."""
     if isinstance(v, _Sentinel):
         if v.kind == "absent":
-            return (2, 0.0, "")
+            return (2, 0.0, v.member or "")
         return (3, 0.0, "") if v.member is None else (4, 0.0, v.member)
     if v is None:
         return (2, 0.0, "")
@@ -1528,6 +1623,8 @@ def _sentinel_word(s: "_Sentinel", *, ascii_mode: bool, words: bool = False) -> 
     `words`, as a language domain and a path binding spell them,
     absence is `None` and the class the word `missing` in both modes."""
     if s.kind == "absent":
+        if s.member is not None:
+            return s.member
         return "None" if words else "absent"
     if s.member is None:
         return "missing" if (ascii_mode or words) else "∅"
@@ -1646,6 +1743,12 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     language = dom.base_type == "L"
 
     narrowed: list = []
+    if not language:
+        # a member of absence excluded is always stated: nothing else
+        # says which member is left
+        narrowed.extend(sorted((v for v in dom.excluded if isinstance(v, _Sentinel)
+                                and v.kind == "absent" and v.member is not None),
+                               key=_member_sort_key))
 
     def excluded_text() -> str:
         if not num_excl and not narrowed:
@@ -1759,8 +1862,11 @@ _MISSING_JSON_TOKEN = "__mathema_missing__"
 
 def _json_value(v):
     """A set member or excluded value as stored: a sentinel as
-    `{"sentinel": <word>}`, anything else as itself."""
+    `{"sentinel": <word>}` (a member of absence with `"kind":
+    "absent"`), anything else as itself."""
     if isinstance(v, _Sentinel):
+        if v.kind == "absent" and v.member is not None:
+            return {"sentinel": v.word, "kind": "absent"}
         return {"sentinel": v.word}
     return v
 
@@ -1768,8 +1874,12 @@ def _json_value(v):
 def _value_from_json(v):
     """The inverse of `_json_value`: `{"sentinel": <word>}` back to its
     sentinel, a stored `null` as absence, and the older
-    `__mathema_missing__` as the hole class."""
+    `__mathema_missing__` as the hole class. A member of absence carries
+    `"kind": "absent"`; a `null` without it is the hole member."""
     if isinstance(v, dict) and "sentinel" in v:
+        if v.get("kind") == "absent":
+            word = str(v["sentinel"])
+            return ABSENT if word in _ABSENCE_TOKENS else _Sentinel("absent", word)
         return _sentinel_of(str(v["sentinel"])) or member(str(v["sentinel"]))
     if v is None:
         return ABSENT
@@ -1890,7 +2000,7 @@ def render_domain_bound(b) -> str:
     return render_domain(b, show_missing=False, ascii_mode=True, always_show_type=False)
 
 
-def _parse_piece(text: str, *, in_element: bool = False):
+def _parse_piece(text: str, *, in_element: bool = False, on_field: bool = False):
     """One union-piece's text (an interval, either spelling; a discrete
     set; a bare named set; or a bare sentinel word) -> `Interval` |
     `frozenset` | `"R"`/`"Z"`/`"N"` | `None` when it's none of those. No
@@ -1899,9 +2009,10 @@ def _parse_piece(text: str, *, in_element: bool = False):
     `nan`, ...) is shorthand for the singleton set the braced spelling
     produces, so `[0, 100] | missing` means `[0, 100] | {missing}`.
     Inside an element clause (`in_element`) a `None` is the `null`
-    hole."""
+    hole; on a path that ends at a field (`on_field`) a `null` is the
+    absence member."""
     text = text.strip()
-    sentinel = _sentinel_of(text, in_element=in_element)
+    sentinel = _sentinel_of(text, in_element=in_element, on_field=on_field)
     if sentinel is not None:
         return frozenset({sentinel})
     m = _PIECE_RANGE.match(text) or _PIECE_INTERVAL.match(text)
@@ -1914,7 +2025,7 @@ def _parse_piece(text: str, *, in_element: bool = False):
     m = _PIECE_SET.match(text)
     if m is not None:
         try:
-            return frozenset(_set_value(v, in_element=in_element)
+            return frozenset(_set_value(v, in_element=in_element, on_field=on_field)
                              for v in _split_commas(m.group(1)) if v.strip())
         except ValueError:
             return None
@@ -2128,6 +2239,11 @@ def _parse_binding(part: str):
     rest = text[m.end():].strip()
     if not rest:
         return f"{part!r}: {name!r} has no domain after the membership operator"
+    # where the path ends decides what `None` and `null` are: at an
+    # element (`o.lines[*]`) a hole, at a field (`o.note`) an absence
+    is_path = "." in name or "[" in name
+    element_path = is_path and name.rstrip().endswith("]")
+    on_field = is_path and not element_path
     # a VECTOR/MATRIX space power binds the whole element domain:
     # `[0,1]^n`, `R^(m*n)`, or the unicode superscript forms. The caret
     # is the one at bracket depth zero, so an endpoint like `10^6`
@@ -2144,7 +2260,8 @@ def _parse_binding(part: str):
                 rest, in_element = inner, True
     pieces = []
     for pt in _UNION_SPLIT.split(rest):
-        piece = _parse_piece(pt, in_element=in_element) if pt else None
+        piece = (_parse_piece(pt, in_element=in_element or element_path,
+                              on_field=on_field) if pt else None)
         if piece is None:
             return (f"{part!r}: {pt!r} isn't a recognized interval, discrete "
                     f"set, or named set (R/Z/N) for {name!r}")
@@ -2166,7 +2283,7 @@ def _parse_binding(part: str):
         else:
             value_pieces.append(piece)
     for word in tail_words:
-        sentinel = _sentinel_of(word)
+        sentinel = _sentinel_of(word, in_element=element_path, on_field=on_field)
         if space_dims and sentinel is not None and sentinel.kind == "missing":
             # a hole word after a space is about its slots
             sentinels.append(sentinel)
@@ -2213,7 +2330,8 @@ def _parse_binding(part: str):
         try:
             for v in _split_commas(excluded_text):
                 if v.strip():
-                    excluded.add(_set_value(v))
+                    excluded.add(_set_value(v, in_element=element_path,
+                                            on_field=on_field))
         except ValueError:
             return (f"{part!r}: an excluded value in {{{excluded_text}}} isn't "
                     f"a recognized number, string, boolean, or sentinel")
@@ -2242,6 +2360,14 @@ def _parse_binding(part: str):
     for sentinel in sentinels:
         if sentinel not in unique:
             unique.append(sentinel)
+    # a member of absence admitted by name is the class with the other
+    # member excluded, one representation for every spelling
+    absent_members = {s for s in unique if s.kind == "absent" and s.member}
+    if absent_members:
+        unique = [s for s in unique if s not in absent_members]
+        if ABSENT not in unique:
+            unique.insert(0, ABSENT)
+            excluded |= {ABSENT_NULL, ABSENT_UNSET} - absent_members
 
     # an enumerated domain is exactly its members: the values it lists
     # and the sentinels it lists, one set

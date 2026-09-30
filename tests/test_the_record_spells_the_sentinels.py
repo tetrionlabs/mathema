@@ -63,7 +63,9 @@ def test_a_member_sentinel_reads_back_as_that_member():
         frozenset({member("NA")})
 
 
-def test_a_path_through_an_absent_field_reaches_none():
-    assert path_values({"a": None}, ["a", "b"]) == [None]
-    assert path_values({}, ["a"]) == [None]
-    assert path_values({"a": [1, 2]}, ["a", 5]) == [None]
+def test_a_path_through_an_absent_field_reaches_absence():
+    from mathema.domain import ABSENT_NULL, ABSENT_UNSET
+    assert path_values({"a": None}, ["a", "b"]) == [ABSENT_UNSET]
+    assert path_values({}, ["a"]) == [ABSENT_UNSET]
+    assert path_values({"a": [1, 2]}, ["a", 5]) == [ABSENT_UNSET]
+    assert path_values({"a": None}, ["a"]) == [ABSENT_NULL]

@@ -7673,6 +7673,30 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                          for key in cj_domain)}
     outside_draw = [False]
 
+    def path_words(point_args) -> list:
+        # what each path binding reached that is not a value, as a
+        # witness names it: `d.note unset`, `o.lines[1] = null (hole)`
+        from .domain import leaf_words, path_leaves, path_steps, path_text
+        words: list = []
+        for p, v in zip(kinds, point_args):
+            if p not in path_bound:
+                continue
+            for key in cj_domain:
+                if not (key.startswith(p + ".") or key.startswith(p + "[")):
+                    continue
+                for where, leaf in path_leaves(v, path_steps(key[len(p):])):
+                    said = leaf_words(path_text(p, where), leaf)
+                    if said is not None and said not in words:
+                        words.append(said)
+        return words
+
+    def _point_text(point_args) -> str:
+        # the witness's arguments, then what a path reached that is not
+        # a value
+        said = _fmt(tuple(point_args), arg_names, shown_names)
+        words = path_words(point_args)
+        return ", ".join([said, *words]) if words else said
+
     def narrowed(p, draw):
         # a parameter with path bindings is drawn until every binding
         # holds, a bounded rejection; a point none satisfies is outside
@@ -7750,7 +7774,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     from .symbolic._base import _dict_key_tree
                     tree_keys = (_dict_key_tree(facts.tree, p)
                                  if facts.tree is not None else {})
-                    v = _synth_dict(tree_keys, rng, specials)
+                    # a claim's binding of one key (`d.note in ...`)
+                    # bounds what that key holds, its absence included
+                    fields = {key[len(p) + 1:]: b for key, b in cj_domain.items()
+                              if key.startswith(p + ".")
+                              and key[len(p) + 1:].isidentifier()}
+                    v = _synth_dict(tree_keys, rng, specials, fields=fields)
                     env[p] = v
                     args.append(v)
                     continue
@@ -7927,12 +7956,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             except Exception as e:
                 checked += 1
                 if raised_type is not None and not isinstance(e, raised_type):
-                    cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: raised "
+                    cx = (f"{_point_text(args)}: raised "
                           f"{type(e).__name__}, claimed {cj.rhs}")
                     break
                 continue
             checked += 1
-            cx = f"{_fmt(tuple(args), arg_names, shown_names)}: returned {v!r} instead of raising"
+            cx = f"{_point_text(args)}: returned {v!r} instead of raising"
             break
         try:
             lv = eval(code_l, {"__builtins__": {}}, env)
@@ -7993,7 +8022,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     break
             if boundary:
                 checked += 1
-                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: raised {type(e).__name__} at a "
+                cx = (f"{_point_text(args)}: raised {type(e).__name__} at a "
                       f"floating-point boundary (the same inputs nudged "
                       f"within ε evaluate cleanly), a clamp at the raising "
                       f"operation's argument would remove the instability")
@@ -8004,7 +8033,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               "blame": "implementation",
                               "cause": "implementation:sub-epsilon-boundary",
                               "representation": "f64",
-                              "witness": _fmt(tuple(args), arg_names, shown_names)}
+                              "witness": _point_text(args)}
                 break
             # a TypeError under a NON-INTEGER sample against a callable
             # with an int-typed parameter is a claim-domain
@@ -8031,7 +8060,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         cj.name, statement, "skipped:misspecified",
                         route=None,
                         note=f"{note}; {call_raised[0]} raised TypeError at "
-                             f"{_fmt(tuple(args), arg_names, shown_names)}: parameter(s) "
+                             f"{_point_text(args)}: parameter(s) "
                              f"{', '.join(int_params)} of "
                              f"{call_raised[0]} are int-typed but the "
                              f"claim's domain admits non-integers "
@@ -8053,21 +8082,21 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         cj.name, statement, "skipped:misspecified",
                         route=None,
                         note=f"{note}; f raised {type(e).__name__} at "
-                             f"{_fmt(tuple(args), arg_names, shown_names)}, sampled as a list: "
+                             f"{_point_text(args)}, sampled as a list: "
                              + "; ".join(listed))
             # a raise is not a value: the claim asserts an equality or
             # ordering AT this in-domain point, and there is nothing on
             # one side to compare, pedantically, that falsifies it.
             checked += 1
             if isinstance(e, ComplexResult):
-                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {e}, which a real claim reads "
+                cx = (f"{_point_text(args)}: {e}, which a real claim reads "
                       f"as a raise; narrow the claim's domain to where every "
                       f"call is real, or annotate the function complex")
                 break
-            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: raised {type(e).__name__}, narrow "
+            cx = (f"{_point_text(args)}: raised {type(e).__name__}, narrow "
                   "the claim's domain to where every call returns, or state "
                   "the raising region as its own raises(...) claim")
-            cx_stratum = _machine_failure_stratum(e, _fmt(tuple(args), arg_names, shown_names))
+            cx_stratum = _machine_failure_stratum(e, _point_text(args))
             break
         if cj.relation in ("in", "not in") and not asks_missing \
                 and inputs_missing(args) \
@@ -8097,7 +8126,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if member != (cj.relation == "in"):
                 if as_arrays:
                     lv = _linalg_eval.shown(lv)
-                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {lv!r} is "
+                cx = (f"{_point_text(args)}: {lv!r} is "
                       f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
                 break
             continue
@@ -8113,9 +8142,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # in-domain point, `!=` included, and the witness names
             # the callee that returned it
             checked += 1
-            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {call_nan[0]} returned nan"
+            cx = (f"{_point_text(args)}: {call_nan[0]} returned nan"
                   if call_nan[0] is not None else
-                  f"{_fmt(tuple(args), arg_names, shown_names)}: "
+                  f"{_point_text(args)}: "
                   f"{_linalg_eval.shown(lv)!r} vs "
                   f"{_linalg_eval.shown(rv)!r}, and a nan is no value")
             break
@@ -8126,7 +8155,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             checked += 1
             if cj.relation in ("==", "~=", "<=", ">="):
                 continue
-            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: both sides are "
+            cx = (f"{_point_text(args)}: both sides are "
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, the same point, "
                   f"which {cj.relation} does not admit")
             break
@@ -8136,7 +8165,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # (the case where `math` raises): against a value, or the
             # opposite infinity, every value relation fails
             checked += 1
-            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: {call_inf[0]} returned "
+            cx = (f"{_point_text(args)}: {call_inf[0]} returned "
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "
                   f"infinity for a finite input is no value")
             break
@@ -8154,7 +8183,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if not missing_in and "absent" in (missing_class(lv), missing_class(rv)):
             # a None from present inputs is no value, like a NaN
             checked += 1
-            cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: "
+            cx = (f"{_point_text(args)}: "
                   f"{_linalg_eval.shown(lv)!r} vs {_linalg_eval.shown(rv)!r}, "
                   f"and None is no value")
             break
@@ -8170,7 +8199,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 continue
             checked += 1
             if ok is False:
-                cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: "
+                cx = (f"{_point_text(args)}: "
                       f"{_linalg_eval.shown(lv)!r} vs {_linalg_eval.shown(rv)!r}")
                 break
             continue
@@ -8218,7 +8247,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 ok = True
                 gap = _linalg_eval.largest_gap(lv, rv)
                 if gap > roundoff_absorbed:
-                    roundoff_absorbed, roundoff_at = gap, _fmt(tuple(args), arg_names, shown_names)
+                    roundoff_absorbed, roundoff_at = gap, _point_text(args)
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex value), or two
@@ -8240,14 +8269,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if ok and cj.tolerance is None:
             gap = ordering_shortfall(lv, rv, cj.relation)
             if gap > absorbed:
-                absorbed, absorbed_at = gap, _fmt(tuple(args), arg_names, shown_names)
+                absorbed, absorbed_at = gap, _point_text(args)
         if not ok:
             aux_part = ("; " + ", ".join(
                 f"{a} = {env[a]:.3g}" if isinstance(env[a], (int, float))
                 else f"{a} = {env[a]!r}" for a in aux) if aux else "")
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
-            cx = f"{_fmt(tuple(args), arg_names, shown_names)}{aux_part}: {_sides(lv, rv)}"
+            cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
             break
     if f_call.calls:
         tally.add(dict(zip(kinds, args)))

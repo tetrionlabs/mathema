@@ -465,6 +465,45 @@ The value claim holds on every string. `nickname = None` was drawn
 first, because the binding admits it, and the function raised there;
 the absence row says no claim allows that raise.
 
+A record's field has the same two kinds, and where the `None` sits
+decides which. A field or key holding `None` is absent, and so is a key
+that is not there, an index past the end, or a step below an absent
+object; an element of a list holding `None` is a hole. Absence has two
+members, as the hole class has several: `null`, the key is there
+holding `None`, and `unset`, the key is left out. They differ where a
+difference matters (in a PATCH body, `{}` leaves a note alone and
+`{"note": null}` clears it), so a binding on a path can admit or
+exclude each, `\ {unset}` or `\ {null}`:
+
+<!-- example: slip file=slips.py -->
+```python
+def delivery_note(order: dict) -> str:
+    """The note printed on a delivery slip."""
+    return order["note"].strip()
+```
+
+<!-- example: slip run -->
+```python
+import mathema
+from slips import delivery_note
+
+print(mathema.check(delivery_note, claims=[mathema.claim(
+    'for order.note in {"ring twice", "leave at the door"} | {None} \\ {null}, '
+    'len(delivery_note(order)) >= 1', name="has_text")]))
+```
+
+<!-- example: slip output match=subset -->
+```text
+  FALSIFY has_text: for order.note in {"leave at the door", "ring twice", None} \ {null}, len(delivery_note(order)) >= 1
+           counterexample order = {'extra5': 0.0}, order.note unset: raised KeyError, narrow the claim's domain to where every call returns, or state the raising region as its own raises(...) claim
+```
+
+The witness names the member: `order.note unset` for a key left out,
+`order.note = null (absent)` for a key holding `None`, and
+`order.lines[1] = null (hole)` for an element of a list. On a path that
+ends at a field `null` is the absence member; on one that ends at an
+element (`order.lines[*]`) it is the hole member.
+
 ## Policy rows, defaults and `mathema claims --write`
 
 A policy row is a claim like any other, in one short form:

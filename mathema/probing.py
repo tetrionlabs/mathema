@@ -498,18 +498,38 @@ def values_differ(u, v, tolerance: float | None = None,
     return not values_agree(u, v, tolerance, rel_tol)
 
 
-def _synth_dict(key_tree, rng: random.Random, specials=None) -> dict:
+def _synth_dict(key_tree, rng: random.Random, specials=None,
+                fields: "dict | None" = None) -> dict:
     """A dict matching the (possibly NESTED) key structure the body
     reads (`_dict_key_tree`): a key with children becomes a nested dict,
     a leaf key a synthesized scalar, so `cfg["a"]["b"]` finds `cfg["a"]`
     a dict rather than a scalar. An empty structure (the body only
     iterates, `d.values()`) gets a few generic scalar keys, plus
-    sometimes an extra key the body never asks for."""
+    sometimes an extra key the body never asks for.
+
+    `fields` maps a top-level key to the bound a claim's path binding
+    states for it (`d.note in {"a", "b"} | {None}`): the key's value is
+    drawn from the bound's values, and where the bound admits absence
+    one draw in three is absent instead, a member it admits: `unset`
+    leaves the key out, `null` holds `None`."""
+    from .domain import absence_members, without_sentinels
+    fields = fields or {}
     if not key_tree:
         key_tree = {f"k{i}": {} for i in range(rng.randint(1, 4))}
-    out = {k: (_synth_dict(sub, rng, specials) if sub
-               else _synth_scalar(rng, specials=specials))
-           for k, sub in key_tree.items()}
+    key_tree = {**key_tree, **{k: {} for k in fields if k not in key_tree}}
+    out: dict = {}
+    for k, sub in key_tree.items():
+        bound = fields.get(k)
+        if bound is None:
+            out[k] = (_synth_dict(sub, rng, specials) if sub
+                      else _synth_scalar(rng, specials=specials))
+            continue
+        members = absence_members(bound)
+        if members and rng.random() < 1 / 3:
+            if rng.choice(members) == "null":
+                out[k] = None
+            continue
+        out[k] = _synth("float", rng, without_sentinels(bound), specials=specials)
     if rng.random() < 0.3:
         out[f"extra{rng.randint(0, 9)}"] = _synth_scalar(rng, specials=specials)
     return out

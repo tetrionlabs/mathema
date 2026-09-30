@@ -20,9 +20,11 @@ from tests.test_missing_values_core import (FALSIFIED, PROVEN,
 needs_language = pytest.mark.skipif(
     importlib.util.find_spec("mathema_language") is None,
     reason="needs the mathema-language package")
-#: the rows that read an absence along a path, which the paths handoff
-#: (absent members `null` and `unset`) re-authors
-paths_handoff = pytest.mark.xfail(strict=True, reason="paths: absent members null, unset")
+#: the rows that read an absence along a path: what a raise at a field's
+#: absence is (a counterexample, or a behaviour a row accounts for) and
+#: whether a field's exclusion renders are open
+paths_handoff = pytest.mark.xfail(
+    strict=True, reason="paths: a field's absence has no policy row yet")
 needs_pydantic = pytest.mark.skipif(
     importlib.util.find_spec("pydantic") is None, reason="needs pydantic")
 
