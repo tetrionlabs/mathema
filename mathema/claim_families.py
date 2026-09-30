@@ -1000,17 +1000,18 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
             before_copy = {k: copy.deepcopy(v) for k, v in before.items()}
         except Exception:
             before_copy = None
-        process_before = _process_state.snapshot()
+        isolation = None
         try:
-            with _process_state.watching_putenv(fn) as env_calls, \
+            with _process_state.isolated(fn) as isolation, \
                     _pinned_float_env():
                 fn(*call_args)
         except Exception:
             return None   # a raising point says nothing about mutation
         finally:
-            process_after = _process_state.snapshot()
-            _process_state.restore(process_before)
-        changed = _process_state.changes(process_before, process_after)
+            if isolation is not None and isolation.restore_failed:
+                restore_failed.extend(isolation.restore_failed)
+        env_calls = isolation.c_environ_calls
+        changed = isolation.changes()
         if changed:
             return (f"calling the function changed process-wide state: "
                     f"{'; '.join(changed)}")
@@ -1065,8 +1066,16 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
                             f"{name!r}: {value!r} became {current!r}")
         return True
 
-    return _probe_trials(fn, facts, target, domain, rng,
-                         max(trials // 4, 8), trial)
+    restore_failed: list = []
+    result = _probe_trials(fn, facts, target, domain, rng,
+                           max(trials // 4, 8), trial)
+    if restore_failed:
+        said = sorted(set(restore_failed))
+        return (*result, None, {
+            "mathema.restore_failed": said,
+            "mathema.caveat": ("mathema could not put the process back "
+                               "after a trial: " + "; ".join(said))})
+    return result
 
 
 def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,

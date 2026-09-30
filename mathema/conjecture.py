@@ -3914,7 +3914,16 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     def corroboration(probe) -> dict:
         return {k: v for k, v in (probe.meta or {}).items()
                 if k.startswith("mathema.corroboration")
-                or k == "mathema.witness_executed"}
+                or k in ("mathema.witness_executed",
+                         "mathema.restore_failed")}
+
+    def with_caveats(note: str, parts) -> str:
+        caveats: list = []
+        for part in parts:
+            said = (part.meta or {}).get("mathema.caveat")
+            if said and said not in caveats:
+                caveats.append(said)
+        return "; ".join([note, *caveats])
 
     for probe, label in zip(probes, labels):
         if probe.verdict == "falsified":
@@ -3924,8 +3933,9 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                          counterexample=(f"{label}: {cx}" if cx else None),
                          sketch=(f"{label}: {probe.sketch}" if probe.sketch
                                  else None),
-                         note=f"{what} falsified at {label}",
-                         meta=corroboration(probe))
+                         note=with_caveats(f"{what} falsified at {label}",
+                                           probes),
+                         meta=corroboration(probe) or None)
     verdicts = [p.verdict for p in probes]
     if all(v == "proven" for v in verdicts):
         # the definition rows each part's proof read through, in order
@@ -3951,17 +3961,11 @@ def _combine_conjunction(probes: list, name: str, statement: str,
         # an engine-bug flag on any part (a derive disproof nothing
         # reproduced) stays on the whole
         flagged = {k: v for p in probes for k, v in corroboration(p).items()
-                   if k.startswith("mathema.corroboration")}
+                   if k.startswith("mathema.corroboration")
+                   or k == "mathema.restore_failed"}
         uncorroborated = [lbl for p, lbl in zip(probes, labels)
                           if "UNCORROBORATED" in (p.note or "")]
-        note = f"every {unit} of the {what} holds"
-        caveats: list = []
-        for p in probes:
-            said = (p.meta or {}).get("mathema.caveat")
-            if said and said not in caveats:
-                caveats.append(said)
-        if caveats:
-            note += "; " + "; ".join(caveats)
+        note = with_caveats(f"every {unit} of the {what} holds", probes)
         if uncorroborated:
             note += (f"; derive reported an UNCORROBORATED disproof at "
                      f"{', '.join(uncorroborated)} (probable engine bug, "

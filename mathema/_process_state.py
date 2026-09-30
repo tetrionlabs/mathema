@@ -5,11 +5,18 @@ module's globals: the environment, the working directory, `sys.path`,
 the global state of `random` and `numpy.random`, and logging's root
 configuration.
 
-`snapshot()` reads it, `changes(before, after)` names what differs,
-and `restore(before)` puts it back, so a trial that observed a write
-leaves the process as it found it. `os.putenv` and `os.unsetenv` change
-the C environment only, which no Python read can see afterwards, so
-`watching_putenv(fn)` records every call to them made while it is open.
+`isolated(fn)` owns one trial: it reads that state (`snapshot()`),
+records every call to `os.putenv` and `os.unsetenv` (they change the C
+environment only, which no Python read can see afterwards), runs the
+body, reads the state again, and puts back what the first read saw
+(`restore()`), including every name written through putenv or
+unsetenv. Restoring runs with SIGALRM blocked in the calling thread,
+each step on its own and run again if a signal interrupts it (another
+thread can still take the signal), so a wall-clock cap cannot leave it
+half done; a step that fails is recorded on the trial, never raised. What cannot be protected: state
+outside this list, and a write a thread the function started makes
+after the function returns.
+
 `writer_calls(fn, facts)` is the structural reading: the call sites in
 the body that resolve to one of these writers.
 """
@@ -20,7 +27,9 @@ import contextlib
 import logging
 import os
 import random
+import signal
 import sys
+import threading
 
 
 def _numpy_random():
@@ -30,22 +39,39 @@ def _numpy_random():
     return getattr(np, "random", None) if np is not None else None
 
 
+def _cwd() -> "str | None":
+    """The working directory, or None when it no longer exists."""
+    try:
+        return os.getcwd()
+    except OSError:
+        return None
+
+
 def snapshot() -> dict:
     """Intent:
-        The process-wide state, keyed by the name a witness gives it.
+        The process-wide state, keyed by the name a witness gives it,
+        plus the `sys.path` list object itself under `_sys.path object`
+        (a key starting with `_` is bookkeeping, never reported). A
+        part that cannot be read is left out.
     """
-    root = logging.getLogger()
-    state = {
-        "os.environ": dict(os.environ),
-        "the working directory": os.getcwd(),
-        "sys.path": list(sys.path),
-        "the global state of random": random.getstate(),
-        "logging's root configuration": (root.level, tuple(root.handlers),
-                                          logging.root.manager.disable),
+    state: dict = {"os.environ": dict(os.environ),
+                   "the working directory": _cwd(),
+                   "sys.path": list(sys.path),
+                   "_sys.path object": sys.path}
+    readers = {
+        "the global state of random": random.getstate,
+        "logging's root configuration": lambda: (
+            logging.getLogger().level, tuple(logging.getLogger().handlers),
+            logging.root.manager.disable),
     }
     npr = _numpy_random()
     if npr is not None:
-        state["the global state of numpy.random"] = npr.get_state()
+        readers["the global state of numpy.random"] = npr.get_state
+    for name, read in readers.items():
+        try:
+            state[name] = read()
+        except Exception:
+            continue
     return state
 
 
@@ -72,53 +98,156 @@ def changes(before: dict, after: dict) -> list[str]:
     """
     out = []
     for name, value in before.items():
-        if name not in after or _same(name, value, after[name]):
+        if name.startswith("_") or name not in after:
+            continue
+        if name == "the working directory" and after[name] is None:
+            out.append("the working directory (deleted)")
+            continue
+        if _same(name, value, after[name]):
             continue
         if name == "os.environ":
             out.append(f"os.environ ({_environ_change(value, after[name])})")
-        elif name in ("the working directory", "sys.path"):
-            out.append(f"{name} ({value!r} became {after[name]!r})"
-                       if name == "the working directory" else name)
+        elif name == "the working directory":
+            out.append(f"{name} ({value!r} became {after[name]!r})")
         else:
             out.append(name)
-    for name in after:
-        if name not in before and name == "the global state of numpy.random":
-            out.append(name)
+    if ("the global state of numpy.random" in after
+            and "the global state of numpy.random" not in before):
+        out.append("the global state of numpy.random")
     return out
 
 
-def restore(before: dict) -> None:
-    """Intent:
-        Put the process-wide state back as `before` read it.
-    """
-    if dict(os.environ) != before["os.environ"]:
-        os.environ.clear()
-        os.environ.update(before["os.environ"])
-    if os.getcwd() != before["the working directory"]:
-        os.chdir(before["the working directory"])
+def _restore_environ(saved: dict) -> None:
+    # by difference, never clear-then-update: the environment is never
+    # empty, even for a moment
+    for key in [k for k in os.environ if k not in saved]:
+        os.environ.pop(key, None)
+    for key, value in saved.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
+
+
+def _restore_c_environ(saved: dict, names) -> None:
+    for name in names:
+        text = os.fsdecode(name)
+        if text in saved:
+            os.putenv(text, saved[text])
+        else:
+            os.unsetenv(text)
+
+
+def _restore_cwd(saved) -> None:
+    if saved is not None and _cwd() != saved:
+        os.chdir(saved)
+
+
+def _restore_sys_path(before: dict) -> None:
+    obj = before.get("_sys.path object")
+    if obj is not None and sys.path is not obj:
+        sys.path = obj
     if sys.path != before["sys.path"]:
         sys.path[:] = before["sys.path"]
-    random.setstate(before["the global state of random"])
-    level, handlers, disable = before["logging's root configuration"]
+
+
+def _restore_logging(saved) -> None:
+    level, handlers, disable = saved
     root = logging.getLogger()
     root.setLevel(level)
     root.handlers[:] = list(handlers)
     logging.disable(disable)
+
+
+def restore(before: dict, c_environ_names=()) -> list[str]:
+    """Intent:
+        Put the process-wide state back as `before` read it, and reset
+        each name in `c_environ_names` (written through os.putenv or
+        os.unsetenv) to its value in `before`, or unset it. Every step
+        runs whatever an earlier one did; a step that raises is
+        returned as a phrase. An exception that is not an ordinary error
+        (a wall-clock alarm, an interrupt) interrupting a step runs that
+        step once more, and is raised again once every step has run.
+    """
+    steps = [("os.environ", lambda: _restore_environ(before["os.environ"])),
+             ("the C environment",
+              lambda: _restore_c_environ(before["os.environ"], c_environ_names)),
+             ("the working directory",
+              lambda: _restore_cwd(before["the working directory"])),
+             ("sys.path", lambda: _restore_sys_path(before))]
+    if "the global state of random" in before:
+        steps.append(("the global state of random",
+                      lambda: random.setstate(before["the global state of random"])))
+    if "logging's root configuration" in before:
+        steps.append(("logging's root configuration",
+                      lambda: _restore_logging(before["logging's root configuration"])))
     npr = _numpy_random()
     if npr is not None and "the global state of numpy.random" in before:
-        npr.set_state(before["the global state of numpy.random"])
+        steps.append(("the global state of numpy.random",
+                      lambda: npr.set_state(before["the global state of numpy.random"])))
+    failed: list = []
+    pending: "BaseException | None" = None
+    for name, step in steps:
+        for attempt in (1, 2):
+            try:
+                step()
+                break
+            except Exception as exc:
+                failed.append(f"{name} ({type(exc).__name__}: {exc})")
+                break
+            except BaseException as exc:
+                # an alarm or interrupt delivered mid-step: the step runs
+                # once more, so the signal leaves nothing half restored
+                pending = pending or exc
+                if attempt == 2:
+                    failed.append(f"{name} ({type(exc).__name__})")
+    if pending is not None:
+        raise pending
+    return failed
 
 
 @contextlib.contextmanager
-def watching_putenv(fn):
+def _alarm_blocked():
+    """SIGALRM held back for the length of the block and delivered after
+    it, where the platform allows (the main thread of a POSIX process)."""
+    mask = getattr(signal, "pthread_sigmask", None)
+    if mask is None or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = mask(signal.SIG_BLOCK, {signal.SIGALRM})
+    try:
+        yield
+    finally:
+        mask(signal.SIG_SETMASK, previous)
+
+
+class Trial:
+    """One isolated call: the state before (`before`) and after
+    (`after`, None when it could not be read), the putenv and unsetenv
+    calls made meanwhile (`c_environ_calls`, `(writer, name)` with the
+    name as text), and the restore steps that failed (`restore_failed`)."""
+
+    def __init__(self, before: dict):
+        self.before = before
+        self.after: "dict | None" = None
+        self.c_environ_calls: list = []
+        self.restore_failed: list = []
+
+    def changes(self) -> list[str]:
+        return changes(self.before, self.after) if self.after is not None else []
+
+
+@contextlib.contextmanager
+def isolated(fn):
     """Intent:
-        Record every call to `os.putenv` and `os.unsetenv` made while
-        open, however the function reaches them (`os.putenv(...)` or a
-        name imported from os into its module), as `(writer, name)`
-        pairs; each call still goes through.
+        One trial of `fn` with the process-wide state read before and
+        after, putenv and unsetenv recorded (reached as `os.putenv` or
+        as a name imported into the function's module), and everything
+        put back on the way out, whether the body returned, raised, or
+        was interrupted. Yields the `Trial`.
     """
+    import warnings
+
     from ._signatures import module_scope
-    calls: list = []
+    trial = Trial(snapshot())
     originals = {"putenv": os.putenv, "unsetenv": os.unsetenv}
     scope = module_scope(fn)
     rebound = {k: v for k, v in scope.items()
@@ -126,7 +255,7 @@ def watching_putenv(fn):
 
     def recorder(label, original):
         def call(name, *rest):
-            calls.append((f"os.{label}", name))
+            trial.c_environ_calls.append((f"os.{label}", os.fsdecode(name)))
             return original(name, *rest)
         return call
 
@@ -137,12 +266,22 @@ def watching_putenv(fn):
         for k, v in rebound.items():
             label = next(lbl for lbl, o in originals.items() if v is o)
             scope[k] = wrapped[label]
-        yield calls
+        yield trial
     finally:
-        for label, o in originals.items():
-            setattr(os, label, o)
-        for k, v in rebound.items():
-            scope[k] = v
+        with _alarm_blocked():
+            for label, o in originals.items():
+                setattr(os, label, o)
+            for k, v in rebound.items():
+                scope[k] = v
+            try:
+                trial.after = snapshot()
+            except Exception:
+                trial.after = None
+            names = sorted({name for _w, name in trial.c_environ_calls})
+            trial.restore_failed = restore(trial.before, names)
+        if trial.restore_failed:
+            warnings.warn("mathema could not put the process back after "
+                          "a trial: " + "; ".join(trial.restore_failed))
 
 
 def _writers() -> set:
