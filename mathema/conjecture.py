@@ -7594,6 +7594,20 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the largest disagreement a draw's own round-off accounted for
     roundoff_absorbed, roundoff_at = 0.0, None
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
+    # `^n` holds n = 1: after every other draw, one more takes every free
+    # axis that two parameters share, or that spans a matrix, at its
+    # least size together (vectors of length 1 side by side, a 1 by 1
+    # matrix), which no single container's floor can build alone; its
+    # values come from a stream of their own, so the draws before it are
+    # the ones the claim draws without it
+    smallest_keys = {key for key, users in axis_users.items()
+                     if key is not None and str(key).isidentifier()
+                     and key not in resolver.fixed
+                     and (len(users) > 1 or any(resolver.shapes[u].ndim >= 2
+                                                for u in users))}
+    smallest_trial = None
+    if plan_dims and smallest_keys:
+        smallest_trial = budget + len(pinned)
     # a literal argument in the claim's own call (`f(values, "nope",
     # 0.35)`) fixes that parameter to the literal; the call passes it
     # verbatim, so sampling must not overwrite it with a synthesized
@@ -7764,16 +7778,23 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     tally = DrawTally()
     # a draw is tallied when the row counted it
     tallied = checked
-    for trial in range(budget + len(pinned)):
+    main_rng = rng
+    for trial in range(budget + len(pinned) + (smallest_trial is not None)):
         if checked > tallied:
             tally.add(dict(zip(kinds, args)))
             tallied = checked
+        if trial == smallest_trial:
+            rng = _random_mod.Random(_RNG_SEED + 2)
         f_call.record(executed_record, dict(zip(kinds, args)))
         call_raised[0] = call_nan[0] = call_inf[0] = None
         outside_draw[0] = False
         trial_sizes: dict = (
             _draw_trial_sizes(resolver, shape_lo, shape_hi, shape_groups, rng)
             if plan_dims and trial >= len(pinned) else {})
+        if trial == smallest_trial:
+            trial_sizes = {k: (max(1, (shape_lo or {}).get(k, 1))
+                               if k in smallest_keys else size)
+                           for k, size in trial_sizes.items()}
         # MATH_CONSTANTS before the per-trial parameter assignment
         # below, so a parameter named `e`/`pi` overrides the constant
         # (precedence identical to the derive route)
@@ -7890,7 +7911,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         extra_cycle=extra_cycles.get(p),
                         length=length,
                         lap=language_laps.get(p) or missing_laps.get(p)))
-                if p in containers and isinstance(v, (list, tuple)):
+                if p in containers and isinstance(v, (list, tuple)) \
+                        and trial != smallest_trial:
                     # the floor's degenerate containers first, then
                     # draws carrying holes
                     # a binding the claim left to the signature draws its
@@ -8318,6 +8340,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
             break
+    rng = main_rng
     if checked > tallied:
         tally.add(dict(zip(kinds, args)))
     f_call.record(executed_record, dict(zip(kinds, args)))
