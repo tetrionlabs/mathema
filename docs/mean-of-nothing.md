@@ -41,7 +41,7 @@ print(mathema.check(mean_return, claims=[value]))
 <!-- example: mean output match=subset -->
 ```text
 mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
-  holds   bounded: for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1 (652 entries across 121 draws, sizes (1, 1) to (8, 1))
+  holds   bounded: for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1 (640 entries across 121 draws, sizes (1, 1) to (8, 1))
            every link of the chained comparison holds; f drops a missing slot when values remain (xs = [nan, 0.317, -0.0865, 0.455, 1]) and gives a hole back when every slot is missing (xs = [nan], [null]); at an all-NA series it raises TypeError instead
 ```
 
@@ -162,7 +162,7 @@ print(mathema.check(returns_fixed.mean_return, claims=[
 <!-- example: mean output match=subset -->
 ```text
 mathema.Record(mean_return) · source, no side effects · form 9671b357ded6
-  holds   bounded: for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1 (806 entries across 152 draws, sizes (1, 1) to (8, 1))
+  holds   bounded: for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1 (792 entries across 152 draws, sizes (1, 1) to (8, 1))
            every link of the chained comparison holds; f drops a missing slot when values remain (xs = [nan, 0.317, -0.0865, 0.455, 1]); when every slot is missing (nan, null, NA) it raises ValueError instead
   proven  is_empty_safe[xs]: is_empty_safe(xs)
   holds   no_values: assuming count(xs) == 0, missing(f, xs) raises(ValueError)   [stated; confirmed on the 152 draws of bounded]

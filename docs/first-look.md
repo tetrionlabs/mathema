@@ -180,7 +180,7 @@ print(mathema.check(ema, claims=collapses))
 <!-- example: ema output -->
 ```text
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
-  holds   collapses_probed: f(x, 1.0) = x[-1] (854 entries across 129 draws, sizes (2, 1) to (8, 1))
+  holds   collapses_probed: f(x, 1.0) = x[-1] (706 entries across 129 draws, sizes (2, 1) to (8, 1))
            inferred alpha=1 from the claim's own literal argument; at x = [null, null] f raised TypeError; at x = [nan, nan, nan, nan, nan, nan] f gave nan back
   proven  collapses_derived: f(x, 1.0) = x[-1]
            ∀ x ∈ Seq(ℝ); missing for x (list) means null or nan

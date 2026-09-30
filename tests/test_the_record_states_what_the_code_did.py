@@ -128,5 +128,57 @@ def test_a_count_says_the_entries_then_the_draws_then_the_sizes():
         "257 entries across 57 draws, sizes (1, 1) to (8, 1)"
     assert count_words(1, {"form": "vec", "smallest": [30, 1], "largest": [30, 1],
                            "entries": 30}) == "30 entries across 1 draw, size (30, 1)"
-    assert count_words(4, {"form": "vec", "smallest": [1, 1], "largest": [1, 1],
-                           "entries": 1}) == "1 entry across 4 draws, size (1, 1)"
+    assert count_words(1, {"form": "vec", "smallest": [1, 1], "largest": [1, 1],
+                           "entries": 1}) == "1 entry across 1 draw, size (1, 1)"
+
+
+def mean_of(xs) -> float:
+    import numpy as np
+    return float(np.mean(xs))
+
+
+def sum_both(xs, ys) -> float:
+    import numpy as np
+    return float(np.mean(xs) + np.mean(ys))
+
+
+def _row(record, name):
+    (row,) = [p for p in record.probes if p.name == name]
+    return row
+
+
+def test_the_entries_are_counted_over_the_draws_the_row_counts():
+    import numpy  # noqa: F401
+    rec = mathema.check(mean_of, claims=[mathema.claim(
+        "for xs in [0, 1]^3, 0 <= f(xs) <= 1", name="unit")])
+    unit = _row(rec, "unit")
+    assert unit.meta["mathema.drawn"]["entries"] == 3 * unit.n
+
+
+def test_the_entries_are_counted_over_every_container():
+    import numpy  # noqa: F401
+    rec = mathema.check(sum_both, claims=[mathema.claim(
+        "for xs in [0, 1]^3, ys in [0, 1]^2, f(xs, ys) >= 0", name="nonneg")])
+    row = _row(rec, "nonneg")
+    assert row.meta["mathema.drawn"]["entries"] == 5 * row.n
+
+
+def test_a_policy_row_cites_the_draw_count_its_claim_prints():
+    import numpy  # noqa: F401
+    rec = mathema.check(mean_of, claims=[mathema.claim(
+        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="unit")])
+    unit = _row(rec, "unit")
+    assert f"on the {unit.n} draws of unit" in _row(rec, "missing[xs]").note
+
+
+def test_a_chained_row_counts_entries_over_the_draws_it_prints():
+    from mathema.conjecture import _combine_conjunction
+    from mathema.probing import Probe
+
+    def link(name, n, entries):
+        return Probe(name, "", "holds", n=n, meta={"mathema.drawn": {
+            "form": "vec", "smallest": [1, 1], "largest": [8, 1], "entries": entries}})
+    row = _combine_conjunction([link("c[link1]", 111, 595), link("c[link2]", 100, 540)],
+                               "c", "0 <= f(xs) <= 1", ["link 1", "link 2"])
+    assert row.n == 100
+    assert row.meta["mathema.drawn"]["entries"] == 540

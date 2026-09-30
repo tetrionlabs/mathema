@@ -4162,10 +4162,12 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                 else:
                     into.setdefault(p, members)
     carried = {"mathema.missing": missing} if missing else {}
-    drawn = next(((p.meta or {}).get("mathema.drawn") for p in probes
-                  if (p.meta or {}).get("mathema.drawn")), None)
-    if drawn:
-        carried["mathema.drawn"] = drawn
+    first_drawn = next((p for p in probes if (p.meta or {}).get("mathema.drawn")), None)
+
+    def drawn_by(probe) -> dict:
+        # the entries are the ones the part whose count is printed drew
+        drawn = (probe.meta or {}).get("mathema.drawn") if probe is not None else None
+        return {"mathema.drawn": drawn} if drawn else {}
 
     for probe, label in zip(probes, labels):
         if probe.verdict == "falsified":
@@ -4176,7 +4178,7 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                          sketch=(f"{label}: {probe.sketch}" if probe.sketch
                                  else None),
                          note=f"{what} falsified at {label}",
-                         meta={**corroboration(probe), **carried})
+                         meta={**corroboration(probe), **carried, **drawn_by(probe)})
     verdicts = [p.verdict for p in probes]
     if all(v == "proven" for v in verdicts):
         # the definition rows each part's proof read through, in order
@@ -4197,9 +4199,10 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                                 else None),
                      note=f"every {unit} of the {what} is proven",
                      meta=({"mathema.definitions": rows} if rows else {})
-                     | carried or None)
+                     | carried | drawn_by(first_drawn) or None)
     if all(v in ("proven", "holds") for v in verdicts):
         n = min((p.n for p in probes if p.n), default=0)
+        carried = {**carried, **drawn_by(next((p for p in probes if p.n == n), None))}
         # an engine-bug flag on any part (a derive disproof nothing
         # reproduced) stays on the whole
         flagged = {k: v for p in probes for k, v in corroboration(p).items()
@@ -4223,7 +4226,7 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                  sketch=weakest.sketch,
                  note=f"{what} {weakest.verdict} at {label}: "
                       f"{weakest.note}",
-                 meta={**corroboration(weakest), **carried})
+                 meta={**corroboration(weakest), **carried, **drawn_by(first_drawn)})
 
 
 def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
@@ -7759,9 +7762,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     args: list = []
     from ._missing_words import DrawTally
     tally = DrawTally()
+    # a draw is tallied when the row counted it
+    tallied = checked
     for trial in range(budget + len(pinned)):
-        if f_call.calls:
+        if checked > tallied:
             tally.add(dict(zip(kinds, args)))
+            tallied = checked
         f_call.record(executed_record, dict(zip(kinds, args)))
         call_raised[0] = call_nan[0] = call_inf[0] = None
         outside_draw[0] = False
@@ -8312,7 +8318,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
             break
-    if f_call.calls:
+    if checked > tallied:
         tally.add(dict(zip(kinds, args)))
     f_call.record(executed_record, dict(zip(kinds, args)))
     missing_meta = with_executed(missing_meta, executed_record) or {}

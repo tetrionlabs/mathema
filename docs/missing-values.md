@@ -414,9 +414,9 @@ mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
            if the raise is intended, write `missing(f, positions, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept portfolio.total_exposure missing[positions, null] --as discovery --corrected "missing(f, positions, null) raises(TypeError)"
   holds   missing[positions, nan]: missing(f, positions, nan) propagates   [default for a list slot that may be nan; confirmed on the 53 draws of nonneg[float]. Keep it by writing it (mathema claims portfolio.total_exposure --write), or change the word to raises or drops if f should do otherwise]
 mathema.Record(average_return) · source, no side effects · form ce47d44bdab7
-  holds   unit: for returns in ([0.0, 1.0] | {missing})^n : float, 0 <= average_return(returns) <= 1 (676 entries across 100 draws, sizes (1, 1) to (8, 1))
+  holds   unit: for returns in ([0.0, 1.0] | {missing})^n : float, 0 <= average_return(returns) <= 1 (474 entries across 100 draws, sizes (1, 1) to (8, 1))
            every link of the chained comparison holds; at returns = [nan] f gave nan back
-  proven  missing[returns]: missing(f, returns) propagates   [from numpy.mean's own policy row, which f calls; confirmed on the 111 draws of unit]
+  proven  missing[returns]: missing(f, returns) propagates   [from numpy.mean's own policy row, which f calls; confirmed on the 100 draws of unit]
 ```
 
 `sum` treats the two members of a list slot differently: it raises on a

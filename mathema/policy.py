@@ -374,6 +374,9 @@ def _on_draws(calls: list, current: "Batch | None") -> str:
     draws = current.draws if current else {}
 
     def count(base: str) -> int:
+        # the count the claim's own row prints, else its parts' largest
+        if base in draws:
+            return draws[base]
         return max((n for k, n in draws.items() if _base_claim(k) == base), default=0)
     if len(bases) == 1:
         n = count(bases[0])

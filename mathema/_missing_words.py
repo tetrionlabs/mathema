@@ -305,7 +305,7 @@ def declared_optional_return(fn) -> "str | None":
 class DrawTally:
     """The shapes of the containers a row executed, for its count: the
     smallest and largest shape drawn, rows then columns, and the entries
-    they held."""
+    every container parameter held."""
 
     def __init__(self) -> None:
         self.draws = 0
@@ -322,15 +322,12 @@ class DrawTally:
                 continue
             if self.form is None:
                 self.form = form
-            if form != self.form:
-                continue
             shape = (rows, cols if form != "vec" else 1)
             if self.smallest is None or shape < self.smallest:
                 self.smallest = shape
             if self.largest is None or shape > self.largest:
                 self.largest = shape
             self.entries += shape[0] * shape[1]
-            return
 
     def meta(self) -> dict:
         if self.form is None:
