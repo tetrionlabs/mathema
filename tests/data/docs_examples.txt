@@ -53,6 +53,7 @@
 [x] docs/lemmas.md:chain                         run output
 [x] docs/lemmas.md:weakest                       run output  (after)
 [x] docs/lemmas.md:orphan                        run output  (after)
+[x] docs/library-claims.md:library               file file run output run output run output file run output run output  (requires)
 [x] docs/mathema-docstring.md:ema                file run output repl repl run output run output
 [x] docs/matrix-structure.md:semantics           run verdicts verdicts
 [x] docs/matrix-structure.md:vocabulary          run verdicts verdicts
@@ -78,6 +79,7 @@
 [x] docs/modes/verify.md:eager                   session
 [-] docs/modes/verify.md:398
 [x] docs/multi-function-claims.md:ratio          run output
+[x] docs/pandas-function.md:pandas               file run output run output run output run output run output run output  (requires)
 [x] docs/quickstart.md:falsify                   file run output run output run output
 [x] docs/quickstart.md:docstring                 file run output run output
 [x] docs/runtime-types.md:rt-mean                run verdicts verdicts  (requires)
@@ -97,4 +99,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 82 examples checked, 4 output fences not yet marked
+# 84 examples checked, 4 output fences not yet marked

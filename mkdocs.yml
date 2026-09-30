@@ -117,9 +117,11 @@ nav:
       - See what mathema finds: findings.md
       - A first look: first-look.md
       - The CDD loop, end to end: tutorial.md
+      - Claims about a pandas function: pandas-function.md
       - Case studies: case-studies.md
       - How-to guides:
           - Gate a pipeline with mathema verify: gate-a-pipeline.md
+          - See what mathema knows about a library you call: library-claims.md
   - Concepts:
       - Guarantees and limits: guarantees.md
       - Verdicts and exit codes: verdicts.md

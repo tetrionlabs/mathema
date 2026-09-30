@@ -20,16 +20,19 @@ have.
 1. [Quick start](quickstart.md): one scalar function, a claim that is
    falsified, the counterexample that says why, and the same claim proven
    once its domain is stated.
-2. [Runtime types: numpy, pandas, polars](runtime-types.md): how a
-   `pd.Series` or `np.ndarray` parameter is sampled as the object your
-   code expects, and how a Sharpe ratio over a Series is proven for every
-   length by reading its pandas and numpy calls through the definition
-   rows mathema ships for those libraries.
+2. [Claims about a pandas function](pandas-function.md): a function that
+   takes a `Series`, the real `Series` it receives, a wrong claim and its
+   witness, and a proof for every length through what mathema knows
+   about pandas.
 3. [The evidence ladder](evidence-ladder.md): what `proven` establishes,
    what `holds` establishes, and why the two are never reported as one.
-4. [`mathema compendium`](modes/compendium.md): `status` lists the library
-   functions your code calls, the claims mathema ships about each, and
-   which of them have been verified in your own project.
+4. [See what mathema knows about a library you call](library-claims.md):
+   which of the numpy calls your code makes have claims, the sweep that
+   checks them on your machine, and how to state one for a call nothing
+   covers.
+5. [Runtime types: numpy, pandas, polars](runtime-types.md): the reference
+   behind it, from how a parameter's runtime type is read off the
+   signature to claims over `DataFrame` columns.
 
 First command:
 
