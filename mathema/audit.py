@@ -398,7 +398,7 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
         else {"sig_hash": None, "form_hash": None})
 
     domains = [{"param": name, "domain": bound, "source": "types"}
-              for name, bound in domain_from_signature(fn).items()]
+              for name, bound in domain_from_signature(fn, guards=False).items()]
     for name, values in (typing_info(fn).get("finite_domains") or {}).items():
         # a plain Python list here (typing_info()'s own return shape) is
         # not part of the Interval/"Z"/"N"/frozenset domain vocabulary

@@ -427,7 +427,8 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
                     f"conflicts with the declared claim domain "
                     f"{declared_domain[p]} on {fn.__name__!r}; these must "
                     "not diverge")
-        merged_domain = {**domain_from_signature(fn), **declared_domain, **explicit}
+        merged_domain = {**domain_from_signature(fn, guards=False),
+                         **declared_domain, **explicit}
         sig = callable_signature(fn)
 
         def _check_scalar(value, bounds) -> bool:

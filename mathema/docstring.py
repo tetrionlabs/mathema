@@ -349,7 +349,8 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     # Where a domain is stated: the signature's bound markers, and the
     # bounds the docstring's own claims quantify over (a claim's
     # bound wins where both name a parameter).
-    merged_domain = {**domain_from_signature(fn), **_claim_stated_domain(parsed)}
+    merged_domain = {**domain_from_signature(fn, guards=False),
+                     **_claim_stated_domain(parsed)}
 
     # --- raises: claim-first (raises(f(x), ExcType)), prose fallback,
     # and a guard raise ENFORCING a declared domain counts too, the

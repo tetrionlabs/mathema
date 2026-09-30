@@ -263,11 +263,13 @@ def _markers(hint) -> tuple:
     return tuple(out)
 
 
-def domain_from_signature(fn) -> dict:
+def domain_from_signature(fn, guards: bool = True) -> dict:
     """Per-parameter domain implied by a bound marker (Probability,
     Positive, InRange, UnitBall, ...) on that parameter, ready to merge
     into `domain=` exactly like an explicitly declared one. A parameter
-    with no marker is absent.
+    with no marker is absent. With `guards`, a function
+    `enforce_domain()` wraps also declares the domain its guard checks,
+    so every draw is one the guard admits.
 
     A bound marker also asserts the value is PRESENT: the domain
     excludes the missing sentinel (nan/None/missing), so a marked
@@ -285,6 +287,9 @@ def domain_from_signature(fn) -> dict:
             if bound is not None:
                 out[name] = Domain(base_type="R", pieces=(bound,),
                                    excluded=frozenset({MISSING}))
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) if guards else None
+    for name, bound in (enforced or {}).items():
+        out[name] = tuple(bound) if isinstance(bound, list) else bound
     return out
 
 
