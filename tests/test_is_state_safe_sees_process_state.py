@@ -516,3 +516,37 @@ def test_a_writer_imported_inside_the_body_is_a_write_site(monkeypatch):
     assert p.verdict == "falsified", (p.verdict, p.route, p.note)
     p = _state_safe(local_numpy_seed)
     assert p.verdict == "falsified", (p.verdict, p.route, p.note)
+
+
+# --- through check(), where other rows call f first -----------------------------
+
+pricing_log = logging.getLogger("mathema.t.pricing")
+
+
+def quiet_pricing(price: float) -> float:
+    pricing_log.setLevel(logging.WARNING)
+    return round(price * 1.2, 2)
+
+
+def set_pricing_mode(price: float) -> float:
+    os.environ["MATHEMA_PRICING_MODE"] = "fast"
+    return price * 2.0
+
+
+def add_pricing_path(price: float) -> float:
+    if "/opt/mathema-pricing" not in sys.path:
+        sys.path.append("/opt/mathema-pricing")
+    return price * 2.0
+
+
+@pytest.mark.parametrize("fn", [quiet_pricing, set_pricing_mode,
+                                add_pricing_path])
+def test_an_idempotent_write_is_falsified_through_check_and_does_not_leak(fn):
+    import mathema
+    level = pricing_log.level
+    rows = {p.name: p for p in mathema.check(fn).probes}
+    assert rows["is_state_safe"].verdict == "falsified", (
+        fn.__name__, rows["is_state_safe"].verdict, rows["is_state_safe"].note)
+    assert pricing_log.level == level
+    assert "MATHEMA_PRICING_MODE" not in os.environ
+    assert "/opt/mathema-pricing" not in sys.path

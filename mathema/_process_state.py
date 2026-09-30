@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import contextvars
 import logging
 import os
 import random
@@ -266,6 +267,52 @@ def _alarm_blocked():
         yield
     finally:
         mask(signal.SIG_SETMASK, previous)
+
+
+_PRISTINE: "contextvars.ContextVar[dict | None]" = contextvars.ContextVar(
+    "mathema_pristine_process_state", default=None)
+
+
+@contextlib.contextmanager
+def pristine():
+    """Intent:
+        Read the process-wide state once, before anything in the block
+        calls the function under check, and put it back when the block
+        ends; `back_to_pristine()` inside the block returns to that
+        reading. An enclosing reading is kept (a check run inside a
+        check starts from the outer one's state).
+    """
+    if _PRISTINE.get() is not None:
+        yield
+        return
+    reading = snapshot()
+    token = _PRISTINE.set(reading)
+    try:
+        yield
+    finally:
+        _PRISTINE.reset(token)
+        with _alarm_blocked():
+            failed = restore(reading)
+        if failed:
+            import warnings
+            warnings.warn("mathema could not restore "
+                          + "; ".join(failed) + " after a check; this "
+                          "process may differ from before the check, so "
+                          "restart it before trusting later results")
+
+
+def back_to_pristine() -> list[str]:
+    """Intent:
+        Put the process-wide state back as the enclosing `pristine()`
+        read it, before a trial that judges whether the function changes
+        it; the restore steps that failed, empty when there is no
+        enclosing reading.
+    """
+    reading = _PRISTINE.get()
+    if reading is None:
+        return []
+    with _alarm_blocked():
+        return restore(reading)
 
 
 class Trial:
@@ -573,15 +620,77 @@ def _is_logger(obj) -> bool:
     return isinstance(obj, (logging.Logger, logging.LoggerAdapter))
 
 
+#: the Logger internals one emission runs through
+_LOGGER_PATH = ("_log", "handle", "callHandlers", "makeRecord",
+                "isEnabledFor", "filter")
+
+
+def _stdlib_class(obj) -> bool:
+    return type(obj).__module__.split(".")[0] == "logging"
+
+
+def _emits_only_stdlib_code(logger, method: str) -> bool:
+    """Intent:
+        Whether calling `method` on `logger` runs only the standard
+        library's logging code: the method and the Logger internals it
+        goes through are the stdlib's own (not overridden by a
+        subclass, an adapter's `process` included), and every filter,
+        handler and formatter the record can reach, on the logger and
+        each ancestor it propagates to, is a stdlib class.
+    """
+    if isinstance(logger, logging.LoggerAdapter):
+        for name in (method, "process", "log", "isEnabledFor"):
+            if getattr(type(logger), name, None) is not getattr(
+                    logging.LoggerAdapter, name, None):
+                return False
+        return _emits_only_stdlib_code(logger.logger, "log")
+    if not isinstance(logger, logging.Logger):
+        return False
+    for name in (method, *_LOGGER_PATH):
+        if getattr(type(logger), name, None) is not getattr(
+                logging.Logger, name, None):
+            return False
+    current = logger
+    while current is not None:
+        for f in getattr(current, "filters", ()):
+            if not _stdlib_class(f):
+                return False
+        for handler in getattr(current, "handlers", ()):
+            if not _stdlib_class(handler) or any(
+                    not _stdlib_class(f) for f in handler.filters) or (
+                    handler.formatter is not None
+                    and not _stdlib_class(handler.formatter)):
+                return False
+        if not getattr(current, "propagate", False):
+            break
+        current = current.parent
+    return True
+
+
+def _nearest_ancestor(name: str):
+    """The existing logger a new logger named `name` would propagate to."""
+    parts = name.split(".")
+    while len(parts) > 1:
+        parts = parts[:-1]
+        found = logging.Logger.manager.loggerDict.get(".".join(parts))
+        if isinstance(found, logging.Logger):
+            return found
+    return logging.getLogger()
+
+
 def log_emissions_only(fn, facts) -> bool:
     """Intent:
         Whether every external write site in the body, and every
         module-level value it reads, is a logger emitting a record: a
         call of `debug`, `info`, `warning`, `error`, `exception`,
         `critical` or `log` on a module-level logger, or on
-        `logging.getLogger(...)`. Emitting is not a state change, so such
-        a body is as write-free as one with no sites at all. A call that
-        configures logging is not an emission and keeps the body out.
+        `logging.getLogger(name)` with a literal name, running only the
+        standard library's code (`_emits_only_stdlib_code`: no
+        overriding subclass or adapter, only stdlib handlers, filters and
+        formatters). Emitting is not a state change, so such a body is as
+        write-free as one with no sites at all. A call that configures
+        logging, or one whose emission runs user code, keeps the body
+        out.
     """
     from ._signatures import module_scope
     from .hazards import _state_writes
@@ -601,13 +710,26 @@ def log_emissions_only(fn, facts) -> bool:
                 and node.func.attr in _EMIT_METHODS):
             continue
         owner = node.func.value
+        method = node.func.attr
         if isinstance(owner, ast.Name) and _is_logger(scope.get(owner.id)):
-            emitted.add(f"{owner.id}.{node.func.attr}")
+            if _emits_only_stdlib_code(scope[owner.id], method):
+                emitted.add(f"{owner.id}.{method}")
         elif isinstance(owner, ast.Call):
             called = _dotted(owner.func) or ""
             head = scope.get(called.split(".")[0])
+            name_arg = owner.args[0] if owner.args else None
             if called.split(".")[-1] == "getLogger" and (
-                    head is logging or head is logging.getLogger):
-                emitted.add(called)
+                    head is logging or head is logging.getLogger) and (
+                    name_arg is None or (isinstance(name_arg, ast.Constant)
+                                         and isinstance(name_arg.value, str))):
+                name = name_arg.value if name_arg is not None else None
+                known = (logging.Logger.manager.loggerDict.get(name)
+                         if name else logging.getLogger())
+                if not isinstance(known, logging.Logger):
+                    # not yet created: a plain Logger under its ancestors
+                    known = logging.Logger(name or "root")
+                    known.parent = _nearest_ancestor(name or "")
+                if _emits_only_stdlib_code(known, method):
+                    emitted.add(called)
     return all(w.get("kind") == "external_method_call"
                and w.get("target") in emitted for w in writes)

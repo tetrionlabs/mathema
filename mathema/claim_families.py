@@ -1033,6 +1033,9 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
             before_copy = None
         isolation = None
         raised = None
+        # another row may already have made the write this trial looks
+        # for: start from the state as it was before the check
+        restore_failed.extend(_process_state.back_to_pristine())
         try:
             with _process_state.isolated(fn) as isolation, \
                     _pinned_float_env():
