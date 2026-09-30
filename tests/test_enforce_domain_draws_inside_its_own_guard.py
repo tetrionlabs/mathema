@@ -65,11 +65,10 @@ def mean_weight(weights: list) -> float:
     return sum(weights) / len(weights)
 
 
-def test_a_row_that_scales_the_argument_out_of_the_guard_is_falsified_by_it():
-    # the draws stay inside the guard, but scale_equivariant calls f at
-    # c * weights, which leaves [0, 1]; the guard's own DomainError is
-    # the witness (the pedantic rule: a raise in the claim's domain)
+def test_the_suggested_scaling_is_bound_to_keep_every_entry_inside_the_guard():
+    # the suggestion restricts its factor to [0, 1], where c * weights
+    # stays in [0, 1], so no call is refused and the row holds
     rows = _by_name(check(mean_weight))
     row = rows["scale_equivariant"]
-    assert row.verdict == "falsified", (row.verdict, row.note)
-    assert "DomainError" in str(row.counterexample), row.counterexample
+    assert "let c be [0.0, 1.0]" in row.statement, row.statement
+    assert row.verdict == "holds", (row.verdict, row.counterexample)

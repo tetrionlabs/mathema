@@ -11,6 +11,8 @@ suggestion is a `Conjecture` a later adjudication pass gets to settle.
 """
 from __future__ import annotations
 
+import math
+
 import ast
 import os
 
@@ -350,6 +352,116 @@ def _homogeneous_degree_one(fn, facts) -> bool:
         return False
 
 
+def _declared_intervals(fn, facts) -> dict:
+    """Intent:
+        `{param: (lo, hi)}` for every parameter the signature or a guard
+        declares a single real interval for (a sequence's entries by
+        the interval its guard admits for each); a parameter with no
+        such declared domain is absent.
+    """
+    from .conjecture import _guard_interval
+    from .types import domain_from_signature
+    try:
+        declared = domain_from_signature(fn)
+    except Exception:
+        return {}
+    out: dict = {}
+    for p in facts.params:
+        found = _guard_interval(declared.get(p))
+        if found is not None:
+            out[p] = (found[0], found[1])
+    return out
+
+
+def _interval_words(bounds) -> str:
+    lo, hi = bounds
+    return f"[{lo:g}, {hi:g}]"
+
+
+def _mirror_binding(bounds) -> "str | None":
+    """Intent:
+        The `for p in [a, b], ` prefix keeping both p and -p inside a
+        declared interval, "" when nothing is declared, None when only a
+        point would stay inside.
+    """
+    if bounds is None:
+        return ""
+    lo, hi = bounds
+    a, b = max(lo, -hi), min(hi, -lo)
+    if not a < b:
+        return None
+    return "for {p} in " + _interval_words((a, b)) + ", "
+
+
+def _scale_factor_range(factors, domains) -> "tuple | None":
+    """Intent:
+        The part of the factor interval `factors` for which c * x stays
+        inside each declared interval for every x in it (both ends of
+        the interval, since c * x is linear in x), the whole of
+        `factors` when nothing is declared, or None when only a point
+        or nothing remains.
+    """
+    lo_c, hi_c = factors
+    for bounds in domains:
+        if bounds is None:
+            continue
+        lo, hi = bounds
+        for x in (lo, hi):
+            if math.isinf(x):
+                # c * x runs off to the same infinity only for c >= 0
+                lo_c = max(lo_c, 0.0)
+                continue
+            if x == 0:
+                if not lo <= 0 <= hi:
+                    return None
+                continue
+            # lo <= c * x <= hi, for either sign of x
+            first, second = sorted((lo / x, hi / x))
+            lo_c, hi_c = max(lo_c, first), min(hi_c, second)
+    if not lo_c < hi_c:
+        return None
+    return (lo_c, hi_c)
+
+
+def _shared_binding(domains) -> "tuple | None":
+    """Intent:
+        The interval every declared domain admits (both arguments of a
+        swap bound to it), (-inf, inf) when none is declared, None when
+        they share no interval of positive width.
+    """
+    lo, hi = -math.inf, math.inf
+    for bounds in domains:
+        if bounds is not None:
+            lo, hi = max(lo, bounds[0]), min(hi, bounds[1])
+    return (lo, hi) if lo < hi else None
+
+
+def _shift_binding(offsets, bounds) -> "tuple | None":
+    """Intent:
+        `(entries, offsets)` so that every entry plus every offset stays
+        inside a declared entry interval: nothing declared keeps the
+        offsets and binds no entries (None); a bounded interval of width
+        w binds the entries to its middle half and the offsets to
+        [-w/4, w/4]; an interval unbounded on one side keeps the entries
+        and the offsets that move toward the open side. None overall
+        when no offset but zero would do.
+    """
+    if bounds is None:
+        return None, offsets
+    lo, hi = bounds
+    if math.isinf(lo) and math.isinf(hi):
+        return None, offsets
+    if math.isinf(hi):
+        return None, (max(offsets[0], 0.0), offsets[1])
+    if math.isinf(lo):
+        return None, (offsets[0], min(offsets[1], 0.0))
+    quarter = (hi - lo) / 4
+    if not quarter > 0:
+        return None
+    return ((lo + quarter, hi - quarter),
+            (max(offsets[0], -quarter), min(offsets[1], quarter)))
+
+
 def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
                    key: str | None = None, root: str = ".") -> list:
     """Intent:
@@ -413,6 +525,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         return []
     scalar_params = [p for p in facts.params if facts.param_kinds.get(p) == "scalar"]
     call = f"f({', '.join(facts.params)})"
+    declared = _declared_intervals(fn, facts)
     out = []
     for p in scalar_params:
         out.append(claim(f"d({call}, {p}) >= 0", name=f"monotonic_increasing[{p}]",
@@ -444,10 +557,18 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     numeric_return = facts.returns_kind == "scalar"
     if len(facts.params) == 1 and scalar_params and numeric_return:
         p = scalar_params[0]
-        out.append(claim(f"f(-{p}) == f({p})", name="even", source="mathema", route="best"))
-        out.append(claim(f"f(-{p}) == -f({p})", name="odd", source="mathema", route="best"))
-        out.append(claim(f"f(f({p})) == f({p})", name="idempotent",
-                         source="mathema", route="best"))
+        # f(-p) stays inside a declared [lo, hi] only for p in
+        # [max(lo, -hi), min(hi, -lo)]; f(f(p)) reaches the function's
+        # own output, whose range nothing states
+        mirrored = _mirror_binding(declared.get(p))
+        if mirrored is not None:
+            out.append(claim(f"{mirrored.format(p=p)}f(-{p}) == f({p})",
+                             name="even", source="mathema", route="best"))
+            out.append(claim(f"{mirrored.format(p=p)}f(-{p}) == -f({p})",
+                             name="odd", source="mathema", route="best"))
+        if p not in declared:
+            out.append(claim(f"f(f({p})) == f({p})", name="idempotent",
+                             source="mathema", route="best"))
     closed_form = (_loop_closed_form(fn, facts)
                    if facts.params
                    and facts.returns_kind in ("scalar", "int")
@@ -464,17 +585,32 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         aux = "c" if "c" not in facts.params else "aux_c"
         args = ", ".join(facts.params)
         scaled_args = ", ".join(f"{aux}*{q}" for q in facts.params)
-        out.append(claim(
-            f"let {aux} be [0.1, 10], f({scaled_args}) == {aux}*f({args})",
-            name="scale_equivariant", source="mathema", route="best"))
+        factor = _scale_factor_range((0.1, 10.0),
+                                     [declared.get(q) for q in facts.params])
+        if factor is not None:
+            out.append(claim(
+                f"let {aux} be {_interval_words(factor)}, "
+                f"f({scaled_args}) == {aux}*f({args})",
+                name="scale_equivariant", source="mathema", route="best"))
     if len(facts.params) == 2 and len(scalar_params) == 2 and numeric_return:
         p1, p2 = facts.params
-        out.append(claim(f"f({p1}, {p2}) == f({p2}, {p1})", name="commutative",
-                         source="mathema", route="best"))
-        aux = "c" if "c" not in facts.params else "aux_c"
-        out.append(claim(f"let {aux} be [-5, 5], "
-                         f"f(f({p1}, {p2}), {aux}) == f({p1}, f({p2}, {aux}))",
-                         name="associative", source="mathema", route="best"))
+        # swapping puts each argument in the other's slot: both are
+        # bound to where both slots admit them
+        shared = _shared_binding([declared.get(p1), declared.get(p2)])
+        if shared is not None:
+            bind = (f"for {p1} in {_interval_words(shared)}, "
+                    f"{p2} in {_interval_words(shared)}, "
+                    if p1 in declared or p2 in declared else "")
+            out.append(claim(f"{bind}f({p1}, {p2}) == f({p2}, {p1})",
+                             name="commutative", source="mathema",
+                             route="best"))
+        if p1 not in declared and p2 not in declared:
+            # f(f(p1, p2), c) passes the function's own output back in,
+            # whose range nothing states
+            aux = "c" if "c" not in facts.params else "aux_c"
+            out.append(claim(f"let {aux} be [-5, 5], "
+                             f"f(f({p1}, {p2}), {aux}) == f({p1}, f({p2}, {aux}))",
+                             name="associative", source="mathema", route="best"))
 
     # f(...) == f(...) genuinely re-evaluates fn twice with the same
     # synthesized arguments on the probe route (check_conjectures shares
@@ -633,16 +769,24 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         aux = "c" if "c" not in facts.params else "aux_c"
         # route best: the derive route composes these elementwise
         # transforms through a recognized fold's closed form, so a
-        # linear fold's equivariance is proven rather than sampled
-        out.append(claim(f"let {aux} be [-5, 5], "
-                         f"{aux}*{call} == f(g({xs}, {aux}){rest_str})",
-                         name="scale_equivariant", source="mathema", route="best",
-                         funcs={"g": "mathema.f.scale_seq"}))
-
-        out.append(claim(f"let {aux} be [-5, 5], "
-                         f"{call} + {aux} == f(g({xs}, {aux}){rest_str})",
-                         name="translation_equivariant", source="mathema", route="best",
-                         funcs={"g": "mathema.f.shift_seq"}))
+        # linear fold's equivariance is proven rather than sampled. A
+        # declared entry domain restricts the factor, or binds the
+        # entries with the shift, so every transformed entry stays in it
+        factor = _scale_factor_range((-5.0, 5.0), [declared.get(xs)])
+        if factor is not None:
+            out.append(claim(f"let {aux} be {_interval_words(factor)}, "
+                             f"{aux}*{call} == f(g({xs}, {aux}){rest_str})",
+                             name="scale_equivariant", source="mathema",
+                             route="best", funcs={"g": "mathema.f.scale_seq"}))
+        shift = _shift_binding((-5.0, 5.0), declared.get(xs))
+        if shift is not None:
+            entries, offsets = shift
+            bind = (f"for {xs} in {_interval_words(entries)}^n, "
+                    if entries is not None else "")
+            out.append(claim(f"{bind}let {aux} be {_interval_words(offsets)}, "
+                             f"{call} + {aux} == f(g({xs}, {aux}){rest_str})",
+                             name="translation_equivariant", source="mathema",
+                             route="best", funcs={"g": "mathema.f.shift_seq"}))
 
         if _sum_like_fold(fn, facts) is not None:
             # a plain accumulation treats every element alike, so the
