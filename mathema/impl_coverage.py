@@ -12,9 +12,12 @@ unioned:
   tracing `check(fn)` (its sampling calls the function across branches);
 - **derive**: a derive-route proof modeled it: a symbolic proof never
   runs the code, so tracing cannot see it, but a body the lift closed is
-  established more strongly than execution. v1 counts a function's whole
-  body as derive-covered when any claim on it proved on the derive route;
-  a per-branch refinement is future work.
+  established more strongly than execution. Only a claim included for
+  the function counts (declared on it, in the project's claims files, or
+  accepted into them) and only once this pass has proved it; the
+  standard claims mathema checks while tracing, and suggestions nobody
+  included, never do. A proof counts the lines its own per-branch
+  attribution names, else the whole body.
 
 A STALE external test report does NOT count toward the score: its lines
 may not even map to the current code. A report stamped with its sources'
@@ -118,8 +121,8 @@ def _external_lines(fn, coverage_data: dict | None) -> set:
     return {ln for ln in executed if start <= ln <= end}
 
 
-def _trace_check(fn):
-    """Run `check(fn)` under a standard-library `sys.settrace` line
+def _trace_check(fn, declared: dict | None = None):
+    """Run `check(fn, declared=declared)` under a standard-library `sys.settrace` line
     tracer and return `(statements, executed, record)` in fn's own line
     range: its executable statements (the denominator, from the AST), the
     lines the probing actually ran, and the check record (for the derive
@@ -151,7 +154,7 @@ def _trace_check(fn):
     sys.settrace(_global)
     record = None
     try:
-        record = check(fn)
+        record = check(fn, declared=declared)
     except Exception:
         record = None
     finally:
@@ -160,16 +163,20 @@ def _trace_check(fn):
     return statements, executed & statements, record
 
 
-def _plain_check(fn):
-    """Run `check(fn)` WITHOUT tracing, for its record only. Used in the
+def _plain_check(fn, declared: dict | None = None):
+    """Run `check(fn, declared=declared)` WITHOUT tracing, for its record only. Used in the
     no-`coverage`-extra fallback so the derive source (read off the
     record) still works even though the probe source, which needs the
     line tracer, does not."""
     try:
         from . import check
-        return check(fn)
+        return check(fn, declared=declared)
     except Exception:
         return None
+
+
+_INCLUDED_SURFACES = frozenset({"declared", "docstring", "decorator",
+                                "types", "ad_hoc"})
 
 
 def _derive_covered_lines(record, statements: set) -> set:
@@ -177,8 +184,13 @@ def _derive_covered_lines(record, statements: set) -> set:
     per-branch attribution (`mathema.derive_lines`, set by the prover for
     a domain-restricted proof) when it recorded one, else the whole body
     for a proven claim (a straight-line proof reasons about all of it).
-    A proof never executes the code, so this is added on top of the
-    traced probe/test lines."""
+    Only a claim included for the function counts: one authored on it or
+    in the project's claims files (`records.row_source` names the
+    surface). The structural battery, mathema's suggestions and
+    compendium rows are left out. A proof never executes the code, so
+    this is added on top of the traced probe/test lines."""
+    from .records import row_source
+
     covered: set = set()
     if record is None:
         return covered
@@ -186,6 +198,9 @@ def _derive_covered_lines(record, statements: set) -> set:
         route = getattr(p, "route", None) or ""
         if (route.split(":", 1)[0] != "derive"
                 or getattr(p, "verdict", None) != "proven"):
+            continue
+        if row_source(getattr(p, "meta", None),
+                      getattr(p, "note", "") or "") not in _INCLUDED_SURFACES:
             continue
         lines = (getattr(p, "meta", None) or {}).get("mathema.derive_lines")
         covered |= set(lines) if lines is not None else set(statements)
@@ -214,7 +229,12 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
         freshness = (ReportFreshness(method="mtime", report_mtime=report_mtime)
                      if report_mtime is not None else coverage_freshness(root))
 
-    statements, probe_executed, record = _trace_check(fn)
+    try:
+        from .authoring import retrieve
+        declared = retrieve(fn, root)
+    except Exception:
+        declared = None
+    statements, probe_executed, record = _trace_check(fn, declared)
     traced = statements is not None
     if statements is None:
         # no coverage extra (or no traceable source): the PROBE source
@@ -224,7 +244,7 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
         # statement-line denominator.
         statements = _statement_lines(fn)
         probe_executed = set()
-        record = _plain_check(fn)
+        record = _plain_check(fn, declared)
 
     test_stale = False
     rng = _line_range(fn)

@@ -530,14 +530,18 @@ def test_implementation_coverage_tool_reports_sources_and_staleness(tmp_path):
     modp = tmp_path / "icp" / "mod.py"
     modp.write_text(textwrap.dedent('''
         def clamp01(x: float) -> float:
-            """Clamp."""
+            """Clamp.
+
+            Claims:
+                lower: f(x) >= 0
+            """
             if x < 0.0:
                 return 0.0
             return x
     '''))
     # a coverage report OLDER than the source: the test source is stale.
     (tmp_path / "coverage.json").write_text(json.dumps(
-        {"files": {os.path.abspath(str(modp)): {"executed_lines": [2, 3, 4, 5]}}}))
+        {"files": {os.path.abspath(str(modp)): {"executed_lines": [7, 8, 9, 10]}}}))
     time.sleep(0.01)
     os.utime(str(modp), None)
 

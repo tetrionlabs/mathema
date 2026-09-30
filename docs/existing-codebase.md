@@ -281,15 +281,16 @@ mathema coverage billing --root .
 ```text
 2 passed in 0.05s
 100%  billing.fees.discounted  [test+probe+derive]
-100%  billing.fees.late_fee  [probe+derive]
+100%  billing.fees.late_fee  [probe]
 100%  billing.fees.settle  [test+probe+derive]
 
 implementation coverage: 100%
 ```
 
-`late_fee` has no claim of its own and still reads `probe+derive`:
+`late_fee` has no claim of its own, so it reads `probe` alone:
 `coverage` runs mathema's standard claims about a function while tracing
-it, and a proof of any of them counts the body as modelled.
+it, and the lines they ran count, but a proof counts the body as
+modelled only for a claim included for the function.
 [`mathema coverage`](modes/coverage.md) explains the three sources and
 what happens to a test report when the code moves on. From here, [Gate a
 pipeline with mathema verify](gate-a-pipeline.md) puts the sweep in CI,
