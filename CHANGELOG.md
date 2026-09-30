@@ -218,7 +218,20 @@ Notable changes to mathema are recorded here from its first public release onwar
   `||x||^2` is the square of the norm. Unicode reads and writes `‖x‖`,
   `‖x‖₂`, `‖x‖∞`. A claim renders in the spelling it was written in, a
   bare `||x||` names the norm it resolved to in the record's note, and
-  any other order is refused naming the accepted ones.
+  any other order is refused naming the accepted ones. In the call
+  form every infinite order (`norm(x, oo)`, `norm(x, infinity)`,
+  `norm(x, ∞)`) is `norm(x, inf)`, which the probe evaluates as the
+  largest magnitude; before, `oo` there was sampled as a free variable
+  and the claim falsified. A claim written with the bars before 0.6.1
+  stored `norm(x)` as its statement and re-fingerprints once.
+- The derive route reads a norm over a vector: `||x||` and `||x||_2`
+  as the root of the sum of squares, `||x||_1` as the sum of
+  magnitudes, `||x||_inf` as the largest magnitude, and `||A||` on a
+  matrix as the root of the trace of `A @ A.T`. A length, a distance,
+  a normalisation, a weight vector's `||w||_1` and a Gram trace are
+  proven for every length through the numpy definition rows; a matrix
+  `_1`, `_2` or `_inf` norm, a chain of norm orders and the triangle
+  inequality stay with the probe.
 
 ## 0.6.0
 
