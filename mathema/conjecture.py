@@ -3363,6 +3363,7 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                 row.grammar = cj.grammar
                 row.meta = {**(row.meta or {}), **(cj.meta or {})}
                 row.meta.setdefault("mathema.surface", cj.source)
+                _stamp_defaults(row, fn, cj)
                 out.append(row)
         for cj in scalar_empty:
             out.append(Probe(cj.name, statement_text(cj.relation, cj.lhs, cj.rhs),
@@ -3380,8 +3381,18 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                 row.grammar = cj.grammar
                 row.meta = {**(row.meta or {}), **(cj.meta or {})}
                 row.meta.setdefault("mathema.surface", cj.source)
+                _stamp_defaults(row, fn, cj)
                 out.append(row)
         return out
+
+
+def _stamp_defaults(row, fn, cj) -> None:
+    """Records on a policy row or gate the values a library function's
+    calls held its unsampled parameters at (`mathema.defaults`), as a
+    value claim's row records them."""
+    resolved = claim_defaults(fn, cj)
+    if resolved:
+        row.meta = {**(row.meta or {}), "mathema.defaults": resolved}
 
 
 def _empty_on_a_scalar(cj, fn, facts) -> bool:
