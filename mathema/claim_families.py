@@ -1536,12 +1536,47 @@ def _deterministic_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 f"no equality of their own or are consumed by comparing "
                 f"them, so paired calls cannot tell whether they agree")
     reads = hidden_reads(fn, facts)
-    if result[0] == "holds" and reads:
-        return (*result, None, {"mathema.caveat": (
-            f"the body reads {', '.join(reads)}, which does not change "
-            f"between two back-to-back calls, so this holds only while it "
-            f"stays as it is")})
+    kept = _module_state_kept(fn, facts)
+    caveats = []
+    if reads:
+        caveats.append(f"the body reads {', '.join(reads)}, which does not "
+                       f"change between two back-to-back calls, so this "
+                       f"holds only while it stays as it is")
+    if kept:
+        names = ", ".join(f"the module-level {n}" for n in kept)
+        caveats.append(f"the body reads and writes {names}, so a later call "
+                       f"can differ where two back-to-back calls agree")
+    if result[0] == "holds" and caveats:
+        return (*result, None, {"mathema.caveat": "; ".join(caveats)})
     return result
+
+
+def _module_state_kept(fn, facts) -> list:
+    """Intent:
+        The module-level values the body writes (a counter, a cache), by
+        name: state one call leaves for the next, which paired calls can
+        miss when it changes behaviour only after many calls.
+    """
+    import logging
+    import types
+
+    from .hazards import _state_writes
+    scope = module_scope(fn)
+    out: list = []
+    for w in _state_writes(facts):
+        name = str(w.get("target", "")).split(".")[0]
+        value = scope.get(name)
+        if (w.get("kind") in ("external_write", "external_method_call",
+                              "global")
+                and name in scope and name not in out
+                and not isinstance(value, (types.ModuleType, types.FunctionType,
+                                           types.BuiltinFunctionType,
+                                           types.MethodType, type,
+                                           logging.Logger,
+                                           logging.LoggerAdapter))):
+            # a logger emitting a record keeps nothing for the next call
+            out.append(name)
+    return out
 
 
 def _is_reproducible_derive(fn, facts, lhs_src: str, rhs_src: str,

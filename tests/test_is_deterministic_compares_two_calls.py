@@ -177,3 +177,57 @@ def test_the_derive_override_is_for_the_self_equality_statement_only():
     (p,) = check_conjectures(minus_five, [mathema.claim(
         "f(x) >= 0", name="is_deterministic")])
     assert (p.verdict, p.route) == ("falsified", "derive"), (p.verdict, p.note)
+
+
+def price_in_fx_local(price: float) -> float:
+    import os as _os
+    return price * float(_os.environ.get("FX_RATE_T", "1"))
+
+
+def price_in_fx_from_import(price: float) -> float:
+    from os import environ
+    return price * float(environ.get("FX_RATE_T", "1"))
+
+
+def stamped_local(x: float) -> float:
+    from time import time as now
+    return x + 0.0 * now()
+
+
+def test_a_read_imported_inside_the_body_is_named():
+    for fn, read in ((price_in_fx_local, "os.environ"),
+                     (price_in_fx_from_import, "os.environ"),
+                     (stamped_local, "time.time")):
+        p = _wide(fn)
+        assert p.verdict == "holds", (fn.__name__, p.verdict, p.note)
+        assert f"the body reads {read}" in (p.note or ""), (fn.__name__, p.note)
+
+
+_calls_made = [0]
+
+
+def metered_cost(units: float) -> float:
+    """A price that rises after the hundredth call."""
+    _calls_made[0] += 1
+    return units * (1.0 if _calls_made[0] <= 100 else 1.5)
+
+
+def test_mutable_module_state_it_reads_and_writes_is_named():
+    p = _wide(metered_cost)
+    assert p.verdict == "holds", (p.verdict, p.counterexample)
+    assert "the module-level _calls_made" in (p.note or ""), p.note
+
+
+import logging  # noqa: E402
+
+_log = logging.getLogger(__name__)
+
+
+def logged_double(x: float) -> float:
+    _log.debug("doubling %s", x)
+    return 2 * x
+
+
+def test_a_module_logger_is_not_named_as_kept_state():
+    p = _wide(logged_double)
+    assert "module-level" not in (p.note or ""), p.note
