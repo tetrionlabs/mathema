@@ -535,3 +535,19 @@ def test_the_hidden_read_row_names_the_read():
     (p,) = check_conjectures(price_in_fx,
                              [claim(LEXICON["deterministic_hidden_read"])])
     assert "the body reads os.environ" in p.note, p.note
+
+
+@pytest.mark.parametrize("key, query", [
+    ("raises_typed_region", "raises in a range"),
+    ("state_safe_env_write", "environment variable"),
+    ("state_safe_global_rng", "global random"),
+    ("deterministic_trap", "same answer twice"),
+    ("deterministic_nan_agrees", "nan determinism"),
+    ("deterministic_hidden_read", "hidden input"),
+    ("enforce_domain_guard", "enforce_domain guard"),
+])
+def test_the_rows_for_state_and_determinism_are_found_by_what_a_reader_types(
+        key, query):
+    from mathema.lexicon import TAGS, search
+    assert TAGS.get(key), key
+    assert key in [k for k, _law in search(query, limit=8)], (key, search(query))

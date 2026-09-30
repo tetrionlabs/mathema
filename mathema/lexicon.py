@@ -768,6 +768,20 @@ SECTIONS: dict[str, tuple[str, ...]] = {
 # find `%`, and someone looking for "for all" should find `∀`. Keep it
 # to vocabulary a newcomer would actually type.
 TAGS: dict[str, tuple[str, ...]] = {
+    "raises_typed_region": ("raises", "exception", "in a range", "region",
+                            "precondition"),
+    "state_safe_env_write": ("state", "side effect", "environment variable",
+                             "os.environ", "trap"),
+    "state_safe_global_rng": ("state", "side effect", "global random",
+                              "random seed", "trap"),
+    "deterministic_trap": ("deterministic", "same answer twice", "random",
+                           "falsified", "trap"),
+    "deterministic_nan_agrees": ("deterministic", "nan determinism",
+                                 "missing", "same answer twice"),
+    "deterministic_hidden_read": ("deterministic", "hidden input",
+                                  "environment", "clock", "file"),
+    "enforce_domain_guard": ("enforce_domain guard", "guard", "decorator",
+                             "domain", "validation"),
     "norm_bars_euclidean": ("norm", "euclidean", "length", "double bars"),
     "norm_bars_two": ("norm", "subscript", "euclidean", "L2"),
     "norm_bars_one": ("norm", "subscript", "manhattan", "taxicab", "L1"),
