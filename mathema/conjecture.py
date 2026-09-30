@@ -6503,6 +6503,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     literal_args.update({p: v for p, v in {**kept_defaults,
                                            **call_pins}.items()
                          if p in kinds and p not in literal_args})
+    # the sampling line states only the parameters actually drawn; the
+    # held ones are stated by the defaults note
+    sampled_kinds = {p: k for p, k in kinds.items()
+                     if p not in kept_defaults and p not in call_pins}
     # the domain box's corners replay with the recorded counterexamples,
     # before any random sampling
     pinned += [c for c in _domain_corners(kinds, cj_domain, literal_args)
@@ -7117,7 +7121,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,
                      counterexample=cx, note=note, stratum=cx_stratum,
                      meta={"mathema.sampling": _sampling_shorthand(
-                               kinds, cj_domain, checked, critical_hints,
+                               sampled_kinds, cj_domain, checked, critical_hints,
                                truncated_hints, observed_lengths,
                                set(premise_draws), runtime_names, nested,
                                lap_floor),
@@ -7138,7 +7142,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 f"magnitudes").lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
-                           kinds, cj_domain, checked, critical_hints,
+                           sampled_kinds, cj_domain, checked, critical_hints,
                            truncated_hints, observed_lengths,
                            set(premise_draws), runtime_names, nested,
                            lap_floor),
