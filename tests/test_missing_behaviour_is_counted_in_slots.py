@@ -53,8 +53,19 @@ def test_a_list_hole_propagates_at_its_position():
     assert classify_call({"xs": [1.0, NAN]}, [2.0, NAN]) == "propagates"
 
 
-def test_a_moved_hole_is_not_propagation():
-    assert classify_call({"xs": [1.0, NAN]}, [NAN, 2.0]) == "introduces"
+def _refilled(fn, xs):
+    from mathema._missing_policy import refill
+
+    def call_at(point):
+        return fn(**point), None
+    return [b for *_rest, b in refill(call_at, {"xs": xs}, fn(xs=xs), None,
+                                      {"xs": (0.0, 1.0)})]
+
+
+def test_a_moved_hole_propagates():
+    def reversed_(xs):
+        return [2.0 * v for v in reversed(xs)]
+    assert _refilled(reversed_, [1.0, NAN]) == ["propagates"]
 
 
 def test_holes_at_the_same_positions_in_two_arguments_are_one_union():
@@ -72,9 +83,17 @@ def test_a_reduction_carries_one_hole_into_its_one_slot():
     assert classify_call({"xs": [NAN, 1.0]}, 1.0) == "drops"
 
 
-def test_extra_holes_are_introduced():
-    assert classify_call({"xs": [1.0, NAN, 2.0]}, [NAN, NAN, NAN]) == "introduces"
+def test_a_hole_spread_over_every_slot_propagates():
+    def spread(xs):
+        return [sum(xs)] * len(xs)
+    assert _refilled(spread, [1.0, NAN, 2.0]) == ["propagates"]
     assert classify_call({"xs": [1.0, NAN, 2.0]}, [1.0, NAN, 2.0]) == "propagates"
+
+
+def test_holes_from_complete_inputs_are_introduced():
+    def shifted(xs):
+        return [NAN] + list(xs[:-1])
+    assert _refilled(shifted, [1.0, NAN, 2.0]) == ["introduces"]
 
 
 def test_a_none_element_is_the_null_hole():

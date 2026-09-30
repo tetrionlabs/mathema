@@ -413,3 +413,147 @@ class PolicyTable:
             if len(found) > 1 and key in self.raised:
                 out.setdefault(key[0], {})[key[2]] = self.raised[key]
         return out
+
+
+# --- the refill: what a call at a hole did, read by filling the hole ------
+
+#: what a call at a hole is when filling the hole leaves the output as it
+#: was: f never read the hole
+NOT_READ = "not read"
+
+
+def filled(value, members, fill):
+    """Intent:
+        `value` with every hole slot whose member is in `members` holding
+        `fill` instead: a scalar hole, the elements of a list, an array, a
+        Series, the rows of a matrix, the cells of a table. Anything else
+        is returned as it is.
+    """
+    members = set(members)
+    slots = [sl for sl in no_value_slots(value).slots
+             if sl.kind == MISSING and sl.member in members]
+    if not slots:
+        return value
+    if slots[0].position == ():
+        return fill
+    at = {sl.position for sl in slots}
+    module = type(value).__module__.split(".")[0]
+    if isinstance(value, dict) or (module in ("pandas", "polars")
+                                   and type(value).__name__ == "DataFrame"):
+        columns = _table_columns(value) or {}
+        cells = {c: [fill if (c, k) in at else v for k, v in enumerate(col)]
+                 for c, col in columns.items()}
+        if isinstance(value, dict):
+            return {c: type(value[c])(cells[str(c)]) if isinstance(value[c], tuple)
+                    else cells[str(c)] for c in value}
+        return type(value)(cells)
+    rows = _rows(value)
+    if rows is not None:
+        out = [[fill if (i, j) in at else v for j, v in enumerate(r)]
+               for i, r in enumerate(rows)]
+        if _is_ndarray(value):
+            import numpy
+            return numpy.array(out, dtype=float)
+        return out
+    cells = _cells(value)
+    if cells is None:
+        return value
+    out = [fill if (k,) in at else v for k, v in enumerate(cells)]
+    if _is_ndarray(value):
+        import numpy
+        return numpy.array(out, dtype=float)
+    if module == "pandas":
+        return type(value)(out, dtype=value.dtype, name=value.name)
+    if module == "polars":
+        return type(value)(value.name, out, dtype=value.dtype)
+    return type(value)(out) if isinstance(value, tuple) else out
+
+
+def _same_output(a, b) -> bool:
+    """Whether two outputs of f are the same value, slot by slot."""
+    import math
+
+    def plain(v):
+        for read in (_table_columns, _rows, _cells):
+            got = read(v)
+            if got is not None:
+                return got
+        return v
+
+    def same(x, y) -> bool:
+        if isinstance(x, (list, tuple)) and isinstance(y, (list, tuple)):
+            return len(x) == len(y) and all(same(p, q) for p, q in zip(x, y))
+        if isinstance(x, dict) and isinstance(y, dict):
+            return x.keys() == y.keys() and all(same(x[k], y[k]) for k in x)
+        if isinstance(x, float) and isinstance(y, float) and math.isnan(x) \
+                and math.isnan(y):
+            return True
+        try:
+            return bool(x == y)
+        except Exception:
+            return False
+    return same(plain(a), plain(b))
+
+
+def refill(call_at, point: dict, output, raised: "str | None",
+           fills: dict) -> "list | None":
+    """Intent:
+        What one call at a hole did, read by calling f again with the
+        hole filled by a value inside its parameter's domain:
+        `[(point, output, raised, behaviour), ...]`, one per hole member
+        the call held. A call holding two members is taken one member at
+        a time, the other members filled, and each member's behaviour
+        read from that call. Per member, in order: a raise `raises`; a
+        hole in the output that stays when the input's hole is filled
+        `introduces` (it does not come from the input); a hole that goes
+        with it `propagates`, however far it spread; a value that the
+        fill leaves the same is `NOT_READ` (f never read the hole); a
+        value the fill changes `drops`. A no-value of the other kind in
+        the output `converts`, by the count rule. None when the call
+        cannot be refilled: it holds an absence or a path, or a holding
+        parameter has no fill values.
+
+    Notes:
+        `call_at(point)` calls f at the arguments by name and returns
+        `(output, raised)`. `fills` maps a parameter to two values of its
+        domain: a replacing function that happens to return one fill for
+        the hole still returns a different value for the other.
+    """
+    keys = keys_of(point)
+    if not keys or any(k != MISSING or is_path(q) for q, k, _m in keys):
+        return None
+    holding = list(dict.fromkeys(q for q, _k, _m in keys))
+    if any(q not in fills for q in holding):
+        return None
+    members = list(dict.fromkeys(m for _q, _k, m in keys))
+
+    def fill_all(at: dict, which, pick: int) -> dict:
+        return {q: (filled(v, which, fills[q][pick]) if q in holding else v)
+                for q, v in at.items()}
+    out = []
+    for m in members:
+        others = [o for o in members if o != m]
+        if others:
+            at = fill_all(point, others, 0)
+            got, err = call_at(at)
+        else:
+            at, got, err = point, output, raised
+        if err is not None:
+            out.append((at, got, err, "raises"))
+            continue
+        counted = classify_call(at, got)
+        if counted == "converts":
+            out.append((at, got, None, "converts"))
+            continue
+        after, after_err = call_at(fill_all(at, [m], 0))
+        if no_value_slots(got).count():
+            behaviour = (counted if after_err is not None else
+                         "introduces" if no_value_slots(after).count() else "propagates")
+        elif after_err is not None or not _same_output(after, got):
+            behaviour = "drops"
+        else:
+            again, again_err = call_at(fill_all(at, [m], 1))
+            behaviour = ("drops" if again_err is not None
+                         or not _same_output(again, got) else NOT_READ)
+        out.append((at, got, None, behaviour))
+    return out
