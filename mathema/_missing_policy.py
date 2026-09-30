@@ -632,6 +632,11 @@ def refill(call_at, point: dict, output, raised: "str | None",
             behaviour = NOT_READ if _unread(call_at, fill_all, at, m, got, after) \
                 else "drops"
         out.append((at, got, None, behaviour))
+    if raised is not None and len(members) > 1 \
+            and not any(b == "raises" for *_r, b in out):
+        # the call raised with its members together and no member raises
+        # alone: the raise is the combination's, filed under every member
+        out.append((point, output, raised, "raises"))
     return out
 
 

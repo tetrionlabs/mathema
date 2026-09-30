@@ -58,3 +58,21 @@ def mean_after_fill(xs: np.ndarray) -> float:
 def test_no_library_row_is_composed_when_the_body_rebinds_the_parameter():
     from mathema.policy import composed_policies
     assert composed_policies(mean_after_fill, analyze(mean_after_fill)) == {}
+
+
+# --- a call holding two members keeps its own raise -----------------------
+
+def refuses_two_kinds(xs: list) -> float:
+    has_null = any(x is None for x in xs)
+    has_nan = any(x is not None and x != x for x in xs)
+    if has_null and has_nan:
+        raise ValueError("both kinds of hole")
+    return sum(x for x in xs if x is not None and x == x)
+
+
+def test_a_raise_at_two_members_together_is_recorded():
+    rows = _rows(refuses_two_kinds, "for xs in [0, 1]^n, f(xs) >= 0",
+                 "missing(f, xs) drops", "is_missing_safe(f)")
+    assert rows["missing_f_xs_drops"].verdict == "falsified"
+    assert rows["missing_f_xs_drops"].counterexample.endswith("f raised ValueError")
+    assert rows["is_missing_safe[f]"].verdict == "falsified"
