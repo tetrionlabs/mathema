@@ -5099,6 +5099,109 @@ def _derive_line_coverage(fn, facts, domain):
     return {first_line - 1 + ln for ln in live}
 
 
+def _guard_interval(bound) -> "tuple | None":
+    """Intent:
+        `(lo, hi, closed_lo, closed_hi)` for a guard bound that is one
+        real interval (a pair or a real `Domain` of one such piece),
+        else None.
+    """
+    pieces = getattr(bound, "pieces", None)
+    if pieces is not None:
+        if getattr(bound, "base_type", "R") != "R" or len(pieces) != 1 \
+                or getattr(bound, "dims", ()):
+            return None
+        bound = pieces[0]
+    if isinstance(bound, (tuple, list)) and not isinstance(bound, frozenset) \
+            and len(bound) == 2:
+        try:
+            lo, hi = float(bound[0]), float(bound[1])
+        except (TypeError, ValueError):
+            return None
+        return (lo, hi, getattr(bound, "closed_lo", True),
+                getattr(bound, "closed_hi", True))
+    return None
+
+
+def _guard_refuses_part_of_the_claim(ctx: "_ClaimContext", fn, facts
+                                     ) -> "str | None":
+    """Intent:
+        Why the derive route leaves a claim to the executed guard, or
+        None: the function is wrapped by `enforce_domain()`, and some
+        call of f in the claim passes a parameter an argument that is
+        not shown, exactly, to stay inside the interval the guard
+        admits over the claim's own region.
+
+    Notes:
+        The argument's range is computed with sympy (`imageset` of the
+        argument over the claim's interval for its one variable), under
+        the wall-clock cap; anything it cannot show inside counts as
+        refused, since a proof must not reach inputs the function
+        refuses.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    if not enforced:
+        return None
+    names = {"f", getattr(fn, "__name__", "f")}
+    cj = ctx.cj
+    sides = [cj.lhs, cj.rhs, *[rhs for _l, _r, rhs in (cj.links or [])]]
+    for side in sides:
+        try:
+            tree = ast.parse(side or "", mode="eval")
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in names):
+                continue
+            for p, arg in zip(facts.params, node.args):
+                guard = _guard_interval(enforced.get(p))
+                if guard is None or facts.param_kinds.get(p) in SEQUENCE_KINDS:
+                    continue
+                text = ast.unparse(arg)
+
+                def inside(text=text, guard=guard):
+                    variables = sorted(
+                        {n.id for n in ast.walk(ast.parse(text, mode="eval"))
+                         if isinstance(n, ast.Name)})
+                    if len(variables) != 1:
+                        return False
+                    (name,) = variables
+                    region = _guard_interval(ctx.cj_domain.get(name))
+                    if region is None:
+                        return False
+                    sym = sympy.Symbol(name, real=True)
+                    expr = sympy.sympify(text, locals={name: sym})
+                    where = sympy.Interval(region[0], region[1],
+                                           not region[2], not region[3])
+                    reached = sympy.imageset(sympy.Lambda(sym, expr), where)
+                    if not isinstance(reached, sympy.Interval):
+                        allowed = sympy.Interval(guard[0], guard[1],
+                                                 not guard[2], not guard[3])
+                        return reached.is_subset(allowed) is True
+                    low, high = float(reached.inf), float(reached.sup)
+                    above = (low > guard[0] or (low == guard[0] and (
+                        guard[2] or reached.left_open)))
+                    below = (high < guard[1] or (high == guard[1] and (
+                        guard[3] or reached.right_open)))
+                    return above and below
+
+                try:
+                    ok = _with_timeout(inside, FAST_TIMEOUT_SECONDS)
+                except TimeoutError:
+                    ok = False
+                except Exception:
+                    ok = False
+                if not ok:
+                    return (f"the claim calls f at {text}, which is not shown "
+                            f"to stay inside the domain its guard admits for "
+                            f"{p}, so the derive route does not prove it; the "
+                            f"executed guard decides")
+    return None
+
+
 def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
     """Intent:
         The parameter whose declared range the claim's premises leave
@@ -5398,6 +5501,16 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     # claim then gets adjudicated over a region its author excluded.
     assumption = (None if ctx.assumption is None else
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
+    refused = _guard_refuses_part_of_the_claim(ctx, fn, facts)
+    if refused is not None:
+        # the guard is the function's domain: a claim reaching inputs it
+        # refuses is not the mathematics of the body alone, and the
+        # executed guard decides it
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; {refused}",
+            meta={"mathema.derive_status": "undecided"})
+        return None
     family_derive = family.routes().get("derive") if family is not None else None
     reserved = getattr(family, "reserved", None)
     if reserved:
