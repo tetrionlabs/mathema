@@ -3726,13 +3726,6 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # family-owned name reaches the family's own empirical
         # technique rather than the generic sampling loop
         ctx.family = _claim_family(cj, fn, facts)
-        left = _apply_argument_premises(ctx, fn, facts)
-        if left is not None:
-            out.append(stamp(Probe(
-                cj.name, statement, "skipped", route=None,
-                note=f"{ctx.note}; {left}",
-                meta={"mathema.argument_outside": True})))
-            continue
         emptied = _empty_premise_parameter(ctx, facts)
         clash = None if emptied is not None else _fixed_dim_clash(ctx)
         if clash is not None:
@@ -4438,10 +4431,6 @@ class _ClaimContext:
     # bindings; an argument the claim transforms out of it is outside
     # the claim
     parent_domain: dict = field(default_factory=dict)
-    # premises the derive route adds for each argument the claim
-    # transforms (`f(x + 2)`): the argument stays inside its parameter's
-    # declared function-level domain, (arg, relation, bound) triples
-    argument_premises: list = field(default_factory=list)
     derive_undecided: "Probe | None" = None
     derive_intermediates: "tuple | None" = None
     # (lhs_expr, rhs_expr, params) from an undecided derive attempt:
@@ -5147,149 +5136,6 @@ def _derive_line_coverage(fn, facts, domain):
     return {first_line - 1 + ln for ln in live}
 
 
-def _bound_interval(bound) -> "tuple | None":
-    """Intent:
-        `(lo, hi, closed_lo, closed_hi)` for a declared bound that is one
-        real interval (a pair, an `Interval`, or a real `Domain` of one
-        such piece), else None.
-    """
-    pieces = getattr(bound, "pieces", None)
-    if pieces is not None:
-        if getattr(bound, "base_type", "R") != "R" or len(pieces) != 1 \
-                or getattr(bound, "dims", ()):
-            return None
-        bound = pieces[0]
-    if isinstance(bound, tuple) and not isinstance(bound, frozenset) \
-            and len(bound) == 2:
-        try:
-            lo, hi = float(bound[0]), float(bound[1])
-        except (TypeError, ValueError):
-            return None
-        return (lo, hi, getattr(bound, "closed_lo", True),
-                getattr(bound, "closed_hi", True))
-    return None
-
-
-def _transformed_arguments(cj, fn, facts) -> list:
-    """Intent:
-        `(argument source, parameter)` for every argument the claim
-        passes to the function under test (as `f` or by its own name)
-        that is not the parameter itself.
-    """
-    names = {"f", getattr(fn, "__name__", "f")}
-    out: list = []
-    sides = [cj.lhs, cj.rhs, *[rhs for _l, _r, rhs in (cj.links or [])]]
-    for side in sides:
-        try:
-            tree = ast.parse(side or "", mode="eval")
-        except SyntaxError:
-            continue
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                    and node.func.id in names):
-                continue
-            for p, arg in zip(facts.params, node.args):
-                if isinstance(arg, ast.Name) and arg.id == p:
-                    continue
-                item = (ast.unparse(arg), p)
-                if item not in out:
-                    out.append(item)
-    return out
-
-
-def _interval_text(region) -> str:
-    """Intent:
-        A sympy set of reals as the grammar writes intervals: `[0.5, 1]`,
-        `(0, 1]`, a union joined with "or".
-    """
-    import sympy
-    parts = region.args if isinstance(region, sympy.Union) else (region,)
-    out = []
-    for part in parts:
-        if isinstance(part, sympy.Interval):
-            out.append(f"{'(' if part.left_open else '['}{float(part.start):g}, "
-                       f"{float(part.end):g}{')' if part.right_open else ']'}")
-        else:
-            out.append(str(part))
-    return " or ".join(out)
-
-
-def _apply_argument_premises(ctx: "_ClaimContext", fn, facts) -> "str | None":
-    """Intent:
-        Set `ctx.argument_premises` (each transformed argument held to
-        its parameter's declared function-level interval, for the derive
-        route), note a claim region part of which those premises
-        exclude, and return the reason to skip the claim when no point
-        of its region keeps every such argument inside (exactly, where
-        the argument has one variable the claim bounds by an interval).
-    """
-    import sympy
-
-    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    premises: list = []
-    reason = None
-    for arg, p in _transformed_arguments(ctx.cj, fn, facts):
-        declared = _bound_interval(ctx.parent_domain.get(p))
-        if declared is None or facts.param_kinds.get(p) in SEQUENCE_KINDS:
-            # a sequence argument is judged entry by entry on the probe
-            # route; the derive route reads premises over numbers
-            continue
-        lo, hi, closed_lo, closed_hi = declared
-        shown = _shapes.domain_text(ctx.parent_domain[p])
-        if not math.isinf(lo):
-            premises.append((arg, ">=" if closed_lo else ">", repr(lo)))
-        if not math.isinf(hi):
-            premises.append((arg, "<=" if closed_hi else "<", repr(hi)))
-
-        def inside_set(arg=arg, lo=lo, hi=hi, closed_lo=closed_lo,
-                       closed_hi=closed_hi):
-            names = {n.id for n in ast.walk(ast.parse(arg, mode="eval"))
-                     if isinstance(n, ast.Name)}
-            variables = [n for n in names if n in ctx.cj_domain
-                         or n in facts.params]
-            if len(variables) != 1 or names - set(variables) - {"pi", "e"}:
-                return None
-            (name,) = variables
-            region = _bound_interval(ctx.cj_domain.get(name))
-            if region is None:
-                return None
-            sym = sympy.Symbol(name, real=True)
-            expr = sympy.sympify(arg, locals={name: sym})
-            where = sympy.Interval(region[0], region[1], not region[2],
-                                   not region[3])
-            above = expr >= lo if closed_lo else expr > lo
-            below = expr <= hi if closed_hi else expr < hi
-            inside = where
-            for condition in (above, below):
-                if condition is sympy.true:
-                    continue
-                inside = inside.intersect(
-                    sympy.solveset(condition, sym, sympy.Reals))
-            return name, inside, where
-
-        try:
-            found = _with_timeout(inside_set, FAST_TIMEOUT_SECONDS)
-        except TimeoutError:
-            found = None
-        except Exception:
-            found = None
-        if found is None:
-            continue
-        name, inside, where = found
-        if inside is sympy.S.EmptySet:
-            reason = (f"the claim's transformed argument {arg} left the "
-                      f"declared domain {shown} of {p} everywhere in the "
-                      f"claim's region, so no point lies inside the claim")
-            break
-        if inside != where:
-            ctx.note = (f"{ctx.note}; points where the argument {arg} leaves "
-                        f"{p}'s declared domain {shown} are outside the claim "
-                        f"and excluded; the claim covers {name} in "
-                        f"{_interval_text(inside)}").lstrip("; ")
-    ctx.argument_premises = premises
-    return reason
-
-
 def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
     """Intent:
         The parameter whose declared range the claim's premises leave
@@ -5589,11 +5435,6 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     # claim then gets adjudicated over a region its author excluded.
     assumption = (None if ctx.assumption is None else
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
-    if ctx.argument_premises:
-        # a point where a transformed argument leaves its parameter's
-        # declared domain is outside the claim, excluded as a premise
-        # excludes
-        assumption = [*(assumption or []), *ctx.argument_premises]
     family_derive = family.routes().get("derive") if family is not None else None
     reserved = getattr(family, "reserved", None)
     if reserved:
