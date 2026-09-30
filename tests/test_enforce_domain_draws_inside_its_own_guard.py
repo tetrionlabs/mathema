@@ -65,11 +65,45 @@ def mean_weight(weights: list) -> float:
     return sum(weights) / len(weights)
 
 
-def test_a_row_that_scales_the_argument_out_of_the_guard_is_falsified_by_it():
-    # the draws stay inside the guard, but scale_equivariant calls f at
-    # c * weights, which leaves [0, 1]; the guard's own DomainError is
-    # the witness (the pedantic rule: a raise in the claim's domain)
+def test_a_sample_whose_transformed_argument_leaves_the_domain_is_outside_the_claim():
+    # scale_equivariant calls f at c * weights and translation_equivariant
+    # at weights + c; a sample that takes the argument out of [0, 1] is
+    # outside the claim, skipped, and the guard's DomainError there is
+    # not a counterexample; the samples that stay inside decide
     rows = _by_name(check(mean_weight))
-    row = rows["scale_equivariant"]
-    assert row.verdict == "falsified", (row.verdict, row.note)
-    assert "DomainError" in str(row.counterexample), row.counterexample
+    for name in ("scale_equivariant", "translation_equivariant"):
+        row = rows[name]
+        assert row.verdict == "holds", (name, row.verdict, row.counterexample)
+
+
+@enforce_domain()
+@claims_decorator("for x in [0, 1], f(x) >= 0")
+def unit_root(x: float) -> float:
+    import math
+    return math.sqrt(x)
+
+
+def test_a_claim_whose_every_sample_leaves_the_domain_is_skipped_with_the_reason():
+    from mathema.conjecture import claim
+    p = _by_name(check(unit_root, claims=[claim(
+        "for x in [0, 1], f(x + 2) >= 0", name="shifted", route="probe")]))[
+        "shifted"]
+    assert p.verdict == "skipped", (p.verdict, p.counterexample)
+    assert "left the declared domain" in (p.note or ""), p.note
+
+
+@enforce_domain()
+@claims_decorator("for x in [0, 1], f(x) >= 0")
+def half_capped(x: float) -> float:
+    if x > 0.4:
+        raise ValueError("above the cap")
+    return x
+
+
+def test_a_raise_at_a_transformed_argument_inside_the_domain_still_falsifies():
+    from mathema.conjecture import claim
+    p = _by_name(check(half_capped, claims=[claim(
+        "for x in [0, 0.25], f(2 * x) >= 0", name="doubled", route="probe")]))[
+        "doubled"]
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "ValueError" in str(p.counterexample), p.counterexample

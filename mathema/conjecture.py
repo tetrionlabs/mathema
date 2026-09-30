@@ -323,6 +323,37 @@ def _guard_points(fn, facts, kinds: dict, domain: dict,
     return out
 
 
+class _ArgumentOutsideClaim(Exception):
+    """A call of f whose argument, after the claim transformed it
+    (`f(c * x)`, `f(x + c)`), lies outside that parameter's declared
+    domain: the sample is outside the claim."""
+
+
+def _argument_in_domain(value, bound) -> bool:
+    """Intent:
+        Whether an argument f is called with lies inside the parameter's
+        declared bound: a number as `_sample_in_domain` judges it, and a
+        sequence (a list, a tuple, an array) entry by entry against the
+        bound its entries are drawn from.
+    """
+    import dataclasses
+    if bound is None:
+        return True
+    if getattr(bound, "base_type", None) == "L":
+        return _sample_in_domain(value, bound)
+    element = (dataclasses.replace(bound, dims=())
+               if getattr(bound, "dims", ()) else bound)
+    try:
+        import numpy
+        if isinstance(value, numpy.ndarray):
+            value = value.tolist()
+    except ImportError:
+        pass
+    if isinstance(value, (list, tuple)):
+        return all(_argument_in_domain(v, element) for v in value)
+    return _sample_in_domain(value, element)
+
+
 def _sample_in_domain(value, bound) -> bool:
     """Intent:
         Whether one sampled value lies inside its parameter's declared
@@ -4395,6 +4426,11 @@ class _ClaimContext:
     cj_domain: dict
     extra: frozenset
     family: object | None = None
+    # the function-level domain the parameters are declared over
+    # (signature markers, a guard, domain=), before the claim's own
+    # bindings; an argument the claim transforms out of it is outside
+    # the claim
+    parent_domain: dict = field(default_factory=dict)
     derive_undecided: "Probe | None" = None
     derive_intermediates: "tuple | None" = None
     # (lhs_expr, rhs_expr, params) from an undecided derive attempt:
@@ -4996,7 +5032,8 @@ def _validate_claim(cj, statement: str, note: str, facts,
                      if len(undeclared) > 1 else "")),
             meta={"mathema.invalid_conjecture": True})
     return _ClaimContext(cj=cj, statement=statement, note=note,
-                         cj_domain=cj_domain, extra=frozenset(cj.funcs))
+                         cj_domain=cj_domain, extra=frozenset(cj.funcs),
+                         parent_domain=dict(domain or {}))
 
 
 def replace_proof(proof, status: str, sketch: str):
@@ -6584,9 +6621,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      **k}
             if sig is not None:
                 try:
-                    sig.bind(*a, **k)
+                    bound_args = sig.bind(*a, **k)
                 except TypeError:
                     raise   # the law called it wrong: untagged
+                if label == "f":
+                    for p, v in bound_args.arguments.items():
+                        if p in kinds and p not in literal_args \
+                                and not _argument_in_domain(
+                                    v, ctx.parent_domain.get(p)):
+                            raise _ArgumentOutsideClaim(p)
             try:
                 value = callee(*a, **k)
             except Exception:
@@ -6658,6 +6701,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     sequence_params = [p for p, k in kinds.items()
                        if k in SEQUENCE_KINDS or k == "table"]
     observed_lengths: dict = {}
+    left_domain = 0
     for trial in range(budget + len(pinned)):
         call_raised[0] = call_nan[0] = call_inf[0] = None
         outside_draw[0] = False
@@ -6854,6 +6898,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # typed raises claim, raising right is a pass
             try:
                 v = eval(code_l, {"__builtins__": {}}, env)
+            except _ArgumentOutsideClaim:
+                left_domain += 1
+                continue
             except Exception as e:
                 checked += 1
                 if raised_type is not None and not isinstance(e, raised_type):
@@ -6872,6 +6919,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # number it holds
                 lv = _linalg_eval.scalar(lv)
                 rv = _linalg_eval.scalar(rv) if code_r is not None else None
+        except _ArgumentOutsideClaim:
+            # the claim transformed an argument out of the declared
+            # domain: this sample is outside the claim
+            left_domain += 1
+            continue
         except Exception as e:
             if any(is_missing(v) for v in args):
                 # missing-value behavior is its own axis
@@ -7168,7 +7220,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           **shrunk_meta})
     if checked == 0:
         why = ("; no sampled point satisfied the assuming clause"
-               if assum_eval is not None else "; no evaluable inputs")
+               if assum_eval is not None
+               else f"; in every sample the claim's transformed argument "
+                    f"left the declared domain ({left_domain} samples), so "
+                    f"no sample lies inside the claim"
+               if left_domain else "; no evaluable inputs")
         return Probe(cj.name, statement, "skipped", route="probe",
                      note=note + why)
     if absorbed > 0:
