@@ -1017,8 +1017,8 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return (f"calling the function changed process-wide state: "
                     f"{'; '.join(changed)}")
         if env_calls:
-            # os.environ's own writes go through os.putenv too; a call
-            # os.environ does not show is a write to the C environment
+            # a direct os.putenv or os.unsetenv: a write to the C
+            # environment, which os.environ does not show
             writer, name = env_calls[0]
             return (f"calling the function called {writer}({name!r}), "
                     f"which changes the process environment")
@@ -1376,18 +1376,58 @@ def _is_deterministic_derive(fn, facts, lhs_src: str, rhs_src: str,
                "the same inputs to vary with")
 
 
-def _same_kind(first, second) -> bool:
-    """Whether two outcomes of the same call agree by kind: equal
-    values, NaN with NaN, element by element inside a list or tuple,
-    and the same exception type (an outcome that raised is its
-    exception's type)."""
-    if isinstance(first, type) and issubclass(first, BaseException):
+def _same_float(a: float, b: float) -> bool:
+    """Two floats agree exactly, the sign of zero included; a NaN agrees
+    with a NaN whatever its payload."""
+    if a != a and b != b:
+        return True
+    return a == b and math.copysign(1.0, a) == math.copysign(1.0, b)
+
+
+def _same_kind(first, second) -> "bool | None":
+    """Whether two outcomes of the same call agree by kind: floats
+    exactly (the sign of zero counts, a NaN agrees with a NaN), element
+    by element inside a list, tuple or dict, arrays by their entries the
+    same way, and the same exception type (an outcome that raised is its
+    exception's type). None when the comparison cannot tell: an object
+    with no equality of its own (two equal ones are two identities) or
+    an iterator (comparing it would consume it)."""
+    import collections.abc
+    first_raised = isinstance(first, type) and issubclass(first, BaseException)
+    second_raised = isinstance(second, type) and issubclass(second, BaseException)
+    if first_raised or second_raised:
         return first is second
-    if isinstance(second, type) and issubclass(second, BaseException):
-        return False
+    if isinstance(first, float) and isinstance(second, float):
+        return _same_float(first, second)
     if (isinstance(first, (list, tuple)) and isinstance(second, (list, tuple))
-            and type(first) is type(second) and len(first) == len(second)):
-        return all(_same_kind(a, b) for a, b in zip(first, second))
+            and type(first) is type(second)):
+        if len(first) != len(second):
+            return False
+        verdicts = [_same_kind(a, b) for a, b in zip(first, second)]
+        if False in verdicts:
+            return False
+        return None if None in verdicts else True
+    if isinstance(first, dict) and isinstance(second, dict):
+        if first.keys() != second.keys():
+            return False
+        return _same_kind([first[k] for k in first], [second[k] for k in first])
+    try:
+        import numpy
+        if isinstance(first, numpy.ndarray) and isinstance(second, numpy.ndarray):
+            if first.shape != second.shape or first.dtype != second.dtype:
+                return False
+            if first.dtype.kind in "fc":
+                return bool(numpy.array_equal(first, second, equal_nan=True)
+                            and numpy.array_equal(numpy.signbit(first.real),
+                                                  numpy.signbit(second.real)))
+            return bool(numpy.array_equal(first, second))
+    except ImportError:
+        pass
+    if isinstance(first, collections.abc.Iterator) \
+            or isinstance(second, collections.abc.Iterator):
+        return None
+    if type(first) is type(second) and type(first).__eq__ is object.__eq__:
+        return None
     return _same_result(first, second)
 
 
@@ -1433,14 +1473,25 @@ def _deterministic_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except Exception:
             return None
         first, second = outcome(call_args), outcome(second_args)
-        if _same_kind(first, second):
+        agree = _same_kind(first, second)
+        if agree is None:
+            # the comparison cannot tell; not a trial
+            uncomparable.append(type(first).__name__)
+            return None
+        if agree:
             return True
         shown = ", ".join(f"{p} = {_witness_value(v)}"
                           for p, v in zip(facts.params, second_args))
         return (f"{shown}: the first call {_outcome_text(first)}, the "
                 f"second {_outcome_text(second)}")
 
+    uncomparable: list = []
     result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    if result[0] == "skipped" and uncomparable:
+        return ("skipped", 0,
+                f"two calls return {uncomparable[0]} values, which have "
+                f"no equality of their own or are consumed by comparing "
+                f"them, so paired calls cannot tell whether they agree")
     reads = hidden_reads(fn, facts)
     if result[0] == "holds" and reads:
         return (*result, None, {"mathema.caveat": (

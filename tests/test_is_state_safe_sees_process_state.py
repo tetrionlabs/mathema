@@ -359,3 +359,35 @@ def test_a_watched_write_through_a_bare_name_or_a_call_result_is_not_proven(
 def test_a_method_call_on_a_local_is_still_proven():
     p = _state_safe(local_sort)
     assert (p.verdict, p.route) == ("proven", "examine")
+
+
+# --- a write undone before returning is no change -----------------------------
+
+def self_restoring(x: float) -> float:
+    old = os.environ.get("HOME")
+    os.environ["HOME"] = "/elsewhere"
+    os.environ["HOME"] = old
+    return x
+
+
+def checks_another_function(x: float) -> float:
+    def inner(y: float) -> float:
+        os.environ["MATHEMA_T7"] = "1"
+        return y
+    check_conjectures(inner, [claim("is_state_safe(f)")])
+    return x
+
+
+def test_a_self_restoring_environment_write_holds():
+    p = _state_safe(self_restoring)
+    assert p.verdict == "holds", (p.verdict, p.counterexample)
+
+
+def test_a_check_run_inside_the_function_is_no_change():
+    p = _state_safe(checks_another_function)
+    assert p.verdict == "holds", (p.verdict, p.counterexample)
+
+
+def test_a_c_environment_write_names_the_variable_as_text():
+    p = _state_safe(put_env)
+    assert "'MATHEMA_T'" in p.counterexample and "b'" not in p.counterexample

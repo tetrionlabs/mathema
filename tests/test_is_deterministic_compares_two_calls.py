@@ -70,8 +70,8 @@ def test_nan_agrees_with_nan():
 def test_the_same_exception_agrees_with_itself():
     for probe in (_wide, _named):
         p = probe(raises_above_zero)
-        assert p.verdict in ("holds", "proven"), (p.verdict, p.counterexample,
-                                                  p.note)
+        assert (p.verdict, p.route) == ("holds", "probe:algorithmic"), (
+            p.verdict, p.counterexample, p.note)
 
 
 def test_a_hidden_read_holds_with_the_read_named():
@@ -86,3 +86,68 @@ def test_a_hidden_read_holds_with_the_read_named():
 def test_a_pure_body_is_still_proven():
     assert _wide(pure).verdict == "proven"
     assert _named(pure).verdict == "proven"
+
+
+# --- comparing by kind: what agrees, what is inconclusive, what differs ----
+
+class Order:
+    """An order with no equality of its own: two equal orders are two
+    objects that compare by identity."""
+
+    def __init__(self, amount):
+        self.amount = amount
+
+
+def make_order(amount: float) -> Order:
+    return Order(amount)
+
+
+def countdown(n: float):
+    return (i for i in range(int(abs(n) % 5)))
+
+
+def quote_with_missing_fields(x: float) -> dict:
+    return {"price": x, "spread": float("nan")}
+
+
+_calls = [0]
+
+
+def signed_zero(x: float) -> float:
+    _calls[0] += 1
+    return 0.0 if _calls[0] % 2 else -0.0
+
+
+def zero_price(x: float) -> float:
+    return -0.0
+
+
+def test_an_object_without_equality_is_not_falsified():
+    for probe in (_wide, _named):
+        p = probe(make_order)
+        assert p.verdict != "falsified", (p.verdict, p.counterexample)
+
+
+def test_a_generator_result_is_not_falsified():
+    for probe in (_wide, _named):
+        p = probe(countdown)
+        assert p.verdict != "falsified", (p.verdict, p.counterexample)
+
+
+def test_a_dict_holding_nan_agrees_with_itself():
+    for probe in (_wide, _named):
+        p = probe(quote_with_missing_fields)
+        assert p.verdict == "holds", (p.verdict, p.counterexample)
+
+
+def test_the_sign_of_zero_is_part_of_the_value():
+    p = _wide(signed_zero)
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "0.0" in p.counterexample and "-0.0" in p.counterexample
+
+
+def test_a_value_claim_reads_minus_zero_as_zero():
+    (p,) = check_conjectures(zero_price, [claim("f(x) == 0")])
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+    (p,) = check_conjectures(zero_price, [claim("f(x) == 0", route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.counterexample)

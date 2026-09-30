@@ -255,7 +255,14 @@ def isolated(fn):
 
     def recorder(label, original):
         def call(name, *rest):
-            trial.c_environ_calls.append((f"os.{label}", os.fsdecode(name)))
+            # os.environ's own writes go through os.putenv too; those are
+            # judged by the os.environ snapshot, by their net effect. A
+            # call passed on by an enclosing trial's recorder (a check
+            # run inside the function) was judged by that recorder
+            caller = sys._getframe(1).f_globals
+            if caller is not vars(os) and caller is not globals():
+                trial.c_environ_calls.append((f"os.{label}",
+                                              os.fsdecode(name)))
             return original(name, *rest)
         return call
 
