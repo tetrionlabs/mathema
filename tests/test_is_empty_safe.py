@@ -73,7 +73,7 @@ def test_deterministic_proves_by_construction_for_a_lifted_body():
     assert "deterministic by construction" in probe.sketch
 
 
-def test_deterministic_falls_to_the_empirical_loop_for_stateful_bodies():
+def test_deterministic_falls_to_paired_calls_for_stateful_bodies():
     import random as _random
 
     def jittery(x: float) -> float:
@@ -83,5 +83,6 @@ def test_deterministic_falls_to_the_empirical_loop_for_stateful_bodies():
                         route="best")],
         facts=analyze_source(jittery))
     assert probe.verdict == "falsified"
-    # the generic empirical loop (not the family battery) decided this
-    assert probe.route == "probe"
+    # the family's paired calls, compared by kind, decided this
+    assert probe.route == "probe:algorithmic"
+    assert "the second returned" in probe.counterexample

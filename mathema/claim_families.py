@@ -1347,7 +1347,12 @@ def _is_deterministic_derive(fn, facts, lhs_src: str, rhs_src: str,
         (the weaker, up-to-a-seed member below). rhs_src/relation/
         tolerance kept for protocol uniformity.
     """
+    from ._process_state import hidden_reads
     from .symbolic import ProofResult, lift
+    if hidden_reads(fn, facts):
+        # a read of the clock, the environment or a file is an input
+        # the lift does not see
+        return None
     try:
         lifted = lift(fn, facts)
     except Exception:
@@ -1359,6 +1364,79 @@ def _is_deterministic_derive(fn, facts, lhs_src: str, rhs_src: str,
         sketch="the body lifts to a closed symbolic form, which is "
                "deterministic by construction; there is no state for "
                "the same inputs to vary with")
+
+
+def _same_kind(first, second) -> bool:
+    """Whether two outcomes of the same call agree by kind: equal
+    values, NaN with NaN, element by element inside a list or tuple,
+    and the same exception type (an outcome that raised is its
+    exception's type)."""
+    if isinstance(first, type) and issubclass(first, BaseException):
+        return first is second
+    if isinstance(second, type) and issubclass(second, BaseException):
+        return False
+    if (isinstance(first, (list, tuple)) and isinstance(second, (list, tuple))
+            and type(first) is type(second) and len(first) == len(second)):
+        return all(_same_kind(a, b) for a, b in zip(first, second))
+    return _same_result(first, second)
+
+
+def _outcome_text(outcome) -> str:
+    if isinstance(outcome, type) and issubclass(outcome, BaseException):
+        return f"raised {outcome.__name__}"
+    return f"returned {outcome!r}"
+
+
+def _deterministic_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                         trials: int):
+    """Empirical half of is_deterministic: two calls at the same inputs
+    (each given its own copy of the arguments) compared by kind
+    (`_same_kind`). Divergence falsifies with both outcomes as witness;
+    agreement across trials holds. A body that reads the clock, the
+    environment or a file (`_process_state.hidden_reads`) holds with a
+    note naming the read, since two back-to-back calls cannot see it
+    change."""
+    import copy
+
+    from ._process_state import hidden_reads
+    if not facts.params:
+        return None
+    target = facts.params[0]
+
+    def outcome(call_args):
+        try:
+            with _pinned_float_env():
+                return fn(*call_args)
+        except Exception as exc:
+            return type(exc)
+
+    def trial(args):
+        call_args = list(args)
+        call_args[facts.params.index(target)] = _synth(
+            facts.param_kinds.get(target, "unknown"), rng, domain.get(target))
+        placed = _placed(dict(zip(facts.params, call_args)), rng)
+        if placed is None:
+            return None
+        call_args = [placed[p] for p in facts.params]
+        try:
+            second_args = copy.deepcopy(call_args)
+        except Exception:
+            return None
+        first, second = outcome(call_args), outcome(second_args)
+        if _same_kind(first, second):
+            return True
+        shown = ", ".join(f"{p} = {_witness_value(v)}"
+                          for p, v in zip(facts.params, second_args))
+        return (f"{shown}: the first call {_outcome_text(first)}, the "
+                f"second {_outcome_text(second)}")
+
+    result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    reads = hidden_reads(fn, facts)
+    if result[0] == "holds" and reads:
+        return (*result, None, {"mathema.caveat": (
+            f"the body reads {', '.join(reads)}; two back-to-back calls "
+            f"cannot see that input change")})
+    return result
 
 
 def _is_reproducible_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -4054,13 +4132,13 @@ def _register_builtin_claim_families() -> None:
         "excluded_outside_domain", derive=_excluded_outside_domain_derive,
         probe=_excluded_probe))
     # the stateless cluster's name-keyed members (claim NAMES, not
-    # predicate relations). is_deterministic is the STRONG one: the
-    # generic f(...) == f(...) re-evaluation loop is its empirical
-    # half, so only a derive half registers. is_reproducible is
+    # predicate relations). is_deterministic is the STRONG one: its
+    # empirical half is paired calls compared by kind. is_reproducible is
     # weaker (up to an RNG seed): its probe runs paired calls with
     # the recognized RNG states captured and restored.
     _families.register("is_deterministic", SafetyFamily(
-        "is_deterministic", derive=_is_deterministic_derive))
+        "is_deterministic", derive=_is_deterministic_derive,
+        probe=_deterministic_probe))
     _families.register("is_reproducible", SafetyFamily(
         "is_reproducible", derive=_is_reproducible_derive,
         probe=_reproducible_probe))

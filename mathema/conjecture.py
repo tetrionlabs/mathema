@@ -3749,6 +3749,22 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 derived = _adjudicate_derive(
                     ctx, fn, facts,
                     extensive or cj.route in ("best", "examine"))
+                if (derived is not None and derived.verdict == "falsified"
+                        and cj.route != "derive"
+                        and families.claim_base_name(cj.name)
+                        == "is_deterministic"):
+                    # a proof reads `f(x) == f(x)` as false only where
+                    # the call has no value (it raises, or returns
+                    # NaN), and determinism compares two calls by kind,
+                    # where those agree; the family's paired calls decide
+                    ctx.derive_undecided = Probe(
+                        cj.name, statement, "unknown", route="derive",
+                        sketch=derived.sketch,
+                        note=f"{ctx.note}; the derive route found the call "
+                             f"has no value somewhere, which two calls "
+                             f"agree on",
+                        meta={"mathema.derive_status": "undecided"})
+                    derived = None
                 if derived is not None:
                     out.append(stamp(derived, _cap=verdict_cap))
                     if ctx.companion is not None:
@@ -3939,6 +3955,13 @@ def _combine_conjunction(probes: list, name: str, statement: str,
         uncorroborated = [lbl for p, lbl in zip(probes, labels)
                           if "UNCORROBORATED" in (p.note or "")]
         note = f"every {unit} of the {what} holds"
+        caveats: list = []
+        for p in probes:
+            said = (p.meta or {}).get("mathema.caveat")
+            if said and said not in caveats:
+                caveats.append(said)
+        if caveats:
+            note += "; " + "; ".join(caveats)
         if uncorroborated:
             note += (f"; derive reported an UNCORROBORATED disproof at "
                      f"{', '.join(uncorroborated)} (probable engine bug, "
@@ -6288,6 +6311,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             algo_meta = copy.deepcopy(algo_meta) if algo_meta else {}
             if algo_meta.get("mathema.sampled"):
                 note = f"{note}; {algo_meta['mathema.sampled']}".lstrip("; ")
+            if algo_meta.get("mathema.caveat"):
+                note = f"{note}; {algo_meta['mathema.caveat']}".lstrip("; ")
             algo_meta = algo_meta or None
             if verdict == "proven":
                 # an ESTABLISHED empirical examination: the guard only
