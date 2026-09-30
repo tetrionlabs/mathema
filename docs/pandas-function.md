@@ -51,7 +51,7 @@ mathema.Record(average_return) · source, no side effects · form cb973acd88fd
   proven  min_returns_le_f_returns_le_max_returns: for returns in [-0.1,
       0.1]^n:float|missing, min(returns) ≤ f(returns) ≤ max(returns)
            ∀ returns over [-0.1, 0.1] with nothing missing, returns of every
-               length
+               length of at least one
   holds   min_returns_le_f_returns_le_max_returns[float, pandas.Series]: for
       returns in [-0.1, 0.1]^n:float|missing, min(returns) <= f(returns) <=
       max(returns) (n=42)
@@ -59,7 +59,7 @@ mathema.Record(average_return) · source, no side effects · form cb973acd88fd
 
 Two rows came back for one claim. The first is `proven`, and the line
 under it says over what: every series with entries in the range, of every
-length, with nothing missing. The `:float|missing` after the range is what
+length of at least one, with nothing missing. The `:float|missing` after the range is what
 mathema resolved `[-0.1, 0.1]^n` to: float entries, with a missing value
 (`nan`) part of the declared domain; the proof line says the proof itself
 does not cover a series with a hole in it. The second is the proof's
@@ -88,11 +88,11 @@ print(textwrap.fill(record.probes[0].sketch, 78))
 ```text
 link 1: min(returns) <= f(returns): through the definition rows
 pandas.Series.mean definition, lowered to sums over returns at a symbolic
-length: the relation holds for every length (min(returns) is at most
-mean(returns)); link 2: f(returns) <= max(returns): through the definition
-rows pandas.Series.mean definition, lowered to sums over returns at a symbolic
-length: the relation holds for every length (max(returns) is at least
-mean(returns))
+length: the relation holds for every length of at least one (min(returns) is
+at most mean(returns)); link 2: f(returns) <= max(returns): through the
+definition rows pandas.Series.mean definition, lowered to sums over returns at
+a symbolic length: the relation holds for every length of at least one
+(max(returns) is at least mean(returns))
 ```
 
 ## A claim that is wrong, and the witness
