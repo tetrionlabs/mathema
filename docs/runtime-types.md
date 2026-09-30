@@ -360,6 +360,8 @@ drawdown 0, and sampling finds one. The proof names the bound it used:
 
 <!-- example: rt-drawdown run requires=pandas -->
 ```python
+import textwrap
+
 import mathema
 
 record = mathema.check(max_drawdown, claims=[
@@ -367,14 +369,18 @@ record = mathema.check(max_drawdown, claims=[
 proof = record.probes[0]
 print(proof.verdict, proof.route)
 print(proof.condition)
-print(proof.sketch)
+print(textwrap.fill(proof.sketch, 78))
 ```
 
 <!-- example: rt-drawdown output -->
 ```text
 proven derive
 ∀ prices over [1.0, 100.0] with nothing missing, prices of every length
-through the definition rows pandas.Series.cummax definition, pandas.Series.min definition, lowered to sums over prices at a symbolic length: the relation holds for every length (every element of prices / cummax(prices) - 1.0 is <= 0 (0 < prices[i] / cummax(prices)[i] <= 1), so min(prices / cummax(prices) - 1.0) is too)
+through the definition rows pandas.Series.cummax definition, pandas.Series.min
+definition, lowered to sums over prices at a symbolic length: the relation
+holds for every length (every element of prices / cummax(prices) - 1.0 is <= 0
+(0 < prices[i] / cummax(prices)[i] <= 1), so min(prices / cummax(prices) -
+1.0) is too)
 ```
 
 A DataFrame's columns are vectors on the derive route too, read by
