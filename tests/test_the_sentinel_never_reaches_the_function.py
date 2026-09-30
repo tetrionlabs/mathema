@@ -95,8 +95,7 @@ def test_s6_a_raise_at_the_listed_absence_is_recorded():
 
 
 def test_s10_a_replaced_absence_is_proven():
-    assert run(zero_if_missing, "for x in {0.25, None}, f(x) >= 0").verdict in (
-        "proven", "holds")
+    assert run(zero_if_missing, "for x in {0.25, None}, f(x) >= 0").verdict == "proven"
 
 
 def test_p2_every_member_raises_the_stated_exception():
@@ -105,13 +104,11 @@ def test_p2_every_member_raises_the_stated_exception():
 
 
 def test_p3_a_replacement_policy_is_proven():
-    assert run(zero_if_missing, "for x in {missing}, f(x) == 0").verdict in (
-        "proven", "holds")
+    assert run(zero_if_missing, "for x in {missing}, f(x) == 0").verdict == "proven"
 
 
 def test_g2_a_listed_absence_reaches_a_string_function_as_none():
-    assert run(label_any_missing, 'for s in {"a", None}, f(s) != ""').verdict in (
-        "proven", "holds")
+    assert run(label_any_missing, 'for s in {"a", None}, f(s) != ""').verdict == "proven"
 
 
 def test_g8_a_string_has_no_hole():

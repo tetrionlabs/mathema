@@ -124,6 +124,7 @@ PROVEN_OR_HOLDS = ("proven", "holds")
 FALSIFIED = ("falsified",)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_s1_a_float_proof_carries_a_companion_that_holds_on_values():
     assert_row(sqrt_plain, "for x in [0, 1], f(x) >= 0", PROVEN,
                companion="holds", behaves={"x": {"nan": "propagates"}})
@@ -139,6 +140,7 @@ def test_s4_a_propagated_listed_nan_is_classified():
                executed={"x": ["nan"]}, behaves={"x": {"nan": "propagates"}})
 
 
+@pytest.mark.needs_full_proof_budget
 def test_s5_a_guarded_float_companion_holds_and_the_guard_raises():
     assert_row(sqrt_guarded, "for x in [0, 1], f(x) >= 0", PROVEN,
                companion="holds", behaves={"x": {"nan": "raises"}})
@@ -150,6 +152,7 @@ def test_s6_a_listed_none_raising_valueerror_is_classified():
     assert probe.meta["mathema.missing"]["executed"]["x"]["None"] == "raised ValueError"
 
 
+@pytest.mark.needs_full_proof_budget
 def test_s7_an_optional_float_companion_holds_and_both_kinds_propagate():
     assert_row(double_or_missing, "for x in [0, 1], f(x) >= 0", PROVEN,
                companion="holds",
@@ -161,10 +164,11 @@ def test_s8_a_propagated_absence_is_classified():
                executed={"x": ["None"]}, behaves={"x": {"None": "propagates"}})
 
 
+@pytest.mark.needs_full_proof_budget
 def test_s9_a_replaced_hole_holds_on_both_halves():
     probe, companions = assert_row(zero_if_missing, "for x in [0, 1], f(x) >= 0",
                                    PROVEN, behaves={"x": {"None": "drops", "nan": "drops"}})
-    assert companions and all(c.verdict in PROVEN_OR_HOLDS for c in companions)
+    assert companions and all(c.verdict == "holds" for c in companions)
     assert any(set(tried(c).get("x", [])) >= {"None", "nan"} for c in companions)
 
 
@@ -174,11 +178,12 @@ def test_s10_a_replaced_absence_is_proven_by_execution_alone():
                behaves={"x": {"None": "drops"}})
 
 
+@pytest.mark.needs_full_proof_budget
 def test_s11_propagation_is_classified_and_the_companion_holds():
     probe, companions = assert_row(ident, "for x in [0, 1], f(x) == x", PROVEN,
                                    behaves={"x": {"None": "propagates",
                                                   "nan": "propagates"}})
-    assert companions and all(c.verdict in PROVEN_OR_HOLDS for c in companions)
+    assert companions and all(c.verdict == "holds" for c in companions)
     assert any("nan" in tried(c).get("x", []) for c in companions)
 
 
@@ -192,6 +197,7 @@ def test_s13_a_hole_propagates_through_the_identity():
                executed={"x": ["nan"]}, behaves={"x": {"nan": "propagates"}})
 
 
+@pytest.mark.needs_full_proof_budget
 def test_s16_a_raise_at_the_second_parameters_absence_is_classified():
     assert_row(add, "for x in [0, 1], y in {0.5, None}, f(x, y) >= 0", PROVEN,
                executed={"y": ["None"]},
@@ -226,14 +232,14 @@ def test_v0_a_value_claim_over_a_propagated_hole_alone_is_unknown():
 # the policy claims each behaviour above states
 
 @pytest.mark.parametrize("fn, text, verdicts", [
-    (sqrt_plain, "missing(f, x) propagates", PROVEN_OR_HOLDS),
-    (sqrt_plain, "absent(f, x) raises(TypeError)", PROVEN_OR_HOLDS),
-    (sqrt_guarded, "missing(f, x) raises(ValueError)", PROVEN_OR_HOLDS),
-    (double_or_missing, "absent(f, x) propagates", PROVEN_OR_HOLDS),
-    (zero_if_missing, "missing(f, x) drops", PROVEN_OR_HOLDS),
-    (zero_if_missing, "absent(f, x) drops", PROVEN_OR_HOLDS),
-    (ident, "missing(f, x) propagates", PROVEN_OR_HOLDS),
-    (add, "absent(f, y) raises(TypeError)", PROVEN_OR_HOLDS),
+    (sqrt_plain, "missing(f, x) propagates", HOLDS),
+    (sqrt_plain, "absent(f, x) raises(TypeError)", HOLDS),
+    (sqrt_guarded, "missing(f, x) raises(ValueError)", PROVEN),
+    (double_or_missing, "absent(f, x) propagates", PROVEN),
+    (zero_if_missing, "missing(f, x) drops", PROVEN),
+    (zero_if_missing, "absent(f, x) drops", PROVEN),
+    (ident, "missing(f, x) propagates", HOLDS),
+    (add, "absent(f, y) raises(TypeError)", HOLDS),
     (sqrt_plain, "missing(f, x) drops", FALSIFIED),
 ])
 def test_the_behaviour_is_a_policy_claim(fn, text, verdicts):

@@ -7,8 +7,6 @@ behaviour recorded in `meta["mathema.missing"]`, and not compared. A
 value claim with no judged point is `unknown`. Membership in
 `{missing}`, `{nan}` or `{absent}` asks about the missing output itself
 and is judged everywhere. The same rule holds on every route."""
-import math
-
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
@@ -72,15 +70,15 @@ def test_s12_s13_propagation_is_classified_by_execution(text, member):
     assert behaviour(probe) == {"x": {member: "propagates"}}
 
 
-@pytest.mark.parametrize("route", ["best", "probe"])
-def test_the_same_rows_hold_on_the_probe(route):
+@pytest.mark.parametrize("route, verdict", [("best", "proven"), ("probe", "holds")])
+def test_the_same_rows_hold_on_the_probe(route, verdict):
     (p,) = [p for p in check_conjectures(
         ident, [claim("for x in {0.25, None, nan}, f(x) == x", route=route)])]
-    assert p.verdict in ("proven", "holds"), (p.verdict, p.note)
+    assert p.verdict == verdict, (p.verdict, p.note)
     (q,) = [p for p in check_conjectures(
         sqrt_plain, [claim("for x in {0.25, None}, f(x) >= 0", route=route)])
             if "[" not in p.name]
-    assert q.verdict in ("proven", "holds"), (q.verdict, q.note)
+    assert q.verdict == verdict, (q.verdict, q.note)
 
 
 def test_s16_a_listed_absence_at_the_second_parameter_is_classified():
@@ -139,5 +137,4 @@ def test_the_executed_rung_of_equivalence_judges_value_points_only():
         return x * 1.0 if x is not None else None
     (p,) = check_conjectures(ident, [claim("for x in {0.5, None, nan}, f =:= g",
                                            funcs={"g": g})])
-    assert p.verdict in ("proven", "holds"), (p.verdict, p.note)
-    assert math.isnan(NAN)
+    assert p.verdict == "holds", (p.verdict, p.note)

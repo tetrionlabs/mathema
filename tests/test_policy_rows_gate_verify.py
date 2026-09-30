@@ -10,7 +10,6 @@ import textwrap
 
 import pytest
 
-from mathema import verify
 from mathema.cli import main
 
 _MOD = textwrap.dedent('''
@@ -98,9 +97,6 @@ def test_accepting_an_unaccounted_raise_as_a_discovery_retires_it(project, capsy
     assert main(["verify", "--root", str(project), "pv.root_opt"]) == 0
     assert _line(capsys, "pv.root_opt").startswith("ok   pv.root_opt:")
 
-
-def test_the_switch_is_on():
-    assert verify.POLICY_ROWS_GATE is True
 
 
 def test_verify_after_write_names_the_contradicted_row(tmp_path, monkeypatch, capsys):

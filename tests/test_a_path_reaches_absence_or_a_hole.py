@@ -163,4 +163,4 @@ def test_a_raise_at_a_key_left_out_is_classified_and_said_by_its_member():
 def test_a_binding_that_admits_no_absence_draws_the_key_present():
     [p] = check_conjectures(note_upper, [claim(
         'for d.note in {"a", "b"}, len(f(d)) == 1', route="probe")])
-    assert p.verdict in ("holds", "proven"), (p.verdict, p.note, p.counterexample)
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)

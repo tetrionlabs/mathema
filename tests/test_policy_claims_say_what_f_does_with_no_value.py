@@ -473,7 +473,7 @@ def test_every_remedy_a_row_prints_holds_once_written(fn, text, observed):
                                           mathema.claim(remedy)])
         (row,) = [p for p in again.probes
                   if (p.meta or {}).get("mathema.policy") and p.statement == remedy]
-        assert row.verdict in ("holds", "proven"), (remedy, row.verdict, row.note)
+        assert row.verdict == "holds", (remedy, row.verdict, row.note)
 
 
 def test_a_member_row_remedy_names_its_member():

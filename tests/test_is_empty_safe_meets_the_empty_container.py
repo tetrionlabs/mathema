@@ -77,7 +77,7 @@ def test_a_hole_for_the_empty_input_fails():
 
 
 def test_an_identity_reduction_passes():
-    assert _row(sum_pd, "is_empty_safe(xs)").verdict in ("proven", "holds")
+    assert _row(sum_pd, "is_empty_safe(xs)").verdict == "proven"
 
 
 def test_an_undeclared_none_fails_and_a_declared_one_passes():
@@ -87,7 +87,7 @@ def test_an_undeclared_none_fails_and_a_declared_one_passes():
         "xs = [] (an empty Float64 polars Series): f returned None for the empty "
         "input; declare the return type "
         "Optional[float], raise, or return a value")
-    assert _row(mean_pl_declared, "is_empty_safe(xs)").verdict in ("proven", "holds")
+    assert _row(mean_pl_declared, "is_empty_safe(xs)").verdict == "proven"
 
 
 def test_an_unguarded_raise_fails_and_a_guarded_one_passes():
@@ -102,7 +102,7 @@ def test_a_table_is_realised_with_zero_rows_and_its_columns():
 
 
 def test_the_empty_container_has_the_runtime_type():
-    assert _row(typed, "is_empty_safe(xs)").verdict in ("proven", "holds")
+    assert _row(typed, "is_empty_safe(xs)").verdict == "proven"
 
 
 def test_a_scalar_parameter_is_misspecified():

@@ -14,7 +14,6 @@ from typing import Optional
 import pytest
 
 import mathema
-from mathema.authoring import _fn_key
 
 
 def lin(x: float) -> float:
@@ -70,10 +69,11 @@ def test_a_default_row_names_itself_and_its_confirmation():
     assert any(line.startswith("           the float64 computation of c ran at 43 "
                                "points: nan, every corner and 40 interior points;")
                and line.endswith("; at x = nan f gave nan back") for line in lines)
-    assert (f"  holds   missing[x]: missing(f, x) propagates   [default for a float, "
-            f"which may be nan; confirmed on the 43 draws of c[float]. Keep it by "
-            f"writing it (mathema claims {_fn_key(lin)} --write), or change the word "
-            f"to raises or drops if f should do otherwise]") in lines
+    assert ("  holds   missing[x]: missing(f, x) propagates   [default for a float, "
+            "which may be nan; confirmed on the 43 draws of c[float]. Keep it by "
+            "writing it (mathema claims test_policy_rows_say_where_they_come_from.lin "
+            "--write), or change the word to raises or drops if f should do "
+            "otherwise]") in lines
 
 
 def test_an_unaccounted_raise_is_a_named_sentence_row():
@@ -269,7 +269,7 @@ def test_a_premised_library_row_remedy_keeps_its_premise():
         "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c")] + [
         mathema.claim(r) for r in remedies])
     stated = [p for p in again.probes if p.statement in remedies]
-    assert stated and all(p.verdict in ("holds", "proven") for p in stated), \
+    assert stated and all(p.verdict == "holds" for p in stated), \
         [(p.statement, p.verdict, p.note) for p in stated]
 
 

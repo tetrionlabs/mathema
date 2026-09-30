@@ -69,11 +69,11 @@ except ImportError:  # pragma: no cover
 
 
 def test_g1_a_listed_absence_is_handled():
-    assert_row(label, 'for s in {"a", None}, f(s) != ""', PROVEN_OR_HOLDS)
+    assert_row(label, 'for s in {"a", None}, f(s) != ""', PROVEN)
 
 
 def test_g2_a_listed_absence_is_called_with_none():
-    assert_row(label_any_missing, 'for s in {"a", None}, f(s) != ""', PROVEN_OR_HOLDS)
+    assert_row(label_any_missing, 'for s in {"a", None}, f(s) != ""', PROVEN)
 
 
 @needs_language
@@ -121,7 +121,7 @@ def test_g7_the_empty_string_is_a_value():
 
 def test_g8_a_string_has_no_hole():
     probe, _ = run(label, 'for s in {missing}, f(s) == "-"')
-    assert probe.verdict.startswith("skipped"), (probe.verdict, probe.note)
+    assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
     assert ("s is a string, and a string has no hole; to admit its absence write "
             "`|absent`") in (probe.note or "")
     assert probe.statement == 'for s in {missing}, f(s) = "-"'   # the whole claim

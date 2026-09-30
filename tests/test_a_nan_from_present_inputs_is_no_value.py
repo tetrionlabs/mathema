@@ -4,8 +4,6 @@
 missing is no value, and fails every relation, `!=` included, another
 NaN included. Only an input that was missing makes a missing output a
 propagation, compared by kind."""
-import math
-
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
@@ -42,4 +40,3 @@ def test_a_nan_at_one_present_point_is_found():
 def test_a_nan_that_propagates_a_listed_hole_agrees_with_itself():
     p = run(ident, "for x in {0.25, nan}, f(x) == x", route="best")
     assert p.verdict == "proven", (p.verdict, p.note)
-    assert math.isnan(float("nan"))

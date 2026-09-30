@@ -93,7 +93,7 @@ def _rows(fn, *texts):
                                       "| {None} \\ {unset}"])
 def test_a_raise_at_an_admitted_absence_along_a_path_is_classified(admitted):
     rows = _rows(note_upper, f'for d.note in {{"a", "b"}} {admitted}, len(f(d)) == 1')
-    assert rows["c0"].verdict in ("holds", "proven"), (rows["c0"].verdict, rows["c0"].note)
+    assert rows["c0"].verdict == "holds", (rows["c0"].verdict, rows["c0"].note)
 
 
 def test_the_record_says_what_f_did_at_each_member():

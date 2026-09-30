@@ -180,7 +180,7 @@ def test_a_stated_member_row_narrows_the_library_row():
 def test_a_len_premise_is_read():
     rec = _record(ema, "for x in [0, 1]^n, alpha in [0, 1], f(x, alpha) <= 1",
                   "assuming len(x) == 1, missing(f, x, null) converts")
-    assert _row(rec, "c1").verdict in ("holds", "proven"), _row(rec, "c1").note
+    assert _row(rec, "c1").verdict == "holds", _row(rec, "c1").note
 
 
 # --- is_empty_safe --------------------------------------------------------
