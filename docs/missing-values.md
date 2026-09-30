@@ -456,7 +456,7 @@ print(mathema.check(greeting, claims=[mathema.claim(
 ```text
 mathema.Record(greeting) · source, no side effects · form 4ddaf64c7461
   holds   long_enough: for nickname in L[unicode]|None, len(greeting(nickname)) >= 3 (223 draws)
-           bound greeting = names.greeting (f's module); nickname in L[unicode] (entry point mathema_language.text:UNICODE); derive could not decide it (nickname quantified over a language domain: the symbolic lift has no reading of a string or structured value, so only a finite language, swept point by point, is decided on this route); the probe decided it; at nickname = None f raised AttributeError
+           nickname in L[unicode] (entry point mathema_language.text:UNICODE); derive could not decide it (nickname quantified over a language domain: the symbolic lift has no reading of a string or structured value, so only a finite language, swept point by point, is decided on this route); the probe decided it; at nickname = None f raised AttributeError
   FALSIFY absent[nickname]: f raised AttributeError at nickname = None, a value the claim admits, and no claim says it may
            if the raise is intended, state `absent(f, nickname) raises(AttributeError)`; otherwise handle None in f, or remove |absent from the domain; or accept the raise as a discovery (mathema accept names.greeting absent[nickname] --as discovery) and state `absent(f, nickname) raises(AttributeError)`
 ```
