@@ -75,6 +75,10 @@ def observed_shape(value) -> "tuple | None":
         return None
     if _is_number(value) or is_missing(value):
         return ()
+    if type(value).__module__.split(".", 1)[0] == "numpy":
+        shape = getattr(value, "shape", None)
+        if isinstance(shape, tuple) and all(isinstance(n, int) for n in shape):
+            return tuple(shape)
     seen = observe(value)
     if isinstance(seen, AbstractVec):
         return (len(seen),)
@@ -136,26 +140,44 @@ def leaves(value):
     yield value
 
 
-def fits(shape: tuple, dims: tuple) -> bool:
-    """Whether a value of `shape` fits `dims`: the same rank, and every
-    fixed axis at its size. A named axis takes any size."""
+def fits(shape: tuple, dims: tuple, sizes: "dict | None" = None) -> bool:
+    """Whether a value of `shape` fits `dims`: the same rank, every
+    fixed axis at its size, every named axis at least 1 (`R^n` is never
+    empty) and, where `sizes` binds the name, exactly that size."""
     if len(shape) != len(dims):
         return False
-    return all(fixed_size(d) is None or fixed_size(d) == n
-               for n, d in zip(shape, dims))
+    sizes = sizes or {}
+    for n, d in zip(shape, dims):
+        size = fixed_size(d)
+        if size is None:
+            size = sizes.get(str(d))
+        if size is None:
+            if n < 1:
+                return False
+        elif n != size:
+            return False
+    return True
+
+
+def _is_container(value) -> bool:
+    return (isinstance(value, (list, tuple, dict))
+            or (hasattr(value, "shape") and hasattr(value, "__len__")))
 
 
 def contains_shaped(value, dom) -> "bool | None":
     """Intent:
         Membership of a container `value` in a space domain: its shape
         fits the domain's dims and every element is in the element
-        domain. None when `value` is not a container (a number, a
+        domain. A container with no shape reading (ragged rows) is
+        outside. None when `value` is not a container (a number, a
         missing scalar, a string), which the caller then judges as an
         element.
     """
     from .domain import domain_contains
     shape = observed_shape(value)
-    if shape is None or shape == ():
+    if shape is None:
+        return False if _is_container(value) else None
+    if shape == ():
         return None
     if not fits(shape, dims_of(dom)):
         return False
@@ -163,15 +185,47 @@ def contains_shaped(value, dom) -> "bool | None":
     return all(domain_contains(v, element) for v in leaves(value))
 
 
-def in_space(value, bound) -> bool:
+def in_space(value, bound, sizes: "dict | None" = None) -> bool:
     """Membership of a value read as a whole against a domain: a
     container by its shape and its elements, a number only in a scalar
-    domain (a number is not a member of `R^(3,4)`)."""
-    from .domain import domain_contains
-    if dims_of(bound):
-        shaped = contains_shaped(value, bound)
-        return bool(shaped) if shaped is not None else False
-    return domain_contains(value, bound)
+    domain (a number is not a member of `R^(3,4)`). A named axis takes
+    the size `sizes` binds to the name, when it binds one. A leaf that
+    is not a member of the element domain, a missing value included,
+    makes the container not a member, the container form of the scalar
+    rule that a missing value is a member of nothing."""
+    from .domain import domain_contains, is_missing
+    dims = dims_of(bound)
+    if not dims:
+        return domain_contains(value, bound)
+    shape = observed_shape(value)
+    if shape is None or shape == () or not fits(shape, dims, sizes):
+        return False
+    element = dataclasses.replace(bound, dims=())
+    return all(not is_missing(v) and domain_contains(v, element)
+               for v in leaves(value))
+
+
+def axis_sizes(domain: dict, values: dict) -> dict:
+    """The size each dimension name is bound to by the actual values,
+    `{name: size}`: every named axis of a parameter whose binding
+    states a space, measured off the value passed for it. A name two
+    parameters bind to different sizes is left out."""
+    out: dict = {}
+    clash: set = set()
+    for p, bound in (domain or {}).items():
+        dims = dims_of(bound)
+        if not dims or p not in values:
+            continue
+        shape = observed_shape(values[p])
+        if shape is None or len(shape) != len(dims):
+            continue
+        for n, d in zip(shape, dims):
+            if fixed_size(d) is not None:
+                continue
+            if d in out and out[d] != n:
+                clash.add(d)
+            out.setdefault(d, n)
+    return {k: v for k, v in out.items() if k not in clash}
 
 
 # --- wording ----------------------------------------------------------
@@ -181,12 +235,20 @@ def shape_text(shape: tuple) -> str:
     return "(" + ", ".join(str(n) for n in shape) + ("," if len(shape) == 1 else "") + ")"
 
 
-def words(shape: "tuple | None") -> str:
+_ABSENT = object()
+
+
+def words(shape: "tuple | None", value=_ABSENT) -> str:
     """A shape in words: "length 5", "3 by 4", "shape (2, 3, 4)", "a
-    number" for `()`, "no shape" for None."""
+    number" for `()`, "no shape" for None. Given the value, a missing
+    scalar is named ("None", "NaN") rather than called a number."""
     if shape is None:
         return "no shape"
     if shape == ():
+        if value is None:
+            return "None"
+        if isinstance(value, float) and value != value:
+            return "NaN"
         return "a number"
     if len(shape) == 1:
         return f"length {shape[0]}"
@@ -195,11 +257,11 @@ def words(shape: "tuple | None") -> str:
     return f"shape {shape_text(shape)}"
 
 
-def describe(shape: "tuple | None") -> str:
+def describe(shape: "tuple | None", value=_ABSENT) -> str:
     """A value's shape as a predicate: "has length 5", "is 3 by 4",
-    "has shape (2, 3, 4)", "is a number", "has no shape"."""
+    "has shape (2, 3, 4)", "is a number", "is None", "has no shape"."""
     verb = "is" if shape == () or (shape is not None and len(shape) == 2) else "has"
-    return f"{verb} {words(shape)}"
+    return f"{verb} {words(shape, value)}"
 
 
 def must(dims: tuple, sizes: "dict | None" = None) -> str:
@@ -250,10 +312,19 @@ def axis_text(axis: int, size: int, ndim: int) -> str:
 
 
 def space_text(bound) -> str:
-    """A space domain as a claim writes it: `R^(30,15)`, `[0.0,
-    1.0]^30:float`."""
+    """A space domain as a claim writes it, in ascii: `R^(30,15)`,
+    `[0.0, 1.0]^30`."""
     from .domain import render_domain
-    return render_domain(bound, show_missing=False, ascii_mode=True)
+    text = render_domain(bound, show_missing=False, ascii_mode=True)
+    return text.split(":", 1)[0] if text.startswith(("[", "(")) else text
+
+
+def domain_text(bound) -> str:
+    """A domain as `enforce_domain` renders it in its own messages, so a
+    stack of the two guards names one domain one way: `[0.0, 1.0]³⁰ ⊂ ℝ
+    ∪ {∅}` in unicode."""
+    from .domain import render_domain
+    return render_domain(bound, show_missing=True)
 
 
 def outside_space(name: str, value, bound) -> "str | None":
@@ -291,32 +362,99 @@ def shaped(bound, rng: random.Random, element) -> list:
     return build(0)
 
 
-def wrong_shaped(bound, rng: random.Random, element) -> "tuple | None":
-    """Intent:
-        `(value, why)`: a nested list of in-domain elements whose shape
-        lies outside the space `bound` names, with the words that say
-        so, for a probe asking whether the code rejects it. The first
-        fixed axis is drawn one larger; a space with no fixed axis
-        gets one axis more than it has. None when `bound` names no
-        space.
-    """
+def outside_shapes(bound) -> list:
+    """Every shape just outside the space `bound` names, as size
+    tuples, a named axis at 3: each fixed axis one larger, each fixed
+    axis above 1 one smaller, one rank higher, and one rank lower for a
+    matrix or deeper. Empty when `bound` names no space."""
     dims = dims_of(bound)
     if not dims:
-        return None
-    sizes = [_size_or(d, 3) for d in dims]
-    fixed_axes = [k for k, d in enumerate(dims) if fixed_size(d) is not None]
-    if fixed_axes:
-        sizes[fixed_axes[0]] += 1
-    else:
-        sizes.append(2)
+        return []
+    base = [_size_or(d, 3) for d in dims]
+    out: list = []
+    for k, d in enumerate(dims):
+        if fixed_size(d) is None:
+            continue
+        up = list(base)
+        up[k] += 1
+        out.append(tuple(up))
+        if base[k] > 1:
+            down = list(base)
+            down[k] -= 1
+            out.append(tuple(down))
+    out.append(tuple(base) + (2,))
+    if len(dims) >= 2:
+        out.append(tuple(base[:-1]))
+    return out
 
+
+def build_shape(shape: tuple, element) -> list:
+    """A nested list of `shape`, each leaf drawn by `element`."""
     def build(axis):
-        if axis == len(sizes):
+        if axis == len(shape):
             return element()
-        return [build(axis + 1) for _ in range(sizes[axis])]
+        return [build(axis + 1) for _ in range(shape[axis])]
+    return build(0)
 
-    value = build(0)
-    return value, f"has shape {shape_text(tuple(sizes))}; the domain is {space_text(bound)}"
+
+def wrong_shaped(bound, rng: random.Random, element) -> "tuple | None":
+    """`(value, shape)`: the first outside of the space `bound` names,
+    built with in-domain elements; None when `bound` names no space."""
+    shapes = outside_shapes(bound)
+    if not shapes:
+        return None
+    return build_shape(shapes[0], element), shapes[0]
+
+
+# --- a large container witness ---------------------------------------------
+
+#: a container with more entries than this prints its shape, its first
+#: few entries and a count, never every entry; a 4 by 4 matrix or a
+#: 16-vector still prints in full
+WITNESS_ENTRIES = 16
+
+
+def witness_text(value) -> "str | None":
+    """Intent:
+        A short rendering for a large container witness: "30 by 15,
+        every entry -1.79769e+308" when the entries agree, else "30 by
+        15, first row [-8.77, -2.73, ...] (450 entries)"; for a vector
+        "length 30, first entries [...] (30 entries)". None for a
+        number, a string, or a container of at most `WITNESS_ENTRIES`
+        entries, which prints in full.
+    """
+    if isinstance(value, (str, bytes)) or _is_number(value):
+        return None
+    shape = observed_shape(value)
+    if shape is None or shape == ():
+        return None
+    entries = list(leaves(value))
+    if len(entries) <= WITNESS_ENTRIES:
+        return None
+
+    def one(v) -> str:
+        return f"{v:.6g}" if isinstance(v, float) else repr(v)
+
+    same = all(v == entries[0] or (isinstance(v, float) and isinstance(entries[0], float)
+                                   and v != v and entries[0] != entries[0])
+               for v in entries)
+    if same:
+        return f"{words(shape)}, every entry {one(entries[0])}"
+    if len(shape) == 1:
+        head = ", ".join(one(v) for v in entries[:6])
+        return f"{words(shape)}, first entries [{head}, ...] ({len(entries)} entries)"
+    first_row = entries[:shape[-1]] if len(shape) == 2 else entries[:6]
+    head = ", ".join(one(v) for v in first_row[:6])
+    tail = ", ..." if len(first_row) > 6 else ""
+    return f"{words(shape)}, first row [{head}{tail}] ({len(entries)} entries)"
+
+
+def fixed_clause(name: str, dims: tuple) -> str:
+    """The one clause a sketch adds for a binding that fixes a size:
+    "the binding fixes xs at length 30", "the binding fixes A at 30 by
+    15"; a fixed axis beside a name reads "the binding fixes A at n by
+    15"."""
+    return f"the binding fixes {name} at {expected(dims)}"
 
 
 # --- a literal dimension against a premise -------------------------------
@@ -409,6 +547,8 @@ def dimension_plan(shapes: dict, domains: dict) -> DimensionPlan:
         parameter's rank.
     """
     params: dict = {}
+    pinned: dict = {}
+    pinned_by: dict = {}
     for name in sorted(set(shapes) | set(domains)):
         if name == "return":
             continue
@@ -422,17 +562,33 @@ def dimension_plan(shapes: dict, domains: dict) -> DimensionPlan:
                     f"{'s' if len(binding) != 1 else ''} "
                     f"({space_text(domains[name])}) but its shape marker "
                     f"declares {len(marker)} ({marker_text(marker)})")
+            for m, b in zip(marker, binding):
+                size = fixed_size(b)
+                if size is None or fixed_size(m) is not None:
+                    continue
+                if m in pinned and pinned[m] != size:
+                    raise ValueError(
+                        f"{m} is fixed to two sizes: {pinned[m]} by "
+                        f"{pinned_by[m]}'s binding and {size} by {name}'s "
+                        f"binding; one shared dimension has one size")
+                pinned[m] = size
+                pinned_by[m] = name
             dims = tuple(b if fixed_size(b) is not None else m
                          for m, b in zip(marker, binding))
             source = (f"the shape {marker_text(marker)} with the domain "
-                      f"{space_text(domains[name])}")
+                      f"{domain_text(domains[name])}")
         elif marker:
             dims, source = marker, f"the shape {marker_text(marker)}"
         elif binding:
-            dims, source = binding, f"the domain {space_text(domains[name])}"
+            dims, source = binding, f"the domain {domain_text(domains[name])}"
         else:
             continue
         params[name] = (dims, source)
+    if pinned:
+        # a name one binding fixes is that size wherever the marker
+        # names it
+        params = {p: (tuple(str(pinned.get(d, d)) for d in dims), source)
+                  for p, (dims, source) in params.items()}
     result = (tuple(str(d) for d in shapes["return"].dims)
               if "return" in shapes else None)
     return DimensionPlan(params, result,
@@ -451,9 +607,11 @@ def entry_problem(plan: DimensionPlan, arguments: dict) -> tuple:
     for p, (dims, source) in plan.params.items():
         if p not in arguments:
             continue
-        shape = observed_shape(arguments[p])
+        value = arguments[p]
+        shape = observed_shape(value)
         if shape is None or len(shape) != len(dims):
-            return f"{p} {describe(shape)}; {source} expects {expected(dims)}", bound
+            return (f"{p} {describe(shape, value)}; {source} expects "
+                    f"{expected(dims)}", bound)
         for n, d in zip(shape, dims):
             size = fixed_size(d)
             if size is not None:
@@ -497,4 +655,5 @@ def exit_problem(plan: DimensionPlan, bound: dict, result,
     source = f"the return shape {plan.result_source}"
     if with_text:
         source += f" with {with_text}"
-    return f"{fn_name} returned {words(shape)}; {source} expects {expected(dims, sizes)}"
+    return (f"{fn_name} returned {words(shape, result)}; {source} expects "
+            f"{expected(dims, sizes)}")

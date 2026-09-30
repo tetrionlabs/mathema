@@ -746,6 +746,13 @@ def _fmt_point(point, names):
             from .probing import spell_text
             parts.append(f"{n}={spell_text(v)}")
             continue
+        capped = _shapes.witness_text(v)
+        if capped is not None:
+            # a large vector or matrix prints its shape, a first row and
+            # a count; the full value rides in the counterexample's
+            # arguments
+            parts.append(f"{n} = {capped}")
+            continue
         parts.append(f"{n}={v:.6g}" if isinstance(v, (int, float))
                      and not isinstance(v, bool) else f"{n}={v!r}")
     return ", ".join(parts)

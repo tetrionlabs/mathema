@@ -3681,7 +3681,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 cj.name, statement, "skipped", route=None,
                 note=f"{ctx.note}; the premise ({premise_text}) admits no "
                      f"value of {emptied} in its declared domain "
-                     f"{_shapes.space_text(ctx.cj_domain[emptied])}: "
+                     f"{_shapes.domain_text(ctx.cj_domain[emptied])}: "
                      f"{emptied} {axis_words} by its binding, so the "
                      f"claim quantifies over nothing and is vacuous; "
                      f"state a premise the binding can satisfy",
@@ -4163,7 +4163,8 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
                 "the raising region as its own raises(...) claim")
     if cj.relation in ("in", "not in"):
         if cj.rhs_bound is not None:
-            member = (not is_missing(lv)) and _shapes.in_space(lv, cj.rhs_bound)
+            sizes = _shapes.axis_sizes(cj.domain or {}, dict(zip(kinds, args)))
+            member = (not is_missing(lv)) and _shapes.in_space(lv, cj.rhs_bound, sizes)
         else:
             try:
                 member = lv in rv  # type: ignore[operator]
@@ -6927,7 +6928,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # set, or it is not, and a missing value is in neither
             # unless the right-hand side admits it in so many words
             if cj.rhs_bound is not None:
-                member = (not is_missing(lv)) and _shapes.in_space(lv, cj.rhs_bound)
+                # a named axis of the output's space takes the size this
+                # trial bound to the name
+                sizes = _shapes.axis_sizes(cj_domain, {p: env[p] for p in kinds if p in env})
+                member = (not is_missing(lv)) and _shapes.in_space(lv, cj.rhs_bound, sizes)
             else:
                 try:
                     member = bool(lv in rv)  # type: ignore[operator]

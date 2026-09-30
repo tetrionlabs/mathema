@@ -1116,15 +1116,21 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
     from .runtime_types import calling
     call = calling(fn, facts)
     state = {"idx": 0}
-    cycle = len(candidates) + (1 if space_dims else 0)
+    # every shape just outside the space, each tried in turn: a fixed
+    # axis one up and one down, one rank up, one rank down
+    outsides = _shapes.outside_shapes(bounds) if space_dims else []
+    cycle = len(candidates) + len(outsides)
 
     def trial(args):
         slot = state["idx"] % cycle
         state["idx"] += 1
-        if space_dims and slot == len(candidates):
-            value, why = _shapes.wrong_shaped(
-                bounds, rng, lambda: _synth("float", rng, element_bound))
-            spelled = f"{target} {why}"
+        if slot >= len(candidates):
+            shape = outsides[slot - len(candidates)]
+            value = _shapes.build_shape(
+                shape, lambda: _synth("float", rng, element_bound))
+            spelled = (f"{target} of shape {_shapes.shape_text(shape)} is "
+                       f"outside the declared domain "
+                       f"{_shapes.space_text(bounds)}")
         elif language_bound:
             bad = candidates[slot]
             value = bad
@@ -1155,6 +1161,11 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
             out = _call_with_target(call, facts, target, args, value)
         except Exception:
             return True   # rejected, as the claim demands
+        if spelled.endswith(_shapes.space_text(bounds)):
+            # the shape round's sentence already says where the value lies
+            from .probing import _fmt_value
+            return (f"{spelled} but was accepted (returned {_fmt_value(out)}); "
+                    f"the exclusion is asserted, not enforced")
         return (f"{spelled} is outside the declared domain but was "
                 f"accepted (returned {out!r}); the exclusion is "
                 f"asserted, not enforced")

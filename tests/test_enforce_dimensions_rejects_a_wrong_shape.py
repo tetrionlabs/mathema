@@ -71,6 +71,13 @@ def test_a_fixed_size_from_the_claim_binding_is_enforced():
     text = str(err.value)
     assert "xs has length 5" in text, text
     assert "expects length 30" in text, text
+    # the domain is rendered the way enforce_domain renders it
+    from mathema import claim
+    from mathema.domain import render_domain
+    space = render_domain(claim("for xs in [0, 1]^30, f(xs) >= 0").domain["xs"],
+                          show_missing=True)
+    assert f"the domain {space} expects" in text, text
+    assert ":float" not in text, text
 
 
 def test_the_result_is_checked_against_the_return_marker():
@@ -81,8 +88,9 @@ def test_the_result_is_checked_against_the_return_marker():
 
     with pytest.raises(ValueError) as err:
         bad_matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1])
-    assert ('bad_matvec returned length 4; the return shape Vec("m") with '
-            'm = 3 expects length 3' in str(err.value)), str(err.value)
+    # the function is named once
+    assert str(err.value) == ('bad_matvec returned length 4; the return shape '
+                              'Vec("m") with m = 3 expects length 3'), str(err.value)
 
 
 def test_a_result_of_the_declared_shape_is_returned():
@@ -196,3 +204,30 @@ def test_stacking_in_either_order_gives_the_same_rows_and_errors():
     assert errors[0] == errors[1], errors
     assert "x has length 2" in errors[0][0], errors[0]
     assert "outside its declared domain" in errors[0][1], errors[0]
+
+
+def test_none_is_called_none_not_a_number():
+    matvec = _matvec()
+    with pytest.raises(ValueError) as err:
+        matvec([[1, 2, 3, 4]] * 3, None)
+    assert str(err.value).startswith("matvec: x is None;"), str(err.value)
+
+    @enforce_dimensions()
+    def nothing(x: Vec("n")) -> Vec("n"):
+        """Returns nothing."""
+        return None
+
+    with pytest.raises(ValueError) as err:
+        nothing([1.0, 2.0])
+    assert str(err.value) == ('nothing returned None; the return shape Vec("n") '
+                              'with n = 2 expects length 2'), str(err.value)
+
+
+def test_a_rank_clash_between_marker_and_binding_is_refused_at_decoration():
+    from mathema.authoring import DomainError
+    with pytest.raises(DomainError) as err:
+        @enforce_dimensions()
+        @claims_decorator("for A in R^(30,15), f(A) >= 0")
+        def g(A: Vec("n")) -> float:
+            return sum(A)
+    assert "A" in str(err.value) and "2 dimensions" in str(err.value), str(err.value)

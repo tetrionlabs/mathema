@@ -1433,12 +1433,16 @@ def _fmt(args: tuple, names: tuple[str, ...] | None = None,
     counterexample like `([...], -5.54)` reads as (input, output);
     it's actually (x, alpha), both inputs. With `shown`, only the named
     arguments in it appear (all of them when none is)."""
+    from ._shapes import witness_text
     if names is not None and len(names) == len(args):
         pairs = list(zip(names, args))
         if shown is not None and any(n in shown for n, _ in pairs):
             pairs = [(n, a) for n, a in pairs if n in shown]
-        return ", ".join(f"{n}={_fmt_value(a)}" for n, a in pairs)
-    return "(" + ", ".join(_fmt_value(a) for a in args) + ")"
+        # a large vector or matrix prints its shape, a first row and a
+        # count; the full value rides in the counterexample's arguments
+        return ", ".join(f"{n} = {capped}" if (capped := witness_text(a)) is not None
+                         else f"{n}={_fmt_value(a)}" for n, a in pairs)
+    return "(" + ", ".join(witness_text(a) or _fmt_value(a) for a in args) + ")"
 
 
 def _sampling_shorthand(kinds: dict, domain: dict, n: int,
@@ -2002,6 +2006,13 @@ def probe(fn, facts, domain: dict | None = None,
     else:
         hints = "".join(f"; {h['text']}" for h in
                         (getattr(facts, "runtime_hints", None) or {}).values())
+        if getattr(last_exc, "at_exit", False):
+            # a shape guard refused the RESULT: the inputs were fine,
+            # the body's answer was not
+            return [Probe("callable", callable_statement, "skipped",
+                          note=f"the call raised after the body returned: "
+                               f"{last_exc}" + hints,
+                          meta={"mathema.probe_gap": "result-shape"})]
         return [Probe("callable", callable_statement, "skipped",
                       note="could not synthesize valid inputs from the "
                            f"signature ({type(last_exc).__name__}: {last_exc})"

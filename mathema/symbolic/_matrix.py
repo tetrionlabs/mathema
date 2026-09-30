@@ -589,17 +589,17 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
 
 
 def _fixed_shapes_text(mat_syms: dict, domain: dict) -> str:
-    """The operands whose binding fixes an axis, for the sketch: " (A of
-    shape 30 by 15, b of length 30)"; empty when no axis is fixed."""
-    from .._shapes import dims_of, fixed_size
+    """The clause the sketch adds for the operands whose binding fixes
+    an axis: "; the binding fixes A at 30 by 15 and b at length 30";
+    empty when no axis is fixed."""
+    from .._shapes import dims_of, expected, fixed_size
     parts = []
     for p in sorted(mat_syms):
         dims = dims_of((domain or {}).get(p))
         if not dims or not any(fixed_size(d) is not None for d in dims):
             continue
-        parts.append(f"{p} of length {dims[0]}" if len(dims) == 1
-                     else f"{p} of shape {' by '.join(dims)}")
-    return f" ({', '.join(parts)})" if parts else ""
+        parts.append(f"{p} at {expected(dims)}")
+    return f"; the binding fixes {' and '.join(parts)}" if parts else ""
 
 
 def _lemma_table(mat_syms: dict, structures: dict, invertible) -> LemmaTable:

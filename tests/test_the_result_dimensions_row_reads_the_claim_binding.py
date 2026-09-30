@@ -103,7 +103,11 @@ def test_dimensions_enforced_is_the_shared_dimension_probe():
     assert "dimensions_enforced" in names, names
     assert "shape_enforced" not in names, names
     (probe,) = [p for p in type_probes(matmul) if p.name == "dimensions_enforced"]
-    assert "mismatched sizes on shared dims" in probe.statement, probe.statement
+    # the statements are sentences, never Python reprs
+    assert probe.statement == "matmul(a, b) rejects a mismatch on n", probe.statement
+    (row,) = [p for p in type_probes(matmul) if p.name == "result_dimensions"]
+    assert row.statement == ("matmul(a, b) is m by p for a of shape m by n and "
+                             "b of shape n by p"), row.statement
 
 
 def test_size_enforced_witnesses_an_accepted_wrong_fixed_size():
@@ -116,12 +120,13 @@ def test_size_enforced_witnesses_an_accepted_wrong_fixed_size():
                      probe.counterexample or ""), probe.counterexample
     assert "30 by 15" in probe.statement, probe.statement
     # the witness names distinct wrong sizes only, the smallest and the
-    # largest tried, never the same size twice
+    # largest tried, never the same size twice, and both axes were tried
     entries = probe.counterexample.split("; ")
     assert len(entries) == len(set(entries)) <= 2, entries
     assert all(re.fullmatch(r"A is \d+ by \d+ where the shape fixes 30 by 15", e)
                for e in entries), entries
-    assert probe.n == 6, probe.n
+    assert any(re.search(r"A is 30 by 1[678]", e) for e in entries), entries
+    assert any(re.search(r"A is 3[123] by 15", e) for e in entries), entries
 
 
 def test_a_binding_only_fixed_size_emits_no_size_row_and_passes(tmp_path):
@@ -198,3 +203,43 @@ def test_size_enforced_is_absent_without_a_fixed_size():
         return [[0.0] * len(b[0]) for _ in a]
 
     assert "size_enforced" not in {p.name for p in type_probes(matmul)}
+
+
+def test_a_guard_at_exit_falsifies_the_result_dimensions_row():
+    """The row judges the callable the user ships: a raise at a
+    consistent input is a counterexample, and the guard's exit error
+    already names both shapes."""
+    from mathema import enforce_dimensions
+
+    @enforce_dimensions()
+    def bad_matvec(a: Mat("m", "n"), x: Mat("n")) -> Mat("m"):
+        return [0.0] * len(x)
+
+    rec = mathema.check(bad_matvec, claims=[])
+    (row,) = [p for p in rec.probes if p.name == "result_dimensions"]
+    assert row.verdict == "falsified", (row.verdict, row.note)
+    assert "returned length" in (row.counterexample or ""), row.counterexample
+    assert "expects length" in (row.counterexample or ""), row.counterexample
+    # the battery's call row reads the exit failure as a result problem
+    (call,) = [p for p in rec.probes if p.name == "callable"]
+    assert call.note.startswith("the call raised after the body returned"), call.note
+
+
+def test_the_enforcement_rows_need_one_in_shape_call_that_returns():
+    def always_raises(A: Mat(30, 15)) -> float:
+        raise RuntimeError("broken")
+
+    (probe,) = [p for p in type_probes(always_raises) if p.name == "size_enforced"]
+    assert probe.verdict == "skipped", (probe.verdict, probe.note)
+    assert "no evaluable inputs" in (probe.note or ""), probe.note
+
+    def never_works(a: Mat("m", "n"), b: Mat("n", "p")) -> Mat("m", "p"):
+        raise RuntimeError("broken")
+
+    rows = {p.name: p for p in type_probes(never_works)}
+    assert rows["dimensions_enforced"].verdict == "skipped", rows["dimensions_enforced"]
+    assert "no evaluable inputs" in (rows["dimensions_enforced"].note or "")
+    # the result row judges the shipped callable: a raise at a consistent
+    # input is its counterexample
+    assert rows["result_dimensions"].verdict == "falsified"
+    assert "RuntimeError" in (rows["result_dimensions"].counterexample or "")

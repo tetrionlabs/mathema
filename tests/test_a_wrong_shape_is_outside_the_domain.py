@@ -104,6 +104,28 @@ def frob_checked(A: np.ndarray) -> float:
     if A.shape != (30, 15):
         raise ValueError("expected a 30 by 15 matrix")
     return float((A * A).sum())
+
+
+def rows_only(A: np.ndarray) -> float:
+    """Sum of squares, refusing any row count but 30; columns unchecked."""
+    if A.shape[0] != 30:
+        raise ValueError("need 30 rows")
+    return float((A * A).sum())
+
+
+def atx(A: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """A transposed times x: as long as A has columns."""
+    return A.T @ x
+
+
+def nan_same(A: np.ndarray) -> np.ndarray:
+    """A matrix of the input's shape holding no values."""
+    return np.full_like(A, np.nan)
+
+
+def drop_first(xs: list) -> list:
+    """Everything after the first element."""
+    return xs[1:]
 '''
 
 
@@ -139,12 +161,55 @@ def test_a_number_is_not_a_member_of_a_matrix_space(mod):
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_the_exclusion_probe_tries_a_wrong_shape(mod):
     (accepting,) = check_conjectures(mod.frob, [claim(
         "for A in R^(30,15), excluded_outside_domain(A)", route="best")])
     assert accepting.verdict == "falsified", (accepting.verdict, accepting.note)
-    assert "shape" in (accepting.counterexample or ""), accepting.counterexample
-    assert "R^(30,15)" in (accepting.counterexample or ""), accepting.counterexample
+    assert "A of shape (" in (accepting.counterexample or ""), accepting.counterexample
+    assert ("is outside the declared domain R^(30,15) but was accepted"
+            in (accepting.counterexample or "")), accepting.counterexample
     (refusing,) = check_conjectures(mod.frob_checked, [claim(
         "for A in R^(30,15), excluded_outside_domain(A)", route="best")])
     assert refusing.verdict == "holds", (refusing.verdict, refusing.note)
+
+
+def test_ragged_rows_are_outside_a_matrix_space():
+    assert not domain_contains([[0.0] * 3] * 3 + [[0.0] * 2], _space("A in R^(4,3)"))
+
+
+def test_an_empty_container_is_outside_a_vector_space(mod):
+    # `^n` means at least one element, as the grammar page says
+    assert not domain_contains([], _space("v in R^n"))
+    np = pytest.importorskip("numpy")
+    assert not domain_contains(np.array([]), _space("v in R^n"))
+    (p,) = check_conjectures(mod.drop_first, [claim(
+        "for xs in R^1, f(xs) in R^n", route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+
+
+def test_a_named_output_axis_takes_the_size_the_trial_bound(mod):
+    (wrong,) = check_conjectures(mod.atx, [claim(
+        "for A in R^(n,15), x in R^n, f(A, x) in R^n", route="probe")])
+    assert wrong.verdict == "falsified", (wrong.verdict, wrong.note)
+    (right,) = check_conjectures(mod.atx, [claim(
+        "for A in R^(n,15), x in R^n, f(A, x) in R^15", route="probe")])
+    assert right.verdict == "holds", (right.verdict, right.note)
+
+
+def test_a_container_with_a_missing_leaf_is_outside_a_space(mod):
+    for space in ("R^(3,4)", "[0, 1]^(3,4)"):
+        (p,) = check_conjectures(mod.nan_same, [claim(
+            f"for A in R^(3,4), f(A) in {space}", route="probe")])
+        assert p.verdict == "falsified", (space, p.verdict, p.note)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_the_exclusion_probe_tries_every_outside_of_a_space(mod):
+    (p,) = check_conjectures(mod.rows_only, [claim(
+        "for A in R^(30,15), excluded_outside_domain(A)", route="best")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "(30, 16)" in (p.counterexample or ""), p.counterexample
+    (p,) = check_conjectures(mod.rows_only, [claim(
+        "for A in R^(30,n), excluded_outside_domain(A)", route="best")])
+    assert p.verdict == "falsified", (p.verdict, p.note)

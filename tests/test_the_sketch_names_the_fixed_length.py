@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The derive sketch and the record say what a binding fixed: "xs of
-length 30", "A of shape 30 by 15", never "every length" or "any length"
-when a length is fixed. The sampling note prints one fixed size, never
-a range, and a literal dimension that contradicts a length premise is
-the vacuous premise the engine already reports, naming both."""
+"""The derive sketch says what a binding fixed with one clause on every
+route, after the proof's own sentence: "; the binding fixes xs at length
+30", "; the binding fixes A at 30 by 15". A proof over every length
+keeps saying so, since it covers the fixed one. The sampling note prints
+one fixed size, never a range, and a literal dimension that contradicts
+a length premise is the vacuous premise the engine already reports,
+naming both; a premise the size satisfies is not vacuous."""
 import importlib.util
 import textwrap
 
@@ -52,9 +54,7 @@ def test_the_sketch_names_a_fixed_length(mod):
     (p,) = check_conjectures(mod.total, [claim(
         "for xs in [0, 1]^30, f(xs) >= 0", route="derive")])
     assert p.verdict == "proven", (p.verdict, p.sketch)
-    assert "xs of length 30" in (p.sketch or ""), p.sketch
-    assert "any length" not in (p.sketch or ""), p.sketch
-    assert "every length" not in (p.sketch or ""), p.sketch
+    assert (p.sketch or "").endswith("; the binding fixes xs at length 30"), p.sketch
 
 
 @pytest.mark.needs_full_proof_budget
@@ -62,23 +62,37 @@ def test_the_sketch_keeps_every_length_when_none_is_fixed(mod):
     (p,) = check_conjectures(mod.total, [claim(
         "for xs in [0, 1]^n, f(xs) >= 0", route="derive")])
     assert p.verdict == "proven", (p.verdict, p.sketch)
-    assert "of length" not in (p.sketch or ""), p.sketch
+    assert "the binding fixes" not in (p.sketch or ""), p.sketch
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_claim_true_only_at_the_fixed_length_is_proven(mod):
+    # the pinned sums carry the element bounds, so a fact about the
+    # length itself is decided
+    (p,) = check_conjectures(mod.total, [claim(
+        "for xs in [0, 1]^3, f(xs) <= 3", route="derive")])
+    assert p.verdict == "proven", (p.verdict, p.sketch)
+    assert (p.sketch or "").endswith("; the binding fixes xs at length 3"), p.sketch
+    (false,) = check_conjectures(mod.total, [claim(
+        "for xs in [0, 1]^3, f(xs) <= 2", route="best")])
+    assert false.verdict == "falsified", (false.verdict, false.note)
 
 
 @pytest.mark.needs_full_proof_budget
 def test_the_definition_row_sketch_covers_the_fixed_length(mod):
+    # the numpy.sum definition row covers every numpy the compendium
+    # does, so the proof is available on each of them
     # the definition-row route proves over every length and says so,
-    # then names the length the binding fixed as a consequence, never
-    # as a proof it ran at that length alone
-    pytest.importorskip("numpy")
+    # then adds the one clause every route adds for a fixed size
     (p,) = check_conjectures(mod.np_total, [claim(
         "for xs in [0, 1]^30, f(xs) >= 0", route="derive")])
     assert p.verdict == "proven", (p.verdict, p.sketch)
-    assert "xs of every length, so for length 30" in (p.sketch or ""), p.sketch
+    assert "holds for every length" in (p.sketch or ""), p.sketch
+    assert (p.sketch or "").endswith("; the binding fixes xs at length 30"), p.sketch
     (free,) = check_conjectures(mod.np_total, [claim(
         "for xs in [0, 1]^n, f(xs) >= 0", route="derive")])
     assert free.verdict == "proven", (free.verdict, free.sketch)
-    assert "so for length" not in (free.sketch or ""), free.sketch
+    assert "the binding fixes" not in (free.sketch or ""), free.sketch
 
 
 @pytest.mark.needs_full_proof_budget
@@ -87,7 +101,7 @@ def test_the_sketch_names_a_fixed_matrix_shape(mod):
     (p,) = check_conjectures(mod.gram_trace, [claim(
         "for A in R^(30,15), f(A) >= 0", route="derive")])
     assert p.verdict == "proven", (p.verdict, p.sketch)
-    assert "A of shape 30 by 15" in (p.sketch or ""), p.sketch
+    assert (p.sketch or "").endswith("; the binding fixes A at 30 by 15"), p.sketch
 
 
 def test_the_sampling_note_prints_one_fixed_length(mod):
@@ -127,3 +141,10 @@ def test_a_literal_length_contradicted_by_a_premise_is_a_vacuous_premise(mod):
         assert "dim(xs, 0) == 5" in note, note
         assert "length 30" in note, note
         assert p.meta.get("mathema.empty_premise") == "xs", p.meta
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_premise_the_fixed_length_satisfies_is_not_vacuous(mod):
+    (p,) = check_conjectures(mod.total, [claim(
+        "for xs in [0, 1]^30, assuming len(xs) >= 5, f(xs) >= 0", route="best")])
+    assert p.verdict == "proven", (p.verdict, p.note)

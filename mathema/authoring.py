@@ -312,6 +312,16 @@ def materialize_declared(fn, key: str, root: str = ".") -> str:
 # without editing the function body to add it by hand.
 # ---------------------------------------------------------------------------
 
+class DimensionError(ValueError):
+    """An argument's or a result's shape breaks what `enforce_dimensions()`
+    guards. `at_exit` says the result broke the return marker after the
+    body ran, rather than an argument breaking a shape at entry."""
+
+    def __init__(self, message: str, *, at_exit: bool = False):
+        super().__init__(message)
+        self.at_exit = at_exit
+
+
 class DomainError(ValueError):
     """A parameter's actual value, or a domain declaration itself,
     conflicts with a function's own declared domain, raised by
@@ -549,6 +559,9 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     what it makes true: one `excluded_outside_domain(p)` claim per
     guarded parameter, proven by construction.
 
+    Every rejection is a `DimensionError`, a `ValueError`; its `at_exit`
+    says whether the result, rather than an argument, broke the shape.
+
     A declared dimension premise is enforced too:
 
         @enforce_dimensions()
@@ -646,7 +659,7 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
             av = bound.arguments
             problem, bound_names = _shapes.entry_problem(plan, av)
             if problem is not None:
-                raise ValueError(f"{fn.__name__}: {problem}")
+                raise DimensionError(f"{fn.__name__}: {problem}")
             for lhs, rel, rhs in premises:
                 left = _dim_ref(lhs)
                 if left is None or left[0] not in av:
@@ -670,9 +683,12 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
             problem = _shapes.exit_problem(plan, bound_names, result,
                                            fn.__name__)
             if problem is not None:
-                raise ValueError(f"{fn.__name__}: {problem}")
+                raise DimensionError(problem, at_exit=True)
             return result
 
+        # what the guard checks, read back by every sampler as the
+        # parameter's declared shape, so the engine's own draws are
+        # never the draws the guard rejects
         wrapper.__mathema_enforced_dimensions__ = {
             p: dims for p, (dims, _source) in plan.params.items()}
         _declare_exclusions(wrapper, fn, sorted(plan.params),
