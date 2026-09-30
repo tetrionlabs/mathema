@@ -1138,5 +1138,20 @@
   "input": "is_empty_safe(volumes)",
   "unicode": "volumes is empty safe",
   "ascii": "is_empty_safe(volumes)"
+ },
+ "absent_field_raises": {
+  "input": "absent(f, trade.memo) raises(TypeError)",
+  "unicode": "absent(f, trade.memo) raises(TypeError)",
+  "ascii": "absent(f, trade.memo) raises(TypeError)"
+ },
+ "is_absent_safe_field": {
+  "input": "is_absent_safe(f)",
+  "unicode": "f is absent safe",
+  "ascii": "is_absent_safe(f)"
+ },
+ "absent_key_left_out": {
+  "input": "for order.side in {\"buy\", \"sell\"} | {None} \\ {null}, len(f(order)) >= 1",
+  "unicode": "∀ order.side ∈ {\"buy\", \"sell\", None} \\ {null}, len(f(order)) ≥ 1",
+  "ascii": "for order.side in {\"buy\", \"sell\", None} \\ {null}, len(f(order)) >= 1"
  }
 }

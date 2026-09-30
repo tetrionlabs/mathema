@@ -589,18 +589,21 @@ class ExecutedMissing:
         self.policy = PolicyTable()
         self.classified = 0
         self.last_classified = False
+        # `{param: [path, ...]}`: the paths the claim binds, whose
+        # absences and holes are missing inputs too
+        self.paths: dict = {}
 
     def add_call(self, point: dict, output=None, raised: "str | None" = None) -> None:
         """File one call at `point` (its arguments by name) that returned
         `output` or raised `raised`."""
-        from ._missing_policy import (classify_call, keys_of, member_changes,
-                                      no_value_slots)
-        from ._missing_words import outcome_entry, said, value_shown
+        from ._missing_policy import (classify_call, is_path, keys_of, member_changes,
+                                      no_value_slots, unseen_kinds)
+        from ._missing_words import outcome_entry, path_said, said, value_shown
         # a parameter left at its own default (numpy's `axis=None`) is no
         # missing input
         point = {p: v for p, v in point.items()
                  if not (p in self.defaults and v is self.defaults[p])}
-        keys = keys_of(point)
+        keys = keys_of(point, self.paths)
         if not keys:
             return
         # a parameter at its own default (`scale=None` meaning "no
@@ -609,8 +612,8 @@ class ExecutedMissing:
                       if p in self.flags and point[p] is self.flags[p]}
         if at_default and any(p not in at_default for p, _k, _m in keys):
             point = {p: v for p, v in point.items() if p not in at_default}
-            keys = keys_of(point)
-        behaviour = classify_call(point, output, raised)
+            keys = keys_of(point, self.paths)
+        behaviour = classify_call(point, output, raised, unseen_kinds(point, keys))
         # a hole returned in its slot spelled as another member is said
         # slot by slot: `values[1]=None returned as nan`
         respelled: dict = {}
@@ -623,8 +626,18 @@ class ExecutedMissing:
                 respelled.setdefault((p, word),
                                      f"{p}{where}={shown} returned as {back}")
         from .policy import record_call
-        record_call(point, output, raised)
-        for p, _kind, member in keys:
+        record_call(point, output, raised, keys=keys)
+        for p, kind, member in keys:
+            if is_path(p):
+                # a field's or key's no-value, said by its path
+                self.table.setdefault(p, {}).setdefault(
+                    member, outcome_entry(member, output, raised=raised,
+                                          behaviour=behaviour))
+                self.said.setdefault(p, {}).setdefault(
+                    member, path_said(p, member, point, output, raised, behaviour,
+                                      kind=kind))
+                self.first.setdefault((p, member), (None, output, raised, behaviour))
+                continue
             in_slot = no_value_slots(point[p]).shape != ()
             entry = (outcome_entry(member, raised=raised) if raised is not None
                      else outcome_entry(member, output, behaviour=behaviour,
@@ -634,7 +647,7 @@ class ExecutedMissing:
             self.said.setdefault(p, {}).setdefault(
                 member, said(p, member, {p: point[p]}, output, raised, behaviour))
             self.first.setdefault((p, member), (point[p], output, raised, behaviour))
-        self.policy.add(point, output, raised)
+        self.policy.add(point, output, raised, paths=self.paths)
 
     def returned_absent(self, point: dict, declared: str) -> None:
         """File a None the function returned from present inputs, which
@@ -704,13 +717,20 @@ class LastCall:
         for kind, value, *given in self.calls:
             actual = (_called_at(point, given[0], given[1], self.defaults)
                       if len(given) == 2 else point)
-            if not inputs_missing(actual.values()):
+            if not inputs_missing(actual.values()) and not (
+                    executed.paths and _paths_reach(actual, executed.paths)):
                 continue
             if kind == "raised":
                 executed.add_call(actual, raised=value)
             else:
                 executed.add_call(actual, output=value)
         self.calls = []
+
+
+def _paths_reach(point: dict, paths: dict) -> bool:
+    """Whether a path a claim binds reaches no value in `point`."""
+    from ._missing_policy import keys_of
+    return any(q not in point for q, _k, _m in keys_of(point, paths))
 
 
 def _called_at(point: dict, args: tuple, kwargs: dict, defaults: dict) -> dict:
@@ -854,7 +874,11 @@ def inputs_missing(args) -> bool:
             except Exception:
                 return False
             return seen is not v and holds(seen)
-        return False
+        from ._missing_policy import _fields
+        fields = _fields(v) if not isinstance(v, (str, bytes, int, float)) else None
+        # a record (a pydantic model, a dataclass) holds a missing value
+        # where one of its own fields is one; a path reaches further in
+        return bool(fields) and any(missing_class(x) is not None for x in fields.values())
 
     return any(holds(a) for a in args)
 

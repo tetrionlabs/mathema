@@ -2,14 +2,21 @@
 # Copyright 2026 Tetrion Ltd
 """Policy claims: what a function does with a value that is not there.
 
-A policy claim names a kind of missing input, a parameter, optionally one
-member, and one of five behaviours:
+A policy claim names a kind of missing input, a parameter or a path
+from one, optionally one member, and one of five behaviours:
 
     missing(f, x) propagates
     absent(f, x) raises(TypeError)
     missing(f, xs, null) drops
     absent(f) raises
     assuming count(xs) >= 1, missing(f, xs) drops
+    absent(f, o.note) raises(TypeError)
+    absent(f, d.note, unset) drops
+    missing(f, o.lines[*].qty) propagates
+
+On a path, absence has two members: `null`, the field or key holding
+`None`, and `unset`, a key left out, an index past the end or a step
+below an absent object.
 
 `absent` is the object itself not there (a `None` argument); `missing`
 is a hole in a slot (`nan`, a `None` element, `pd.NA`). The behaviours
@@ -45,13 +52,15 @@ _KIND_WORDS = {"missing": "missing", "∅": "missing", "absent": "absent",
 #: the older predicate words, read as the behaviour they name
 _BEHAVIOUR_WORDS = {**{b: b for b in BEHAVIOURS}, "removed": "drops"}
 
+#: a parameter, or a path from one (`o.note`, `o.lines[*].qty`)
+_TARGET = r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[(?:\d+|\*)\])*"
 _SELECTOR = re.compile(
     r"^\s*(?P<kind>missing|absent|∅|None)\s*\(\s*f\s*"
-    r"(?:,\s*(?P<param>[A-Za-z_]\w*)\s*(?:,\s*(?P<member>[A-Za-z_][\w:]*)\s*)?)?\)"
+    rf"(?:,\s*(?P<param>{_TARGET})\s*(?:,\s*(?P<member>[A-Za-z_][\w:]*)\s*)?)?\)"
     r"(?:\s+(?P<behaviour>[a-z]+)(?:\s*\(\s*(?P<exc>[A-Za-z_][\w.]*)\s*\))?)?\s*$")
 _PREDICATE = re.compile(
     r"^\s*(?P<kind>missing|absent)_(?P<behaviour>[a-z]+)\s*\(\s*f\s*"
-    r"(?:,\s*(?P<param>[A-Za-z_]\w*)\s*(?:,\s*(?P<member>[A-Za-z_][\w:]*)\s*)?)?\)\s*$")
+    rf"(?:,\s*(?P<param>{_TARGET})\s*(?:,\s*(?P<member>[A-Za-z_][\w:]*)\s*)?)?\)\s*$")
 
 
 @dataclass(frozen=True)
@@ -125,6 +134,9 @@ class Call:
     output: object = None
     raised: "str | None" = None
     claim: "str | None" = None
+    # `[(param or path, kind, member), ...]` the call held, when the
+    # route that made it knew the paths its claim binds
+    keys: "list | None" = None
 
 
 @dataclass
@@ -173,12 +185,14 @@ def claim_scope(name: "str | None"):
         _CLAIM.reset(token)
 
 
-def record_call(point: dict, output=None, raised: "str | None" = None) -> None:
+def record_call(point: dict, output=None, raised: "str | None" = None,
+                keys: "list | None" = None) -> None:
     """File one call at a missing input into the active batch."""
     current = _BATCH.get()
     if current is None:
         return
-    current.calls.append(Call(dict(point), output, raised, _CLAIM.get()))
+    current.calls.append(Call(dict(point), output, raised, _CLAIM.get(),
+                              list(keys) if keys is not None else None))
 
 
 def record_introduced(point: dict) -> None:
@@ -228,17 +242,32 @@ def _premise_holds(premise: str, point: dict) -> bool:
         return False
 
 
+def _keys(call: Call) -> list:
+    """`[(param or path, kind, member), ...]` a call held."""
+    from ._missing_policy import keys_of
+    return call.keys if call.keys is not None else keys_of(call.point)
+
+
+def _members_at(call: Call, param: str, kind: str) -> list:
+    """The member words of `kind` a call held at a parameter or a path
+    (`o.note`), each once."""
+    return list(dict.fromkeys(m for q, k, m in _keys(call) if q == param and k == kind))
+
+
 def _relevant(calls: list, param: str, kind: str, member: "str | None",
               premise: str) -> list:
-    return [c for c in calls if param in c.point
-            and (member in _members_in(c.point[param], kind) if member
-                 else _members_in(c.point[param], kind))
-            and _premise_holds(premise, c.point)]
+    out = []
+    for c in calls:
+        members = _members_at(c, param, kind)
+        if (member in members if member else members) and _premise_holds(premise, c.point):
+            out.append(c)
+    return out
 
 
 def _behaviour_of(call: Call) -> str:
-    from ._missing_policy import classify_call
-    return classify_call(call.point, call.output, call.raised)
+    from ._missing_policy import classify_call, unseen_kinds
+    return classify_call(call.point, call.output, call.raised,
+                         unseen_kinds(call.point, _keys(call)))
 
 
 def _raised_matches(raised: "str | None", expected: "str | None") -> bool:
@@ -360,8 +389,14 @@ def _on_draws(calls: list, current: "Batch | None") -> str:
 
 def _at(call: Call, param: "str | None") -> str:
     """The point of a call as the record shows it, the one parameter
-    alone when it names one: `x = None`, `xs = [null, 0.609]`."""
-    from ._missing_words import point_shown
+    alone when it names one: `x = None`, `xs = [null, 0.609]`, and what
+    a path reached when it names one: `d.note unset`."""
+    from ._missing_policy import is_path
+    from ._missing_words import path_shown, point_shown
+    if param and is_path(param):
+        found = next(((k, m) for q, k, m in _keys(call) if q == param), None)
+        if found is not None:
+            return path_shown(param, found[1], call.point, found[0])
     if param and param in call.point:
         return point_shown({param: call.point[param]})
     return point_shown(call.point)
@@ -379,11 +414,15 @@ def _confirmed(calls: list, current: "Batch | None", floor: bool,
     return "confirmed " + _on_draws(calls, current)
 
 
-def _witness(call: Call) -> str:
-    """`xs = [NA]: f raised TypeError`, `x = nan: f returned 1.0`."""
+def _witness(call: Call, param: "str | None" = None) -> str:
+    """`xs = [NA]: f raised TypeError`, `x = nan: f returned 1.0`, and
+    for a path what it reached: `d.note unset: f raised KeyError`."""
+    from ._missing_policy import is_path
     from ._missing_words import point_shown, value_shown
     did = (f"f raised {call.raised}" if call.raised
            else f"f returned {value_shown(call.output)}")
+    if param and is_path(param):
+        return f"{_at(call, param)}: {did}"
     return f"{point_shown(call.point)}: {did}"
 
 
@@ -394,9 +433,12 @@ def _in_slot(call: Call, param: str, kind: str) -> bool:
 
 def _entry(call: Call, param: str, kind: str) -> str:
     """`nan in, 1.0 out`, `a null slot in, TypeError`."""
+    from ._missing_policy import is_path
     from ._missing_words import value_shown
-    member = (_members_in(call.point.get(param), kind) or ["?"])[0]
+    member = (_members_at(call, param, kind) or ["?"])[0]
     out = call.raised if call.raised else f"{value_shown(call.output)} out"
+    if is_path(param):
+        return f"{_at(call, param)}, {out}"
     if _in_slot(call, param, kind):
         return f"a {member} slot in, {out}"
     return f"{member} in, {out}"
@@ -455,7 +497,7 @@ def _cases(calls: list, param: str, kind: str, member: "str | None" = None,
     def classes_by(classify) -> "dict | None":
         seen: dict = {}
         for c in calls:
-            members = _members_in(c.point.get(param), kind)
+            members = _members_at(c, param, kind)
             if len(members) != 1:
                 continue
             cls = classify(c.point.get(param)) if kind == "missing" else None
@@ -545,7 +587,15 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
     for p in params:
         found = _relevant(current.calls if current else [], p, stated.kind,
                           stated.member, stated.premise)
-        if not found:
+        if not found and _is_path(p) and stated.kind == "absent" \
+                and stated.member in (None, "null"):
+            # an optional field of a record parameter: called with it None
+            from ._missing_policy import path_root
+            points = [pt for q, pt in _field_floor(fn, facts, path_root(p), domain)
+                      if q == p and _premise_holds(stated.premise, pt)]
+            found = _run_floor(fn, facts, points)
+            floor = floor or bool(found)
+        elif not found and not _is_path(p):
             members = [stated.member] if stated.member else _members_of(fn, p, stated.kind)
             points = [pt for pt in _floor_points(fn, facts, p, stated.kind, members,
                                                  domain, cj)
@@ -578,7 +628,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
                    f"intended, or change f")
         meta["mathema.policy"].update({"reason": reason, "next": nxt})
         return Probe(cj.name, statement, "falsified", n=len(calls), route="probe:classified",
-                     counterexample=_witness(wrong), note=f"{reason}; {nxt}",
+                     counterexample=_witness(wrong, p), note=f"{reason}; {nxt}",
                      meta=meta)
     guard = None
     for p in params:
@@ -655,6 +705,10 @@ def _why_undecided(stated: Policy, params: list, current: "Batch | None") -> str
                         f"{point_shown({p: call.point[p]})}")
             return (f"no call where {p} is missing met the premise {stated.premise}")
     who = stated.parameter or "a parameter"
+    if _is_path(who):
+        member = f" ({stated.member})" if stated.member else ""
+        return (f"no call reached a {stated.kind} {who}{member}, so nothing says what f "
+                f"does there; bind {who} in a claim that admits it")
     if stated.kind == "absent":
         return (f"no call reached {who} = None, so nothing says what f does there; bind "
                 f"{who} in a claim that admits None")
@@ -689,14 +743,19 @@ def _stated_word(policy: Policy, behaviour: str, call: Call,
     member = policy.member
     if member is None and calls and policy.parameter:
         kind = policy.kind
-        mine = _members_in(call.point.get(policy.parameter), kind)
+        mine = _members_at(call, policy.parameter, kind)
         others = [c for c in calls
-                  if not set(_members_in(c.point.get(policy.parameter), kind)) & set(mine)]
+                  if not set(_members_at(c, policy.parameter, kind)) & set(mine)]
         if len(mine) == 1 and any(_behaviour_of(c) != behaviour for c in others):
             member = mine[0]
     word = replace(policy, member=member, behaviour=behaviour,
                    exception=call.raised if behaviour == "raises" else None)
     return f"`{policy_text(word)}`"
+
+
+def _is_path(name: "str | None") -> bool:
+    from ._missing_policy import is_path
+    return bool(name) and is_path(name)
 
 
 def _admits(fn, param: str, kind: str) -> bool:
@@ -827,6 +886,10 @@ def _why_admitted(fn, param: str, kind: str, origin: str, word: str) -> str:
     Optional[float], so f promised to take None`, `the claim lists nan
     for x`."""
     from .conjecture import _annotation_words
+    if origin == "path":
+        what = "a key left out" if word == "unset" else (
+            "None" if kind == "absent" else word)
+        return f"{param} may be {what}"
     if origin == "optional":
         return f"{param} is {_annotation_words(fn, param)}, so f promised to take None"
     if origin == "listed":
@@ -939,30 +1002,77 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
                     continue
             calls = [c for c in _relevant(current.calls if current else [], p, kind,
                                           None, "")
-                     if not (set(_members_in(c.point[p], kind))
+                     if not (set(_members_at(c, p, kind))
                              & (done_members | stated_members))
-                     and not any((m is None or m in _members_in(c.point[p], kind))
+                     and not any((m is None or m in _members_at(c, p, kind))
                                  and _premise_holds(pr, c.point) for m, pr in premised)]
             # a record's own rows read the calls its claims made, and run
             # nothing of their own
             if not calls:
                 continue
-            by_member: dict = {}
-            for c in calls:
-                for m in _members_in(c.point[p], kind):
-                    by_member.setdefault(m, []).append(c)
-            ways = {m: _decide(cs) for m, cs in by_member.items()}
-            singles = {m: next(iter(w)) for m, w in ways.items() if len(w) == 1}
-            split = (len(ways) > 1 and len(singles) == len(ways)
-                     and len(set(singles.values())) > 1)
-            apart = bool(stated_members or premised) and kind == "missing"
-            groups = ([(m, [c for c in by_member[m]
-                            if _members_in(c.point[p], kind) == [m]] or by_member[m])
-                       for m in ways] if split or apart else [(None, calls)])
-            for member, cs in groups:
-                rows.append(_default_row(fn, p, kind, member, cs, origin, sig,
-                                         guards, current, name_of, Probe))
+            rows += _member_rows(fn, p, kind, calls, origin, sig, guards, current,
+                                 name_of, Probe,
+                                 apart=bool(stated_members or premised) and kind == "missing")
+    rows += _path_rows(fn, covered, current, guards, name_of)
     rows += _return_rows(fn, covered, current, name_of)
+    return rows
+
+
+def _member_rows(fn, p, kind, calls, origin, sig, guards, current, name_of, Probe,
+                 apart: bool = False) -> list:
+    """One row for `calls` at `p`, or one per member when the members
+    behave differently (or `apart` asks for one per member)."""
+    by_member: dict = {}
+    for c in calls:
+        for m in _members_at(c, p, kind):
+            by_member.setdefault(m, []).append(c)
+    ways = {m: _decide(cs) for m, cs in by_member.items()}
+    singles = {m: next(iter(w)) for m, w in ways.items() if len(w) == 1}
+    split = (len(ways) > 1 and len(singles) == len(ways)
+             and len(set(singles.values())) > 1)
+    groups = ([(m, [c for c in by_member[m]
+                    if _members_at(c, p, kind) == [m]] or by_member[m])
+               for m in ways] if split or apart else [(None, calls)])
+    return [_default_row(fn, p, kind, member, cs, origin, sig, guards, current,
+                         name_of, Probe) for member, cs in groups]
+
+
+#: what a path's row reads for the type of what it reaches: nothing is
+#: known of a field's type here, so a kind it reaches is observed
+_PATH_SIG = None
+
+
+def _path_rows(fn, covered: set, current: "Batch | None", guards: dict, name_of) -> list:
+    """Intent:
+        The rows for every path (`o.note`, `d.note`, `o.lines[*].qty`) a
+        call reached no value at, a field's or key's absence or a hole:
+        observed, since a record's field is the language's or the
+        claim's to admit, and a raise there unaccounted for until a
+        claim states it. One row per member where the members behave
+        differently; none for a case a stated row covers.
+    """
+    from ._missing_policy import is_path
+    from .domain import MissingDefaults
+    from .records import Probe
+    calls = list(current.calls) if current else []
+    targets: list = []
+    for c in calls:
+        for q, k, _m in _keys(c):
+            if is_path(q) and (q, k) not in targets:
+                targets.append((q, k))
+    rows: list = []
+    sig = MissingDefaults(False, (), "field", annotated=False)
+    for path, kind in targets:
+        mine = {(m, pr) for (k, q, m, pr) in covered if k == kind and q == path}
+        if (None, "") in mine:
+            continue
+        stated_members = {m for m, pr in mine if m and not pr}
+        found = [c for c in _relevant(calls, path, kind, None, "")
+                 if not set(_members_at(c, path, kind)) & stated_members]
+        if not found:
+            continue
+        rows += _member_rows(fn, path, kind, found, "path", sig, guards, current,
+                             name_of, Probe, apart=bool(stated_members))
     return rows
 
 
@@ -1042,11 +1152,11 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
 
     if len(seen) > 1:
         members_seen = list(dict.fromkeys(m for c in calls
-                                          for m in _members_in(c.point[p], kind)))
+                                          for m in _members_at(c, p, kind)))
         ways = {m: {} for m in members_seen}
         raised: dict = {}
         for c in calls:
-            ms = _members_in(c.point[p], kind)
+            ms = _members_at(c, p, kind)
             b = _behaviour_of(c)
             for m in ms:
                 ways[m].setdefault(b, _at(c, None))
@@ -1068,7 +1178,7 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
         return row("falsified", None, None, "observed",
                    f"f has no single policy for {what}",
                    sentence=f"f has no single policy for {what}", said=said, nxt=nxt,
-                   cx=_witness(next(iter(seen.values()))))
+                   cx=_witness(next(iter(seen.values())), p))
     (behaviour, call), = seen.items()
     exception = call.raised if behaviour == "raises" else None
     accepted = policy_text(replace(policy, behaviour=behaviour, exception=exception))
@@ -1121,12 +1231,20 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
                 f"{name_of(expected_policy)} --as discovery --corrected \"{accepted}\"")
         return row("falsified", expected, None, "default", bracket, nxt=nxt,
                    cx=_witness(call), shown=expected_policy)
-    word = "None" if kind == "absent" else (member or _members_in(
-        call.point.get(p), kind)[0] if _members_in(call.point.get(p), kind) else "nan")
+    held = _members_at(call, p, kind)
+    word = (member or (held[0] if held else "None")) if origin == "path" else (
+        "None" if kind == "absent" else (member or held[0] if held else "nan"))
     why = _why_admitted(fn, p, kind, origin, word)
     if behaviour == "raises":
         at = _at(call, p)
-        if origin == "optional":
+        if origin == "path":
+            from ._missing_words import path_place
+            place = path_place(p, (_members_at(call, p, kind) or ["null"])[0],
+                               call.point, kind)
+            sentence = (f"f raised {exception} at {place}, and no claim says it may")
+            nxt = (f"if the raise is intended, state `{accepted}`; otherwise handle "
+                   f"it in f, or exclude it where {p} is bound, `\\ {{{word}}}`")
+        elif origin == "optional":
             sentence = f"f raised {exception} at {at}, and no claim says it may"
             nxt = (f"{why}. If the raise is intended, state `{accepted}`; otherwise "
                    f"handle None in f, or annotate {p} as {_plain_type(fn, p)}")
@@ -1143,7 +1261,7 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
         nxt += (f"; or accept the raise as a discovery (mathema accept {key} "
                 f"{name_of(policy)} --as discovery) and state `{accepted}`")
         return row("falsified", None, None, "observed", sentence, sentence=sentence,
-                   nxt=nxt, cx=_witness(call))
+                   nxt=nxt, cx=_witness(call, p))
     return row("holds", behaviour, None, "observed",
                f"observed: {why}; f {behaviour} it ({_entry(call, p, kind)}) "
                f"{_on_draws(calls, current)}")
@@ -1335,6 +1453,129 @@ def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
 
 
 # --- the gates: is_missing_safe(f), is_absent_safe(f) --------------------
+
+def _path_calls(fn, facts, params: list, kind: str, domain: dict,
+                current: "Batch | None") -> dict:
+    """`{path: [call, ...]}`: the calls where a path inside one of
+    `params` reached no value of `kind`, and for absence a call per
+    optional field of a record parameter no call reached, the field set
+    to None."""
+    from ._missing_policy import is_path, path_root
+    out: dict = {}
+    for c in (current.calls if current else []):
+        for q, k, _m in _keys(c):
+            if k == kind and is_path(q) and path_root(q) in params:
+                if c not in out.setdefault(q, []):
+                    out[q].append(c)
+    if kind == "absent":
+        for p in params:
+            for path, point in _field_floor(fn, facts, p, domain):
+                if path not in out:
+                    found = _run_floor(fn, facts, [point])
+                    if found:
+                        out[path] = found
+    return out
+
+
+def _optional_fields(cls) -> list:
+    """The fields of a record type (a pydantic model, a dataclass) whose
+    annotation admits None."""
+    import dataclasses
+    import types
+    import typing
+
+    def admits_none(ann) -> bool:
+        return ann is type(None) or (
+            typing.get_origin(ann) in (typing.Union, types.UnionType)
+            and type(None) in typing.get_args(ann))
+    fields = getattr(cls, "model_fields", None)
+    if isinstance(fields, dict):
+        return [n for n, info in fields.items()
+                if admits_none(getattr(info, "annotation", None))]
+    if isinstance(cls, type) and dataclasses.is_dataclass(cls):
+        try:
+            hints = typing.get_type_hints(cls)
+        except Exception:
+            return []
+        return [f.name for f in dataclasses.fields(cls) if admits_none(hints.get(f.name))]
+    return []
+
+
+def _plain_value(ann, depth: int = 0):
+    """A present value of an annotation's type, for a record the floor
+    builds: a record built field by field, `None` where nothing fits."""
+    import types
+    import typing
+    origin = typing.get_origin(ann)
+    if origin in (typing.Union, types.UnionType):
+        inner = [a for a in typing.get_args(ann) if a is not type(None)]
+        return _plain_value(inner[0], depth) if inner else None
+    simple = {str: "a", int: 1, float: 1.0, bool: True, list: [], dict: {}}
+    if ann in simple:
+        return simple[ann]
+    if origin in (list, dict, tuple, set):
+        return origin()
+    if depth < 3:
+        made = _plain_record(ann, depth + 1)
+        if made is not None:
+            return made
+    return None
+
+
+def _plain_record(cls, depth: int = 0):
+    """An instance of a record type with a present value in every field
+    its type does not default, or None for another type."""
+    import dataclasses
+    import typing
+    fields = getattr(cls, "model_fields", None)
+    try:
+        if isinstance(fields, dict):
+            values = {n: _plain_value(info.annotation, depth) for n, info in fields.items()
+                      if info.is_required()}
+            return cls.model_construct(**values)
+        if isinstance(cls, type) and dataclasses.is_dataclass(cls):
+            hints = typing.get_type_hints(cls)
+            values = {f.name: _plain_value(hints.get(f.name), depth)
+                      for f in dataclasses.fields(cls)
+                      if f.default is dataclasses.MISSING
+                      and f.default_factory is dataclasses.MISSING}
+            return cls(**values)
+    except Exception:
+        return None
+    return None
+
+
+def _field_floor(fn, facts, param: str, domain: dict) -> list:
+    """`[(path, point), ...]`: one point per optional field of a record
+    parameter, that field set to None, the other parameters drawn
+    inside their domains."""
+    import dataclasses
+    import random
+    import typing
+
+    from ._sampling import _RNG_SEED
+    from .probing import _synth, signature_defaults
+    try:
+        cls = typing.get_type_hints(fn).get(param)
+    except Exception:
+        return []
+    names = _optional_fields(cls)
+    base = _plain_record(cls) if names else None
+    if base is None:
+        return []
+    rng = random.Random(_RNG_SEED)
+    defaulted = signature_defaults(fn)
+    others = {q: _synth(facts.param_kinds.get(q, "unknown"), rng, (domain or {}).get(q))
+              for q in facts.params if q != param and q not in defaulted}
+    out = []
+    for name in names:
+        if hasattr(base, "model_copy"):
+            value = base.model_copy(update={name: None})
+        else:
+            value = dataclasses.replace(base, **{name: None})
+        out.append((f"{param}.{name}", {**others, param: value}))
+    return out
+
 
 def _stated_for(rows: list, kind: str, p: str, member: str) -> list:
     """The stated policy rows that speak for a parameter's member."""
@@ -1667,6 +1908,65 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
         if guarded:
             for e in table.get(p, []):
                 e["guarded"] = e["member"] in guarded
+    # the fields and keys inside a parameter (R7): what a path reached
+    # that is not a value, from the calls the check made and, for a
+    # record's optional field no call reached, a floor of its own
+    path_calls = _path_calls(fn, facts, params, kind, domain, current)
+    for path, calls_here in path_calls.items():
+        said = []
+        by_member: dict = {}
+        for c in calls_here:
+            for m in _members_at(c, path, kind):
+                by_member.setdefault(m, []).append(c)
+        for m, calls in by_member.items():
+            n += len(calls)
+            entry = {"member": m}
+            table.setdefault(path, []).append(entry)
+            ways = _decide(calls)
+            stated = [r for r in _stated_for(stated_rows, kind, path, m)
+                      if ((r.meta or {}).get("mathema.policy") or {}).get("parameter")
+                      == path]
+            wrong = [r for r in stated if r.verdict == "falsified"]
+            if wrong:
+                w = wrong[0]
+                entry.update({"source": "stated"})
+                said.append(f"{m} contradicts the stated `{w.statement}`")
+                failures.append(f"{w.statement} is falsified: {w.counterexample}")
+                witness = witness or w.counterexample
+                nexts.append(((w.meta or {}).get("mathema.policy") or {}).get("next") or "")
+                continue
+            if len(ways) > 1:
+                entry["source"] = "unstated"
+                said.append(f"{m} " + _and([_did(c) + " at " + _at(c, path)
+                                            for c in ways.values()])
+                            + ", and no claim states either")
+                failures.append(f"f has no single policy for {path} ({m})")
+                witness = witness or "; ".join(_witness(c, path) for c in ways.values())
+                continue
+            behaviour, call = next(iter(ways.items()))
+            entry["behaviour"] = behaviour
+            if stated:
+                entry["source"] = "stated"
+                said.append(f"{m} {_did(call)}, stated")
+                continue
+            if behaviour == "raises":
+                row = _default_row(fn, path, kind, m, calls, "path", None, guards,
+                                   current, row_name, Probe)
+                entry.update({"source": "unstated", "exception": call.raised})
+                said.append(f"{m} raises {call.raised}, and no claim says it may")
+                failures.append(f"f raised {call.raised} at {_at(call, path)}, and no "
+                                f"claim says it may")
+                witness = witness or _witness(call, path)
+                nexts.append(((row.meta or {}).get("mathema.policy") or {}).get("next")
+                             or "")
+                continue
+            entry["source"] = "observed"
+            said.append(f"{m} {_did(call)}, {_confirmed(calls, current, False, path)}; "
+                        f"no claim states it yet")
+            if weakest == "proven":
+                weakest = "holds"
+        if said:
+            parts.append(f"{path} (field): {_by_member(said)}")
     if kind == "absent" and whole:
         # what the output may be: a None from present inputs is the
         # return type's to declare

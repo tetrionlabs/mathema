@@ -3510,7 +3510,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             if completed:
                 cj = _dc_replace(cj, domain=completed)
             admitted_now = _missing_record({**implied, **(cj.domain or {})})
-            if not admitted_now and ((probe.meta or {}).get("mathema.missing") or {}).get("returned"):
+            ran = (probe.meta or {}).get("mathema.missing") or {}
+            if not admitted_now and (ran.get("returned") or ran.get("said")):
+                # what f did at a missing input the parameters' own
+                # bindings do not admit (a path's) is still said
                 admitted_now = {"admitted": {}}
             if admitted_now:
                 earlier = (probe.meta or {}).get("mathema.missing") or {}
@@ -7539,9 +7542,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             containers[_p] = made
 
     def completed_at(point_args) -> bool:
-        # a missing input the claim's own binding does not list
-        return any(inputs_missing([v]) and not _lists_sentinel(cj_domain.get(p))
-                   for p, v in zip(kinds, point_args))
+        # a missing input the claim's own binding does not list: the
+        # parameter's binding, or the binding of the path that reached it
+        from ._missing_policy import keys_of
+        for p, v in zip(kinds, point_args):
+            for q, _k, _m in keys_of({p: v}, executed_record.paths):
+                if not _lists_sentinel(cj_domain.get(q if q in cj_domain else p)):
+                    return True
+        return False
     lap_floor = None
     def sample_bound(p):
         # a container's elements are drawn from its completed domain, so
@@ -7689,6 +7697,17 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     if said is not None and said not in words:
                         words.append(said)
         return words
+
+    # the paths the claim binds, whose absences and holes are missing
+    # inputs as a parameter's are
+    executed_record.paths = {p: [key for key in cj_domain
+                                 if key.startswith(p + ".") or key.startswith(p + "[")]
+                             for p in path_bound}
+
+    def at_missing(point_args) -> bool:
+        # a missing input: an argument that is or holds one, or a path
+        # the claim binds that reached an absence or a hole
+        return inputs_missing(point_args) or bool(path_words(point_args))
 
     def _point_text(point_args) -> str:
         # the witness's arguments, then what a path reached that is not
@@ -7982,7 +8001,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # from a BOUND function is not excused: is_defined(f)
                 # says nothing about g, and the pedantic reading stands
                 continue
-            if inputs_missing(args) and not asks_missing:
+            if at_missing(args) and not asks_missing:
                 # a raise at a missing input is classified into the
                 # executed missing inputs, never judged
                 executed_record.classified += 1
@@ -8099,7 +8118,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             cx_stratum = _machine_failure_stratum(e, _point_text(args))
             break
         if cj.relation in ("in", "not in") and not asks_missing \
-                and inputs_missing(args) \
+                and at_missing(args) \
                 and classified(args, f_call.outputs() or [lv, rv]):
             # membership in a set of values at a missing input that came
             # back missing: classified, as a value claim's point is
@@ -8130,7 +8149,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                       f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
                 break
             continue
-        missing_in = inputs_missing(args)
+        missing_in = at_missing(args)
         if missing_in and classified(args, f_call.outputs() or [lv, rv]):
             # a missing output at a missing input: classified into the
             # executed missing inputs, never judged

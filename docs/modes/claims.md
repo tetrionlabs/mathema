@@ -28,9 +28,11 @@ mathema claims KEY --write          # write the policy rows
 
 Beside the declared claims, `mathema claims KEY` lists the policy rows
 the record carries: what the function does with a missing or absent
-input, grouped by state. `--write` writes them to
+input, grouped by state ([missing values](../missing-values.md) says
+what each word means). `--write` writes them to
 `claims/policies.claims.yaml` under their record names (`missing[x]`,
-`missing[xs, null]`, `absent[x]`), each with a note saying where it
+`missing[xs, null]`, `absent[x]`, `absent[d.note, unset]` for a key
+along a path), each with a note saying where it
 came from. A row the code contradicts is written too, its note saying
 so with the date, and the write line names the three ways out: change
 the word, change the code, or accept it as a discovery. A raise no

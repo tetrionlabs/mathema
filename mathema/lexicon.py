@@ -541,6 +541,12 @@ LEXICON: dict[str, str] = {
     "is_absent_safe_gate_falsified": "is_absent_safe(f)",
     "is_empty_safe_hole": "is_empty_safe(returns)",
     "is_empty_safe_identity": "is_empty_safe(volumes)",
+    # a field or key along a path: where the None sits decides the kind,
+    # and absence has the members null (held) and unset (left out)
+    "absent_field_raises": "absent(f, trade.memo) raises(TypeError)",
+    "is_absent_safe_field": "is_absent_safe(f)",
+    "absent_key_left_out": ('for order.side in {"buy", "sell"} | {None} \\ {null}, '
+                            'len(f(order)) >= 1'),
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -662,7 +668,8 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "absent_none_spelling", "is_missing_safe_gate",
         "is_missing_safe_gate_falsified", "is_absent_safe_gate",
         "is_absent_safe_gate_falsified", "is_empty_safe_hole",
-        "is_empty_safe_identity"),
+        "is_empty_safe_identity", "absent_field_raises", "is_absent_safe_field",
+        "absent_key_left_out"),
     "languages": (
         "language_alphabet", "language_contraction",
         "language_excluding_empty", "language_membership_symbol",
@@ -831,6 +838,12 @@ TAGS: dict[str, tuple[str, ...]] = {
     "is_empty_safe_hole": ("empty", "empty array", "mean of nothing", "hole"),
     "is_empty_safe_identity": ("empty", "empty series", "sum", "identity",
                                "zero"),
+    "absent_field_raises": ("absent", "None", "field", "path", "record",
+                            "dataclass", "raises"),
+    "is_absent_safe_field": ("absent", "None", "field", "path", "gate",
+                             "unstated raise", "dataclass"),
+    "absent_key_left_out": ("absent", "unset", "null", "key", "path", "dict",
+                            "PATCH", "left out"),
 }
 
 
@@ -1556,6 +1569,23 @@ def session_volume(volumes: "pandas.Series") -> float:
     return float(volumes.sum())
 
 
+@dataclass
+class Trade:
+    """A booked trade; its memo is optional."""
+    amount: float = 100.0
+    memo: "str | None" = None
+
+
+def memo_length(trade: Trade) -> int:
+    """The length of a trade's memo; a trade with no memo raises."""
+    return len(trade.memo)  # type: ignore[arg-type]
+
+
+def side_label(order: dict) -> str:
+    """An order's side in capitals; an order with no side key raises."""
+    return order["side"].upper()
+
+
 def polars_mean(xs: "polars.Series") -> float:
     """The mean of a polars Series, which skips its nulls while values
     remain."""
@@ -1614,6 +1644,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "average_return": (average_return, ["is_empty_safe_hole"]),
     "session_volume": (session_volume, ["is_empty_safe_identity"]),
     "polars_mean": (polars_mean, ["missing_member_defined"]),
+    "memo_length": (memo_length, ["absent_field_raises"]),
+    "memo_length_gate": (memo_length, ["is_absent_safe_field"]),
+    "side_label": (side_label, ["absent_key_left_out"]),
     "max_drawdown": (max_drawdown, ["vector_drawdown_bounds"]),
     "weighted_return": (weighted_return, ["table_columns_dot"]),
     "nearly_identity": (nearly_identity, [

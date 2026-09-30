@@ -163,6 +163,9 @@ PINNED: dict = {
     "is_absent_safe_gate_falsified": ("falsified", "score = None: f raised TypeError"),
     "is_empty_safe_hole": ("falsified", "returns = [] (an empty numpy.ndarray)"),
     "is_empty_safe_identity": "proven",
+    "absent_field_raises": "holds",
+    "is_absent_safe_field": ("falsified", "trade.memo = null (absent): f raised TypeError"),
+    "absent_key_left_out": "holds",
 }
 if importlib.util.find_spec("mathema_language") is None:
     PINNED.update({key: "skipped" for key in _LANGUAGE_ROWS})

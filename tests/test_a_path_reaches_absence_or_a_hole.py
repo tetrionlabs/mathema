@@ -151,14 +151,13 @@ def test_each_member_of_absence_is_drawn_and_named(member_word, witness, shown):
     assert shown in p.counterexample, p.counterexample
 
 
-def test_a_raise_at_a_key_left_out_is_a_counterexample_naming_the_member():
-    """A path's absence is not a policy row's to account for, so a raise
-    at a key left out falsifies the value claim, the witness naming the
-    member."""
+def test_a_raise_at_a_key_left_out_is_classified_and_said_by_its_member():
+    """A raise where the path reached no value is a raise at a missing
+    input: recorded under the path and member, never a counterexample."""
     [p] = check_conjectures(note_upper, [claim(
         'for d.note in {"a", "b"} | {None} \\ {null}, len(f(d)) == 1', route="probe")])
-    assert p.verdict == "falsified", (p.verdict, p.note)
-    assert "d.note unset: raised KeyError" in p.counterexample, p.counterexample
+    assert p.verdict == "holds", (p.verdict, p.note)
+    assert "at d.note, a key left out, f raised KeyError" in p.note, p.note
 
 
 def test_a_binding_that_admits_no_absence_draws_the_key_present():

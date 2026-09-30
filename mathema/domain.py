@@ -2239,11 +2239,12 @@ def _parse_binding(part: str):
     rest = text[m.end():].strip()
     if not rest:
         return f"{part!r}: {name!r} has no domain after the membership operator"
-    # where the path ends decides what `None` and `null` are: at an
-    # element (`o.lines[*]`) a hole, at a field (`o.note`) an absence
+    # where the binding sits decides what `None` and `null` are: at an
+    # element (`o.lines[*]`, a space's slots) a hole, at a parameter or a
+    # field (`x`, `o.note`) an absence
     is_path = "." in name or "[" in name
     element_path = is_path and name.rstrip().endswith("]")
-    on_field = is_path and not element_path
+    on_field = not element_path
     # a VECTOR/MATRIX space power binds the whole element domain:
     # `[0,1]^n`, `R^(m*n)`, or the unicode superscript forms. The caret
     # is the one at bracket depth zero, so an endpoint like `10^6`
@@ -2283,7 +2284,8 @@ def _parse_binding(part: str):
         else:
             value_pieces.append(piece)
     for word in tail_words:
-        sentinel = _sentinel_of(word, in_element=element_path, on_field=on_field)
+        sentinel = _sentinel_of(word, in_element=element_path,
+                                on_field=on_field and not space_dims)
         if space_dims and sentinel is not None and sentinel.kind == "missing":
             # a hole word after a space is about its slots
             sentinels.append(sentinel)
@@ -2330,8 +2332,11 @@ def _parse_binding(part: str):
         try:
             for v in _split_commas(excluded_text):
                 if v.strip():
-                    excluded.add(_set_value(v, in_element=element_path,
-                                            on_field=on_field))
+                    value = _set_value(v, in_element=element_path,
+                                       on_field=on_field and not space_dims)
+                    # a parameter's `null` is its absence, the whole class
+                    excluded.add(ABSENT if value == ABSENT_NULL and not is_path
+                                 else value)
         except ValueError:
             return (f"{part!r}: an excluded value in {{{excluded_text}}} isn't "
                     f"a recognized number, string, boolean, or sentinel")
@@ -2367,7 +2372,10 @@ def _parse_binding(part: str):
         unique = [s for s in unique if s not in absent_members]
         if ABSENT not in unique:
             unique.insert(0, ABSENT)
-            excluded |= {ABSENT_NULL, ABSENT_UNSET} - absent_members
+            if is_path:
+                # a parameter is always there to hold None: only a path
+                # can be left unset
+                excluded |= {ABSENT_NULL, ABSENT_UNSET} - absent_members
 
     # an enumerated domain is exactly its members: the values it lists
     # and the sentinels it lists, one set

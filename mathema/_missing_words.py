@@ -143,6 +143,98 @@ def said(param: str, member: str, point: dict, output=None,
     return f"{at} f returned {shown}"
 
 
+def _unset_reason(value, root: str, where: tuple) -> str:
+    """Why a path reached no position: `a key left out`, `an attribute
+    not there`, `an index past the end`, or `below an absent o.address`
+    when a step on the way held None."""
+    from .domain import path_text
+    current = value
+    for step in where:
+        if current is None:
+            break
+        if isinstance(step, int):
+            try:
+                current = current[step]
+            except (IndexError, KeyError, TypeError):
+                return "an index past the end"
+        elif isinstance(current, dict):
+            if step not in current:
+                return "a key left out"
+            current = current[step]
+        elif hasattr(current, step):
+            current = getattr(current, step)
+        else:
+            return "an attribute not there"
+    return f"below an absent {path_text(root, where)}"
+
+
+def _path_case(path: str, member: str, point: dict, kind: "str | None" = None):
+    """`(root, where)` of the first case of `member` the path reaches in
+    `point`, or None."""
+    from ._missing_policy import path_members, path_root
+    root = path_root(path)
+    for k, m, where in path_members(point.get(root), root, path):
+        if m == member and (kind is None or k == kind):
+            return root, where
+    return None
+
+
+def path_shown(path: str, member: str, point: dict, kind: "str | None" = None) -> str:
+    """What a path reached, as a witness names it: `d.note unset`,
+    `d.note = null (absent)`, `o.lines[1] = null (hole)`,
+    `o.lines[0].qty = nan`."""
+    from .domain import path_text
+    found = _path_case(path, member, point, kind)
+    if member == "unset":
+        return f"{path} unset"
+    if found is None:
+        return f"{path} = {member}"
+    root, where = found
+    at = path_text(root, where)
+    if member == "null":
+        absent = kind == ABSENT if kind else len(where) and not isinstance(where[-1], int)
+        return f"{at} = null ({'absent' if absent else 'hole'})"
+    return f"{at} = {member}"
+
+
+def path_place(path: str, member: str, point: dict, kind: "str | None" = None) -> str:
+    """Where a path reached no value, in words: `d.note, a key left
+    out`, `o.address.zip, below an absent o.address`, `d.note = null
+    (absent)`."""
+    if member != "unset":
+        return path_shown(path, member, point, kind)
+    found = _path_case(path, member, point, kind)
+    reason = (_unset_reason(point.get(found[0]), found[0], found[1])
+              if found is not None else "not there")
+    return f"{path}, {reason}"
+
+
+def path_said(path: str, member: str, point: dict, output=None,
+              raised: "str | None" = None, behaviour: "str | None" = None,
+              kind: "str | None" = None) -> str:
+    """What the function did where a path reached no value, as a fact:
+    `at d.note, a key left out, f raised KeyError`, `at d.note = null
+    (absent) f returned "-", so it drops the absence`."""
+    at = f"at {path_place(path, member, point, kind)}"
+    if member == "unset":
+        at += ","
+    if raised is not None:
+        return f"{at} f raised {raised}"
+    shown = value_shown(output)
+    hole = (kind or (MISSING if member not in ("null", "unset") else ABSENT)) == MISSING
+    what = "the hole" if hole else "the absence"
+    if behaviour == "propagates":
+        return f"{at} f gave {shown} back"
+    if behaviour == "drops":
+        return f"{at} f returned {shown}, so it drops {what}"
+    if behaviour == "converts":
+        to = "an absent result" if hole else "a hole"
+        return f"{at} f returned {shown}, so it converts {what} to {to}"
+    if behaviour == "introduces":
+        return f"{at} f returned {shown}, with a missing value where it was given none"
+    return f"{at} f returned {shown}"
+
+
 def _in_slot(value) -> bool:
     return value is not None and _elements(value) is not None
 

@@ -276,7 +276,8 @@ grammars detected: mathema; verified by this run: mathema
 
 The line also names a policy row the code contradicts: running_total
 raises TypeError when a slot of xs is None, where mathema's default row
-says propagates; the clause names the row and the word to write.
+says propagates; the clause names the row and the word to write
+([missing values](../missing-values.md#policy-rows-defaults-and-mathema-claims-write)).
 
 The ways out are real evidence (rewrite the claim or the code so a
 route can decide it) or an explicit human decision to own the gap

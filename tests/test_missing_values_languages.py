@@ -12,6 +12,7 @@ from typing import Optional
 import pytest
 
 import mathema
+from mathema.conjecture import check_conjectures
 
 from tests.test_missing_values_core import (FALSIFIED, PROVEN,
                                             PROVEN_OR_HOLDS, assert_row,
@@ -20,11 +21,10 @@ from tests.test_missing_values_core import (FALSIFIED, PROVEN,
 needs_language = pytest.mark.skipif(
     importlib.util.find_spec("mathema_language") is None,
     reason="needs the mathema-language package")
-#: the rows that read an absence along a path: what a raise at a field's
-#: absence is (a counterexample, or a behaviour a row accounts for) and
-#: whether a field's exclusion renders are open
+#: hiding a field's `\ {None}` where the field admits no None needs the
+#: field's optionality, which the language's `fields()` does not state
 paths_handoff = pytest.mark.xfail(
-    strict=True, reason="paths: a field's absence has no policy row yet")
+    strict=True, reason="needs the field's optionality from the language's fields()")
 needs_pydantic = pytest.mark.skipif(
     importlib.util.find_spec("pydantic") is None, reason="needs pydantic")
 
@@ -137,9 +137,19 @@ def test_g10_a_function_handling_every_missing_value_is_missing_safe():
 
 @needs_language
 @needs_pydantic
-@paths_handoff
-def test_o1_an_absent_optional_field_raising_falsifies():
-    assert_row(note_len, f"for o in {ORDER}, f(o) >= 0", FALSIFIED)
+def test_o1_a_raise_at_an_absent_optional_field_is_its_row_not_the_claims():
+    """The field's absence is a missing input (FM26 on a path): the value
+    claim holds on the orders with a note, and the field's own row says
+    no claim accounts for the raise."""
+    rec = mathema.check(note_len, claims=[mathema.claim(f"for o in {ORDER}, f(o) >= 0",
+                                                        name="c")])
+    rows = {p.name: p for p in rec.probes}
+    assert rows["c"].verdict in PROVEN_OR_HOLDS, (rows["c"].verdict, rows["c"].note)
+    assert rows["c[float]"].verdict == "holds", rows["c[float]"].note
+    assert "at o.note = null (absent) f raised TypeError" in rows["c[float]"].note
+    row = rows["absent[o.note]"]
+    assert row.verdict == "falsified", (row.verdict, row.note)
+    assert row.counterexample == "o.note = null (absent): f raised TypeError"
 
 
 @needs_language
@@ -164,17 +174,32 @@ def test_o4_an_absent_field_raises_typeerror():
 
 @needs_language
 @needs_pydantic
-@paths_handoff
-def test_o5_an_absent_optional_field_is_not_missing_safe():
-    probe, _ = assert_row(note_len, "is_missing_safe(f)", FALSIFIED)
-    assert "None" in witness(probe)
+def test_o5_an_absent_optional_field_is_not_absent_safe():
+    """A field's absence is the absence gate's business (R7): the gate
+    reaches into o's fields."""
+    probe, _ = assert_row(note_len, "is_absent_safe(f)", FALSIFIED)
+    assert witness(probe) == "o.note = null (absent): f raised TypeError"
 
 
 @needs_language
 @needs_pydantic
-def test_o6_an_admitted_absent_field_falsifies():
-    assert_row(note_len, f"for o in {ORDER}, o.note in L[unicode] | {{None}}, f(o) >= 0",
-               FALSIFIED)
+def test_o5_the_gate_holds_once_the_field_row_is_stated():
+    rows = check_conjectures(note_len, [
+        mathema.claim("absent(f, o.note) raises(TypeError)"),
+        mathema.claim("is_absent_safe(f)")])
+    gate = next(r for r in rows if r.statement == "is_absent_safe(f)")
+    assert gate.verdict in PROVEN, (gate.verdict, gate.note)
+
+
+@needs_language
+@needs_pydantic
+def test_o6_an_admitted_absent_field_raising_is_its_row_not_the_claims():
+    value, row = _absent_row(
+        note_len, f"for o in {ORDER}, o.note in L[unicode] | {{None}}, f(o) >= 0", "o.note")
+    assert value.verdict in PROVEN_OR_HOLDS, (value.verdict, value.note)
+    assert "at o.note = null (absent) f raised TypeError" in (value.note or "")
+    assert row.verdict == "falsified"
+    assert row.counterexample == "o.note = null (absent): f raised TypeError"
 
 
 @needs_language

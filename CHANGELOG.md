@@ -87,6 +87,20 @@ Notable changes to mathema are recorded here from its first public release onwar
   any falsified claim; the row's second line names the word to write,
   and `mathema accept KEY missing[x] --as discovery --corrected "..."`
   retires it with its witness.
+- Along a path, where the `None` sits decides the kind: a field or key
+  holding `None` is absent (member `null`), a key left out, an index
+  past the end or a step below an absent object is absent (member
+  `unset`), and an element of a list holding `None` is a hole (member
+  `null`). `\ {null}` and `\ {unset}` narrow a path binding; `null`
+  written for a parameter itself is its absence. A field's or key's
+  no-value is a missing input: a raise there is recorded and said
+  (`at d.note, a key left out, f raised KeyError`), the path has a
+  policy row (`absent(f, d.note, unset) drops`, `absent[d.note,
+  unset]`), and `is_absent_safe(f)` reaches into a record's optional
+  fields. A witness names what a path reached (`d.note unset`,
+  `o.lines[1] = null (hole)`).
+- Every witness names its arguments, `x = nan, alpha = 0.5`; a
+  parameter the claim never reads is left out.
 - `is_memory_safe` is not part of this release: it is named nowhere,
   and a claim naming it fails as an unknown predicate does, with one
   sentence saying the family is planned.

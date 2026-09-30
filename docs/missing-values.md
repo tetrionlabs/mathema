@@ -494,15 +494,26 @@ print(mathema.check(delivery_note, claims=[mathema.claim(
 
 <!-- example: slip output match=subset -->
 ```text
-  FALSIFY has_text: for order.note in {"leave at the door", "ring twice", None} \ {null}, len(delivery_note(order)) >= 1
-           counterexample order = {'extra5': 0.0}, order.note unset: raised KeyError, narrow the claim's domain to where every call returns, or state the raising region as its own raises(...) claim
+  holds   has_text: for order.note in {"leave at the door", "ring twice", None} \ {null}, len(delivery_note(order)) >= 1 (87 draws)
+  FALSIFY absent[order.note]: f raised KeyError at order.note, a key left out, and no claim says it may
 ```
 
-The witness names the member: `order.note unset` for a key left out,
+A field's no-value is a missing input as a parameter's is: the value
+claim is judged on the notes that are there, the raise at the key left
+out is said on the claim's row, and the path has a policy row of its
+own. `absent(f, order.note, unset) raises(KeyError)` states it; the
+second argument of a policy row is a parameter or a path, with the same
+member forms (`absent(f, order.note, null) drops`,
+`missing(f, order.lines[*].qty) propagates`).
+
+A witness names the member: `order.note unset` for a key left out,
 `order.note = null (absent)` for a key holding `None`, and
 `order.lines[1] = null (hole)` for an element of a list. On a path that
 ends at a field `null` is the absence member; on one that ends at an
-element (`order.lines[*]`) it is the hole member.
+element (`order.lines[*]`) it is the hole member. Written for a
+parameter itself, `null` is its absence, the same as `None`.
+`is_absent_safe(f)` reaches into a record's fields: an `Optional` field
+of a dataclass or a pydantic model is called with `None` too.
 
 ## Policy rows, defaults and `mathema claims --write`
 

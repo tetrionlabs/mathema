@@ -221,13 +221,22 @@ def test_a_datetime_member_on_a_real_series_is_refused():
 
 
 @pytest.mark.parametrize("text", ['for s in {"a", nan}, f(s) == s',
-                                  'for s in {"a", null}, f(s) == s',
+                                  'for s in {"a", missing}, f(s) == s',
                                   'for s in {"a", absent} \\ {missing}, f(s) == s'])
 def test_any_hole_written_on_a_string_is_refused(text):
     probe = run(named, text)
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
     assert ("s is a string, and a string has no hole; to admit its absence write "
             "`|absent`") in probe.note
+
+
+def test_null_at_the_top_of_a_binding_is_the_absence_member():
+    """Position decides: `null` written for a parameter itself is its
+    absence, the same set `{"a", None}` states."""
+    from mathema.domain import parse_binding
+    assert parse_binding('s in {"a", null}') == parse_binding('s in {"a", None}')
+    probe = run(named, 'for s in {"a", null}, f(s) == s')
+    assert probe.verdict != "skipped:misspecified", (probe.verdict, probe.note)
 
 
 def test_a_claim_may_widen_a_float_with_absence_and_the_none_is_executed():
