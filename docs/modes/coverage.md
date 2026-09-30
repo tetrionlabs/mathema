@@ -4,10 +4,19 @@ Implementation coverage: the share of each function's own statements that
 some evidence has exercised. Three sources count, and their union is the
 score: a test run that executed the line, read from a coverage report that
 already exists; a mathema probe that executed it while checking the
-function; and a derive-route proof of a claim included for the function,
-declared on it, in a claims file or adopted from a suggestion, which
-counts the whole body it modelled. The standard claims `coverage` checks
-while tracing, and suggestions nobody adopted, never count as proofs.
+function; and a proof of a claim included for the function, which counts
+the lines the proof modelled (the whole body, unless the proof was over
+part of the domain and names its branches). A proof is one on the derive
+route or one from the function's structure (the examine route).
+
+A claim is included when it is declared on the function (a docstring or
+decorator claim), when it sits in a claims file and `mathema verify` has
+recorded it, or when it is a suggestion you adopted into a claims file or
+accepted with `mathema accept --as evidence`. A claims-file claim the
+coverage run proves on its own does not count until verify has recorded
+it, so coverage never certifies itself. The standard claims `coverage`
+checks while tracing, and suggestions nobody adopted, never count as
+proofs.
 
 ```bash
 mathema coverage [targets] [--root .]

@@ -3752,7 +3752,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 if (derived is not None and derived.verdict == "falsified"
                         and cj.route != "derive"
                         and families.claim_base_name(cj.name)
-                        == "is_deterministic"):
+                        == "is_deterministic"
+                        and cj.relation == "=="
+                        and (cj.lhs or "").replace(" ", "")
+                        == (cj.rhs or "").replace(" ", "")):
                     # a proof reads `f(x) == f(x)` as false only where
                     # the call has no value (it raises, or returns
                     # NaN), and determinism compares two calls by kind,
@@ -3847,7 +3850,7 @@ def pseudo_infinity_condition(cj, facts, parent_domain: "dict | None",
     from .records import operational_infinity
     found = operational_infinity(cj)
     if (found is None or found.source == "claim"
-            or (probe.route or "").split(":", 1)[0] == "derive"):
+            or routes.is_proof_route(probe.route)):
         return probe.condition
     rest = probe.condition
     if not rest:
@@ -6289,8 +6292,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     if algo_route is not None:
         # the probe is registered under "probe:algorithmic", but a member
         # may name a more specific mechanism to stamp (fuzz + shrink ->
-        # "probe:minimal_example"); evidence_rank folds any subroute back
-        # to the "probe" rung, so this is descriptive, not a strength claim.
+        # "probe:minimal_example"); the stamped subroute has its own rung
+        # on EVIDENCE_LADDER.
         probe_route = getattr(family, "probe_route", "probe:algorithmic")
         setup = sampling()
         from . import _premises
@@ -7256,7 +7259,10 @@ def evidence_rank(route_or_class: str) -> int:
         strong as an ordinary route="probe" claim, it just tried
         derive first and reports why it fell back), but a suffix can
         also name a genuinely stronger rung of its own, as
-        `probe:algorithmic`/`probe:semi_analytical` do here. A value
+        `probe:algorithmic`/`probe:semi_analytical` do here. An unlisted
+        `derive:<mechanism>` (a language strategy's) ranks as the
+        default path ranks a wider mechanism, with `derive:extensive`;
+        `derive:language` (no mechanism named) ranks with `derive`. A value
         this ladder doesn't recognize at all (a custom route from a
         different verification technique, per record-schema.md's "Open
         for extension") ranks last, weaker than every known value,
@@ -7266,11 +7272,17 @@ def evidence_rank(route_or_class: str) -> int:
         NotOnTheLadder: for `axiom`, which is not evidence of any
             strength.
     """
-    base = route_or_class.split(":", 1)[0]
+    base, _, sub = route_or_class.partition(":")
     if base in _OFF_THE_LADDER:
         raise NotOnTheLadder(f"{route_or_class!r} is not on the evidence "
                              f"ladder: {_OFF_THE_LADDER[base]}")
-    for candidate in (route_or_class, base):
+    candidates = [route_or_class]
+    if base == "derive" and sub and sub not in ("language", "domain_split"):
+        # a language strategy's `derive:<mechanism>`: ranked as the
+        # default path ranks a wider mechanism, derive:extensive
+        candidates.append("derive:extensive")
+    candidates.append(base)
+    for candidate in candidates:
         for rank, rung in enumerate(EVIDENCE_LADDER):
             if candidate in rung:
                 return rank

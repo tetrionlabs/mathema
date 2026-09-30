@@ -462,7 +462,7 @@ def test_a_proof_of_a_declared_docstring_claim_counts(tmp_path):
     assert "derive" in fc.by_source
 
 
-def test_a_proof_of_a_claim_in_the_project_claims_file_counts(tmp_path):
+def test_a_claims_file_claim_counts_once_verify_has_recorded_it(tmp_path):
     import sys
     pkg = tmp_path / "filedecl"
     pkg.mkdir()
@@ -480,13 +480,18 @@ def test_a_proof_of_a_claim_in_the_project_claims_file_counts(tmp_path):
     """))
     sys.path.insert(0, str(tmp_path))
     try:
-        pc = project_coverage(["filedecl.mod"], root=str(tmp_path))
+        # coverage never certifies itself: the claim counts only once
+        # verify has recorded it
+        (fc,) = project_coverage(["filedecl.mod"], root=str(tmp_path)).functions
+        assert "derive" not in fc.by_source
+        from mathema.verify import verify_project
+        verify_project(str(tmp_path))
+        (fc,) = project_coverage(["filedecl.mod"], root=str(tmp_path)).functions
+        assert "derive" in fc.by_source
     finally:
         sys.path.remove(str(tmp_path))
         for m in [m for m in sys.modules if m.startswith("filedecl")]:
             del sys.modules[m]
-    (fc,) = pc.functions
-    assert "derive" in fc.by_source
 
 
 def test_derive_lines_come_only_from_claims_included_for_the_function():
@@ -499,9 +504,55 @@ def test_derive_lines_come_only_from_claims_included_for_the_function():
                                      meta={"mathema.surface": surface},
                                      note="")
     statements = {2, 3}
-    for surface in ("mathema", "builtin", "compendium"):
+    for surface in ("mathema", "builtin", "compendium", "declared"):
         record = types.SimpleNamespace(probes=[proven(surface)])
         assert _derive_covered_lines(record, statements) == set(), surface
-    for surface in ("docstring", "decorator", "declared", "types"):
+    for surface in ("docstring", "decorator", "types"):
         record = types.SimpleNamespace(probes=[proven(surface)])
         assert _derive_covered_lines(record, statements) == statements, surface
+
+
+def _proven_row(surface, route="derive", name="c"):
+    import types
+    return types.SimpleNamespace(name=name, route=route, verdict="proven",
+                                 meta={"mathema.surface": surface}, note="")
+
+
+def test_a_claims_file_claim_counts_only_when_recorded_by_verify():
+    import types
+
+    from mathema.impl_coverage import _derive_covered_lines
+    record = types.SimpleNamespace(probes=[_proven_row("declared")])
+    assert _derive_covered_lines(record, {2}) == set()
+    assert _derive_covered_lines(record, {2}, recorded={"c"}) == {2}
+
+
+def test_a_suggestion_accepted_as_evidence_counts_as_included():
+    import types
+
+    from mathema.impl_coverage import _derive_covered_lines
+    record = types.SimpleNamespace(probes=[_proven_row("mathema")])
+    assert _derive_covered_lines(record, {2}) == set()
+    assert _derive_covered_lines(record, {2}, accepted={"c"}) == {2}
+
+
+def test_an_examine_proof_of_an_included_claim_counts_as_derive_does():
+    import types
+
+    from mathema.impl_coverage import _derive_covered_lines
+    record = types.SimpleNamespace(probes=[_proven_row("docstring", "examine")])
+    assert _derive_covered_lines(record, {2, 3}) == {2, 3}
+
+
+def test_an_included_examine_claim_covers_the_body_end_to_end(tmp_path):
+    mod = _load(tmp_path, '''
+        def fee(x: float) -> float:
+            """A flat fee.
+
+            Claims:
+                is_state_safe: is_state_safe(f)
+            """
+            return 2.0
+    ''', name="examined")
+    fc = function_coverage(mod.fee, root=str(tmp_path), coverage_data={})
+    assert "derive" in fc.by_source

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """mathema/conjecture.py's EVIDENCE_LADDER/evidence_rank(): route
-strength ordering, including the tie between probe:semi_analytical and
-probe:algorithmic, no test coverage existed for either before this."""
+strength ordering, the routes tied on one rung, every route the engine
+emits placed, and the routes that are not on the ladder at all."""
 import os
 import re
 
@@ -93,3 +93,16 @@ def test_an_axiom_is_not_on_the_ladder():
     with pytest.raises(NotOnTheLadder, match="trusted, not adjudicated"):
         evidence_rank("axiom")
 
+
+
+def test_the_public_evidence_rank_raises_for_an_axiom():
+    from mathema.interfaces.extension import evidence_rank as public
+    with pytest.raises(NotOnTheLadder):
+        public("axiom")
+
+
+def test_a_language_strategy_route_ranks_as_the_default_path_would():
+    # a strategy reports derive:<its mechanism>; the default path calls
+    # a wider mechanism derive:extensive, and the plain one derive
+    assert evidence_rank("derive:language") == evidence_rank("derive")
+    assert evidence_rank("derive:sturm") == evidence_rank("derive:extensive")

@@ -165,3 +165,15 @@ def test_the_hidden_read_caveat_reads_as_one_sentence():
     assert ("the body reads os.environ, which does not change between two "
             "back-to-back calls, so this holds only while it stays as it is"
             ) in p.note, p.note
+
+
+def minus_five(x: float) -> float:
+    return x - 5
+
+
+def test_the_derive_override_is_for_the_self_equality_statement_only():
+    # a claim named is_deterministic that states something else keeps
+    # the derive route's disproof
+    (p,) = check_conjectures(minus_five, [mathema.claim(
+        "f(x) >= 0", name="is_deterministic")])
+    assert (p.verdict, p.route) == ("falsified", "derive"), (p.verdict, p.note)

@@ -1354,10 +1354,9 @@ def _is_deterministic_derive(fn, facts, lhs_src: str, rhs_src: str,
         time, nothing external can change state within it and no
         seed is involved anywhere. A body that lifts to a closed
         symbolic form is deterministic by construction: the form has
-        no state to vary with. Undecided (None) otherwise: the
-        generic empirical loop (f(...) == f(...), re-evaluated per
-        trial) is the runtime half that catches a body reading time,
-        RNG state, or mutable globals.
+        no state to vary with. Undecided (None) otherwise, and for a
+        body that reads the clock, the environment or a file;
+        `_deterministic_probe` is the runtime half.
 
     Notes:
         The maths is deterministic by definition; determinism is the

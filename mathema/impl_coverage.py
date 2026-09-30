@@ -12,12 +12,13 @@ unioned:
   tracing `check(fn)` (its sampling calls the function across branches);
 - **derive**: a derive-route proof modeled it: a symbolic proof never
   runs the code, so tracing cannot see it, but a body the lift closed is
-  established more strongly than execution. Only a claim included for
-  the function counts (declared on it, in the project's claims files, or
-  accepted into them) and only once this pass has proved it; the
-  standard claims mathema checks while tracing, and suggestions nobody
-  included, never do. A proof counts the lines its own per-branch
-  attribution names, else the whole body.
+  established more strongly than execution. A proof is a `derive` or an
+  `examine` row. Only a claim included for the function counts: one
+  declared on it, a claims-file claim once `verify` has recorded it, or
+  a suggestion adopted into the claims files or accepted as evidence;
+  the standard claims mathema checks while tracing, and suggestions
+  nobody included, never do. A proof counts the lines its own
+  per-branch attribution names, else the whole body.
 
 A STALE external test report does NOT count toward the score: its lines
 may not even map to the current code. A report stamped with its sources'
@@ -175,36 +176,61 @@ def _plain_check(fn, declared: dict | None = None):
         return None
 
 
-_INCLUDED_SURFACES = frozenset({"declared", "docstring", "decorator",
-                                "types", "ad_hoc"})
+_INCLUDED_SURFACES = frozenset({"docstring", "decorator", "types", "ad_hoc"})
 
 
-def _derive_covered_lines(record, statements: set) -> set:
-    """Lines the derive route established on this function: a proof's own
+def _derive_covered_lines(record, statements: set, recorded=frozenset(),
+                          accepted=frozenset()) -> set:
+    """Lines a proof established on this function: a proof's own
     per-branch attribution (`mathema.derive_lines`, set by the prover for
     a domain-restricted proof) when it recorded one, else the whole body
     for a proven claim (a straight-line proof reasons about all of it).
-    Only a claim included for the function counts: one authored on it or
-    in the project's claims files (`records.row_source` names the
-    surface). The structural battery, mathema's suggestions and
-    compendium rows are left out. A proof never executes the code, so
-    this is added on top of the traced probe/test lines."""
+    A proof is a `derive` or an `examine` row (`routes.is_proof_route`).
+    Only a claim included for the function counts: one authored on it
+    (`records.row_source` names the surface); a claims-file claim once
+    `verify` has recorded it (its name in `recorded`), since this pass's
+    own proof does not verify it; and a suggestion accepted as evidence
+    (its name in `accepted`). The structural battery, other suggestions
+    and compendium rows are left out. A proof never executes the code,
+    so this is added on top of the traced probe/test lines."""
     from .records import row_source
+    from .routes import is_proof_route
 
     covered: set = set()
     if record is None:
         return covered
     for p in getattr(record, "probes", []) or []:
-        route = getattr(p, "route", None) or ""
-        if (route.split(":", 1)[0] != "derive"
+        if (not is_proof_route(getattr(p, "route", None))
                 or getattr(p, "verdict", None) != "proven"):
             continue
-        if row_source(getattr(p, "meta", None),
-                      getattr(p, "note", "") or "") not in _INCLUDED_SURFACES:
+        surface = row_source(getattr(p, "meta", None),
+                             getattr(p, "note", "") or "")
+        name = getattr(p, "name", None)
+        included = (surface in _INCLUDED_SURFACES
+                    or (surface == "declared" and name in recorded)
+                    or (surface == "suggested" and name in accepted))
+        if not included:
             continue
         lines = (getattr(p, "meta", None) or {}).get("mathema.derive_lines")
         covered |= set(lines) if lines is not None else set(statements)
     return covered & statements
+
+
+def _verified_names(key: str, root: str) -> tuple:
+    """Intent:
+        From the function's verified record: the claim names verify has
+        recorded, and the ones a person accepted as evidence.
+    """
+    try:
+        from .spec import load_verified
+        entry = (load_verified(root).get(key) or {}).get("entry") or {}
+    except Exception:
+        return frozenset(), frozenset()
+    claims = entry.get("claims") or []
+    recorded = frozenset(c.get("name") for c in claims if c.get("verdict"))
+    accepted = frozenset(c.get("name") for c in claims
+                         if (c.get("accepted") or {}).get("as") == "evidence")
+    return recorded, accepted
 
 
 def function_coverage(fn, key: str | None = None, root: str = ".",
@@ -254,7 +280,9 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
     by_source: dict = {}
     if probe_executed and not _is_mathema_own(fn):
         by_source["probe"] = probe_executed & statements
-    derive_lines = _derive_covered_lines(record, statements)
+    recorded, accepted = _verified_names(key, root)
+    derive_lines = _derive_covered_lines(record, statements, recorded,
+                                         accepted)
     if derive_lines:
         by_source["derive"] = derive_lines
     test_lines = _external_lines(fn, coverage_data) & statements
