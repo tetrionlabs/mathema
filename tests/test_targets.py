@@ -135,3 +135,33 @@ def test_colon_form_names_a_library_callable_that_is_not_a_plain_function():
     assert "KEYS ['numpy.clip']" in r.stdout, r.stdout + r.stderr
     assert "WALKED False" in r.stdout
     assert "I made it!" not in r.stdout
+
+
+def _resolve_in_subprocess(target: str):
+    import subprocess
+    import sys
+    script = ("import sys\n"
+              "from mathema.targets import resolve, TargetError\n"
+              "try:\n"
+              f"    resolve({target!r})\n"
+              "    print('RESOLVED')\n"
+              "except TargetError as e:\n"
+              "    print('ERROR', e)\n"
+              "print('WALKED', 'numpy.f2py' in sys.modules)\n")
+    return subprocess.run([sys.executable, "-c", script],
+                          capture_output=True, text=True, timeout=120)
+
+
+@pytest.mark.parametrize("target, said", [
+    ("numpy:nosuch", "numpy has no function 'nosuch'"),
+    ("numpy:pi", "'numpy:pi' names a float, not a function"),
+    ("numpy:float64", "'numpy:float64' names a class"),
+])
+def test_a_colon_form_that_names_no_library_function_is_one_mathema_line(
+        target, said):
+    pytest.importorskip("numpy")
+    r = _resolve_in_subprocess(target)
+    lines = r.stdout.splitlines()
+    assert lines[0].startswith("ERROR ") and said in lines[0], r.stdout + r.stderr
+    assert lines[-1] == "WALKED False", r.stdout
+    assert len(lines) == 2, r.stdout   # nothing else printed
