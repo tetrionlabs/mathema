@@ -1873,9 +1873,11 @@ def _assumption_rewrites(bound_context) -> list:
         if pred == sympy.Q.zero:
             out.append((rest, -const))
         else:
-            t = sympy.Dummy("assumed",
-                            positive=(pred == sympy.Q.positive),
-                            nonnegative=True)
+            # a slack ranging over every nonnegative value (every
+            # positive one for a strict premise)
+            t = (sympy.Dummy("assumed", positive=True)
+                 if pred == sympy.Q.positive
+                 else sympy.Dummy("assumed", nonnegative=True))
             out.append((rest, t - const))
     return out
 
