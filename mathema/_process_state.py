@@ -529,3 +529,51 @@ def hidden_reads(fn, facts) -> list[str]:
             if resolved in _HIDDEN_READ_CALLS:
                 add(resolved)
     return found
+
+
+#: the methods that emit a log record; emitting is not a state change
+_EMIT_METHODS = frozenset({"debug", "info", "warning", "warn", "error",
+                           "exception", "critical", "fatal", "log"})
+
+
+def _is_logger(obj) -> bool:
+    return isinstance(obj, (logging.Logger, logging.LoggerAdapter))
+
+
+def log_emissions_only(fn, facts) -> bool:
+    """Intent:
+        Whether every external write site in the body, and every
+        module-level value it reads, is a logger emitting a record: a
+        call of `debug`, `info`, `warning`, `error`, `exception`,
+        `critical` or `log` on a module-level logger, or on
+        `logging.getLogger(...)`. Emitting is not a state change, so such
+        a body is as write-free as one with no sites at all. A call that
+        configures logging is not an emission and keeps the body out.
+    """
+    from ._signatures import module_scope
+    from .hazards import _state_writes
+    tree = getattr(facts, "tree", None)
+    if tree is None or getattr(facts, "unresolved", None):
+        return False
+    scope = module_scope(fn)
+    if any(not _is_logger(scope.get(name))
+           for name in getattr(facts, "global_vars", None) or ()):
+        return False
+    writes = _state_writes(facts)
+    if not writes:
+        return False
+    emitted = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in _EMIT_METHODS):
+            continue
+        owner = node.func.value
+        if isinstance(owner, ast.Name) and _is_logger(scope.get(owner.id)):
+            emitted.add(f"{owner.id}.{node.func.attr}")
+        elif (isinstance(owner, ast.Call) and _dotted(owner.func) is not None
+              and _dotted(owner.func).split(".")[-1] == "getLogger"
+              and scope.get(_dotted(owner.func).split(".")[0]) in (
+                  logging, logging.getLogger)):
+            emitted.add(_dotted(owner.func))
+    return all(w.get("kind") == "external_method_call"
+               and w.get("target") in emitted for w in writes)

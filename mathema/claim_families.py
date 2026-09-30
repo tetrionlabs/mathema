@@ -926,7 +926,7 @@ def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         core concern). rhs_src/relation/tolerance kept for protocol
         uniformity.
     """
-    from ._process_state import writer_calls
+    from ._process_state import log_emissions_only, writer_calls
     from .hazards import _write_free
     from .symbolic import ProofResult, lift
     if writer_calls(fn, facts):
@@ -941,6 +941,12 @@ def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                    "argument mutation, no global or module write, no "
                    "dynamic escape) and every name resolves; there "
                    "is no state to mutate")
+    if log_emissions_only(fn, facts):
+        return ProofResult(
+            "proven",
+            sketch="the only external calls in the body emit log records, "
+                   "which change no state; there is no argument mutation, "
+                   "no global or module write and no dynamic escape")
     try:
         lifted = lift(fn, facts)
     except Exception:
