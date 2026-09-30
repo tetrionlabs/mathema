@@ -373,7 +373,7 @@ Option:
   defines: ["absent := {Option::None}"]
 std::iter::Iterator.sum:
   claims:
-    - {name: missing, statement: "for a in (R | {nan})^n, assuming any_missing(a), f(a) in {missing}"}
+    - {name: "missing[a]", statement: "missing(f, a) propagates"}
 ```
 
 ```yaml
@@ -385,9 +385,15 @@ java.lang.Object:
   defines: ["absent := {null}"]
 java.util.stream.DoubleStream.average:
   claims:
-    - {name: absent, statement: "for a in {absent}, raises(f(a), NullPointerException)"}
-    - {name: missing, statement: "for a in (R | {nan})^n, assuming any_missing(a), f(a) in {missing}"}
+    - {name: "absent[a]", statement: "absent(f, a) raises(NullPointerException)"}
+    - {name: "missing[a]", statement: "missing(f, a) propagates"}
 ```
+
+A library's policy rows, what each function does with a value that is
+not there, are ordinary rows in the same file; a user function whose
+body makes one call inherits them, as `numpy.mean`'s
+`missing(f, a) propagates` becomes the row of a function returning
+`float(np.mean(xs))` ([missing values](missing-values.md)).
 
 A TypeScript compendium writes `absent := {undefined, null}` on its object
 key; `null` in `missing := {null}` on an array key is a different set,

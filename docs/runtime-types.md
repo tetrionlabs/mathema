@@ -125,11 +125,14 @@ declared, a raise falsifies as always.
 | `polars.Series` | vector | null, NaN | |
 | `polars.DataFrame` | table | null, NaN | |
 
-Missing is one concept in mathema, whatever a library calls it: every
-spelling in the table reads back as missing when a function returns
-it, a polars NaN included (polars itself treats NaN as an ordinary
-float), and an adapter can realise a missing position in each of its
-spellings (the first one listed is the one it uses by default).
+A missing position is a hole, one concept in mathema whatever a library
+calls it: every spelling in the table reads back as `missing` when a
+function returns it, a polars NaN included (polars itself treats NaN as
+an ordinary float), and an adapter can realise a hole in each of its
+spellings (the first one listed is the one it uses by default). The
+container itself set to `None` is `absent`, the other kind. What a
+function does with each is its policy row; see [missing
+values](missing-values.md).
 
 numpy, pandas and polars stay optional: an adapter whose library is not
 installed is absent, and a parameter it would have claimed is sampled

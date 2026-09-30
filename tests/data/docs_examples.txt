@@ -62,6 +62,7 @@
 [x] docs/matrix-structure.md:numpy-functions     run verdicts verdicts  (requires)
 [x] docs/matrix-structure.md:enforce-structure   run  (requires)
 [x] docs/mean-of-nothing.md:mean                 file run output run output run output run output file run output
+[-] docs/mean-of-nothing.md:21
 [x] docs/missing-values.md:kinds                 file run output
 [x] docs/missing-values.md:admits                file run output
 [x] docs/missing-values.md:traps                 run output
@@ -100,13 +101,13 @@
 [-] docs/runtime-types.md:105
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
-[ ] docs/symbology.md:134
+[ ] docs/symbology.md:135
 [-] docs/three-layers.md:36
 [x] docs/tutorial.md:loop                        file run file run output file run output run output run output run output run output
 [x] README.md:parity                             file run output
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output
-[-] README.md:188
-[-] README.md:286
+[-] README.md:192
+[-] README.md:290
 
 # 92 examples checked, 4 output fences not yet marked

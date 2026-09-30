@@ -75,8 +75,12 @@ that proof's `[float]` companion, a separate claim that runs the same identity
 through the real code in floating point at the region's corners and across its
 interior, because a proof is about the mathematics and whether its
 computation keeps up with it in float64 is a different question, answered here
-by `holds`. The [claim grammar](https://mathema.tetrionlabs.com/grammar/) has
-the full notation.
+by `holds`. The other five rows are policy claims, one per parameter,
+saying what the function does with a missing value (`missing(f, s)
+propagates`: a `nan` in gives a `nan` back), each checked on the calls
+already made; [missing values](https://mathema.tetrionlabs.com/missing-values/)
+explains them. The [claim grammar](https://mathema.tetrionlabs.com/grammar/)
+has the full notation.
 
 The domain is doing real work: drop it and the same claim comes back
 `falsified`, with a counterexample at a negative maturity where `math.sqrt(t)`

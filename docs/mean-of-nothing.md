@@ -15,6 +15,16 @@ def mean_return(xs: pd.Series) -> float:
     return float(xs.mean())
 ```
 
+The series it will meet, slot by slot:
+
+<!-- illustration -->
+```text
+[0.02, NaN, -0.01]     slot 1 is a hole (member nan): pandas skips it, mean 0.005
+[NaN, None]            every slot a hole (members nan, null): pandas gives NaN
+[<NA>]                 every slot a hole (member NA): xs.mean() is pd.NA
+[]                     no slots at all: empty, not missing
+```
+
 ## The value claim holds
 
 A mean of returns in `[-1, 1]` lies in `[-1, 1]`:

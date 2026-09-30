@@ -201,31 +201,13 @@ for n in Z, ...                                # bare, unbounded, still a stated
 
 ### Missing values
 
-A value can be not there in two ways. Absent (`absent`; Python spells
-it `None`) means the object itself is not there: the argument, the
-whole vector, a field. Missing (`missing`, `∅` in unicode) means one
-slot holds no computable value: a `nan` in a float, a `None` or `nan`
-element of a list, a `pd.NA` in a Series. `nan`, `NA`, `null` and `NaT`
-each name one member of the missing class, and a compendium can add more
-(see [Definitions](claims-transfer.md#definitions)).
-
-A domain says which kinds it admits. A type clause states exactly what
-the domain admits, so `[0, 1] : float` admits neither, `[0, 1] : float|absent` admits
-absence, `[0, 1] : float|missing` a hole, and `[0, 1] : float|nan` only
-the NaN member; `\ {missing}` and `\ {absent}` exclude a kind. A bare
-interval and a bare named space (`R`, `R^n`, `Z`) state nothing. A finite set
-is exactly its members: `{6, 28, 496}` admits nothing missing and
-`{0.25, absent}` admits 0.25 and absence. Inside a space the slot's holes
-sit in brackets before the power, `([0, 1] | {missing})^n`.
-
-A binding without a type clause takes what it admits from the
-parameter's annotation: a `float` slot may hold its NaN hole, an `int`, `bool` or
-`str` holds none, `Optional[...]` may be absent, a `list` element may be
-`null` or `nan`, and a parameter with no annotation admits both. The
-record's `meta["mathema.missing"]` names the members the class resolved
-to, and a written clause wins over the annotation, the note saying
-whether it widens or narrows it. The statement shows what the domain
-admits:
+A value can be not there in two ways: **absent** (`None`, the object
+itself) and **missing** (a hole in a slot: `nan`, a `None` element,
+`pd.NA`). A domain says which it admits (`: float|missing`, `\ {absent}`),
+and a binding without a type clause takes that from the annotation. What
+a function does with each is its policy, stated as a claim
+(`missing(f, x) propagates`). [Missing values](missing-values.md) is the
+full account. The statement shows what the domain admits:
 
 <!-- example: missing-default run -->
 ```python

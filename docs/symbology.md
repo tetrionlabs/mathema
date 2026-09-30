@@ -58,7 +58,8 @@ The ASCII form writes `[0.0, 1.0] : float|absent|missing` where the
 Unicode form writes `[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}`. Both say the same
 three things: the interval, that the object may be absent (`absent`,
 which `None` also spells), and that its slot may hold a hole
-(`missing`, `∅`). A domain renders what it admits and never what it
+(`missing`, `∅`); see [missing values](missing-values.md) for the two
+words. A domain renders what it admits and never what it
 excludes, in the order `absent`, `missing`, then
 member words (`nan`, `NA`, `null`, `NaT`). A type clause admits what
 it lists and nothing else, so `[0, 100] ⊂ Z` renders `[0, 100] ⊂ ℤ`
