@@ -926,8 +926,14 @@ def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         core concern). rhs_src/relation/tolerance kept for protocol
         uniformity.
     """
+    from ._process_state import writer_calls
     from .hazards import _write_free
     from .symbolic import ProofResult, lift
+    if writer_calls(fn, facts):
+        # a bare call of a process-state writer (os.putenv, random.seed,
+        # a draw from the global generator) is a write site the
+        # certificate below does not see
+        return None
     if _write_free(facts):
         return ProofResult(
             "proven",
@@ -950,12 +956,16 @@ def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
 def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
                  trials: int):
     """Empirical half of is_state_safe: deep-copy the arguments and
-    snapshot the function's module globals (data entries only) before
-    a call, compare after, an observed mutation falsifies naming
-    the mutated target. Clean rounds hold: an unexecuted branch may
-    still hide a write, so trials never establish this fact."""
+    snapshot the function's module globals (data entries only) and the
+    process-wide state (`_process_state`) before a call, compare after,
+    an observed mutation falsifies naming the mutated target. The
+    process-wide state is put back after every call. Clean rounds hold:
+    an unexecuted branch may still hide a write, so trials never
+    establish this fact."""
     import copy
     import types
+
+    from . import _process_state
     if not facts.params:
         return None
     target = facts.params[0]
@@ -990,11 +1000,26 @@ def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
             before_copy = {k: copy.deepcopy(v) for k, v in before.items()}
         except Exception:
             before_copy = None
+        process_before = _process_state.snapshot()
         try:
-            with _pinned_float_env():
+            with _process_state.watching_putenv(fn) as env_calls, \
+                    _pinned_float_env():
                 fn(*call_args)
         except Exception:
             return None   # a raising point says nothing about mutation
+        finally:
+            process_after = _process_state.snapshot()
+            _process_state.restore(process_before)
+        changed = _process_state.changes(process_before, process_after)
+        if changed:
+            return (f"calling the function changed process-wide state: "
+                    f"{'; '.join(changed)}")
+        if env_calls:
+            # os.environ's own writes go through os.putenv too; a call
+            # os.environ does not show is a write to the C environment
+            writer, name = env_calls[0]
+            return (f"calling the function called {writer}({name!r}), "
+                    f"which changes the process environment")
         for p, original, after in zip(facts.params, originals, call_args):
             same = (original == after
                     or (isinstance(original, float) and original != original
