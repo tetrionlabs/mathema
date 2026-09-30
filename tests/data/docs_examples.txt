@@ -4,7 +4,14 @@
 # [x] page:id  roles         a marked example, run and compared
 # [ ] page:line               an unmarked fence that shows output
 # [-] page:line               marked as an illustration, not a run
+# [h] page:line               a command checked by hand, not run here
 
+[h] docs/agent-setup.md:19
+[h] docs/agent-setup.md:40
+[h] docs/agent-setup.md:59
+[h] docs/agent-setup.md:82
+[h] docs/agent-setup.md:99
+[h] docs/agent-setup.md:119
 [x] docs/authoring.md:raises-guard               run verdicts
 [x] docs/authoring.md:write-spec                 run repl
 [x] docs/case-studies.md:parity                  verdicts
@@ -90,6 +97,10 @@
 [x] docs/runtime-types.md:rt-proofs              run verdicts verdicts verdicts run output  (requires)
 [x] docs/runtime-types.md:rt-drawdown            run verdicts run output verdicts  (requires)
 [-] docs/runtime-types.md:105
+[h] docs/start.md:40
+[h] docs/start.md:71
+[h] docs/start.md:99
+[h] docs/start.md:124
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
 [ ] docs/symbology.md:127
@@ -101,4 +112,4 @@
 [-] README.md:188
 [-] README.md:286
 
-# 86 examples checked, 4 output fences not yet marked
+# 86 examples checked, 4 output fences not yet marked, 10 commands checked by hand

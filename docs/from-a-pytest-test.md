@@ -64,10 +64,15 @@ installed:
 mathema verify claims/numpy.claims.yaml --root .
 ```
 
-<!-- example: ptp output -->
+<!-- example: ptp output wrap=80 -->
 ```text
-note numpy.ptp: at_most_the_largest falsified on first adjudication. A declared claim is kept until a human decides it (fix the code, `mathema accept numpy.ptp <claim> --as discovery`, or supersede it). To try a spelling first, `mathema check numpy.ptp --claim "..."` adjudicates it and writes nothing.
-FAIL numpy.ptp: library claims from claims/numpy.claims.yaml; no baseline record; 1 proven, 0 holds, 1 falsified  <- 1 falsified claim(s)
+note numpy.ptp: at_most_the_largest falsified on first adjudication. A declared
+    claim is kept until a human decides it (fix the code, `mathema accept
+    numpy.ptp <claim> --as discovery`, or supersede it). To try a spelling
+    first, `mathema check numpy.ptp --claim "..."` adjudicates it and writes
+    nothing.
+FAIL numpy.ptp: library claims from claims/numpy.claims.yaml; no baseline
+    record; 1 proven, 0 holds, 1 falsified  <- 1 falsified claim(s)
 0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -104,24 +109,42 @@ which is fine when a person types the command:
 mathema accept numpy.ptp at_most_the_largest --as discovery --corrected "for a in [-100, 100]^n, f(a) == max(a) - min(a)" --by "Ada Lovelace" --yes
 ```
 
-<!-- example: ptp output match=subset -->
+<!-- example: ptp output match=subset wrap=80 -->
 ```text
-accepting numpy.ptp :: at_most_the_largest (verdict falsified) as discovery, by Ada Lovelace
-  - move at_most_the_largest to the record's discoveries section (superseded_by: at_most_the_largest_corrected), keeping its counterexample as the witness
-  - declare the stated corrected claim 'at_most_the_largest_corrected': 'for a in [-100, 100]^n, f(a) == max(a) - min(a)', adjudicated now: holds over 160 trials
-  - rewrite claims/numpy.claims.yaml: replace declared claim 'at_most_the_largest' with 'at_most_the_largest_corrected'
-written: move at_most_the_largest to the record's discoveries section (superseded_by: at_most_the_largest_corrected), keeping its counterexample as the witness; declare the stated corrected claim 'at_most_the_largest_corrected': 'for a in [-100, 100]^n, f(a) == max(a) - min(a)', adjudicated now: holds over 160 trials; rewrite claims/numpy.claims.yaml: replace declared claim 'at_most_the_largest' with 'at_most_the_largest_corrected'
-declared layer: claims/numpy.claims.yaml now declares at_most_the_largest_corrected in place of at_most_the_largest (the superseded claim stays in the record's discoveries section):
+accepting numpy.ptp :: at_most_the_largest (verdict falsified) as discovery, by
+    Ada Lovelace
+  - move at_most_the_largest to the record's discoveries section (superseded_by:
+      at_most_the_largest_corrected), keeping its counterexample as the witness
+  - declare the stated corrected claim 'at_most_the_largest_corrected': 'for a
+      in [-100, 100]^n, f(a) == max(a) - min(a)', adjudicated now: holds over
+      160 trials
+  - rewrite claims/numpy.claims.yaml: replace declared claim
+      'at_most_the_largest' with 'at_most_the_largest_corrected'
+written: move at_most_the_largest to the record's discoveries section
+    (superseded_by: at_most_the_largest_corrected), keeping its counterexample
+    as the witness; declare the stated corrected claim
+    'at_most_the_largest_corrected': 'for a in [-100, 100]^n, f(a) == max(a) -
+    min(a)', adjudicated now: holds over 160 trials; rewrite
+    claims/numpy.claims.yaml: replace declared claim 'at_most_the_largest' with
+    'at_most_the_largest_corrected'
+declared layer: claims/numpy.claims.yaml now declares
+    at_most_the_largest_corrected in place of at_most_the_largest (the
+    superseded claim stays in the record's discoveries section):
   - name: at_most_the_largest_corrected
     statement: "for a in [-100, 100]^n, f(a) == max(a) - min(a)"
     route: probe
 ```
 
 `holds over 160 trials`, on the probe route: the corrected claim is the
-test's sentence, and mathema ran `ptp` at 160 vectors it chose, biased
-toward the edges of the range, short vectors and repeated values. It is
-evidence, not proof. `ptp`'s body hands the array to a compiled routine,
-so the derive route has nothing to read, and the record says so.
+test's sentence, run at 160 vectors mathema chose. The record's sampling
+line says how: `a~[-100.0, 100.0]^n, ..., seed=20260718, n=160`, vectors
+of two to eight entries drawn inside the range; the line also names
+`axis`, `out` and `keepdims`, which the note says were held at numpy's
+defaults. It is evidence, not proof. The corrected claim carries `route:
+probe`, which `accept` wrote, so the derive route was not tried for it;
+the first attempt's record shows what it met: `derive: underivable (a is
+a vector or matrix, which the scalar derive route does not read, and the
+matrix algebra did not close the claim)`.
 
 ## Claims the test never stated
 
@@ -181,4 +204,6 @@ claims](authoring.md) lists the four places and which one wins.
 package with none. The compendium file stays the right place for a claim
 about a library you call; [See what mathema knows about a library you
 call](library-claims.md) shows what mathema already states about numpy
-and how your own rows join in.
+and how your own rows join in. [The claim grammar](grammar.md) has one
+example per form used here: the `[a, b]^n` space, `let c be [-5, 5]` and
+`let s = mathema.f.shift_seq`.

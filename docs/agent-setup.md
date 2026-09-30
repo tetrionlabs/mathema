@@ -9,9 +9,9 @@ agent can and cannot do here.
 The commands on this page write to your tool's configuration, fetch from
 the network or read a PIN from your terminal, so they are shown rather
 than run by the test suite behind the other pages. Each was run by hand
-while this page was written, and each server block below was checked by
-starting the server with exactly that command and listing its tools over
-stdio.
+while this page was written; the server blocks were checked by starting
+`mathema mcp serve --root <project>` from a project environment and
+listing its tools over stdio.
 
 ## 1. Install the extra
 
@@ -103,8 +103,9 @@ mathema pin set
 The PIN is read from the controlling terminal only, never from a pipe or
 a subprocess, which is how an agent runs commands. `--yes` skips the y/N
 prompt on `mathema accept` and never the PIN. It is stored salted and
-hashed in `~/.config/mathema/auth.yaml`, outside the project, and every
-acceptance made with it carries the credential's key id in the record.
+hashed in `~/.config/mathema/auth.yaml` by default (`XDG_CONFIG_HOME`
+moves it), outside the project, and every acceptance made with it carries
+the credential's key id in the record.
 `mathema pin status` prints the method and that key id; you need it for
 the next step.
 

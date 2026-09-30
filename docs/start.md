@@ -36,6 +36,7 @@ have.
 
 First command:
 
+<!-- checked by hand -->
 ```bash
 pip install "mathema[numpy,pandas]"
 ```
@@ -66,6 +67,7 @@ to the tests they have, where a claim goes, and how to reach a passing
 
 First command:
 
+<!-- checked by hand -->
 ```bash
 mathema audit mypkg
 ```
@@ -93,6 +95,7 @@ what to do when the gate fails on a claim nobody on the team wrote.
 
 First command:
 
+<!-- checked by hand -->
 ```bash
 mathema init --ci
 ```
@@ -111,11 +114,13 @@ deciding what counts as correct.
    exposes, and the shape of what they return.
 4. [`mathema pin`](modes/pin.md): what the PIN stamps into a record, and
    the policy file that makes a missing stamp fail the sweep.
-5. [`mathema lock`](modes/lock.md): settling a finished function so the
-   agent's next pass cannot change its body.
+5. [`mathema lock`](modes/lock.md): settling a finished function, so that
+   the sweep fails and refuses to re-adjudicate if the agent's next pass
+   changes its body.
 
 First command:
 
+<!-- checked by hand -->
 ```bash
 pip install "mathema[mcp]"
 ```

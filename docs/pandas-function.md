@@ -4,7 +4,8 @@ The [quick start](quickstart.md) took a claim about a scalar function
 from falsified to proven. This page does the same for a function that
 takes a pandas `Series`, and shows the two things that change: how mathema
 hands the function a real `Series`, and how a claim about it is proven for
-every length of the series by reading the pandas calls in the body.
+every length of the series, with nothing missing in it, by reading the
+pandas calls in the body.
 
 It needs the `pandas` extra (`pip install "mathema[pandas]"`).
 
@@ -44,17 +45,25 @@ record = mathema.check(average_return, claims=[
 print(record)
 ```
 
-<!-- example: pandas output -->
+<!-- example: pandas output wrap=80 -->
 ```text
 mathema.Record(average_return) · source, no side effects · form cb973acd88fd
-  proven  min_returns_le_f_returns_le_max_returns: for returns in [-0.1, 0.1]^n:float|missing, min(returns) ≤ f(returns) ≤ max(returns)
-           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every length
-  holds   min_returns_le_f_returns_le_max_returns[float, pandas.Series]: for returns in [-0.1, 0.1]^n:float|missing, min(returns) <= f(returns) <= max(returns) (n=42)
+  proven  min_returns_le_f_returns_le_max_returns: for returns in [-0.1,
+      0.1]^n:float|missing, min(returns) ≤ f(returns) ≤ max(returns)
+           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every
+               length
+  holds   min_returns_le_f_returns_le_max_returns[float, pandas.Series]: for
+      returns in [-0.1, 0.1]^n:float|missing, min(returns) <= f(returns) <=
+      max(returns) (n=42)
 ```
 
 Two rows came back for one claim. The first is `proven`, and the line
-under it says over what: every vector in the range, of every length. The
-second is the proof's companion, the same relation run through the real
+under it says over what: every series with entries in the range, of every
+length, with nothing missing. The `:float|missing` after the range is what
+mathema resolved `[-0.1, 0.1]^n` to: float entries, with a missing value
+(`nan`) part of the declared domain; the proof line says the proof itself
+does not cover a series with a hole in it. The second is the proof's
+companion, the same relation run through the real
 code, and its name says what the function received: `[float,
 pandas.Series]`. The signature says `returns: pd.Series`, so before each
 of the 42 calls mathema built a `Series` from the vector it drew, and the
@@ -104,11 +113,14 @@ record = mathema.check(sharpe, claims=[mathema.claim(
 print(record)
 ```
 
-<!-- example: pandas output -->
+<!-- example: pandas output wrap=80 -->
 ```text
 mathema.Record(sharpe) · source, no side effects · form 099872a2a5ee
-  FALSIFY leverage_invariant: let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns)
-           counterexample returns=[0.0], c=4.26366: the computation returns NaN here (f returned nan)
+  FALSIFY leverage_invariant: let s = mathema.f.scale_seq, let c be [0.1,
+      10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing,
+      f(s(returns, c)) ~= f(returns)
+           counterexample returns=[0.0], c=4.26366: the computation returns NaN
+               here (f returned nan)
 ```
 
 Read the witness. `returns=[0.0]` is a series of one day. Its standard
@@ -134,19 +146,27 @@ record = mathema.check(sharpe, claims=[mathema.claim(
 print(record)
 ```
 
-<!-- example: pandas output -->
+<!-- example: pandas output wrap=80 -->
 ```text
 mathema.Record(sharpe) · source, no side effects · form 099872a2a5ee
-  proven  leverage_invariant: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns)
-           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every length from 2
-  holds   leverage_invariant[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns) (n=39)
+  proven  leverage_invariant: assuming std(returns, ddof=1) > 0, let s =
+      mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in
+      [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns)
+           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every
+               length from 2
+  holds   leverage_invariant[float, pandas.Series]: assuming std(returns,
+      ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1,
+      10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing,
+      f(s(returns, c)) ~= f(returns) (n=39)
 ```
 
 `every length from 2`: the premise took the one-day series out, and
 mathema says so in the region it proved over. It reads the premise
 exactly. The standard deviation of equal returns is 0 over the reals, so
 a constant series is outside the claim too, on the proof and on the
-companion alike, however floating point rounds it.
+companion alike: mathema computes the premise's `std` exactly rather than
+through the function's floating point, so a constant series whose float
+standard deviation rounds to `1e-17` is still outside.
 
 The proof rested on two rows this time. The record names each one, with
 the file it came from:
@@ -191,8 +211,8 @@ falsified
 returns=[-0.0272559, -0.089997, 0.00605701, -0.0117273]; c=0.1: 26.317059661412703 vs -11.673709413201967
 ```
 
-Four days of returns, shifted up by 10 percent a day: a Sharpe ratio of
-26.3 against the original's -11.7. Sampling is seeded, so the same
+Four days of returns, each shifted up by 0.1: a Sharpe ratio of 26.3
+against the original's -11.7. Sampling is seeded, so the same
 witness comes back on every run.
 
 ## Where next
@@ -203,5 +223,10 @@ witness comes back on every run.
   `DataFrame` columns.
 - [The evidence ladder](evidence-ladder.md) places `proven` and its
   `[float, pandas.Series]` companion on their rungs.
-- [`mathema compendium`](modes/compendium.md) shows which of the pandas
-  and numpy calls your code makes have rows like the two above.
+- [See what mathema knows about a library you call](library-claims.md)
+  shows which of the pandas and numpy calls your code makes have rows like
+  the two above, and how to state one for a call nothing covers.
+- [The claim grammar](grammar.md) has one example per form used here:
+  `[a, b]^n`, `let c be [0.1, 10]`, `let s = mathema.f.scale_seq`, a
+  premise such as `std(returns, ddof=1) > 0` written after `assuming`,
+  and `~=`.

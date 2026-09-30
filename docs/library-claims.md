@@ -150,10 +150,12 @@ numpy.ptp:
       route: probe
 ```
 
-`route: probe` asks for the row to be checked by running the function,
-since `ptp` hands its array to a compiled routine the derive route cannot
-read. The next sweep adjudicates the new row and nothing else, every
-other record being fresh:
+`route: probe` says up front that the row is checked by running the
+function. Left out, mathema tries the derive route first and falls back
+to probing, and the record keeps why: `a is a vector or matrix, which the
+scalar derive route does not read, and the matrix algebra did not close
+the claim`. Either way the next sweep adjudicates the new row and nothing
+else, every other record being fresh:
 
 <!-- example: library run requires=numpy -->
 ```bash
@@ -219,3 +221,6 @@ has the exact semantics.
 - [`mathema verify`](modes/verify.md#library-claims-lazy-by-default-a-file-up-front)
   explains the lazy sweep and how to adjudicate a whole claims file up
   front.
+- [The claim grammar](grammar.md) has one example per form used here: the
+  `[a, b]^n` space and a `dim(returns) >= 2` premise written after
+  `assuming`.

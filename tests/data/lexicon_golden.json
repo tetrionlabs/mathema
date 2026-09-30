@@ -953,5 +953,35 @@
   "input": "for x in [0, 1], f(x) in [0, 1]",
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, 0 ≤ f(x) ≤ 1",
   "ascii": "for x in [0.0, 1.0]:float|missing, 0 <= f(x) <= 1"
+ },
+ "let_scale_seq_sharpe_premise": {
+  "input": "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], assuming std(returns, ddof=1) > 0, f(s(returns, c)) ~= f(returns)",
+  "unicode": "assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0] ⊂ ℝ ∪ {∅}, ∀ returns ∈ [-0.1, 0.1]ⁿ ⊂ ℝ ∪ {∅}, f(s(returns, c)) ≈ f(returns)",
+  "ascii": "assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns)"
+ },
+ "let_scale_seq_sharpe_trap": {
+  "input": "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], f(s(returns, c)) ~= f(returns)",
+  "unicode": "let s = mathema.f.scale_seq, let c be [0.1, 10.0] ⊂ ℝ ∪ {∅}, ∀ returns ∈ [-0.1, 0.1]ⁿ ⊂ ℝ ∪ {∅}, f(s(returns, c)) ≈ f(returns)",
+  "ascii": "let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns)"
+ },
+ "let_shift_seq_range": {
+  "input": "for a in [-100, 100]^n, let s = mathema.f.shift_seq, let c be [-5, 5], f(s(a, c)) == f(a)",
+  "unicode": "let s = mathema.f.shift_seq, let c be [-5.0, 5.0] ⊂ ℝ ∪ {∅}, ∀ a ∈ [-100.0, 100.0]ⁿ ⊂ ℝ ∪ {∅}, f(s(a, c)) = f(a)",
+  "ascii": "let s = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, for a in [-100.0, 100.0]^n:float|missing, f(s(a, c)) = f(a)"
+ },
+ "let_shift_seq_mean_moves": {
+  "input": "for xs in [-1, 1]^n, let s = mathema.f.shift_seq, let c be [0.1, 1], f(s(xs, c)) ~= f(xs)",
+  "unicode": "let s = mathema.f.shift_seq, let c be [0.1, 1.0] ⊂ ℝ ∪ {∅}, ∀ xs ∈ [-1.0, 1.0]ⁿ ⊂ ℝ ∪ {∅}, f(s(xs, c)) ≈ f(xs)",
+  "ascii": "let s = mathema.f.shift_seq, let c be [0.1, 1.0]:float|missing, for xs in [-1.0, 1.0]^n:float|missing, f(s(xs, c)) ~= f(xs)"
+ },
+ "assuming_spread_positive": {
+  "input": "for returns in [-0.1, 0.1]^n, assuming std(returns, ddof=1) > 0, is_defined(f)",
+  "unicode": "assuming std(returns, ddof=1) > 0, ∀ returns ∈ [-0.1, 0.1]ⁿ ⊂ ℝ ∪ {∅}, f is defined",
+  "ascii": "assuming std(returns, ddof=1) > 0, for returns in [-0.1, 0.1]^n:float|missing, is_defined(f)"
+ },
+ "dim_call_premise": {
+  "input": "assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n, f(returns) >= 0",
+  "unicode": "assuming dim(returns) >= 2, ∀ returns ∈ [-0.1, 0.1]ⁿ ⊂ ℝ ∪ {∅}, f(returns) ≥ 0",
+  "ascii": "assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n:float|missing, f(returns) >= 0"
  }
 }

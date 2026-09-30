@@ -118,6 +118,21 @@
 .md-typeset__scrollwrap { margin: 1.5em -.8rem; }
 .md-typeset .admonition,
 .md-typeset details { font-size: .72rem; padding: 0 .8rem; }
+/* Material ties the admonition's title bar, its icon and the tables
+   inside it to the box's side padding, so each follows the wider
+   padding above: the title bleeds to the border, the icon sits inside
+   it, and an inner table keeps the body's table margins. */
+.md-typeset .admonition-title,
+.md-typeset summary { margin: 0 -.8rem; }
+[dir=ltr] .md-typeset .admonition-title { padding-left: 2.2rem; padding-right: .8rem; }
+[dir=ltr] .md-typeset summary { padding-left: 2.2rem; padding-right: 2rem; }
+[dir=ltr] .md-typeset .admonition-title:before,
+[dir=ltr] .md-typeset summary:before { left: .8rem; }
+[dir=ltr] .md-typeset summary:after { right: .6rem; }
+.md-typeset .admonition .md-typeset__scrollwrap,
+.md-typeset details .md-typeset__scrollwrap { margin: 1.5em -.8rem; }
+.md-typeset .admonition .md-typeset__table,
+.md-typeset details .md-typeset__table { padding: 0 .8rem; }
 .md-nav { line-height: 1.45; }
 
 /* The header, set like the Labs site's nav: a 64px ink bar carrying

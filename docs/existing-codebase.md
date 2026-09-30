@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # Add claims to an existing codebase
 
 This guide takes a package with functions, tests and no claims to a
@@ -69,8 +74,10 @@ billing.fees
 ```
 
 `0/3 claimed`, and all three could be proven. The `claims` cell reads
-`{suggested | declared | verified}`: mathema has eleven suggestions for
-`discounted` and nobody has declared anything. `tested` says
+`{floor | actual | expected}`: the least a function of this shape gives
+you to state (eleven for `discounted`, one per relevant built-in claim and
+target), what it states (nothing yet), and what a function of this shape
+typically carries (`-`: not known without a corpus). `tested` says
 `no-report`: there is no coverage report yet for the tests to count.
 
 ## 2. Scaffold the store
@@ -154,7 +161,7 @@ keeps it:
 
 <!-- example: codebase run -->
 ```bash
-mathema check billing.fees:discounted --root .
+mathema check billing.fees.discounted --root .
 ```
 
 <!-- example: codebase output -->
@@ -181,7 +188,10 @@ falsified rate=-2.72559 -> -32.66347642639832, rate=4.92258 -> 34.39055087522713
 
 The derivative of `price * (1 - rate)` in `rate` is `-price`, which is
 positive when the price is negative, and the claim said nothing about
-prices. The suggestion was right about the function and silent about its
+prices. Both values were computed at the same price, which the witness
+does not print; either one solves to -8.77. (`d(f(price, rate), rate)` is
+the derivative in `rate`; [the claim grammar](grammar.md#calculus) lists
+the calculus forms.) The suggestion was right about the function and silent about its
 domain, which is the usual state of a suggestion. Say what the function
 is for, a price that is never negative and a rate between none and all
 of it:
@@ -231,7 +241,7 @@ wins when both name the same claim.
 <!-- example: codebase run -->
 ```bash
 mathema verify --root .
-mathema audit billing --root . --filter unclaimed
+mathema audit billing --root . --filter unclaimed --cols key,claims
 ```
 
 <!-- example: codebase output -->
@@ -241,7 +251,7 @@ ok   billing.fees.late_fee: no baseline record; 1 proven, 0 holds, 0 falsified
 ok   billing.fees.settle: no baseline record; 2 proven, 1 holds, 0 falsified
 0 fresh (form unchanged, skipped), 3 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
-{"prefix":"billing.fees.","cols":["key","span","claims","derivable","unconditional","blocker","typed","tested"],"rows":[["late_fee","1:3p",0,true,true,"",[3,3],"no-report"]]}
+{"prefix":"billing.fees.","cols":["key","claims"],"rows":[["late_fee",0]]}
 ```
 
 Both claims proved on the derive route, and every record also carries
@@ -250,8 +260,9 @@ depends on has not moved; that is the second `proven` on the two claimed
 functions and the only one on `late_fee`. The `1 holds` on `settle` is
 the proof's `[float]` companion, the same claim run through the real code
 in floating point. `--filter unclaimed` is the list of what is left, as
-data: one function. The records under `.mathema/verified/` are the
-evidence, and they are meant to be committed with the code.
+data, cut to two columns with `--cols`: one function. The records under
+`.mathema/verified/` are the evidence, and they are meant to be committed
+with the code.
 
 ## 7. Let the tests you have count
 
@@ -276,6 +287,9 @@ mathema coverage billing --root .
 implementation coverage: 100%
 ```
 
+`late_fee` has no claim of its own and still reads `probe+derive`:
+`coverage` runs mathema's standard claims about a function while tracing
+it, and a proof of any of them counts the body as modelled.
 [`mathema coverage`](modes/coverage.md) explains the three sources and
 what happens to a test report when the code moves on. From here, [Gate a
 pipeline with mathema verify](gate-a-pipeline.md) puts the sweep in CI,

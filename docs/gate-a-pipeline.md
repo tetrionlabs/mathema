@@ -5,8 +5,10 @@ fails on a falsified or undecided claim and passes on a clean store. It
 assumes you have written a claim before ([quick start](quickstart.md)) and
 know what a record is ([the CDD loop](tutorial.md)).
 
-The running example is a fees module in a billing service: a late fee
-that grows with the delay, and a discount with a bug in it.
+The running example is the fees module of a billing service from [Add
+claims to an existing codebase](existing-codebase.md), as a later commit
+left it: the late fee now grows with the log of the delay, which brings
+in `math.log`, and the discount has a bug in it.
 
 <!-- example: gate file=fees.py -->
 ```python
@@ -112,11 +114,21 @@ exit code the job would see:
 mathema verify --root .; echo "exit code $?"
 ```
 
-<!-- example: gate output -->
+<!-- example: gate output wrap=80 -->
 ```text
-note fees.discounted: never_raises_price falsified on first adjudication. A declared claim is kept until a human decides it (fix the code, `mathema accept fees.discounted <claim> --as discovery`, or supersede it). To try a spelling first, `mathema check fees.discounted --claim "..."` adjudicates it and writes nothing.
-FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- 1 unknown claim(s); compendium:math declares 'log_monotone' for math.log; mathema verify recorded it unknown against the installed library: accept it (mathema accept math.log log_monotone --as trusted) or let mathema verify adjudicate it against the installed library
-FAIL fees.discounted: no baseline record; 1 proven, 0 holds, 1 falsified  <- 1 falsified claim(s)
+note fees.discounted: never_raises_price falsified on first adjudication. A
+    declared claim is kept until a human decides it (fix the code, `mathema
+    accept fees.discounted <claim> --as discovery`, or supersede it). To try a
+    spelling first, `mathema check fees.discounted --claim "..."` adjudicates it
+    and writes nothing.
+FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no
+    baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- 1 unknown
+    claim(s); compendium:math declares 'log_monotone' for math.log; mathema
+    verify recorded it unknown against the installed library: accept it (mathema
+    accept math.log log_monotone --as trusted) or let mathema verify adjudicate
+    it against the installed library
+FAIL fees.discounted: no baseline record; 1 proven, 0 holds, 1 falsified  <- 1
+    falsified claim(s)
 ok   fees.late_fee: no baseline record; 1 proven, 1 holds, 0 falsified
 0 fresh (form unchanged, skipped), 3 adjudicated, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
@@ -131,9 +143,11 @@ Three keys were adjudicated, and two of them fail the gate.
   claim was wrong.
 - `math.log` is a function nobody on the team wrote. `late_fee` calls it,
   so the sweep adjudicated the claims mathema ships about it, and one of
-  them, `log_monotone`, a derivative claim, cannot be settled against a
-  function with no Python source and is recorded `unknown`. An unknown
-  claim fails the gate in every mode.
+  them, `log_monotone`, a derivative claim, is recorded `unknown`:
+  `math.log` is a C function with no Python body for the derive route to
+  lift, and the probe route does not evaluate `d(f(x), x)` by calling the
+  function (`probe: skipped (unrecognized call 'd' ...)` in the record).
+  An unknown claim fails the gate in every mode.
 - `fees.late_fee` passes. The `1 proven` in every row is
   `dependencies_current`, the claim `verify` adds to each record that
   what the function depends on has not moved.
@@ -161,11 +175,15 @@ mathema accept math.log log_monotone --as trusted --by "Grace Hopper" --yes
 mathema verify --root .; echo "exit code $?"
 ```
 
-<!-- example: gate output -->
+<!-- example: gate output wrap=80 -->
 ```text
 accepting math.log :: log_monotone (verdict unknown) as trusted, by Grace Hopper
-  - trust log_monotone at its claimed level (holds), on the word of compendium:math; `mathema verify` re-adjudicating this key replaces the testimony with a local verdict
-written: trust log_monotone at its claimed level (holds), on the word of compendium:math; `mathema verify` re-adjudicating this key replaces the testimony with a local verdict
+  - trust log_monotone at its claimed level (holds), on the word of
+      compendium:math; `mathema verify` re-adjudicating this key replaces the
+      testimony with a local verdict
+written: trust log_monotone at its claimed level (holds), on the word of
+    compendium:math; `mathema verify` re-adjudicating this key replaces the
+    testimony with a local verdict
 ok   math.log: fresh; library claims from mathema/compendium/math.claims.yaml
 FAIL fees.discounted: fresh; 1 falsified claim(s)
 ok   fees.late_fee: fresh
@@ -226,11 +244,10 @@ gaps a person has accepted as risk. `--lenient` reports the last two by
 name and proceeds; it never passes a falsified or an unaccepted unknown
 claim. The full table is on [`mathema verify`](modes/verify.md#what-fails-the-run).
 
-Keep the default. Expect the first run to be red and to say exactly which
-claims it means; decide each one, with `accept --as risk` for a gap the
-team owns and `--as trusted` for a library row; and add `--lenient` to the
-workflow only once every skipped or accepted-risk claim is understood, so
-that a new one still stops the pipeline.
+Keep the default. Decide each red claim, `accept --as risk` for a gap the
+team owns and `--as trusted` for a library row, and add `--lenient` only
+once every skipped or accepted-risk claim has been decided, so that a new
+one still stops the pipeline.
 
 ## 7. Tell a failing gate from a broken job
 

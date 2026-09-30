@@ -4,7 +4,8 @@ Implementation coverage: the share of each function's own statements that
 some evidence has exercised. Three sources count, and their union is the
 score: a test run that executed the line, read from a coverage report that
 already exists; a mathema probe that executed it while checking the
-function; and a derive-route proof of a claim on the function, which
+function; and a derive-route proof of a claim on the function, one you
+declared or one of the standard claims `coverage` checks about it, which
 counts the whole body it modelled.
 
 ```bash
