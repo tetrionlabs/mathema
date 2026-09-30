@@ -265,9 +265,9 @@ print(mathema.check(clamp_discount, claims=[mathema.claim(
 <!-- example: core output match=subset -->
 ```text
 mathema.Record(clamp_discount) · source, no side effects · form bc9fa73b5bd1
-  proven  in_unit: let clamp_discount = pricing.clamp_discount, for rate in R|missing, 0 <= clamp_discount(rate) <= 1
+  proven  in_unit: for rate in R|missing, 0 <= clamp_discount(rate) <= 1
            where x=rate: ∀ x ∈ ℝ; missing for rate (float) means nan
-  holds   in_unit[float]: let clamp_discount = pricing.clamp_discount, for rate in R|missing, 0 <= clamp_discount(rate) <= 1 (43 draws)
+  holds   in_unit[float]: for rate in R|missing, 0 <= clamp_discount(rate) <= 1 (43 draws)
            the float64 computation of in_unit ran link by link, and every link holds; at rate = nan f returned 1.0, so it drops the hole
   FALSIFY missing[rate]: missing(f, rate) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, 1.0 out]
            if 1.0 is the answer f should give for a missing rate, write `missing(f, rate) drops`; if not, make f raise or give nan back; or accept it as a discovery: mathema accept pricing.clamp_discount missing[rate] --as discovery --corrected "missing(f, rate) drops"
@@ -414,7 +414,7 @@ mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
            if the raise is intended, write `missing(f, positions, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept portfolio.total_exposure missing[positions, null] --as discovery --corrected "missing(f, positions, null) raises(TypeError)"
   holds   missing[positions, nan]: missing(f, positions, nan) propagates   [default for a list slot that may be nan; confirmed on the 53 draws of nonneg[float]. Keep it by writing it (mathema claims portfolio.total_exposure --write), or change the word to raises or drops if f should do otherwise]
 mathema.Record(average_return) · source, no side effects · form ce47d44bdab7
-  holds   unit: let average_return = portfolio.average_return, for returns in ([0.0, 1.0] | {missing})^n : float, 0 <= average_return(returns) <= 1 (676 entries across 100 draws, sizes (1, 1) to (8, 1))
+  holds   unit: for returns in ([0.0, 1.0] | {missing})^n : float, 0 <= average_return(returns) <= 1 (676 entries across 100 draws, sizes (1, 1) to (8, 1))
            every link of the chained comparison holds; at returns = [nan] f gave nan back
   proven  missing[returns]: missing(f, returns) propagates   [from numpy.mean's own policy row, which f calls; confirmed on the 111 draws of unit]
 ```

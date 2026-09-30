@@ -3672,6 +3672,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 chained.meta = {**(chained.meta or {}),
                                 "mathema.float_companion":
                                     "none (derive:math_only)"}
+            # the links bound the chain's call names; one bound to the
+            # function under test is f, with nothing to `let`
+            cj.under_test = cj.under_test | {n for n, v in cj.funcs.items()
+                                             if v != n and _is_under_test(v, fn)}
             out.append(_stamped(chained, cj))
             if companion is not None:
                 _emit_companion(out, _stamped(companion, cj), cj.name)

@@ -67,3 +67,11 @@ def test_a_claim_naming_the_function_under_test_binds_nothing():
         funcs={"midpoint": midpoint})])
     assert not row.statement.startswith("let midpoint"), row.statement
     assert "bound midpoint" not in (row.note or ""), row.note
+
+
+def test_a_chain_naming_the_function_under_test_by_scope_binds_nothing():
+    """The name resolves from f's module, link by link; the chain's own
+    statement still carries no `let` for f."""
+    (row,) = check_conjectures(midpoint, [claim(
+        "for a in [0, 100], b in [0, 100], min(a, b) <= midpoint(a, b) <= max(a, b)")])
+    assert "let midpoint" not in row.statement, row.statement
