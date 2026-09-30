@@ -1038,17 +1038,17 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
         The structural half of excluded_outside_domain[param]: the
         function must raise on any input outside param's declared
         domain. Proven when the function is wrapped by
-        @enforce_domain covering this parameter, rejection by
-        construction, the wrapper checks every call before the body
-        runs. Undecided (None) otherwise: the trials at concrete
-        out-of-domain values decide empirically.
+        @enforce_domain (values) or @enforce_dimensions (shape) covering
+        this parameter, rejection by construction, the wrapper checks
+        every call before the body runs. Undecided (None) otherwise:
+        the trials at concrete out-of-domain values decide empirically.
 
     Notes:
         This claim is never battery-suggested: it is DECLARED,
         explicitly, via the `excluding` keyword, or automatically by
-        @enforce_domain itself (the decorator that makes it true also
-        declares it). rhs_src/relation/tolerance kept for protocol
-        uniformity.
+        @enforce_domain or @enforce_dimensions itself (the decorator
+        that makes it true also declares it). rhs_src/relation/tolerance
+        kept for protocol uniformity.
     """
     from .symbolic import ProofResult
     param = lhs_src
@@ -1058,6 +1058,14 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
             "proven",
             sketch=f"rejection by construction: the enforce_domain "
                    f"wrapper checks {param} against its declared domain "
+                   f"before the body ever runs")
+    shaped = getattr(fn, "__mathema_enforced_dimensions__", None)
+    if shaped is not None and param in shaped:
+        from ._shapes import expected
+        return ProofResult(
+            "proven",
+            sketch=f"rejection by construction: the enforce_dimensions "
+                   f"wrapper checks {param}'s shape ({expected(shaped[param])}) "
                    f"before the body ever runs")
     return None
 
@@ -1092,38 +1100,77 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
         candidates = [c for c in _out_of_domain_candidates(bounds)
                       if not is_missing(c)]   # missing spellings are
         # is_missing_safe's own hazard, not this member's
-        if not candidates:
-            return None
-    sequence_target = (facts.param_kinds.get(target) in SEQUENCE_KINDS
-                       and not language_bound)
+    from . import _shapes
+    # a space domain (`R^(30,15)`, `[0, 1]^30`) has an outside of its
+    # own: a value of another shape, its elements inside the domain
+    space_dims = _shapes.dims_of(bounds) if not language_bound else ()
+    if not candidates and not space_dims:
+        return None
+    element_bound = bounds
+    if space_dims:
+        import dataclasses
+        element_bound = dataclasses.replace(bounds, dims=())
+    sequence_target = ((facts.param_kinds.get(target) in SEQUENCE_KINDS
+                        or bool(space_dims)) and not language_bound)
+    # the function receives each value as its own runtime type
+    from .runtime_types import calling
+    call = calling(fn, facts)
     state = {"idx": 0}
+    # every shape just outside the space, each tried in turn: a fixed
+    # axis one up and one down, one rank up, one rank down
+    outsides = _shapes.outside_shapes(bounds) if space_dims else []
+    cycle = len(candidates) + len(outsides)
 
     def trial(args):
-        bad = candidates[state["idx"] % len(candidates)]
+        slot = state["idx"] % cycle
         state["idx"] += 1
-        if language_bound:
+        if slot >= len(candidates):
+            shape = outsides[slot - len(candidates)]
+            value = _shapes.build_shape(
+                shape, lambda: _synth("float", rng, element_bound))
+            spelled = (f"{target} of shape {_shapes.shape_text(shape)} is "
+                       f"outside the declared domain "
+                       f"{_shapes.space_text(bounds)}")
+        elif language_bound:
+            bad = candidates[slot]
             value = bad
             spelled = (f"{target} = {_witness_value(bad)} "
                        f"(outside L[{names}]{_why_outside(bad, bounds)})")
         elif sequence_target:
             # a sequence parameter is violated one ELEMENT at a time:
-            # a fresh in-domain sequence with one out-of-domain entry
-            seq = [rng.uniform(-10, 10) for _ in range(4)]
-            seq[rng.randrange(len(seq))] = bad
-            value: object = seq
+            # a fresh in-domain sequence with one out-of-domain entry,
+            # of the shape the space fixes when it fixes one
+            bad = candidates[slot]
+            if space_dims:
+                seq = _shapes.shaped(
+                    bounds, rng, lambda: _synth("float", rng, element_bound))
+                leaf = seq
+                while leaf and isinstance(leaf[0], list):
+                    leaf = leaf[0]
+                leaf[rng.randrange(len(leaf))] = bad
+            else:
+                seq = [rng.uniform(-10, 10) for _ in range(4)]
+                seq[rng.randrange(len(seq))] = bad
+            value = seq
             spelled = f"{target}[...] = {bad!r}"
         else:
+            bad = candidates[slot]
             value = bad
             spelled = f"{target} = {bad!r}"
         try:
-            out = _call_with_target(fn, facts, target, args, value)
+            out = _call_with_target(call, facts, target, args, value)
         except Exception:
             return True   # rejected, as the claim demands
+        if spelled.endswith(_shapes.space_text(bounds)):
+            # the shape round's sentence already says where the value lies
+            from .probing import _fmt_value
+            return (f"{spelled} but was accepted (returned {_fmt_value(out)}); "
+                    f"the exclusion is asserted, not enforced")
         return (f"{spelled} is outside the declared domain but was "
                 f"accepted (returned {out!r}); the exclusion is "
                 f"asserted, not enforced")
 
-    rounds = max(len(candidates), min(trials, len(candidates) * 4))
+    rounds = max(cycle, min(trials, cycle * 4))
     return _probe_trials(fn, facts, target, domain, rng, rounds, trial)
 
 
@@ -3693,12 +3740,6 @@ def _recursion_probe(fn, facts, cj, domain: dict, rng: random.Random,
                                 f"the recursion limit"})
 
 
-#: why is_memory_safe reports skipped: adjudicating memory use needs a
-#: resource cap around the call, which this release does not provide
-_MEMORY_SAFETY_NOTE = ("memory safety needs a resource cap and is not "
-                       "adjudicated in this release")
-
-
 #: computation-safety families named now and adjudicated in a later
 #: release, with the question each answers
 RESERVED_FAMILIES = {
@@ -3731,22 +3772,6 @@ def _reserved_probe(name: str):
               trials: int):
         return "skipped", 0, _reserved_note(name)
     return probe
-
-
-def _is_memory_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
-                           relation: str, domain: dict | None = None,
-                           tolerance: float | None = None):
-    """Structural half of is_memory_safe: decline; the member is
-    defined and reserved, see `_MEMORY_SAFETY_NOTE`."""
-    return None
-
-
-def _memory_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                  trials: int):
-    """Empirical half of is_memory_safe: skipped, with the reason. The
-    name is registered so a claim stating it is a known claim, not a
-    misspelling."""
-    return "skipped", 0, _MEMORY_SAFETY_NOTE
 
 
 #: the children of is_computation_safe, in the order the roll-up runs
@@ -4004,14 +4029,6 @@ def _register_builtin_claim_families() -> None:
     _families.register("is_state_safe", SafetyFamily(
         "is_state_safe", derive=_is_state_safe_derive,
         probe=_state_probe))
-    # is_memory_safe is defined and reserved (skipped with the reason,
-    # never suggested); is_computation_safe is the roll-up of the
-    # hierarchy, declared by the author and never battery-suggested,
-    # like excluded_outside_domain
-    _families.register("is_memory_safe", SafetyFamily(
-        "is_memory_safe", derive=_is_memory_safe_derive,
-        probe=_memory_probe, whole_function=True,
-        reserved=_MEMORY_SAFETY_NOTE))
     # reserved: named now, adjudicated later, never suggested; a
     # platform (GPU, JIT, distributed) is named in the bracketed
     # computation descriptor, never in a family name

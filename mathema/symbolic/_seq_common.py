@@ -286,7 +286,8 @@ def _seq_law_to_sympy(node: ast.AST, view: SeqLiftView, aux: dict):
 
 
 def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
-                         view: "SeqLiftView") -> "ProofResult | None":
+                         view: "SeqLiftView",
+                         fixed: "dict | None" = None) -> "ProofResult | None":
     """Intent:
         The each-term rung for a sign claim over a symbolic-length sum:
         `init + Sum(smnd, (i, 0, L-1)) >= 0` is proven when the
@@ -490,8 +491,60 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
         "proven",
         sketch=f"each term of the sum is {kind} over the declared element "
                f"domain, so the whole sum is (termwise sign, exact for any "
-               f"length)",
+               f"length){fixed_lengths_text(fixed)}",
         meta={"mathema.derive_route": "termwise_sum"})
+
+
+def _element_scalars(lhs, rhs, domain: "dict | None", view: "SeqLiftView"):
+    """Intent:
+        `(lhs, rhs, domain, params)` with every indexed element
+        (`xs[0]`, `xs[1]`) of an expanded sum replaced by a real scalar
+        symbol bounded by its sequence's element domain, so the relation
+        can be decided as an ordinary scalar fact at the fixed length.
+    """
+    import dataclasses
+
+    elem_domain = dict(domain or {})
+    params = dict(view.other_params)
+    replacements: dict = {}
+    for ix in sorted(lhs.atoms(sympy.Indexed) | rhs.atoms(sympy.Indexed),
+                     key=str):
+        base = str(ix.base)
+        index = ix.indices[0] if ix.indices else 0
+        name = f"{base}_{index}"
+        symbol = sympy.Symbol(name, real=True)
+        replacements[ix] = symbol
+        params[name] = symbol
+        bound = elem_domain.get(base)
+        if bound is not None and getattr(bound, "dims", ()):
+            elem_domain[name] = dataclasses.replace(bound, dims=())
+        elif bound is not None:
+            elem_domain[name] = bound
+    return (lhs.xreplace(replacements), rhs.xreplace(replacements),
+            elem_domain, params)
+
+
+def fixed_lengths(view: "SeqLiftView", domain: "dict | None") -> dict:
+    """The lifted sequences whose binding fixes their length (`xs in
+    [0, 1]^30`), `{name: size}`."""
+    from .._shapes import dims_of, fixed_size
+    out: dict = {}
+    for name in view.seqs:
+        dims = dims_of((domain or {}).get(name))
+        size = fixed_size(dims[0]) if dims else None
+        if size is not None:
+            out[name] = size
+    return out
+
+
+def fixed_lengths_text(fixed: "dict | None") -> str:
+    """The clause a sketch adds for the lengths a binding fixes: "; the
+    binding fixes xs at length 30" (several: "; the binding fixes xs at
+    length 30 and ys at length 4"); empty when nothing is fixed."""
+    if not fixed:
+        return ""
+    parts = [f"{n} at length {k}" for n, k in sorted(fixed.items())]
+    return "; the binding fixes " + " and ".join(parts)
 
 
 def _length_pins(equalities, length_symbols) -> dict:
@@ -716,12 +769,38 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
                                  view.other_params, opaque=view.opaque)
     except Exception as e:
         return ProofResult("undecided", sketch=f"{type(e).__name__} during proof: {e}")
+    fixed = fixed_lengths(view, domain)
     if result.status == "undecided":
-        termwise = _termwise_sum_decide(lhs, rhs, relation, domain, view)
+        termwise = _termwise_sum_decide(lhs, rhs, relation, domain, view,
+                                        fixed=fixed)
         if termwise is not None:
             result = termwise
+    if result.status == "undecided" and fixed:
+        # a binding that fixes a length is a substitution, as a length
+        # premise is: the sums are expanded at that length, each element
+        # becomes a bounded scalar of the element domain, and the
+        # relation is decided again
+        fixed_pins = {view.lengths[n]: sympy.Integer(k)
+                      for n, k in fixed.items() if n in view.lengths
+                      and view.lengths[n] not in length_pins}
+        if fixed_pins:
+            try:
+                lhs_p = lhs.subs(fixed_pins).doit()
+                rhs_p = rhs.subs(fixed_pins).doit()
+                lhs_p, rhs_p, elem_domain, params = _element_scalars(
+                    lhs_p, rhs_p, domain, view)
+                result = _prove_relation(
+                    lhs_p, rhs_p, relation, elem_domain, bound_context,
+                    params, opaque=view.opaque)
+            except Exception as e:
+                return ProofResult("undecided",
+                                   sketch=f"{type(e).__name__} during proof: {e}")
     if result.status != "proven":
         return result
+    if fixed and (result.meta or {}).get("mathema.derive_route") != "termwise_sum":
+        clause = fixed_lengths_text(fixed)
+        result = replace(result, sketch=(f"{result.sketch}{clause}"
+                                         if result.sketch else clause.lstrip("; ")))
     # a folded sequence isn't a plain sympy.Symbol (it's an IndexedBase),
     # so it can't go through _free_names/_quantifier_clause the way a
     # scalar can; its clause is prepended by hand, merged with
@@ -736,7 +815,11 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     reserved = {n for n in view.seqs if len(n) == 1}
     scalar_clause = _quantifier_clause(scalar_names, view.sig_params, domain or {},
                                        reserved=reserved)
-    seq_part = f"{', '.join(view.seqs)} ∈ Seq(ℝ)"
+    if fixed:
+        seq_part = ", ".join(f"{n} ∈ ℝ^{fixed[n]}" if n in fixed
+                             else f"{n} ∈ Seq(ℝ)" for n in view.seqs)
+    else:
+        seq_part = f"{', '.join(view.seqs)} ∈ Seq(ℝ)"
     if scalar_clause is None:
         quantifier = f"∀ {seq_part}"
     elif scalar_clause.startswith("where "):

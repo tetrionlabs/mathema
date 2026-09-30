@@ -312,6 +312,16 @@ def materialize_declared(fn, key: str, root: str = ".") -> str:
 # without editing the function body to add it by hand.
 # ---------------------------------------------------------------------------
 
+class DimensionError(ValueError):
+    """An argument's or a result's shape breaks what `enforce_dimensions()`
+    guards. `at_exit` says the result broke the return marker after the
+    body ran, rather than an argument breaking a shape at entry."""
+
+    def __init__(self, message: str, *, at_exit: bool = False):
+        super().__init__(message)
+        self.at_exit = at_exit
+
+
 class DomainError(ValueError):
     """A parameter's actual value, or a domain declaration itself,
     conflicts with a function's own declared domain, raised by
@@ -497,31 +507,62 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             return fn(*args, **kwargs)
 
         wrapper.__mathema_enforced_domain__ = merged_domain
-        # the decorator that MAKES out-of-domain rejection true also
-        # DECLARES it: one excluded_outside_domain claim per enforced
-        # parameter joins the decorator claims surface, so check()
-        # adjudicates the enforcement like any other declared claim
-        # (proven structurally, rejection by construction)
-        auto_declared = []
-        for p in sorted(merged_domain):
-            d = _declare(_claim(f"excluded_outside_domain({p})"))
-            d["authored"] = _authored_entry(fn, "decorator",
-                                            ref_surface="enforce_domain")
-            auto_declared.append(d)
-        existing = list(getattr(wrapper, "__mathema_claims__", []) or [])
-        by_name = {c.get("name"): c for c in existing}
-        by_name.update({c.get("name"): c for c in auto_declared})
-        wrapper.__mathema_claims__ = list(by_name.values())
+        _declare_exclusions(wrapper, fn, sorted(merged_domain), "enforce_domain")
         return wrapper
     return decorator
 
 
+def _declare_exclusions(wrapper, fn, params, ref_surface: str) -> None:
+    """The decorator that MAKES out-of-domain rejection true also
+    DECLARES it: one `excluded_outside_domain(p)` claim per guarded
+    parameter joins the decorator claims surface, so `check()`
+    adjudicates the enforcement like any other declared claim (proven
+    structurally, rejection by construction). Claims are merged by
+    name, so a parameter two guards cover is one row, whichever is
+    applied first."""
+    auto_declared = []
+    for p in params:
+        d = _declare(_claim(f"excluded_outside_domain({p})"))
+        d["authored"] = _authored_entry(fn, "decorator",
+                                        ref_surface=ref_surface)
+        auto_declared.append(d)
+    existing = list(getattr(wrapper, "__mathema_claims__", []) or [])
+    by_name = {c.get("name"): c for c in existing}
+    by_name.update({c.get("name"): c for c in auto_declared})
+    wrapper.__mathema_claims__ = list(by_name.values())
+
+
 def enforce_dimensions(key: str | None = None, root: str = "."):
-    """Decorator: wrap a function so a call whose arguments violate a
-    declared DIMENSION premise raises `ValueError` before the real
-    function runs. The shape analogue of `@enforce_domain`; where that
-    guards a parameter's value domain, this guards the relations
-    between argument shapes a claim states as its precondition.
+    """Decorator: wrap a function so a call whose arguments have the
+    wrong dimensions raises `ValueError` before the real function runs,
+    and a result of the wrong dimensions raises after it. The shape
+    analogue of `@enforce_domain`, which guards a parameter's value
+    domain and knows nothing about shapes; the two stack:
+
+        @enforce_dimensions()
+        @enforce_domain()
+        def matvec(a: Mat("m", "n"), x: Vec("n")) -> Vec("m"):
+            ...
+
+        matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1, 1])
+        # ValueError: matvec: x has length 5; a is 3 by 4, so x must have length 4
+
+    At entry, every shaped parameter (a `Shape`, `Vec` or `Mat` marker,
+    or a space a claim's own binding states, `for A in R^(30,15)`) has
+    the rank and the fixed sizes its dimensions state, and a dimension
+    name shared across parameters agrees across the actual arguments; a
+    runtime type reports its shape the way its adapter reads it. At
+    exit, the result matches the return marker with the names this call
+    bound (`Vec("m")` after `a` was 3 by 4 means length 3). Each
+    failure names the parameter (or the result), the shape found and
+    the shape expected. Like `@enforce_domain`, the decorator declares
+    what it makes true: one `excluded_outside_domain(p)` claim per
+    guarded parameter, proven by construction.
+
+    Every rejection is a `DimensionError`, a `ValueError`; its `at_exit`
+    says whether the result, rather than an argument, broke the shape.
+
+    A declared dimension premise is enforced too:
 
         @enforce_dimensions()
         @claims_decorator("assuming len(x) == len(y), f(x, y) == f(y, x)")
@@ -602,12 +643,23 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     def decorator(fn):
         premises = _premises(fn)
         sig = callable_signature(fn)
+        from . import _shapes
+        from .types import shapes_from_signature
+        try:
+            plan = _shapes.dimension_plan(
+                shapes_from_signature(fn),
+                _domain_from_declared_claims(fn, key, root))
+        except ValueError as e:
+            raise DomainError(f"enforce_dimensions(): {e}") from e
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
             av = bound.arguments
+            problem, bound_names = _shapes.entry_problem(plan, av)
+            if problem is not None:
+                raise DimensionError(f"{fn.__name__}: {problem}")
             for lhs, rel, rhs in premises:
                 left = _dim_ref(lhs)
                 if left is None or left[0] not in av:
@@ -627,7 +679,20 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
                         f"{fn.__name__}: dim({left[0]}, {left[1]})={lval} "
                         f"violates the declared premise "
                         f"dim({left[0]}, {left[1]}) {rel} {rdesc}")
-            return fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
+            problem = _shapes.exit_problem(plan, bound_names, result,
+                                           fn.__name__)
+            if problem is not None:
+                raise DimensionError(problem, at_exit=True)
+            return result
+
+        # what the guard checks, read back by every sampler as the
+        # parameter's declared shape, so the engine's own draws are
+        # never the draws the guard rejects
+        wrapper.__mathema_enforced_dimensions__ = {
+            p: dims for p, (dims, _source) in plan.params.items()}
+        _declare_exclusions(wrapper, fn, sorted(plan.params),
+                            "enforce_dimensions")
         return wrapper
 
     return decorator

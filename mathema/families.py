@@ -155,9 +155,9 @@ GROUPS: dict[str, tuple[str, ...]] = {
                   "is_reproducible"),
     # the children of is_computation_safe: the facts about one
     # implementation that answer "does it run" and "is it right in
-    # float64" (is_memory_safe is reserved and not yet adjudicated;
-    # is_computation_safe itself is the roll-up, declared by name;
-    # repeatability is is_repeatable's, over the stateless cluster)
+    # float64" (is_computation_safe itself is the roll-up, declared by
+    # name; repeatability is is_repeatable's, over the stateless
+    # cluster)
     "computation_safe": ("is_overflow_safe", "is_numerically_stable",
                          "is_representation_safe", "is_extremity_safe",
                          "is_pole_safe", "is_builtin_safe",
@@ -212,6 +212,24 @@ def registered_output_predicates() -> frozenset:
     the safety predicates; `routes` unions this with its static table."""
     return frozenset(name for name in families()
                      if _OUTPUT_SHAPE.fullmatch(name))
+
+
+#: families named in mathema's plan and not part of this release; a
+#: claim naming one fails as an unknown predicate does, with this
+#: sentence added to the error
+PLANNED_FAMILIES: dict[str, str] = {
+    "is_memory_safe": ("is_memory_safe is planned and is not part of "
+                       "this release"),
+}
+
+
+def planned_family_note(text: str) -> str | None:
+    """The sentence for the planned family `text` names as a whole
+    word, or None when it names none."""
+    for name, note in PLANNED_FAMILIES.items():
+        if re.search(rf"\b{name}\b", text):
+            return note
+    return None
 
 
 def registered_predicates() -> frozenset:

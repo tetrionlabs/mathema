@@ -1,16 +1,10 @@
 # Definition rows for numpy functions that mathema can adjudicate from
-# numpy 2.4 on: before it, `numpy.dot` states no signature and
-# `numpy.sum`'s source writes to its `out` argument, so a row about
-# either cannot be checked by execution there. What each function
-# computes is stated as in definitions.claims.yaml, over inputs with
-# nothing missing.
+# numpy 2.4 on: before it, `numpy.dot` states no signature and has no
+# source, so a row about it cannot be checked by execution there. What
+# the function computes is stated as in definitions.claims.yaml, over
+# inputs with nothing missing.
 compendium: numpy
 versions: ">=2.4,<3"
-
-numpy.sum:
-  claims:
-    - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= sum(a)"
 
 numpy.dot:
   claims:
