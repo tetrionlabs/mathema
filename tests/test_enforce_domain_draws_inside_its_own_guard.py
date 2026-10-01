@@ -71,4 +71,8 @@ def test_the_suggested_scaling_is_bound_to_keep_every_entry_inside_the_guard():
     rows = _by_name(check(mean_weight))
     row = rows["scale_equivariant"]
     assert "let c be [0.0, 1.0]" in row.statement, row.statement
-    assert row.verdict == "holds", (row.verdict, row.counterexample)
+    # the numbers hold; the empty list has no mean, which the
+    # empty-input line under the row reports
+    assert row.verdict == "falsified", (row.verdict, row.counterexample)
+    assert row.counterexample.startswith("weights = []"), row.counterexample
+    assert "DomainError" not in f"{row.counterexample} {row.note}"

@@ -41,6 +41,12 @@ def test_no_suggested_row_is_refused_by_the_guard(fn):
         if p.name.startswith(_FEEDS_BACK) or p.name not in suggested:
             continue
         text = f"{p.counterexample or ''} {p.note or ''}"
+        # what f did at a missing input (`at x = nan f raised ...`) is the
+        # missing-value line, not a refusal of a suggested number
+        said = ((p.meta or {}).get("mathema.missing") or {}).get("said") or {}
+        for by_member in said.values():
+            for sentence in by_member.values():
+                text = text.replace(sentence, "")
         assert "DomainError" not in text and "ValueError" not in text, (
             fn.__name__, p.name, p.statement, p.counterexample)
 
