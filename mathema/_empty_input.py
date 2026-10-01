@@ -151,7 +151,7 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
             if facts.param_kinds.get(p) in SEQUENCE_KINDS]
     open_seqs = []
     realised = realised_parameters(facts)
-    empty = {}
+    empty: dict = {}
     for p in seqs:
         dims = dims_of((cj_domain or {}).get(p)) or dims_of(shapes.get(p))
         # a matrix parameter's runtime type receives the 0x0 matrix
