@@ -1575,7 +1575,7 @@ def _deterministic_probe(fn, facts, cj, domain: dict, rng: random.Random,
         agree = _same_kind(first, second)
         if agree is None:
             # the comparison cannot tell; not a trial
-            uncomparable.append(type(first).__name__)
+            uncomparable.append(first)
             return None
         if agree:
             return True
@@ -1591,10 +1591,19 @@ def _deterministic_probe(fn, facts, cj, domain: dict, rng: random.Random,
     uncomparable: list = []
     result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
     if result[0] == "skipped" and uncomparable:
-        return ("skipped", 0,
-                f"two calls return {uncomparable[0]} values, which have "
-                f"no equality of their own or are consumed by comparing "
-                f"them, so paired calls cannot tell whether they agree")
+        import collections.abc
+        value = uncomparable[0]
+        if isinstance(value, collections.abc.Iterator):
+            kind = ("generators" if isinstance(value, collections.abc.Generator)
+                    else "iterators")
+            why = (f"two calls return {kind}, and comparing them would use "
+                   f"them up")
+        else:
+            name = type(value).__name__
+            why = (f"two calls return {name} objects, and {name} defines no "
+                   f"equality, so mathema cannot tell whether they agree. "
+                   f"Give {name} an __eq__, or claim what its fields are")
+        return ("skipped", 0, why)
     reads = hidden_reads(fn, facts)
     kept = _module_state_kept(fn, facts)
     caveats = []

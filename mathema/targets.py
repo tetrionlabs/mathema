@@ -319,12 +319,17 @@ def _no_such_attribute(module_name: str, name: str) -> str:
     # the module's own namespace, never `dir()`/`getattr`, which can
     # import a library's lazily loaded submodules
     names = [n for n, v in vars(mod).items() if not n.startswith("_")
-             and callable(v)] if mod is not None else []
+             and callable(v) and not inspect.isclass(v)] if mod is not None else []
     close = difflib.get_close_matches(name, names, n=3, cutoff=0.6)
-    example = close[0] if close else (names[0] if names else "NAME")
-    hint = (f"did you mean {', '.join(f'{module_name}:{c}' for c in close)}?"
-            if close else f"name one with {module_name}:NAME, for example "
-                          f"{module_name}:{example}")
+    if close:
+        hint = f"did you mean {', '.join(f'{module_name}:{c}' for c in close)}?"
+    elif names:
+        hint = (f"name one with {module_name}:NAME, for example "
+                f"{module_name}:{names[0]}")
+    else:
+        return (f"{module_name} has no function {name!r} at its top level; "
+                f"name the module that defines it, for example "
+                f"{module_name}.module:{name}")
     return f"{module_name} has no function {name!r}; {hint}"
 
 

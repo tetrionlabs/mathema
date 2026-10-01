@@ -165,3 +165,13 @@ def test_a_colon_form_that_names_no_library_function_is_one_mathema_line(
     assert lines[0].startswith("ERROR ") and said in lines[0], r.stdout + r.stderr
     assert lines[-1] == "WALKED False", r.stdout
     assert len(lines) == 2, r.stdout   # nothing else printed
+
+
+def test_the_example_a_colon_form_hint_offers_is_a_function():
+    r = _resolve_in_subprocess("json:nosuch")
+    line = r.stdout.splitlines()[0]
+    assert line.startswith("ERROR json has no function 'nosuch'"), r.stdout
+    example = line.rsplit("json:", 1)[1].rstrip("?")
+    import importlib
+    import inspect
+    assert inspect.isroutine(getattr(importlib.import_module("json"), example)), line

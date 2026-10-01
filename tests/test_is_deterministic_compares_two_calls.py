@@ -297,3 +297,13 @@ def test_a_deterministic_series_result_holds():
     pytest.importorskip("pandas")
     p = _wide(price_changes)
     assert p.verdict == "holds", (p.verdict, p.counterexample)
+
+
+def test_an_uncomparable_result_says_why_and_what_to_do():
+    p = _wide(make_order)
+    assert ("two calls return Order objects, and Order defines no equality, "
+            "so mathema cannot tell whether they agree. Give Order an "
+            "__eq__, or claim what its fields are") in (p.note or ""), p.note
+    p = _wide(countdown)
+    assert ("two calls return generators, and comparing them would use them "
+            "up") in (p.note or ""), p.note

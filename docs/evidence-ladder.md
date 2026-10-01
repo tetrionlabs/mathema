@@ -36,9 +36,9 @@ and it never lets a weaker result be reported as a stronger one.
 `derive` and `examine` share the top rung, a proof either way; the
 informed probing routes share a rung too: they draw on different
 information, and none is stronger than another. A language's own derive
-strategy reports `derive:` followed by its mechanism's name, and ranks as
-the default path ranks a wider mechanism, with `derive:extensive`; one
-that names no mechanism (`derive:language`) ranks with `derive`. The
+strategy reports `derive:` followed by its mechanism's name and ranks
+with `derive:extensive`; one that names no mechanism (`derive:language`)
+ranks with `derive`. The
 ladder is defined in the engine as `mathema.conjecture.EVIDENCE_LADDER`,
 and a route mathema does not recognise, such as one from a verification
 technique you have plugged in yourself, ranks below everything it does.

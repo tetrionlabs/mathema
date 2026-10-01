@@ -110,3 +110,11 @@ def test_a_variable_base_or_a_negative_constant_to_a_fractional_power_does_not(
         src):
     with pytest.raises(NotSymbolic, match="power"):
         _lower(src)
+
+
+def test_the_refusal_names_what_a_power_needs_to_lower():
+    with pytest.raises(NotSymbolic, match="a power is lowered only when the "
+                       "exponent is a whole number of at least 0, or when "
+                       "the base is a positive constant and the exponent a "
+                       "fraction"):
+        _lower("x ** 0.5")

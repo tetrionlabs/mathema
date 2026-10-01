@@ -380,9 +380,9 @@ nothing behind.
 
 | Spelling | What you learn | Usual fix |
 |---|---|---|
-| `is_deterministic` | the same inputs give the same output on every call | remove the hidden input (a clock, a global counter, an unseeded random draw) |
+| `is_deterministic` | two calls with the same inputs give the same result: floats match exactly, the sign of zero included, NaN agrees with NaN, and a raise agrees with a raise of the same type. A body that reads the clock, the environment or a file holds with a note saying two back-to-back calls cannot see that input change | remove the hidden input (a clock, a global counter, an unseeded random draw) |
 | `is_reproducible` | the same inputs give the same output once the random seed is fixed; a parameter named `seed`, `rng`, `random_state` or `key`, or one annotated as a numpy `Generator` or `RandomState` or a `random.Random`, is the seed, held fixed while nothing else varies | draw from a generator the caller can seed |
-| `is_state_safe` | the call changes nothing outside itself: no argument mutated, no global written | copy before modifying, and return the result instead of storing it |
+| `is_state_safe` | the call changes nothing outside itself: no argument mutated, no global written, and no process state changed (the environment, the working directory, `sys.path`, the global random generators, logging's configuration). Emitting a log record through the standard library's own logging, and drawing from a generator passed in, are not changes; mathema puts the process state back after each trial | copy before modifying, and return the result instead of storing it |
 | `is_order_invariant(f)` | reserved for a later release: the same answer whatever order a reduction runs in | |
 
 A reserved family is a known claim that is `skipped` in this release,

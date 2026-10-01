@@ -285,9 +285,11 @@ class Lowering:
                              and left.is_positive and right.is_Rational)
             if not (right.is_integer and right.is_nonnegative) \
                     and not constant_root:
-                raise NotSymbolic(f"{ast.unparse(node)!r}: only a whole, "
-                                  f"nonnegative power, or a rational power "
-                                  f"of a positive constant, is lowered")
+                raise NotSymbolic(f"{ast.unparse(node)!r}: a power is "
+                                  f"lowered only when the exponent is a "
+                                  f"whole number of at least 0, or when the "
+                                  f"base is a positive constant and the "
+                                  f"exponent a fraction")
         if isinstance(left, Vec) or isinstance(right, Vec):
             length = self._same_length(left, right, node)
             le = left.elem if isinstance(left, Vec) else left
