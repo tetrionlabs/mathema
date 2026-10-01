@@ -183,11 +183,20 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
         empty[p] = AbstractMat(()) if len(dims) == 2 and p in realised else []
         if dims and fixed_size(dims[0]) is not None:
             continue
+        # the premises over this sequence or its length's name (`n` in
+        # `xs in R^n`), read at the empty list
+        at_empty = {p: []}
+        names = [p]
+        if dims and isinstance(dims[0], str) and dims[0].isidentifier():
+            at_empty[dims[0]] = 0
+            names.append(dims[0])
         reading = [a for a in assumption or ()
-                   if _reads_length(p, [a])]
-        if reading and _premises_hold(reading, {p: []}) is True:
-            # the claim's own premises name the empty list (`assuming
-            # len(x) == 0`): the claim itself covers it
+                   if any(_reads_length(name, [a]) for name in names)]
+        if reading and _premises_hold(reading, at_empty) is not None:
+            # the claim's own premises settle the empty list: they name
+            # it (`assuming len(x) == 0`), and the claim covers it, or
+            # they exclude it (`assuming len(x) >= 2`), and the claim
+            # says nothing about it; either way no line is owed
             continue
         open_seqs.append(p)
     if not open_seqs:
