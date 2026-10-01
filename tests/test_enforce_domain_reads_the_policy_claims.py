@@ -99,3 +99,16 @@ def test_converts_enforces_nothing():
 
 def test_a_missing_value_error_is_a_domain_error():
     assert issubclass(MissingValueError, mathema.DomainError)
+
+
+def test_a_dotted_exception_name_is_raised_as_named():
+    np = pytest.importorskip("numpy")
+
+    @enforce_domain()
+    @claims_decorator("absent(f, x) raises(numpy.linalg.LinAlgError)")
+    def solve_for(x: Optional[float]) -> float:
+        return x
+    with pytest.raises(np.linalg.LinAlgError) as err:
+        solve_for(None)
+    assert str(err.value) == ("enforce_domain is active and raised LinAlgError because "
+                              "x is None")

@@ -389,13 +389,12 @@ def _policy_guard(fn, policies: list, arguments: dict) -> "BaseException | None"
 
 def _refusal(fn, exception: "str | None", because: str) -> BaseException:
     """The exception `enforce_domain` raises for a refused input: the
-    named type, looked up among the builtins and then f's module, or
-    `DomainError` when none is named or the name is not an exception."""
-    import builtins
-    kind = None
-    if exception:
-        kind = getattr(builtins, exception, None) or \
-            (getattr(fn, "__globals__", {}) or {}).get(exception)
+    named type, looked up among the builtins, then f's module, then the
+    module a dotted name imports, or `DomainError` when none is named or
+    the name is not an exception."""
+    from .policy import _exception_type
+    kind = _exception_type(exception, getattr(fn, "__globals__", {}) or {}) \
+        if exception else None
     if not (isinstance(kind, type) and issubclass(kind, BaseException)):
         kind = DomainError
     return kind(f"enforce_domain is active and raised {kind.__name__} because {because}")

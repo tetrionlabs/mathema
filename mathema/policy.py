@@ -290,17 +290,25 @@ def exceptions_of(fn):
         _SCOPE.reset(token)
 
 
-def _exception_type(name: str):
-    """The exception class a name stands for, a builtin or one `fn`'s
-    module reaches (`MissingInput`, `decimal.InvalidOperation`), or
-    None."""
+def _exception_type(name: str, scope: "dict | None" = None):
+    """The exception class a name stands for: a builtin, one the
+    function's module (`scope`, else the one under check) reaches
+    (`MissingInput`, `np.linalg.LinAlgError`), or one a dotted name
+    imports (`numpy.linalg.LinAlgError`); None for anything else."""
     import builtins
+    import importlib
     head, *rest = name.split(".")
     found = getattr(builtins, head, None) if not rest else None
     if found is None:
-        found = (_SCOPE.get() or {}).get(head)
+        found = (scope if scope is not None else _SCOPE.get() or {}).get(head)
         for part in rest:
             found = getattr(found, part, None)
+    if found is None and rest:
+        module_name, _, attr = name.rpartition(".")
+        try:
+            found = getattr(importlib.import_module(module_name), attr, None)
+        except Exception:
+            found = None
     return found if isinstance(found, type) and issubclass(found, BaseException) else None
 
 
