@@ -927,8 +927,11 @@ def _examined_verdict(found: list, unread: list, clean: str,
     if unread:
         return ProofResult("undecided", sketch="; ".join(
             site.text for site in unread))
+    assumes = sorted(getattr(effects, "assumes", ()) or ())
     return ProofResult("proven", sketch=f"examined from its source: the "
-                                        f"function {clean}")
+                                        f"function {clean}" + "".join(
+                                            f"; it assumes {a}"
+                                            for a in assumes))
 
 
 def _branch_dead_over(guard: tuple, domain: dict | None) -> "str | None":

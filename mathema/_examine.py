@@ -57,6 +57,10 @@ class Site:
     text: str
 
 
+#: marks a label for an object that may come from outside the call
+_MAYBE = "\u2063"
+
+
 @dataclass
 class Effects:
     """What a function's body, with the project functions it reaches,
@@ -81,8 +85,21 @@ class Effects:
     #: (parameter, site): a caller decides whether what it passes there
     #: is its own object or one from outside the call
     arg_writes: list = field(default_factory=list)
+    #: what the function's result may be: origins in the function's own
+    #: terms, ("param", p) for a parameter it hands back, an outside
+    #: value, or ("fresh",); `returns_exact` when every return hands
+    #: back the same one
+    returns: list = field(default_factory=list)
+    returns_exact: bool = False
+    #: assumptions a proof from this examination rests on
+    assumes: set = field(default_factory=set)
 
     def add(self, site: Site) -> None:
+        if _MAYBE in site.text:
+            # a write through an object that may or may not come from
+            # outside the call cannot be attributed: it is unknown
+            site = Site("unknown" if site.kind == "write" else site.kind,
+                        site.text.replace(_MAYBE, ""))
         bucket = {"write": self.writes, "hidden_read": self.hidden_reads,
                   "order": self.order_sensitive,
                   "unknown": self.unknowns}[site.kind]
@@ -99,6 +116,7 @@ class Effects:
             self.add(site)
         self.module_writes |= other.module_writes
         self.module_reads |= other.module_reads
+        self.assumes |= other.assumes
 
     def settle(self) -> None:
         """A module-level value both read and written in the call is a
@@ -157,7 +175,9 @@ _LIBRARY = {
     "os.system": "write", "sys.exit": "write",
     "sys.setrecursionlimit": "write", "sys.getrecursionlimit": "read",
     "random.seed": "write", "random.setstate": "write",
-    "random.getstate": "read", "random.Random": "pure",
+    "random.getstate": "read", "random.Random": "seeded",
+    "random.SystemRandom": "read", "uuid.uuid1": "read",
+    "uuid.uuid4": "read", "os.getpid": "read",
     "warnings.simplefilter": "write", "warnings.filterwarnings": "write",
     "warnings.warn": "write",
     "logging.basicConfig": "write", "logging.disable": "write",
@@ -188,6 +208,8 @@ _PURE_MODULES = frozenset({"math", "cmath", "operator", "functools",
                            "re", "json", "collections", "typing",
                            "dataclasses", "bisect", "heapq", "abc",
                            "enum", "textwrap"})
+#: modules whose functions read fresh entropy or the system
+_ENTROPY_MODULES = frozenset({"secrets"})
 #: modules whose module-level functions draw from a shared generator
 _DRAW_MODULES = frozenset({"random", "numpy.random"})
 
@@ -283,7 +305,9 @@ def _project_source(fn) -> "ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda 
     if any(path.startswith(p + os.sep) for p in _INSTALLED):
         return None
     try:
-        source = textwrap.dedent(inspect.getsource(fn))
+        # the code object's own source: the function's would follow
+        # __wrapped__ past a decorator's wrapper
+        source = textwrap.dedent(inspect.getsource(code))
         tree = ast.parse(source)
     except (OSError, TypeError, SyntaxError):
         return None
@@ -292,6 +316,17 @@ def _project_source(fn) -> "ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda 
                              ast.Lambda)):
             return node
     return None
+
+
+def _project_class(cls) -> bool:
+    """Whether a class is defined in project source, outside the
+    standard library and the installed packages."""
+    module = sys.modules.get(getattr(cls, "__module__", "") or "")
+    path = getattr(module, "__file__", None)
+    if not path:
+        return False
+    path = os.path.abspath(path)
+    return not any(path.startswith(p + os.sep) for p in _INSTALLED)
 
 
 def _dotted(node) -> "str | None":
@@ -370,7 +405,7 @@ def _returns_its_argument(qualified: str, node: ast.Call) -> bool:
 def _joined(*origins: dict) -> dict:
     """The origins of names after paths that may each have run: a name
     fresh on one path and from outside on another is from outside; two
-    different outside origins leave it unresolved."""
+    different outside origins leave it one that may be either."""
     out: dict = {}
     for name in set().union(*origins):
         seen = [o[name] for o in origins if name in o]
@@ -380,7 +415,7 @@ def _joined(*origins: dict) -> dict:
         elif all(o == outside[0] for o in outside):
             out[name] = outside[0]
         else:
-            out[name] = ("unresolved", name)
+            out[name] = ("may", tuple(dict.fromkeys(outside)))
     return out
 
 
@@ -415,6 +450,35 @@ def _argument_for(fn, node: ast.Call, param: str, bound=None,
     return "default"
 
 
+def _closure_ids(fn) -> tuple:
+    """The identities of the values a function closes over: one wrapper
+    code shared by many decorated functions is a different function
+    for each."""
+    out = []
+    for cell in getattr(fn, "__closure__", None) or ():
+        try:
+            out.append(id(cell.cell_contents))
+        except ValueError:
+            out.append(None)
+    return tuple(out)
+
+
+_MATHEMA_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _unwrapped(fn):
+    """`fn`, or the function a mathema guard decorator wraps: those
+    wrappers only check arguments and results, and every other
+    decorator's wrapper is examined as the function it is."""
+    while True:
+        code = getattr(fn, "__code__", None)
+        inner = getattr(fn, "__wrapped__", None)
+        if inner is None or code is None or not os.path.abspath(
+                code.co_filename).startswith(_MATHEMA_DIR + os.sep):
+            return fn
+        fn = inner
+
+
 def examine(fn, generator: "str | None" = None,
             constructing: bool = False) -> Effects:
     """Intent:
@@ -425,7 +489,8 @@ def examine(fn, generator: "str | None" = None,
         `constructing` reads `fn` as a class's `__init__`, whose first
         parameter is the object being made.
     """
-    key = (getattr(fn, "__code__", fn), generator, constructing)
+    key = (getattr(fn, "__code__", fn), _closure_ids(fn), generator,
+           constructing)
     if key in _CACHE:
         return _CACHE[key]
     _CACHE[key] = Effects()      # a cycle reaching fn again adds nothing
@@ -434,12 +499,63 @@ def examine(fn, generator: "str | None" = None,
     return found
 
 
+def _own_statements(tree):
+    """Every node of a function's body outside the functions and
+    classes defined in it."""
+    stack = list(tree.body) if isinstance(tree.body, list) else []
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef, ast.Lambda)):
+            stack.extend(ast.iter_child_nodes(node))
+
+
+def _own_returns(tree) -> list:
+    return [n for n in _own_statements(tree) if isinstance(n, ast.Return)]
+
+
+#: method names whose result is part of the object they are called on
+_PART_METHODS = frozenset({
+    "values", "items", "keys", "get", "__getitem__", "view", "reshape",
+    "ravel", "transpose", "squeeze", "setdefault", "pop", "popitem",
+    "__iter__", "__next__", "swapaxes", "real", "imag", "diagonal",
+})
+
+
+def _set_of_text(node) -> bool:
+    """Whether `node` builds a set or frozenset holding text: a set
+    display or comprehension with a string element, or set()/
+    frozenset() of a display or a string holding one."""
+    def textual(n) -> bool:
+        return isinstance(n, ast.Constant) and isinstance(
+            n.value, (str, bytes))
+    if isinstance(node, ast.Set):
+        return any(textual(e) for e in node.elts)
+    if isinstance(node, ast.SetComp):
+        return True
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id in ("set", "frozenset") and node.args:
+        arg = node.args[0]
+        if textual(arg):
+            return True
+        if isinstance(arg, (ast.List, ast.Tuple, ast.Set)):
+            return any(textual(e) for e in arg.elts)
+        return isinstance(arg, (ast.ListComp, ast.GeneratorExp, ast.SetComp))
+    return False
+
+
+#: calls whose result depends on the order their argument iterates in
+_ORDERED_CONSUMERS = frozenset({"iter", "list", "tuple", "enumerate",
+                                "next", "zip", "map", "filter", "reversed"})
+
+
 class _Examiner:
     """One function's examination (see `examine`)."""
 
     def __init__(self, fn, generator, constructing: bool = False):
         self.constructing = constructing
-        self.fn = getattr(fn, "__wrapped__", fn)
+        self.fn = _unwrapped(fn)
         self.name = getattr(self.fn, "__name__", "f")
         self.generator = generator
         self.effects = Effects()
@@ -473,12 +589,31 @@ class _Examiner:
         if self.constructing and params:
             self.origin[params[0]] = ("fresh",)
         self.declared_global = {n for node in ast.walk(tree)
-                                if isinstance(node, (ast.Global, ast.Nonlocal))
+                                if isinstance(node, ast.Global)
                                 for n in node.names}
+        self.declared_nonlocal = {n for node in _own_statements(tree)
+                                  if isinstance(node, ast.Nonlocal)
+                                  for n in node.names}
+        self.params = params
+        self.text_sets: set = set()
+        for p in params:
+            try:
+                note = str(inspect.signature(self.fn).parameters[p].annotation)
+            except (TypeError, ValueError, KeyError):
+                note = ""
+            if re.search(r"(?:set|Set|frozenset|FrozenSet)\[(?:str|bytes)\]",
+                         note):
+                self.text_sets.add(p)
         body = tree.body if isinstance(tree.body, list) else [tree.body]
         for stmt in body:
             self.visit(stmt)
         self.effects.settle()
+        returned = [self._origin_of(r.value) if r.value is not None
+                    else ("fresh",) for r in _own_returns(tree)] if \
+            isinstance(tree.body, list) else [self._origin_of(tree.body)]
+        self.effects.returns = [o for o in returned if o[0] != "fresh"]
+        self.effects.returns_exact = bool(returned) and all(
+            o == returned[0] for o in returned) and returned[0][0] != "fresh"
         own = f"{self.name} "
         for site in self.effects.writes:
             if not site.text.startswith(own):
@@ -513,18 +648,58 @@ class _Examiner:
                 return ("value", obj, f"{base[2]}.{node.attr}")
             if base[0] == "value" and isinstance(node, ast.Subscript):
                 return ("value", None, f"{base[2]}[...]")
+            if base[0] == "holds":
+                return ("may", base[1])
             return base
         if isinstance(node, ast.Call):
             return self._call_origin(node)
+        if isinstance(node, ast.NamedExpr):
+            return self._origin_of(node.value)
+        if isinstance(node, ast.Lambda):
+            return ("local_fn",)
+        if isinstance(node, ast.IfExp):
+            return _joined({"v": self._origin_of(node.body)},
+                           {"v": self._origin_of(node.orelse)})["v"]
+        if isinstance(node, ast.BoolOp):
+            return _joined(*({"v": self._origin_of(v)}
+                             for v in node.values))["v"]
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict)):
+            parts = node.values if isinstance(node, ast.Dict) else node.elts
+            held = tuple(dict.fromkeys(
+                o for o in (self._origin_of(e) for e in parts if e is not None)
+                if self._outside(o) is not None))
+            return ("holds", held) if held else ("fresh",)
+        return ("fresh",)
+
+    def _part_of(self, origin):
+        """The origin of an element or a part of an object of `origin`:
+        a part of an object from outside the call is outside it too, a
+        part of a fresh container holding outside objects may be one."""
+        if origin[0] == "holds":
+            return ("may", origin[1])
+        if origin[0] in ("param", "global", "element"):
+            return ("element", origin) if origin[0] != "element" else origin
+        if origin[0] == "value" and self._outside(origin) is not None:
+            return ("element", origin)
+        if origin[0] == "may":
+            return origin
         return ("fresh",)
 
     def _call_origin(self, node: ast.Call):
         func = node.func
-        if isinstance(func, ast.Attribute) and func.attr in (
-                "reshape", "ravel", "view", "T", "transpose", "squeeze",
-                "__getitem__"):
-            return self._origin_of(func.value)
+        if isinstance(func, ast.Attribute):
+            owner = self._origin_of(func.value)
+            if not (owner[0] == "value" and isinstance(
+                    owner[1], (types.ModuleType, type))):
+                if func.attr in ("reshape", "ravel", "view", "T", "transpose",
+                                 "squeeze", "__getitem__", "__iter__"):
+                    return owner
+                if func.attr in _PART_METHODS:
+                    return self._part_of(owner)
         callee = self._origin_of(func)
+        if callee[0] == "value" and isinstance(callee[1], types.FunctionType) \
+                and _project_source(callee[1]) is not None:
+            return self._returned(callee[1], node)
         if callee[0] == "value" and _qualified(callee[1]) in _SHARED_RESULTS:
             # the call returns an object other code holds too
             return ("value", None, self._shown(node))
@@ -533,6 +708,30 @@ class _Examiner:
             # an array already of the asked type comes back as itself
             return self._origin_of(node.args[0])
         return ("fresh",)
+
+    def _returned(self, fn, node: ast.Call):
+        """The origin of what a call of project function `fn` returns:
+        the argument passed for a parameter it hands back, an outside
+        value it hands back, else fresh."""
+        found = examine(fn)
+        mapped = []
+        for origin in found.returns:
+            if origin[0] == "param":
+                arg = _argument_for(fn, node, origin[1])
+                if arg is None or arg == "default":
+                    mapped.append(("opaque", f"what {fn.__name__} returns"))
+                else:
+                    mapped.append(self._origin_of(arg))
+            elif origin[0] in ("value", "global"):
+                mapped.append(origin)
+            else:
+                mapped.append(("opaque", f"what {fn.__name__} returns"))
+        outside = [o for o in mapped if self._outside(o) is not None]
+        if not outside:
+            return ("fresh",)
+        if found.returns_exact and len(outside) == 1:
+            return outside[0]
+        return ("may", tuple(dict.fromkeys(outside)))
 
     def _shown(self, node) -> str:
         try:
@@ -544,6 +743,24 @@ class _Examiner:
         """What a write through an object of this origin changes, or None
         for an object made in the call."""
         kind = origin[0]
+        if kind == "element":
+            inner = self._outside(origin[1])
+            if inner is None:
+                return None
+            if inner.startswith(_MAYBE):
+                return inner
+            return f"an element of {inner}"
+        if kind == "may":
+            labels = [lab for lab in (self._outside(o) for o in origin[1])
+                      if lab is not None]
+            if not labels:
+                return None
+            return (_MAYBE + "an object that may be "
+                    + " or ".join(dict.fromkeys(
+                        lab.replace(_MAYBE, "").replace(
+                            "an object that may be ", "") for lab in labels)))
+        if kind == "opaque":
+            return _MAYBE + origin[1]
         if kind == "param":
             if origin[1] == self.generator:
                 return None
@@ -552,6 +769,9 @@ class _Examiner:
             return f"the module-level {origin[1]}"
         if kind == "value":
             value, shown = origin[1], origin[2]
+            if isinstance(value, type) and not shown.endswith("]") and \
+                    _project_class(value):
+                return f"the class {shown}"
             if isinstance(value, (types.FunctionType, types.BuiltinFunctionType,
                                   type)) and not shown.endswith("]"):
                 return None
@@ -588,8 +808,8 @@ class _Examiner:
             self._augmented(node)
             return
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for stmt in node.body:
-                self.visit(stmt)
+            self._nested(node.name, node.args, node.body)
+            self.origin[node.name] = ("local_fn",)
             return
         if isinstance(node, ast.Delete):
             for target in node.targets:
@@ -613,8 +833,9 @@ class _Examiner:
             return
         if isinstance(node, (ast.For, ast.AsyncFor)):
             self.expr(node.iter)
+            self._iterated(node.iter)
             before = dict(self.origin)
-            self._bind(node.target, ("fresh",))
+            self._bind(node.target, self._part_of(self._origin_of(node.iter)))
             for stmt in (*node.body, *node.body, *node.orelse):
                 # twice: a name the body rebinds late is what an early
                 # statement sees on the next pass
@@ -632,7 +853,8 @@ class _Examiner:
             for item in node.items:
                 self.expr(item.context_expr)
                 if item.optional_vars is not None:
-                    self._bind(item.optional_vars, ("fresh",))
+                    self._bind(item.optional_vars,
+                               self._entered(item.context_expr))
             for stmt in node.body:
                 self.visit(stmt)
             return
@@ -669,7 +891,59 @@ class _Examiner:
             self.origin[alias.asname or alias.name] = (
                 "value", value, f"{node.module}.{alias.name}")
 
+    def _nested(self, name: str, args, body) -> None:
+        """Examine a function or lambda defined in the body where it
+        stands: its parameters receive whatever a caller passes, and
+        the names it binds are its own."""
+        before = dict(self.origin)
+        for a in (*args.posonlyargs, *args.args, *args.kwonlyargs,
+                  *([args.vararg] if args.vararg else []),
+                  *([args.kwarg] if args.kwarg else [])):
+            self.origin[a.arg] = ("opaque", f"an argument passed to {name}")
+        for default in (*args.defaults, *args.kw_defaults):
+            if default is not None:
+                self.expr(default)
+        if isinstance(body, list):
+            for stmt in body:
+                self.visit(stmt)
+        else:
+            self.expr(body)
+        self.origin = before
+
+    def _entered(self, node):
+        """The origin of what `with node as name` binds: the object
+        itself for one from outside the call, what a project context
+        manager yields (which mathema does not follow), else fresh."""
+        if isinstance(node, ast.Call):
+            callee = self._origin_of(node.func)
+            if callee[0] == "value" and (
+                    isinstance(callee[1], types.FunctionType)
+                    and _project_source(callee[1]) is not None
+                    or isinstance(callee[1], type)
+                    and _project_class(callee[1])):
+                return ("opaque", f"what {self._shown(node)} yields")
+            return ("fresh",)
+        origin = self._origin_of(node)
+        return origin if self._outside(origin) is not None else ("fresh",)
+
+    def _iterated(self, node) -> None:
+        """An iteration of `node` whose order reaches the result: a set
+        of strings iterates in an order that changes from one process
+        to the next."""
+        if _set_of_text(node) or isinstance(node, ast.Name) and \
+                node.id in self.text_sets:
+            self.effects.add(Site("order", f"{self.name} iterates "
+                                  f"{self._shown(node)}: the iteration order "
+                                  f"of a set of strings varies across "
+                                  f"processes"))
+
     def _bind(self, target, origin) -> None:
+        if isinstance(target, ast.Name) and target.id in \
+                self.declared_nonlocal:
+            self.effects.add(Site("write", f"{self.name} rebinds "
+                                  f"{target.id}, a variable of the function "
+                                  f"that encloses it"))
+            return
         if isinstance(target, ast.Name):
             if target.id in self.declared_global:
                 self.effects.module_writes.add((self.module, target.id))
@@ -679,7 +953,8 @@ class _Examiner:
             self.origin[target.id] = origin
         elif isinstance(target, (ast.Tuple, ast.List)):
             for element in target.elts:
-                self._bind(element, ("fresh",))
+                self._bind(element.value if isinstance(element, ast.Starred)
+                           else element, self._part_of(origin))
 
     def _target_parts(self, target) -> None:
         """Read the expressions inside an assignment target (an index, a
@@ -698,11 +973,28 @@ class _Examiner:
             self._write_through(target, f"{self._shown(target)} = ...")
             return
         if isinstance(target, ast.Name):
+            if _set_of_text(value) or isinstance(value, ast.Name) and \
+                    value.id in self.text_sets:
+                self.text_sets.add(target.id)
+            else:
+                self.text_sets.discard(target.id)
             self._bind(target, self._origin_of(value))
             return
         if isinstance(target, (ast.Tuple, ast.List)):
+            if isinstance(value, (ast.Tuple, ast.List)) and len(
+                    value.elts) == len(target.elts) and not any(
+                    isinstance(e, ast.Starred)
+                    for e in (*value.elts, *target.elts)):
+                for element, part in zip(target.elts, value.elts):
+                    self._store(element, part)
+                return
             for element in target.elts:
-                self._store(element, ast.Constant(None))
+                inner = element.value if isinstance(
+                    element, ast.Starred) else element
+                if isinstance(inner, ast.Name):
+                    self._bind(inner, self._part_of(self._origin_of(value)))
+                else:
+                    self._store(inner, ast.Constant(None))
 
     def _augmented(self, node: ast.AugAssign) -> None:
         target = node.target
@@ -719,6 +1011,9 @@ class _Examiner:
             if target.id in self.declared_global:
                 self.effects.add(Site("write", f"{self.name} rebinds the "
                                       f"module-level {target.id}"))
+                return
+            if target.id in self.declared_nonlocal:
+                self._bind(target, ("fresh",))
                 return
             origin = self.origin.get(target.id)
             if origin and origin[0] == "param" and isinstance(
@@ -764,7 +1059,7 @@ class _Examiner:
 
     def expr(self, node) -> None:
         if isinstance(node, ast.Lambda):
-            self.expr(node.body)
+            self._nested("a lambda", node.args, node.body)
             return
         if isinstance(node, ast.Call):
             self.call(node)
@@ -785,9 +1080,13 @@ class _Examiner:
             return
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp,
                              ast.DictComp)):
+            before = dict(self.origin)
             for gen in node.generators:
                 self.expr(gen.iter)
-                self._bind(gen.target, ("fresh",))
+                if not isinstance(node, ast.SetComp):
+                    self._iterated(gen.iter)
+                self._bind(gen.target, self._part_of(
+                    self._origin_of(gen.iter)))
                 for cond in gen.ifs:
                     self.expr(cond)
             if isinstance(node, ast.DictComp):
@@ -795,6 +1094,7 @@ class _Examiner:
                 self.expr(node.value)
             else:
                 self.expr(node.elt)
+            self.origin = before
             return
         if isinstance(node, ast.NamedExpr):
             self.expr(node.value)
@@ -875,6 +1175,7 @@ class _Examiner:
             if site not in passed:
                 self.effects.add(site)
         self.effects.module_writes |= found.module_writes
+        self.effects.assumes |= found.assumes
         self.effects.module_reads |= found.module_reads
         callee = getattr(fn, "__name__", "f")
         for p, site in found.arg_writes:
@@ -903,6 +1204,13 @@ class _Examiner:
         for keyword in node.keywords:
             self.expr(keyword.value)
         func = node.func
+        if isinstance(func, ast.Name) and func.id in _ORDERED_CONSUMERS \
+                and node.args and func.id not in self.origin:
+            self._iterated(node.args[0])
+        if isinstance(func, ast.Attribute) and func.attr in ("join", "pop") \
+                and (node.args or func.attr == "pop"):
+            self._iterated(node.args[0] if func.attr == "join"
+                           else func.value)
         if isinstance(func, ast.Name):
             name = func.id
             if name in self.origin:
@@ -914,6 +1222,11 @@ class _Examiner:
                     return
                 if origin[0] == "value":
                     self._callee(origin[1], origin[2], node)
+                    return
+                if origin[0] != "local_fn":
+                    self.effects.add(Site("unknown", f"{self.name} calls "
+                                          f"{name}, an object mathema cannot "
+                                          f"follow"))
                 return
             if name in _UNREADABLE_BUILTINS and name not in self.scope:
                 self.effects.add(Site("unknown", f"{self.name} calls "
@@ -1070,6 +1383,8 @@ class _Examiner:
                 entry = "draw"
             elif module in _THREADED_MODULES:
                 entry = "threaded"
+            elif module in _ENTROPY_MODULES:
+                entry = "read"
             elif module in _PURE_MODULES or module.split(".")[0] in \
                     _PURE_MODULES:
                 entry = "pure"
@@ -1078,6 +1393,10 @@ class _Examiner:
                 entry = "pure"
             elif module == "builtins" or qualified in _PURE_BUILTINS:
                 entry = "pure"
+        if module == "numpy" or module.startswith("numpy."):
+            # every numpy ufunc reads the floating-point error state
+            # np.seterr sets: under all="raise", np.log(0) raises
+            self.effects.assumes.add("numpy's default error state")
         name = qualified if "." in qualified else (shown or qualified)
         if qualified.rsplit(".", 1)[-1] in ("shuffle",) and node is not None \
                 and node.args:
