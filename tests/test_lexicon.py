@@ -177,7 +177,7 @@ PINNED: dict = {
     "missing_trap_comparison": "holds",
     "missing_predicate_sugar": "holds",
     "absent_none_spelling": "holds",
-    "is_missing_safe_gate": "holds",
+    "is_missing_safe_gate": "proven",
     "is_missing_safe_gate_falsified": ("falsified", "positions = [null]: f raised TypeError"),
     "is_absent_safe_gate": "holds",
     "is_absent_safe_gate_falsified": ("falsified", "score = None: f raised TypeError"),

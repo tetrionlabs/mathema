@@ -146,8 +146,8 @@
  },
  "enforce_domain_guard_unbound": {
   "input": "for x in [1, 10], f(x, alpha) <= x",
-  "unicode": "let α = alpha, ∀ x ∈ [1.0, 10.0] ⊂ ℝ ∪ {∅}, f(x, α) ≤ x",
-  "ascii": "for x in [1.0, 10.0]:float|missing, f(x, alpha) <= x"
+  "unicode": "let α = alpha, ∀ x ∈ [1.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x, α) ≤ x",
+  "ascii": "for x in [1.0, 10.0] : float|absent|missing, f(x, alpha) <= x"
  },
  "domain_open_interval": {
   "input": "for x in (0, 1), f(x) >= 0",
