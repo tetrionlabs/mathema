@@ -650,7 +650,13 @@ def _entry_outside(value, element,
         import numpy
         hits = numpy.flatnonzero(numpy.isinf(flat))
         return (flat[hits[0]].item(),) if hits.size else None
-    for leaf in leaves(value):
+    entries = leaves(value)
+    if (kind == "f" and type(value).__module__ == "numpy"
+            and str(getattr(value, "dtype", "")) != "float64"):
+        # a narrower or wider float keeps its own type, so each entry
+        # meets an endpoint parsed in that type
+        entries = iter(value.ravel())
+    for leaf in entries:
         if is_missing(leaf):
             if not numbers_judged_elsewhere and not domain_contains(
                     leaf, element):

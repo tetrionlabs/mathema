@@ -1123,19 +1123,34 @@ def _as_written(value):
     return value
 
 
-def _written_domain(bounds) -> "Domain":
+def _in_carrier(carrier):
+    """Intent:
+        A reader turning a finite float endpoint into the exact value of
+        its literal parsed in `carrier`, a numpy float type (`0.1` in
+        float32 is float32("0.1")); anything else unchanged.
+    """
+    def read(value):
+        if isinstance(value, float) and math.isfinite(value):
+            parsed = carrier(repr(value))
+            return fractions.Fraction(*parsed.as_integer_ratio())
+        return value
+    return read
+
+
+def _written_domain(bounds, read=None) -> "Domain":
     """Intent:
         `bounds` with every float endpoint, discrete member and excluded
         value read as written (`_as_written`), for judging an exact
-        number.
+        number, or through `read` when one is given.
     """
     import dataclasses
+    read = read or _as_written
 
     def piece(p):
         if isinstance(p, frozenset):
-            return frozenset(_as_written(v) for v in p)
+            return frozenset(read(v) for v in p)
         if isinstance(p, tuple) and len(p) == 2:
-            return Interval(_as_written(p[0]), _as_written(p[1]),
+            return Interval(read(p[0]), read(p[1]),
                             getattr(p, "closed_lo", True),
                             getattr(p, "closed_hi", True))
         return p
@@ -1143,7 +1158,7 @@ def _written_domain(bounds) -> "Domain":
     dom = _as_domain(bounds)
     return dataclasses.replace(
         dom, pieces=tuple(piece(p) for p in dom.pieces),
-        excluded=frozenset(_as_written(v) for v in dom.excluded))
+        excluded=frozenset(read(v) for v in dom.excluded))
 
 
 def number_member(value, bounds) -> "bool | None":
@@ -1159,7 +1174,9 @@ def number_member(value, bounds) -> "bool | None":
         Each kind meets an endpoint written `0.1` in its own reading: a
         binary float (a Python or numpy float) against the float the
         literal parses to, an exact number (an int, a numpy integer, a
-        Fraction, a Decimal) against the number as written, 1/10.
+        Fraction, a Decimal) against the number as written, 1/10. A
+        numpy float narrower or wider than float64 meets the literal
+        parsed in its own type (float32 against float32("0.1")).
     """
     import decimal
     import numbers
@@ -1176,6 +1193,12 @@ def number_member(value, bounds) -> "bool | None":
         return False
     if exact and isinstance(v, (int, fractions.Fraction)):
         return domain_contains(v, _written_domain(bounds))
+    carrier = type(value)
+    if (carrier.__module__ == "numpy" and carrier.__name__ != "float64"
+            and hasattr(value, "as_integer_ratio")
+            and isinstance(v, (float, fractions.Fraction))):
+        return domain_contains(v, _written_domain(bounds,
+                                                  _in_carrier(carrier)))
     return domain_contains(v, bounds)
 
 

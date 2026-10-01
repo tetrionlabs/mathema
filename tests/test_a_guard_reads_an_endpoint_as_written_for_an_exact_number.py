@@ -74,3 +74,37 @@ def test_an_integer_endpoint_reads_the_same_for_every_kind(value):
     with pytest.raises(DomainError):
         below_three(value)
     assert below_three(value - 1) == value - 1
+
+
+@pytest.mark.parametrize("carrier", [np.float16, np.float32, np.float64],
+                         ids=lambda t: t.__name__)
+def test_a_float_meets_the_endpoint_in_its_own_float_type(carrier):
+    value = carrier("0.1")
+    with pytest.raises(DomainError):
+        half_open(value)
+    assert closed(value) == value
+
+
+@pytest.mark.parametrize("carrier", [np.float16, np.float32],
+                         ids=lambda t: t.__name__)
+def test_a_narrow_float_next_to_the_endpoint_is_judged_in_its_type(carrier):
+    value = carrier("0.1")
+    above = np.nextafter(value, carrier(1))
+    below = np.nextafter(value, carrier(0))
+    with pytest.raises(DomainError):
+        closed(above)
+    assert half_open(below) == below
+
+
+def test_an_array_of_narrow_floats_meets_the_endpoint_in_its_type():
+    from mathema import enforce_dimensions
+
+    @enforce_dimensions()
+    @claims_decorator("for xs in [0, 0.1]^3, f(xs) >= 0")
+    def total(xs: np.ndarray) -> float:
+        return float(np.asarray(xs, dtype=float).sum())
+
+    assert total(np.full(3, "0.1", dtype=np.float32)) > 0
+    from mathema.authoring import DimensionError
+    with pytest.raises(DimensionError):
+        total(np.full(3, np.nextafter(np.float32("0.1"), np.float32(1))))
