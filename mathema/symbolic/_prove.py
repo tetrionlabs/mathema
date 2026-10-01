@@ -2332,16 +2332,29 @@ def _loop_proof_raise_gate(fn, facts, domain, proof: ProofResult) -> ProofResult
         the raise-region walk found (a non-integer `range()` argument,
         a division) provably misses the declared domain; otherwise the
         proof becomes undecided, since the closed form is silent about
-        the points where the code raises.
+        the points where the code raises. When every parameter is a
+        scalar, an operation whose region the walk could not state (a
+        division by a loop-built value) keeps it undecided too.
     """
     from ._fold import _cond_truth_over
     from ._partiality import partiality_walk
+    missed: list = []
     try:
-        guards, _unread = partiality_walk(fn, facts, domain or {})
+        guards, _unread = partiality_walk(fn, facts, domain or {},
+                                          missed_out=missed)
     except TimeoutError:
         raise
     except Exception:
-        return proof
+        guards, missed = [], ["the raise-region pass failed"]
+    if missed and not any(kind in SEQUENCE_KINDS
+                          for kind in (facts.param_kinds or {}).values()):
+        return ProofResult(
+            "undecided",
+            sketch=f"{proof.sketch}; not kept as a proof: the raise-region "
+                   f"pass cannot state where the code raises at "
+                   f"{missed[0]}, so a raise inside the domain is not "
+                   f"ruled out",
+            meta=dict(proof.meta))
     from ._partiality import NO_VALUE
     for cond, exc in guards:
         # a loop body's guard reads its range index, a nonnegative

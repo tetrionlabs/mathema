@@ -614,7 +614,8 @@ def partiality_guards(fn, facts) -> list:
 
 def partiality_walk(fn, facts, domain: "dict | None" = None,
                     complex_out: "list | None" = None,
-                    opaque_out: "list | None" = None) -> "tuple[list, str | None]":
+                    opaque_out: "list | None" = None,
+                    missed_out: "list | None" = None) -> "tuple[list, str | None]":
     """Intent:
         The implicit raise regions of a straight-line (or simply
         branched) body, as (condition, exception name) guards over the
@@ -641,7 +642,10 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
         When `opaque_out` is a list, the walk also appends a description
         of every call whose definedness is not known (no partiality
         lemma, not a known total function, no library `is_defined`
-        row): the region it reports says nothing about such a call.
+        row): the region it reports says nothing about such a call. When
+        `missed_out` is a list, it receives every operation whose raise
+        region the walk read but could not state (a divisor that does
+        not lift), apart from the statements it stopped at.
     """
     if facts.tree is None:
         return [], "no source"
@@ -912,5 +916,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
         _INT_SYMS.reset(int_token)
         _OPAQUE_OUT.reset(opaque_token)
         _COMPLEX_OUT.reset(token)
+    if missed_out is not None:
+        missed_out.extend(missed)
     first = (unread or missed or [None])[0]
     return guards, first
