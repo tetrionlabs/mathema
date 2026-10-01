@@ -1551,20 +1551,124 @@ def _interval_hull(expr, box: dict):
     return None
 
 
+def _hull_sign(arg, box: dict):
+    """Intent:
+        The sign `arg` keeps over the whole box: 1 when its interval
+        hull is strictly positive, -1 when strictly negative, None when
+        the hull reaches zero or cannot be computed.
+    """
+    try:
+        hull = _interval_hull(arg, box)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    if hull is None:
+        return None
+    if isinstance(hull, sympy.AccumBounds):
+        lo, hi = hull.min, hull.max
+    else:
+        lo = hi = hull
+    if not (getattr(lo, "is_finite", False) and getattr(hi, "is_finite", False)):
+        lo_sign = _verified_sign(lo) if getattr(lo, "is_finite", False) else None
+        hi_sign = _verified_sign(hi) if getattr(hi, "is_finite", False) else None
+        if lo_sign == 1 and hi is sympy.oo:
+            return 1
+        if hi_sign == -1 and lo is -sympy.oo:
+            return -1
+        return None
+    if _verified_sign(lo) == 1:
+        return 1
+    if _verified_sign(hi) == -1:
+        return -1
+    return None
+
+
+_SMOOTH_EVERYWHERE = (sympy.exp, sympy.sin, sympy.cos, sympy.atan,
+                      sympy.sinh, sympy.cosh, sympy.tanh, sympy.asinh,
+                      sympy.erf, sympy.erfc)
+
+
+def _smooth_on_box(expr, box: dict) -> bool:
+    """Intent:
+        Whether `expr` is defined, continuous and differentiable at
+        every point of the closed box, by checking each subterm against
+        the region where its function is smooth.
+
+    Notes:
+        A sufficient test, never a complete one: sums, products,
+        nonnegative integer powers and the functions in
+        `_SMOOTH_EVERYWHERE` are smooth everywhere; every other
+        function is accepted only when the interval hull of its
+        argument stays inside its smooth region over the box (a
+        negative power or an Abs needs a base that keeps one sign, a
+        fractional or symbolic power and log a positive base, tan and
+        sec a cos that keeps one sign, asin, acos and atanh an argument
+        strictly inside (-1, 1), atan2(y, x) a positive x or a y that
+        keeps one sign). Anything else (Piecewise, floor, sign, Mod, an
+        unknown function) makes the answer False.
+    """
+    for node in sympy.preorder_traversal(expr):
+        if node.is_Atom or isinstance(node, (sympy.Add, sympy.Mul)):
+            continue
+        if isinstance(node, _SMOOTH_EVERYWHERE):
+            continue
+        if isinstance(node, sympy.Pow):
+            base, exponent = node.args
+            if exponent.is_Integer and exponent >= 0:
+                continue
+            if exponent.is_Integer:
+                if _hull_sign(base, box) is None:
+                    return False
+                continue
+            if _hull_sign(base, box) != 1:
+                return False
+            continue
+        if isinstance(node, sympy.atan2):
+            y, x = node.args
+            if _hull_sign(x, box) == 1 or _hull_sign(y, box) is not None:
+                continue
+            return False
+        if len(node.args) != 1:
+            return False
+        arg = node.args[0]
+        if isinstance(node, sympy.log):
+            ok = _hull_sign(arg, box) == 1
+        elif isinstance(node, (sympy.Abs, sympy.acot)):
+            ok = _hull_sign(arg, box) is not None
+        elif isinstance(node, (sympy.tan, sympy.sec)):
+            ok = _hull_sign(sympy.cos(arg), box) is not None
+        elif isinstance(node, (sympy.cot, sympy.csc)):
+            ok = _hull_sign(sympy.sin(arg), box) is not None
+        elif isinstance(node, (sympy.asin, sympy.acos, sympy.atanh)):
+            ok = (_hull_sign(1 - arg, box) == 1
+                  and _hull_sign(1 + arg, box) == 1)
+        elif isinstance(node, sympy.acosh):
+            ok = _hull_sign(arg - 1, box) == 1
+        else:
+            ok = False
+        if not ok:
+            return False
+    return True
+
+
 def _constant_by_derivative(diff, domain: dict, params: dict):
     """Intent:
         Decide `diff == 0` for a differentiable expression over a
-        connected interval box by the classic argument: if every
-        partial derivative simplifies to zero, `diff` is constant
-        there, and one exact evaluation at an interior rational point
-        settles which constant.
+        connected interval box by the classic argument: if `diff` is
+        smooth on the closed box and every partial derivative
+        simplifies to zero, `diff` is constant there, and one exact
+        evaluation at a point of the box settles which constant.
 
     Notes:
         `True`/`False` only when everything discharges exactly (all
-        free symbols interval-bounded, all partials provably zero, the
-        point value exactly zero or exactly not); `None` otherwise;
-        in particular for a nonzero derivative, which says nothing
-        about equality at any single point.
+        free symbols interval-bounded, `diff` smooth on the whole box
+        by `_smooth_on_box`, all partials provably zero, the point
+        value exactly zero or exactly not); `None` otherwise; in
+        particular for a nonzero derivative, which says nothing about
+        equality at any single point, and for a difference with a pole,
+        branch cut or jump inside the box, across which a zero
+        derivative does not make it constant.
     """
     from ..domain import bound_to_sympy_set
 
@@ -1591,6 +1695,10 @@ def _constant_by_derivative(diff, domain: dict, params: dict):
         point[sym] = mid
         ranges[sym] = (lo, hi)
     if any(s not in point for s in diff.free_symbols):
+        return None
+    box = {sym: (sympy.AccumBounds(lo, hi) if lo != hi else lo)
+           for sym, (lo, hi) in ranges.items()}
+    if not _smooth_on_box(diff, box):
         return None
     for sym in point:
         try:
@@ -2152,13 +2260,23 @@ def _decide_equality(lhs, rhs, diff, relation, domain, bound_context, params,
         # these shapes.
         try:
             if sympy.simplify(diff.rewrite(sympy.asin)).is_zero:
-                equal = True
+                return ProofResult(
+                    "proven",
+                    sketch=f"{_humanize(lhs)} and {_humanize(rhs)} simplify "
+                           "identically once the inverse trigonometric "
+                           "functions are rewritten in terms of asin")
         except TimeoutError:
             raise
         except Exception:
             pass
-        if equal is None:
-            equal = _constant_by_derivative(diff, domain, params)
+        equal = _constant_by_derivative(diff, domain, params)
+        if equal is True:
+            return ProofResult(
+                "proven",
+                sketch=f"{_humanize(diff)} is smooth on the declared box, "
+                       "every partial derivative of it is zero there, and it "
+                       "is zero at one point of the box, so it is zero "
+                       "throughout")
     if equal is None:
         # an Abs the declared domain settles the sign of: resolve it
         # before asking .equals(), which cannot see the domain and
