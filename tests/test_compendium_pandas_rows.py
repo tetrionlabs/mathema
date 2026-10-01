@@ -44,6 +44,7 @@ def test_every_pandas_row_file_is_bundled():
     assert here == sorted(_FILES + ["pandas/series.claims.yaml"])
 
 
+@pytest.mark.library_rows
 @pytest.mark.parametrize("relative", _FILES)
 def test_every_pandas_row_holds_against_the_installed_pandas(tmp_path,
                                                              relative):
