@@ -150,6 +150,19 @@ def _vector_like(term, vectors: frozenset) -> bool:
             and bool(term.atoms(sympy.MatrixSymbol) & vectors))
 
 
+def _transpose(term, vectors: frozenset):
+    """`term.T` with numpy's reading of a 1-D vector: an expression
+    built from a vector parameter that has one axis of length 1 (a
+    column `x`, `A @ x`, or the row `x @ A`) is a 1-D array, whose
+    transpose is itself, so `x @ x.T` is the inner product, not
+    `outer(x, x)`."""
+    if isinstance(term, sympy.MatrixExpr) and 1 in term.shape \
+            and term.shape != (1, 1) \
+            and term.atoms(sympy.MatrixSymbol) & vectors:
+        return term
+    return sympy.Transpose(term)
+
+
 def _matmul(left, right, vectors: frozenset):
     """`left @ right` with numpy's reading of a 1-D vector: two
     vectors give their dot product, a vector on the left of a matrix
@@ -214,7 +227,7 @@ def _lift(node, env: dict, vectors: frozenset = frozenset()):
             and not isinstance(node.value, bool):
         return sympy.sympify(node.value)
     if isinstance(node, ast.Attribute) and node.attr == "T":
-        return sympy.Transpose(_shaped(lift(node.value), node.value))
+        return _transpose(_shaped(lift(node.value), node.value), vectors)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
         return -lift(node.operand)
     if isinstance(node, ast.BinOp):
@@ -245,7 +258,7 @@ def _lift(node, env: dict, vectors: frozenset = frozenset()):
         if name == "inv" and one:
             return sympy.Inverse(args[0])
         if name == "transpose" and one:
-            return sympy.Transpose(args[0])
+            return _transpose(_shaped(args[0], node.args[0]), vectors)
         if name == "I" and one:
             return sympy.Identity(args[0])
         if name == "matrix_power" and len(args) == 2 \
