@@ -47,6 +47,7 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       UnreadableSpelling)
 from . import linalg
 from ._scan import _split_commas, blank_strings
+from ._float_text import exact_literal_text, overlong_literals
 from .domain import DuplicateBinding
 from .domain import operational_domain as _operational_domain
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
@@ -5362,30 +5363,6 @@ def _bound_callables(cj) -> dict:
     return out
 
 
-_NUMBER_LITERAL = re.compile(
-    r"(?<![\w.])(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?(?![\w.])")
-
-
-def overlong_literals(text: str) -> list[str]:
-    """Intent:
-        The number literals in a claim's text that a double does not
-        read exactly as written: the literal's decimal value differs
-        from the decimal the nearest double prints as
-        (`0.30000000000000000001` reads as 0.3). Strings are skipped.
-    """
-    from decimal import Decimal, InvalidOperation
-    found = []
-    for m in _NUMBER_LITERAL.finditer(blank_strings(text or "")):
-        literal = m.group(0)
-        try:
-            value = float(literal)
-            if math.isfinite(value) and Decimal(repr(value)) != Decimal(literal):
-                found.append(literal)
-        except (ValueError, OverflowError, InvalidOperation):
-            continue
-    return found
-
-
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        extensive: bool) -> "Probe | None":
     """Intent:
@@ -5401,6 +5378,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         `ctx.family` is already resolved by the orchestration loop.
     """
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
+    exact_law = False
     cj_domain, family = ctx.cj_domain, ctx.family
     # A registered family's own "derive" route is tried before
     # the ordinary derive_ineligible check below; it doesn't
@@ -5417,6 +5395,20 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     assumption = (None if ctx.assumption is None else
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
     family_derive = family.routes().get("derive") if family is not None else None
+    # literals a double does not read exactly reach only the ordinary
+    # prover exactly (`exact_literal_text`); every other derive route
+    # reads the parsed doubles, so it does not decide such a claim
+    overlong_all = overlong_literals(cj.raw or "")
+    overlong_reason = (f"{', '.join(overlong_all)} has more digits than a "
+                       f"double carries, and the proof reads every number "
+                       f"exactly as written, so it does not decide this "
+                       f"claim")
+    if overlong_all and family_derive is not None:
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; {overlong_reason}",
+            meta={"mathema.derive_status": "undecided"})
+        return None
     reserved = getattr(family, "reserved", None)
     if reserved:
         # a family defined but not adjudicated in this release: the
@@ -5527,7 +5519,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     # that applies but does not decide leaves its reason as the derive
     # note should nothing below decide the claim either.
     definitions_hint = None
-    if not ctx.assume_defined:
+    if not ctx.assume_defined and not overlong_all:
         from .definitions import prove_through_definitions
         dproof = prove_through_definitions(
             cj, fn, facts, cj_domain, assumption,
@@ -5573,7 +5565,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     if array_uses or matrix_claim:
         mproof = None
         from .symbolic._matrix_lemmas import structure_properties
-        if (not cj.negated and not cj.links
+        if (not cj.negated and not cj.links and not overlong_all
                 and (cj.relation in ("==", "~=", ">", ">=", "<", "<=", "!=")
                      or cj.relation in structure_properties())):
             _structs = dict(structures_from_signature(fn))
@@ -5682,7 +5674,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # bounded above, whatever class its rows are
         with row_fields({p: [k for k in row_domain if k.startswith(f"{p}.")]
                          for p in language_params}):
-            proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
+            exact_law = True
+            proof = try_prove(fn, facts, exact_literal_text(cj.lhs),
+                              exact_literal_text(cj.rhs), cj.relation,
                               domain={**row_domain, **cj_domain},
                               tolerance=cj.tolerance,
                               extensive=extensive, funcs=bound_funcs or None,
@@ -5714,7 +5708,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         proof = try_prove_raises(fn, facts, cj.lhs, cj.rhs or None,
                                  domain=cj_domain)
     else:
-        proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
+        exact_law = True
+        proof = try_prove(fn, facts, exact_literal_text(cj.lhs),
+                          exact_literal_text(cj.rhs), cj.relation,
                           domain=cj_domain, tolerance=cj.tolerance,
                           extensive=extensive, funcs=bound_funcs or None,
                           assumption=assumption,
@@ -5759,7 +5755,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         swept = _brute_force_fallback()
         if swept is not None:
             proof = swept
-    overlong = overlong_literals(cj.raw or "")
+    from collections import Counter
+    overlong = Counter(overlong_literals(cj.raw or ""))
+    if exact_law:
+        # the law's own literals reached the proof exactly
+        overlong -= Counter(overlong_literals(cj.lhs or "")
+                            + overlong_literals(cj.rhs or ""))
+    overlong = list(overlong)
     if overlong and proof.status in ("proven", "disproven"):
         # the parse read these literals as the nearest double, a
         # different number from the one written, so a symbolic verdict
