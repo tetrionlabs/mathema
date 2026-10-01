@@ -90,9 +90,12 @@ refuses the 81st character. `L[unicode, len >= 1]` is the same set as
 (annotated_types, pydantic) infers `L[unicode, len <= 80]` through the
 package's text adaptor, and the record's note says so.
 
-A language domain spells the missing value as a word in both modes,
-`L[unicode]|missing` and `L[unicode] \ {missing}`: to a reader of formal
-languages `∅` is the empty language, a different set.
+A language domain spells a missing value as a word in both modes: to a
+reader of formal languages `∅` is the empty language, a different set.
+A string has no hole of its own, so the missing value of a string
+parameter is its absence, `L[unicode]|None`, which an `Optional[str]`
+admits and a `str` does not; `for s in {missing}` over a `str` is
+refused with the reason.
 
 ## Paths into a member
 

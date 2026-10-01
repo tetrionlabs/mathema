@@ -11,11 +11,11 @@ versions: ">=2,<4"
 pandas.DataFrame.abs:
   claims:
     - name: columns
-      statement: "for a in R^n \\ {∅}, f(a)[\"x\"] == abs(a.x)"
+      statement: "for a in R^n, f(a)[\"x\"] == abs(a.x)"
       note: "Element by element, a table of the same shape."
 
 pandas.DataFrame.cumsum:
   claims:
     - name: columns
-      statement: "for a in R^n \\ {∅}, f(a)[\"x\"] ~= cumsum(a.x)"
+      statement: "for a in R^n, f(a)[\"x\"] ~= cumsum(a.x)"
       note: "The running sums down each column."

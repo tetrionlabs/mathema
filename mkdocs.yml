@@ -119,6 +119,7 @@ nav:
       - The CDD loop, end to end: tutorial.md
       - Claims about a pandas function: pandas-function.md
       - Case studies: case-studies.md
+      - "Case study: the mean of nothing": mean-of-nothing.md
       - How-to guides:
           - Gate a pipeline with mathema verify: gate-a-pipeline.md
           - See what mathema knows about a library you call: library-claims.md
@@ -141,6 +142,7 @@ nav:
       - Lemmas: lemmas.md
       - Matrix structure and linear algebra: matrix-structure.md
       - "Runtime types: numpy, pandas, polars": runtime-types.md
+      - Missing values: missing-values.md
       - Language domains: language.md
       - Multi-function claims: multi-function-claims.md
   - Command reference:

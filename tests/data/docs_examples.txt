@@ -13,6 +13,8 @@
 [h] docs/agent-setup.md:99
 [h] docs/agent-setup.md:119
 [x] docs/authoring.md:raises-guard               run verdicts
+[x] docs/authoring.md:missing-default            run output
+[x] docs/authoring.md:missing-spelling           run
 [x] docs/authoring.md:write-spec                 run repl
 [x] docs/authoring.md:fixed-shape                run verdicts verdicts  (requires)
 [x] docs/authoring.md:enforce-dimensions-shapes  run
@@ -72,6 +74,20 @@
 [x] docs/matrix-structure.md:lemmas              run verdicts verdicts verdicts verdicts verdicts
 [x] docs/matrix-structure.md:numpy-functions     run verdicts verdicts  (requires)
 [x] docs/matrix-structure.md:enforce-structure   run  (requires)
+[x] docs/mean-of-nothing.md:mean                 file run output run output run output run output file run output
+[-] docs/mean-of-nothing.md:21
+[x] docs/missing-values.md:kinds                 file run output
+[x] docs/missing-values.md:admits                file run output
+[x] docs/missing-values.md:traps                 run output
+[x] docs/missing-values.md:core                  file run output run output run output run output run output
+[x] docs/missing-values.md:containers            file run output
+[x] docs/missing-values.md:strings               file run output  (requires)
+[x] docs/missing-values.md:slip                  file run output
+[x] docs/missing-values.md:write                 file session session session
+[x] docs/missing-values.md:defines               file run output
+[x] docs/missing-values.md:enforce               run output
+[-] docs/missing-values.md:17
+[-] docs/missing-values.md:523
 [x] docs/modes/accept.md:balance                 file file session session run file session session
 [x] docs/modes/audit.md:branches                 file session
 [x] docs/modes/audit.md:half                     run repl
@@ -88,7 +104,7 @@
 [x] docs/modes/review.md:delta                   file file run output file file run output
 [x] docs/modes/verify.md:sweep                   file run session file session file session file file session session session run file session
 [x] docs/modes/verify.md:eager                   session
-[-] docs/modes/verify.md:398
+[-] docs/modes/verify.md:403
 [x] docs/multi-function-claims.md:ratio          run output
 [x] docs/pandas-function.md:pandas               file run output run output run output run output run output run output  (requires)
 [x] docs/quickstart.md:falsify                   file run output run output run output
@@ -105,13 +121,13 @@
 [h] docs/start.md:124
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
-[ ] docs/symbology.md:127
+[ ] docs/symbology.md:135
 [-] docs/three-layers.md:36
 [x] docs/tutorial.md:loop                        file run file run output file run output run output run output run output run output
 [x] README.md:parity                             file run output
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output
-[-] README.md:188
-[-] README.md:286
+[-] README.md:192
+[-] README.md:290
 
-# 88 examples checked, 4 output fences not yet marked, 10 commands checked by hand
+# 101 examples checked, 4 output fences not yet marked, 10 commands checked by hand

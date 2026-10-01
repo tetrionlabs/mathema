@@ -57,7 +57,7 @@ from .analysis import Facts, SourceUnavailable, _parse_notes, analyze_source
 # alias below (`mathema.claims.check(...)`, load-bearing in README/tests), so
 # the claims()-decorator is exposed as `claims_decorator` at this level,
 # still directly importable as `from mathema.authoring import claims`.
-from .authoring import (DomainError, claims as claims_decorator,
+from .authoring import (DomainError, MissingValueError, claims as claims_decorator,
                         declared_from_function, enforce_dimensions, enforce_domain,
                         enforce_structure,
                         materialize_declared, parse_docstring_claims,
@@ -110,7 +110,7 @@ __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "tagged", "Record", "claims", "registry", "SPEC_VERSION",
            "__version__", "claims_decorator", "declared_from_function",
            "resolve_declared", "materialize_declared",
-           "parse_docstring_claims", "enforce_domain", "enforce_dimensions", "enforce_structure", "reject_missing",
+           "parse_docstring_claims", "enforce_domain", "MissingValueError", "enforce_dimensions", "enforce_structure", "reject_missing",
            "DomainError", "docstring_report", "DocstringReport", "lift_symbolic",
            "critical_points", "suggest_claims", "Conjecture",
            "issue", "ReasonCode", "Category", "ClaimReasonCode",
@@ -164,16 +164,49 @@ class Record:
             mark = {"holds": "holds  ", "falsified": "FALSIFY", "proven": "proven ",
                     "skipped": "skip   ", "unknown": "unknown",
                     "invalidated": "INVALID"}.get(p.verdict.split(":", 1)[0], p.verdict)
+            missing = (p.meta or {}).get("mathema.missing") or {}
+            pol = (p.meta or {}).get("mathema.policy")
+            if pol:
+                # a policy row: its name and claim, where it came from, and
+                # the next step when it does not hold; a row with no single
+                # behaviour to state reads as a sentence
+                if pol.get("sentence"):
+                    line = f"  {mark} {p.name}: {pol['sentence']}"
+                elif p.verdict.startswith(("unknown", "skipped")):
+                    line = f"  {mark} {p.name}: {p.statement}"
+                    if pol.get("reason") or p.note:
+                        line += f"\n           {pol.get('reason') or p.note}"
+                else:
+                    line = f"  {mark} {p.name}: {p.statement}"
+                    if pol.get("reason"):
+                        line += f"   [{pol['reason']}]"
+                for extra in (pol.get("said"), pol.get("next")):
+                    if extra and p.verdict not in ("holds", "proven"):
+                        line += f"\n           {extra}"
+                lines.append(line)
+                continue
+            gate = (p.meta or {}).get("mathema.gate")
+            if gate and p.sketch:
+                # a gate names what each parameter's members do and whose
+                # word it is; a falsified one its witness and next step
+                line = f"  {mark} {p.name}: {p.statement}"
+                line += f"\n           {p.sketch}"
+                if p.counterexample:
+                    line += f"\n           counterexample {p.counterexample}"
+                if gate.get("next") and p.verdict not in ("holds", "proven"):
+                    line += f"\n           {gate['next']}"
+                lines.append(line)
+                continue
             if p.verdict == "proven":
-                # a proof has no trial count the way a probe does, the
-                # statement itself gets prettified into ordinary math
-                # notation, and the quantifier (who it holds for) stands
-                # in place of "(n=...)", on its own line since it's
-                # often longer than the statement it qualifies.
-                stmt = p.statement.replace("==", "=").replace("<=", "≤").replace(">=", "≥")
-                line = f"  {mark} {p.name}: {stmt}"
-                if p.condition:
-                    line += f"\n           {p.condition}"
+                # a proof has no trial count the way a probe does: the
+                # quantifier (who it holds for) stands in place of
+                # "(n=...)", on its own line since it's often longer than
+                # the statement it qualifies, with what a missing value
+                # of each parameter means
+                line = f"  {mark} {p.name}: {p.statement}"
+                detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
+                if detail:
+                    line += f"\n           {detail}"
             else:
                 shown = p.statement
                 if (p.condition or "").startswith("let |inf| be ") \
@@ -182,7 +215,17 @@ class Record:
                     shown = f"{p.condition.split(', ', 1)[0]}, {shown}"
                 line = f"  {mark} {p.name}: {shown}"
                 if p.verdict == "holds" and p.n:
-                    line += f" (n={p.n})"
+                    from ._missing_words import count_words
+                    line += f" ({count_words(p.n, (p.meta or {}).get('mathema.drawn'))})"
+            if p.verdict != "proven" and p.note and (
+                    p.verdict.split(":", 1)[0] in ("unknown", "skipped")
+                    or missing.get("said") or missing.get("returned")):
+                # what happened at a missing input, or why the row is
+                # open, said once under the row
+                line += f"\n           {p.note}"
+            elif p.verdict == "proven" and (missing.get("said") or missing.get("returned")) \
+                    and p.note:
+                line += f"\n           {p.note}"
             if p.counterexample:
                 line += f"\n           counterexample {p.counterexample}"
             for said in (p.meta or {}).get("mathema.let_warning") or ():
@@ -660,14 +703,24 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     all_claims = entry_claims(merged_entry)
     if pseudo_infinity is None and declared is not None:
         pseudo_infinity = declared.get("pseudo_infinity")
-    if all_claims:
-        probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
-                                            trials=trials, trials_scale=trials_scale,
-                                            facts=facts, extensive=extensive,
-                                            known_premises=known_premises,
-                                            float_companions=True,
-                                            pseudo_infinity=pseudo_infinity)
-    else:
+    from . import policy as _policy
+    with _policy.batch():
+        if all_claims:
+            probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
+                                                trials=trials, trials_scale=trials_scale,
+                                                facts=facts, extensive=extensive,
+                                                known_premises=known_premises,
+                                                float_companions=True,
+                                                pseudo_infinity=pseudo_infinity)
+        # what f does with a value that is not there, for every parameter
+        # that admits one and no stated policy row covers
+        covered = {(pol["kind"], pol.get("parameter"), pol.get("member"),
+                    pol.get("premise") or "") for pol in
+                   ((p.meta or {}).get("mathema.policy") for p in probes)
+                   if pol and pol.get("source") == "stated"}
+        probes = probes + _policy.default_rows(
+            fn, facts, parent_domain or {}, covered, _policy.row_name)
+    if not all_claims:
         # a bad function-level or project value refuses even with
         # nothing to adjudicate
         from .records import resolve_pseudo_infinity
@@ -746,7 +799,7 @@ def write_spec(fn, claims: list | None = None, root: str = ".",
     merged = merge_entries(dict(declared), {"claims": explicit},
                            on_conflict="silent")
     rec.spec_path = record(rec, key=key, root=root, claims=merged["claims"],
-                           grammar=declared.get("grammar", "mathema"))
+                           grammar=declared.get("grammar", "mathema"), fn=fn)
     return rec
 
 

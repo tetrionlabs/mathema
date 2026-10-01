@@ -65,8 +65,8 @@ mathema verify --root .
 <!-- example: loop output -->
 ```text
 note funcs.settle: nonneg, symmetric_in_sign falsified on first adjudication. A declared claim is kept until a human decides it (fix the code, `mathema accept funcs.settle <claim> --as discovery`, or supersede it). To try a spelling first, `mathema check funcs.settle --claim "..."` adjudicates it and writes nothing.
-ok   funcs.midpoint: no baseline record; 2 proven, 1 holds, 0 falsified
-FAIL funcs.settle: no baseline record; 1 proven, 1 holds, 2 falsified  <- 2 falsified claim(s)
+ok   funcs.midpoint: no baseline record; 2 proven (1 claim, 1 built-in), 3 holds, 0 falsified
+FAIL funcs.settle: no baseline record; 1 proven, 2 holds, 2 falsified  <- 2 falsified claim(s)
 0 fresh (form unchanged, skipped), 2 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -80,13 +80,13 @@ the three declared claims):
 
 ```yaml
     - name: "negative_exposure_negative"
-      statement: "for x in [-5.0, -1.0]:float|missing, f(x) <= 0"
+      statement: "for x in [-5.0, -1.0] : float|missing, f(x) <= 0"
       verdict: "holds"
       n: 34
       route: "probe"
       # ...
     - name: "nonneg"
-      statement: "for x in [-5.0, 5.0]:float|missing, f(x) >= 0"
+      statement: "for x in [-5.0, 5.0] : float|missing, f(x) >= 0"
       verdict: "falsified"
       n: 1
       counterexample: "(-5): -5.0 vs 0"
@@ -96,7 +96,7 @@ the three declared claims):
           - -5.0
       # ...
     - name: "symmetric_in_sign"
-      statement: "for x in [-5.0, 5.0]:float|missing, f(x) = f(-x)"
+      statement: "for x in [-5.0, 5.0] : float|missing, f(x) = f(-x)"
       verdict: "falsified"
       n: 1
       counterexample: "(-5): -5.0 vs 5.0"
@@ -134,7 +134,7 @@ mathema verify --root .
 <!-- example: loop output -->
 ```text
 ok   funcs.midpoint: fresh
-FAIL funcs.settle: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
+FAIL funcs.settle: form changed; 1 proven, 3 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -145,7 +145,7 @@ and the record now keeps the arc (trimmed):
 
 ```yaml
     - name: "negative_exposure_negative"
-      statement: "for x in [-5.0, -1.0]:float|missing, f(x) <= 0"
+      statement: "for x in [-5.0, -1.0] : float|missing, f(x) <= 0"
       verdict: "invalidated"
       n: 1
       counterexample: "(-5): 5.0 vs 0"
@@ -153,13 +153,13 @@ and the record now keeps the arc (trimmed):
         mathema.previous_verdict: "holds"
         mathema.regressed_to: "falsified"
     - name: "nonneg"
-      statement: "for x in [-5.0, 5.0]:float|missing, f(x) >= 0"
+      statement: "for x in [-5.0, 5.0] : float|missing, f(x) >= 0"
       verdict: "holds"
       n: 130
       # ...
         mathema.previous_verdict: "falsified"
     - name: "symmetric_in_sign"
-      statement: "for x in [-5.0, 5.0]:float|missing, f(x) = f(-x)"
+      statement: "for x in [-5.0, 5.0] : float|missing, f(x) = f(-x)"
       verdict: "holds"
       n: 130
       # ...
@@ -197,8 +197,8 @@ echo y | mathema accept funcs.settle nonneg --as evidence --by "Ada Lovelace"
 <!-- example: loop output -->
 ```text
 accepting funcs.settle :: nonneg (verdict holds) as evidence, by Ada Lovelace
-  - annotate nonneg as accepted evidence at n=130 (bound to form 3eb01e1d9919...)
-write this acceptance? [y/N] written: annotate nonneg as accepted evidence at n=130 (bound to form 3eb01e1d9919...)
+  - annotate nonneg as accepted evidence at n=129 (bound to form 3eb01e1d9919...)
+write this acceptance? [y/N] written: annotate nonneg as accepted evidence at n=129 (bound to form 3eb01e1d9919...)
 ```
 
 `accept` prints exactly what it will write and waits for a yes, here
@@ -241,12 +241,12 @@ echo y | mathema accept funcs.settle negative_exposure_negative --as discovery -
 ```text
 accepting funcs.settle :: negative_exposure_negative (verdict invalidated) as discovery, by Ada Lovelace
   - move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness
-  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 130 trials
+  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', adjudicated now: holds over 127 trials
   - rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
-write this acceptance? [y/N] written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0]:float|missing, f(x) > 0', adjudicated now: holds over 130 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
+write this acceptance? [y/N] written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', adjudicated now: holds over 127 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
 declared layer: claims/demo.claims.yaml now declares negative_exposure_negative_corrected in place of negative_exposure_negative (the superseded claim stays in the record's discoveries section):
   - name: negative_exposure_negative_corrected
-    statement: "for x in [-5.0, -1.0]:float|missing, f(x) > 0"
+    statement: "for x in [-5.0, -1.0] : float|missing, f(x) > 0"
     route: probe
 ```
 
@@ -274,7 +274,7 @@ mathema verify --root .
 <!-- example: loop output -->
 ```text
 ok   funcs.midpoint: fresh
-ok   funcs.settle: claims changed; 1 proven, 3 holds, 0 falsified
+ok   funcs.settle: claims changed; 1 proven, 4 holds, 0 falsified
 1 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```

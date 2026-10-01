@@ -189,9 +189,10 @@ def test_a_norm_is_not_positive_at_the_zero_vector():
     law = "for x in R^n, f(x) > 0"
     p = _one(norm_of, law, route="derive")
     assert p.verdict != "proven", (p.verdict, p.sketch)
-    # false at x = [0.0, ...], a vector the sampler of R^n does not draw
+    # false at x = [0.0, ...], the zero vector every claim over R^n meets
     p = _one(norm_of, law, extensive=True)
-    assert p.verdict == "holds", (p.verdict, p.note)
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "[0, 0" in p.counterexample, p.counterexample
 
 
 @pytest.mark.needs_full_proof_budget
@@ -210,4 +211,4 @@ def test_held_on_the_probe_until_the_derive_route_reads_the_row(fn, law,
                                                                   why):
     p = _one(fn, law)
     assert (p.verdict, p.route) == ("holds", "probe"), (p.verdict, p.note)
-    assert why in p.note, p.note
+    assert why in f"{p.note} {(p.meta or {}).get('mathema.routes_attempted', '')}", p.note

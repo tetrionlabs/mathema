@@ -104,4 +104,4 @@ def test_empirical_fallback_handles_domain_typed_integer_bounds(monkeypatch):
         choose, [claim("for n in [10,11] ⊂ Z, k in [5,6] ⊂ Z, f(n,k) >= 1",
                        route="derive")])
     assert p.verdict == "holds"
-    assert ":int" in p.meta.get("mathema.sampling", "")
+    assert " : int" in p.meta.get("mathema.sampling", "")

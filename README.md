@@ -62,7 +62,7 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 
 <!-- example: parity output -->
 ```text
-ok   options.put_call_parity_gap: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   options.put_call_parity_gap: source, no side effects; claims 7/7 adjudicated (1 proven, 6 holds, 0 falsified)
 ```
 
 Everything before the last comma is the domain and everything after it is the
@@ -75,8 +75,12 @@ that proof's `[float]` companion, a separate claim that runs the same identity
 through the real code in floating point at the region's corners and across its
 interior, because a proof is about the mathematics and whether its
 computation keeps up with it in float64 is a different question, answered here
-by `holds`. The [claim grammar](https://mathema.tetrionlabs.com/grammar/) has
-the full notation.
+by `holds`. The other five rows are policy claims, one per parameter,
+saying what the function does with a missing value (`missing(f, s)
+propagates`: a `nan` in gives a `nan` back), each checked on the calls
+already made; [missing values](https://mathema.tetrionlabs.com/missing-values/)
+explains them. The [claim grammar](https://mathema.tetrionlabs.com/grammar/)
+has the full notation.
 
 The domain is doing real work: drop it and the same claim comes back
 `falsified`, with a counterexample at a negative maturity where `math.sqrt(t)`
@@ -132,7 +136,7 @@ mathema check sigmoid.py \
 
 <!-- example: sigmoid output -->
 ```text
-ok   sigmoid.logistic: source, no side effects; claims 5/5 adjudicated (4 proven, 1 holds, 0 falsified)
+ok   sigmoid.logistic: source, no side effects; claims 6/6 adjudicated (4 proven, 2 holds, 0 falsified)
 ```
 
 ## When the code is wrong

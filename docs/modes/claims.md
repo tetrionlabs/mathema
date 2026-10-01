@@ -9,6 +9,7 @@ step; a suggestion never lives in any record until someone adopts it.
 mathema claims KEY                  # list the declared claims
 mathema claims KEY --suggest        # render the suggested standard claims
 mathema claims KEY --adopt NAME     # write one into the declared layer
+mathema claims KEY --write          # write the policy rows
 ```
 
 ## Arguments
@@ -18,9 +19,25 @@ mathema claims KEY --adopt NAME     # write one into the declared layer
 | `key` | module-qualified function key (`functions.softmax`) |
 | `--suggest` | render the suggested standard claims with laws, in three sections: individual claims, questions with candidate answers, and claims likely to be unknowable |
 | `--adopt NAME` | write the named suggestion into `claims/adopted.claims.yaml` |
+| `--write` | write the policy rows mathema suggests, what each parameter does with a value that is not there, into `claims/policies.claims.yaml`, each under the name the record prints, a contradicted one with the contradiction in its note |
 | `--root` | project root (default: the nearest ancestor holding `.mathema/` within the enclosing git repository, else that repository, else `.`; never the home directory) |
 | `--format` | `text` (default) or `json`: emit `--suggest`'s rows columnar, matching the MCP `suggest_claims` tool |
 | `--output FILE` | write the report to a file instead of stdout |
+
+## Policy rows
+
+Beside the declared claims, `mathema claims KEY` lists the policy rows
+the record carries: what the function does with a missing or absent
+input, grouped by state ([missing values](../missing-values.md) says
+what each word means). `--write` writes them to
+`claims/policies.claims.yaml` under their record names (`missing[x]`,
+`missing[xs, null]`, `absent[x]`, `absent[d.note, unset]` for a key
+along a path), each with a note saying where it
+came from. A row the code contradicts is written too, its note saying
+so with the date, and the write line names the three ways out: change
+the word, change the code, or accept it as a discovery. A raise no
+claim accounts for has no word to write; the write line names the claim
+to state instead. Changing a policy is then editing one word.
 
 ## Where suggestions live (and where they never do)
 
@@ -65,10 +82,8 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 ```
 $ mathema claims functions.softmax
 functions.softmax: no declared claims (mathema claims --suggest lists candidates)
-
 $ mathema claims functions.softmax --suggest
-functions.softmax: 7 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
- individual claims:
+functions.softmax: 8 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
   - is_deterministic: f(scores) == f(scores)  [route best]
   - is_state_safe: f(scores) == f(scores)  [route best]
   - is_numerically_stable: g(f, scores) == 1  [route best]
@@ -76,13 +91,18 @@ functions.softmax: 7 suggested claim(s) (adopt with: mathema claims KEY --adopt 
   - is_permutation_of_input: sorted(f(scores)) == sorted(scores)  [route probe]
   - preserves_type: type(f(scores)) == type(scores)  [route probe]
   - is_sorted_output: is_sorted_output(f(scores))  [route examine]
-
+  - is_missing_safe[f]: is_missing_safe(f)  [route examine]
 $ mathema claims functions.softmax --adopt is_deterministic --root .
 adopted is_deterministic into ./claims/adopted.claims.yaml: f(scores) == f(scores)
-
 $ mathema claims functions.softmax
 functions.softmax: 1 declared claim(s)
   - is_deterministic: f(scores) == f(scores)  [route best]
+functions.softmax: 2 policy rows about scores
+  confirmed by the code (mathema claims functions.softmax --write writes these):
+    holds   missing[scores, nan]: missing(f, scores, nan) propagates   [default for a list slot that may be nan; confirmed on the 155 draws of is_deterministic. Keep it by writing it (mathema claims functions.softmax --write), or change the word to raises or drops if f should do otherwise]
+  contradicted by the code (change the word, the code, or accept it as a discovery; --write writes these with the contradiction in the note):
+    FALSIFY missing[scores, null]: missing(f, scores, null) propagates   [mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError]
+             if the raise is intended, write `missing(f, scores, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept functions.softmax missing[scores, null] --as discovery --corrected "missing(f, scores, null) raises(TypeError)"
 ```
 
 The adopted stanza is plain declared-claims YAML, so it's yours to

@@ -309,6 +309,191 @@ def domain_from_signature(fn, guards: bool = True) -> dict:
     return out
 
 
+def _optional_parts(hint) -> tuple:
+    """`(optional, inner)`: whether a union admits `None`, and the one
+    other member (or the hint itself when it is no such union)."""
+    import types as _types
+    origin = typing.get_origin(hint)
+    if origin is typing.Union or origin is getattr(_types, "UnionType", None):
+        args = typing.get_args(hint)
+        present = [a for a in args if a is not type(None)]
+        optional = len(present) < len(args)
+        return optional, (present[0] if len(present) == 1 else hint)
+    return False, hint
+
+
+def _scalar_slot_type(hint) -> "str | None":
+    """The scalar runtime's name for a Python type, `float`, `int`,
+    `bool`, `str`, `complex`, `datetime`, or None when it is no scalar
+    type the table names."""
+    import datetime as _dt
+    if not isinstance(hint, type):
+        return None
+    if issubclass(hint, bool):
+        return "bool"
+    if issubclass(hint, (_dt.datetime, _dt.date)):
+        return "datetime"
+    if issubclass(hint, str):
+        return "str"
+    if issubclass(hint, int):
+        return "int"
+    if issubclass(hint, float):
+        return "float"
+    if issubclass(hint, complex):
+        return "complex"
+    module = getattr(hint, "__module__", "") or ""
+    if module.startswith("numpy"):
+        name = hint.__name__.lower()
+        if name.startswith(("float", "double", "half", "longdouble")):
+            return "float"
+        if name.startswith(("int", "uint", "long", "short", "byte")):
+            return "int"
+        if name.startswith("bool"):
+            return "bool"
+        if name.startswith("complex"):
+            return "complex"
+        if name.startswith("datetime"):
+            return "datetime"
+    if module.startswith("pandas") and hint.__name__ == "Timestamp":
+        return "datetime"
+    return None
+
+
+def _element_policy(args) -> "tuple[str, tuple] | None":
+    """`(slot type suffix, members)` a container's element type states,
+    `list[float]` its floats' `nan`, or None when it states none."""
+    from .runtime_types import resolve_missing
+    if not args:
+        return None
+    optional, inner = _optional_parts(args[-1] if len(args) > 1 else args[0])
+    scalar = _scalar_slot_type(inner)
+    if scalar is None:
+        return None
+    members = (("null",) if optional else ()) + resolve_missing(scalar)
+    return scalar, members
+
+
+def _numpy_dtype_scalar(hint) -> "str | None":
+    """The scalar type a subscripted `numpy.ndarray`/`NDArray` states for
+    its entries (`NDArray[np.int64]`), or None."""
+    for arg in typing.get_args(hint):
+        for inner in (arg, *typing.get_args(arg)):
+            scalar = _scalar_slot_type(inner)
+            if scalar is not None:
+                return scalar
+    return None
+
+
+def _policy_of_hint(hint, detection):
+    """The missing-value defaults of one live annotation."""
+    from .domain import NO_ANNOTATION, MissingDefaults
+    from .runtime_types import (absence_defined, resolve_absence,
+                                resolve_missing)
+    if hint is typing.Any:
+        return NO_ANNOTATION
+    for m in _markers(hint):
+        if _marker_interval(m) is not None:
+            return MissingDefaults(False, (), type(m).__name__)
+    if typing.get_origin(hint) is typing.Annotated:
+        hint = typing.get_args(hint)[0]
+    optional, inner = _optional_parts(hint)
+    if detection is not None and detection.adapter != "list":
+        name = detection.adapter
+        if name == "numpy.ndarray":
+            from .runtime_types._adapters import _alias_value
+            scalar = (_numpy_dtype_scalar(inner)
+                      or _numpy_dtype_scalar(_alias_value(inner)))
+            if scalar is not None and not resolve_missing(scalar):
+                return MissingDefaults(optional, (), f"{name}[{scalar}]",
+                                       absence=("None",))
+        return MissingDefaults(optional or absence_defined(name),
+                               resolve_missing(name), name,
+                               absence=resolve_absence(name) or ("None",))
+    origin = typing.get_origin(inner) or inner
+    if origin in (list, tuple):
+        element = _element_policy(typing.get_args(inner))
+        if element is not None:
+            scalar, members = element
+            return MissingDefaults(optional, members,
+                                   f"{origin.__name__}[{scalar}]")
+        return MissingDefaults(optional, resolve_missing("list"), origin.__name__)
+    scalar = _scalar_slot_type(inner)
+    if scalar is not None:
+        return MissingDefaults(optional, resolve_missing(scalar), scalar)
+    name = getattr(inner, "__qualname__", None) or str(inner)
+    return MissingDefaults(optional, (), name)
+
+
+def _policy_of_text(text: str):
+    """The missing-value defaults of an annotation known only as source
+    text (a name the function's module does not bind)."""
+    from .analysis import _annotation_base
+    from .domain import NO_ANNOTATION, MissingDefaults
+    from .runtime_types import resolve_missing
+    lowered = text.strip().strip("'\"").lower()
+    optional = (lowered.startswith(("optional[", "typing.optional["))
+                or "none" in [m.strip() for m in lowered.split("|")])
+    base = _annotation_base(lowered)
+    if base in ("", "any", "typing.any"):
+        return NO_ANNOTATION
+    head = base.split("[", 1)[0]
+    if head in ("float", "int", "bool", "str", "complex"):
+        return MissingDefaults(optional, resolve_missing(head), head)
+    if head in ("list", "tuple"):
+        inner = base[len(head) + 1:-1] if "[" in base else ""
+        if inner in ("float", "int", "bool", "str", "complex"):
+            return MissingDefaults(optional, resolve_missing(inner),
+                                   f"{head}[{inner}]")
+        return MissingDefaults(optional, resolve_missing("list"), head)
+    return MissingDefaults(optional, (), text.strip())
+
+
+def missing_policy_from_signature(fn) -> dict:
+    """Intent:
+        Each parameter's missing-value defaults, read off its
+        annotation, as `{param: domain.MissingDefaults}`: whether the
+        object may be absent (an `Optional[...]`/`X | None`, or a
+        runtime type whose definition row states an absence) and the
+        members of the hole class on its slots. A `float` slot holds
+        `nan`, a datetime `NaT`, an `int`, `bool`, `str` or a class
+        nothing; a `list` element `null` and `nan`, `list[float]` `nan`,
+        `list[int]` nothing; a runtime type (`numpy.ndarray`,
+        `pandas.Series`, a registered adapter) the members its adapter
+        and the definition rows give. A bound marker (`Probability`)
+        admits neither kind, and a parameter with no annotation admits
+        both (`domain.NO_ANNOTATION`).
+    """
+    import inspect
+
+    from .domain import NO_ANNOTATION
+    from .runtime_types import detect_parameters
+    try:
+        sig = callable_signature(fn)
+    except (TypeError, ValueError):
+        return {}
+    hints = _hints(fn)
+    try:
+        detected = detect_parameters(fn)
+    except Exception:
+        detected = {}
+    out: dict = {}
+    for p, param in sig.parameters.items():
+        hint = hints.get(p)
+        found = (detected.get(p) or (None,))[0]
+        if hint is not None:
+            out[p] = _policy_of_hint(hint, found)
+        elif isinstance(param.annotation, str):
+            if found is not None and found.adapter != "list":
+                out[p] = _policy_of_hint(object, found)
+            else:
+                out[p] = _policy_of_text(param.annotation)
+        elif param.annotation is inspect.Parameter.empty:
+            out[p] = NO_ANNOTATION
+        else:
+            out[p] = _policy_of_hint(param.annotation, found)
+    return out
+
+
 #: the SEMANTIC output bound per fixed marker, as
 #: (lo, hi, closed_lo, closed_hi) with None on a side the marker leaves
 #: unbounded. Distinct from the sampling intervals in _DOMAIN_MARKERS,

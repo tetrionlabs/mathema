@@ -178,7 +178,9 @@ def test_a_record_is_stale_when_its_definition_rows_change(project,
         '''))
     (project / "claims" / "quant.claims.yaml").write_text(yaml.safe_dump({
         "qpkg.quant.doubled_sharpe": {"claims": [
-            {"name": "leverage_invariant", "statement": _LEVERAGE}]}}))
+            {"name": "leverage_invariant", "statement": _LEVERAGE},
+            # pandas skips a missing return in both the mean and the std
+            {"name": "missing[returns]", "statement": "missing(f, returns) drops"}]}}))
     monkeypatch.syspath_prepend(str(project))
     sys.modules.pop("qpkg", None)
     sys.modules.pop("qpkg.quant", None)

@@ -34,15 +34,17 @@ def test_explicit_guard_proves_deliberate_rejection():
     probe = _one(guarded_mean, "is_empty_safe(xs)")
     assert probe.verdict == "proven"
     assert probe.route == "examine"
-    assert "deliberately rejected" in probe.sketch
+    assert probe.sketch.startswith("xs = [] (an empty list): f raised ")
+    assert "behind the guard on line" in probe.sketch
 
 
 def test_unguarded_empty_crash_falsifies_with_the_witness():
     probe = _one(naive_mean, "is_empty_safe(xs)")
     assert probe.verdict == "falsified"
     assert probe.route == "probe:algorithmic"
-    assert "xs = [] raised ZeroDivisionError" in probe.counterexample
-    assert "no emptiness guard" in probe.counterexample
+    assert probe.counterexample.startswith(
+        "xs = [] (an empty list): f raised ZeroDivisionError with no guard for the "
+        "empty input")
 
 
 def test_clean_empty_return_proves_exhaustively_for_one_param():
@@ -52,7 +54,7 @@ def test_clean_empty_return_proves_exhaustively_for_one_param():
     probe = _one(total, "is_empty_safe(xs)")
     assert probe.verdict == "proven"
     assert probe.route == "probe:algorithmic"
-    assert "exhaustive" in probe.sketch
+    assert probe.sketch == "xs = [] (an empty list): f returned 0.0"
 
 
 def test_suggested_only_where_an_emptiness_guard_exists():

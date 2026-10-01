@@ -247,6 +247,31 @@ def _missing_guard_coverage(facts) -> dict:
     return out
 
 
+def _missing_guard_line(facts, param: str, raising: bool = True) -> "int | None":
+    """The line, counted from the `def`, of the first `if` that tests
+    `param` for a missing value (`x != x`, `x is None`, `isnan(x)`) and
+    raises in its body (or, with `raising` False, returns), else None."""
+    tree = facts.tree
+    if tree is None:
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        acts = any(isinstance(s, ast.Raise if raising else ast.Return)
+                   for s in node.body)
+        if not acts:
+            continue
+        for sub in ast.walk(node.test):
+            if isinstance(sub, ast.Compare) and isinstance(sub.left, ast.Name) \
+                    and sub.left.id == param:
+                return node.lineno
+            if isinstance(sub, ast.Call) and _call_name(sub) in ("isnan", "isna") \
+                    and sub.args and isinstance(sub.args[0], ast.Name) \
+                    and sub.args[0].id == param:
+                return node.lineno
+    return None
+
+
 def _missing_guard_params(facts) -> set:
     """Every real parameter with ANY recognized raising missing-guard
     (whichever spelling), the is_missing_safe suggestion gate."""
@@ -522,16 +547,19 @@ def _admitted_spelling(value: float, bounds):
 
 
 def _emptiness_guard_params(facts) -> set:
-    """Every sequence parameter fn's own body guards against emptiness
-    with an explicit raising check, `if not xs: raise` or
-    `if len(xs) == 0: raise` (a compound condition counts for the
-    part that matches). The is_empty_safe relevance gate and the
-    deliberate-rejection signal its derive half reads."""
+    """Every container parameter fn's own body guards against emptiness
+    with an explicit raising check, `if not xs: raise`, `if len(xs) ==
+    0: raise`, `if xs.empty: raise` or `if xs.count() == 0: raise` (no
+    value slot, so none when it is empty either); checks joined by `or`
+    count each, and a condition that also reads anything else guards
+    nothing, since the raise then depends on more than the container. The
+    is_empty_safe relevance gate and the deliberate-rejection signal its
+    derive half reads."""
     tree = facts.tree
     if tree is None:
         return set()
     pset = {p for p in facts.params
-            if facts.param_kinds.get(p) in SEQUENCE_KINDS}
+            if facts.param_kinds.get(p) in (*SEQUENCE_KINDS, "table")}
     if not pset:
         return set()
 
@@ -552,14 +580,60 @@ def _emptiness_guard_params(facts) -> set:
                     and isinstance(node.comparators[0], ast.Constant)
                     and node.comparators[0].value in (0, 1)):
                 found.add(node.left.args[0].id)  # len(xs) == 0 / < 1
+            if (isinstance(node, ast.Attribute) and node.attr == "empty"
+                    and isinstance(node.value, ast.Name) and node.value.id in pset):
+                found.add(node.value.id)         # xs.empty
+            if (isinstance(node, ast.Compare) and len(node.ops) == 1
+                    and isinstance(node.ops[0], (ast.Eq, ast.Lt, ast.LtE))
+                    and isinstance(node.left, ast.Call)
+                    and isinstance(node.left.func, ast.Attribute)
+                    and node.left.func.attr in ("count", "size")
+                    and isinstance(node.left.func.value, ast.Name)
+                    and node.left.func.value.id in pset
+                    and isinstance(node.comparators[0], ast.Constant)
+                    and node.comparators[0].value in (0, 1)):
+                found.add(node.left.func.value.id)  # xs.count() == 0
+        return found
+
+    def guard_of(test) -> set:
+        parts = test.values if isinstance(test, ast.BoolOp) \
+            and isinstance(test.op, ast.Or) else [test]
+        found: set = set()
+        for part in parts:
+            if isinstance(part, ast.BoolOp):
+                return set()
+            names = guarded_names(part)
+            read = {n.id for n in ast.walk(part) if isinstance(n, ast.Name)}
+            if len(names) != 1 or read - names - {"len"}:
+                return set()
+            found |= names
         return found
 
     out: set = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and any(isinstance(s, ast.Raise)
                                             for s in node.body):
-            out |= guarded_names(node.test)
+            out |= guard_of(node.test)
     return out
+
+
+def _emptiness_guard_line(facts, param: str) -> "int | None":
+    """The line (from the def) of the raising emptiness guard on `param`,
+    or None."""
+    tree = facts.tree
+    if tree is None:
+        return None
+    fdef = next((n for n in ast.walk(tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))), None)
+    first = getattr(fdef, "lineno", 1)
+    probe = type("F", (), {"tree": None, "params": facts.params,
+                            "param_kinds": facts.param_kinds})
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and any(isinstance(s, ast.Raise) for s in node.body):
+            probe.tree = ast.Module(body=[node], type_ignores=[])
+            if param in _emptiness_guard_params(probe):
+                return node.lineno - first + 1
+    return None
 
 
 # machine type names a raising type guard can meaningfully name for a

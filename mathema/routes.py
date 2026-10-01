@@ -36,7 +36,8 @@ DERIVE_ONLY_FORMS = frozenset({"d", "lim", "integrate", "Sum", "Prod",
 # records, spec, acceptance, and the adjudication loop all read it
 # from here.
 SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_builtin_safe",
-                               "is_missing_safe", "is_extremity_safe",
+                               "is_missing_safe", "is_absent_safe",
+                               "is_extremity_safe",
                                "is_representation_safe", "is_empty_safe",
                                "is_arbitrary_input_safe",
                                "is_compendium_safe",

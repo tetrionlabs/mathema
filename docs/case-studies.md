@@ -128,7 +128,8 @@ for p in rec.probes:
 <!-- example: sigmoid-whole-line output -->
 ```text
 f_x_eq_1_f_x           proven    ∀ x ∈ ℝ
-f_x_eq_1_f_x[float]    falsified x=-1.7976931348623157e+308
+f_x_eq_1_f_x[float]    falsified x = -1.79769e+308
+missing[x]             holds
 ```
 
 The proof is over ℝ, with infinity as infinity, and the companion says

@@ -86,12 +86,17 @@ for law, route in [("for x in [0, 1e6], f(x) == 1", "derive"),
 ```text
 derive           one        proven
 derive           one[float] holds
+derive           missing[x] holds
 derive           one        proven
-derive           one[float] falsified x=-1.7976931348623157e+308
+derive           one[float] falsified x = -1.79769e+308
+derive           missing[x] holds
 derive:math_only one        proven
 ```
 
-`(x + 1) - x` is `1` for every real `x`, so all three proofs stand. In
+`(x + 1) - x` is `1` for every real `x`, so all three proofs stand.
+The third row of the first block is the policy row mathema writes for a
+float's nan (what f does with a value that is not there); it holds
+because f gives nan back. In
 float64 the `+ 1` is lost once `|x|` passes `2^53`, so the companion of
 the unbounded claim is falsified, and its row names the stratum:
 mathematics sound, its computation numerically unstable

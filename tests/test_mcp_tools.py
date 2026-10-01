@@ -357,7 +357,11 @@ def test_adjudicate_target_include_selects_the_row_set(tmp_path):
     suggested = _with_path(root, lambda: run(include="suggested"))
     every = _with_path(root, lambda: run(include="all"))
 
-    assert {r["source"] for r in declared["claims"]} == {"docstring"}
+    # beside the declared claims, the policy rows mathema writes for the
+    # function's parameters, which gate as the declared claims do
+    assert {r["source"] for r in declared["claims"]} == {"docstring", "default"}
+    assert [r["claim"] for r in declared["claims"] if r["source"] == "default"] == \
+        ["missing[x]"]
     assert {r["source"] for r in suggested["claims"]} == {"suggested"}
     assert len(every["claims"]) == len(declared["claims"]) + len(suggested["claims"])
     # the default is strictly cheaper than what it replaced
@@ -383,7 +387,11 @@ def test_adjudicate_target_empty_claims_no_longer_collapses(tmp_path):
     battery = _with_path(root, lambda: tools.adjudicate_target(
         "ckpkg.mod:scale", claims=None, root=str(root), include="all"))
     assert len(explicit["claims"]) < len(battery["claims"])
-    assert not any(r["source"] == "suggested" for r in explicit["claims"])
+    # a policy row is the record's own statement of what f did at a
+    # missing input, written beside any claim that drew one
+    from mathema.policy import parse_policy
+    assert not any(r["source"] == "suggested" and parse_policy(r["statement"]) is None
+                   for r in explicit["claims"])
 
 
 def test_adjudicate_target_lints_before_adjudicating(tmp_path):

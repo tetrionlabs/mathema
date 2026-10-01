@@ -283,3 +283,49 @@ def test_a_project_function_lists_its_sampled_defaulted_parameter(
         route="probe")]).probes
     (p,) = [p for p in rows if "mathema.sampling" in (p.meta or {})]
     assert _sampled(p) == {"x", "k"}
+
+
+def test_a_library_key_with_a_policy_row_stays_fresh(tmp_path, monkeypatch):
+    import mathema.compendium as comp
+    from mathema.verify import verify_project
+    real = comp._installed_version
+    monkeypatch.setattr(comp, "_installed_version",
+                        lambda lib, aliases=(): "1.0" if lib == "extlib" else real(lib, aliases))
+    site = tmp_path / "site"
+    (site / "extlib").mkdir(parents=True)
+    (site / "extlib" / "__init__.py").write_text(textwrap.dedent('''
+        def scaled(x: float, k: float = 2.0) -> float:
+            """x times k."""
+            return x * k
+    '''))
+    monkeypatch.syspath_prepend(str(site))
+    proj = tmp_path / "proj"
+    (proj / "claims").mkdir(parents=True)
+    (proj / "claims" / "extlib.claims.yaml").write_text(textwrap.dedent("""
+        compendium: extlib
+        versions: ">=1.0"
+        extlib.scaled:
+          claims:
+            - name: nonneg
+              statement: 'for x in [0, 4], f(x) >= 0'
+            - name: holes_through
+              statement: 'missing(f, x) propagates'
+    """))
+    (proj / "claims" / "use.claims.yaml").write_text(textwrap.dedent("""
+        extlib.scaled:
+          claims: []
+    """))
+
+    def sweep():
+        sys.modules.pop("extlib", None)
+        comp.uninstall()
+        return verify_project(str(proj))
+
+    sweep()
+    import yaml
+    rec = proj / ".mathema" / "verified" / "extlib.scaled.yaml"
+    (row,) = [c for c in yaml.safe_load(rec.read_text())["extlib.scaled"]
+              ["claims"] if c["name"] == "holes_through"]
+    assert row["meta"]["mathema.defaults"] == {"extlib.scaled": {"k": "2.0"}}
+    again = sweep()
+    assert any("extlib.scaled: fresh" in line for line in again.lines), again.lines

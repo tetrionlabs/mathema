@@ -68,7 +68,7 @@ def test_sin_is_never_split_at_its_in():
 def test_the_symbols_render_and_the_text_is_a_fixed_point(letters):
     for law, unicode_text in (
             ("for s in L[letters], f(s) in L[letters]", "f(s) ∈ L[letters]"),
-            ('for s in L[letters], "<" not in f(s)', "'<' ∉ f(s)"),
+            ('for s in L[letters], "<" not in f(s)', '"<" ∉ f(s)'),
             ("for s ∈ L[letters], f(s) ∉ L[letters]", "f(s) ∉ L[letters]")):
         cj = claim(law)
         assert render_claim_text(cj, unicode=True).endswith(unicode_text)

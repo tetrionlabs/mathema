@@ -495,7 +495,8 @@ def suggest_claims(target: str, root: str = ".") -> dict:
     declared_names = {c.get("name") for c in entry.get("claims") or []}
     from mathema.suggest import suggestion_sections
     rows = []
-    suggestions = _suggest(fn, key=key, root=root)
+    from mathema.suggest import gate_suggestions
+    suggestions = _suggest(fn, key=key, root=root) + gate_suggestions(fn)
     for cj, (section, reason) in zip(suggestions,
                                      suggestion_sections(fn, suggestions)):
         text = claim_statement(cj).strip()

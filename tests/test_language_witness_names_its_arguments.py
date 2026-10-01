@@ -36,7 +36,7 @@ def test_the_witness_names_the_argument_and_leaves_out_the_unmentioned_one():
     (p,) = check_conjectures(ascii_slug, [claim(
         "for value in L[some_text], len(ascii_slug(value)) <= len(value)")])
     assert p.verdict == "falsified"
-    assert p.counterexample == "value='ǆ': 2 vs 1"
+    assert p.counterexample == "value = 'ǆ': 2 vs 1"
     assert p.meta["mathema.counterexample_args"][0] == "ǆ"
 
 
@@ -44,5 +44,5 @@ def test_every_argument_the_claim_reads_is_named():
     (p,) = check_conjectures(pad, [claim(
         "for value in L[some_text], width in {0}, len(pad(value, width)) <= len(value) - 1")])
     assert p.verdict == "falsified"
-    assert p.counterexample.startswith("value=''") and ", width=0: " in p.counterexample, \
+    assert p.counterexample.startswith("value = ''") and ", width = 0: " in p.counterexample, \
         p.counterexample

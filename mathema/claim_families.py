@@ -207,6 +207,7 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if facts.param_kinds.get(target) != "scalar":
         return None
     bounds = domain.get(target)
+    no_value: dict = {}
 
     def trial(args):
         x1 = _synth("float", rng, bounds)
@@ -220,6 +221,11 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
             v2 = _call_with_target(fn, facts, target, args, x2)
         except Exception:
             return None
+        for x, v in ((x1, v1), (x2, v2)):
+            if not _a_value(v):
+                # a point with no value to order is skipped, and said
+                no_value.setdefault("at", (x, v))
+                return None
         try:
             if not (math.isfinite(float(v1)) and math.isfinite(float(v2))):
                 # an overflow or a nan says nothing about direction
@@ -231,11 +237,40 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return True
         direction = "increasing" if increasing else "decreasing"
         held = _held_text(facts, target, args)
-        return (f"{target}={_fmt_coordinate(x1)} -> {v1!r}, "
-                f"{target}={_fmt_coordinate(x2)} -> {v2!r}"
+        return (f"{target} = {_fmt_coordinate(x1)} -> {v1!r}, "
+                f"{target} = {_fmt_coordinate(x2)} -> {v2!r}"
                 f"{f' at {held}' if held else ''} (not {direction})")
 
-    return _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    return _with_no_value_note(result, fn, target, cj, no_value)
+
+
+def _a_value(v) -> bool:
+    """Whether `v` is a real number a probe can compare: not None, not a
+    NaN, not something that is no number at all."""
+    if isinstance(v, bool) or v is None:
+        return False
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return False
+    return f == f
+
+
+def _with_no_value_note(result, fn, target: str, cj, no_value: dict):
+    """A family probe's result with a sentence saying it skipped the
+    points where the function gave no value, when it did."""
+    if not no_value or result is None:
+        return result
+    from ._missing_words import declared_optional_return, value_shown
+    x, v = no_value["at"]
+    declared = declared_optional_return(fn)
+    what = "returns None" if v is None else f"returns {value_shown(v)}"
+    family = (cj.name or "").split("[", 1)[0]
+    said = (f"f {what} at {target} = {value_shown(x)}"
+            + (f" ({declared})" if declared and v is None else "")
+            + f"; the {family} check skipped the points with no value")
+    return (*result, {"mathema.sampled": said})
 
 
 def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
@@ -256,6 +291,7 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return None
     bounds = domain.get(target)
     lo, hi = _interval_ends(bounds) or (None, None)
+    no_value: dict = {}
 
     def trial(args):
         x0 = _synth("float", rng, bounds)
@@ -269,6 +305,10 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
             v_hi = _call_with_target(fn, facts, target, args, x0 + h)
         except Exception:
             return None
+        for x, v in ((x0 - h, v_lo), (x0, v_mid), (x0 + h, v_hi)):
+            if not _a_value(v):
+                no_value.setdefault("at", (x, v))
+                return None
         try:
             values = (float(v_lo), float(v_mid), float(v_hi))
         except (TypeError, ValueError):
@@ -298,10 +338,11 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
              curvature <= tol)
         if ok:
             return True
-        return (f"{target}={_fmt_coordinate(x0)}, h={h:.3g}: curvature estimate "
+        return (f"{target} = {_fmt_coordinate(x0)}, h = {h:.3g}: curvature estimate "
                 f"{curvature:.6g} does not settle {kind}")
 
-    return _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    return _with_no_value_note(result, fn, target, cj, no_value)
 
 
 def _raise_or_nonfinite(out) -> "str | None":
@@ -1395,85 +1436,244 @@ def _is_empty_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                           tolerance: float | None = None):
     """Intent:
         The structural half of is_empty_safe[xs]: proven when the
-        sequence parameter carries an explicit raising emptiness guard
-        (`if not xs: raise`, `if len(xs) == 0: raise`), the empty
-        boundary is deliberately rejected, which is safe handling.
-        Undecided (None) otherwise: the probe decides empirically
-        whether an empty input crashes by accident.
+        container parameter carries an explicit raising emptiness guard
+        (`if not xs: raise`, `if len(xs) == 0: raise`) and f, called
+        with the empty container, does raise there: the empty boundary
+        is deliberately rejected. Undecided (None) otherwise: the probe
+        decides what f does at the empty input.
 
     Notes:
         rhs_src/relation/tolerance kept for protocol uniformity;
         `lhs_src` is the parameter itself.
     """
-    from .hazards import _emptiness_guard_params
+    from .hazards import _emptiness_guard_line, _emptiness_guard_params
     from .symbolic import ProofResult
     param = lhs_src
-    if facts.param_kinds.get(param) not in SEQUENCE_KINDS:
+    if facts.param_kinds.get(param) not in (*SEQUENCE_KINDS, "table"):
         return None
-    if param in _emptiness_guard_params(facts):
+    if param not in _emptiness_guard_params(facts):
+        return None
+    value, shown = _empty_value(fn, facts, param, None)
+    args = _synth_other_params(fn, facts, param, domain or {}, random.Random(0))
+    try:
+        with _pinned_float_env():
+            _call_with_target(fn, facts, param, args, value)
+    except Exception as exc:
+        line = _emptiness_guard_line(facts, param)
         return ProofResult(
             "proven",
-            sketch=f"the empty {param} is deliberately rejected by an "
-                   f"explicit raising guard; the boundary is handled, "
-                   f"not stumbled into")
+            sketch=f"{shown}: f raised {type(exc).__name__} behind the guard"
+                   + (f" on line {line}" if line else ""),
+            meta={"mathema.witness_executed": True})
+    return None
+
+
+def _uses_as_matrix(facts, target: str) -> bool:
+    """Whether the body reads a parameter as a matrix: a matrix marker,
+    or the parameter handed to a `linalg` function, `trace`, `@`, or
+    `.T`."""
+    import ast
+    if facts.param_kinds.get(target) == "mat":
+        return True
+    tree = getattr(facts, "tree", None)
+    if tree is None:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args and any(
+                isinstance(a, ast.Name) and a.id == target for a in node.args):
+            func = node.func
+            dotted = ast.unparse(func)
+            if ".linalg." in f".{dotted}" or dotted.endswith(("trace", "linalg.det")):
+                return True
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.MatMult) and any(
+                isinstance(side, ast.Name) and side.id == target
+                for side in (node.left, node.right)):
+            return True
+        if isinstance(node, ast.Attribute) and node.attr == "T" \
+                and isinstance(node.value, ast.Name) and node.value.id == target:
+            return True
+    return False
+
+
+def _empty_value(fn, facts, target: str, cj=None) -> tuple:
+    """Intent:
+        `(value, shown)`: the empty container for `target`, realised
+        through its runtime type, and how the record says what was
+        built: `xs = [] (an empty float Series)`, `A = [] (an empty 0 by
+        0 numpy.ndarray)`, `df = {r: []} (a frame with zero rows)`. An
+        empty matrix has zero rows by the column count a claim's binding
+        fixes, else 0 by 0.
+    """
+    from .runtime_types import realised_parameters
+    adapter = getattr(realised_parameters(facts).get(target), "adapter", None) or ""
+    kind = facts.param_kinds.get(target)
+    if kind == "table" or adapter in ("pandas.DataFrame", "polars.DataFrame"):
+        from .conjecture import _table_columns
+        columns = _table_columns(target, cj, facts) if cj is not None else ["a"]
+        shown = f"{target} = {{{', '.join(f'{c}: []' for c in columns)}}} (a frame with zero rows)"
+        if adapter == "polars.DataFrame":
+            import polars as pl
+            return pl.DataFrame({c: pl.Series([], dtype=pl.Float64)
+                                 for c in columns}), shown
+        import pandas as pd
+        return pd.DataFrame({c: pd.Series([], dtype=float) for c in columns}), shown
+    if _uses_as_matrix(facts, target):
+        import numpy as np
+        from ._floor import fixed_sizes
+        bound = (getattr(cj, "domain", None) or {}).get(target) if cj is not None else None
+        fixed = fixed_sizes(bound)
+        cols = fixed[1] if len(fixed) > 1 and fixed[1] is not None else 0
+        value = np.zeros((0, cols))
+        if adapter not in ("numpy.ndarray", ""):
+            value = value.tolist()
+        runtime = "numpy.ndarray" if adapter in ("numpy.ndarray", "") else "matrix"
+        return value, f"{target} = [] (an empty 0 by {cols} {runtime})"
+    if adapter == "numpy.ndarray":
+        import numpy as np
+        return np.array([], dtype=float), f"{target} = [] (an empty numpy.ndarray)"
+    if adapter == "pandas.Series":
+        import pandas as pd
+        return pd.Series([], dtype=float), f"{target} = [] (an empty float Series)"
+    if adapter == "polars.Series":
+        import polars as pl
+        return (pl.Series([], dtype=pl.Float64),
+                f"{target} = [] (an empty Float64 polars Series)")
+    return [], f"{target} = [] (an empty list)"
+
+
+def _realised(fn, facts, target: str, cells: list, cj=None):
+    """A container of `cells` for `target`, through its runtime type: a
+    float numpy array, a float pandas or polars Series, a frame whose
+    columns (the ones the body reads) hold `cells` each, a plain list for
+    a list parameter; the empty container through `_empty_value`."""
+    if not cells:
+        return _empty_value(fn, facts, target, cj)[0]
+    from .runtime_types import realised_parameters
+    adapter = getattr(realised_parameters(facts).get(target), "adapter", None) or ""
+    kind = facts.param_kinds.get(target)
+    if kind == "table" or adapter in ("pandas.DataFrame", "polars.DataFrame"):
+        from .conjecture import _table_columns
+        columns = _table_columns(target, cj, facts) if cj is not None else ["a", "b"]
+        if adapter == "polars.DataFrame":
+            import polars as pl
+            return pl.DataFrame({c: pl.Series(cells, dtype=pl.Float64) for c in columns})
+        import pandas as pd
+        return pd.DataFrame({c: pd.Series(cells, dtype=float) for c in columns})
+    if _uses_as_matrix(facts, target):
+        import numpy as np
+        side = int(math.isqrt(len(cells))) or 1
+        grid = np.array(cells[: side * side], dtype=float).reshape(side, side)
+        return grid if adapter in ("numpy.ndarray", "") else grid.tolist()
+    if adapter == "numpy.ndarray":
+        import numpy as np
+        return np.array(cells, dtype=float)
+    if adapter == "pandas.Series":
+        import pandas as pd
+        return pd.Series(cells, dtype=float)
+    if adapter == "polars.Series":
+        import polars as pl
+        return pl.Series(cells, dtype=pl.Float64)
+    return list(cells)
+
+
+def _empty_outcome(out, declared: "str | None") -> "str | None":
+    """Why a value returned for the empty input fails, or None: a hole,
+    an undeclared None, an infinity."""
+    from ._missing_words import value_shown
+    from .domain import member_of
+    if out is None:
+        if declared:
+            return None
+        return ("f returned None for the empty input; declare the return type "
+                "Optional[float], raise, or return a value")
+    try:
+        word = member_of(out)
+    except Exception:
+        word = None
+    if word not in (None, "None"):
+        return f"f returned {word} for the empty input; raise, or return a value"
+    try:
+        as_float = float(out)
+    except (TypeError, ValueError):
+        # a container: each slot is read as a returned value is
+        from ._missing_policy import no_value_slots
+        from .probing import holds_inf
+        if no_value_slots(out).count() or holds_inf(out):
+            return (f"f returned {value_shown(out)} for the empty input; raise, or "
+                    f"return a value")
+        return None
+    if math.isinf(as_float):
+        return (f"f returned {value_shown(as_float)} for the empty input; raise, or "
+                f"return a value")
     return None
 
 
 def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
                  trials: int):
     """Empirical half of is_empty_safe[xs]: call fn with the empty
-    sequence, a single-element sequence, and a longer one (every other
-    parameter freshly sampled). An UNGUARDED raise on the empty input
-    is an accidental boundary crash and falsifies with that witness
-    (min/max/mean of [] raise however sound the maths); a raise
-    behind a recognized emptiness guard is deliberate rejection and
-    passes. A raise or non-finite result on the non-empty sanity
-    inputs falsifies outright."""
+    container, realised through the parameter's runtime type, then a
+    single-element and a longer one (every other parameter freshly
+    sampled). At the empty input a raise behind a recognized emptiness
+    guard passes, an unguarded raise fails, a finite value passes, a
+    hole fails, and a None fails unless the return type declares it. A
+    raise or non-finite result on the non-empty inputs fails outright.
+    The row says what f did at the empty input."""
+    from ._missing_words import declared_optional_return, value_shown
     from .hazards import _emptiness_guard_params
     target = cj.lhs
-    if facts.param_kinds.get(target) not in SEQUENCE_KINDS:
+    if facts.param_kinds.get(target) not in (*SEQUENCE_KINDS, "table"):
         return None
     guarded = target in _emptiness_guard_params(facts)
+    declared = declared_optional_return(fn)
     shapes = ("empty", "single", "longer")
-    state = {"idx": 0}
+    state: dict = {"idx": 0, "said": None}
+    empty, shown = _empty_value(fn, facts, target, cj)
 
     def trial(args):
         shape = shapes[state["idx"] % len(shapes)]
         state["idx"] += 1
-        value = ([] if shape == "empty"
+        cells = ([] if shape == "empty"
                  else [rng.uniform(-10, 10)] if shape == "single"
                  else [rng.uniform(-10, 10) for _ in range(5)])
+        value = empty if shape == "empty" else _realised(fn, facts, target, cells, cj)
         try:
             with _pinned_float_env():
                 out = _call_with_target(fn, facts, target, args, value)
         except Exception as exc:
+            name = type(exc).__name__
             if shape == "empty":
                 if guarded:
+                    state["said"] = state["said"] or f"{shown}: f raised {name} behind a guard"
                     return True   # deliberate rejection
-                return (f"{target} = [] raised {type(exc).__name__} with no "
-                        f"emptiness guard in the body, the empty boundary "
-                        f"is stumbled into, not handled")
-            return (f"{target} = {value!r} raised {type(exc).__name__}")
+                return (f"{shown}: f raised {name} with no guard for the empty input; "
+                        f"guard it (`if not {target}: raise ValueError(...)`) so the "
+                        f"raise is deliberate, or return a value")
+            return (f"{target} = {cells!r} raised {name}")
+        if shape == "empty":
+            why = _empty_outcome(out, declared)
+            if why is not None:
+                return f"{shown}: {why}"
+            state["said"] = state["said"] or (
+                f"{shown}: f returned None, as its return type {declared} declares"
+                if out is None else f"{shown}: f returned {value_shown(out)}")
+            return True
         try:
             as_float = float(out)
         except (TypeError, ValueError):
             return True
-        if shape != "empty" and (as_float != as_float
-                                 or math.isinf(as_float)):
-            return (f"{target} = {value!r} returned {out!r}")
+        if as_float != as_float or math.isinf(as_float):
+            return (f"{target} = {cells!r} returned {out!r}")
         return True
 
     result = _probe_trials(fn, facts, target, domain, rng,
                            max(trials // 4, 9), trial)
     verdict, checked, cx = result
     if verdict == "holds" and len(facts.params) == 1:
-        # exhaustive coverage: the empty-sequence hazard is one input,
-        # and with no other parameter to vary, observing that one call
-        # behave IS the whole hazard class
-        return ("proven", checked, None,
-                "the empty-sequence hazard is a single input; with one "
-                "parameter the call at [] was observed to behave, so the "
-                "examination is exhaustive")
+        # the empty container is one input, and with no other parameter
+        # to vary, calling f with it is the whole case
+        return ("proven", checked, None, state["said"])
+    if verdict == "holds" and state["said"]:
+        return ("holds", checked, None, state["said"])
     return result
 
 
@@ -1834,26 +2034,30 @@ def _is_missing_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                                   "enforced by explicit raising guards for both "
                                   "missing spellings (NaN and None)")
     if included and coverage:
-        sketch = (f"the declared domain admits a missing {param} (missing "
-                  "is included by default; no \\ {∅} exclusion is stated) "
-                  "but the body has a raising guard for it")
+        # a raising guard is a policy: the function rejects the missing
+        # values it tests for, on purpose (R20)
+        from .hazards import _missing_guard_line
         spellings = [(label, value) for key, label, value in
                      (("nan", "nan", float("nan")), ("none", "None", None))
                      if key in coverage]
-        executed = 0
+        raised = []
         for label, value in spellings:
-            what, calls = _executed_family_witness(fn, facts, param, value,
-                                                   domain)
-            executed += calls
-            if what is not None:
-                return ProofResult(
-                    "disproven", sketch=sketch,
-                    counterexample=f"{param} = {label} {what}",
-                    meta={"mathema.corroboration": "reproduced",
-                          "mathema.witness_executed": True})
-        return _uncorroborated_family_disproof(
-            sketch, f"no call with a missing {param} raised ({executed} "
-                    f"call(s) made)")
+            what, _calls = _executed_family_witness(fn, facts, param, value,
+                                                    domain)
+            if what is None or not what.startswith("raised "):
+                return None
+            raised.append(what[len("raised "):])
+        line = _missing_guard_line(facts, param)
+        exc = raised[0] if len(set(raised)) == 1 else " or ".join(dict.fromkeys(raised))
+        words = " and ".join(label for label, _v in spellings)
+        return ProofResult(
+            "proven",
+            sketch=(f"{words} {'are' if len(spellings) > 1 else 'is'} "
+                    f"rejected by the guard"
+                    + (f" on line {line}" if line else "")
+                    + f" (raises {exc}); that counts as a policy, "
+                      f"`missing(f, {param}) raises({exc})`"),
+            meta={"mathema.witness_executed": True})
     return None
 
 
@@ -1871,14 +2075,34 @@ def _missing_probe(fn, facts, cj, domain: dict, rng: random.Random,
     is_builtin_safe. Returns (verdict, n_checked, counterexample) or
     None to decline."""
     from .domain import missing_included
+    from .types import missing_policy_from_signature
+    from ._missing_words import value_shown
     target = cj.lhs
     if target not in facts.params:
         return None
     if facts.param_kinds.get(target) not in ("scalar", "unknown"):
         return None
     included = missing_included(domain.get(target))
-    spellings = (("nan", float("nan")), ("None", None))
+    # only the missing values the parameter's type admits are tried: a
+    # float is never None
+    policy = missing_policy_from_signature(fn).get(target)
+    spellings = [("nan", float("nan"))] if (policy is None or policy.members) else []
+    if policy is None or policy.absent:
+        spellings.append(("None", None))
+    if not spellings:
+        return None
+    annotation = None
+    try:
+        import inspect
+        ann = inspect.signature(fn).parameters[target].annotation
+        if ann is not inspect.Parameter.empty:
+            annotation = ann if isinstance(ann, str) else (
+                getattr(ann, "__name__", None) if isinstance(ann, type)
+                else repr(ann).replace("typing.", ""))
+    except (TypeError, ValueError, KeyError):
+        annotation = None
     state = {"idx": 0}
+    returned: dict = {}
 
     def trial(args):
         label, missing_value = spellings[state["idx"] % len(spellings)]
@@ -1887,29 +2111,83 @@ def _missing_probe(fn, facts, cj, domain: dict, rng: random.Random,
             value = _call_with_target(fn, facts, target, args, missing_value)
         except Exception as exc:
             if included:
-                return (f"{target}={label} raised {type(exc).__name__} but the "
-                        "declared domain admits a missing value (missing is "
-                        "included by default; no \\ {∅} exclusion is stated)")
+                name = type(exc).__name__
+                if label == "None":
+                    why = ("the parameter is unannotated" if annotation is None
+                           else f"{target} is {annotation}")
+                    fix = (f"Annotate {target} as float to exclude None, or state "
+                           f"`absent(f, {target}) raises({name})`."
+                           if annotation is None else
+                           f"Handle None in f, or state `absent(f, {target}) "
+                           f"raises({name})`.")
+                    return (f"f raised {name} at {target} = None, and the claim "
+                            f"admits None for {target} ({why}). {fix}")
+                return (f"f raised {name} at {target} = nan, and {target}'s type "
+                        f"admits nan. State `missing(f, {target}) raises({name})`, "
+                        f"or make f return a value there.")
+            returned.setdefault(label, _Raised(type(exc).__name__))
             return True
         if not included:
-            return (f"{target}={label} returned {value!r} but the declared "
-                    "domain excludes missing; the exclusion is asserted, "
-                    "not enforced")
+            return (f"f returned {value_shown(value)} at {target} = {label}, but "
+                    f"the claim excludes it; guard {target} in f so the exclusion "
+                    f"holds, or remove the exclusion")
+        returned.setdefault(label, value)
         return True
 
     result = _probe_trials(fn, facts, target, domain, rng,
                            max(trials // 4, 8), trial)
     verdict, checked, cx = result
     if verdict == "holds" and len(facts.params) == 1:
-        # exhaustive coverage: the missing hazard class is exactly two
-        # spellings, and with no other parameter to vary, calling this
-        # function at both IS the whole class, an established fact
+        # exhaustive coverage: the missing values the type admits are one
+        # call each, and with no other parameter to vary, calling the
+        # function at each IS every case
         return ("proven", checked, None,
-                "the missing hazard class is exactly two spellings (NaN "
-                "and None); with a single parameter both were called and "
-                "behaved per the declared policy, so the examination is "
-                "exhaustive")
+                _missing_safe_sketch(fn, facts, target, returned, policy))
     return result
+
+
+class _Raised:
+    """What a call at a missing value raised, for a sketch."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+def _missing_safe_sketch(fn, facts, target: str, returned: dict, policy) -> str:
+    """What the function did at each missing value its parameter admits,
+    for a proven `is_missing_safe`: `x: None and nan both return 0.0
+    (the guard on line 2 replaces them), so f drops missing and absent
+    input; every case was called`."""
+    from .hazards import _missing_guard_line
+    from ._missing_words import value_shown
+    values = list(returned.values())
+    labels = list(returned)
+    all_values = values and not any(isinstance(v, _Raised) for v in values) and all(
+        v == v and v is not None for v in values
+        if isinstance(v, (int, float)) or v is None)
+    same = len({value_shown(v) for v in values}) == 1
+    if len(labels) > 1 and same and all_values:
+        line = _missing_guard_line(facts, target, raising=False)
+        where = f" (the guard on line {line} replaces them)" if line else ""
+        return (f"{' and '.join(labels)} both return "
+                f"{value_shown(values[0])}{where}, so f drops missing and absent "
+                f"input; every case was called")
+    parts = []
+    for label, value in returned.items():
+        if isinstance(value, _Raised):
+            parts.append(f"{label} is rejected (f raises {value.name}), as the claim's "
+                         f"exclusion says")
+            continue
+        shown = value_shown(value)
+        if shown == label:
+            pair = "missing in, missing out" if label != "None" else "absent in, absent out"
+            parts.append(f"{label} comes back as {shown} ({pair})")
+        else:
+            parts.append(f"{label} returns {shown}")
+    text = ", and ".join(parts)
+    if policy is not None and not policy.absent:
+        text += f", and {target} is a {policy.slot_type}, so it is never None"
+    return text + "; every case was called"
 
 
 class _NamedClaimFamily:
@@ -2334,6 +2612,11 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     """
     if facts.tree is None:
         return None
+    if _may_return_undeclared_none(fn, facts):
+        # a None under a return type that does not admit it is no value;
+        # the region the body's raises carve says nothing about it, so
+        # the calls decide
+        return None
     import ast as _ast
 
     import sympy as _sympy
@@ -2540,6 +2823,52 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
             meta={"mathema.corroboration": "reproduced",
                   "mathema.witness_executed": True})
     return ProofResult("undecided", sketch=undecided_sketch)
+
+
+def _may_return_undeclared_none(fn, facts) -> bool:
+    """Whether f's body can hand back None (a `return None`, a bare
+    `return`, or a way to the end of the body with no return) while its
+    return type does not declare it."""
+    import ast as _ast
+
+    from ._missing_words import declared_optional_return
+    if declared_optional_return(fn):
+        return False
+    fdef = next((n for n in _ast.walk(facts.tree)
+                 if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))), None)
+    if fdef is None:
+        return False
+
+    def gives_none(value) -> bool:
+        return value is None or (isinstance(value, _ast.Constant) and value.value is None)
+    for node in _ast.walk(fdef):
+        if isinstance(node, _ast.Return) and gives_none(node.value):
+            return True
+        if isinstance(node, _ast.IfExp) and (gives_none(node.body) or gives_none(node.orelse)):
+            return True
+
+    def always_leaves(block) -> bool:
+        # every way through `block` ends at a return or a raise
+        if not block:
+            return False
+        last = block[-1]
+        if isinstance(last, (_ast.Return, _ast.Raise)):
+            return True
+        if isinstance(last, _ast.If):
+            return always_leaves(last.body) and always_leaves(last.orelse)
+        if isinstance(last, (_ast.With, _ast.AsyncWith)):
+            return always_leaves(last.body)
+        if isinstance(last, _ast.Try):
+            return (always_leaves(last.body) or always_leaves(last.orelse)) \
+                and all(always_leaves(h.body) for h in last.handlers)
+        if isinstance(last, _ast.While) and isinstance(last.test, _ast.Constant) \
+                and last.test.value is True:
+            return True
+        return False
+    body = [st for st in fdef.body if not (isinstance(st, _ast.Expr)
+                                           and isinstance(st.value, _ast.Constant)
+                                           and isinstance(st.value.value, str))]
+    return not always_leaves(body)
 
 
 def _has_value(out, exc) -> bool:
@@ -2808,6 +3137,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     from .probing import _fmt_value
     words = _REGION_WORDS[kind]
     safe = _REGION_SAFE[kind]
+    from ._missing_words import declared_optional_return
+    declared_none = bool(declared_optional_return(fn))
 
     # a library function's defaulted parameters the claim leaves alone
     # are not passed (they take their defaults); a pinned one is
@@ -3051,7 +3382,11 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             what = f"returned {_fmt_value(out)}"
         checked += 1
         n_in, n_out = n_in + bool(where), n_out + (not where)
-        if safe(out, raised) == where or (conjunct and where):
+        ok = safe(out, raised)
+        if kind == "is_defined" and raised is None and out is None and not declared_none:
+            # None under a return type that does not admit it is no value
+            ok, what = False, "returned None, which its return type does not admit"
+        if ok == where or (conjunct and where):
             continue
         at = _fmt_point(point, params)
         if bare:
@@ -3274,10 +3609,11 @@ def _matrix_output_probe(prop):
             except PremiseRejected:
                 continue
             except Exception:
+                # a raise at a missing input is classified, not judged
                 if raised and not any(is_missing(v) for v in filled):
                     checked += 1
                     return ("falsified", checked,
-                            f"{_fmt(tuple(filled))}: f raised "
+                            f"{_fmt(tuple(filled), tuple(facts.params))}: f raised "
                             f"{type(raised[0]).__name__}, no value", None)
                 continue
             got = prop.check(value)
@@ -3286,7 +3622,7 @@ def _matrix_output_probe(prop):
             checked += 1
             if got is not True:
                 return ("falsified", checked,
-                        f"{_fmt(tuple(filled))}: result is not "
+                        f"{_fmt(tuple(filled), tuple(facts.params))}: result is not "
                         f"{prop.name[3:]}", None)
         if checked == 0:
             return ("skipped", 0, None, None)
@@ -3323,7 +3659,7 @@ def _matrix_guard_probe(prop):
                 continue     # a graceful decline is a guard too
             return ("falsified", checked,
                     f"{prop.name[3:]} not enforced: accepted "
-                    f"{_fmt(tuple([bad]))}", None)
+                    f"{_fmt((bad,), (target,))}", None)
         if checked == 0:
             return ("skipped", 0, None, None)
         return ("holds", checked, None, None)
@@ -3426,15 +3762,16 @@ def _output_predicate_probe(check):
                     out = fn(*filled)
             except Exception as exc:
                 if any(is_missing(v) for v in filled):
+                    # a raise at a missing input is classified, not judged
                     return None
-                return (f"{_fmt(tuple(filled))}: f raised "
+                return (f"{_fmt(tuple(filled), tuple(facts.params))}: f raised "
                         f"{type(exc).__name__}, no output")
             got = check(out)
             if got is None:
                 return None
             if got is True:
                 return True
-            return f"{_fmt(tuple(filled))}: output {out!r} fails {cj.relation}"
+            return f"{_fmt(tuple(filled), tuple(facts.params))}: output {out!r} fails {cj.relation}"
         target = facts.params[0] if facts.params else ""
         return _probe_trials(fn, facts, target, domain, rng, trials, trial)
     return probe
@@ -3542,12 +3879,12 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
                 out = fn(*filled)
         except Exception as e:
             if _raised_by_library(e, library):
-                return diagnosed(f"{_fmt(tuple(filled))}: raised "
+                return diagnosed(f"{_fmt(tuple(filled), tuple(facts.params))}: raised "
                                  f"{type(e).__name__} inside {library}",
                                  filled)
             return None
         if _is_nonfinite(out):
-            return diagnosed(f"{_fmt(tuple(filled))}: output {out!r} is a "
+            return diagnosed(f"{_fmt(tuple(filled), tuple(facts.params))}: output {out!r} is a "
                              f"silent non-finite value from an unguarded "
                              f"{library} call", filled)
         return True

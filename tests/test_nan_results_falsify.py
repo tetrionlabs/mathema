@@ -54,11 +54,15 @@ def test_the_corroboration_kit_reads_a_nan_result_as_a_counterexample():
     assert kit["evaluate"]({"x": 0.5}) is True
 
 
-def test_a_nan_that_propagates_a_missing_input_is_not_a_counterexample():
-    cj = claim("for x in [-1, 1], f(x) >= 0")
-    kit = _point_evaluator(cj, identity, analyze_source(identity),
-                           cj.domain, {})
-    assert kit["evaluate"]({"x": float("nan")}) is None
+def test_a_nan_that_propagates_a_missing_input_is_classified_not_judged():
+    # a hole in, a hole out: propagation, classified and not compared,
+    # under an ordering and under equality alike
+    for text in ("for x in [-1, 1], f(x) >= 0", "for x in [-1, 1], f(x) == x"):
+        cj = claim(text)
+        kit = _point_evaluator(cj, identity, analyze_source(identity),
+                               cj.domain, {})
+        assert kit["evaluate"]({"x": float("nan")}) is None
+        assert kit["evaluate"].executed.last_classified
 
 
 def test_not_equal_is_falsified_by_a_nan_result():

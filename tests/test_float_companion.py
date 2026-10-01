@@ -114,7 +114,8 @@ def test_an_integer_domain_reaches_the_code_as_an_int():
     # integer, so every executed point, corners included, is an int
     probes, _ = _check(count_up, "for n in {2, 3, 4}, f(n) == n")
     assert probes["law"].verdict == "proven"
-    assert probes["law[float]"].verdict == "holds", probes["law[float]"].sketch
+    # every point of the finite set was executed: no companion
+    assert "law[float]" not in probes
     probes, _ = _check(count_up, "for n in [2, 10] ⊂ Z, f(n) == n")
     assert probes["law[float]"].verdict == "holds", probes["law[float]"].sketch
 
@@ -327,7 +328,7 @@ def test_a_numpy_overflow_falsifies_the_companion_at_the_corner(
     comp = probes["law[float]"]
     assert comp.verdict == "falsified", comp.note
     assert "f returned inf" in comp.sketch
-    assert comp.counterexample and "x=" in comp.counterexample
+    assert comp.counterexample and "x = " in comp.counterexample
 
 
 def add(a: float, b: float) -> float:

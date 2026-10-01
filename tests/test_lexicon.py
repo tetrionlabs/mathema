@@ -154,6 +154,38 @@ PINNED: dict = {
     "space_excluded_fixed": ("falsified", "A of shape (31, 15)"),
     "space_excluded_by_construction": "proven",
     "dim_premise_against_fixed": "skipped",
+    # the missing section: a policy row per behaviour and kind, the
+    # member and premise forms, the traps and the gates
+    "missing_propagates": "holds",
+    "missing_drops": "holds",
+    "missing_trap_silent_drop": ("falsified", "rate = nan: f returned 1.0"),
+    "missing_raises": "proven",
+    "missing_converts": "holds",
+    "missing_introduces": "holds",
+    "missing_introduces_by_shape": "holds",
+    "absent_raises": "holds",
+    "absent_drops": "proven",
+    "absent_propagates": "holds",
+    "absent_converts": "holds",
+    "missing_member_null": "holds",
+    "missing_member_nan": "holds",
+    "missing_class_row_contradicted": ("falsified", "positions = [null]: f raised TypeError"),
+    "missing_premise_values_remain": "holds",
+    "missing_premise_no_values": "holds",
+    "missing_premise_all_na_raises": "holds",
+    "missing_member_defined": "holds",
+    "missing_trap_comparison": "holds",
+    "missing_predicate_sugar": "holds",
+    "absent_none_spelling": "holds",
+    "is_missing_safe_gate": "holds",
+    "is_missing_safe_gate_falsified": ("falsified", "positions = [null]: f raised TypeError"),
+    "is_absent_safe_gate": "holds",
+    "is_absent_safe_gate_falsified": ("falsified", "score = None: f raised TypeError"),
+    "is_empty_safe_hole": ("falsified", "returns = [] (an empty numpy.ndarray)"),
+    "is_empty_safe_identity": "proven",
+    "absent_field_raises": "holds",
+    "is_absent_safe_field": ("falsified", "trade.memo = null (absent): f raised TypeError"),
+    "absent_key_left_out": "holds",
     # the norm written with double bars, each against its function in
     # mathema/_lexicon_numpy.py
     "norm_bars_euclidean": "proven",
@@ -189,7 +221,7 @@ PINNED: dict = {
     "matrix_norm_bars_spectral": "holds",
     "matrix_norm_bars_spectral_below_frobenius": "holds",
     "let_scale_seq_sharpe_premise": "proven",
-    "let_scale_seq_sharpe_trap": ("falsified", "returns=[0.0]"),
+    "let_scale_seq_sharpe_trap": ("falsified", "returns = [0.0]"),
     "let_shift_seq_range": "holds",
     "let_shift_seq_mean_moves": "falsified",
     "assuming_spread_positive": "holds",
@@ -285,20 +317,21 @@ def test_every_spelling_is_a_render_parse_render_fixed_point():
     assert not drifted, "rendered claims drift on reparse:\n" + "\n".join(drifted)
 
 
-def test_a_rendered_domain_always_states_its_missing_policy():
+def test_a_rendered_domain_always_states_what_it_admits():
     """Terse input, explicit output: nothing has to say anything about
     missing values, and a rendered domain always does."""
     from mathema.conjecture import claim
     from mathema.spec import render_claim_text
 
     allowed = claim("for x in [0,10], f(x) >= 0")
-    assert "∪ {∅}" in render_claim_text(allowed, unicode=True)
-    assert "|missing" in render_claim_text(allowed, unicode=False)
+    assert "∪ {absent, ∅}" in render_claim_text(allowed, unicode=True)
+    assert "|absent|missing" in render_claim_text(allowed, unicode=False)
 
     excluded = claim("for x in [0,10] \\ {missing}, f(x) >= 0")
-    assert "\\ {∅}" in render_claim_text(excluded, unicode=True)
-    assert "|missing" not in render_claim_text(excluded, unicode=False)
-    assert "\\ {missing}" in render_claim_text(excluded, unicode=False)
+    # the type clause states what it admits, so the excluded hole needs
+    # no exclusion beside it
+    assert "⊂ ℝ ∪ {absent}" in render_claim_text(excluded, unicode=True)
+    assert ": float|absent," in render_claim_text(excluded, unicode=False)
 
     from mathema.spec import canonical_claim_text
     for conjecture in (allowed, excluded):

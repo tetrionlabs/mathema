@@ -3654,5 +3654,78 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
                 s = s.replace(symbol, backslash_name)
         return s
 
-    return outside_strings(
-        respell, to_canonical(expr, funcs, unicode, suppress_glyphs))
+    return _double_quoted(outside_strings(
+        respell, to_canonical(expr, funcs, unicode, suppress_glyphs)))
+
+
+_SINGLE_QUOTED = re.compile(r"(?<![\w)\]'])'((?:[^'\\\"]|\\.)*)'(?!')")
+
+
+def _double_quoted(text: str) -> str:
+    """`text` with each single-quoted string literal written in double
+    quotes, the one quote style a statement uses (a set member renders
+    `{"a"}`); a literal holding a double quote keeps its own."""
+    return _SINGLE_QUOTED.sub(lambda m: f'"{m.group(1)}"', text)
+
+
+class InvalidDefinition(ValueError):
+    """A `defines:` row that does not read as `<word> := {<members>}`."""
+
+
+#: the words a definition row may define: the hole class and absence
+#: (`absent`, with `None` its synonym, both read as the absence word)
+DEFINABLE_WORDS = ("missing", "absent", "None")
+_DEFINITION = re.compile(
+    r"^\s*(?P<word>[^\s:=]+)\s*:=\s*\{\s*(?P<members>.*?)\s*\}\s*$")
+_SPELLING = re.compile(r"^[A-Za-z_][\w]*(?:::[A-Za-z_][\w]*)*$")
+
+
+def parse_definition(text: str) -> tuple:
+    """Intent:
+        One definition row, `<word> := {<members>}`, as `(word,
+        members, extends)`: the word defined (`missing`, the hole class,
+        or `None` for the object's absence, written `absent` or `None`),
+        the spellings the set names
+        with the word itself left out, and whether the set extends what
+        the key already had (the word appears inside it, `missing :=
+        {missing, NaT}`) rather than replacing it. Read only from a
+        key's `defines:`; a claim or a binding never holds `:=`.
+
+    Raises:
+        InvalidDefinition: the text is not a definition of a word this
+            grammar defines, or a member is not a spelling (a name,
+            `Option::None` style paths allowed).
+    """
+    m = _DEFINITION.match(str(text))
+    if m is None:
+        raise InvalidDefinition(
+            f"{text!r} is not a definition; a definition row is "
+            f"`<word> := {{<members>}}`, `missing := {{null, nan}}`")
+    word = m.group("word")
+    if word == "∅":
+        word = "missing"
+    if word not in DEFINABLE_WORDS:
+        raise InvalidDefinition(
+            f"{text!r} defines {word!r}; a definition row defines "
+            f"`missing` (the hole class) or `absent` (the object's absence)")
+    synonyms = ("absent", "None") if word in ("absent", "None") else (word, "∅")
+    if word == "absent":
+        word = "None"
+    members: list = []
+    extends = False
+    for part in _split_commas(m.group("members")):
+        spelling = part.strip()
+        if not spelling:
+            continue
+        if spelling in synonyms:
+            extends = True
+            continue
+        if not _SPELLING.match(spelling):
+            raise InvalidDefinition(
+                f"{text!r}: {spelling!r} is not a spelling (a name such as "
+                f"`nan`, `NaT` or `Option::None`)")
+        if spelling not in members:
+            members.append(spelling)
+    if not members and not extends:
+        raise InvalidDefinition(f"{text!r} names no spelling")
+    return word, tuple(members), extends

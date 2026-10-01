@@ -243,18 +243,27 @@ def unaccepted_retirements(entry: dict) -> list:
     return out
 
 
-def _same_law_as(statement: str):
+def _same_law_as(statement: str, key: "str | None" = None, root: str = "."):
     """Intent:
         A canonical-law comparator over claim spellings: two texts
         match when they parse to the same fingerprint form, so the
         record's canonical rendering and an author's hand spelling of
-        the same law compare equal. An unparseable side never matches.
+        the same law compare equal. With the function's `key`, each
+        side's bindings are completed from its annotations first, as
+        its record states them. An unparseable side never matches.
     """
-    from .spec import _declared_conjecture, fingerprint_text
+    from .sync import _identity
+    fn = None
+    if key is not None:
+        from .conjecture import _resolve_func_ref
+        try:
+            fn = _resolve_func_ref(key, root=root)
+        except Exception:
+            fn = None
 
     def canon(text: str):
         try:
-            return fingerprint_text(_declared_conjecture({"statement": text}))
+            return _identity(text, None, fn)
         except Exception:
             return None
 
@@ -279,7 +288,7 @@ def _declared_claim_files(root: str, key: str, claim_name: str,
     import yaml
 
     from .spec import _SKIP_DIRS, _is_claim_file
-    same = _same_law_as(statement)
+    same = _same_law_as(statement, key, root)
     hits = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
@@ -1054,7 +1063,7 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
         matchers = []
         for d in discovery_rows:
             stmt = d.get("statement") or d.get("law") or ""
-            matchers.append((d["name"], _same_law_as(stmt) if stmt else None))
+            matchers.append((d["name"], _same_law_as(stmt, key) if stmt else None))
 
         def _retired(c) -> bool:
             name = c.get("name")

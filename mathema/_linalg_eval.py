@@ -59,6 +59,29 @@ class Table(dict):
                 f"{', '.join(self) or 'none'})") from None
 
 
+_HOLED: list = []
+
+
+def _holed(array, holes: dict):
+    """`array` carrying the hole values its missing positions were drawn
+    as (`None`, `pd.NA`), `{position: value}`, so the function receives
+    them as drawn when the array goes back to a plain list; the array
+    itself holds NaN there."""
+    if not holes:
+        return array
+    if not _HOLED:
+        np = _np()
+
+        class HoledArray(np.ndarray):  # type: ignore[name-defined]
+            """A float array with the hole values it stands for."""
+            hole_values: dict = {}
+
+        _HOLED.append(HoledArray)
+    out = array.view(_HOLED[0])
+    out.hole_values = dict(holes)
+    return out
+
+
 def _numbers(value) -> bool:
     from .runtime_types import abstract_of
     from .runtime_types._abstract import AbstractMat, AbstractVec
@@ -86,11 +109,18 @@ def as_array(value):
         return value.astype(float) if value.dtype.kind in "biu" else value
     if isinstance(value, (list, tuple)) and value and _numbers(value):
         from .domain import is_missing
+
+        def kept(v):
+            # a hole drawn as something other than a float NaN
+            return is_missing(v) and not isinstance(v, float)
         if all(isinstance(r, (list, tuple)) for r in value):
-            return np.array([[math.nan if is_missing(v) else float(v)
-                              for v in r] for r in value], dtype=float)
-        return np.array([math.nan if is_missing(v) else float(v)
-                         for v in value], dtype=float)
+            return _holed(np.array([[math.nan if is_missing(v) else float(v)
+                                     for v in r] for r in value], dtype=float),
+                          {(i, j): v for i, r in enumerate(value)
+                           for j, v in enumerate(r) if kept(v)})
+        return _holed(np.array([math.nan if is_missing(v) else float(v)
+                                for v in value], dtype=float),
+                      {(k,): v for k, v in enumerate(value) if kept(v)})
     return value
 
 
@@ -104,7 +134,16 @@ def to_plain(value):
     if isinstance(value, Table):
         return {k: to_plain(v) for k, v in value.items()}
     if is_array(value):
-        return value.tolist()
+        out = value.tolist()
+        for position, hole in (getattr(value, "hole_values", None) or {}).items():
+            # the hole value the array was drawn with, back in its slot
+            if len(position) == 1 and isinstance(out, list) and position[0] < len(out):
+                out[position[0]] = hole
+            elif len(position) == 2 and isinstance(out, list) \
+                    and position[0] < len(out) and isinstance(out[position[0]], list) \
+                    and position[1] < len(out[position[0]]):
+                out[position[0]][position[1]] = hole
+        return out
     return value
 
 
@@ -333,13 +372,17 @@ def _abs(x):
 def _norm(x, ord=None):
     """The Euclidean norm of a vector, the Frobenius norm of a matrix,
     or `numpy.linalg.norm`'s `ord` norm (`2` spectral, `1`, `inf`); the
-    absolute value of a number."""
+    absolute value of a number. The Euclidean and Frobenius norms read
+    the value slots, 0 over none."""
     if isinstance(x, (int, float, complex)) and not isinstance(x, bool):
         return builtins.abs(x)
     np = _np()
     a = as_array(x) if not is_array(x) else x
     if not is_array(a):
         raise TypeError(f"norm of {type(x).__name__}")
+    if a.dtype.kind in "fc" and np.isnan(a).any() and ord is None:
+        # over the value slots, a hole contributing nothing; 0 over none
+        a = np.where(np.isnan(a), 0.0, a)
     # every norm is homogeneous, so it is computed on the array scaled
     # to its largest magnitude: squaring an entry near the float
     # maximum overflows where the norm itself does not
@@ -352,9 +395,36 @@ def _norm(x, ord=None):
                          else np.linalg.norm(unit, ord))
 
 
+def _holes(a) -> bool:
+    """Whether an array holds a hole (a NaN position)."""
+    np = _np()
+    return bool(a.dtype.kind in "fc" and np.isnan(a).any())
+
+
+#: the reductions with an identity, which they give over no value slot
+_IDENTITY = {"sum": 0.0, "prod": 1.0}
+
+
+def _over_values(numpy_name: str, a, axis=None, **kwargs):
+    """A reduction over the value slots of `a`: numpy's NaN-skipping
+    reduction. Over no value slot a reduction with an identity gives it
+    (`sum` 0, `prod` 1) and one without gives a hole."""
+    np = _np()
+    out = getattr(np, "nan" + numpy_name)(a, axis=axis, **kwargs)
+    empty = np.all(np.isnan(a), axis=axis)
+    out = np.where(empty, _IDENTITY.get(numpy_name, np.nan), out)
+    return out.item() if getattr(out, "ndim", 1) == 0 else out
+
+
 def _reduction(builtin_fn, numpy_name):
     def reduce(*args, axis=None, **kwargs):
         if len(args) == 1 and _is_array_arg(args[0]):
+            if _holes(args[0]):
+                # over the value slots; a vector of holes reduces to one
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    return _over_values(numpy_name, args[0], axis=axis, **kwargs)
             out = getattr(_np(), numpy_name)(args[0], axis=axis, **kwargs)
             return out.item() if getattr(out, "ndim", 1) == 0 else out
         if axis is not None:
@@ -407,14 +477,33 @@ def _element(v):
     return v.item() if hasattr(v, "item") else v
 
 
-def _along(args, axis, of_list):
-    """`of_list` applied to the one vector the arguments give, or along
-    `axis` of a matrix (one value per remaining index)."""
+def _is_hole(v) -> bool:
+    """Whether one element is a hole (a missing value, read as nan)."""
+    return isinstance(v, float) and math.isnan(v)
+
+
+def _over_slots(values: list, of_list, identity=math.nan):
+    """`of_list` over the value slots of a list: its holes left out.
+    Over no value slot, `identity` (a reduction with one gives it; one
+    without gives a hole)."""
+    if any(_is_hole(v) for v in values):
+        values = [v for v in values if not _is_hole(v)]
+        if not values:
+            return identity
+    return of_list(values)
+
+
+def _along(args, axis, of_list, identity=math.nan):
+    """`of_list` applied to the value slots of the one vector the
+    arguments give, or along `axis` of a matrix (one value per
+    remaining index); see `_over_slots`."""
     a = _raw(args)
     if axis is None:
-        return of_list([_element(v) for v in a.ravel()])
+        return _over_slots([_element(v) for v in a.ravel()], of_list,
+                           identity)
     return _np().apply_along_axis(
-        lambda v: of_list([_element(x) for x in v]), axis, a)
+        lambda v: _over_slots([_element(x) for x in v], of_list, identity),
+        axis, a)
 
 
 def _is_complex(v) -> bool:
@@ -615,7 +704,7 @@ def _sum(*args, axis=None):
     """The sum of a vector's elements, exact and rounded once; along
     `axis` for a matrix."""
     if len(args) == 1 and _is_array_arg(args[0]):
-        return _along(args, axis, _exact_sum)
+        return _along(args, axis, _exact_sum, identity=0.0)
     if axis is not None:
         raise TypeError("sum(..., axis=) needs an array")
     return builtins.sum(*args)
@@ -633,7 +722,7 @@ def _prod(*args, axis=None):
     """The exact product of a vector's elements, rounded once; along
     `axis` for a matrix."""
     if len(args) == 1 and _is_array_arg(args[0]):
-        return _along(args, axis, _product)
+        return _along(args, axis, _product, identity=1.0)
     return math.prod(args[0] if len(args) == 1 else args)
 
 
@@ -656,21 +745,26 @@ def _moment(word):
 
 
 def _count(*args, axis=None):
-    """The number of positions: every element of a vector or matrix,
-    or the positions along `axis` (one count per remaining index)."""
+    """The number of value slots: every element of a vector or matrix
+    that is not a hole, or those along `axis` (one count per remaining
+    index); `len` counts every slot."""
     a = _values(args)
-    if axis is None:
-        return int(a.size)
     np = _np()
-    return np.full(np.delete(np.array(a.shape), axis), a.shape[axis],
-                   dtype=float) if a.ndim > 1 else int(a.shape[axis])
+    present = ~np.isnan(a) if a.dtype.kind in "fc" else np.ones(a.shape, dtype=bool)
+    if axis is None:
+        return int(present.sum())
+    counts = present.sum(axis=axis)
+    return counts.astype(float) if a.ndim > 1 else int(counts)
 
 
 def _running(of_list, word):
-    """A running word: entry `i` is `of_list` of elements `0..i`; a
-    matrix is read in row order without `axis`, along it with one."""
+    """A running word: entry `i` is `of_list` of the value slots
+    `0..i`, a hole kept at its own position; a matrix is read in row
+    order without `axis`, along it with one."""
     def entries(values):
-        out = [of_list(values[:i + 1]) for i in range(len(values))]
+        out = [math.nan if _is_hole(values[i]) else
+               of_list([v for v in values[:i + 1] if not _is_hole(v)])
+               for i in range(len(values))]
         np = _np()
         if all(isinstance(v, float) for v in out):
             return np.array(out, dtype=float)
@@ -787,13 +881,16 @@ def _quantile_of(values: list, q):
 def _quantile(a, q):
     """The `q`-quantile of a vector (`0 <= q <= 1`), interpolated
     linearly between the two sorted elements it falls between, as
-    numpy and pandas compute it by default; several levels give one
-    quantile each."""
+    numpy and pandas compute it by default, over the value slots (a
+    hole when every slot is one); several levels give one quantile
+    each."""
     values = [_element(v) for v in _raw((a,)).ravel()]
     if is_array(q) or isinstance(q, (list, tuple)):
-        return _np().array([_quantile_of(values, _element(level))
-                            for level in _np().asarray(q).ravel()])
-    return _quantile_of(values, q)
+        return _np().array([
+            _over_slots(values, lambda vs, lv=_element(level):
+                        _quantile_of(vs, lv))
+            for level in _np().asarray(q).ravel()])
+    return _over_slots(values, lambda vs: _quantile_of(vs, q))
 
 
 def _matrix(x):
@@ -868,6 +965,14 @@ def _dot(x, y):
     if a.shape[-1] != b.shape[0]:
         raise ValueError(f"dot of shapes {a.shape} and {b.shape}: the "
                          f"inner dimensions differ")
+    if a.ndim == 1 and b.ndim == 1:
+        pairs = [(_element(u), _element(v)) for u, v in zip(a, b)]
+        if any(_is_hole(u) or _is_hole(v) for u, v in pairs):
+            # over the value slots both vectors hold; 0 where none is
+            both = [(u, v) for u, v in pairs
+                    if not (_is_hole(u) or _is_hole(v))]
+            return (_exact_inner([u for u, _ in both], [v for _, v in both])
+                    if both else 0.0)
     a2 = a.reshape(1, -1) if a.ndim == 1 else a
     b2 = b.reshape(-1, 1) if b.ndim == 1 else b
     entries = [[_exact_inner([_element(v) for v in a2[i]],

@@ -144,7 +144,7 @@ def test_ordinary_claim_reports_a_structural_reason_not_a_domain_hint_when_block
     # the structural diagnosis stays (in the note, since probing then
     # adjudicates the, true, claim empirically: 1/y > 0 on [1, 5])
     assert results[0].verdict == "holds"
-    assert "isn't affine" in results[0].note
+    assert "isn't affine" in results[0].meta["mathema.routes_attempted"]
     assert "needs a domain" not in results[0].note
 
 
@@ -321,8 +321,9 @@ def test_boolop_condition_with_no_domain_stays_unliftable():
     # derive stays blocked without a domain; the probe fallback then
     # supplies (weak, sampling-limited) empirical evidence
     assert results[0].verdict in ("holds", "falsified")
-    assert "routes attempted" in results[0].note
-    assert "derive: underivable" in results[0].note
+    trail = results[0].meta["mathema.routes_attempted"]
+    assert "routes attempted" in trail
+    assert "derive: underivable" in trail
 
 
 def test_wrong_formula_for_boolop_pinned_branch_is_falsified():

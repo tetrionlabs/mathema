@@ -111,7 +111,7 @@ def test_a_sharpe_ratio_has_no_value_where_the_returns_do_not_vary():
            "let c be [0.1, 10], f(s(returns, c)) ~= f(returns)")
     p = _one(sharpe, law, route="derive")
     assert p.verdict == "falsified", (p.verdict, p.note, p.sketch)
-    assert p.counterexample.startswith("returns=[0.0]"), p.counterexample
+    assert p.counterexample.startswith("returns = [0.0]"), p.counterexample
     assert "returns NaN" in p.counterexample, p.counterexample
     assert "std(returns, ddof=1) == 0" in p.sketch, p.sketch
 

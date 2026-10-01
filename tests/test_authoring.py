@@ -317,11 +317,9 @@ def test_enforce_domain_raises_on_a_non_integer_for_z():
 
 
 def test_enforce_domain_allows_missing_for_a_bare_named_type_by_default():
-    # a bare "Z"/"N" string bypasses grammar parsing entirely, but is
-    # just as much a stated type as an explicit ⊂ Z clause, stating a
-    # type never excludes missing by default, regardless of spelling; a
-    # claim's own domain text doesn't get to assert that true just by
-    # naming a type, only an explicit exclusion clause does.
+    # a bare "Z"/"N" string bypasses grammar parsing entirely, and like a
+    # bare named space in claim text it states no missing-value policy:
+    # with no annotation to complete from, missing values are admitted
     @mathema.enforce_domain({"n": "Z"})
     def f(n):
         return n
@@ -424,11 +422,10 @@ def test_enforce_domain_checks_every_sequence_element_against_its_domain():
         total([1.0, 150.0])
 
 
-def test_enforce_domain_allows_a_missing_element_when_domain_is_explicit_type():
-    # stating a type alone (⊂ Z) never excludes missing by default,
-    # regardless of spelling, only an explicit exclusion clause does
+def test_enforce_domain_allows_a_missing_element_the_explicit_type_lists():
+    # a stated type admits the holes it lists, `⊂ Z ∪ {∅}`
     # (see test_enforce_domain_rejects_a_missing_element_when_explicitly_excluded).
-    @mathema.enforce_domain({"xs": _dom("for x in [0, 100] \\subset Z, True")})
+    @mathema.enforce_domain({"xs": _dom("for x in [0, 100] \\subset Z ∪ {∅}, True")})
     def total(xs: list) -> float:
         return sum(v for v in xs if v == v)
 

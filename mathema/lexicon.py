@@ -57,8 +57,11 @@ except ImportError:   # numpy is optional; the example functions over arrays nee
     np = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
+    from typing import Optional
+
     import numpy
     import pandas
+    import polars
 
 LEXICON: dict[str, str] = {
     # one construct at a time -----------------------------------
@@ -603,6 +606,45 @@ LEXICON: dict[str, str] = {
     "language_length_bound": "for s in L[unicode, len <= 80], len(f(s)) <= 80",
     "containment_absent": 'for s in L[unicode], "<" not in f(s)',
     "membership_interval_reduces_to_chain": "for x in [0, 1], f(x) in [0, 1]",
+    # what a function does with a value that is not there: a policy row
+    # names the kind (`missing`, a hole in a slot; `absent`, the object
+    # not there), the parameter, optionally one member, and one of five
+    # behaviours counted in no-value slots
+    "missing_propagates": "missing(f, variance) propagates",
+    "missing_drops": "missing(f, rate) drops",
+    "missing_trap_silent_drop": "missing(f, rate) propagates",
+    "missing_raises": "missing(f, ratio) raises(ValueError)",
+    "missing_converts": "missing(f, price) converts",
+    "missing_introduces": "assuming count(weights) >= 1, missing(f, weights) introduces",
+    "missing_introduces_by_shape":
+        "assuming count(prices) >= 1, missing(f, prices) introduces",
+    "absent_raises": "absent(f, score) raises(TypeError)",
+    "absent_drops": "absent(f, fx_rate) drops",
+    "absent_propagates": "absent(f, amount) propagates",
+    "absent_converts": "absent(f, price) converts",
+    "missing_member_null": "missing(f, positions, null) raises(TypeError)",
+    "missing_member_nan": "missing(f, positions, nan) propagates",
+    "missing_class_row_contradicted": "missing(f, positions) propagates",
+    "missing_premise_values_remain": "assuming count(xs) >= 1, missing(f, xs) drops",
+    "missing_premise_no_values": "assuming count(xs) == 0, missing(f, xs, nan) propagates",
+    "missing_premise_all_na_raises":
+        "assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)",
+    "missing_member_defined": "assuming count(xs) >= 1, missing(f, xs, null) drops",
+    "missing_trap_comparison": "missing(f, score) drops",
+    "missing_predicate_sugar": "missing_propagates(f, variance)",
+    "absent_none_spelling": "None(f, score) raises",
+    "is_missing_safe_gate": "is_missing_safe(f)",
+    "is_missing_safe_gate_falsified": "is_missing_safe(f)",
+    "is_absent_safe_gate": "is_absent_safe(f)",
+    "is_absent_safe_gate_falsified": "is_absent_safe(f)",
+    "is_empty_safe_hole": "is_empty_safe(returns)",
+    "is_empty_safe_identity": "is_empty_safe(volumes)",
+    # a field or key along a path: where the None sits decides the kind,
+    # and absence has the members null (held) and unset (left out)
+    "absent_field_raises": "absent(f, trade.memo) raises(TypeError)",
+    "is_absent_safe_field": "is_absent_safe(f)",
+    "absent_key_left_out": ('for order.side in {"buy", "sell"} | {None} \\ {null}, '
+                            'len(f(order)) >= 1'),
     # a series of returns: a transform bound by `let`, a statistic as a
     # premise, and a length premise on a call -------------------------
     # `mathema.f.scale_seq` scales every entry by `c`; a Sharpe ratio
@@ -763,6 +805,20 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "mixed_backslash_greek_and_unicode_relation",
         "stress_gauge_invariance", "stress_mixed_let_and_types",
         "chained_comparison", "euler_via_exp"),
+    "missing": (
+        "missing_propagates", "missing_drops", "missing_trap_silent_drop",
+        "missing_raises", "missing_converts", "missing_introduces",
+        "missing_introduces_by_shape", "absent_raises", "absent_drops",
+        "absent_propagates", "absent_converts", "missing_member_null",
+        "missing_member_nan", "missing_class_row_contradicted",
+        "missing_premise_values_remain", "missing_premise_no_values",
+        "missing_premise_all_na_raises", "missing_member_defined",
+        "missing_trap_comparison", "missing_predicate_sugar",
+        "absent_none_spelling", "is_missing_safe_gate",
+        "is_missing_safe_gate_falsified", "is_absent_safe_gate",
+        "is_absent_safe_gate_falsified", "is_empty_safe_hole",
+        "is_empty_safe_identity", "absent_field_raises", "is_absent_safe_field",
+        "absent_key_left_out"),
     "languages": (
         "language_alphabet", "language_contraction",
         "language_excluding_empty", "language_membership_symbol",
@@ -960,6 +1016,54 @@ TAGS: dict[str, tuple[str, ...]] = {
                                      "conformable", "premise", "symmetry"),
     "premise_relates_two_params": ("premise", "relates two parameters",
                                    "ordering premise", "not a box"),
+    "missing_propagates": ("missing", "nan", "hole", "propagates", "policy",
+                           "volatility", "sqrt"),
+    "missing_drops": ("missing", "nan", "hole", "drops", "clamp", "stated"),
+    "missing_trap_silent_drop": ("missing", "nan", "drops", "clamp", "trap",
+                                 "silent", "contradicted", "default"),
+    "missing_raises": ("missing", "nan", "hole", "raises", "guard", "log return"),
+    "missing_converts": ("missing", "nan", "converts", "optional", "None out"),
+    "missing_introduces": ("missing", "nan", "introduces", "weights",
+                           "diff", "portfolio"),
+    "missing_introduces_by_shape": ("missing", "nan", "introduces", "rolling",
+                                    "moving average", "window", "pandas"),
+    "absent_raises": ("absent", "None", "optional", "raises", "TypeError"),
+    "absent_drops": ("absent", "None", "optional", "drops", "flag", "default",
+                     "currency"),
+    "absent_propagates": ("absent", "None", "optional", "propagates"),
+    "absent_converts": ("absent", "None", "optional", "converts", "nan out"),
+    "missing_member_null": ("missing", "null", "hole", "member", "raises",
+                            "list", "None element"),
+    "missing_member_nan": ("missing", "nan", "hole", "member", "propagates"),
+    "missing_class_row_contradicted": ("missing", "null", "nan", "mixed",
+                                       "member", "contradicted"),
+    "missing_premise_values_remain": ("missing", "NA", "skipna", "drops",
+                                      "count", "pandas", "mean"),
+    "missing_premise_no_values": ("missing", "nan", "skipna", "propagates",
+                                  "count", "all missing", "mean of nothing"),
+    "missing_premise_all_na_raises": ("missing", "NA", "raises", "count",
+                                      "all missing", "pandas"),
+    "missing_member_defined": ("missing", "null", "polars", "axiom",
+                               "definition", "drops"),
+    "missing_trap_comparison": ("missing", "nan", "drops", "comparison",
+                                "trap", "silent", "label"),
+    "missing_predicate_sugar": ("missing", "propagates", "sugar"),
+    "absent_none_spelling": ("absent", "None", "raises", "spelling"),
+    "is_missing_safe_gate": ("missing", "hole", "gate", "safety"),
+    "is_missing_safe_gate_falsified": ("missing", "hole", "gate", "safety",
+                                       "NaT", "falsified"),
+    "is_absent_safe_gate": ("absent", "None", "optional", "gate", "safety"),
+    "is_absent_safe_gate_falsified": ("absent", "None", "optional", "gate",
+                                      "unstated raise"),
+    "is_empty_safe_hole": ("empty", "empty array", "mean of nothing", "hole"),
+    "is_empty_safe_identity": ("empty", "empty series", "sum", "identity",
+                               "zero"),
+    "absent_field_raises": ("absent", "None", "field", "path", "record",
+                            "dataclass", "raises"),
+    "is_absent_safe_field": ("absent", "None", "field", "path", "gate",
+                             "unstated raise", "dataclass"),
+    "absent_key_left_out": ("absent", "unset", "null", "key", "path", "dict",
+                            "PATCH", "left out"),
 }
 
 
@@ -1711,6 +1815,113 @@ def sharpe_annualised(returns: "pandas.Series") -> float:
     return returns.mean() / returns.std(ddof=1) * 252 ** 0.5
 
 
+def volatility(variance: float) -> float:
+    """The standard deviation for a variance: `math.sqrt` gives a hole
+    back for a hole."""
+    import math
+    return math.sqrt(variance)
+
+
+def clamp_discount(rate: float) -> float:
+    """A discount rate held to [0, 1]; `min(1.0, nan)` is 1.0, so a
+    missing rate becomes a full discount (a drop)."""
+    return max(0.0, min(1.0, rate))
+
+
+def log_of_ratio(ratio: float) -> float:
+    """The log of a price ratio, refusing a missing ratio with a guard."""
+    import math
+    if ratio != ratio:
+        raise ValueError("ratio is missing")
+    return math.log(ratio)
+
+
+def price_or_none(price: float) -> "Optional[float]":
+    """A quoted price, None for a missing quote: a hole in, `None` out
+    (converts)."""
+    return None if price != price else price
+
+
+def price_as_float(price: "Optional[float]") -> float:
+    """A price as a float, `nan` for no quote: `None` in, a hole out
+    (converts)."""
+    return float("nan") if price is None else price
+
+
+def converted_amount(amount: "Optional[float]") -> "Optional[float]":
+    """An amount at a fixed rate, `None` passed through (propagates)."""
+    return None if amount is None else 1.1 * amount
+
+
+def weight_changes(weights: "numpy.ndarray"):
+    """Each portfolio weight's change since the one before it: the first
+    has nothing before it, so it is a hole whatever the input
+    (introduces)."""
+    import numpy
+    return numpy.diff(weights, prepend=numpy.nan)
+
+
+def rolling_average(prices: "pandas.Series"):
+    """The three-period moving average of a price series: its first two
+    slots are holes whatever the input (introduces)."""
+    return prices.rolling(3).mean()
+
+
+def in_base_currency(amount: float, fx_rate: "Optional[float]" = None) -> float:
+    """An amount converted at `fx_rate`, `None` meaning it is already in
+    base: the flag is replaced, so an absent rate is dropped."""
+    if fx_rate is None:
+        fx_rate = 1.0
+    return amount * fx_rate
+
+
+def total_exposure(positions: list) -> float:
+    """`sum` over a list of positions: a `None` element (the member null)
+    raises, a `nan` element propagates."""
+    return sum(positions)
+
+
+def risk_label(score: "Optional[float]") -> str:
+    """"high" above one half, else "low": `nan > 0.5` is False, so a
+    missing score reads as "low" (a drop), and `None` raises."""
+    return "high" if score > 0.5 else "low"  # type: ignore[operator]
+
+
+def average_return(returns: "numpy.ndarray") -> float:
+    """The mean of a return series; the mean of an empty array is
+    `nan`."""
+    import numpy as np
+    return float(np.mean(returns))
+
+
+def session_volume(volumes: "pandas.Series") -> float:
+    """The traded volume over a session; the sum over nothing is 0."""
+    return float(volumes.sum())
+
+
+@dataclass
+class Trade:
+    """A booked trade; its memo is optional."""
+    amount: float = 100.0
+    memo: "str | None" = None
+
+
+def memo_length(trade: Trade) -> int:
+    """The length of a trade's memo; a trade with no memo raises."""
+    return len(trade.memo)  # type: ignore[arg-type]
+
+
+def side_label(order: dict) -> str:
+    """An order's side in capitals; an order with no side key raises."""
+    return order["side"].upper()
+
+
+def polars_mean(xs: "polars.Series") -> float:
+    """The mean of a polars Series, which skips its nulls while values
+    remain."""
+    return float(xs.mean())
+
+
 def sharpe(returns: "pandas.Series") -> float:
     """The Sharpe ratio of a series of returns at a zero risk-free rate,
     unannualised: the mean over the sample standard deviation
@@ -1756,7 +1967,35 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "scale_column": (scale_column, ["table_column_attribute",
                                     "table_column_item"]),
     "running_peak": (running_peak, ["vector_running_maximum"]),
-    "series_mean": (series_mean, ["vector_between_least_and_greatest"]),
+    "series_mean": (series_mean, ["vector_between_least_and_greatest",
+                                  "missing_premise_values_remain",
+                                  "missing_premise_no_values",
+                                  "missing_premise_all_na_raises"]),
+    "volatility": (volatility, ["missing_propagates", "missing_predicate_sugar",
+                                "is_missing_safe_gate"]),
+    "clamp_discount": (clamp_discount, ["missing_drops"]),
+    # the same function with the default word, apart: two words for one
+    # case in one batch are refused as a clash
+    "clamp_discount_default": (clamp_discount, ["missing_trap_silent_drop"]),
+    "log_of_ratio": (log_of_ratio, ["missing_raises"]),
+    "price_or_none": (price_or_none, ["missing_converts"]),
+    "price_as_float": (price_as_float, ["absent_converts"]),
+    "converted_amount": (converted_amount, ["absent_propagates", "is_absent_safe_gate"]),
+    "weight_changes": (weight_changes, ["missing_introduces"]),
+    "rolling_average": (rolling_average, ["missing_introduces_by_shape"]),
+    "in_base_currency": (in_base_currency, ["absent_drops"]),
+    "total_exposure": (total_exposure, ["missing_member_null", "missing_member_nan",
+                                        "missing_class_row_contradicted",
+                                        "is_missing_safe_gate_falsified"]),
+    "risk_label": (risk_label, ["missing_trap_comparison", "absent_raises",
+                                "absent_none_spelling"]),
+    "risk_label_gate": (risk_label, ["is_absent_safe_gate_falsified"]),
+    "average_return": (average_return, ["is_empty_safe_hole"]),
+    "session_volume": (session_volume, ["is_empty_safe_identity"]),
+    "polars_mean": (polars_mean, ["missing_member_defined"]),
+    "memo_length": (memo_length, ["absent_field_raises"]),
+    "memo_length_gate": (memo_length, ["is_absent_safe_field"]),
+    "side_label": (side_label, ["absent_key_left_out"]),
     "max_drawdown": (max_drawdown, ["vector_drawdown_bounds"]),
     "weighted_return": (weighted_return, ["table_columns_dot"]),
     "nearly_identity": (nearly_identity, [
