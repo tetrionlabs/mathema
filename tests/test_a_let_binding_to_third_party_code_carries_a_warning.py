@@ -271,3 +271,54 @@ def test_a_declared_package_is_found_from_a_subdirectory(project,
     assert row.verdict in ("proven", "holds"), (row.verdict, row.note)
     assert _WORDS not in (row.note or ""), row.note
     sys.modules.pop("helpers", None)
+
+
+def test_an_installed_dependency_key_accepted_as_trusted_is_silent(
+        tmp_path, monkeypatch):
+    import yaml
+    _write(tmp_path / "dep2.py", '''
+        def f(x: float) -> float:
+            return x
+    ''')
+    # a compendium for an installed dependency (PyYAML), in the project
+    _write(tmp_path / "claims" / "yaml.claims.yaml", f"""
+        compendium: yaml
+        versions: ">={yaml.__version__.split('.')[0]}"
+        yaml.safe_dump:
+          claims:
+            - name: grows
+              statement: 'for x in (0, 100], d(f(x), x) > 0'
+              meta: {{mathema.compendium_claimed: holds}}
+    """)
+    _write(tmp_path / "claims" / "dep2.claims.yaml", """
+        dep2.f:
+          claims:
+            - name: same
+              statement: 'let g = yaml.safe_dump, for x in [0, 1], f(x) == x'
+    """)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    from mathema.compendium import load_library_claims
+    assert "yaml.safe_dump" in load_library_claims(str(tmp_path))
+    _cli(tmp_path, "verify", "--root", str(tmp_path))
+    sys.modules.pop("dep2", None)
+    import dep2
+    stmt = "let g = yaml.safe_dump, for x in [0, 1], f(x) == x"
+    said = f"let g = yaml.safe_dump {_WORDS}"
+    _rec, row = _row(stmt, dep2.f)
+    assert said in (row.note or ""), row.note
+    from mathema.acceptance import apply_acceptance, plan_acceptance
+    apply_acceptance(plan_acceptance(str(tmp_path), "yaml.safe_dump",
+                                     "grows", "trusted", by="test"))
+    _rec, row = _row(stmt, dep2.f)
+    assert said not in (row.note or ""), row.note
+    # a trust gone stale (the form it was given for has changed) warns
+    path = tmp_path / ".mathema" / "verified" / "yaml.safe_dump.yaml"
+    data = yaml.safe_load(path.read_text())
+    for c in data["yaml.safe_dump"]["claims"]:
+        if c.get("name") == "grows":
+            c["accepted"]["stale"] = True
+    path.write_text(yaml.safe_dump(data))
+    _rec, row = _row(stmt, dep2.f)
+    assert said in (row.note or ""), row.note
+    sys.modules.pop("dep2", None)
