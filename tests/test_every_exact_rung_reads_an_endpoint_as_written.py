@@ -66,3 +66,10 @@ def test_a_root_equal_to_an_open_endpoint_as_a_double_is_outside():
     assert math.sqrt(2) == hi
     assert exact_membership(sympy.sqrt(2), Interval(0.0, hi, True, False)) is True
     assert exact_membership(sympy.sqrt(2), Interval(0.0, 1.414213562373095, True, True)) is False
+
+
+def test_a_claim_short_by_a_value_below_the_double_range_is_not_proven():
+    # log(1 + 10**-400) - 10**-400 is about -5e-801, so the claim fails
+    # at x = 0
+    p = _one(ident, "for x in [0, 1], f(x) + log(1 + 10**-400) - 10**-400 >= 0")
+    assert p.verdict != "proven"
