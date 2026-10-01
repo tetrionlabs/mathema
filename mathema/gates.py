@@ -434,7 +434,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return (f"the relation fails on the executed values "
                     f"({_fmt_value(complex(lv))} {cj.relation} "
                     f"{_fmt_value(complex(rv))}), past the magnitude-scaled "
-                    f"tolerance: precision loss")
+                    f"tolerance")
         if _is_matrix_value(lv) or _is_matrix_value(rv):
             if holds_nan(lv) or holds_nan(rv) or holds_inf(lv) \
                     or holds_inf(rv):
@@ -453,7 +453,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return None
             return (f"the relation fails on the executed values ({lv!r} "
                     f"{cj.relation} {rv!r}), past the magnitude-scaled "
-                    f"tolerance: precision loss")
+                    f"tolerance")
         if any(isinstance(v, float) and v != v for v in (lv, rv)):
             return ("the computation returns NaN here"
                     if calls_nonfinite[0] else None)
@@ -472,7 +472,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                     f"{cj.relation} {rv!r})")
         return (f"the relation fails on the executed values ({lv!r} "
                 f"{cj.relation} {rv!r}), past the magnitude-scaled "
-                f"tolerance: precision loss")
+                f"tolerance")
 
     def _ends(bound):
         # the bound's (lo, hi) as floats, +-inf for an unbounded end
@@ -1077,6 +1077,48 @@ def _finite_arguments(args, kwargs) -> bool:
                    for v in (*args, *kwargs.values()))
 
 
+def _exact_claim_at(cj, fn, facts, point: dict, assum) -> "bool | None":
+    """Intent:
+        Whether the claim holds at one executed point in exact
+        arithmetic: the derive route run over the domain pinned to that
+        point, each coordinate the exact rational value of the float
+        that was executed. True or False when it decides, None when it
+        does not (a sequence or non-numeric coordinate, a bound
+        function, a claim with no relation, an undecided or timed-out
+        attempt).
+    """
+    from fractions import Fraction
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .symbolic import try_prove
+    if cj.funcs or cj.relation not in ("==", "!=", "<=", ">=", "<", ">") \
+            or cj.tolerance is not None:
+        return None
+    pinned: dict = {}
+    for name, value in point.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or value != value or value in (float("inf"), float("-inf")):
+            return None
+        exact = Fraction(value)
+        pinned[name] = (exact, exact)
+    try:
+        result = _with_timeout(
+            lambda: try_prove(fn, facts, cj.lhs, cj.rhs or "0", cj.relation,
+                              domain=pinned,
+                              assumption=[tuple(a) for a in assum or ()]
+                              or None),
+            FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except Exception:
+        return None
+    if result.status == "proven":
+        return True
+    if result.status == "disproven":
+        return False
+    return None
+
+
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      assum=(), budget=None,
                      excluded=None) -> "Probe | None":
@@ -1167,11 +1209,39 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         # states one and the failing point lies outside it
         from .compendium import computation_diagnosis
         covered = computation_diagnosis(fn, facts, sweep.fragile_point)
+        exact = _exact_claim_at(cj, fn, facts, sweep.fragile_point, assum)
+        if exact is False:
+            # the claim is false at the executed point in exact
+            # arithmetic too: the proof, not the computation, failed
+            return Probe(
+                name, parent.statement, "falsified", route="probe",
+                n=sweep.checked, counterexample=pt, note=what,
+                sketch=f"the proof of {parent.name} failed: at {pt} the "
+                       f"claim is false in exact arithmetic as well as in "
+                       f"the computation ({sweep.detail})",
+                meta={"mathema.proof_contradicted": pt})
+        relation_failed = sweep.detail.startswith("the relation fails")
+        if exact is None and relation_failed:
+            # finite values that contradict the proof: either float lost
+            # the value or the proof is wrong, and nothing here says which
+            return Probe(
+                name, parent.statement, "falsified", route="probe",
+                n=sweep.checked, counterexample=pt, note=what,
+                sketch=f"{parent.name} is proven, but its computation "
+                       f"fails at {pt}: {sweep.detail}; whether the "
+                       f"mathematics holds at that point was not decided, "
+                       f"so this is the computation failing or the proof "
+                       f"failing; "
+                       + (f"{covered}; " if covered else "")
+                       + f"{remedy}")
         return Probe(
             name, parent.statement, "falsified", route="probe",
             n=sweep.checked, counterexample=pt, note=what,
             sketch=f"{parent.name} is mathematically proven, but its "
-                   f"computation fails at {pt}: {sweep.detail}; "
+                   f"computation fails at {pt}: {sweep.detail}"
+                   + (": precision loss" if relation_failed else "")
+                   + ("; the claim holds there in exact arithmetic; "
+                      if exact else "; ")
                    + (f"{covered}; " if covered else "")
                    + f"{remedy}",
             # the proof that coexists with the executed break is the

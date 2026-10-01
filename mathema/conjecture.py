@@ -5328,6 +5328,24 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     proven.meta = {**(proven.meta or {}),
                    "mathema.float_companion": companion.name}
     ctx.companion = companion
+    witness = (companion.meta or {}).get("mathema.proof_contradicted")
+    if witness:
+        # an executed point where the claim is false in exact arithmetic
+        # too: the proof failed, and the claim is falsified there
+        proven.verdict = "falsified"
+        proven.route = "probe"
+        proven.counterexample = witness
+        proven.condition = None
+        proven.sketch = (f"the proof failed: derive reported the claim "
+                         f"proven ({proven.sketch}), but at {witness} it is "
+                         f"false in exact arithmetic and in the executed "
+                         f"computation")
+        proven.stratum = {"mathematics": "unsound", "blame": "claim",
+                          "witness": witness}
+        proven.meta = {**proven.meta,
+                       "mathema.corroboration": "reproduced",
+                       "mathema.witness_executed": True,
+                       "mathema.proof_contradicted": witness}
 
 
 def _same_univariate_region(fn, facts, links) -> "bool | None":
