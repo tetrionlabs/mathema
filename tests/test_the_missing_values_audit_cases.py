@@ -186,3 +186,46 @@ def test_a_raise_from_another_parameter_is_not_the_holes():
 def test_a_raise_the_filled_call_repeats_is_not_the_holes():
     row = _rows(distinct_total, "missing(f, xs) drops")["missing_f_xs_drops"]
     assert row.verdict != "falsified", (row.verdict, row.counterexample)
+
+
+# --- a guard's return is read by what it returns ---------------------------
+
+nan_fill = 0.0
+
+
+def hole_back(x: float) -> float:
+    if x != x:
+        return x
+    return x + 1.0
+
+
+def named_fill(x: float) -> float:
+    import math
+    if math.isnan(x):
+        return nan_fill
+    return x + 1.0
+
+
+def none_back(x: Optional[float]) -> Optional[float]:
+    if x is None:
+        return x
+    return x + 1.0
+
+
+def nan_literal(x: Optional[float]) -> float:
+    if x is None:
+        return float("nan")
+    return x
+
+
+def test_a_guard_returning_the_parameter_passes_it_on():
+    assert guard_policies(analyze(hole_back))[("x", "missing", "nan")][0] == "propagates"
+    assert guard_policies(analyze(none_back))[("x", "absent", "None")][0] == "propagates"
+
+
+def test_a_guard_returning_a_name_that_holds_a_value_drops():
+    assert guard_policies(analyze(named_fill))[("x", "missing", "nan")][0] == "drops"
+
+
+def test_a_guard_returning_nan_for_none_converts():
+    assert guard_policies(analyze(nan_literal))[("x", "absent", "None")][0] == "converts"

@@ -869,8 +869,10 @@ def guard_policies(facts) -> dict:
         x, nan) drops`. `x is None` covers absence only, `x != x` and
         `isnan(x)` the member `nan`, `isna(x)` every member and absence.
         A guard that returns `None` passes an absence on and turns a
-        hole into an absence; one that returns `nan` passes a hole on
-        and turns an absence into a hole; any other return drops.
+        hole into an absence; one that returns `nan` (`float("nan")`,
+        `math.nan`, `np.nan`) passes a hole on and turns an absence into
+        a hole; one that returns the parameter itself passes it on; any
+        other return drops.
     """
     import ast
     tree = getattr(facts, "tree", None)
@@ -917,24 +919,35 @@ def guard_policies(facts) -> dict:
                              (node.args[0].id, "absent", "None")]
         return keys
 
+    def what(value, param) -> str:
+        # what an expression is: None, a nan, the parameter itself, or a
+        # value
+        if value is None or (isinstance(value, ast.Constant) and value.value is None):
+            return "None"
+        if isinstance(value, ast.Name) and value.id == param:
+            return "itself"
+        if isinstance(value, ast.Name) and value.id == "nan":
+            return "nan"
+        if isinstance(value, ast.Attribute) and value.attr == "nan" \
+                and isinstance(value.value, ast.Name) \
+                and value.value.id in ("math", "np", "numpy"):
+            return "nan"
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) \
+                and value.func.id == "float" and len(value.args) == 1 \
+                and isinstance(value.args[0], ast.Constant) \
+                and str(value.args[0].value).lower() == "nan":
+            return "nan"
+        return "value"
+
     def returned(body, param) -> "str | None":
         for stmt in body:
             if isinstance(stmt, ast.Assign) and any(
                     isinstance(t, ast.Name) and t.id == param for t in stmt.targets):
                 # the parameter replaced by a value: `if scale is None:
                 # scale = 1.0`
-                value = stmt.value
-                if isinstance(value, ast.Constant) and value.value is None:
-                    return "None"
-                return "nan" if "nan" in ast.unparse(value) else "value"
+                return what(stmt.value, param)
             if isinstance(stmt, ast.Return):
-                value = stmt.value
-                if value is None or (isinstance(value, ast.Constant) and value.value is None):
-                    return "None"
-                text = ast.unparse(value)
-                if "nan" in text:
-                    return "nan"
-                return "value"
+                return what(stmt.value, param)
         return None
 
     # a check that also reads something else decides only part of a
@@ -964,7 +977,10 @@ def guard_policies(facts) -> dict:
                     name = exc.attr
                 out.setdefault((p, kind, member), ("raises", name, node.lineno))
             elif back is not None:
-                if back == "value":
+                if back == "itself":
+                    # what came in goes back out
+                    behaviour = "propagates"
+                elif back == "value":
                     behaviour = "drops"
                 elif back == "None":
                     behaviour = "propagates" if kind == "absent" else "converts"
