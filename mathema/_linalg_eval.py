@@ -325,71 +325,217 @@ def _values(args):
     return np.asarray(args, dtype=float)
 
 
-def _exact_sum(values: list) -> "float | complex":
-    """The sum of a list of numbers with one final rounding
-    (`math.fsum`), its real and imaginary parts summed apart for complex
-    elements. A missing element (nan) or opposite infinities give nan;
-    a sum beyond float range gives the infinity of its sign."""
-    if any(isinstance(v, complex) for v in values):
-        return complex(_exact_sum([complex(v).real for v in values]),
-                       _exact_sum([complex(v).imag for v in values]))
-    if not all(math.isfinite(v) for v in values):
-        return builtins.sum(values, 0.0)
-    try:
-        return math.fsum(values)
-    except OverflowError:
-        return builtins.sum(values, 0.0)
+def _raw(args):
+    """The one vector or matrix a word reads, its elements as given:
+    an array as it is, a list (or nested lists) as an object array with
+    nan at each missing position, several numbers gathered into one
+    vector. Integers stay integers."""
+    np = _np()
+    from .domain import is_missing
+    a = args[0] if len(args) == 1 else list(args)
+    if is_array(a):
+        return a
+    if isinstance(a, (list, tuple)):
+        def element(v):
+            if isinstance(v, (list, tuple)):
+                return [element(x) for x in v]
+            return math.nan if is_missing(v) else v
+        out = np.empty(0, dtype=object)
+        rows = [element(v) for v in a]
+        if rows and all(isinstance(r, list) for r in rows):
+            out = np.empty((len(rows), len(rows[0])), dtype=object)
+            for i, r in enumerate(rows):
+                out[i, :] = r
+            return out
+        out = np.empty(len(rows), dtype=object)
+        out[:] = rows
+        return out
+    return np.asarray(as_array(a))
 
 
-def _exact_mean(values: list) -> "float | complex":
-    """The exact sum of a list over its length; no value when empty."""
-    return _exact_sum(values) / len(values) if values else float("nan")
-
-
-def _product(values: list) -> "float | complex":
-    """The product of a list's elements, multiplied in order."""
-    return math.prod(values, start=1.0)
-
-
-def _variance(values: list, ddof) -> float:
-    """The mean squared deviation from the mean, with `ddof` taken from
-    the length in the divisor, computed in exact rational arithmetic for
-    finite real elements and rounded once. Fewer than `ddof + 1`
-    elements, or a missing element, give no value."""
-    from fractions import Fraction
-    n = len(values) - ddof
-    if n <= 0 or any(isinstance(v, complex) and not math.isfinite(abs(v))
-                     or not isinstance(v, complex) and not math.isfinite(v)
-                     for v in values):
-        return float("nan")
-    if any(isinstance(v, complex) for v in values):
-        mean = _exact_mean(values)
-        return _exact_sum([abs(v - mean) ** 2 for v in values]) / n
-    exact = [Fraction(v) for v in values]
-    mean = builtins.sum(exact) / len(exact)
-    return float(builtins.sum((v - mean) ** 2 for v in exact) / n)
+def _element(v):
+    """One array element as a Python number."""
+    return v.item() if hasattr(v, "item") else v
 
 
 def _along(args, axis, of_list):
     """`of_list` applied to the one vector the arguments give, or along
     `axis` of a matrix (one value per remaining index)."""
-    a = _values(args)
+    a = _raw(args)
     if axis is None:
         return of_list([_element(v) for v in a.ravel()])
     return _np().apply_along_axis(
         lambda v: of_list([_element(x) for x in v]), axis, a)
 
 
-def _element(v):
-    """One array element as a Python number."""
-    v = v.item() if hasattr(v, "item") else v
-    return v if isinstance(v, complex) else float(v)
+def _is_complex(v) -> bool:
+    import numbers
+    return isinstance(v, numbers.Complex) and not isinstance(v, numbers.Real)
+
+
+def _exact(v):
+    """A real number as an exact rational; an infinity or nan as the
+    float it is."""
+    import numbers
+    from fractions import Fraction
+    if isinstance(v, Fraction):
+        return v
+    if isinstance(v, numbers.Integral):
+        return Fraction(int(v))
+    f = float(v)
+    return Fraction(f) if math.isfinite(f) else f
+
+
+def _rounded(x):
+    """An exact value rounded once to the nearest float; a value beyond
+    float range stays exact (a `Fraction`), so an infinity a computation
+    returns is judged against it rather than against another infinity."""
+    from fractions import Fraction
+    if not isinstance(x, Fraction):
+        return x
+    try:
+        return float(x)
+    except OverflowError:
+        return x
+
+
+def _ext_add(values: list):
+    """The sum of exact rationals and infinities: nan when a summand is
+    nan or both infinities appear (no value), the infinity when one
+    appears, else the exact sum."""
+    from fractions import Fraction
+    infinite = {v for v in values if isinstance(v, float)}
+    if any(math.isnan(v) for v in infinite) or len(infinite) > 1:
+        return math.nan
+    if infinite:
+        return infinite.pop()
+    return builtins.sum(values, Fraction(0))
+
+
+def _ext_mul(values: list):
+    """The product of exact rationals and infinities: nan when a factor
+    is nan or an infinity meets a zero (no value), a signed infinity
+    when an infinity appears, else the exact product."""
+    from fractions import Fraction
+    if any(isinstance(v, float) and math.isnan(v) for v in values):
+        return math.nan
+    if any(isinstance(v, float) for v in values):
+        if any(v == 0 for v in values):
+            return math.nan
+        negative = builtins.sum(1 for v in values if v < 0) % 2
+        return -math.inf if negative else math.inf
+    return math.prod(values, start=Fraction(1))
+
+
+def _parts(values: list):
+    """The real and imaginary parts of a list of numbers, each exact,
+    or None when a part is not finite."""
+    from fractions import Fraction
+    re, im = [], []
+    for v in values:
+        if not _is_complex(v):
+            x = _exact(v)
+            if isinstance(x, float):
+                return None
+            re.append(x)
+            im.append(Fraction(0))
+            continue
+        z = complex(v)
+        if not (math.isfinite(z.real) and math.isfinite(z.imag)):
+            return None
+        re.append(_exact(z.real))
+        im.append(_exact(z.imag))
+    return re, im
+
+
+def _complex_result(re, im) -> complex:
+    """A complex value from exact parts, each rounded once.
+
+    Raises:
+        OverflowError: a part lies beyond float range, which a complex
+            float cannot hold.
+    """
+    return complex(float(re), float(im))
+
+
+def _exact_sum(values: list):
+    """The exact sum of a list of numbers, rounded once (see
+    `_rounded`); complex numbers sum their parts apart."""
+    if any(_is_complex(v) for v in values):
+        parts = _parts(values)
+        if parts is None:
+            return complex(math.nan, math.nan)
+        return _complex_result(_ext_add(parts[0]), _ext_add(parts[1]))
+    return _rounded(_ext_add([_exact(v) for v in values]))
+
+
+def _exact_mean(values: list):
+    """The exact sum of a list over its length, rounded once; no value
+    when empty."""
+    if not values:
+        return math.nan
+    if any(_is_complex(v) for v in values):
+        parts = _parts(values)
+        if parts is None:
+            return complex(math.nan, math.nan)
+        n = len(values)
+        return _complex_result(_ext_add(parts[0]) / n,
+                               _ext_add(parts[1]) / n)
+    total = _ext_add([_exact(v) for v in values])
+    return total if isinstance(total, float) else _rounded(total / len(values))
+
+
+def _product(values: list):
+    """The exact product of a list's elements, rounded once."""
+    from fractions import Fraction
+    if any(_is_complex(v) for v in values):
+        parts = _parts(values)
+        if parts is None:
+            return complex(math.nan, math.nan)
+        re, im = Fraction(1), Fraction(0)
+        for a, b in zip(*parts):
+            re, im = re * a - im * b, re * b + im * a
+        return _complex_result(re, im)
+    return _rounded(_ext_mul([_exact(v) for v in values]))
+
+
+def _exact_variance(values: list, ddof):
+    """The mean squared deviation from the mean (the squared modulus for
+    complex numbers), `ddof` taken from the length in the divisor,
+    exact; nan (no value) for fewer than `ddof + 1` elements or an
+    element that is nan or infinite."""
+    n = len(values) - _exact(ddof)
+    if n <= 0:
+        return math.nan
+    parts = _parts(values)
+    if parts is None:
+        return math.nan
+    re, im = parts
+    mean_re = builtins.sum(re) / len(re)
+    mean_im = builtins.sum(im) / len(im)
+    return builtins.sum((a - mean_re) ** 2 + (b - mean_im) ** 2
+                        for a, b in zip(re, im)) / n
+
+
+def _exact_sqrt(x):
+    """The square root of an exact non-negative rational, rounded once;
+    beyond float range it stays exact to 60 significant digits."""
+    from decimal import Decimal, localcontext
+    from fractions import Fraction
+    if isinstance(x, float):
+        return x if math.isnan(x) else math.sqrt(x)
+    if x == 0:
+        return 0.0
+    with localcontext() as ctx:
+        ctx.prec = 60
+        root = (Decimal(x.numerator) / Decimal(x.denominator)).sqrt()
+    value = float(root)
+    return Fraction(root) if math.isinf(value) else value
 
 
 def _sum(*args, axis=None):
-    """The sum of a vector's elements, added without intermediate
-    rounding; along `axis` for a matrix. Several numbers, or one list of
-    them, are summed as Python sums them."""
+    """The sum of a vector's elements, exact and rounded once; along
+    `axis` for a matrix."""
     if len(args) == 1 and _is_array_arg(args[0]):
         return _along(args, axis, _exact_sum)
     if axis is not None:
@@ -398,16 +544,15 @@ def _sum(*args, axis=None):
 
 
 def _mean(*args, axis=None):
-    """The exact sum of a vector's elements over its length; along
+    """The exact mean of a vector's elements, rounded once; along
     `axis` for a matrix."""
     if len(args) == 1 and _is_array_arg(args[0]):
         return _along(args, axis, _exact_mean)
-    values = list(args[0]) if len(args) == 1 else list(args)
-    return builtins.sum(values) / len(values)
+    return _exact_mean(list(args[0]) if len(args) == 1 else list(args))
 
 
 def _prod(*args, axis=None):
-    """The product of a vector's elements, multiplied in order; along
+    """The exact product of a vector's elements, rounded once; along
     `axis` for a matrix."""
     if len(args) == 1 and _is_array_arg(args[0]):
         return _along(args, axis, _product)
@@ -418,11 +563,13 @@ def _moment(word):
     """`var` or `std`: the variance is the mean squared deviation from
     the mean, `ddof` subtracted from the number of positions in the
     divisor (0 by default, the population statistic; 1 for the sample
-    statistic), and the standard deviation its square root; `axis`
-    reduces a matrix along one axis."""
+    statistic), and the standard deviation its square root, each exact
+    and rounded once; `axis` reduces a matrix along one axis."""
     def of_list(values, ddof):
-        variance = _variance(values, ddof)
-        return math.sqrt(variance) if word == "std" else variance
+        variance = _exact_variance(values, ddof)
+        if word == "std":
+            return _exact_sqrt(variance)
+        return _rounded(variance)
 
     def moment(*args, ddof=0, axis=None):
         return _along(args, axis, lambda values: of_list(values, ddof))
@@ -463,60 +610,89 @@ def _running_extremum(ufunc_name, word):
     return running
 
 
-def _exact_midpoint(lo: float, hi: float) -> float:
-    """`(lo + hi) / 2` rounded once: exact for finite values, so two
-    huge elements never overflow on the way."""
-    from fractions import Fraction
-    if math.isfinite(lo) and math.isfinite(hi):
-        return float((Fraction(lo) + Fraction(hi)) / 2)
-    return (lo + hi) / 2
+def _ordered(values: list):
+    """The elements of a list sorted, each exact, or None when the list
+    has no order statistic: it is empty, holds a missing element (nan),
+    or holds a complex number (complex numbers have no order)."""
+    if not values or any(_is_complex(v) for v in values):
+        return None
+    exact = [_exact(v) for v in values]
+    if any(isinstance(v, float) and math.isnan(v) for v in exact):
+        return None
+    return sorted(exact)
 
 
-def _median_of(values: list) -> float:
+def _between(a, b, g):
+    """The point the fraction `g` (0 < g < 1) of the way from `a` to
+    `b >= a`, exact for finite ends: between -inf and +inf there is no
+    such point (nan), and an infinite end is the point itself."""
+    if isinstance(a, float) and isinstance(b, float):
+        return math.nan if a != b else a
+    if isinstance(a, float):
+        return a
+    if isinstance(b, float):
+        return b
+    return _rounded(a + g * (b - a))
+
+
+def _median_of(values: list):
     """The median of a list of numbers: the middle element of the
     sorted list, or the midpoint of the two middle elements for an even
-    length. A missing element (nan) or an empty list has no median."""
-    if not values or any(math.isnan(v) for v in values):
-        return float("nan")
-    ordered = sorted(values)
+    length, exact and rounded once. A missing element, a complex element
+    or an empty list has no median (nan)."""
+    from fractions import Fraction
+    ordered = _ordered(values)
+    if ordered is None:
+        return math.nan
     mid = len(ordered) // 2
     if len(ordered) % 2:
-        return float(ordered[mid])
-    return _exact_midpoint(ordered[mid - 1], ordered[mid])
+        return _rounded(ordered[mid])
+    a, b = ordered[mid - 1], ordered[mid]
+    return _rounded(a) if a == b else _between(a, b, Fraction(1, 2))
 
 
 def _median(*args, axis=None):
     """The median: the middle element of the sorted vector, or the
     mean of the middle two for an even length; along `axis` for a
     matrix, one median per remaining index."""
-    a = _values(args)
-    if axis is None:
-        return _median_of([float(v) for v in a.ravel()])
-    return _np().apply_along_axis(
-        lambda v: _median_of([float(x) for x in v]), axis, a)
+    return _along(args, axis, _median_of)
 
 
-def _quantile_of(values: list, q) -> float:
+def _level(q):
+    """A quantile level as the number written: a float by its shortest
+    decimal spelling (`0.1` is one tenth), an integer or rational as it
+    is."""
+    import numbers
+    from fractions import Fraction
+    if isinstance(q, Fraction):
+        return q
+    if isinstance(q, numbers.Integral):
+        return Fraction(int(q))
+    f = float(q)
+    if not math.isfinite(f):
+        raise ValueError(f"a quantile level lies in [0, 1], not {q!r}")
+    return Fraction(repr(f))
+
+
+def _quantile_of(values: list, q):
     """The `q`-quantile of a list of numbers by linear interpolation
     (Hyndman and Fan's type 7): with the list sorted and `h = (n - 1)
     q`, the element at `floor(h)` plus the fraction `h - floor(h)` of
-    the gap to the next one, computed exactly and rounded once."""
-    from fractions import Fraction
-    q = float(q)
-    if not 0.0 <= q <= 1.0:
+    the gap to the next one, computed exactly and rounded once. No
+    value (nan) where `_ordered` gives none."""
+    level = _level(q)
+    if not 0 <= level <= 1:
         raise ValueError(f"a quantile level lies in [0, 1], not {q!r}")
-    if not values or any(math.isnan(v) for v in values):
-        return float("nan")
-    ordered = sorted(values)
-    h = (len(ordered) - 1) * Fraction(q)
+    ordered = _ordered(values)
+    if ordered is None:
+        return math.nan
+    h = (len(ordered) - 1) * level
     lo = math.floor(h)
     hi = min(lo + 1, len(ordered) - 1)
     a, b = ordered[lo], ordered[hi]
     if h == lo or a == b:
-        return float(a)
-    if not (math.isfinite(a) and math.isfinite(b)):
-        return float(a + float(h - lo) * (b - a))
-    return float(Fraction(a) + (h - lo) * (Fraction(b) - Fraction(a)))
+        return _rounded(a)
+    return _between(a, b, h - lo)
 
 
 def _quantile(a, q):
@@ -524,13 +700,11 @@ def _quantile(a, q):
     linearly between the two sorted elements it falls between, as
     numpy and pandas compute it by default; several levels give one
     quantile each."""
-    values = [float(v) for v in _values((a,)).ravel()]
-    levels = q if is_array(q) or isinstance(q, (list, tuple)) else None
-    if levels is None:
-        return _quantile_of(values, q)
-    return _np().array([_quantile_of(values, level)
-                        for level in _np().asarray(levels,
-                                                   dtype=float).ravel()])
+    values = [_element(v) for v in _raw((a,)).ravel()]
+    if is_array(q) or isinstance(q, (list, tuple)):
+        return _np().array([_quantile_of(values, _element(level))
+                            for level in _np().asarray(q).ravel()])
+    return _quantile_of(values, q)
 
 
 def _matrix(x):
@@ -573,24 +747,33 @@ def _matrix_power(A, k):
     return _np().linalg.matrix_power(_matrix(A), k)
 
 
-def _fsum_products(xs, ys) -> "float | complex":
-    """The sum of the products of two equal-length sequences, with no
-    rounding but the products' own and one final rounding."""
-    products = [x * y for x, y in zip(xs, ys)]
-    if any(isinstance(p, complex) for p in products):
-        return complex(math.fsum(p.real for p in products),
-                       math.fsum(p.imag for p in products))
-    return math.fsum(products)
+def _exact_inner(xs: list, ys: list):
+    """The sum of the products of two equal-length lists, exact and
+    rounded once; complex elements multiply and sum their parts apart.
+    No value (nan) where a product or the sum has none (an infinity
+    times zero, opposite infinities, a missing element)."""
+    from fractions import Fraction
+    if any(_is_complex(v) for v in (*xs, *ys)):
+        px, py = _parts(xs), _parts(ys)
+        if px is None or py is None:
+            return complex(math.nan, math.nan)
+        re = builtins.sum((a * c - b * d for a, b, c, d
+                           in zip(px[0], px[1], py[0], py[1])), Fraction(0))
+        im = builtins.sum((a * d + b * c for a, b, c, d
+                           in zip(px[0], px[1], py[0], py[1])), Fraction(0))
+        return _complex_result(re, im)
+    products = [_ext_mul([_exact(x), _exact(y)]) for x, y in zip(xs, ys)]
+    return _rounded(_ext_add(products))
 
 
 def _dot(x, y):
     """The inner product of two vectors, a matrix times a vector, a
     vector times a matrix, or the product of two matrices, each entry
-    a sum of products added without intermediate rounding."""
+    exact and rounded once."""
     np = _np()
-    a, b = _matrix(x), _matrix(y)
+    a, b = _raw((x,)), _raw((y,))
     if a.ndim == 0 or b.ndim == 0:
-        return a * b
+        return _matrix(x) * _matrix(y)
     if a.ndim > 2 or b.ndim > 2:
         raise ValueError("dot reads vectors and matrices")
     if a.shape[-1] != b.shape[0]:
@@ -598,11 +781,12 @@ def _dot(x, y):
                          f"inner dimensions differ")
     a2 = a.reshape(1, -1) if a.ndim == 1 else a
     b2 = b.reshape(-1, 1) if b.ndim == 1 else b
-    entries = [[_fsum_products(a2[i].tolist(), b2[:, j].tolist())
+    entries = [[_exact_inner([_element(v) for v in a2[i]],
+                             [_element(v) for v in b2[:, j]])
                 for j in range(b2.shape[1])] for i in range(a2.shape[0])]
-    out = np.array(entries)
     if a.ndim == 1 and b.ndim == 1:
-        return out.item()
+        return entries[0][0]
+    out = np.array(entries)
     if a.ndim == 1:
         return out[0]
     if b.ndim == 1:

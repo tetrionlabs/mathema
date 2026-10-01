@@ -49,7 +49,7 @@ def test_quantile_interpolates_linearly_in_exact_arithmetic(broken_numpy):
     assert FUNCTIONS["quantile"](xs, 0.0) == 1.0
     assert FUNCTIONS["quantile"](xs, 0.25) == 1.0
     assert FUNCTIONS["quantile"](xs, 0.5) == 2.0
-    assert FUNCTIONS["quantile"](xs, 0.7) == 3.1999999999999997
+    assert FUNCTIONS["quantile"](xs, 0.7) == 3.2
     assert FUNCTIONS["quantile"](xs, 1.0) == 5.0
 
 
