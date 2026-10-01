@@ -1123,15 +1123,15 @@ def _as_written(value):
     return value
 
 
-def _in_carrier(carrier):
+def _in_float_type(float_type):
     """Intent:
         A reader turning a finite float endpoint into the exact value of
-        its literal parsed in `carrier`, a numpy float type (`0.1` in
+        its literal parsed in `float_type`, a numpy float type (`0.1` in
         float32 is float32("0.1")); anything else unchanged.
     """
     def read(value):
         if isinstance(value, float) and math.isfinite(value):
-            parsed = carrier(repr(value))
+            parsed = float_type(repr(value))
             return fractions.Fraction(*parsed.as_integer_ratio())
         return value
     return read
@@ -1193,12 +1193,12 @@ def number_member(value, bounds) -> "bool | None":
         return False
     if exact and isinstance(v, (int, fractions.Fraction)):
         return domain_contains(v, _written_domain(bounds))
-    carrier = type(value)
-    if (carrier.__module__ == "numpy" and carrier.__name__ != "float64"
+    float_type = type(value)
+    if (float_type.__module__ == "numpy" and float_type.__name__ != "float64"
             and hasattr(value, "as_integer_ratio")
             and isinstance(v, (float, fractions.Fraction))):
         return domain_contains(v, _written_domain(bounds,
-                                                  _in_carrier(carrier)))
+                                                  _in_float_type(float_type)))
     return domain_contains(v, bounds)
 
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """An interval endpoint written `0.1` is the number as written, 1/10, in
-exact arithmetic, and the float `0.1` in the float carrier. The
+exact arithmetic, and the float `0.1` in float arithmetic. The
 `@enforce_domain` guard compares each argument in its own kind: a float
 against the endpoint as a float, so `0.1` is inside `[0, 0.1]` and
 outside `[0, 0.1)`; an exact number (an int, a Fraction, a Decimal, a
@@ -76,21 +76,21 @@ def test_an_integer_endpoint_reads_the_same_for_every_kind(value):
     assert below_three(value - 1) == value - 1
 
 
-@pytest.mark.parametrize("carrier", [np.float16, np.float32, np.float64],
+@pytest.mark.parametrize("float_type", [np.float16, np.float32, np.float64],
                          ids=lambda t: t.__name__)
-def test_a_float_meets_the_endpoint_in_its_own_float_type(carrier):
-    value = carrier("0.1")
+def test_a_float_meets_the_endpoint_in_its_own_float_type(float_type):
+    value = float_type("0.1")
     with pytest.raises(DomainError):
         half_open(value)
     assert closed(value) == value
 
 
-@pytest.mark.parametrize("carrier", [np.float16, np.float32],
+@pytest.mark.parametrize("float_type", [np.float16, np.float32],
                          ids=lambda t: t.__name__)
-def test_a_narrow_float_next_to_the_endpoint_is_judged_in_its_type(carrier):
-    value = carrier("0.1")
-    above = np.nextafter(value, carrier(1))
-    below = np.nextafter(value, carrier(0))
+def test_a_narrow_float_next_to_the_endpoint_is_judged_in_its_type(float_type):
+    value = float_type("0.1")
+    above = np.nextafter(value, float_type(1))
+    below = np.nextafter(value, float_type(0))
     with pytest.raises(DomainError):
         closed(above)
     assert half_open(below) == below
