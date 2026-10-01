@@ -95,6 +95,12 @@ def claim_calls(fn, srcs, point: dict, bound_funcs: "dict | None" = None,
     return out
 
 
+def _shown(value):
+    """`value` as a witness prints it: a matrix with no rows as `[]`."""
+    rows = getattr(value, "rows", None)
+    return [] if rows == () else value
+
+
 def _calls_f(srcs) -> bool:
     for src in srcs:
         try:
@@ -145,7 +151,8 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
     from .hazards import _emptiness_guard_params
     from .probing import _synth
     from .records import Probe
-    from .runtime_types import SEQUENCE_KINDS, calling
+    from .runtime_types import SEQUENCE_KINDS, calling, realised_parameters
+    from .runtime_types._abstract import AbstractMat
     from .symbolic._prove import _premises_hold
     from .symbolic._seq_common import _length_ties, signature_shapes
     if cj.relation not in _COMPARISONS or cj.negated or cj.links \
@@ -164,12 +171,16 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
             if facts.param_kinds.get(p) in SEQUENCE_KINDS]
     passed = _passed_names(srcs)
     open_seqs = []
+    realised = realised_parameters(facts)
+    empty: dict = {}
     for p in seqs:
         if p not in passed:
             # no call passes this parameter an open value (only
             # literals): the claim never asks f about its empty list
             continue
         dims = dims_of((cj_domain or {}).get(p)) or dims_of(shapes.get(p))
+        # a matrix parameter's runtime type receives the 0x0 matrix
+        empty[p] = AbstractMat(()) if len(dims) == 2 and p in realised else []
         if dims and fixed_size(dims[0]) is not None:
             continue
         reading = [a for a in assumption or ()
@@ -206,7 +217,7 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
             drawn: "dict | None" = {}
             for p in facts.params:
                 if p in group:
-                    drawn[p] = []
+                    drawn[p] = empty[p]
                     continue
                 try:
                     drawn[p] = _synth(facts.param_kinds.get(p, "float"), rng,
@@ -243,7 +254,7 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
                 note=f"{target} = []: {made[0][0]} returns a value"))
             continue
         text, args, exc = raised[0]
-        at = ", ".join(f"{p} = {from_law(v)!r}" for p, v in args.items())
+        at = ", ".join(f"{p} = {_shown(from_law(v))!r}" for p, v in args.items())
         if target in guarded:
             lines.append(Probe(
                 name, statement, "holds", route="probe:algorithmic", n=len(made),

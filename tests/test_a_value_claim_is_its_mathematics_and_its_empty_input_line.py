@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from mathema.claims import check_conjectures, claim
@@ -139,3 +140,16 @@ def test_a_claim_falsified_on_non_empty_lists_keeps_its_own_witness():
     assert not head.counterexample.startswith("x = []"), head.counterexample
     line = next(p for p in probes if p.name == "is_empty_safe[x]")
     assert line.verdict == "falsified"
+
+
+def gram_trace(A: np.ndarray) -> float:
+    return float(np.trace(A @ A.T))
+
+
+def test_the_empty_matrix_is_zero_by_zero():
+    # trace(A A^T) is 0 at the 0x0 matrix, so the line holds there
+    probes = check_conjectures(gram_trace, [claim("for A in R^(n,n), f(A) >= 0")],
+                               float_companions=True)
+    line = next(p for p in probes if p.name == "is_empty_safe[A]")
+    assert line.verdict == "holds", (line.verdict, line.note)
+    assert probes[0].verdict == "proven", (probes[0].verdict, probes[0].note)

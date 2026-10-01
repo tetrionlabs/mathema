@@ -172,14 +172,20 @@ def test_v8_the_series_companion_holds_and_each_member_is_mixed():
 
 
 @pytest.mark.needs_full_proof_budget
-def test_v9_polars_mean_is_proven_through_its_definition_row():
-    assert_row(mean_pl, "for xs in [0, 1]^n | {missing}, f(xs) >= 0", PROVEN)
+def test_v9_polars_mean_is_proven_through_its_definition_row_and_raises_at_the_empty_series():
+    # the mean of an empty polars Series is None, and float(None) raises
+    probe, _ = assert_row(mean_pl, "for xs in [0, 1]^n | {missing}, f(xs) >= 0",
+                          FALSIFIED, raised="TypeError")
+    assert witness(probe) == "xs = []", witness(probe)
+    assert "polars.Series.mean definition row" in probe.sketch, probe.sketch
+    assert "holds for every length" in probe.sketch, probe.sketch
 
 
 @pytest.mark.needs_full_proof_budget
 def test_v9_the_polars_companion_holds_null_is_mixed_and_nan_propagates():
-    assert_companion(mean_pl, "for xs in [0, 1]^n | {missing}, f(xs) >= 0", "holds",
-                     {"xs": {"null": "mixed", "nan": "propagates"}})
+    assert_row(mean_pl, "for xs in [0, 1]^n | {missing}, f(xs) >= 0", FALSIFIED,
+               companion="holds",
+               behaves={"xs": {"null": "mixed", "nan": "propagates"}})
 
 
 @pytest.mark.needs_full_proof_budget

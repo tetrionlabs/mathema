@@ -6816,8 +6816,11 @@ def _real_set(bound):
     """Intent:
         A real domain bound (an interval, a union of intervals, a
         finite set of numbers, the reals or the integers) as the sympy
-        set it is, open ends kept open; None for anything else.
+        set of the numbers it holds, open ends kept open; a hole or an
+        absence it admits is no number and is left out. None for
+        anything else.
     """
+    from .domain import is_sentinel
     import sympy
     if bound is None:
         return None
@@ -6842,7 +6845,8 @@ def _real_set(bound):
             from .domain import exact_number
             try:
                 parts.append(sympy.FiniteSet(*[exact_number(v)
-                                               for v in piece]))
+                                               for v in piece
+                                               if not is_sentinel(v)]))
             except Exception:
                 return None
             continue
@@ -8699,6 +8703,29 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # the claim binds that reached an absence or a hole
         return inputs_missing(point_args) or bool(path_words(point_args))
 
+    def in_a_slot(v) -> bool:
+        # the argument is missing, or a slot of its vector, matrix or
+        # table is; a record's fields are reached by paths instead
+        if missing_class(v) is not None:
+            return True
+        if isinstance(v, dict):
+            return False
+        if isinstance(v, (list, tuple)):
+            return any(in_a_slot(x) for x in v)
+        if hasattr(v, "shape") or type(v).__module__.split(".")[0] in (
+                "pandas", "polars"):
+            return inputs_missing([v])
+        return False
+
+    def admitted_hole(point_args) -> bool:
+        # a drawn argument holding a hole or absence the claim does not
+        # list as one of its own points, one its type or a written
+        # clause admits; held, literal and path-bound parameters aside
+        return any(in_a_slot(v) and p not in literal_args
+                   and p not in path_bound
+                   and not _lists_sentinel(cj_domain.get(p))
+                   for p, v in zip(kinds, point_args))
+
     def _point_text(point_args) -> str:
         # the witness's arguments, then what a path reached that is not
         # a value
@@ -9181,9 +9208,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 break
             continue
         missing_in = at_missing(args)
-        if missing_in and classified(args, f_call.outputs() or [lv, rv]):
-            # a missing output at a missing input: classified into the
-            # executed missing inputs, never judged
+        if missing_in and (admitted_hole(args)
+                           or classified(args, f_call.outputs() or [lv, rv])):
+            # an admitted hole, or a missing output at a listed one:
+            # classified into the executed missing inputs, never judged;
+            # the missing and absence companions judge what f does there
             executed_record.classified += 1
             continue
         if not missing_in and call_hole[0] is not None:

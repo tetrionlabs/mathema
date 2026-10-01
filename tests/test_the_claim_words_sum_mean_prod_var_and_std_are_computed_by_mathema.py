@@ -77,7 +77,12 @@ def test_too_few_elements_for_the_ddof_have_no_variance(broken_numpy):
     assert math.isnan(FUNCTIONS["std"](np.array([3.0]), ddof=1))
 
 
-def test_a_missing_element_leaves_no_value(broken_numpy):
+def test_a_reduction_reads_the_value_slots(broken_numpy):
     xs = np.array([1.0, float("nan"), 2.0])
-    for word in ("sum", "mean", "prod", "var", "std"):
-        assert math.isnan(FUNCTIONS[word](xs)), word
+    for word, value in (("sum", 3.0), ("mean", 1.5), ("prod", 2.0), ("var", 0.25),
+                        ("std", 0.5)):
+        assert FUNCTIONS[word](xs) == value, word
+    # over no value slot: the identity where there is one, else no value
+    holes = np.array([float("nan")])
+    assert FUNCTIONS["sum"](holes) == 0.0 and FUNCTIONS["prod"](holes) == 1.0
+    assert math.isnan(FUNCTIONS["mean"](holes))

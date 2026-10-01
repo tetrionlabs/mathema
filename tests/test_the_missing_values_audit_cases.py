@@ -2,6 +2,7 @@
 # Copyright 2026 Tetrion Ltd
 """Cases where a policy row, a gate or a value claim once claimed more
 than the calls showed: each pins the verdict the calls support."""
+import itertools
 from typing import Optional
 
 import pytest
@@ -344,14 +345,32 @@ def jitter_at_a_hole(x: float, y: float) -> float:
     return y + (random.random() if x != x else 0.0)
 
 
-def test_a_refill_that_does_not_repeat_falsifies_is_deterministic():
-    rows = {r.name: r for r in check_conjectures(jitter_at_a_hole, [
+_ticks = itertools.count()
+
+
+def tick_at_a_hole(x: float, y: float) -> float:
+    return y + (next(_ticks) if x != x else 0.0)
+
+
+def _determinism(fn):
+    rows = {r.name: r for r in check_conjectures(fn, [
         claim("for x in [0, 1], y in [0, 1], f(x, y) >= 0", name="c", route="probe"),
         claim("for x in [0, 1] \\ {missing}, y in [0, 1], f(x, y) == f(x, y)",
               name="is_deterministic")])}
-    det = rows["is_deterministic"]
+    return rows["is_deterministic"]
+
+
+def test_a_draw_from_the_shared_generator_falsifies_is_deterministic():
+    det = _determinism(jitter_at_a_hole)
     assert det.verdict == "falsified", (det.verdict, det.note)
-    assert det.counterexample.startswith("x = nan")
+    assert "random.random" in det.counterexample, det.counterexample
+
+
+def test_a_refill_that_does_not_repeat_falsifies_is_deterministic():
+    det = _determinism(tick_at_a_hole)
+    assert det.verdict == "falsified", (det.verdict, det.note)
+    assert det.counterexample.startswith("x = nan"), det.counterexample
+    assert det.note == "the same call made twice gave two answers", det.note
 
 
 # --- a reading that leaves a premise's region is inconclusive for it -------

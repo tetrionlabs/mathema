@@ -34,7 +34,8 @@ VERDICTS = {
     "missing_trap_comparison": "holds",
     "missing_predicate_sugar": "holds",
     "absent_none_spelling": "holds",
-    "is_missing_safe_gate": "holds",
+    # volatility calls math.sqrt, whose own policy row says nan propagates
+    "is_missing_safe_gate": "proven",
     "is_missing_safe_gate_falsified": "falsified",
     "is_absent_safe_gate": "holds",
     "is_absent_safe_gate_falsified": "falsified",

@@ -80,11 +80,12 @@ def test_the_running_words_read_a_matrix_along_an_axis(broken_numpy):
     _same(FUNCTIONS["cumsum"](a), [1.0, 3.0, 6.0, 10.0])
 
 
-def test_a_missing_element_leaves_every_later_entry_without_a_value(
+def test_a_running_word_reads_the_value_slots_and_keeps_the_hole_in_place(
         broken_numpy):
     xs = np.array([1.0, math.nan, 2.0])
-    for word in ("cumsum", "cumprod", "cummax", "cummin"):
-        _same(FUNCTIONS[word](xs), [1.0, math.nan, math.nan])
+    for word, out in (("cumsum", [1.0, math.nan, 3.0]), ("cumprod", [1.0, math.nan, 2.0]),
+                      ("cummax", [1.0, math.nan, 2.0]), ("cummin", [1.0, math.nan, 1.0])):
+        _same(FUNCTIONS[word](xs), out)
 
 
 def test_infinities_give_the_mathematical_entries(broken_numpy):
