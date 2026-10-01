@@ -19,13 +19,13 @@ pd = pytest.importorskip("pandas")
 
 @enforce_dimensions()
 @claims_decorator("for A in R^(30,15), f(A) >= 0")
-def frob(A: "numpy.ndarray") -> float:
+def frob(A: np.ndarray) -> float:
     return float(np.square(np.asarray(A, dtype=float)).sum())
 
 
 @enforce_dimensions()
 @claims_decorator("for P in [0, 1]^(3,2), f(P) >= 0")
-def mass(P: "numpy.ndarray") -> float:
+def mass(P: np.ndarray) -> float:
     return float(np.asarray(P, dtype=float).sum())
 
 
