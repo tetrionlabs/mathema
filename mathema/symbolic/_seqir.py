@@ -36,10 +36,12 @@ least `v[i]` and is one of `v[0..i]`, so it lies within `v`'s element
 bounds, and for a positive `v`, `0 < v[i] / cummax(v)[i] <= 1`
 (`cummin` mirrors each). `order_by_bounds` decides an ordering that
 involves them from those facts alone. A law transform a claim binds (`let s =
-mathema.f.scale_seq`) and a reversal (`returns[::-1]`) rewrite every
-element of the sequence they act on by structural replacement, and a
-transform that changes nothing is refused rather than read as the
-identity.
+mathema.f.scale_seq`) acts on the vector it is given: `scale_seq(v, c)`
+has element `c*v[i]`, `shift_seq(v, c)` has `v[i] + c`, and a reversal
+(`reverse_seq(v)`, `v[::-1]`) reads `v` at `L - 1 - i`, so
+`cumsum(x)[::-1]` is the running sum read backwards, not the running
+sum of `x[::-1]`. A transform that changes nothing is refused rather
+than read as the identity.
 
 sympy does not split a sum over `+` or pull a constant out of it, so
 `linear_sums` does: `Sum(c*x[i] + k)` becomes `c*Sum(x[i]) + k*L`,
@@ -62,7 +64,6 @@ import sympy
 
 from .._math_vocab import _SYMPY_FUNCS
 from ._base import NotSymbolic, _exact_numeric_literal
-from ._seq_common import map_sequence_elements
 
 #: the index a vector-valued expression's element is written at
 INDEX = sympy.Symbol("i", integer=True, nonnegative=True)
@@ -188,18 +189,15 @@ def _running(kind, elem, length):
     return Vec(op(body, (j, 0, INDEX)), length)
 
 
-def _reverse(value: Vec, base_lengths: dict) -> Vec:
-    """Every element `x[k]` of every sequence in `value` read at
-    `x[L - 1 - k]`."""
-    elements = [e for e in value.elem.atoms(sympy.Indexed)
-                if e.base in base_lengths]
-    if not elements:
+def _reverse(value: Vec) -> Vec:
+    """The vector `value` in reverse order: its element at position
+    `i` is the element `value` has at `L - 1 - i`, so a reduction or a
+    running sum inside it is read whole at the mirrored position."""
+    if INDEX not in value.elem.free_symbols:
         raise NotSymbolic("the reversal leaves the expression unchanged: "
-                          "no element of a sequence appears in it")
-    mapped = value.elem.xreplace({
-        e: e.base[base_lengths[e.base] - 1 - e.indices[0]]
-        for e in elements})
-    return Vec(mapped, value.length)
+                          "its element does not depend on the position")
+    return Vec(value.elem.xreplace({INDEX: value.length - 1 - INDEX}),
+               value.length)
 
 
 class Lowering:
@@ -223,7 +221,6 @@ class Lowering:
         self.transforms = transforms
         self.bounds = bounds if bounds is not None else Bounds()
         self.obligations = Obligations()
-        self._bases = {ib: length for ib, length in seqs.values()}
 
     def lower(self, node):
         if isinstance(node, ast.Expression):
@@ -318,7 +315,7 @@ class Lowering:
                 and isinstance(s.step.op, ast.USub) \
                 and isinstance(s.step.operand, ast.Constant) \
                 and s.step.operand.value == 1:
-            return _reverse(value, self._bases)
+            return _reverse(value)
         raise NotSymbolic(f"{ast.unparse(node)!r}: only the reversal "
                           f"`[::-1]` of a vector is lowered")
 
@@ -463,17 +460,12 @@ class Lowering:
             raise NotSymbolic(f"{ast.unparse(node.args[0])!r} is not a "
                               f"vector")
         if kind == "reverse":
-            return _reverse(v, self._bases)
+            return _reverse(v)
         c = self.lower(node.args[1])
         if isinstance(c, Vec):
             raise NotSymbolic(f"{ast.unparse(node.args[1])!r}: the "
                               f"transform's constant must be a number")
-        mapper = (lambda e, k: k * e) if kind == "scale" \
-            else (lambda e, k: e + k)
-        elem = v.elem
-        for base in {e.base for e in elem.atoms(sympy.Indexed)
-                     if e.base in self._bases}:
-            elem = map_sequence_elements(elem, base, mapper, (c,))
+        elem = c * v.elem if kind == "scale" else v.elem + c
         if elem == v.elem:
             raise NotSymbolic(f"{ast.unparse(node)!r} leaves the vector "
                               f"unchanged")
