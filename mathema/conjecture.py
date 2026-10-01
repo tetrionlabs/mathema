@@ -3927,7 +3927,7 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     def with_caveats(note: str, parts) -> str:
         caveats: list = []
         for part in parts:
-            said = (part.meta or {}).get("mathema.caveat")
+            said = getattr(part, "_caveat", None)
             if said and said not in caveats:
                 caveats.append(said)
         return "; ".join([note, *caveats])
@@ -6440,9 +6440,18 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             algo_meta = copy.deepcopy(algo_meta) if algo_meta else {}
             if algo_meta.get("mathema.sampled"):
                 note = f"{note}; {algo_meta['mathema.sampled']}".lstrip("; ")
-            if algo_meta.get("mathema.caveat"):
-                note = f"{note}; {algo_meta['mathema.caveat']}".lstrip("; ")
+            # a family's caveat (a hidden input, a restore that failed) is
+            # a sentence in the row's note, never a key of its own; it
+            # rides on the Probe, outside the record, for a function-wide
+            # conjunction to carry into its own note
+            caveat = algo_meta.pop("mathema.caveat", None)
+            if caveat:
+                note = f"{note}; {caveat}".lstrip("; ")
             algo_meta = algo_meta or None
+
+            def _with_caveat(row):
+                row._caveat = caveat
+                return row
             if verdict == "proven":
                 # an ESTABLISHED empirical examination: the guard only
                 # lets this through with the exhaustive-coverage
@@ -6465,16 +6474,18 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     "is_recursion_safe": "implementation:recursion-depth",
                 }.get(families.claim_base_name(cj.name)) or (
                     algo_meta or {}).get("mathema.cause")
-                return Probe(cj.name, statement, "falsified", n=checked,
-                             route=probe_route, counterexample=cx, note=note,
-                             stratum=({"blame": "implementation",
-                                       "cause": family_cause,
-                                       "witness": cx}
-                                      if family_cause else None),
-                             meta=algo_meta)
+                return _with_caveat(Probe(
+                    cj.name, statement, "falsified", n=checked,
+                    route=probe_route, counterexample=cx, note=note,
+                    stratum=({"blame": "implementation",
+                              "cause": family_cause,
+                              "witness": cx}
+                             if family_cause else None),
+                    meta=algo_meta))
             if verdict == "holds":
-                return Probe(cj.name, statement, "holds", n=checked,
-                             route=probe_route, note=note, meta=algo_meta)
+                return _with_caveat(Probe(
+                    cj.name, statement, "holds", n=checked,
+                    route=probe_route, note=note, meta=algo_meta))
             if verdict == "unknown":
                 # the family examined the function and could not
                 # settle it (a roll-up with an unsettled child): the

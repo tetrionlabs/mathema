@@ -307,3 +307,11 @@ def test_an_uncomparable_result_says_why_and_what_to_do():
     p = _wide(countdown)
     assert ("two calls return generators, and comparing them would use them "
             "up") in (p.note or ""), p.note
+
+
+def test_the_hidden_read_sentence_lives_in_the_note_alone():
+    for probe in (_wide, _named):
+        p = probe(read_env)
+        assert "the body reads os.environ, which does not change" in (
+            p.note or ""), p.note
+        assert "mathema.caveat" not in (p.meta or {}), p.meta

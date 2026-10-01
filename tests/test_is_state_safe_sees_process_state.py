@@ -620,3 +620,15 @@ def test_a_handler_the_function_added_is_closed():
     _state_safe(adds_a_handler)
     assert ClosingHandler.closed
     assert not logging.getLogger("mathema.t.closing").handlers
+
+
+def test_a_restore_failure_is_a_sentence_in_the_note_and_no_caveat_key(
+        monkeypatch):
+    def broken(saved):
+        raise RuntimeError("no")
+    _state_safe(pure)
+    monkeypatch.setattr(random, "setstate", broken)
+    with pytest.warns(UserWarning):
+        p = _state_safe(draw_and_configure)
+    assert "restart it before trusting later results" in (p.note or "")
+    assert "mathema.caveat" not in (p.meta or {}), p.meta
