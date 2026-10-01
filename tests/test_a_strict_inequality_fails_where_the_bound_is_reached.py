@@ -34,7 +34,7 @@ def test_a_strict_lower_bound_above_the_maximum_is_falsified():
                 "for x in [0.2, 0.8], 0.3 < f(x)"):
         p = _one(hump, law)
         assert p.verdict == "falsified", law
-        assert p.counterexample == "x=0.5", law
+        assert p.counterexample == "x = 0.5", law
 
 
 @pytest.mark.needs_full_proof_budget

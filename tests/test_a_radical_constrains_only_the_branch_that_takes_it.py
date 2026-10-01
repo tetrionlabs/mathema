@@ -35,8 +35,9 @@ def test_the_other_branch_of_a_square_root_is_still_checked():
         root_or_gap, [claim("for x in [-1, 1], y in [-1, 1], f(x, y) >= 0")],
         extensive=True)
     assert p.verdict == "falsified"
-    point = dict(part.strip().split("=") for part in
-                 p.counterexample.split(":")[0].strip("()").split(","))
+    point = {k.strip(): v for k, v in (
+        part.split("=") for part in
+        p.counterexample.split(":")[0].strip("()").split(","))}
     assert root_or_gap(float(point["x"]), float(point["y"])) < 0
     assert root_or_gap(-1.0, 1.0) == -2.0
 

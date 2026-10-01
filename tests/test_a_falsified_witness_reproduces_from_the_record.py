@@ -36,6 +36,6 @@ def test_the_stored_witness_breaks_the_claim():
 
 def test_a_witness_coordinate_keeps_every_digit():
     x = 0.34729635533386066
-    assert _fmt_point({"x": x, "y": 0.5}, ["x", "y"]) == "x=0.34729635533386066, y=0.5"
-    assert _fmt((x, 2.0), ("x", "n")) == "x=0.34729635533386066, n=2"
+    assert _fmt_point({"x": x, "y": 0.5}, ["x", "y"]) == "x = 0.34729635533386066, y = 0.5"
+    assert _fmt((x, 2.0), ("x", "n")) == "x = 0.34729635533386066, n = 2"
     assert float(_fmt_point({"x": math.pi}, ["x"]).split("=")[1]) == math.pi

@@ -22,7 +22,7 @@ def test_a_domain_end_past_the_bound_is_not_proven():
     # x reaches 0.30000000000000000001 > 0.3, so the claim is false
     p = _derive("for x in [0, 0.30000000000000000001], f(x) <= 0.3")
     assert p.verdict != "proven"
-    assert "derive: undecided (0.30000000000000000001 has more digits" in p.note
+    assert "derive could not decide it (0.30000000000000000001 has more digits" in p.note
 
 
 def test_a_bound_just_past_the_domain_end_is_proven_from_the_exact_literal():
