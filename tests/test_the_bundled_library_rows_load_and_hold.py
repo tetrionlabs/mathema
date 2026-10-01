@@ -70,6 +70,8 @@ _COMMON_CALLS = {
     "pandas.Series.diff": ["differences@periods=2"],
     "pandas.DataFrame.abs": ["columns"],
     "pandas.DataFrame.cumsum": ["columns"],
+    "pandas.Series.clip": ["definition"],
+    "polars.Series.clip": ["definition"],
     "polars.Series.min": ["definition"],
     "polars.Series.max": ["definition"],
     "polars.Series.abs": ["definition"],

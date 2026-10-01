@@ -68,7 +68,7 @@ def test_every_pandas_row_holds_against_the_installed_pandas(tmp_path,
 def test_the_numbers_of_pandas_rows():
     assert {relative: len(_rows(relative)) for relative in _FILES} == {
         "pandas/series_running.claims.yaml": 2,
-        "pandas/series_bounds.claims.yaml": 3,
+        "pandas/series_bounds.claims.yaml": 4,
         "pandas/series_shape.claims.yaml": 7,
         "pandas/series_arithmetic.claims.yaml": 11,
         "pandas/series_statistics.claims.yaml": 4,
