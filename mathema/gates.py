@@ -1425,8 +1425,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     if deps is None:
         return None
     if excluded is not None:
-        admits = deps["admits"]
-        deps["admits"] = lambda point: admits(point) and not excluded(point)
+        inside = deps["admits"]
+        deps["admits"] = lambda point: inside(point) and not excluded(point)
     name = companion_name(parent.name, descriptor)
     # the companion's calls are filed under its own name
     from .policy import _CLAIM as _policy_claim
