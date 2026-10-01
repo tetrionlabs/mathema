@@ -20,6 +20,27 @@ def _write(path, text):
     path.write_text(textwrap.dedent(text))
 
 
+def install_throwaway_library(tmp_path, monkeypatch) -> str:
+    """Intent:
+        A made-up library `ramp_kit`, importable and installed at 1.0,
+        whose `ramp(x)` raises ValueError below 1: a key the compendium
+        tests can state true rows about without naming a real function.
+    """
+    import sys
+    site = tmp_path / "site"
+    _write(site / "ramp_kit.py", """
+        def ramp(x):
+            if x < 1:
+                raise ValueError("below one")
+            return x - 1
+    """)
+    _write(site / "ramp_kit-1.0.dist-info" / "METADATA",
+           "Metadata-Version: 2.1\nName: ramp_kit\nVersion: 1.0\n")
+    monkeypatch.syspath_prepend(str(site))
+    monkeypatch.delitem(sys.modules, "ramp_kit", raising=False)
+    return "ramp_kit.ramp"
+
+
 def test_bundled_files_load_for_installed_libraries():
     lib = load_library_claims(".")
     assert lib["math.sqrt"]["compendium"] == "math"          # stdlib: always
@@ -234,15 +255,16 @@ def test_an_empty_reduction_is_a_hazard_on_sequence_parameters():
 
 
 def test_library_rows_reach_the_partiality_registry_with_their_labels(
-        tmp_path):
+        tmp_path, monkeypatch):
     import sympy
 
     from mathema.compendium import install, register_library_claims
     from mathema.partiality import NO_VALUE
     from mathema.symbolic._partiality import _PARTIALITY_LEMMAS
-    _write(tmp_path / "claims" / "math.claims.yaml", """
-        compendium: math
-        math.erfc:
+    key = install_throwaway_library(tmp_path, monkeypatch)
+    _write(tmp_path / "claims" / "ramp_kit.claims.yaml", """
+        compendium: ramp_kit
+        ramp_kit.ramp:
           claims:
             - name: is_defined
               statement: 'x >= 1'
@@ -250,9 +272,9 @@ def test_library_rows_reach_the_partiality_registry_with_their_labels(
               statement: 'for x in [-10, 10], assuming x < 1, raises(f(x), ValueError)'
     """)
     names = register_library_claims(str(tmp_path))
-    assert ("math.erfc", "is_defined") in names
-    assert ("math.erfc", "below_one_raises") in names
-    rows = _PARTIALITY_LEMMAS["math.erfc"]
+    assert (key, "is_defined") in names
+    assert (key, "below_one_raises") in names
+    rows = _PARTIALITY_LEMMAS[key]
     assert [label for _b, label in rows] == [NO_VALUE, "ValueError"]
     u = sympy.Symbol("u", real=True)
     assert rows[0][0](u) == sympy.Lt(u, 1)
@@ -262,9 +284,9 @@ def test_library_rows_reach_the_partiality_registry_with_their_labels(
     assert raises_region.subs(u, -11) == sympy.false
     # the same root again is a no-op; another root replaces these rows
     install(str(tmp_path))
-    assert len(_PARTIALITY_LEMMAS["math.erfc"]) == 2
+    assert len(_PARTIALITY_LEMMAS[key]) == 2
     install(".")
-    assert "math.erfc" not in _PARTIALITY_LEMMAS
+    assert key not in _PARTIALITY_LEMMAS
 
 
 def test_a_row_whose_region_does_not_build_is_reported_once(tmp_path):
