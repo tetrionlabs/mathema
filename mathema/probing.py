@@ -595,11 +595,11 @@ class ExecutedMissing:
         # how to call f again with a hole filled (`call_at(point)` gives
         # `(output, raised)`), the fill per parameter where the argument
         # holds no present value, and per parameter the calls whose hole
-        # f never read and those whose refill was inconclusive
+        # f is indifferent to and those whose refill said nothing
         self.refill_at = None
         self.given: "tuple | None" = None
         self.fills: dict = {}
-        self.not_read: dict = {}
+        self.indifferent: dict = {}
         self.inconclusive: dict = {}
         self.not_repeatable: dict = {}
 
@@ -621,7 +621,7 @@ class ExecutedMissing:
         if at_default and any(p not in at_default for p, _k, _m in keys):
             point = {p: v for p, v in point.items() if p not in at_default}
             keys = keys_of(point, self.paths)
-        from ._missing_policy import INCONCLUSIVE, NOT_READ, NOT_REPEATABLE, refill
+        from ._missing_policy import INCONCLUSIVE, INDIFFERENT, NOT_REPEATABLE, refill
         given, refill_at = self.given, self.refill_at
         pieces = (refill(lambda at: refill_at(at, given), point, output, raised,
                          self.fills)
@@ -631,14 +631,20 @@ class ExecutedMissing:
                        classify_call(point, output, raised, unseen_kinds(point, keys)))
             return
         for at, got, err, behaviour in pieces:
-            if behaviour in (NOT_READ, INCONCLUSIVE, NOT_REPEATABLE):
-                # the fill left the output as it was (f never read the
-                # hole), the filled call gave no value back, or the call
-                # did not repeat: no evidence of what f does with the hole
-                counted = {NOT_READ: self.not_read, INCONCLUSIVE: self.inconclusive,
+            if behaviour in (INDIFFERENT, INCONCLUSIVE, NOT_REPEATABLE):
+                # no fill changed the output (f is indifferent to the
+                # slot), the filled call gave no value back, or the call
+                # did not repeat
+                counted = {INDIFFERENT: self.indifferent, INCONCLUSIVE: self.inconclusive,
                            NOT_REPEATABLE: self.not_repeatable}[behaviour]
                 for p, _k, _m in keys_of(at):
                     counted[p] = counted.get(p, 0) + 1
+                if behaviour == INDIFFERENT:
+                    # a value returned with the hole there: evidence against
+                    # raises and propagates only
+                    from .policy import record_call
+                    record_call(at, got, err, keys=keys_of(at, self.paths),
+                                behaviour="drops", indifferent=True)
                 continue
             self._file(at, got, err, keys_of(at, self.paths), behaviour)
 
@@ -695,8 +701,8 @@ class ExecutedMissing:
 
     def meta(self) -> dict:
         out: dict = {}
-        if self.not_read:
-            out["not_read"] = dict(self.not_read)
+        if self.indifferent:
+            out["indifferent"] = dict(self.indifferent)
         if self.inconclusive:
             out["inconclusive"] = dict(self.inconclusive)
         if self.not_repeatable:
@@ -863,8 +869,8 @@ def with_executed(meta: "dict | None", executed: "ExecutedMissing | None") -> "d
     missing = dict(out.get("mathema.missing") or {})
     if extra.get("returned") and "returned" not in missing:
         missing["returned"] = extra["returned"]
-    for key in ("not_read", "inconclusive", "not_repeatable"):
-        # the calls whose hole f never read, and those whose refill said
+    for key in ("indifferent", "inconclusive", "not_repeatable"):
+        # the calls indifferent to the hole, and those whose refill said
         # nothing, per parameter
         if extra.get(key):
             counted = dict(missing.get(key) or {})

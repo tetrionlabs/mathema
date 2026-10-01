@@ -77,11 +77,12 @@ def test_a_policy_row_alone_calls_f_at_the_fixed_size():
     assert row.counterexample.endswith("f returned 30.0"), row.counterexample
 
 
-def test_a_policy_row_on_a_function_that_never_reads_the_hole_is_unknown():
+def test_a_function_indifferent_to_the_hole_breaks_a_stated_raise():
     space = claim("for xs in [0, 1]^30, len(xs) == 30").domain
     (row,) = check_conjectures(length, [claim("missing(f, xs, nan) raises", name="p")],
                                domain=space)
-    assert row.verdict == "unknown", (row.verdict, row.note)
+    assert row.verdict == "falsified", (row.verdict, row.note)
+    assert row.counterexample.endswith("f returned 30.0"), row.counterexample
 
 
 pd = pytest.importorskip("pandas")

@@ -34,8 +34,11 @@ its domain (`refill`): a filled call that raises or gives no value back
 is inconclusive; a hole that stays in the output was introduced, one
 that goes with the fill propagated however far it spread, a value the
 fill changes dropped the hole, and a value it leaves the same shows f
-never read the hole. An inconclusive or unread call is no evidence of
-any behaviour. The counts above decide what a route cannot refill.
+indifferent to the slot. An indifferent call returned a value the hole
+did not change, so it breaks `raises` and `propagates` and says nothing
+for `drops`, `converts` or `introduces`; an inconclusive call is no
+evidence of any behaviour. The counts
+above decide what a route cannot refill.
 
 Over many calls the behaviours per (parameter, kind, member) aggregate
 to one behaviour, or to `mixed` with a witness for each behaviour seen.
@@ -431,9 +434,12 @@ class PolicyTable:
 
 # --- the refill: what a call at a hole did, read by filling the hole ------
 
-#: what a call at a hole is when filling the hole leaves the output as it
-#: was: f never read the hole
-NOT_READ = "not read"
+#: what a call at a hole is when no fill changes the output: f is
+#: indifferent to the slot. It returned a value with the hole there, so it
+#: counts against raises, propagates, converts and introduces, and says
+#: nothing when deciding drops, where ignoring a slot and replacing a hole
+#: look the same
+INDIFFERENT = "indifferent"
 #: what a call at a hole is when the filled call, its inputs complete,
 #: raises or gives no value back: it says nothing about the hole
 INCONCLUSIVE = "inconclusive"
@@ -584,8 +590,8 @@ def refill(call_at, point: dict, output, raised: "str | None",
         `introduces` (it does not come from the input); a hole that goes
         with it `propagates`, however far it spread; a value every fill
         leaves the same (the fill, twice it, and 0.9 of it) is
-        `NOT_READ` (f never read the hole); a value a fill changes
-        `drops`. A no-value of the other kind in the output `converts`,
+        `INDIFFERENT` (f is indifferent to the slot); a value a fill
+        changes `drops`. A no-value of the other kind in the output `converts`,
         by the count rule. A raise the members cause only together is
         filed under each. None when the call cannot be refilled: it
         holds an absence or a path, or a holding parameter has neither a
@@ -636,7 +642,7 @@ def refill(call_at, point: dict, output, raised: "str | None",
         elif no_value_slots(got).count():
             behaviour = "introduces" if after_slots.count() else "propagates"
         else:
-            behaviour = NOT_READ if _unread(call_at, fill_all, at, m, got, after) \
+            behaviour = INDIFFERENT if _unread(call_at, fill_all, at, m, got, after) \
                 else "drops"
         out.append((at, got, None, behaviour))
     if raised is not None and len(members) > 1 \

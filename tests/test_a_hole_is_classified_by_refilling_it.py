@@ -4,13 +4,14 @@
 filled by a value of its domain: a raise raises; a hole in the output
 that stays when the input's hole is filled was introduced; a hole that
 goes with it propagates, however far it spread; a value the fill leaves
-the same was never read; a value the fill changes dropped the hole. A
-container holding two members is filled one member at a time."""
+the same leaves f indifferent to the slot; a value the fill changes
+dropped the hole. A container holding two members is filled one member
+at a time."""
 import math
 
 import pytest
 
-from mathema._missing_policy import INCONCLUSIVE, NOT_READ, refill
+from mathema._missing_policy import INCONCLUSIVE, INDIFFERENT, refill
 
 NAN = math.nan
 UNIT = {"x": 0.5, "y": 0.5, "xs": 0.5, "A": 0.5}
@@ -82,8 +83,8 @@ def test_a_hole_that_goes_with_the_fill_propagates():
     assert _behaviours(root, x=NAN) == ["propagates"]
 
 
-def test_a_value_the_fill_leaves_the_same_was_not_read():
-    assert _behaviours(second, x=NAN, y=0.5) == [NOT_READ]
+def test_a_value_no_fill_changes_is_indifferent():
+    assert _behaviours(second, x=NAN, y=0.5) == [INDIFFERENT]
 
 
 def test_a_value_the_fill_changes_dropped_the_hole():
@@ -107,18 +108,18 @@ def test_a_spread_is_propagation():
     assert _behaviours(trace_of, A=[[NAN, 0.5], [0.25, 1.0]]) == ["propagates"]
 
 
-def test_a_hole_off_the_diagonal_is_not_read_by_a_trace():
+def test_a_trace_is_indifferent_to_a_hole_off_the_diagonal():
     np = pytest.importorskip("numpy")
 
     def trace_of(A):
         return float(np.trace(np.array(A, dtype=float)))
-    assert _behaviours(trace_of, A=[[0.5, NAN], [0.25, 1.0]]) == [NOT_READ]
+    assert _behaviours(trace_of, A=[[0.5, NAN], [0.25, 1.0]]) == [INDIFFERENT]
 
 
-def test_an_entry_never_indexed_is_not_read():
+def test_an_entry_never_indexed_leaves_f_indifferent():
     def coupling(A):
         return A[0][1]
-    assert _behaviours(coupling, A=[[NAN, 0.5], [0.25, 1.0]]) == [NOT_READ]
+    assert _behaviours(coupling, A=[[NAN, 0.5], [0.25, 1.0]]) == [INDIFFERENT]
     assert _behaviours(coupling, A=[[0.5, NAN], [0.25, 1.0]]) == ["propagates"]
 
 
@@ -177,15 +178,16 @@ def test_a_gram_matrix_propagates_its_holes():
     assert rows["missing[A]"].verdict == "holds", rows["missing[A]"].note
 
 
-def test_a_trace_leaves_holes_off_the_diagonal_unread_and_counts_them():
+def test_a_trace_is_mixed_where_a_hole_off_the_diagonal_leaves_it_indifferent():
     np = pytest.importorskip("numpy")
 
     def trace_of(A: np.ndarray) -> float:
         return float(np.trace(A))
     rows = _rows(trace_of, "for A in [0, 1]^(n,n), f(A) >= 0")
-    assert rows["missing[A]"].verdict == "holds", rows["missing[A]"].note
-    assert rows["c"].meta["mathema.missing"]["not_read"]["A"] >= 1
-
+    # a finite trace beside a hole breaks "the hole comes back"
+    assert rows["missing[A]"].verdict == "falsified", rows["missing[A]"].note
+    assert "no fill of the nan slot changes" in rows["missing[A]"].note
+    assert rows["c"].meta["mathema.missing"]["indifferent"]["A"] >= 1
 
 def test_an_overflow_under_complete_inputs_is_inconclusive_not_introduced():
     def ema(x: list[float], alpha: float) -> float:

@@ -537,8 +537,10 @@ call at a hole is made again with the hole filled, and the difference
 says what the function did with it. `clamp_discount` returns `1.0` for a
 missing rate; filled with `1.0` and with `2.0` it returns `1.0` again,
 but filled with `0.9` it returns `0.9`, so it read the slot and drops
-the hole. A fill that changes nothing means the function never read
-the slot, and that call says nothing about the row. Where a kind reaches a parameter,
+the hole. When no fill changes the answer, the function is
+indifferent to the slot: it returned a value with the hole there, which
+breaks `raises` and `propagates`, and says nothing for `drops`,
+where ignoring a slot and replacing a hole look the same. Where a kind reaches a parameter,
 the record carries a row for it, and the bracket says whose word it is:
 
 - **default for a float, which may be nan**: the type admits the kind

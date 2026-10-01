@@ -289,3 +289,49 @@ def test_the_mixed_sentence_states_only_what_its_witnesses_show():
                           {"nan": "ValueError"}, "array")
     assert text == ("f drops the hole at xs = [nan, nan, nan]; at xs = [nan] it raises "
                     "ValueError instead")
+
+
+# --- an indifferent call breaks raises and propagates only ---------------
+
+def capped_total(xs: np.ndarray) -> float:
+    a = np.asarray(xs, dtype=float)
+    if len(a) < 3 and np.isnan(a).any():
+        raise ValueError("too short to skip a hole")
+    return float(np.minimum(1.0, (np.nansum(a) + 1.0) * 1000.0))
+
+
+def second(x: float, y: float) -> float:
+    return y
+
+
+def test_a_value_returned_at_the_hole_contradicts_a_stated_raise():
+    rows = _rows(capped_total, "for xs in [0, 1]^n, f(xs) >= 0",
+                 "missing(f, xs) raises(ValueError)", "is_missing_safe(f)")
+    assert rows["missing_f_xs_raises_ValueError"].verdict == "falsified"
+    assert rows["is_missing_safe[f]"].verdict == "falsified"
+
+
+def test_an_indifferent_call_neither_confirms_nor_contradicts_a_drop():
+    row = _rows(second, "for x in [0, 1], y in [0, 1], f(x, y) >= 0",
+                "missing(f, x) drops")["missing_f_x_drops"]
+    assert row.verdict == "unknown", (row.verdict, row.note)
+
+
+def test_the_indifferent_calls_are_counted():
+    (row,) = check_conjectures(second, [claim(
+        "for x in [0, 1], y in [0, 1], f(x, y) >= 0", route="probe")])
+    counted = row.meta["mathema.missing"]
+    assert counted["indifferent"]["x"] >= 1 and "not_read" not in counted
+
+
+def test_the_gate_is_not_proven_on_indifferent_calls_alone():
+    gate = _rows(second, "for x in [0, 1], y in [0, 1], f(x, y) >= 0",
+                 "missing(f, x) drops", "missing(f, y) propagates",
+                 "is_missing_safe(f)")["is_missing_safe[f]"]
+    assert gate.verdict == "unknown", (gate.verdict, gate.note)
+
+
+def test_an_indifferent_call_does_not_break_converts():
+    row = _rows(second, "for x in [0, 1], y in [0, 1], f(x, y) >= 0",
+                "missing(f, x) converts")["missing_f_x_converts"]
+    assert row.verdict == "unknown", (row.verdict, row.note)

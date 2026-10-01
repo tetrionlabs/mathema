@@ -438,7 +438,8 @@ def mixed_sentence(param: str, ways_by_member: dict, raised_by_member: dict,
     for member, behaviour, at in other:
         what = f"the {member} slot" if container_noun else "the hole"
         verb = ("converts " + what + " to an absent result" if behaviour == "converts"
-                else "introduces a missing value")
+                else "returns a value no fill of " + what + " changes"
+                if behaviour == "indifferent" else "introduces a missing value")
         text = (f"{text}; at {where([at])} it {verb}" if text
                 else f"at {where([at])} f {verb}")
     return text
