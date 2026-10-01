@@ -51,7 +51,10 @@ class _Translator:
         numbers become exact rationals, and a radical becomes an
         auxiliary variable with its defining polynomial constraint.
         `constraints` collects those side constraints; the caller adds
-        them to the solver alongside the query.
+        them to the solver alongside the query. A side constraint is
+        global to the query, so it must hold at every point of the box:
+        an even root's defining constraint applies only where its base
+        is nonnegative.
     """
 
     def __init__(self, z3mod, params: dict):
@@ -75,12 +78,16 @@ class _Translator:
             return cached
         base = self.expr(base_expr)
         y = self.z3.Real(f"_rad{len(self._aux)}")
-        self.constraints.append(y ** q == base)
         if q % 2 == 0:
             # an even root exists only for a nonnegative base, and is
-            # the nonnegative branch by convention
-            self.constraints.append(y >= 0)
-            self.constraints.append(base >= 0)
+            # the nonnegative branch by convention; where the base is
+            # negative the auxiliary variable is left free, so the
+            # constraint holds on every branch of the query, including
+            # those that never evaluate this radical
+            self.constraints.append(self.z3.Implies(
+                base >= 0, self.z3.And(y >= 0, y ** q == base)))
+        else:
+            self.constraints.append(y ** q == base)
         self._aux[key] = y
         return y
 
