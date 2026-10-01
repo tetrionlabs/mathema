@@ -16,9 +16,14 @@ inputs):
     Conjecture("bounded", lhs="min(x)", rhs="f(x, alpha)", relation="<=")
     Conjecture("shift", lhs="f(x + c)", rhs="f(x) + c", relation="==")
 
-Expressions are validated against a strict AST whitelist before evaluation:
-this pipeline accepts untrusted proposals, so nothing outside arithmetic,
-comparisons handled by the relation, and a fixed set of safe calls can run.
+Expressions are validated against an AST whitelist before evaluation:
+arithmetic, the comparisons the relation handles, the grammar's own
+functions, and calls to the functions the claim names. A dotted name in a
+claim (`let g = numpy.mean`) resolves to that function, which runs as
+importing and calling it would, except that a name reaching a refused
+module (os, subprocess, builtins and the others `_claim_reach` lists) is
+refused. A binding into third-party code whose purity mathema cannot
+establish runs and carries a warning naming it.
 """
 from __future__ import annotations
 
