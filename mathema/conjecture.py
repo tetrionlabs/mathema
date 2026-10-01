@@ -4172,6 +4172,15 @@ def _stamp_examine_route(probe, cj, fn, facts) -> None:
     if not is_safety:
         return
     root, _, _sub = probe.route.partition(":")
+    if (root == "derive" and probe.verdict == "falsified"
+            and region_row_kind(cj.name) == "is_defined"
+            and (probe.meta or {}).get("mathema.corroboration")
+            == "reproduced"):
+        # an is_defined falsification is decided by executing the
+        # function at a point the computed region suggested, an
+        # analytically seeded execution, never by the structure alone
+        probe.route = "probe:semi_analytical"
+        return
     if root == "derive":
         # a structural mechanism established the predicate (proven-
         # capable); the extensive-ladder detail folds into the plain
