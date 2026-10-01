@@ -55,13 +55,25 @@ def test_the_record_names_the_members_tried():
     assert probe.meta["mathema.missing"]["tried"]["x"] == ["None", "nan"]
 
 
+def raises_always(x: Optional[float]) -> float:
+    raise ValueError("no value")
+
+
 def test_a_raises_claim_over_the_class_is_called_with_nan():
     probe = run(recording_raises, "for x in {missing}, raises(f(x), ValueError)")
-    assert probe.verdict == "proven"
+    # f writes SEEN, so calling it at the one point is evidence, not a proof
+    assert probe.verdict == "holds", (probe.verdict, probe.note)
+    assert "at x = nan f raised ValueError" in probe.note, probe.note
     # the claim's own point reaches f as the float nan; the smoke call
     # that checks f can be called at all uses a value from its signature
     assert any(isinstance(v, float) and math.isnan(v) for v in SEEN)
     assert all(isinstance(v, float) for v in SEEN)
+
+
+def test_a_raises_claim_over_the_class_is_proven_by_its_one_point():
+    probe = run(raises_always, "for x in {missing}, raises(f(x), ValueError)")
+    assert probe.verdict == "proven", (probe.verdict, probe.note)
+    assert probe.route == "derive:brute_force", probe.route
 
 
 def sqrt_guarded(x: float) -> float:
