@@ -169,6 +169,9 @@ def _check_rows(args) -> list[dict]:
         hints = [h["text"] for h in (rec.facts.runtime_hints or {}).values()
                  if h.get("strong") or any(h["text"] in (p.note or "")
                                            for p in rec.probes)]
+        warnings = list(dict.fromkeys(
+            said for p in rec.probes
+            for said in (p.meta or {}).get("mathema.let_warning") or ()))
         rows.append({"name": name, "tier": rec.facts.tier,
                      "identity": {"form": rec.facts.form, "sig": rec.facts.sigh},
                      "proven": proven, "holds": holds, "refuted": report.refuted,
@@ -184,7 +187,8 @@ def _check_rows(args) -> list[dict]:
                      "claim_rows": [claim_row(p, accepted_risk=accepted)
                                     for p in rec.probes],
                      "problems": problems,
-                     **({"hints": hints} if hints else {})})
+                     **({"hints": hints} if hints else {}),
+                     **({"warnings": warnings} if warnings else {})})
     return rows
 
 
@@ -263,6 +267,7 @@ def _format_check(rows: list[dict], fmt: str) -> str:
             line += "  <- " + "; ".join(r["problems"])
         lines.append(line)
         lines.extend(f"     hint: {h}" for h in r.get("hints", ()))
+        lines.extend(f"     warning: {w}" for w in r.get("warnings", ()))
     return "\n".join(lines)
 
 

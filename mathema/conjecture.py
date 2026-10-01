@@ -2599,6 +2599,35 @@ def _system_reach(cj) -> "str | None":
     return None
 
 
+def _third_party_warnings(cj, fn) -> list:
+    """Intent:
+        One warning per function the claim names that is third-party
+        code whose purity mathema cannot establish
+        (`_claim_reach.third_party_warning`): a dotted `let` binding,
+        and a bare call name bound from the function's module or the
+        calling scope. Empty for mathema itself, the author's own
+        project and a function whose purity is established.
+    """
+    from ._claim_reach import third_party_warning
+    own = getattr(fn, "__module__", "") or ""
+    out: list = []
+    for name, ref in sorted((cj.funcs or {}).items()):
+        if isinstance(ref, str):
+            if ref == name or "." not in ref or ":" in ref:
+                continue
+            said = third_party_warning(f"let {name} = {ref}",
+                                       _resolve_bound_ref(ref), ref, own)
+        elif name in (cj.scope_bound or ()):
+            path = (f"{getattr(ref, '__module__', '?')}."
+                    f"{getattr(ref, '__qualname__', name)}")
+            said = third_party_warning(f"{name} = {path}", ref, path, own)
+        else:
+            continue
+        if said is not None and said not in out:
+            out.append(said)
+    return out
+
+
 def _resolve_bound_ref(ref: str):
     """Intent:
         A claim's dotted function reference resolved to its callable,
@@ -3461,6 +3490,13 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             if said not in (probe.note or ""):
                 probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         _stamp_examine_route(probe, cj, fn, facts)
+        warnings = _third_party_warnings(cj, fn)
+        if warnings:
+            probe.meta = {**(probe.meta or {}),
+                          "mathema.let_warning": warnings}
+            for said in warnings:
+                if said not in (probe.note or ""):
+                    probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         return probe
 
     from .types import matrix_param_names

@@ -13,8 +13,11 @@ as code or loads a pickle, and anything reached through an allowed
 module's attributes (`logging.os.system`, a project module's
 `from os import system`).
 
-The denylist is a list, not an isolation boundary: a project function
-a claim names runs with the claim's arguments like any other call.
+Every other name runs as written, the way importing it and calling it
+in the author's own code would. A binding into third-party code whose
+purity mathema cannot establish carries a warning naming it
+(`third_party_warning`); one into mathema itself or the author's own
+project carries none.
 """
 from __future__ import annotations
 
@@ -268,3 +271,97 @@ def refuse_path(path: str) -> None:
     said = path_refusal(path)
     if said is not None:
         raise SystemReach(said)
+
+
+#: libraries whose functions mathema treats as pure: math, cmath,
+#: statistics, and numpy's numeric functions (its random generators
+#: excluded)
+_PURE_MODULES = frozenset({"math", "cmath", "statistics"})
+
+
+def purity_established(obj, path: str) -> bool:
+    """Intent:
+        Whether mathema can establish that the function a claim names
+        is pure (no state read or written beyond its arguments): a
+        function of math, cmath or statistics, or a numpy ufunc or
+        numeric function outside `numpy.random`.
+    """
+    module = getattr(obj, "__module__", None)
+    if not isinstance(module, str):
+        module = getattr(type(obj), "__module__", "") or ""
+    if _top(module) in _PURE_MODULES or _top(path) in _PURE_MODULES:
+        return True
+    if _top(module) == "numpy" or _top(path) == "numpy":
+        return not (module.startswith("numpy.random")
+                    or path.startswith("numpy.random")
+                    or type(obj).__module__.startswith("numpy.random"))
+    return False
+
+
+def _library_file(path: str) -> bool:
+    """Intent:
+        Whether a source file belongs to an installed library or the
+        standard library rather than to a project's own tree.
+    """
+    import sysconfig
+    parts = path.replace("\\", "/").split("/")
+    if "site-packages" in parts or "dist-packages" in parts:
+        return True
+    roots = {sysconfig.get_paths().get(k) for k in ("stdlib", "platstdlib")}
+    return any(r and os_path_within(path, r) for r in roots)
+
+
+def os_path_within(path: str, root: str) -> bool:
+    """Whether `path` lies inside the directory `root`."""
+    import os
+    try:
+        return os.path.commonpath([os.path.realpath(path),
+                                   os.path.realpath(root)]) \
+            == os.path.realpath(root)
+    except ValueError:
+        return False
+
+
+def is_project_code(obj, own_module: str = "") -> bool:
+    """Intent:
+        Whether the function a claim names is mathema itself or the
+        author's own project: its module is mathema's, shares its
+        top-level package with the function under test (`own_module`),
+        or its source file lies in the working directory outside any
+        installed library.
+    """
+    import inspect
+    import os
+    module = getattr(obj, "__module__", None) or ""
+    if _top(module) == "mathema":
+        return True
+    if own_module and module and _top(module) == _top(own_module) \
+            and _top(own_module) != "builtins":
+        mod = sys.modules.get(module)
+        source = getattr(mod, "__file__", None) or ""
+        if not source or not _library_file(source):
+            return True
+    try:
+        source = inspect.getsourcefile(obj) or ""
+    except (TypeError, OSError):
+        source = ""
+    if not source:
+        mod = sys.modules.get(module)
+        source = getattr(mod, "__file__", None) or ""
+    return bool(source) and not _library_file(source) \
+        and os_path_within(source, os.getcwd())
+
+
+def third_party_warning(binding: str, obj, path: str,
+                        own_module: str = "") -> "str | None":
+    """Intent:
+        The warning a claim's result carries for one binding (`let g =
+        json.dumps`) into third-party code whose purity mathema cannot
+        establish, or None for mathema itself, the author's own
+        project, and a function whose purity is established.
+    """
+    if obj is None or is_project_code(obj, own_module) \
+            or purity_established(obj, path):
+        return None
+    return (f"{binding} calls third-party code whose purity mathema "
+            f"cannot establish, as importing and calling it would")

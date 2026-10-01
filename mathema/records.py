@@ -250,6 +250,8 @@ def claim_row(c, *, accepted_risk: frozenset = frozenset()) -> dict:
            "evidence": {"n": n or None}}
     if name in accepted_risk:
         row["accepted"] = "risk"
+    if meta.get("mathema.let_warning"):
+        row["warnings"] = list(meta["mathema.let_warning"])
     if st == "refuted":
         row["counterexample"] = counterexample
         if stratum:
