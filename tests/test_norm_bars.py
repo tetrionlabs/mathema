@@ -314,7 +314,8 @@ def largest_magnitude(x: np.ndarray) -> float:
     ("||x||_inf", "proven"),
     ("‖x‖∞", "proven"),
     ("norm(x, oo)", "proven"),
-    # the control: the wrong order is caught on the same path
+    # the control: the wrong order is caught on the same path, at a
+    # vector with entries
     ("||x||_1", "falsified"),
 ])
 def test_the_cli_reads_the_infinite_order_on_the_decorator_path(
@@ -322,21 +323,30 @@ def test_the_cli_reads_the_infinite_order_on_the_decorator_path(
     # at e9172e8 `mathema check` on this module printed a probe record
     # falsified with the witness `inf=-1.13166e+162`: the decorator path
     # never bound `inf`, which was sampled as a free variable
+    import json
+
     from mathema.cli import main
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     (tmp_path / "normdeco.py").write_text(_DECORATED.format(law=law))
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    main(["check", "normdeco.py"])
+    main(["check", "normdeco.py", "--format", "compact"])
     out = capsys.readouterr().out
-    # the summary counts the mathematics record and its [float]
-    # companion; nothing is falsified and no witness names `inf`
     assert "inf=" not in out, out
+    (record,) = json.loads(out)
+    rows = [r for r in record["claims"] if r["source"] == "decorator"]
+    headline = next(r for r in rows if r["claim"].startswith("f_x_approx")
+                    and "[" not in r["claim"])
     if expected == "proven":
-        assert "1 proven" in out and "0 falsified" in out, out
+        companion = next(r for r in rows if "[float" in r["claim"])
+        # np.max raises on the empty vector, which the claim's
+        # empty-input line reports: that is the claim's only witness,
+        # and every non-empty vector agrees with the infinite order
+        assert headline["counterexample"] == "x = []", headline
+        assert companion["verdict"] == "holds", companion
     else:
-        assert "0 proven" in out and "falsified)" in out \
-            and "0 falsified" not in out, out
+        assert headline["verdict"] == "falsified", headline
+        assert headline["counterexample"] != "x = []", headline
 
 
 # --- the evaluation path: numpy's norm, both ranks, the matrix orders ------
