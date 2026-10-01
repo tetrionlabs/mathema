@@ -352,3 +352,31 @@ def test_a_refill_that_does_not_repeat_falsifies_is_deterministic():
     det = rows["is_deterministic"]
     assert det.verdict == "falsified", (det.verdict, det.note)
     assert det.counterexample.startswith("x = nan")
+
+
+# --- a reading that leaves a premise's region is inconclusive for it -------
+
+def test_a_member_reading_outside_the_premise_is_no_evidence_for_the_row():
+    from mathema.policy import Call, _in_region
+    nan = float("nan")
+    made = {"a": [None, nan]}
+    read = Call({"a": [None, 0.5]}, 0.5, None, None, None, "drops", False, made)
+    assert not _in_region("count(a) == 0", read)
+    assert _in_region("count(a) == 0",
+                      Call({"a": [None, None]}, None, None, None, None, "converts"))
+
+
+
+# --- a container holding two members reaches f holding both ---------------
+
+def test_a_drawn_container_holding_two_members_is_realised_with_both():
+    from mathema.runtime_types import Detection, realise
+    nan = float("nan")
+    pl = pytest.importorskip("polars")
+    series = realise([None, nan, 0.5], Detection("polars.Series", "vec", ""))
+    assert series.to_list()[0] is None and series.to_list()[1] != series.to_list()[1]
+    frame = realise([None, nan, 0.5], Detection("pandas.Series", "vec", ""))
+    assert frame.iloc[0] is None and frame.iloc[1] != frame.iloc[1]
+    listed = realise([None, nan, 0.5], Detection("list", "vec", ""))
+    assert listed[0] is None and listed[1] != listed[1]
+    assert pl.Series([None, nan]).mean() != pl.Series([None, nan]).mean()

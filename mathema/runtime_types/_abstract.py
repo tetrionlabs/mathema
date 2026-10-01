@@ -21,12 +21,14 @@ from dataclasses import dataclass, field
 class AbstractVec:
     """A vector of `len(values)` numbers, with `missing` the positions
     that hold no value and `spelling` the member they are held as
-    (`nan`, `null`, `NA`), None for the runtime type's own default.
-    The number stored at a missing position is NaN and carries no
-    meaning."""
+    (`nan`, `null`, `NA`), None for the runtime type's own default;
+    `members` the member each missing position holds, `((position,
+    member), ...)`, when they are not all one. The number stored at a
+    missing position is NaN and carries no meaning."""
     values: tuple
     missing: frozenset = frozenset()
     spelling: "str | None" = None
+    members: tuple = ()
 
     def __len__(self) -> int:
         return len(self.values)
@@ -41,10 +43,12 @@ class AbstractVec:
 class AbstractMat:
     """A matrix as a tuple of equal-length rows of numbers, with
     `missing` the `(row, column)` positions that hold no value (NaN in
-    `rows`) and `spelling` the member they are held as."""
+    `rows`) and `spelling` the member they are held as, or `members`
+    per position when they are not all one."""
     rows: tuple
     missing: frozenset = frozenset()
     spelling: "str | None" = None
+    members: tuple = ()
 
     @property
     def shape(self) -> tuple:
@@ -90,6 +94,14 @@ def _one_spelling(words) -> "str | None":
     """The member every hole is held as, when they all share one."""
     found = set(words)
     return found.pop() if len(found) == 1 else None
+
+
+def _members(words: dict) -> tuple:
+    """`((position, member), ...)` when the holes are not all one
+    member, else `()`."""
+    if len(set(words.values())) < 2:
+        return ()
+    return tuple(sorted(words.items()))
 
 
 def _hole_word(v) -> "str | None":
@@ -142,7 +154,8 @@ def abstract_of(value):
         return AbstractMat(tuple(tuple(math.nan if (i, j) in holes else _number(v)
                                        for j, v in enumerate(r))
                                  for i, r in enumerate(value)),
-                           frozenset(holes), _one_spelling(holes.values()))
+                           frozenset(holes), _one_spelling(holes.values()),
+                           _members(holes))
     values, missing, words = [], set(), []
     for k, v in enumerate(value):
         if _is_missing_element(v):
@@ -153,7 +166,8 @@ def abstract_of(value):
             values.append(_number(v))
         else:
             return None
-    return AbstractVec(tuple(values), frozenset(missing), _one_spelling(words))
+    return AbstractVec(tuple(values), frozenset(missing), _one_spelling(words),
+                       _members(dict(zip(sorted(missing), words))))
 
 
 def plain(value):

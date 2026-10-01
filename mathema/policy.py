@@ -142,6 +142,9 @@ class Call:
     # a call that returned a value no fill of the hole changed: evidence
     # against raises and propagates only
     indifferent: bool = False
+    # the arguments as the call was first made, where this call is one
+    # member's reading of it with the other members filled
+    origin: "dict | None" = None
 
 
 @dataclass
@@ -195,14 +198,14 @@ def claim_scope(name: "str | None"):
 
 def record_call(point: dict, output=None, raised: "str | None" = None,
                 keys: "list | None" = None, behaviour: "str | None" = None,
-                indifferent: bool = False) -> None:
+                indifferent: bool = False, origin: "dict | None" = None) -> None:
     """File one call at a missing input into the active batch."""
     current = _BATCH.get()
     if current is None:
         return
     current.calls.append(Call(dict(point), output, raised, _CLAIM.get(),
                               list(keys) if keys is not None else None, behaviour,
-                              indifferent))
+                              indifferent, dict(origin) if origin is not None else None))
 
 
 def record_unrepeatable(point: dict, first: tuple, second: tuple) -> None:
@@ -259,6 +262,22 @@ def _members_in(value, kind: str) -> list:
                               if s.kind == kind))
 
 
+def _in_region(premise: str, call: "Call") -> bool:
+    """Whether a call is evidence for a row with `premise`: the call as
+    first made meets it, and so does the member's reading of it; a
+    reading that leaves the region is inconclusive for the row."""
+    if not _premise_holds(premise, call.point):
+        return False
+    return call.origin is None or _premise_holds(premise, call.origin)
+
+
+def _left_region(premise: str, call: "Call") -> bool:
+    """Whether a member's reading of a call lies on the other side of
+    `premise` from the call as first made."""
+    return call.origin is not None and \
+        _premise_holds(premise, call.point) != _premise_holds(premise, call.origin)
+
+
 def _premise_holds(premise: str, point: dict) -> bool:
     """Whether a call's inputs meet a policy's premise (`count(xs) >= 1`),
     read in the claim's own words over the arguments as the claim sees
@@ -292,7 +311,7 @@ def _relevant(calls: list, param: str, kind: str, member: "str | None",
     out = []
     for c in calls:
         members = _members_at(c, param, kind)
-        if (member in members if member else members) and _premise_holds(premise, c.point):
+        if (member in members if member else members) and _in_region(premise, c):
             out.append(c)
     return out
 
@@ -471,7 +490,7 @@ def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
                 record_unrepeatable(at, (value, raised), (got, err))
         out.extend(Call(at, got, err, None, None,
                         "drops" if behaviour == INDIFFERENT else behaviour,
-                        behaviour == INDIFFERENT)
+                        behaviour == INDIFFERENT, point if at is not point else None)
                    for at, got, err, behaviour in pieces
                    if behaviour not in (INCONCLUSIVE, NOT_REPEATABLE))
     return out
@@ -1229,7 +1248,7 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
                      if not (set(_members_at(c, p, kind))
                              & (done_members | stated_members))
                      and not any((m is None or m in _members_at(c, p, kind))
-                                 and _premise_holds(pr, c.point) for m, pr in premised)]
+                                 and _in_region(pr, c) for m, pr in premised)]
             # a record's own rows read the calls its claims made, and run
             # nothing of their own
             if not calls:
@@ -2186,7 +2205,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
             for r in stated:
                 pol = parse_policy(r.statement) if r.verdict == "falsified" else None
                 bad = [c for c in calls if pol is not None
-                       and _premise_holds(pol.premise, c.point) and not _follows(pol, c)]
+                       and _in_region(pol.premise, c) and not _follows(pol, c)]
                 if bad:
                     wrong.append((r, bad[0]))
             stated = [r for r in stated if r.verdict != "falsified"
@@ -2224,10 +2243,13 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                 rest = [pol for pol in library_here
                         if pol.premise not in {q.premise for q in stated_pols}]
                 broken = next(((pol, c) for c in calls for pol in rest
-                               if _premise_holds(pol.premise, c.point)
+                               if _in_region(pol.premise, c)
                                and not _follows(pol, c)), None)
+                # a reading that left a premise's region is inconclusive
+                # for that row, so it is no uncovered call either
                 uncovered = [c for c in calls
-                             if not any(_premise_holds(q.premise, c.point)
+                             if not any(_in_region(q.premise, c)
+                                        or _left_region(q.premise, c)
                                         for q in stated_pols + rest)]
                 if broken is not None:
                     pol, c = broken

@@ -97,8 +97,16 @@ POLARS_SPELLINGS = {"null": (lambda: None, lambda v: v is None),
                     "nan": (lambda: math.nan, _is_nan)}
 
 
-def _missing_to(values, missing, fill) -> list:
-    return [fill if k in missing else v for k, v in enumerate(values)]
+def _missing_to(values, missing, fill, per: "dict | None" = None) -> list:
+    return [(per[k] if per and k in per else fill) if k in missing else v
+            for k, v in enumerate(values)]
+
+
+def _per_position(options: dict, spellings: dict, default: str, abstract) -> dict:
+    """The value each missing position is realised as, where an abstract
+    value's holes are not all one member: `{position: value}`."""
+    return {pos: _spelling(options, spellings, default, word)
+            for pos, word in getattr(abstract, "members", ())}
 
 
 #: the older spellings of the member words, read as the words
@@ -163,7 +171,8 @@ class ListAdapter:
     def realise(self, abstract, options):
         if isinstance(abstract, AbstractMat):
             fill = _spelling(options, self.MISSING, "null", abstract.spelling)
-            return [[fill if (i, j) in abstract.missing else v
+            per = _per_position(options, self.MISSING, "null", abstract)
+            return [[per.get((i, j), fill) if (i, j) in abstract.missing else v
                      for j, v in enumerate(r)]
                     for i, r in enumerate(abstract.rows)]
         if isinstance(abstract, AbstractTable):
@@ -171,7 +180,8 @@ class ListAdapter:
                     for name, col in abstract.columns.items()}
         return _missing_to(abstract.values, abstract.missing,
                            _spelling(options, self.MISSING, "null",
-                                     abstract.spelling))
+                                     abstract.spelling),
+                           _per_position(options, self.MISSING, "null", abstract))
 
     def observe(self, obj):
         from ._abstract import abstract_of
@@ -345,8 +355,10 @@ def _pandas_column(abstract: AbstractVec, options: dict, index):
     spellings = {"nan": lambda: math.nan, "null": lambda: None,
                  "NA": lambda: pd.NA}
     fill = _spelling(options, spellings, "nan", abstract.spelling)
-    values = _missing_to(abstract.values, abstract.missing, fill)
-    if fill is None:
+    per = _per_position(options, spellings, "nan", abstract)
+    values = _missing_to(abstract.values, abstract.missing, fill, per)
+    if fill is None or per:
+        # an object column holds None, nan and pd.NA side by side
         return pd.Series(values, index=index, dtype=object)
     if fill is pd.NA:
         return pd.Series(values, index=index, dtype="Float64")
@@ -440,10 +452,10 @@ def _polars_values(abstract: AbstractVec, options: "dict | None" = None
     """A vector's values for a polars Series, a missing position held
     as `null` (the default) or `NaN`, which polars treats as an
     ordinary float and mathema reads as missing all the same."""
-    fill = _spelling(options or {}, {"null": lambda: None,
-                                     "nan": lambda: math.nan}, "null",
-                     abstract.spelling)
-    values = _missing_to(abstract.values, abstract.missing, fill)
+    spellings = {"null": lambda: None, "nan": lambda: math.nan}
+    fill = _spelling(options or {}, spellings, "null", abstract.spelling)
+    values = _missing_to(abstract.values, abstract.missing, fill,
+                         _per_position(options or {}, spellings, "null", abstract))
     if any(isinstance(v, float) for v in values):
         # one dtype for the column: an int among floats is a float
         values = [float(v) if isinstance(v, int) else v for v in values]

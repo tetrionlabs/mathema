@@ -9,7 +9,8 @@ The floor, once per claim and parameter, in order:
   constant vector, a vector of length 1; per admitted hole member, an
   all-hole vector of length 1 and of length 2, and a vector with one
   hole at the first position and one at the last; per two admitted
-  members, a vector holding both;
+  members, a vector of the two alone and one holding both beside a
+  value;
 - a matrix: the zero matrix (when the entries may be 0), a constant
   matrix, a rank-deficient one (its second row a copy of its first);
   per admitted member, one hole entry and an all-hole row; per two
@@ -80,6 +81,7 @@ def vector_floor(holes: list, admits_zero: bool, length_free: bool,
         items.append(lambda base, h=h: [*base[:-1], h] if len(base) > 1 else None)
     for h, g in _pairs(holes):
         if length_free:
+            items.append(lambda base, h=h, g=g: [h, g])
             items.append(lambda base, h=h, g=g: [h, g, base[0]] if base else None)
         else:
             items.append(lambda base, h=h, g=g: [h, g, *base[2:]] if len(base) > 1

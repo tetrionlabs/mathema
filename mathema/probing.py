@@ -648,12 +648,14 @@ class ExecutedMissing:
                     # raises and propagates only
                     from .policy import record_call
                     record_call(at, got, err, keys=keys_of(at, self.paths),
-                                behaviour="drops", indifferent=True)
+                                behaviour="drops", indifferent=True,
+                                origin=point if at is not point else None)
                 continue
-            self._file(at, got, err, keys_of(at, self.paths), behaviour)
+            self._file(at, got, err, keys_of(at, self.paths), behaviour,
+                       origin=point if at is not point else None)
 
     def _file(self, point: dict, output, raised: "str | None", keys: list,
-              behaviour: str) -> None:
+              behaviour: str, origin: "dict | None" = None) -> None:
         """File one call's behaviour under every key it holds."""
         from ._missing_policy import is_path, member_changes, no_value_slots
         from ._missing_words import outcome_entry, path_said, said, value_shown
@@ -669,7 +671,7 @@ class ExecutedMissing:
                 respelled.setdefault((p, word),
                                      f"{p}{where}={shown} returned as {back}")
         from .policy import record_call
-        record_call(point, output, raised, keys=keys, behaviour=behaviour)
+        record_call(point, output, raised, keys=keys, behaviour=behaviour, origin=origin)
         for p, kind, member in keys:
             if is_path(p):
                 # a field's or key's no-value, said by its path

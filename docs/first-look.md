@@ -184,8 +184,8 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
            inferred alpha=1 from the claim's own literal argument; at x = [null, null] f raised TypeError; at x = [nan, nan, nan, nan, nan, nan] f gave nan back
   proven  collapses_derived: f(x, 1.0) = x[-1]
            ∀ x ∈ Seq(ℝ); missing for x (list) means null or nan
-  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (248 entries across 54 draws, sizes (1, 1) to (8, 1))
-           the float64 computation of collapses_derived ran at 54 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raised TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back
+  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (250 entries across 55 draws, sizes (1, 1) to (8, 1))
+           the float64 computation of collapses_derived ran at 55 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raised TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back
   FALSIFY missing[x]: f has no single policy for a missing x
            f gives a hole back at x = [nan, nan, nan, nan, nan, nan], alpha = 1.0; at x = [null, null], alpha = 1.0 it raises TypeError instead; at x = [null] it converts the null slot to an absent result
            to state each case, write `assuming len(x) == 1, missing(f, x, null) converts`, `assuming len(x) >= 2, missing(f, x, null) raises(TypeError)` and `missing(f, x, nan) propagates`; or make f treat a missing x one way
@@ -255,8 +255,8 @@ ema:
     - name: "collapses_derived[float]"
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
-      n: 54
-      note: "the float64 computation of collapses_derived ran at 54 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raised TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back"
+      n: 55
+      note: "the float64 computation of collapses_derived ran at 55 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raised TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back"
       route: "probe"
     - name: "collapses_probed"
       statement: "f(x, 1.0) = x[-1]"
@@ -283,7 +283,7 @@ ema:
       basis: "when L = 1: x[0]; otherwise x[L - 1] and x[L - 1] simplify identically"
     - step: "evidence"
       claim: "f(x, 1.0) = x[-1]"
-      basis: "probed, n=54"
+      basis: "probed, n=55"
     - step: "situating"
       claim: "instantiates: summation, folded-sum"
       basis: "deterministic concept tagging"

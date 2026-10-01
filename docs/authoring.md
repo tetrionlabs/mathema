@@ -706,19 +706,19 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7982b776d687
   holds   result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
-  holds   is_deterministic: f(scores) = f(scores) (837 entries across 155 draws, sizes (1, 1) to (8, 1))
+  holds   is_deterministic: f(scores) = f(scores) (835 entries across 155 draws, sizes (1, 1) to (8, 1))
            derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
   holds   is_state_safe: f(scores) = f(scores) (48 draws)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (949 entries across 192 draws, sizes (1, 1) to (8, 1))
-  holds   preserves_length: len(f(scores)) = len(scores) (784 entries across 153 draws, sizes (1, 1) to (8, 1))
+  holds   preserves_length: len(f(scores)) = len(scores) (809 entries across 154 draws, sizes (1, 1) to (8, 1))
            at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
   FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
            counterexample scores = [0, 0]: [0.5, 0.5] vs [0.0, 0.0]
-  holds   preserves_type: type(f(scores)) = type(scores) (834 entries across 156 draws, sizes (1, 1) to (8, 1))
+  holds   preserves_type: type(f(scores)) = type(scores) (805 entries across 152 draws, sizes (1, 1) to (8, 1))
            at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
   FALSIFY is_sorted_output: is_sorted_output(f(scores))
            counterexample scores = [4.86304, 8.4521, -9.06059, -3.61645]: output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
-  holds   sums_to_one: sum(f(scores)) = 1 (753 entries across 154 draws, sizes (1, 1) to (8, 1))
+  holds   sums_to_one: sum(f(scores)) = 1 (741 entries across 151 draws, sizes (1, 1) to (8, 1))
            derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
   FALSIFY missing[scores, null]: missing(f, scores, null) propagates   [mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError]
            if the raise is intended, write `missing(f, scores, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept softmax missing[scores, null] --as discovery --corrected "missing(f, scores, null) raises(TypeError)"
