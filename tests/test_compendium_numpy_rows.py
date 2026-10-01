@@ -77,7 +77,7 @@ def test_every_row_holds_against_the_installed_numpy(tmp_path, relative):
 def test_the_numbers_of_rows():
     assert {relative: (len(_definition_rows(relative)), len(_rows(relative)))
             for relative in _FILES} == {
-        "numpy/linalg.claims.yaml": (12, 21),
+        "numpy/linalg.claims.yaml": (11, 21),
         "numpy/linalg_2_4.claims.yaml": (1, 1),
         "numpy/elementwise.claims.yaml": (6, 7),
         "numpy/statistics.claims.yaml": (21, 24)}

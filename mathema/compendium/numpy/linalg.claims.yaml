@@ -33,10 +33,11 @@ numpy.linalg.solve:
 numpy.linalg.pinv:
   claims:
     - name: definition
-      statement: "for a in R^(m,n) \\ {∅}, f(a) ~= pinv(a)"
-      note: "The Moore-Penrose pseudo-inverse, through the singular value decomposition."
+      statement: "for a in R^(m,n) \\ {∅}, assuming cond(a) < 1e15, f(a) ~= pinv(a)"
+      note: "The Moore-Penrose pseudo-inverse, through the singular value decomposition. A singular value at most 1e-15 times the largest (the default rcond) is read as zero, so the pseudo-inverse is stated where every singular value is above that cutoff."
     - name: inverse_when_nonsingular
-      statement: "for a in R^(n,n) \\ {∅}, assuming det(a) != 0, f(a) ~= inv(a)"
+      statement: "for a in R^(n,n) \\ {∅}, assuming cond(a) < 1e15, f(a) ~= inv(a)"
+      note: "A nonsingular matrix with a singular value at most 1e-15 times the largest is not inverted: that value is read as zero."
     - name: penrose
       statement: "for a in R^(m,n) \\ {∅}, a @ f(a) @ a ~= a"
 
@@ -50,8 +51,9 @@ numpy.linalg.eigvalsh:
 
 numpy.linalg.matrix_rank:
   claims:
-    - name: definition
-      statement: "for A in R^(m,n) \\ {∅}, f(A) == rank(A)"
+    - name: at_most_rank
+      statement: "for A in R^(m,n) \\ {∅}, f(A) <= rank(A)"
+      note: "Counts the singular values above the tolerance S.max() * max(M, N) * eps, so it is below the rank where a nonzero singular value falls under it (diag(1, 1e-18) has rank 2 and matrix_rank 1). It has no definition row: it is not rank(A)."
 
 numpy.linalg.cond:
   claims:
