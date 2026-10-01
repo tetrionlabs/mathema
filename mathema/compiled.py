@@ -179,7 +179,8 @@ def numeric_check(lhs: CompiledForm, rhs: CompiledForm, relation: str,
             return None, checked, None
         checked += 1
         if not ok:
-            coords = ", ".join(f"{n}={point[n]:.6g}" for n in names)
+            from .probing import _fmt_coordinate
+            coords = ", ".join(f"{n}={_fmt_coordinate(point[n])}" for n in names)
             return "falsified", checked, f"{coords}: {lv!r} vs {rv!r}"
     if checked >= max(6, trials // 4):
         # the floor bends for expensive backends (a quad-backed check

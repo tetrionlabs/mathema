@@ -735,13 +735,15 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
 
 def _fmt_point(point, names):
-    """A point rendered for a counterexample string, numeric coords
-    as :.6g, discrete/string coords (a string domain member) as-is."""
+    """A point rendered for a counterexample string, a float coordinate
+    at full precision (`probing._fmt_coordinate`), discrete/string
+    coords (a string domain member) as-is."""
     parts = []
     for n in names:
         if n not in point:
             continue
         v = point[n]
+        from .probing import _fmt_coordinate
         if isinstance(v, str):
             from .probing import spell_text
             parts.append(f"{n}={spell_text(v)}")
@@ -753,8 +755,8 @@ def _fmt_point(point, names):
             # arguments
             parts.append(f"{n} = {capped}")
             continue
-        parts.append(f"{n}={v:.6g}" if isinstance(v, (int, float))
-                     and not isinstance(v, bool) else f"{n}={v!r}")
+        parts.append(f"{n}={_fmt_coordinate(v)}" if isinstance(v, float)
+                     else f"{n}={v!r}")
     return ", ".join(parts)
 
 

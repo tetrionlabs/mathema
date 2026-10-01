@@ -1425,11 +1425,35 @@ def _fmt_value_of(v) -> str:
     return shown
 
 
+def _fmt_coordinate(v) -> str:
+    """Intent:
+        One witness coordinate at full precision: a float keeps its
+        six-digit spelling when that reads back as the same float, and
+        otherwise prints every digit it needs (`exact_float_text`), so
+        a point read back from the record is the point that was
+        checked. Containers recurse; anything else is `_fmt_value`.
+    """
+    from ._float_text import exact_float_text
+    if isinstance(v, float):
+        return exact_float_text(v, f"{v:.6g}")
+    if isinstance(v, complex):
+        re_text = exact_float_text(v.real, f"{v.real:.6g}")
+        im_text = exact_float_text(v.imag, f"{v.imag:.6g}")
+        sign = "" if im_text.startswith("-") else "+"
+        return f"{re_text}{sign}{im_text}j"
+    if isinstance(v, list):
+        return "[" + ", ".join(_fmt_coordinate(x) for x in v) + "]"
+    if isinstance(v, tuple):
+        return "(" + ", ".join(_fmt_coordinate(x) for x in v) + ")"
+    return _fmt_value(v)
+
+
 def _fmt(args: tuple, names: tuple[str, ...] | None = None,
          shown: "set[str] | None" = None) -> str:
     """A counterexample's argument tuple, legible on its own: labeled
     `name=value` pairs when the caller's own parameter names are known,
-    a bare positional tuple otherwise. Unlabeled, a two-element
+    a bare positional tuple otherwise, each value at full precision
+    (`_fmt_coordinate`). Unlabeled, a two-element
     counterexample like `([...], -5.54)` reads as (input, output);
     it's actually (x, alpha), both inputs. With `shown`, only the named
     arguments in it appear (all of them when none is)."""
@@ -1441,8 +1465,8 @@ def _fmt(args: tuple, names: tuple[str, ...] | None = None,
         # a large vector or matrix prints its shape, a first row and a
         # count; the full value rides in the counterexample's arguments
         return ", ".join(f"{n} = {capped}" if (capped := witness_text(a)) is not None
-                         else f"{n}={_fmt_value(a)}" for n, a in pairs)
-    return "(" + ", ".join(witness_text(a) or _fmt_value(a) for a in args) + ")"
+                         else f"{n}={_fmt_coordinate(a)}" for n, a in pairs)
+    return "(" + ", ".join(witness_text(a) or _fmt_coordinate(a) for a in args) + ")"
 
 
 def _sampling_shorthand(kinds: dict, domain: dict, n: int,
