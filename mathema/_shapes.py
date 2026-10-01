@@ -532,6 +532,7 @@ class DimensionPlan:
     params: dict
     result: "tuple | None" = None
     result_source: "str | None" = None
+    elements: dict = dataclasses.field(default_factory=dict)
 
 
 def dimension_plan(shapes: dict, domains: dict) -> DimensionPlan:
@@ -591,8 +592,64 @@ def dimension_plan(shapes: dict, domains: dict) -> DimensionPlan:
                   for p, (dims, source) in params.items()}
     result = (tuple(str(d) for d in shapes["return"].dims)
               if "return" in shapes else None)
+    # a space a claim binds states its entries as well as its shape
+    elements = {p: dataclasses.replace(domains[p], dims=())
+                for p in params
+                if dims_of(domains.get(p)) and dataclasses.is_dataclass(
+                    domains[p])}
     return DimensionPlan(params, result,
-                         marker_text(result) if result is not None else None)
+                         marker_text(result) if result is not None else None,
+                         elements)
+
+
+def _table_as_matrix(value, rank: int) -> "tuple | None":
+    """Intent:
+        The `(rows, columns)` shape of a table whose columns are all of
+        one length, read as the matrix it holds when the declared rank
+        is two; None for anything else.
+    """
+    from .runtime_types import AbstractTable, observe
+    if rank != 2:
+        return None
+    seen = observe(value)
+    if not isinstance(seen, AbstractTable) or not seen.columns:
+        return None
+    lengths = {len(c) for c in seen.columns.values()}
+    if len(lengths) != 1:
+        return None
+    return (lengths.pop(), len(seen.columns))
+
+
+def _entry_outside(value, element) -> "tuple | None":
+    """Intent:
+        `(entry,)` for the first entry of a container value outside the
+        element domain, or None when every entry is a member. A missing
+        entry is judged by the element domain's own missing rule; any
+        other entry must be a number of the element domain
+        (`domain.number_member`), so text, a bool, an imaginary number
+        and an infinity in a bare real set are outside.
+    """
+    from .domain import domain_contains, is_missing, number_member
+    kind = getattr(getattr(value, "dtype", None), "kind", None)
+    if (kind in ("i", "u", "f") and type(value).__module__ == "numpy"
+            and getattr(element, "base_type", None) == "R"
+            and not element.pieces and not element.excluded):
+        # a numeric array against the bare reals: only an infinity is
+        # outside, found without visiting every entry in Python
+        flat = value.ravel()
+        if kind != "f":
+            return None
+        import numpy
+        hits = numpy.flatnonzero(numpy.isinf(flat))
+        return (flat[hits[0]].item(),) if hits.size else None
+    for leaf in leaves(value):
+        if is_missing(leaf):
+            if not domain_contains(leaf, element):
+                return (leaf,)
+            continue
+        if not number_member(leaf, element):
+            return (leaf,)
+    return None
 
 
 def entry_problem(plan: DimensionPlan, arguments: dict) -> tuple:
@@ -610,6 +667,8 @@ def entry_problem(plan: DimensionPlan, arguments: dict) -> tuple:
         value = arguments[p]
         shape = observed_shape(value)
         if shape is None or len(shape) != len(dims):
+            shape = _table_as_matrix(value, len(dims)) or shape
+        if shape is None or len(shape) != len(dims):
             return (f"{p} {describe(shape, value)}; {source} expects "
                     f"{expected(dims)}", bound)
         for n, d in zip(shape, dims):
@@ -626,6 +685,13 @@ def entry_problem(plan: DimensionPlan, arguments: dict) -> tuple:
                         f"{describe(other_shape)}, so {p} must "
                         f"{must(dims, sizes)}", bound)
             bound.setdefault(d, (n, p, shape))
+        element = plan.elements.get(p)
+        if element is not None:
+            outside = _entry_outside(value, element)
+            if outside is not None:
+                return (f"{p} has the entry {outside[0]!r}, outside "
+                        f"{domain_text(element)}; {source} expects every "
+                        f"entry in it", bound)
     return None, bound
 
 
