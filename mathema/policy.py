@@ -661,6 +661,35 @@ def _written(policies: list) -> str:
 
 # --- a stated policy claim ------------------------------------------------
 
+def none_default_misspecified(fn, params: "list | None" = None) -> "str | None":
+    """Why a parameter annotated with a type that has no None, yet
+    defaulting to None, leaves its absence undecided (`x: float = None`),
+    or None: the sentence for the first such parameter."""
+    import inspect
+    import typing
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return None
+    for p, param in sig.parameters.items():
+        if params is not None and p not in params:
+            continue
+        ann = param.annotation
+        if param.default is not None or ann is inspect.Parameter.empty:
+            continue
+        if isinstance(ann, str):
+            text = ann
+            if any(w in text for w in ("None", "Optional", "Any", "object")):
+                continue
+        else:
+            if ann in (typing.Any, object) or _admits_none(ann):
+                continue
+            text = getattr(ann, "__name__", None) or repr(ann).replace("typing.", "")
+        return (f"{p} is annotated {text} but defaults to None; annotate it "
+                f"Optional[{text}] or change the default")
+    return None
+
+
 def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
     """Intent:
         The row for one stated policy claim `cj` (relation `policy`),
@@ -689,6 +718,12 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
     if stated.kind == "absent" and stated.parameter is None \
             and stated.behaviour == "introduces":
         return _adjudicate_return(cj, fn, stated, statement, current, meta, unknown)
+    misspecified = none_default_misspecified(
+        fn, [stated.parameter] if stated.parameter else None) \
+        if stated.kind == "absent" else None
+    if misspecified:
+        return Probe(cj.name, statement, "skipped:misspecified", route=None,
+                     note=misspecified, meta={**meta, "mathema.invalid_conjecture": True})
     params = [stated.parameter] if stated.parameter else [
         p for p in facts.params if _admits(fn, p, stated.kind)]
     rows_calls: list = []
@@ -2051,6 +2086,10 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
     whole = cj.lhs not in facts.params
     params = list(facts.params) if whole else [cj.lhs]
     statement = f"{cj.relation}({cj.lhs})"
+    misspecified = none_default_misspecified(fn, params) if kind == "absent" else None
+    if misspecified:
+        return Probe(cj.name, statement, "skipped:misspecified", route=None,
+                     note=misspecified, meta={"mathema.invalid_conjecture": True})
     current = active_batch()
     signature = missing_policy_from_signature(fn)
     composed = composed_policies(fn, facts)

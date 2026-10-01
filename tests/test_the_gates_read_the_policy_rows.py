@@ -216,3 +216,17 @@ def test_the_absent_gate_round_trips_through_the_store():
     assert canonical_claim_text(cj) == "is_absent_safe(f)"
     (again,) = entry_claims({"claims": [declare(cj)]})
     assert again.relation == "is_absent_safe"
+
+
+def none_default(x: float = None) -> float:
+    return x + 1.0
+
+
+def test_a_float_that_defaults_to_none_is_misspecified():
+    row = _gate(none_default, "is_absent_safe(f)")
+    assert row.verdict == "skipped:misspecified"
+    assert row.note == ("x is annotated float but defaults to None; annotate it "
+                        "Optional[float] or change the default")
+    stated = check_conjectures(none_default, [claim("absent(f, x) raises(TypeError)")])[-1]
+    assert stated.verdict == "skipped:misspecified"
+    assert stated.note == row.note
