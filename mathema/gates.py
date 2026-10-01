@@ -954,9 +954,15 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         falsified.counterexample = pt or falsified.counterexample
         detail = deps["probe_finite"](result.point)
         if pt and isinstance(detail, str) and \
-                detail.startswith("the claim's own side has no real value"):
+                detail.startswith("the claim's own"):
+            # the witness carries why the claim fails there: its own
+            # side has no value (no real value, or an expression of it
+            # raising, named first)
+            reason = (detail if "no real value" in detail else
+                      f"{detail}, so the claim's own side has no real "
+                      f"value here")
             falsified.counterexample = (
-                f"{pt}: {detail}; narrow the claim's domain to where every "
+                f"{pt}: {reason}; narrow the claim's domain to where every "
                 f"side of it is real")
         if falsified.stratum is None:
             # a symbolic disproof plus a reproduced executed witness is
@@ -1105,13 +1111,13 @@ def _exact_claim_at(cj, fn, facts, point: dict, assum) -> "bool | None":
     """Intent:
         Whether the claim holds at one executed point in exact
         arithmetic: the derive route run over the domain pinned to that
-        point, each coordinate the exact rational value of the float
-        that was executed. True or False when it decides, None when it
+        point, each coordinate the decimal reading of the float that
+        was executed (`repr`, as a declared bound is read). True or False when it decides, None when it
         does not (a sequence or non-numeric coordinate, a bound
         function, a claim with no relation, an undecided or timed-out
         attempt).
     """
-    from fractions import Fraction
+    import sympy
 
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     from .symbolic import try_prove
@@ -1123,7 +1129,11 @@ def _exact_claim_at(cj, fn, facts, point: dict, assum) -> "bool | None":
         if isinstance(value, bool) or not isinstance(value, (int, float)) \
                 or value != value or value in (float("inf"), float("-inf")):
             return None
-        exact = Fraction(value)
+        # the decimal reading of the executed float, the same reading
+        # the derive route gives a declared bound, so a domain corner
+        # pins to the corner the proof quantified over
+        exact = sympy.Rational(repr(float(value))) \
+            if isinstance(value, float) else sympy.Integer(value)
         pinned[name] = (exact, exact)
     try:
         result = _with_timeout(
@@ -1239,7 +1249,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             # arithmetic too: the proof, not the computation, failed
             return Probe(
                 name, parent.statement, "falsified", route="probe",
-                n=sweep.checked, counterexample=pt, note=what,
+                n=sweep.checked, counterexample=f"{pt}: {sweep.detail}",
+                note=what,
                 sketch=f"the proof of {parent.name} failed: at {pt} the "
                        f"claim is false in exact arithmetic as well as in "
                        f"the computation ({sweep.detail})",
