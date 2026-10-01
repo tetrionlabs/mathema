@@ -413,6 +413,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
     def decorator(fn):
         import functools
 
+        from .domain import number_member
         from .grammar import is_missing, domain_contains, render_domain
         from .types import domain_from_signature
 
@@ -455,15 +456,14 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             numeric_only = (isinstance(bounds, (str, tuple))
                             or (hasattr(bounds, "pieces")
                                 and not any(isinstance(p, frozenset) for p in bounds.pieces)))
-            if numeric_only and isinstance(value, complex) \
-                    and not isinstance(value, (int, float)):
-                # a complex value IS a candidate against a numeric
-                # bound: domain_contains reads a zero-imaginary complex
-                # as the real number it equals and rejects a genuinely
-                # imaginary one, never silently exempt.
-                return domain_contains(value, bounds)
-            if numeric_only and (not isinstance(value, (int, float)) or isinstance(value, bool)):
-                return True   # not a candidate, exempt, not a violation
+            # a number of any numeric type (a bool, a numpy scalar, a
+            # Fraction, a Decimal, a complex) is judged by its value;
+            # a zero-imaginary complex reads as the real number it is
+            member = number_member(value, bounds)
+            if member is not None:
+                return member
+            if numeric_only:
+                return True   # not a number: not a candidate, exempt
             return domain_contains(value, bounds)
 
         def _violation(name: str, value) -> str | None:

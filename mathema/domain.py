@@ -19,6 +19,7 @@ new code should import from here.
 """
 from __future__ import annotations
 
+import fractions
 import math
 import re
 from dataclasses import dataclass
@@ -724,11 +725,12 @@ def _real_scalar(value):
     Notes:
         A `complex` with zero imaginary part reads as its real part
         (3+0j is the number 3); one with a nonzero imaginary part is
-        not a member of any R/Z/N domain.
+        not a member of any R/Z/N domain. A `Fraction` is its own exact
+        value, compared exactly against the endpoints.
     """
     if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float, fractions.Fraction)):
         return value
     if isinstance(value, complex):
         return value.real if value.imag == 0 else None
@@ -1062,6 +1064,73 @@ def domain_contains(value, bound) -> bool:
     if not dom.pieces:
         return True   # unrestricted within base_type
     return any(_piece_contains(value, p) for p in dom.pieces)
+
+
+def plain_number(value):
+    """Intent:
+        A number of any numeric type as the plain Python number with
+        exactly its value, for judging membership: a numpy scalar, a
+        `Fraction` or a `Decimal` with an integer value becomes an
+        `int`; a binary float of any width becomes a `float`; a
+        non-integer `Fraction` or `Decimal` becomes an exact `Fraction`;
+        a complex number of any width becomes a `complex`. A bool, a
+        plain number and anything that is not a number come back
+        unchanged.
+    """
+    import decimal
+    import numbers
+    if isinstance(value, bool) or type(value) in (int, float, complex):
+        return value
+    if type(value).__name__ in ("bool_", "bool") \
+            and type(value).__module__ == "numpy":
+        return bool(value)
+    if not isinstance(value, numbers.Number):
+        return value
+    if isinstance(value, numbers.Integral):
+        return int(value)
+    if isinstance(value, decimal.Decimal):
+        if not value.is_finite():
+            return float(value)
+        exact = fractions.Fraction(value)
+        return int(exact) if exact.denominator == 1 else exact
+    if isinstance(value, numbers.Rational):
+        exact = fractions.Fraction(value.numerator, value.denominator)
+        return int(exact) if exact.denominator == 1 else exact
+    if isinstance(value, numbers.Real):
+        as_ratio = getattr(value, "as_integer_ratio", None)
+        try:
+            exact = fractions.Fraction(*as_ratio()) if as_ratio else None
+        except (OverflowError, ValueError, TypeError):
+            exact = None
+        if exact is None:
+            return float(value)
+        widened = float(value)
+        return widened if fractions.Fraction(widened) == exact else exact
+    if isinstance(value, numbers.Complex):
+        return complex(value)
+    return value
+
+
+def number_member(value, bounds) -> "bool | None":
+    """Intent:
+        Membership of one number in a numeric domain, whatever the
+        number's type, or None when `value` is not a number (the
+        caller decides what a non-number means). A bool is a member of
+        no numeric domain; a value is judged by its exact value
+        (`plain_number`), so `np.float32(5.0)`, `Fraction(5)` and
+        `Decimal(5)` are each the number 5; an infinity is not a member
+        of a bare real, integer or natural set.
+    """
+    v = plain_number(value)
+    if isinstance(v, bool):
+        return False
+    if not isinstance(v, (int, float, complex, fractions.Fraction)):
+        return None
+    dom = _as_domain(bounds)
+    if (isinstance(v, float) and math.isinf(v) and not dom.pieces
+            and dom.base_type in ("R", "Z", "N")):
+        return False
+    return domain_contains(v, bounds)
 
 
 _TYPE_GLYPH = {"R": "ℝ", "Z": "ℤ", "N": "ℕ", "C": "ℂ"}
