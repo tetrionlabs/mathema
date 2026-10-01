@@ -511,7 +511,7 @@ def _element_scalars(lhs, rhs, domain: "dict | None", view: "SeqLiftView"):
                      key=str):
         base = str(ix.base)
         index = ix.indices[0] if ix.indices else 0
-        name = f"{base}_{index}"
+        name = f"{base}[{index}]"
         symbol = sympy.Symbol(name, real=True)
         replacements[ix] = symbol
         params[name] = symbol
