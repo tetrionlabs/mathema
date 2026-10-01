@@ -453,7 +453,7 @@ class _Examiner:
         self.origin: dict = {}      # local name -> ("param", p) | ("global", n)
                                     # | ("value", obj, dotted) | ("fresh",)
 
-    # -- entry ------------------------------------------------------------
+    # entry
 
     def run(self) -> Effects:
         tree = _project_source(self.fn)
@@ -489,7 +489,7 @@ class _Examiner:
                     break
         return self.effects
 
-    # -- what a name or expression is --------------------------------------
+    # what a name or expression is
 
     def _origin_of(self, node):
         """Where the value of `node` comes from: a parameter, a
@@ -564,7 +564,7 @@ class _Examiner:
             return shown
         return None
 
-    # -- statements -----------------------------------------------------------
+    # statements
 
     def visit(self, node) -> None:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -760,7 +760,7 @@ class _Examiner:
             self.effects.add(Site("write", f"{self.name} changes {changed} "
                                   f"({shown})"))
 
-    # -- expressions ----------------------------------------------------------
+    # expressions
 
     def expr(self, node) -> None:
         if isinstance(node, ast.Lambda):

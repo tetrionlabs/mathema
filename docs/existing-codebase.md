@@ -114,7 +114,10 @@ claim you wrote.
 ## 3. Start from a suggestion
 
 For one function, `mathema claims --suggest` renders the standard claims
-mathema would check, each with the route it would take:
+mathema would check, each with the route it would take, in three
+sections: claims that stand alone, questions with candidate answers
+(which way f moves or bends in each parameter), and claims likely to be
+unknowable (none here):
 
 <!-- example: codebase run -->
 ```bash
@@ -124,13 +127,25 @@ mathema claims billing.fees.discounted --suggest --root .
 <!-- example: codebase output match=subset -->
 ```text
 billing.fees.discounted: 17 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
-  - monotonic_increasing[price]: d(f(price, rate), price) >= 0  [route best]  [aspect: monotonicity[price]]
-  - monotonic_decreasing[price]: d(f(price, rate), price) <= 0  [route best]  [aspect: monotonicity[price]]
-  - affine[price]: d(f(price, rate), price, price) == 0  [route best]  [aspect: shape[price]]
-  - convex[price]: d(f(price, rate), price, price) >= 0  [route best]  [aspect: shape[price]]
-  - concave[price]: d(f(price, rate), price, price) <= 0  [route best]  [aspect: shape[price]]
-  - monotonic_increasing[rate]: d(f(price, rate), rate) >= 0  [route best]  [aspect: monotonicity[rate]]
-  - monotonic_decreasing[rate]: d(f(price, rate), rate) <= 0  [route best]  [aspect: monotonicity[rate]]
+ individual claims:
+  - commutative: f(price, rate) == f(rate, price)  [route best]
+  - associative: f(f(price, rate), c) == f(price, f(rate, c))  [route best]
+  - is_deterministic: f(price, rate) == f(price, rate)  [route best]
+  - is_state_safe: f(price, rate) == f(price, rate)  [route best]
+  - is_numerically_stable: g(f, price, rate) == 1  [route best]
+  - is_representation_safe[price]: is_representation_safe(price)  [route examine]
+  - is_representation_safe[rate]: is_representation_safe(rate)  [route examine]
+ questions with candidate answers (adopt every answer that holds):
+  monotonicity[price]:
+    - monotonic_increasing[price]: d(f(price, rate), price) >= 0  [route best]
+    - monotonic_decreasing[price]: d(f(price, rate), price) <= 0  [route best]
+  shape[price]:
+    - affine[price]: d(f(price, rate), price, price) == 0  [route best]
+    - convex[price]: d(f(price, rate), price, price) >= 0  [route best]
+    - concave[price]: d(f(price, rate), price, price) <= 0  [route best]
+  monotonicity[rate]:
+    - monotonic_increasing[rate]: d(f(price, rate), rate) >= 0  [route best]
+    - monotonic_decreasing[rate]: d(f(price, rate), rate) <= 0  [route best]
 ```
 
 A suggestion is not verified and never gates until someone adopts it. A

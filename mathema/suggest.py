@@ -893,3 +893,54 @@ def _write_suggested_claims(fn, suggestions: list, key: str | None, root: str) -
     merged_entry = merge_entries(existing.get(key, {}), new_entry)
     existing[key] = merged_entry
     return write_yaml(path, existing)
+
+
+#: the families examine decides, and the effects that keep each from proven
+_EXAMINED = {
+    "is_state_safe": ("writes", "unknowns"),
+    "is_deterministic": ("hidden_reads", "unknowns", "order_sensitive"),
+    "is_reproducible": ("hidden_reads", "unknowns", "order_sensitive"),
+}
+
+
+def suggestion_sections(fn, suggestions: list, facts=None) -> list:
+    """Intent:
+        `(section, reason)` per suggestion, in order: `"unknowable"`
+        with a one-line reason for a state or repeatability family the
+        examination cannot prove (something it cannot read, or a site
+        it already sees), `"question"` for a candidate answer to a
+        question other suggestions answer too (monotonicity, shape,
+        symmetry), `"individual"` for the rest; the reason is `""`
+        outside `"unknowable"`.
+    """
+    from ._examine import examine
+    from .claim_families import _generator_parameter
+    from .families import aspect_label
+    if facts is None:
+        try:
+            facts = analyze_source(fn)
+        except Exception:
+            facts = None
+    effects: dict = {}
+    out = []
+    for cj in suggestions:
+        if cj.name in _EXAMINED:
+            generator = (_generator_parameter(fn, facts)
+                         if cj.name != "is_deterministic"
+                         and facts is not None else None)
+            if generator not in effects:
+                try:
+                    effects[generator] = examine(fn, generator)
+                except Exception:
+                    effects[generator] = None
+            found = effects[generator]
+            sites = ([site for kind in _EXAMINED[cj.name]
+                      for site in getattr(found, kind)]
+                     if found is not None else [])
+            if found is None or sites:
+                out.append(("unknowable", sites[0].text if sites
+                            else "the examination could not read it"))
+                continue
+        out.append(("question" if aspect_label(cj.name) else "individual",
+                    ""))
+    return out
