@@ -386,20 +386,74 @@ def _running_extremum(ufunc_name, word):
     return running
 
 
+def _exact_midpoint(lo: float, hi: float) -> float:
+    """`(lo + hi) / 2` rounded once: exact for finite values, so two
+    huge elements never overflow on the way."""
+    from fractions import Fraction
+    if math.isfinite(lo) and math.isfinite(hi):
+        return float((Fraction(lo) + Fraction(hi)) / 2)
+    return (lo + hi) / 2
+
+
+def _median_of(values: list) -> float:
+    """The median of a list of numbers: the middle element of the
+    sorted list, or the midpoint of the two middle elements for an even
+    length. A missing element (nan) or an empty list has no median."""
+    if not values or any(math.isnan(v) for v in values):
+        return float("nan")
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[mid])
+    return _exact_midpoint(ordered[mid - 1], ordered[mid])
+
+
 def _median(*args, axis=None):
     """The median: the middle element of the sorted vector, or the
     mean of the middle two for an even length; along `axis` for a
-    matrix."""
-    out = _np().median(_values(args), axis=axis)
-    return out.item() if getattr(out, "ndim", 1) == 0 else out
+    matrix, one median per remaining index."""
+    a = _values(args)
+    if axis is None:
+        return _median_of([float(v) for v in a.ravel()])
+    return _np().apply_along_axis(
+        lambda v: _median_of([float(x) for x in v]), axis, a)
+
+
+def _quantile_of(values: list, q) -> float:
+    """The `q`-quantile of a list of numbers by linear interpolation
+    (Hyndman and Fan's type 7): with the list sorted and `h = (n - 1)
+    q`, the element at `floor(h)` plus the fraction `h - floor(h)` of
+    the gap to the next one, computed exactly and rounded once."""
+    from fractions import Fraction
+    q = float(q)
+    if not 0.0 <= q <= 1.0:
+        raise ValueError(f"a quantile level lies in [0, 1], not {q!r}")
+    if not values or any(math.isnan(v) for v in values):
+        return float("nan")
+    ordered = sorted(values)
+    h = (len(ordered) - 1) * Fraction(q)
+    lo = math.floor(h)
+    hi = min(lo + 1, len(ordered) - 1)
+    a, b = ordered[lo], ordered[hi]
+    if h == lo or a == b:
+        return float(a)
+    if not (math.isfinite(a) and math.isfinite(b)):
+        return float(a + float(h - lo) * (b - a))
+    return float(Fraction(a) + (h - lo) * (Fraction(b) - Fraction(a)))
 
 
 def _quantile(a, q):
     """The `q`-quantile of a vector (`0 <= q <= 1`), interpolated
     linearly between the two sorted elements it falls between, as
-    numpy and pandas compute it by default."""
-    out = _np().quantile(_values((a,)), q)
-    return out.item() if getattr(out, "ndim", 1) == 0 else out
+    numpy and pandas compute it by default; several levels give one
+    quantile each."""
+    values = [float(v) for v in _values((a,)).ravel()]
+    levels = q if is_array(q) or isinstance(q, (list, tuple)) else None
+    if levels is None:
+        return _quantile_of(values, q)
+    return _np().array([_quantile_of(values, level)
+                        for level in _np().asarray(levels,
+                                                   dtype=float).ravel()])
 
 
 def _matrix(x):
@@ -442,9 +496,41 @@ def _matrix_power(A, k):
     return _np().linalg.matrix_power(_matrix(A), k)
 
 
+def _fsum_products(xs, ys) -> "float | complex":
+    """The sum of the products of two equal-length sequences, with no
+    rounding but the products' own and one final rounding."""
+    products = [x * y for x, y in zip(xs, ys)]
+    if any(isinstance(p, complex) for p in products):
+        return complex(math.fsum(p.real for p in products),
+                       math.fsum(p.imag for p in products))
+    return math.fsum(products)
+
+
 def _dot(x, y):
-    out = _np().dot(_matrix(x), _matrix(y))
-    return out.item() if getattr(out, "ndim", 1) == 0 else out
+    """The inner product of two vectors, a matrix times a vector, a
+    vector times a matrix, or the product of two matrices, each entry
+    a sum of products added without intermediate rounding."""
+    np = _np()
+    a, b = _matrix(x), _matrix(y)
+    if a.ndim == 0 or b.ndim == 0:
+        return a * b
+    if a.ndim > 2 or b.ndim > 2:
+        raise ValueError("dot reads vectors and matrices")
+    if a.shape[-1] != b.shape[0]:
+        raise ValueError(f"dot of shapes {a.shape} and {b.shape}: the "
+                         f"inner dimensions differ")
+    a2 = a.reshape(1, -1) if a.ndim == 1 else a
+    b2 = b.reshape(-1, 1) if b.ndim == 1 else b
+    entries = [[_fsum_products(a2[i].tolist(), b2[:, j].tolist())
+                for j in range(b2.shape[1])] for i in range(a2.shape[0])]
+    out = np.array(entries)
+    if a.ndim == 1 and b.ndim == 1:
+        return out.item()
+    if a.ndim == 1:
+        return out[0]
+    if b.ndim == 1:
+        return out[:, 0]
+    return out
 
 
 def _outer(x, y):
