@@ -688,8 +688,8 @@ def signature_shapes(fn) -> dict:
 def _length_ties(names, domain: dict, assumption,
                  shapes: "dict | None" = None) -> dict:
     """`{name: representative}` grouping the sequences the claim makes
-    one length: two sequences bound over one dimension (`for a, b in
-    R^n`, or both `R^3`), or a premise equating their lengths
+    one length: two sequences bound over one dimension (`for a in R^n,
+    b in R^n`, or both `R^3`), or a premise equating their lengths
     (`len(a) == len(b)`, or each `== 3`). A sequence the claim does
     not bind takes its signature's Shape marker from `shapes`."""
     import re
