@@ -1429,7 +1429,22 @@ def _interval_bounds(expr, domain: dict, params: dict):
     for s in expr.free_symbols:
         if s not in box:
             box[s] = sympy.AccumBounds(-sympy.oo, sympy.oo)
-    return _interval_hull(expr, box)
+    hull = _interval_hull(expr, box)
+    if isinstance(hull, sympy.AccumBounds) \
+            and not (hull.min.is_finite and hull.max.is_finite) \
+            and all(_finite_entry(box[s]) for s in expr.free_symbols):
+        # an infinite end over a bounded box: the expression may have a
+        # pole inside it, where it has no value, so the hull bounds
+        # nothing
+        return None
+    return hull
+
+
+def _finite_entry(entry) -> bool:
+    """Whether one box entry (an `AccumBounds` or a number) is bounded."""
+    if isinstance(entry, sympy.AccumBounds):
+        return bool(entry.min.is_finite and entry.max.is_finite)
+    return bool(getattr(entry, "is_finite", False))
 
 
 def _min_max_hull(e):
