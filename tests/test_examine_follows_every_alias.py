@@ -95,6 +95,21 @@ def test_a_generator_built_without_a_seed_falsifies_determinism(fn, site):
     assert site in p.counterexample, (fn.__name__, p.counterexample)
 
 
+def test_hash_of_a_string_is_unknown_across_processes():
+    p = _row(A.r_str_hash, "is_deterministic(f)")
+    assert p.verdict == "unknown", p.verdict
+    assert "calls hash(), whose value for a string, bytes or an object " \
+        "varies across processes" in p.note, p.note
+    assert _row(A.r_str_hash, "is_state_safe(f)").verdict == "proven"
+
+
+def test_a_written_mutable_default_is_state_every_call_shares():
+    p = _row(A.w_default_mutable, "is_state_safe(f)")
+    assert p.verdict == "falsified"
+    assert ("changes its argument cache, whose default every call that "
+            "leaves it out shares") in p.counterexample, p.counterexample
+
+
 @pytest.mark.parametrize("fn", [A.r_set_order, A.r_frozenset_order,
                                 A.r_set_loop], ids=lambda f: f.__name__)
 def test_iterating_a_set_of_strings_leaves_determinism_unknown(fn):

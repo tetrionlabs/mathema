@@ -148,7 +148,7 @@ _UNREADABLE_BUILTINS = {
     "getattr": "getattr", "setattr": "setattr", "delattr": "delattr",
     "exec": "exec", "eval": "eval", "globals": "globals()",
     "vars": "vars()", "locals": "locals()", "__import__": "__import__",
-    "compile": "compile", "id": "id()", "hash": "hash()",
+    "compile": "compile",
 }
 _WRITING_BUILTINS = {"print": "writes to standard output",
                      "input": "reads standard input"}
@@ -764,6 +764,9 @@ class _Examiner:
         if kind == "param":
             if origin[1] == self.generator:
                 return None
+            if self._shared_default(origin[1]):
+                return (f"its argument {origin[1]}, whose default every "
+                        f"call that leaves it out shares")
             return f"its argument {origin[1]}"
         if kind == "global":
             return f"the module-level {origin[1]}"
@@ -1025,6 +1028,15 @@ class _Examiner:
             else:
                 self.origin[target.id] = ("fresh",)
 
+    def _shared_default(self, name: str) -> bool:
+        """Whether parameter `name` defaults to one mutable object."""
+        try:
+            default = inspect.signature(self.fn).parameters[name].default
+        except (TypeError, ValueError, KeyError):
+            return False
+        return default is not inspect.Parameter.empty and \
+            not _immutable(default)
+
     def _mutable_param(self, name: str) -> bool:
         annotation = None
         try:
@@ -1227,6 +1239,11 @@ class _Examiner:
                     self.effects.add(Site("unknown", f"{self.name} calls "
                                           f"{name}, an object mathema cannot "
                                           f"follow"))
+                return
+            if name in ("hash", "id") and name not in self.scope:
+                self.effects.add(Site("order", f"{self.name} calls {name}(), "
+                                      f"whose value for a string, bytes or an "
+                                      f"object varies across processes"))
                 return
             if name in _UNREADABLE_BUILTINS and name not in self.scope:
                 self.effects.add(Site("unknown", f"{self.name} calls "
