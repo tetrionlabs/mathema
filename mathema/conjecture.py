@@ -7265,7 +7265,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               eval(code_r, {"__builtins__": {}}, jenv)),
                 env, [*array_names, *(p for p in kinds
                                       if isinstance(env.get(p), float))],
-                (lv, rv))
+                (lv, rv), domain=cj_domain)
             call_raised[0] = call_nan[0] = call_inf[0] = None
             if allowance > 0 and relation_holds_elementwise(
                     lv, rv, cj.relation, slack + allowance,

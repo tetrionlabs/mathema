@@ -164,10 +164,10 @@ def test_every_entry_drawn_lies_in_the_space_enforce_dimensions_guards():
     SEEN.clear()
     check(share_total_30)
     assert SEEN
-    # a value comparison's round-off estimate recomputes each draw with
-    # every entry moved by a few units in its last place; any other
-    # entry outside [0, 1] is a draw from outside the space
-    outside = sorted({v for v in SEEN if not -1e-12 <= v <= 1 + 1e-12})
+    # the round-off estimate of a value comparison recomputes a draw
+    # with its entries moved by a few units in the last place, and
+    # never moves one out of the space
+    outside = sorted({v for v in SEEN if not 0 <= v <= 1})
     assert not outside, outside[:10]
 
 
