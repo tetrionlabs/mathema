@@ -172,12 +172,13 @@ def test_the_monotone_witness_names_the_held_parameters():
     verdict, _, witness = _monotone_probe(
         discounted, facts, cj, {}, random.Random(1), 200, increasing=False)
     assert verdict == "falsified"
-    m = re.fullmatch(r"rate=(\S+) -> (\S+), rate=(\S+) -> (\S+) "
+    m = re.fullmatch(r"rate = (\S+) -> (\S+), rate = (\S+) -> (\S+) "
                      r"at price = (\S+) \(not decreasing\)", witness)
     assert m is not None, witness
     r1, v1, r2, v2, price = (float(g) for g in m.groups())
-    assert math.isclose(discounted(price, r1), v1, rel_tol=1e-5)
-    assert math.isclose(discounted(price, r2), v2, rel_tol=1e-5)
+    # every coordinate at full precision: the witness reproduces exactly
+    assert discounted(price, r1) == v1
+    assert discounted(price, r2) == v2
 
 
 def test_a_one_parameter_witness_has_nothing_held():

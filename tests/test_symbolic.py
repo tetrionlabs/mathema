@@ -1288,7 +1288,7 @@ def test_fold_claim_non_bare_first_argument_is_skipped():
     # ema raises, a witness at length 1
     results = check_conjectures(ema, [claim("f(x[1:], 1.0) == x[-1]", route="derive")])
     assert results[0].verdict == "falsified"
-    assert results[0].counterexample.startswith("([")
+    assert results[0].counterexample.startswith("x = [")
     # from two elements on, with alpha = 1.0 the average collapses to
     # the last element, so the claim holds empirically
     results = check_conjectures(ema, [claim(
