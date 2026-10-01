@@ -29,14 +29,16 @@ def test_let_bound_variable_ranges_reach_the_interval_machinery():
 
 
 def test_scaled_assumed_gap_proves():
-    # (b-a)/2 under `assuming a <= b` is half the assumed gap; the
-    # subtree rewrite misses it (expansion destroys the literal gap),
-    # the ratio check closes it
+    # (b-a)/2 under `assuming a <= b` is half the assumed gap: the
+    # premise decides its sign, read by the assumption context or by
+    # the ratio check, and without the premise it is false
     def radius(a, b):
         return (b - a) / 2
     p = _v(radius, "assuming a <= b, for a in [0,10], b in [0,10], f(a,b) >= 0")
     assert p.verdict == "proven"
-    assert "times the assumed-nonnegative gap" in p.sketch
+    assert "b/2" in p.sketch
+    p = _v(radius, "for a in [0,10], b in [0,10], f(a,b) >= 0")
+    assert p.verdict == "falsified"
 
 
 def test_integer_multiple_of_an_assumed_gap_proves():
