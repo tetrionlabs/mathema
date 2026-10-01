@@ -70,19 +70,26 @@ jobs:
         run: python -c "import importlib.util, sys; sys.exit(importlib.util.find_spec('mathema_language') is not None)"
       - run: python -m pytest -q
 
-  # The bundled compendium rows adjudicated against the libraries pip
-  # resolves today (`--library-rows`): a red here is a library that
-  # changed under a row, or a row that misreads it. Runs when a bundled
-  # compendium file or the lock file changes, weekly, and on demand, on
-  # the floor and ceiling interpreters, since each resolves a different
-  # numpy and pandas.
+  # The bundled compendium rows adjudicated against the libraries
+  # (`--library-rows`): a red here is a library that changed under a
+  # row, or a row that misreads it. Runs when a bundled compendium file
+  # or the lock file changes, weekly, and on demand: on the floor and
+  # ceiling interpreters with the libraries pip resolves today, and on
+  # the oldest numpy, pandas and polars the bundled files declare, so
+  # each declared version range is exercised at both ends.
   library-rows:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.13"]
+        include:
+          - python-version: "3.10"
+            libraries: ""
+          - python-version: "3.13"
+            libraries: ""
+          - python-version: "3.10"
+            libraries: "numpy==1.24.* pandas==2.0.* polars==1.0.*"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -118,6 +125,10 @@ jobs:
           cache-dependency-path: pyproject.toml
       - if: steps.changed.outputs.run == 'true'
         run: pip install -e '.[test]'
+      - if: steps.changed.outputs.run == 'true' && matrix.libraries != ''
+        env:
+          LIBRARIES: ${{ matrix.libraries }}
+        run: pip install $LIBRARIES
       - if: steps.changed.outputs.run == 'true'
         run: python -m pytest -n 4 -q -m library_rows --library-rows
 
