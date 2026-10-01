@@ -506,3 +506,31 @@ def third_party_warning(binding: str, obj, path: str,
     return (f"{binding} calls third-party code whose effects mathema "
             f"cannot establish, in the same way as importing it and "
             f"calling it directly would")
+
+
+def call_writes_argument(obj, n_positional: int, keywords) -> bool:
+    """Intent:
+        Whether one call of `obj` with `n_positional` positional
+        arguments and the keyword names `keywords` passes a value to an
+        output parameter (`out`), however it is passed: a numpy ufunc
+        takes its outputs after its `nin` inputs, any other function is
+        bound to its signature. A call that cannot be bound counts as
+        writing.
+    """
+    import inspect
+    keywords = set(keywords)
+    if "out" in keywords:
+        return True
+    numpy = sys.modules.get("numpy")
+    if numpy is not None and isinstance(obj, numpy.ufunc):
+        return n_positional > obj.nin
+    try:
+        signature = inspect.signature(obj)
+    except (TypeError, ValueError):
+        return True
+    try:
+        bound = signature.bind_partial(*range(n_positional),
+                                       **dict.fromkeys(keywords))
+    except TypeError:
+        return True
+    return "out" in bound.arguments

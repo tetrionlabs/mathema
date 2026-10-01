@@ -2613,39 +2613,67 @@ def _third_party_warnings(cj, fn) -> list:
         and a bare call name bound from the function's module or the
         calling scope. Empty for mathema itself, the author's own
         project and a function whose effects are established; a call
-        the claim makes with `out=` writes its argument, so its
-        effects are never established.
+        the claim makes that passes a value to `out`, by keyword or by
+        position, writes its argument, so its effects are never
+        established. The project is the one `_project_root` finds.
     """
-    from ._claim_reach import third_party_warning
+    from ._claim_reach import call_writes_argument, third_party_warning
     own = getattr(fn, "__module__", "") or ""
-    with_out: set = set()
+    root = _project_root(fn)
+    calls: dict = {}
     for side in (cj.lhs, cj.rhs, cj.assuming):
         try:
             tree = ast.parse(side or "0", mode="eval")
         except SyntaxError:
             continue
-        with_out |= {n.func.id for n in ast.walk(tree)
-                     if isinstance(n, ast.Call)
-                     and isinstance(n.func, ast.Name)
-                     and any(k.arg == "out" for k in n.keywords)}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+                calls.setdefault(n.func.id, []).append(
+                    (len(n.args), [k.arg for k in n.keywords]))
+
+    def writes(name: str, obj) -> bool:
+        return obj is not None and any(
+            call_writes_argument(obj, n, kw) for n, kw in calls.get(name, ()))
+
     out: list = []
     for name, ref in sorted((cj.funcs or {}).items()):
         if isinstance(ref, str):
             if ref == name or "." not in ref or ":" in ref:
                 continue
-            said = third_party_warning(f"let {name} = {ref}",
-                                       _resolve_bound_ref(ref), ref, own,
-                                       writes_argument=name in with_out)
+            obj = _resolve_bound_ref(ref)
+            said = third_party_warning(f"let {name} = {ref}", obj, ref, own,
+                                       root, writes_argument=writes(name, obj))
         elif name in (cj.scope_bound or ()):
             path = (f"{getattr(ref, '__module__', '?')}."
                     f"{getattr(ref, '__qualname__', name)}")
             said = third_party_warning(f"{name} = {path}", ref, path, own,
-                                       writes_argument=name in with_out)
+                                       root, writes_argument=writes(name, ref))
         else:
             continue
         if said is not None and said not in out:
             out.append(said)
     return out
+
+
+def _project_root(fn) -> str:
+    """Intent:
+        The project a function belongs to: the nearest directory above
+        its source file holding a pyproject.toml, else the working
+        directory.
+    """
+    try:
+        source = inspect.getsourcefile(fn) or ""
+    except (TypeError, OSError):
+        source = ""
+    here = os.path.dirname(os.path.abspath(source)) if source else ""
+    while here:
+        if os.path.exists(os.path.join(here, "pyproject.toml")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            break
+        here = parent
+    return "."
 
 
 def _resolve_bound_ref(ref: str):

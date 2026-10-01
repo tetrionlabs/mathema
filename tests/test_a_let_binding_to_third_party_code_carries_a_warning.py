@@ -223,3 +223,51 @@ def test_an_established_function_called_with_out_carries_the_warning():
     _rec, row = _row("let g = numpy.add, for x in [0, 1], "
                      "g(x, x, out=x) == 2 * x")
     assert f"let g = numpy.add {_WORDS}" in (row.note or ""), row.note
+
+
+@pytest.mark.parametrize("stmt,binding", [
+    ("let g = numpy.add, let y be 0.0, for x in [0, 1], "
+     "g(x, 1.0, y) == x + 1", "let g = numpy.add"),
+    ("let g = numpy.clip, let y be 0.0, for x in [0, 1], "
+     "g(x, 0, 1, y) == x", "let g = numpy.clip"),
+    ("let g = numpy.cumsum, let y be 0.0, for x in [0, 1], "
+     "g(x, 0, None, y) == x", "let g = numpy.cumsum"),
+])
+def test_out_passed_by_position_carries_the_warning(stmt, binding):
+    _rec, row = _row(stmt)
+    assert f"{binding} {_WORDS}" in (row.note or ""), row.note
+
+
+@pytest.mark.parametrize("stmt", [
+    "let g = numpy.add, for x in [0, 1], g(x, 1.0) == x + 1",
+    "let g = numpy.clip, for x in [0, 1], g(x, 0, 1) == x",
+    "let g = numpy.cumsum, for x in [0, 1], g(x, 0) == x",
+])
+def test_an_established_call_without_out_carries_none(stmt):
+    _rec, row = _row(stmt)
+    assert _WORDS not in (row.note or ""), row.note
+
+
+def test_a_declared_package_is_found_from_a_subdirectory(project,
+                                                         monkeypatch):
+    import pathlib
+    root = pathlib.Path(project.__file__).parent
+    _write(root / "pyproject.toml", '''
+        [project]
+        name = "projmod"
+
+        [tool.setuptools]
+        packages = ["helpers"]
+    ''')
+    _write(root / "helpers" / "__init__.py", '''
+        def triple(x: float) -> float:
+            return 3 * x
+    ''')
+    (root / "sub").mkdir()
+    monkeypatch.chdir(root / "sub")
+    sys.modules.pop("helpers", None)
+    stmt = "let g = helpers.triple, for x in [0, 1], 3 * f(x) == 2 * g(x)"
+    _rec, row = _row(stmt, project.f)
+    assert row.verdict in ("proven", "holds"), (row.verdict, row.note)
+    assert _WORDS not in (row.note or ""), row.note
+    sys.modules.pop("helpers", None)
