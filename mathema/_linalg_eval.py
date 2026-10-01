@@ -467,13 +467,19 @@ def _cumulative(numpy_name):
 
 def _running_extremum(ufunc_name, word):
     """`cummax` or `cummin`: the running maximum or minimum, element
-    `i` the greatest (least) of elements `0..i`; a matrix is read in
-    row order without `axis`, along it with one."""
+    `i` the greatest (least) of the value slots `0..i`, a hole kept at
+    its own position; a matrix is read in row order without `axis`,
+    along it with one."""
     def running(*args, axis=None):
         a = _values(args)
         if axis is None:
             a, axis = a.ravel(), 0
-        return getattr(_np(), ufunc_name).accumulate(a, axis=axis)
+        np = _np()
+        if _holes(a):
+            # fmax and fmin take the value where one side is a hole
+            out = getattr(np, "f" + ufunc_name[:3]).accumulate(a, axis=axis)
+            return np.where(np.isnan(a), np.nan, out)
+        return getattr(np, ufunc_name).accumulate(a, axis=axis)
     running.__name__ = word
     return running
 

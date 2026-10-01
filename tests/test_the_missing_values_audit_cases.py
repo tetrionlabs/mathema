@@ -247,3 +247,23 @@ def test_a_subclass_of_the_stated_exception_satisfies_a_policy_row():
     rows = _rows(refuses_none, "absent(f, x) raises(ValueError)", "is_absent_safe(f)")
     assert rows["absent_f_x_raises_ValueError"].verdict == "proven"
     assert rows["is_absent_safe[f]"].verdict == "proven"
+
+
+# --- the running extremes in a claim read the value slots ------------------
+
+def test_cummax_and_cummin_in_claim_words_skip_holes_and_keep_them_in_place():
+    from mathema._linalg_eval import FUNCTIONS, as_array, shown
+    nan = float("nan")
+    xs = as_array([nan, 0.2, 0.1, nan, 0.5])
+    assert repr(shown(FUNCTIONS["cummax"](xs))) == repr([nan, 0.2, 0.2, nan, 0.5])
+    assert repr(shown(FUNCTIONS["cummin"](xs))) == repr([nan, 0.2, 0.1, nan, 0.1])
+
+
+def series_top(xs: pd.Series) -> float:
+    return float(xs.max())
+
+
+def test_a_claim_through_cummax_holds_where_the_series_skips_holes():
+    (row,) = check_conjectures(series_top, [claim(
+        "for xs in [0, 1]^n, f(xs) == max(cummax(xs))")])
+    assert row.verdict != "falsified", row.counterexample
