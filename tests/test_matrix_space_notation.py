@@ -35,7 +35,7 @@ def _law(space: str) -> str:
 ])
 def test_every_matrix_spelling_is_the_same_claim(space):
     canon = assert_round_trips(_law(space), corner)
-    assert canon == "for a in R^(m,n)|missing, f(a) = a[0][0]"
+    assert canon == "for a in (R | {missing})^(m,n)|absent, f(a) = a[0][0]"
     assert _verdict(corner, claim(_law(space))) == "holds"
 
 
@@ -44,23 +44,23 @@ def test_every_matrix_spelling_is_the_same_claim(space):
 ])
 def test_a_fixed_size_matrix_reads_in_every_spelling(space):
     canon = assert_round_trips(_law(space), corner)
-    assert canon == "for a in R^(3,3)|missing, f(a) = a[0][0]"
+    assert canon == "for a in (R | {missing})^(3,3)|absent, f(a) = a[0][0]"
 
 
 def test_the_ascii_display_uses_commas_and_the_unicode_superscripts():
     cj = claim(_law("R^(2*3)"))
-    assert "R^(2,3)" in render_claim_text(cj, unicode=False)
-    assert "ℝ²ˣ³" in render_claim_text(cj, unicode=True)
+    assert "(R | {missing})^(2,3)" in render_claim_text(cj, unicode=False)
+    assert "(ℝ ∪ {∅})²ˣ³" in render_claim_text(cj, unicode=True)
     cj = claim(_law("R^(m*n)"))
-    assert "ℝᵐˣⁿ" in render_claim_text(cj, unicode=True)
+    assert "(ℝ ∪ {∅})ᵐˣⁿ" in render_claim_text(cj, unicode=True)
 
 
 @pytest.mark.parametrize("space, shown", [
-    ("R^(x,n)", "ℝ^(x,n)"),
-    ("R^(x*n)", "ℝ^(x,n)"),
-    ("R^(n,x)", "ℝ^(n,x)"),
-    ("R^(nx,m)", "ℝ^(nx,m)"),
-    ("R^(q,n)", "ℝ^(q,n)"),
+    ("R^(x,n)", "(ℝ ∪ {∅})^(x,n)"),
+    ("R^(x*n)", "(ℝ ∪ {∅})^(x,n)"),
+    ("R^(n,x)", "(ℝ ∪ {∅})^(n,x)"),
+    ("R^(nx,m)", "(ℝ ∪ {∅})^(nx,m)"),
+    ("R^(q,n)", "(ℝ ∪ {∅})^(q,n)"),
 ])
 def test_a_dimension_the_superscripts_cannot_carry_displays_plainly(
         space, shown):
@@ -70,10 +70,10 @@ def test_a_dimension_the_superscripts_cannot_carry_displays_plainly(
 
 
 @pytest.mark.parametrize("space, shown", [
-    ("R^x", "ℝ^x"),
-    ("R^q", "ℝ^q"),
-    ("R^n", "ℝⁿ"),
-    ("R^3", "ℝ³"),
+    ("R^x", "(ℝ ∪ {∅})^x"),
+    ("R^q", "(ℝ ∪ {∅})^q"),
+    ("R^n", "(ℝ ∪ {∅})ⁿ"),
+    ("R^3", "(ℝ ∪ {∅})³"),
 ])
 def test_a_vector_dimension_the_superscripts_cannot_carry(space, shown):
     law = f"for v in {space}, f(v) == v[0]"
@@ -84,17 +84,17 @@ def test_a_vector_dimension_the_superscripts_cannot_carry(space, shown):
 def test_a_parameter_named_x_is_unaffected():
     law = "for x in R^(m,n), f(x) == x[0][0]"
     canon = assert_round_trips(law, corner)
-    assert canon == "for x in R^(m,n)|missing, f(x) = x[0][0]"
+    assert canon == "for x in (R | {missing})^(m,n)|absent, f(x) = x[0][0]"
     shown = render_claim_text(claim(law), unicode=True)
-    assert "∀ x ∈ ℝᵐˣⁿ" in shown
+    assert "∀ x ∈ (ℝ ∪ {∅})ᵐˣⁿ" in shown
     assert_round_trips("for x in [0, 1], f(x) >= x² - 9", square)
 
 
 def test_a_three_dimensional_space_reads_back():
     law = "for a in R^(k,m,n), f(a) == f(a)"
     canon = assert_round_trips(law)
-    assert "R^(k,m,n)" in canon
-    assert "ℝᵏˣᵐˣⁿ" in render_claim_text(claim(law), unicode=True)
+    assert "(R | {missing})^(k,m,n)" in canon
+    assert "(ℝ ∪ {∅})ᵏˣᵐˣⁿ" in render_claim_text(claim(law), unicode=True)
 
 
 @pytest.mark.parametrize("spelling", [

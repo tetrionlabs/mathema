@@ -156,3 +156,35 @@ def test_pole_exclusion_alone_does_not_prove_numerical_stability():
         route="best", funcs={"g": "mathema.f.finite_no_error"})])
     assert p.verdict != "proven", (p.verdict, p.sketch)
     assert p.verdict == "falsified"
+
+
+def discounted(price: float, rate: float) -> float:
+    return price * (1 - rate)
+
+
+def test_the_monotone_witness_names_the_held_parameters():
+    # both calls share one price; the witness states it, so the two
+    # printed values can be reproduced from the witness alone
+    import re
+    facts = analyze_source(discounted)
+    cj = claim("d(f(price, rate), rate) <= 0",
+               name="monotonic_decreasing[rate]")
+    verdict, _, witness = _monotone_probe(
+        discounted, facts, cj, {}, random.Random(1), 200, increasing=False)
+    assert verdict == "falsified"
+    m = re.fullmatch(r"rate = (\S+) -> (\S+), rate = (\S+) -> (\S+) "
+                     r"at price = (\S+) \(not decreasing\)", witness)
+    assert m is not None, witness
+    r1, v1, r2, v2, price = (float(g) for g in m.groups())
+    # every coordinate at full precision: the witness reproduces exactly
+    assert discounted(price, r1) == v1
+    assert discounted(price, r2) == v2
+
+
+def test_a_one_parameter_witness_has_nothing_held():
+    facts = analyze_source(sq)
+    cj = claim("d(f(x), x) >= 0", name="monotonic_increasing[x]")
+    verdict, _, witness = _monotone_probe(sq, facts, cj, {}, random.Random(1),
+                                          200, increasing=True)
+    assert verdict == "falsified"
+    assert " at " not in witness

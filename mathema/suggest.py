@@ -11,7 +11,10 @@ suggestion is a `Conjecture` a later adjudication pass gets to settle.
 """
 from __future__ import annotations
 
+import math
+
 import ast
+import dataclasses
 import os
 
 from . import families as _families
@@ -142,6 +145,31 @@ def _raise_guard_types(fdef, params: list[str]) -> dict[str, str]:
                             out.setdefault(p, name)
     return out
 
+
+
+def _value_guarded(fdef, params: list[str]) -> set:
+    """Intent:
+        The parameters an `if ...: raise` guard compares by value (an
+        order or an equality), which can cut real numbers out of the
+        working domain; a guard that only tests for nan, None or
+        emptiness cuts no real number.
+    """
+    pset = set(params)
+    out: set = set()
+    for node in ast.walk(fdef):
+        if not (isinstance(node, ast.If) and any(
+                isinstance(stmt, ast.Raise) for stmt in node.body)):
+            continue
+        for part in ast.walk(node.test):
+            if not isinstance(part, ast.Compare):
+                continue
+            sides = [part.left, *part.comparators]
+            self_test = len({ast.dump(side) for side in sides}) == 1
+            if not self_test and not all(
+                    isinstance(op, (ast.Is, ast.IsNot)) for op in part.ops):
+                out |= {n.id for n in ast.walk(part)
+                        if isinstance(n, ast.Name)} & pset
+    return out
 
 
 def _resolvable(ref: str) -> bool:
@@ -350,6 +378,183 @@ def _homogeneous_degree_one(fn, facts) -> bool:
         return False
 
 
+def _declared_intervals(fn, facts) -> dict:
+    """Intent:
+        `{param: (lo, hi)}` for every parameter the signature or a guard
+        declares a single real interval for (a sequence's entries by
+        the interval its guard admits for each, a space `[lo, hi]^n` by
+        its entries' interval); a parameter with no such declared
+        domain is absent.
+    """
+    from .conjecture import _guard_interval
+    from .types import domain_from_signature
+    try:
+        declared = domain_from_signature(fn)
+    except Exception:
+        return {}
+    out: dict = {}
+    for p in facts.params:
+        bound = declared.get(p)
+        if bound is not None and getattr(bound, "dims", ()):
+            # a space such as [0, 1]^n: the interval each entry lies in
+            bound = dataclasses.replace(bound, dims=())
+        found = _guard_interval(bound)
+        if found is not None:
+            out[p] = (found[0], found[1])
+    return out
+
+
+def _widest_piece(fn, p: str) -> "tuple | None":
+    """Intent:
+        `(lo, hi, closed_lo, closed_hi)` of the widest interval of a
+        parameter whose declared
+        domain (or entry domain) is a union of several real intervals,
+        or None when it is not such a union.
+    """
+    from .types import domain_from_signature
+    try:
+        bound = domain_from_signature(fn).get(p)
+    except Exception:
+        return None
+    pieces = getattr(bound, "pieces", None)
+    if not pieces or len(pieces) < 2 or getattr(bound, "base_type",
+                                                "R") != "R":
+        return None
+    from .conjecture import _guard_interval
+    spans = []
+    for part in pieces:
+        found = _guard_interval(part)
+        if found is None:
+            return None
+        spans.append(found)
+    return max(spans, key=lambda ab: ab[1] - ab[0])
+
+
+def _num_words(value) -> str:
+    """A bound as written: a whole number without a decimal point, any
+    other number by its shortest exact float spelling, never rounded."""
+    import sympy
+    if value is sympy.oo or value == math.inf:
+        return "oo"
+    if value is -sympy.oo or value == -math.inf:
+        return "-oo"
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return repr(number)
+
+
+def _open_entries(fn, p: str) -> "tuple | None":
+    """`(lo, hi, closed_lo, closed_hi)` of a parameter's declared entry
+    interval when it is open at an end, else None."""
+    from .conjecture import _guard_interval
+    from .types import domain_from_signature
+    try:
+        bound = domain_from_signature(fn).get(p)
+    except Exception:
+        return None
+    if bound is not None and getattr(bound, "dims", ()):
+        import dataclasses
+        bound = dataclasses.replace(bound, dims=())
+    found = _guard_interval(bound)
+    if found is None or (found[2] and found[3]):
+        return None
+    return found
+
+
+def _interval_words(bounds) -> str:
+    lo, hi = bounds[0], bounds[1]
+    closed_lo = bounds[2] if len(bounds) > 2 else True
+    closed_hi = bounds[3] if len(bounds) > 3 else True
+    return (("[" if closed_lo and not math.isinf(lo) else "(")
+            + f"{_num_words(lo)}, {_num_words(hi)}"
+            + ("]" if closed_hi and not math.isinf(hi) else ")"))
+
+
+def _mirror_binding(bounds) -> "str | None":
+    """Intent:
+        The `for p in [a, b], ` prefix keeping both p and -p inside a
+        declared interval, "" when nothing is declared, None when only a
+        point would stay inside.
+    """
+    if bounds is None:
+        return ""
+    lo, hi = bounds
+    a, b = max(lo, -hi), min(hi, -lo)
+    if not a < b:
+        return None
+    return "for {p} in " + _interval_words((a, b)) + ", "
+
+
+def _scale_factor_range(factors, domains) -> "tuple | None":
+    """Intent:
+        The part of the factor interval `factors` for which c * x stays
+        inside each declared interval for every x in it (both ends of
+        the interval, since c * x is linear in x), the whole of
+        `factors` when nothing is declared, or None when only a point
+        or nothing remains.
+    """
+    lo_c, hi_c = factors
+    for bounds in domains:
+        if bounds is None:
+            continue
+        lo, hi = bounds
+        for x in (lo, hi):
+            if math.isinf(x):
+                # c * x runs off to the same infinity only for c >= 0
+                lo_c = max(lo_c, 0.0)
+                continue
+            if x == 0:
+                if not lo <= 0 <= hi:
+                    return None
+                continue
+            # lo <= c * x <= hi, for either sign of x
+            first, second = sorted((lo / x, hi / x))
+            lo_c, hi_c = max(lo_c, first), min(hi_c, second)
+    if not lo_c < hi_c:
+        return None
+    return (lo_c, hi_c)
+
+
+def _shared_binding(domains) -> "tuple | None":
+    """Intent:
+        The interval every declared domain admits (both arguments of a
+        swap bound to it), (-inf, inf) when none is declared, None when
+        they share no interval of positive width.
+    """
+    lo, hi = -math.inf, math.inf
+    for bounds in domains:
+        if bounds is not None:
+            lo, hi = max(lo, bounds[0]), min(hi, bounds[1])
+    return (lo, hi) if lo < hi else None
+
+
+def _shift_binding(offsets, bounds) -> "tuple | None":
+    """Intent:
+        `(entries, offsets)` so that every entry plus every offset stays
+        inside a declared entry interval: nothing declared keeps the
+        offsets and binds no entries (None); a bounded interval of width
+        w binds the entries to its middle half and the offsets to
+        [-w/4, w/4]; an interval unbounded on one side keeps the entries
+        and the offsets that move toward the open side. None overall
+        when no offset but zero would do.
+    """
+    if bounds is None:
+        return None, offsets
+    lo, hi = bounds
+    if math.isinf(lo) and math.isinf(hi):
+        return None, offsets
+    if math.isinf(hi):
+        return None, (max(offsets[0], 0.0), offsets[1])
+    if math.isinf(lo):
+        return None, (offsets[0], min(offsets[1], 0.0))
+    quarter = (hi - lo) / 4
+    if not quarter > 0:
+        return None
+    return ((lo + quarter, hi - quarter),
+            (max(offsets[0], -quarter), min(offsets[1], quarter)))
+
+
 def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
                    key: str | None = None, root: str = ".") -> list:
     """Intent:
@@ -413,17 +618,27 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         return []
     scalar_params = [p for p in facts.params if facts.param_kinds.get(p) == "scalar"]
     call = f"f({', '.join(facts.params)})"
+    declared = _declared_intervals(fn, facts)
+    # the working domain a parameter's own raise guards leave, which
+    # every suggestion binding that parameter stays inside
+    cut = _guard_cut_domains(fn, facts, declared)
+    declared = {q: v for q, v in declared.items() if q not in cut}
+    made: dict = {}
+
+    def _made(text: str, **kw):
+        made[kw.get("name")] = (text, kw)
+        return claim(text, **kw)
     out = []
     for p in scalar_params:
-        out.append(claim(f"d({call}, {p}) >= 0", name=f"monotonic_increasing[{p}]",
+        out.append(_made(f"d({call}, {p}) >= 0", name=f"monotonic_increasing[{p}]",
                          source="mathema", route="best"))
-        out.append(claim(f"d({call}, {p}) <= 0", name=f"monotonic_decreasing[{p}]",
+        out.append(_made(f"d({call}, {p}) <= 0", name=f"monotonic_decreasing[{p}]",
                          source="mathema", route="best"))
-        out.append(claim(f"d({call}, {p}, {p}) == 0", name=f"affine[{p}]",
+        out.append(_made(f"d({call}, {p}, {p}) == 0", name=f"affine[{p}]",
                          source="mathema", route="best"))
-        out.append(claim(f"d({call}, {p}, {p}) >= 0", name=f"convex[{p}]",
+        out.append(_made(f"d({call}, {p}, {p}) >= 0", name=f"convex[{p}]",
                          source="mathema", route="best"))
-        out.append(claim(f"d({call}, {p}, {p}) <= 0", name=f"concave[{p}]",
+        out.append(_made(f"d({call}, {p}, {p}) <= 0", name=f"concave[{p}]",
                          source="mathema", route="best"))
 
     # Bound from a return-type marker: an annotated return
@@ -438,15 +653,33 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     if rb is not None:
         bound_text = _bound_claim_text(call, *rb)
         if bound_text:
-            out.append(claim(bound_text, name="returns_in_range",
+            out.append(_made(bound_text, name="returns_in_range",
                              source="mathema", route="best"))
 
     numeric_return = facts.returns_kind == "scalar"
     if len(facts.params) == 1 and scalar_params and numeric_return:
         p = scalar_params[0]
-        out.append(claim(f"f(-{p}) == f({p})", name="even", source="mathema", route="best"))
-        out.append(claim(f"f(-{p}) == -f({p})", name="odd", source="mathema", route="best"))
-        out.append(claim(f"f(f({p})) == f({p})", name="idempotent",
+        # f(-p) stays inside a declared [lo, hi] only for p in
+        # [max(lo, -hi), min(hi, -lo)]; f(f(p)) reaches the function's
+        # own output, whose range nothing states
+        mirrored = _mirror_binding(declared.get(p))
+        if p in cut:
+            symmetric = _set_words(_mirrored_set(cut[p]))
+            mirrored = (None if symmetric is None
+                        else "for {p} in " + symmetric + ", ")
+        if mirrored is not None:
+            out.append(_made(f"{mirrored.format(p=p)}f(-{p}) == f({p})",
+                             name="even", source="mathema", route="best"))
+            out.append(_made(f"{mirrored.format(p=p)}f(-{p}) == -f({p})",
+                             name="odd", source="mathema", route="best"))
+        # over the whole working domain: an output that leaves it makes
+        # f(f(p)) a call outside it, which falsifies with that witness
+        whole = (f"for {p} in {_interval_words(declared[p])}, "
+                 if p in declared else "")
+        if p in cut:
+            words = _set_words(cut[p])
+            whole = f"for {p} in {words}, " if words else ""
+        out.append(_made(f"{whole}f(f({p})) == f({p})", name="idempotent",
                          source="mathema", route="best"))
     closed_form = (_loop_closed_form(fn, facts)
                    if facts.params
@@ -455,7 +688,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
                            for q in facts.params) else None)
     if closed_form is not None:
         text, premise = closed_form
-        out.append(claim((f"assuming {premise}, " if premise else "")
+        out.append(_made((f"assuming {premise}, " if premise else "")
                          + f"{call} == {text}",
                          name="closed_form", source="mathema",
                          route="best"))
@@ -464,17 +697,70 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         aux = "c" if "c" not in facts.params else "aux_c"
         args = ", ".join(facts.params)
         scaled_args = ", ".join(f"{aux}*{q}" for q in facts.params)
-        out.append(claim(
-            f"let {aux} be [0.1, 10], f({scaled_args}) == {aux}*f({args})",
-            name="scale_equivariant", source="mathema", route="best"))
+        factor = _scale_factor_range((0.1, 10.0), [
+            declared.get(q) if q not in cut else _single_interval(cut[q])
+            for q in facts.params])
+        if any(q in cut and _single_interval(cut[q]) is None
+               for q in facts.params):
+            factor = None
+        if factor is not None:
+            out.append(_made(
+                f"let {aux} be {_interval_words(factor)}, "
+                f"f({scaled_args}) == {aux}*f({args})",
+                name="scale_equivariant", source="mathema", route="best"))
     if len(facts.params) == 2 and len(scalar_params) == 2 and numeric_return:
         p1, p2 = facts.params
-        out.append(claim(f"f({p1}, {p2}) == f({p2}, {p1})", name="commutative",
-                         source="mathema", route="best"))
+        # swapping puts each argument in the other's slot: both are
+        # bound to where both slots admit them
+        shared = _shared_binding([declared.get(p1), declared.get(p2)])
+        if p1 in cut or p2 in cut:
+            both = _whole(cut.get(p1)) & _whole(cut.get(p2))
+            if declared.get(p1):
+                both &= _as_set(declared[p1])
+            if declared.get(p2):
+                both &= _as_set(declared[p2])
+            words = _set_words(both)
+            shared = None
+            if words:
+                out.append(_made(f"for {p1} in {words}, {p2} in {words}, "
+                                 f"f({p1}, {p2}) == f({p2}, {p1})",
+                                 name="commutative", source="mathema",
+                                 route="best"))
+        if shared is not None:
+            bind = (f"for {p1} in {_interval_words(shared)}, "
+                    f"{p2} in {_interval_words(shared)}, "
+                    if p1 in declared or p2 in declared else "")
+            out.append(_made(f"{bind}f({p1}, {p2}) == f({p2}, {p1})",
+                             name="commutative", source="mathema",
+                             route="best"))
+        # over the whole working domain, the third argument c in the
+        # second slot's: an inner result that leaves it is a call
+        # outside it, which falsifies with that witness
         aux = "c" if "c" not in facts.params else "aux_c"
-        out.append(claim(f"let {aux} be [-5, 5], "
-                         f"f(f({p1}, {p2}), {aux}) == f({p1}, f({p2}, {aux}))",
-                         name="associative", source="mathema", route="best"))
+        if p1 in cut or p2 in cut:
+            sets = {q: (cut[q] if q in cut else _as_set(declared[q])
+                        if q in declared else _whole(None)) for q in (p1, p2)}
+            words = {q: _set_words(sets[q]) for q in (p1, p2)}
+            if all(words.values()):
+                out.append(_made(
+                    f"for {p1} in {words[p1]}, {p2} in {words[p2]}, "
+                    f"{aux} in {words[p2]}, f(f({p1}, {p2}), {aux}) == "
+                    f"f({p1}, f({p2}, {aux}))",
+                    name="associative", source="mathema", route="best"))
+        elif p1 in declared or p2 in declared:
+            spans = {q: declared.get(q, (-math.inf, math.inf))
+                     for q in (p1, p2)}
+            third = spans[p2] if p2 in declared else (-5, 5)
+            bind = ", ".join(f"{q} in {_interval_words(spans[q])}"
+                             for q in (p1, p2))
+            prefix = (f"for {bind}, let {aux} be {_interval_words(third)}, ")
+        else:
+            prefix = f"let {aux} be [-5, 5], "
+        if not (p1 in cut or p2 in cut):
+            out.append(_made(f"{prefix}f(f({p1}, {p2}), {aux}) == "
+                             f"f({p1}, f({p2}, {aux}))",
+                             name="associative", source="mathema",
+                             route="best"))
 
     # f(...) == f(...) genuinely re-evaluates fn twice with the same
     # synthesized arguments on the probe route (check_conjectures shares
@@ -482,17 +768,17 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     # hardcoded battery ran unconditionally. On the derive route a
     # lifted function proves this trivially, honestly: lifting already
     # assumes purity.
-    out.append(claim(f"{call} == {call}", name="is_deterministic",
+    out.append(_made(f"{call} == {call}", name="is_deterministic",
                      source="mathema", route="best"))
     # the mutation member rides the same ceremonial law (the family's
     # own halves adjudicate; the law text never compiles): does calling
     # the function mutate an argument, a global, or module state?
-    out.append(claim(f"{call} == {call}", name="is_state_safe",
+    out.append(_made(f"{call} == {call}", name="is_state_safe",
                      source="mathema", route="best"))
     if any("randomness" in e for e in facts.effects):
         # the weaker stateless member is only worth asking where
         # randomness structurally exists: reproducible up to the seed
-        out.append(claim(f"{call} == {call}", name="is_reproducible",
+        out.append(_made(f"{call} == {call}", name="is_reproducible",
                          source="mathema", route="best"))
 
     # no symbolic form for the probe fallback (whether a call raises or
@@ -513,7 +799,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     all_text = bool(facts.params) and all(
         facts.param_kinds.get(p) == "string" for p in facts.params)
     if not (all_text and facts.returns_kind != "scalar"):
-        out.append(claim(f"g(f, {', '.join(facts.params)}) == 1", name="is_numerically_stable",
+        out.append(_made(f"g(f, {', '.join(facts.params)}) == 1", name="is_numerically_stable",
                          source="mathema", route="best", funcs={"g": "mathema.f.finite_no_error"}))
 
     # the definedness region as its own named claim: adjudicated by
@@ -533,7 +819,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         # the freshly computed region
         name = "is_defined" if len(region) == 1 else f"is_defined[{i + 1}]"
         try:
-            out.append(claim(conjunct, name=name, source="mathema",
+            out.append(_made(conjunct, name=name, source="mathema",
                              route="derive"))
         except Exception:
             # a region claim() can't state simply isn't suggested
@@ -555,7 +841,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         if gate is None:
             continue
         for p in gate(fn, facts):
-            out.append(claim(f"{family_name}({p})",
+            out.append(_made(f"{family_name}({p})",
                              name=f"{family_name}[{p}]",
                              source="mathema",
                              route=family.suggested_route()))
@@ -571,7 +857,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     if (mat_params and ret_shape is not None and len(ret_shape.dims) == 2
             and ret_shape.dims[0] == ret_shape.dims[1]):
         try:
-            out.append(claim(f"is_symmetric({call})", name="is_symmetric",
+            out.append(_made(f"is_symmetric({call})", name="is_symmetric",
                              source="mathema", route="best"))
         except Exception:
             pass
@@ -585,7 +871,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     if core_key is not None and _resolvable(core_key):
         g = next((c for c in "ghk" if c not in facts.params), "g")
         try:
-            out.append(claim(f"let {g} = {core_key}, f =:= {g}",
+            out.append(_made(f"let {g} = {core_key}, f =:= {g}",
                              name="equivalent_to_core", source="mathema",
                              route="best"))
         except Exception:
@@ -602,7 +888,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
             x = facts.params[0]
             g = next((c for c in "ghk" if c not in facts.params), "g")
             try:
-                out.append(claim(f"let {g} = {inv_key}, {g}(f({x})) == {x}",
+                out.append(_made(f"let {g} = {inv_key}, {g}(f({x})) == {x}",
                                  name="roundtrips_with", source="mathema",
                                  route="best"))
             except Exception:
@@ -616,9 +902,9 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         rest = facts.params[1:]
         rest_str = (", " + ", ".join(rest)) if rest else ""
 
-        out.append(claim(f"min({xs}) <= {call}", name="bounded_lower",
+        out.append(_made(f"min({xs}) <= {call}", name="bounded_lower",
                          source="mathema", route="best"))
-        out.append(claim(f"{call} <= max({xs})", name="bounded_upper",
+        out.append(_made(f"{call} <= max({xs})", name="bounded_upper",
                          source="mathema", route="best"))
 
         # a fixed reversal, not a random shuffle: necessary but not
@@ -626,33 +912,55 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         # every permutation implies invariant under reversal, not the
         # converse), traded for a pure, stateless, by-name-referenceable
         # transform.
-        out.append(claim(f"{call} == f(g({xs}){rest_str})", name="permutation_invariant",
+        out.append(_made(f"{call} == f(g({xs}){rest_str})", name="permutation_invariant",
                          source="mathema", route="probe",
                          funcs={"g": "mathema.f.reverse_seq"}))
 
         aux = "c" if "c" not in facts.params else "aux_c"
         # route best: the derive route composes these elementwise
         # transforms through a recognized fold's closed form, so a
-        # linear fold's equivariance is proven rather than sampled
-        out.append(claim(f"let {aux} be [-5, 5], "
-                         f"{aux}*{call} == f(g({xs}, {aux}){rest_str})",
-                         name="scale_equivariant", source="mathema", route="best",
-                         funcs={"g": "mathema.f.scale_seq"}))
-
-        out.append(claim(f"let {aux} be [-5, 5], "
-                         f"{call} + {aux} == f(g({xs}, {aux}){rest_str})",
-                         name="translation_equivariant", source="mathema", route="best",
-                         funcs={"g": "mathema.f.shift_seq"}))
+        # linear fold's equivariance is proven rather than sampled. A
+        # declared entry domain restricts the factor, or binds the
+        # entries with the shift, so every transformed entry stays in it
+        # entries declared as a union of intervals are bound to its
+        # widest piece, so a scaled or shifted entry stays in that piece
+        piece = _widest_piece(fn, xs) or _open_entries(fn, xs)
+        entry_bounds = piece[:2] if piece is not None else declared.get(xs)
+        # an entry domain open at an end keeps the factor and the shift
+        # off their own ends, so no moved entry lands on the open end
+        open_end = piece is not None and not (piece[2] and piece[3])
+        factor = _scale_factor_range((-5.0, 5.0), [entry_bounds])
+        if factor is not None:
+            within = (f"for {xs} in {_interval_words(piece)}^n, "
+                      if piece is not None else "")
+            factor_words = _interval_words(
+                (*factor, not open_end, not open_end))
+            out.append(_made(f"{within}let {aux} be "
+                             f"{factor_words}, "
+                             f"{aux}*{call} == f(g({xs}, {aux}){rest_str})",
+                             name="scale_equivariant", source="mathema",
+                             route="best", funcs={"g": "mathema.f.scale_seq"}))
+        shift = _shift_binding((-5.0, 5.0), entry_bounds)
+        if shift is not None:
+            entries, offsets = shift
+            bind = (f"for {xs} in {_interval_words(entries)}^n, "
+                    if entries is not None else "")
+            offset_words = _interval_words(
+                (*offsets, not open_end, not open_end))
+            out.append(_made(f"{bind}let {aux} be {offset_words}, "
+                             f"{call} + {aux} == f(g({xs}, {aux}){rest_str})",
+                             name="translation_equivariant", source="mathema",
+                             route="best", funcs={"g": "mathema.f.shift_seq"}))
 
         if _sum_like_fold(fn, facts) is not None:
             # a plain accumulation treats every element alike, so the
             # order-insensitive family applies and, being a linear
             # fold, mostly proves
-            out.append(claim(
+            out.append(_made(
                 f"f(g({xs}, {xs}){rest_str}) == {call} + {call}",
                 name="self_concat_additive", source="mathema",
                 route="best", funcs={"g": "mathema.f.concat_seq"}))
-            out.append(claim(
+            out.append(_made(
                 f"f(g({xs}){rest_str}) == {call}",
                 name="order_invariant", source="mathema", route="best",
                 funcs={"g": "mathema.f.sort_seq"}))
@@ -661,7 +969,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
                 # carries seven optional parameters, so positional
                 # equivalence is not meaningful, but the one-argument
                 # call is
-                out.append(claim(
+                out.append(_made(
                     f"{call} == g({xs})", name="sum_like",
                     source="mathema", route="best",
                     funcs={"g": "numpy.sum"}))
@@ -674,16 +982,16 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     if (facts.params and facts.returns_kind == "sequence"
             and facts.param_kinds.get(facts.params[0]) in SEQUENCE_KINDS):
         seq = facts.params[0]
-        out.append(claim(f"len({call}) == len({seq})",
+        out.append(_made(f"len({call}) == len({seq})",
                          name="preserves_length", source="mathema",
                          route="probe"))
-        out.append(claim(f"sorted({call}) == sorted({seq})",
+        out.append(_made(f"sorted({call}) == sorted({seq})",
                          name="is_permutation_of_input", source="mathema",
                          route="probe"))
-        out.append(claim(f"type({call}) == type({seq})",
+        out.append(_made(f"type({call}) == type({seq})",
                          name="preserves_type", source="mathema",
                          route="probe"))
-        out.append(claim(f"is_sorted_output({call})",
+        out.append(_made(f"is_sorted_output({call})",
                          name="is_sorted_output", source="mathema",
                          route="probe"))
 
@@ -694,18 +1002,302 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
            and (n.value is None
                 or (isinstance(n.value, ast.Constant) and n.value.value is None))
            for n in ast.walk(facts.tree)):
-        out.append(claim(f"output_never_none({call})",
+        out.append(_made(f"output_never_none({call})",
                          name="output_never_none", source="mathema",
                          route="probe"))
 
     guard_types = _raise_guard_types(facts.tree, facts.params)
     for p, exc_name in guard_types.items():
-        out.append(claim(f"raises({call}, {exc_name})", name=f"raises[{p}]",
+        out.append(_made(f"raises({call}, {exc_name})", name=f"raises[{p}]",
                          source="mathema", route="best"))
 
+    premises, blocked = _guard_premises(fn, facts, cut)
+    if cut or premises or blocked:
+        out = [kept for kept in (
+            _bound_to_cut(cj, made.get(cj.name), cut, premises, blocked)
+            for cj in out) if kept is not None]
     if write:
         _write_suggested_claims(fn, out, key=key, root=root)
     return out
+
+
+#: suggestions about the raising region itself, or decided from the
+#: source, which a guard cut does not bind
+_UNCUT = ("raises[", "is_defined", "is_deterministic", "is_state_safe",
+          "is_reproducible", "excluded_outside_domain", "is_missing_safe",
+          "is_empty_safe", "is_absent_safe")
+
+
+def _whole(found):
+    import sympy
+    return sympy.S.Reals if found is None else found
+
+
+def _as_set(bounds):
+    """A declared `(lo, hi)` as a closed sympy interval."""
+    import sympy
+    lo, hi = bounds
+    return sympy.Interval(-sympy.oo if math.isinf(lo) and lo < 0
+                          else sympy.nsimplify(lo),
+                          sympy.oo if math.isinf(hi) and hi > 0
+                          else sympy.nsimplify(hi))
+
+
+def _pieces(found) -> list:
+    """The intervals of positive width a sympy set is made of; isolated
+    points are left out."""
+    import sympy
+    parts = list(found.args) if isinstance(found, sympy.Union) else [found]
+    return [part for part in parts if isinstance(part, sympy.Interval)
+            and part.measure > 0]
+
+
+def _end_words(value) -> str:
+    return _num_words(value)
+
+
+def _set_words(found) -> "str | None":
+    """A sympy set of intervals in claim grammar (`(0, oo)`, `[-1, 0) ∪
+    (0, 1]`), or None when it holds no interval of positive width."""
+    if found is None:
+        return None
+    parts = _pieces(found)
+    if not parts:
+        return None
+    return " ∪ ".join(
+        ("(" if part.left_open or part.start.is_infinite else "[")
+        + f"{_inward_words(part.start, True)}, "
+        + f"{_inward_words(part.end, False)}"
+        + (")" if part.right_open or part.end.is_infinite else "]")
+        for part in parts)
+
+
+def _inward_words(value, lower: bool) -> str:
+    """An interval end as written: a number a float spells exactly (a
+    decimal the guard was written with) as that float, any other (an
+    irrational root, a third) as the nearest float on the inside, so
+    the binding never reaches past the guard."""
+    import sympy
+    if value.is_infinite:
+        return _end_words(value)
+    number = float(value)
+    rational = value.is_Rational and all(
+        prime in (2, 5) for prime in sympy.factorint(value.q))
+    if not rational:
+        exact = sympy.nsimplify(number, rational=True)
+        if lower and exact < value:
+            number = math.nextafter(number, math.inf)
+        elif not lower and exact > value:
+            number = math.nextafter(number, -math.inf)
+    return _num_words(number)
+
+
+def _single_interval(found) -> "tuple | None":
+    parts = _pieces(found)
+    if len(parts) != 1:
+        return None
+    return (float(parts[0].start), float(parts[0].end))
+
+
+def _mirrored_set(found):
+    """The part of a set its own mirror image keeps: x with -x in it."""
+    import sympy
+    mirror = sympy.Union(*[sympy.Interval(-part.end, -part.start,
+                                          part.right_open, part.left_open)
+                           for part in _pieces(found)]) \
+        if _pieces(found) else sympy.S.EmptySet
+    return found & mirror
+
+
+def _guard_cut_domains(fn, facts, declared: dict) -> dict:
+    """Intent:
+        `{param: sympy set}`: the working domain of every real scalar
+        parameter that a raise guard of the function reads alone, or
+        whose declared domain is open at an end or made of several
+        pieces: the declared domain (the reals when none) minus every
+        such guard's region, endpoints and openness as written. Other
+        parameters are absent; `_guard_premises` covers guards that read
+        several parameters.
+    Raises:
+        Nothing: a guard sympy cannot read is left to `_guard_premises`,
+        which reports the parameter as not representable.
+    """
+    import sympy
+    from .conjecture import _guard_interval, _real_set
+    from .types import domain_from_signature
+    try:
+        bounds = domain_from_signature(fn)
+    except Exception:
+        bounds = {}
+    out: dict = {}
+    for p in facts.params:
+        if facts.param_kinds.get(p) != "scalar":
+            continue
+        base = _real_set(bounds.get(p)) if p in bounds else sympy.S.Reals
+        if base is None:
+            continue
+        raising = _single_guard_region(fn, facts, p)
+        single = _guard_interval(bounds.get(p)) if p in bounds else None
+        plain = single is not None and single[2] and single[3]
+        if raising is sympy.S.EmptySet and (p not in bounds or plain):
+            continue
+        out[p] = base - raising
+    return out
+
+
+def _lifted_guards(fn, facts) -> "list | None":
+    """The raise guards the piecewise lift reads from the function's
+    own conditional raises, [] when it has none, None when it has
+    some the lift cannot read."""
+    if not facts.branch_count:
+        return []
+    if facts.loops or facts.recursion:
+        return None
+    try:
+        from .symbolic._conditioned import lift_piecewise
+        lifted = lift_piecewise(fn, facts)
+    except Exception:
+        return None
+    if lifted is None:
+        return None if _raise_guard_types(facts.tree, facts.params) else []
+    return list(getattr(lifted, "raise_guards", ()) or ())
+
+
+def _guard_region(cond):
+    """The set of reals where a one-variable guard holds, or None when
+    sympy cannot read it as a set within the fast cap."""
+    import sympy
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    (sym,) = cond.free_symbols
+    real = sympy.Symbol(str(sym), real=True)
+    try:
+        region = _with_timeout(lambda c=cond.subs(sym, real): c.as_set(),
+                               FAST_TIMEOUT_SECONDS)
+    except Exception:
+        return None
+    if region is sympy.S.EmptySet or isinstance(
+            region, (sympy.Interval, sympy.Union, sympy.FiniteSet)):
+        return region
+    return None
+
+
+def _single_guard_region(fn, facts, p: str):
+    """Where the guards that read parameter `p` alone raise."""
+    import sympy
+    raising = sympy.S.EmptySet
+    for cond, _exc in _lifted_guards(fn, facts) or ():
+        if cond is sympy.false or not hasattr(cond, "free_symbols"):
+            continue
+        if {str(sym) for sym in cond.free_symbols} != {p}:
+            continue
+        region = _guard_region(cond)
+        if region is not None:
+            raising = raising | region
+    return raising
+
+
+def _guard_premises(fn, facts, cut: dict) -> "tuple[list, set]":
+    """Intent:
+        `(premises, blocked)`: for each raise guard that reads several
+        parameters, the claim-grammar texts of its negation, as
+        `(parameters, texts)`, the joint working domain an `assuming`
+        premise states; and the parameters whose guards cannot be
+        stated so (a guard the lift cannot read, one sympy cannot set,
+        a path guard whose negation is not a conjunction), over which
+        no suggestion is made.
+    """
+    import sympy
+    from .conjecture import _negated_guard_texts
+    from .symbolic._base import NEGATED_REL, REL_TEXT
+    guarded = set(_raise_guard_types(facts.tree, facts.params)) & \
+        _value_guarded(facts.tree, facts.params)
+    lifted = _lifted_guards(fn, facts)
+    if lifted is None:
+        return [], {p for p in guarded}
+    premises: list = []
+    blocked: set = set()
+    read: set = set()
+    for cond, _exc in lifted:
+        if cond is sympy.false or not hasattr(cond, "free_symbols"):
+            continue
+        names = {str(sym) for sym in cond.free_symbols}
+        if len(names) == 1:
+            if _guard_region(cond) is None:
+                blocked |= names
+            read |= names
+            continue
+        if isinstance(cond, sympy.And):
+            # a path guard: drop the conditions the parameters' own
+            # working domains already settle
+            rest = []
+            for arg in cond.args:
+                own = {str(sym) for sym in arg.free_symbols}
+                if len(own) == 1:
+                    (q,) = own
+                    region = _guard_region(arg)
+                    if q in cut and region is not None and \
+                            cut[q].is_subset(region) is True:
+                        continue
+                rest.append(arg)
+            cond = rest[0] if len(rest) == 1 else sympy.And(*rest)
+        texts = (_negated_guard_texts(cond, NEGATED_REL, REL_TEXT)
+                 if not isinstance(cond, sympy.And) else [])
+        if texts:
+            premises.append((names, texts))
+        else:
+            blocked |= names
+        read |= names
+    blocked |= guarded - read - set(cut)
+    return premises, blocked
+
+
+#: suggestions that call f at a transformed argument (a mirror, a swap,
+#: its own output, a scaled or shifted value), which a guard on several
+#: parameters can refuse whatever the premise
+_TRANSFORMS = ("even", "odd", "idempotent", "commutative", "associative",
+               "scale_equivariant", "translation_equivariant",
+               "permutation_invariant", "self_concat_additive",
+               "order_invariant")
+
+
+def _bound_to_cut(cj, source, cut: dict, premises: list = (),
+                  blocked: set = frozenset()):
+    """A suggestion with every parameter a guard cuts bound to what the
+    guard leaves, and every guard on several parameters it touches
+    stated as an `assuming` premise; None when it would cross a guard
+    that cannot be stated. A suggestion about the raising region itself
+    is left as it is."""
+    if source is None or cj.name.startswith(_UNCUT):
+        return cj
+    text, kw = source
+
+    def mentions(p: str) -> bool:
+        # every suggestion here calls f with all its parameters, a family
+        # predicate on one parameter included
+        return True
+    if any(mentions(p) for p in blocked):
+        return None
+    assumed = [t for params, texts in premises
+               if any(mentions(p) for p in params) for t in texts]
+    if assumed and cj.name.split("[", 1)[0] in _TRANSFORMS:
+        return None
+    bound = set((getattr(cj, "domain", None) or {}).keys())
+    binds = []
+    for p, found in cut.items():
+        if p in bound or not mentions(p):
+            continue
+        words = _set_words(found)
+        if words is None:
+            return None
+        binds.append(f"{p} in {words}")
+    if not binds and not assumed:
+        return cj
+    prefix = (f"for {', '.join(binds)}, " if binds else "") + (
+        f"assuming {' and '.join(assumed)}, " if assumed else "")
+    try:
+        return claim(prefix + text, **kw)
+    except Exception:
+        return None
 
 
 def _write_suggested_claims(fn, suggestions: list, key: str | None, root: str) -> str:
@@ -731,3 +1323,91 @@ def _write_suggested_claims(fn, suggestions: list, key: str | None, root: str) -
     merged_entry = merge_entries(existing.get(key, {}), new_entry)
     existing[key] = merged_entry
     return write_yaml(path, existing)
+
+
+#: the families examine decides, and the effects that keep each from proven
+_EXAMINED = {
+    "is_state_safe": (("writes", "a write"),),
+    "is_deterministic": (("hidden_reads", "a hidden read"),),
+    "is_reproducible": (("hidden_reads", "a hidden read"),),
+}
+#: what leaves each examined family unknown
+_UNREAD = {
+    "is_state_safe": ("unknowns", "unknown_writes"),
+    "is_deterministic": ("unknowns", "order_sensitive"),
+    "is_reproducible": ("unknowns", "order_sensitive"),
+}
+
+
+def suggestion_sections(fn, suggestions: list, facts=None) -> list:
+    """Intent:
+        `(section, reason)` per suggestion, in order: `"unknowable"`
+        with a one-line reason for a state or repeatability family the
+        examination cannot read far enough to decide; `"question"` for
+        a candidate answer to a question other suggestions answer too
+        (monotonicity, shape, symmetry); `"individual"` for the rest.
+        An examined family whose site the examination already sees is
+        individual, its reason naming the site: adopting it records the
+        falsification. The reason is `""` everywhere else.
+    """
+    from ._examine import examine
+    from .claim_families import _generator_parameter
+    from .families import aspect_label
+    if facts is None:
+        try:
+            facts = analyze_source(fn)
+        except Exception:
+            facts = None
+    effects: dict = {}
+    out = []
+    for cj in suggestions:
+        if cj.name in _EXAMINED:
+            generator = (_generator_parameter(fn, facts)
+                         if cj.name != "is_deterministic"
+                         and facts is not None else None)
+            if generator not in effects:
+                try:
+                    effects[generator] = examine(fn, generator)
+                except Exception:
+                    effects[generator] = None
+            found = effects[generator]
+            if found is None:
+                out.append(("unknowable", "the examination could not read "
+                                          "the function"))
+                continue
+            seen = [(what, site) for kind, what in _EXAMINED[cj.name]
+                    for site in getattr(found, kind)]
+            if seen:
+                what, site = seen[0]
+                out.append(("individual", f"examine finds {what}: "
+                                          f"{site.text}; adopting records it "
+                                          f"as falsified"))
+                continue
+            unread = [site for kind in _UNREAD[cj.name]
+                      for site in getattr(found, kind)]
+            if unread:
+                out.append(("unknowable", unread[0].text))
+                continue
+        out.append(("question" if aspect_label(cj.name) else "individual",
+                    ""))
+    return out
+
+
+def gate_suggestions(fn) -> list:
+    """`is_missing_safe(f)` and `is_absent_safe(f)` for a function with a
+    parameter that admits the kind: the gates an author may assert,
+    offered by `mathema claims --suggest` and never asserted by
+    default."""
+    from .conjecture import claim
+    from .policy import _admits
+    try:
+        from . import analyze
+        params = analyze(fn).params
+    except Exception:
+        return []
+    out = []
+    for kind, gate in (("missing", "is_missing_safe"), ("absent", "is_absent_safe")):
+        if any(_admits(fn, p, kind) for p in params):
+            out.append(claim(f"{gate}(f)", name=f"{gate}[f]", source="mathema",
+                             route="examine"))
+    return out

@@ -42,10 +42,14 @@ this module exercises."""
 from __future__ import annotations
 
 import functools
+import logging
+import math
+import os
+import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .authoring import claims as claims_decorator, enforce_dimensions
+from .authoring import claims as claims_decorator, enforce_dimensions, enforce_domain
 
 try:
     import numpy as np
@@ -53,8 +57,11 @@ except ImportError:   # numpy is optional; the example functions over arrays nee
     np = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
+    from typing import Optional
+
     import numpy
     import pandas
+    import polars
 
 LEXICON: dict[str, str] = {
     # one construct at a time -----------------------------------
@@ -130,6 +137,13 @@ LEXICON: dict[str, str] = {
     "dim_premise_against_fixed":
         "for r in [0, 1]^12, assuming len(r) == 5, f(r) >= 0",
     "domain_closed_interval": "for x in [0, 1], f(x) >= 0",
+    # a function @enforce_domain() guards is checked over the domain its
+    # guard admits: a blend of x with 1 never exceeds x when x is at
+    # least 1
+    "enforce_domain_guard": "for alpha in [0, 1], x in [1, 10], f(x, alpha) <= x",
+    # a parameter the claim leaves unbound ranges over what the guard
+    # admits: alpha in [0, 1] here comes from the guard alone
+    "enforce_domain_guard_unbound": "for x in [1, 10], f(x, alpha) <= x",
     "domain_open_interval": "for x in (0, 1), f(x) >= 0",
     "domain_subset_integer": "for n in [0, 100] subset Z, f(n) >= 0",
     # a subscripted sequence element: no algebraic reading, carried
@@ -144,6 +158,8 @@ LEXICON: dict[str, str] = {
     # adjudicate it yet)
     "outcome_reference": "f(x) > 0 => self.stays_positive",
     "raises_typed": "raises(f(x), ValueError)",
+    # the same claim over a region where the function does raise
+    "raises_typed_region": "for x in [-10, -1], raises(f(x), ValueError)",
     "is_pole_safe": "is_pole_safe(x)",
     "negated_predicate": "not is_pole_safe(x)",
     "is_extremity_safe": "is_extremity_safe(x)",
@@ -157,6 +173,24 @@ LEXICON: dict[str, str] = {
     # the function-wide spelling: the predicate over f is the
     # conjunction over every numeric parameter
     "safety_predicate_function_wide": "is_missing_safe(f)",
+    # state safety watches the process too: an environment write, a draw
+    # from the global random generator
+    "state_safe_env_write": "is_state_safe(f)",
+    "state_safe_global_rng": "is_state_safe(f)",
+    # determinism is two calls at the same inputs, compared by kind: a
+    # global draw differs, NaN agrees with NaN, and a read of the
+    # environment holds with a note saying two calls cannot see it change
+    "deterministic_trap": "is_deterministic(f)",
+    "deterministic_nan_agrees": "is_deterministic(f)",
+    "deterministic_hidden_read": "is_deterministic(f)",
+    # emitting a log record through the standard library is not a state
+    # change; changing a logger's level is
+    "state_safe_logging": "is_state_safe(f)",
+    "state_safe_logging_config_trap": "is_state_safe(f)",
+    # drawing from a generator the caller passes in moves the caller's
+    # own generator, not shared state; the same seed gives the same draw
+    "state_safe_passed_generator": "is_state_safe(f)",
+    "reproducible_passed_generator": "is_reproducible(f)",
     # matrix structure predicates: a property of a matrix VALUE, on a
     # bare parameter (a precondition) or an f(...) output. The postfix
     # `A is symmetric` is sugar folding to the canonical call form.
@@ -572,6 +606,45 @@ LEXICON: dict[str, str] = {
     "language_length_bound": "for s in L[unicode, len <= 80], len(f(s)) <= 80",
     "containment_absent": 'for s in L[unicode], "<" not in f(s)',
     "membership_interval_reduces_to_chain": "for x in [0, 1], f(x) in [0, 1]",
+    # what a function does with a value that is not there: a policy row
+    # names the kind (`missing`, a hole in a slot; `absent`, the object
+    # not there), the parameter, optionally one member, and one of five
+    # behaviours counted in no-value slots
+    "missing_propagates": "missing(f, variance) propagates",
+    "missing_drops": "missing(f, rate) drops",
+    "missing_trap_silent_drop": "missing(f, rate) propagates",
+    "missing_raises": "missing(f, ratio) raises(ValueError)",
+    "missing_converts": "missing(f, price) converts",
+    "missing_introduces": "assuming count(weights) >= 1, missing(f, weights) introduces",
+    "missing_introduces_by_shape":
+        "assuming count(prices) >= 1, missing(f, prices) introduces",
+    "absent_raises": "absent(f, score) raises(TypeError)",
+    "absent_drops": "absent(f, fx_rate) drops",
+    "absent_propagates": "absent(f, amount) propagates",
+    "absent_converts": "absent(f, price) converts",
+    "missing_member_null": "missing(f, positions, null) raises(TypeError)",
+    "missing_member_nan": "missing(f, positions, nan) propagates",
+    "missing_class_row_contradicted": "missing(f, positions) propagates",
+    "missing_premise_values_remain": "assuming count(xs) >= 1, missing(f, xs) drops",
+    "missing_premise_no_values": "assuming count(xs) == 0, missing(f, xs, nan) propagates",
+    "missing_premise_all_na_raises":
+        "assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)",
+    "missing_member_defined": "assuming count(xs) >= 1, missing(f, xs, null) drops",
+    "missing_trap_comparison": "missing(f, score) drops",
+    "missing_predicate_sugar": "missing_propagates(f, variance)",
+    "absent_none_spelling": "None(f, score) raises",
+    "is_missing_safe_gate": "is_missing_safe(f)",
+    "is_missing_safe_gate_falsified": "is_missing_safe(f)",
+    "is_absent_safe_gate": "is_absent_safe(f)",
+    "is_absent_safe_gate_falsified": "is_absent_safe(f)",
+    "is_empty_safe_hole": "is_empty_safe(returns)",
+    "is_empty_safe_identity": "is_empty_safe(volumes)",
+    # a field or key along a path: where the None sits decides the kind,
+    # and absence has the members null (held) and unset (left out)
+    "absent_field_raises": "absent(f, trade.memo) raises(TypeError)",
+    "is_absent_safe_field": "is_absent_safe(f)",
+    "absent_key_left_out": ('for order.side in {"buy", "sell"} | {None} \\ {null}, '
+                            'len(f(order)) >= 1'),
     # a series of returns: a transform bound by `let`, a statistic as a
     # premise, and a length premise on a call -------------------------
     # `mathema.f.scale_seq` scales every entry by `c`; a Sharpe ratio
@@ -625,13 +698,18 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "domain_closed_interval",
         "domain_open_interval", "domain_subset_integer",
         "relation_indexing", "relation_boolean_rhs",
-        "outcome_reference", "raises_typed",
+        "outcome_reference", "raises_typed", "raises_typed_region",
         "is_pole_safe", "negated_predicate", "is_extremity_safe",
         "is_representation_safe", "is_empty_safe",
         "is_arbitrary_input_safe", "is_arbitrary_input_safe_postfix",
         "is_compendium_safe", "is_compendium_safe_scoped",
         "is_sorted_output", "output_never_none",
-        "safety_predicate_function_wide", "matrix_symmetric",
+        "safety_predicate_function_wide", "state_safe_env_write",
+        "state_safe_global_rng", "deterministic_trap",
+        "deterministic_nan_agrees", "deterministic_hidden_read",
+        "state_safe_logging", "state_safe_logging_config_trap",
+        "state_safe_passed_generator", "reproducible_passed_generator",
+        "matrix_symmetric",
         "matrix_symmetric_postfix", "matrix_symmetric_output",
         "matrix_positive_definite", "matrix_finite",
         "matrix_determinant_product", "matrix_transpose_product",
@@ -682,7 +760,9 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "latex_geqslant", "latex_varepsilon", "latex_varphi",
         "latex_left_right_bars"),
     "domains": (
-        "domain_excluded_point", "domain_discrete_strings",
+        "domain_excluded_point", "enforce_domain_guard",
+        "enforce_domain_guard_unbound",
+        "domain_discrete_strings",
         "domain_natural_numbers", "domain_complex", "relation_approx",
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex",
@@ -725,6 +805,20 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "mixed_backslash_greek_and_unicode_relation",
         "stress_gauge_invariance", "stress_mixed_let_and_types",
         "chained_comparison", "euler_via_exp"),
+    "missing": (
+        "missing_propagates", "missing_drops", "missing_trap_silent_drop",
+        "missing_raises", "missing_converts", "missing_introduces",
+        "missing_introduces_by_shape", "absent_raises", "absent_drops",
+        "absent_propagates", "absent_converts", "missing_member_null",
+        "missing_member_nan", "missing_class_row_contradicted",
+        "missing_premise_values_remain", "missing_premise_no_values",
+        "missing_premise_all_na_raises", "missing_member_defined",
+        "missing_trap_comparison", "missing_predicate_sugar",
+        "absent_none_spelling", "is_missing_safe_gate",
+        "is_missing_safe_gate_falsified", "is_absent_safe_gate",
+        "is_absent_safe_gate_falsified", "is_empty_safe_hole",
+        "is_empty_safe_identity", "absent_field_raises", "is_absent_safe_field",
+        "absent_key_left_out"),
     "languages": (
         "language_alphabet", "language_contraction",
         "language_excluding_empty", "language_membership_symbol",
@@ -745,6 +839,28 @@ SECTIONS: dict[str, tuple[str, ...]] = {
 # find `%`, and someone looking for "for all" should find `∀`. Keep it
 # to vocabulary a newcomer would actually type.
 TAGS: dict[str, tuple[str, ...]] = {
+    "enforce_domain_guard_unbound": ("guard", "unbound parameter",
+                                     "enforce_domain"),
+    "state_safe_logging": ("logging", "log record", "state", "audit log"),
+    "state_safe_logging_config_trap": ("logging", "log level", "state",
+                                       "trap"),
+    "state_safe_passed_generator": ("generator", "rng", "random", "state"),
+    "reproducible_passed_generator": ("reproducible", "generator", "seed",
+                                      "rng"),
+    "raises_typed_region": ("raises", "exception", "in a range", "region",
+                            "precondition"),
+    "state_safe_env_write": ("state", "side effect", "environment variable",
+                             "os.environ", "trap"),
+    "state_safe_global_rng": ("state", "side effect", "global random",
+                              "random seed", "trap"),
+    "deterministic_trap": ("deterministic", "same answer twice", "random",
+                           "falsified", "trap"),
+    "deterministic_nan_agrees": ("deterministic", "nan determinism",
+                                 "missing", "same answer twice"),
+    "deterministic_hidden_read": ("deterministic", "hidden input",
+                                  "environment", "clock", "file"),
+    "enforce_domain_guard": ("enforce_domain guard", "guard", "decorator",
+                             "domain", "validation"),
     "norm_bars_euclidean": ("norm", "euclidean", "length", "double bars"),
     "norm_bars_two": ("norm", "subscript", "euclidean", "L2"),
     "norm_bars_one": ("norm", "subscript", "manhattan", "taxicab", "L1"),
@@ -900,6 +1016,54 @@ TAGS: dict[str, tuple[str, ...]] = {
                                      "conformable", "premise", "symmetry"),
     "premise_relates_two_params": ("premise", "relates two parameters",
                                    "ordering premise", "not a box"),
+    "missing_propagates": ("missing", "nan", "hole", "propagates", "policy",
+                           "volatility", "sqrt"),
+    "missing_drops": ("missing", "nan", "hole", "drops", "clamp", "stated"),
+    "missing_trap_silent_drop": ("missing", "nan", "drops", "clamp", "trap",
+                                 "silent", "contradicted", "default"),
+    "missing_raises": ("missing", "nan", "hole", "raises", "guard", "log return"),
+    "missing_converts": ("missing", "nan", "converts", "optional", "None out"),
+    "missing_introduces": ("missing", "nan", "introduces", "weights",
+                           "diff", "portfolio"),
+    "missing_introduces_by_shape": ("missing", "nan", "introduces", "rolling",
+                                    "moving average", "window", "pandas"),
+    "absent_raises": ("absent", "None", "optional", "raises", "TypeError"),
+    "absent_drops": ("absent", "None", "optional", "drops", "flag", "default",
+                     "currency"),
+    "absent_propagates": ("absent", "None", "optional", "propagates"),
+    "absent_converts": ("absent", "None", "optional", "converts", "nan out"),
+    "missing_member_null": ("missing", "null", "hole", "member", "raises",
+                            "list", "None element"),
+    "missing_member_nan": ("missing", "nan", "hole", "member", "propagates"),
+    "missing_class_row_contradicted": ("missing", "null", "nan", "mixed",
+                                       "member", "contradicted"),
+    "missing_premise_values_remain": ("missing", "NA", "skipna", "drops",
+                                      "count", "pandas", "mean"),
+    "missing_premise_no_values": ("missing", "nan", "skipna", "propagates",
+                                  "count", "all missing", "mean of nothing"),
+    "missing_premise_all_na_raises": ("missing", "NA", "raises", "count",
+                                      "all missing", "pandas"),
+    "missing_member_defined": ("missing", "null", "polars", "axiom",
+                               "definition", "drops"),
+    "missing_trap_comparison": ("missing", "nan", "drops", "comparison",
+                                "trap", "silent", "label"),
+    "missing_predicate_sugar": ("missing", "propagates", "sugar"),
+    "absent_none_spelling": ("absent", "None", "raises", "spelling"),
+    "is_missing_safe_gate": ("missing", "hole", "gate", "safety"),
+    "is_missing_safe_gate_falsified": ("missing", "hole", "gate", "safety",
+                                       "NaT", "falsified"),
+    "is_absent_safe_gate": ("absent", "None", "optional", "gate", "safety"),
+    "is_absent_safe_gate_falsified": ("absent", "None", "optional", "gate",
+                                      "unstated raise"),
+    "is_empty_safe_hole": ("empty", "empty array", "mean of nothing", "hole"),
+    "is_empty_safe_identity": ("empty", "empty series", "sum", "identity",
+                               "zero"),
+    "absent_field_raises": ("absent", "None", "field", "path", "record",
+                            "dataclass", "raises"),
+    "is_absent_safe_field": ("absent", "None", "field", "path", "gate",
+                             "unstated raise", "dataclass"),
+    "absent_key_left_out": ("absent", "unset", "null", "key", "path", "dict",
+                            "PATCH", "left out"),
 }
 
 
@@ -1236,9 +1400,98 @@ def nearly_identity(x: float) -> float:
 
 
 def double(x: float) -> float:
-    """f(x) = 2x, the plain function every single-construct LEXICON
-    entry above (relation/power/abs/domain shapes) is checked against."""
+    """f(x) = 2x, the plain function most single-construct LEXICON
+    entries above (power and domain shapes, the notation) are checked
+    against."""
     return 2 * x
+
+
+def celsius_round_trip(x: float) -> float:
+    """A temperature in Celsius converted to Fahrenheit and back, what
+    "relation_eq" demonstrates: `f(x) == x`, an exact equality, proven as
+    mathematics, while its `[float]` companion is the computation."""
+    return ((x * 9 / 5) + 32 - 32) * 5 / 9
+
+
+def checked_sqrt(x: float) -> float:
+    """A square root that refuses a negative input, the second function
+    for "raises_typed": it raises only below zero, so the unbounded claim
+    is falsified at zero, and "raises_typed_region" proves it over the
+    negative numbers."""
+    if x < 0:
+        raise ValueError("negative")
+    return math.sqrt(x)
+
+
+def remember_fx_rate(rate: float) -> float:
+    """Stores an exchange rate in the environment for later calls, what
+    "state_safe_env_write" demonstrates: a write to os.environ."""
+    os.environ["FX_RATE"] = str(rate)
+    return rate
+
+
+def noisy_quote(price: float) -> float:
+    """A price with a little noise from the global random generator, what
+    "state_safe_global_rng" and "deterministic_trap" demonstrate: the
+    draw advances shared state, and reads it as an input the arguments
+    do not carry."""
+    return price * (1 + 0.001 * random.gauss(0, 1))
+
+
+def log_return(p0: float, p1: float) -> float:
+    """The log return from p0 to p1, NaN where either price is not
+    positive, what "deterministic_nan_agrees" demonstrates: a NaN answer is
+    still a deterministic one."""
+    return math.log(p1 / p0) if p0 > 0 and p1 > 0 else math.nan
+
+
+#: a logger of the pricing service's own, attached to no handlers
+_audit_log = logging.Logger("pricing.audit")
+_pricing_log = logging.getLogger("mathema.lexicon.pricing")
+
+
+def price_with_audit_log(price: float) -> float:
+    """A price with 20 percent added, logged on the way, what
+    "state_safe_logging" demonstrates: emitting a log record changes no
+    state."""
+    _audit_log.info("pricing %s", price)
+    return round(price * 1.2, 2)
+
+
+def quiet_pricing(price: float) -> float:
+    """The same price, after turning the pricing logger down to
+    warnings, what "state_safe_logging_config_trap" demonstrates: a
+    logger's level is shared configuration."""
+    _pricing_log.setLevel(logging.WARNING)
+    return round(price * 1.2, 2)
+
+
+def price_in_fx(price: float) -> float:
+    """A price converted at the rate the environment holds, what
+    "deterministic_hidden_read" demonstrates: a read of an input the
+    arguments do not carry."""
+    return price * float(os.environ.get("FX_RATE", "1"))
+
+
+def triangular_number(n: int) -> int:
+    """The n-th triangular number, 0 + 1 + ... + n, the count of pairs
+    among n + 1 items; what "domain_subset_integer" and its symbol
+    spelling demonstrate: a domain of whole numbers."""
+    return n * (n + 1) // 2
+
+
+def removed_endpoint(x: float) -> float:
+    """A function kept only to point callers at its replacement: every
+    call raises, what "raises_typed" demonstrates, a claim that the
+    function raises one named exception."""
+    raise ValueError("removed_endpoint was retired, call rate() instead")
+
+
+def simple_interest_balance(x: float) -> float:
+    """A million at five percent simple interest, after `x` years; what
+    the "let_free_var_*" entries demonstrate: `c`, a free variable the
+    claim quantifies over, with nothing in the function to alias."""
+    return 1_000_000 * (1 + 0.05 * x)
 
 
 def discount(price: float, code: float) -> float:
@@ -1258,6 +1511,14 @@ def center_of_mass_two_body(m1: float, x1: float, m2: float, x2: float) -> float
     return (m1 * x1 + m2 * x2) / (m1 + m2)
 
 
+@enforce_domain()
+@claims_decorator("for alpha in [0, 1], f(x, alpha) <= max(x, 1)")
+def blend(x: float, alpha: float) -> float:
+    """A blend of x with 1, weighted by alpha, which its guard keeps in
+    [0, 1], what "enforce_domain_guard" demonstrates."""
+    return alpha * x + (1 - alpha) * 1.0
+
+
 def gibbs_free_energy(dh: float, t: float, ds: float) -> float:
     """delta-G = delta-H - T*delta-S, undefined below absolute zero,
     what "stress_gauge_invariance" demonstrates: a free variable (`c`,
@@ -1274,7 +1535,12 @@ def quadratic_root_plus(a: float, b: float, c: float) -> float:
     """(-b + sqrt(b^2 - 4ac)) / 2a, what the `assuming_*` entries
     demonstrate: the unconditional monotonicity claim falsifies (the
     sqrt raises where the discriminant goes negative), while the same
-    claim under `assuming b^2 - 4*a*c >= 0.01` proves."""
+    claim under `assuming b^2 - 4*a*c >= 0.01` proves, and so does the
+    claim resting on `real_roots` below, which borrows its relation.
+
+    Claims:
+        real_roots: b^2 - 4*a*c >= 0.01
+    """
     import math
     return (-b + math.sqrt(b * b - 4 * a * c)) / (2 * a)
 
@@ -1542,6 +1808,120 @@ def unescape_angle(s: str) -> str:
     return s.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
 
 
+def sharpe_annualised(returns: "pandas.Series") -> float:
+    """The Sharpe ratio annualised over 252 trading days, written with a
+    power, the second function for the "let_scale_seq_sharpe_*" entries:
+    `252 ** 0.5` lowers as `sqrt(252)` does."""
+    return returns.mean() / returns.std(ddof=1) * 252 ** 0.5
+
+
+def volatility(variance: float) -> float:
+    """The standard deviation for a variance: `math.sqrt` gives a hole
+    back for a hole."""
+    import math
+    return math.sqrt(variance)
+
+
+def clamp_discount(rate: float) -> float:
+    """A discount rate held to [0, 1]; `min(1.0, nan)` is 1.0, so a
+    missing rate becomes a full discount (a drop)."""
+    return max(0.0, min(1.0, rate))
+
+
+def log_of_ratio(ratio: float) -> float:
+    """The log of a price ratio, refusing a missing ratio with a guard."""
+    import math
+    if ratio != ratio:
+        raise ValueError("ratio is missing")
+    return math.log(ratio)
+
+
+def price_or_none(price: float) -> "Optional[float]":
+    """A quoted price, None for a missing quote: a hole in, `None` out
+    (converts)."""
+    return None if price != price else price
+
+
+def price_as_float(price: "Optional[float]") -> float:
+    """A price as a float, `nan` for no quote: `None` in, a hole out
+    (converts)."""
+    return float("nan") if price is None else price
+
+
+def converted_amount(amount: "Optional[float]") -> "Optional[float]":
+    """An amount at a fixed rate, `None` passed through (propagates)."""
+    return None if amount is None else 1.1 * amount
+
+
+def weight_changes(weights: "numpy.ndarray"):
+    """Each portfolio weight's change since the one before it: the first
+    has nothing before it, so it is a hole whatever the input
+    (introduces)."""
+    import numpy
+    return numpy.diff(weights, prepend=numpy.nan)
+
+
+def rolling_average(prices: "pandas.Series"):
+    """The three-period moving average of a price series: its first two
+    slots are holes whatever the input (introduces)."""
+    return prices.rolling(3).mean()
+
+
+def in_base_currency(amount: float, fx_rate: "Optional[float]" = None) -> float:
+    """An amount converted at `fx_rate`, `None` meaning it is already in
+    base: the flag is replaced, so an absent rate is dropped."""
+    if fx_rate is None:
+        fx_rate = 1.0
+    return amount * fx_rate
+
+
+def total_exposure(positions: list) -> float:
+    """`sum` over a list of positions: a `None` element (the member null)
+    raises, a `nan` element propagates."""
+    return sum(positions)
+
+
+def risk_label(score: "Optional[float]") -> str:
+    """"high" above one half, else "low": `nan > 0.5` is False, so a
+    missing score reads as "low" (a drop), and `None` raises."""
+    return "high" if score > 0.5 else "low"  # type: ignore[operator]
+
+
+def average_return(returns: "numpy.ndarray") -> float:
+    """The mean of a return series; the mean of an empty array is
+    `nan`."""
+    import numpy as np
+    return float(np.mean(returns))
+
+
+def session_volume(volumes: "pandas.Series") -> float:
+    """The traded volume over a session; the sum over nothing is 0."""
+    return float(volumes.sum())
+
+
+@dataclass
+class Trade:
+    """A booked trade; its memo is optional."""
+    amount: float = 100.0
+    memo: "str | None" = None
+
+
+def memo_length(trade: Trade) -> int:
+    """The length of a trade's memo; a trade with no memo raises."""
+    return len(trade.memo)  # type: ignore[arg-type]
+
+
+def side_label(order: dict) -> str:
+    """An order's side in capitals; an order with no side key raises."""
+    return order["side"].upper()
+
+
+def polars_mean(xs: "polars.Series") -> float:
+    """The mean of a polars Series, which skips its nulls while values
+    remain."""
+    return float(xs.mean())
+
+
 def sharpe(returns: "pandas.Series") -> float:
     """The Sharpe ratio of a series of returns at a zero risk-free rate,
     unannualised: the mean over the sample standard deviation
@@ -1587,18 +1967,64 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "scale_column": (scale_column, ["table_column_attribute",
                                     "table_column_item"]),
     "running_peak": (running_peak, ["vector_running_maximum"]),
-    "series_mean": (series_mean, ["vector_between_least_and_greatest"]),
+    "series_mean": (series_mean, ["vector_between_least_and_greatest",
+                                  "missing_premise_values_remain",
+                                  "missing_premise_no_values",
+                                  "missing_premise_all_na_raises"]),
+    "volatility": (volatility, ["missing_propagates", "missing_predicate_sugar",
+                                "is_missing_safe_gate"]),
+    "clamp_discount": (clamp_discount, ["missing_drops"]),
+    # the same function with the default word, apart: two words for one
+    # case in one batch are refused as a clash
+    "clamp_discount_default": (clamp_discount, ["missing_trap_silent_drop"]),
+    "log_of_ratio": (log_of_ratio, ["missing_raises"]),
+    "price_or_none": (price_or_none, ["missing_converts"]),
+    "price_as_float": (price_as_float, ["absent_converts"]),
+    "converted_amount": (converted_amount, ["absent_propagates", "is_absent_safe_gate"]),
+    "weight_changes": (weight_changes, ["missing_introduces"]),
+    "rolling_average": (rolling_average, ["missing_introduces_by_shape"]),
+    "in_base_currency": (in_base_currency, ["absent_drops"]),
+    "total_exposure": (total_exposure, ["missing_member_null", "missing_member_nan",
+                                        "missing_class_row_contradicted",
+                                        "is_missing_safe_gate_falsified"]),
+    "risk_label": (risk_label, ["missing_trap_comparison", "absent_raises",
+                                "absent_none_spelling"]),
+    "risk_label_gate": (risk_label, ["is_absent_safe_gate_falsified"]),
+    "average_return": (average_return, ["is_empty_safe_hole"]),
+    "session_volume": (session_volume, ["is_empty_safe_identity"]),
+    "polars_mean": (polars_mean, ["missing_member_defined"]),
+    "memo_length": (memo_length, ["absent_field_raises"]),
+    "memo_length_gate": (memo_length, ["is_absent_safe_field"]),
+    "side_label": (side_label, ["absent_key_left_out"]),
     "max_drawdown": (max_drawdown, ["vector_drawdown_bounds"]),
     "weighted_return": (weighted_return, ["table_columns_dot"]),
     "nearly_identity": (nearly_identity, [
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex", "latex_varepsilon",
     ]),
+    "celsius_round_trip": (celsius_round_trip, ["relation_eq"]),
+    "checked_sqrt": (checked_sqrt, ["raises_typed", "raises_typed_region"]),
+    "remember_fx_rate": (remember_fx_rate, ["state_safe_env_write"]),
+    "noisy_quote": (noisy_quote, ["state_safe_global_rng",
+                                  "deterministic_trap"]),
+    "log_return": (log_return, ["deterministic_nan_agrees"]),
+    "price_in_fx": (price_in_fx, ["deterministic_hidden_read"]),
+    "blend": (blend, ["enforce_domain_guard", "enforce_domain_guard_unbound"]),
+    "price_with_audit_log": (price_with_audit_log, ["state_safe_logging"]),
+    "quiet_pricing": (quiet_pricing, ["state_safe_logging_config_trap"]),
+    "sharpe_annualised": (sharpe_annualised, [
+        "let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap"]),
+    "triangular_number": (triangular_number, [
+        "domain_subset_integer", "domain_subset_symbol",
+    ]),
+    "removed_endpoint": (removed_endpoint, ["raises_typed"]),
+    "simple_interest_balance": (simple_interest_balance, [
+        "let_free_var_closed", "let_free_var_typed",
+    ]),
     "double": (double, [
-        "relation_eq", "relation_le_unicode", "power_caret", "abs_bars",
+        "power_caret",
         "domain_closed_interval", "domain_open_interval",
-        "domain_subset_integer",
-        "forall_symbol", "domain_subset_symbol",
+        "forall_symbol",
         "domain_blackboard_reals", "relation_approx_unicode",
         "power_superscript", "sqrt_symbol", "multiply_dot",
         "infinity_symbol", "floor_brackets_unicode",
@@ -1607,11 +2033,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "latex_geqslant", "latex_left_right_bars",
     ]),
     "cosine_phase": (cosine_phase, ["latex_varphi"]),
-    "discount": (discount, ["raises_typed", "inferred_literal_domain"]),
+    "discount": (discount, ["inferred_literal_domain"]),
     "center_of_mass_two_body": (center_of_mass_two_body, ["let_alias"]),
-    "gibbs_free_energy": (gibbs_free_energy, [
-        "let_free_var_closed", "let_free_var_typed", "stress_gauge_invariance",
-    ]),
+    "gibbs_free_energy": (gibbs_free_energy, ["stress_gauge_invariance"]),
     "quadratic_root_plus": (quadratic_root_plus, [
         "assuming_inequality", "assuming_named_claim",
     ]),
@@ -1632,6 +2056,7 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     ]),
     "put_call_parity_gap": (put_call_parity_gap, ["parity_identity"]),
     "logistic_standard": (logistic_standard, [
+        "relation_le_unicode", "abs_bars",
         "sigmoid_derivative", "sigmoid_symmetry", "sigmoid_limit_upper",
         "sigmoid_limit_lower", "sigmoid_density_integrates",
         "sigmoid_bounded_below", "sigmoid_bounded_above",

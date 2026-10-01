@@ -246,3 +246,86 @@ def test_freshness_compares_the_defaults_per_function():
                         "meta": {"mathema.defaults":
                                  p.meta["mathema.defaults"]["numpy.mean"]}}]}
     assert _defaults_moved(np.mean, entry, flat)
+
+
+def _sampled(p) -> set:
+    # the parameter names the sampling line states a draw for
+    import re
+    return set(re.findall(r"(?:^|, )([A-Za-z_]\w*)~", p.meta["mathema.sampling"]))
+
+
+def test_the_sampling_line_lists_only_the_sampled_array():
+    p = _declared(np.mean, "for a in [-100, 100]^n, f(a) <= max(a)")
+    assert p.verdict == "holds", p.note
+    assert _sampled(p) == {"a"}
+    assert "held at their defaults: axis=None" in p.note
+
+
+def test_a_pinned_parameter_is_not_listed_as_sampled():
+    p = _declared(np.mean, "let axis be 0, for a in R^(n,n), "
+                           "dim(f(a)) == dim(a)")
+    assert _sampled(p) == {"a"}
+    assert "axis=0 (pinned)" in p.note
+
+
+def test_a_project_function_lists_its_sampled_defaulted_parameter(
+        tmp_path, monkeypatch):
+    (tmp_path / "dflt_sampled.py").write_text(textwrap.dedent('''
+        def scaled(x: float, k: float = 2.0) -> float:
+            """x times k."""
+            return x * k
+    '''))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    import importlib
+    scaled = importlib.import_module("dflt_sampled").scaled
+    rows = mathema.check(scaled, claims=[mathema.claim(
+        "for x in [0, 1], for k in [1, 2], f(x, k) >= 0",
+        route="probe")]).probes
+    (p,) = [p for p in rows if "mathema.sampling" in (p.meta or {})]
+    assert _sampled(p) == {"x", "k"}
+
+
+def test_a_library_key_with_a_policy_row_stays_fresh(tmp_path, monkeypatch):
+    import mathema.compendium as comp
+    from mathema.verify import verify_project
+    real = comp._installed_version
+    monkeypatch.setattr(comp, "_installed_version",
+                        lambda lib, aliases=(): "1.0" if lib == "extlib" else real(lib, aliases))
+    site = tmp_path / "site"
+    (site / "extlib").mkdir(parents=True)
+    (site / "extlib" / "__init__.py").write_text(textwrap.dedent('''
+        def scaled(x: float, k: float = 2.0) -> float:
+            """x times k."""
+            return x * k
+    '''))
+    monkeypatch.syspath_prepend(str(site))
+    proj = tmp_path / "proj"
+    (proj / "claims").mkdir(parents=True)
+    (proj / "claims" / "extlib.claims.yaml").write_text(textwrap.dedent("""
+        compendium: extlib
+        versions: ">=1.0"
+        extlib.scaled:
+          claims:
+            - name: nonneg
+              statement: 'for x in [0, 4], f(x) >= 0'
+            - name: holes_through
+              statement: 'missing(f, x) propagates'
+    """))
+    (proj / "claims" / "use.claims.yaml").write_text(textwrap.dedent("""
+        extlib.scaled:
+          claims: []
+    """))
+
+    def sweep():
+        sys.modules.pop("extlib", None)
+        comp.uninstall()
+        return verify_project(str(proj))
+
+    sweep()
+    import yaml
+    rec = proj / ".mathema" / "verified" / "extlib.scaled.yaml"
+    (row,) = [c for c in yaml.safe_load(rec.read_text())["extlib.scaled"]
+              ["claims"] if c["name"] == "holes_through"]
+    assert row["meta"]["mathema.defaults"] == {"extlib.scaled": {"k": "2.0"}}
+    again = sweep()
+    assert any("extlib.scaled: fresh" in line for line in again.lines), again.lines

@@ -241,9 +241,11 @@ def _traces(expr, table: LemmaTable):
 
 def _gram_root(term):
     """`X` when `term` is `X @ X.T` or `X.T @ X` (a Gram product), for
-    the rank lemma, else None."""
+    the rank lemma, else None. A Gram product scaled by `c` has the
+    rank of `X` only when `c` is a nonzero number (`0 * (X @ X.T)` has
+    rank 0), so a scale that may be zero gives None."""
     coeff, factors = _factors(term)
-    if coeff == 0 or len(factors) % 2:
+    if coeff.is_nonzero is not True or len(factors) % 2:
         return None
     half = len(factors) // 2
     left, right = factors[:half], factors[half:]

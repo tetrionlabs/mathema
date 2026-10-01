@@ -125,11 +125,14 @@ declared, a raise falsifies as always.
 | `polars.Series` | vector | null, NaN | |
 | `polars.DataFrame` | table | null, NaN | |
 
-Missing is one concept in mathema, whatever a library calls it: every
-spelling in the table reads back as missing when a function returns
-it, a polars NaN included (polars itself treats NaN as an ordinary
-float), and an adapter can realise a missing position in each of its
-spellings (the first one listed is the one it uses by default).
+A missing position is a hole, one concept in mathema whatever a library
+calls it: every spelling in the table reads back as `missing` when a
+function returns it, a polars NaN included (polars itself treats NaN as
+an ordinary float), and an adapter can realise a hole in each of its
+spellings (the first one listed is the one it uses by default). The
+container itself set to `None` is `absent`, the other kind. What a
+function does with each is its policy row; see [missing
+values](missing-values.md).
 
 numpy, pandas and polars stay optional: an adapter whose library is not
 installed is absent, and a parameter it would have claimed is sampled
@@ -310,10 +313,13 @@ for row in proof.meta["mathema.definitions"]:
 <!-- example: rt-proofs output -->
 ```text
 mathema.Record(sharpe) · source, no side effects · form ef276c12c167
-  proven  f_s_returns_c_approx_f_returns: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns)
-           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every length from 2
-  holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing, f(s(returns, c)) ~= f(returns) (n=39)
-through the definition rows pandas.Series.mean definition, pandas.Series.std definition, lowered to sums over returns at a symbolic length: the relation holds for every length
+  proven  f_s_returns_c_approx_f_returns: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)
+           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every length from 2; missing for returns (pandas.Series) means nan, null or NA
+  holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns) (229 entries across 43 draws, sizes (2, 1) to (8, 1))
+           the float64 computation of f_s_returns_c_approx_f_returns ran at 43 points: nan, null, NA, every corner and 37 interior points; at returns = [nan, -0.009, 0.000606] f returned -9.81, so it drops the nan slot; at returns = [NA, -0.009, 0.000606] f returned -9.81, so it drops the NA slot
+  FALSIFY missing[returns]: missing(f, returns) propagates   [mathema's default word for a pandas.Series slot that may be nan, null or NA, not a claim of yours; f drops instead: a nan slot in, -9.81 out]
+           if -9.81 is the answer f should give when a slot is nan, write `missing(f, returns) drops`; if not, make f raise or give a hole back; or accept it as a discovery: mathema accept sharpe missing[returns] --as discovery --corrected "missing(f, returns) drops"
+through the pandas.Series.mean definition and pandas.Series.std definition rows, lowered to a sum over returns at a symbolic length; holds for every length
 pandas.Series.mean definition bundled mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std definition bundled mathema/compendium/pandas/series.claims.yaml
 ```

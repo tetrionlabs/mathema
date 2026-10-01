@@ -340,6 +340,102 @@ class DomainError(ValueError):
     `except ValueError` handling keeps working unchanged."""
 
 
+class MissingValueError(DomainError):
+    """An output that does not carry the input's holes the way a
+    function's policy claim says (`drops`, `propagates`), found at exit
+    by `enforce_domain()`. The message names the parameter and the
+    member."""
+
+
+def _policies_from_declared_claims(fn, key: str | None, root: str) -> list:
+    """The policy claims declared on `fn` (decorator, docstring, and a
+    claims file when `key` is given), parsed."""
+    from .policy import parse_policy
+    entries = declared_from_function(fn)
+    if key is not None:
+        from .spec import merge_entries, load_declared
+        file_entry = load_declared(root).get(key, {}).get("entry", {})
+        entries = merge_entries({"claims": entries}, file_entry)["claims"]
+    out = []
+    for c in entries:
+        found = parse_policy(str(c.get("statement") or c.get("law") or ""))
+        if found is not None and found.behaviour:
+            out.append(found)
+    return out
+
+
+def _policy_guard(fn, policies: list, arguments: dict) -> "BaseException | None":
+    """The exception a policy that says f raises on a missing or absent
+    input raises for a call's arguments, or None: the type the policy
+    names (`DomainError` where it names none), with one sentence naming
+    the parameter and the member."""
+    from .policy import _members_in, _premise_holds
+    for pol in policies:
+        if pol.behaviour != "raises" or not _premise_holds(pol.premise, arguments):
+            continue
+        for p in ([pol.parameter] if pol.parameter else list(arguments)):
+            if p not in arguments:
+                continue
+            value = arguments[p]
+            if pol.kind == "absent":
+                if value is None:
+                    return _refusal(fn, pol.exception, f"{p} is None")
+                continue
+            held = _members_in(value, "missing")
+            hit = [m for m in held if pol.member in (None, m)]
+            if not hit:
+                continue
+            from ._missing_words import _in_slot
+            article = "an" if hit[0][:1] in "aeiouAEIONS" else "a"
+            what = (f"{p} holds {article} {hit[0]} slot" if _in_slot(value)
+                    else f"{p} is {hit[0]}")
+            return _refusal(fn, pol.exception, what)
+    return None
+
+
+def _refusal(fn, exception: "str | None", because: str) -> BaseException:
+    """The exception `enforce_domain` raises for a refused input: the
+    named type, looked up among the builtins, then f's module, then the
+    module a dotted name imports, or `DomainError` when none is named or
+    the name is not an exception."""
+    from .policy import _exception_type
+    kind = _exception_type(exception, getattr(fn, "__globals__", {}) or {}) \
+        if exception else None
+    if not (isinstance(kind, type) and issubclass(kind, BaseException)):
+        kind = DomainError
+    return kind(f"enforce_domain is active and raised {kind.__name__} because {because}")
+
+
+def _policy_exit(policies: list, arguments: dict, output) -> "str | None":
+    """Why a call's output breaks a `drops` or `propagates` policy, or
+    None: the output's no-value slots counted against the input's."""
+    from ._missing_policy import classify_call
+    from ._missing_words import point_shown, value_shown
+    from .policy import _members_in, _premise_holds, policy_text
+    for pol in policies:
+        if pol.behaviour not in ("drops", "propagates") \
+                or not _premise_holds(pol.premise, arguments):
+            continue
+        for p in ([pol.parameter] if pol.parameter else list(arguments)):
+            if p not in arguments:
+                continue
+            value = arguments[p]
+            held = (["None"] if value is None else []) if pol.kind == "absent" \
+                else _members_in(value, "missing")
+            if not [m for m in held if pol.member in (None, m)]:
+                continue
+            did = classify_call({p: value}, output)
+            if did != pol.behaviour:
+                what = "the hole" if pol.kind == "missing" else "the absence"
+                verb = {"drops": f"dropping {what}", "propagates": f"propagating {what}",
+                        "converts": f"converting {what}",
+                        "introduces": "with a missing value it was not given"}.get(did, did)
+                return (f"at {point_shown({p: value})} f returned {value_shown(output)}, "
+                        f"{verb}, but its policy says {pol.behaviour} "
+                        f"({policy_text(pol)})")
+    return None
+
+
 def _domain_from_declared_claims(fn, key: str | None, root: str) -> dict:
     """Every `for p in ...`-quantified domain already declared on `fn`'s
     own claims (decorator, docstring, and, if `key` is given, a
@@ -413,6 +509,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
     def decorator(fn):
         import functools
 
+        from .domain import number_member
         from .grammar import is_missing, domain_contains, render_domain
         from .types import domain_from_signature
 
@@ -427,10 +524,11 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
                     f"conflicts with the declared claim domain "
                     f"{declared_domain[p]} on {fn.__name__!r}; these must "
                     "not diverge")
-        merged_domain = {**domain_from_signature(fn), **declared_domain, **explicit}
+        merged_domain = {**domain_from_signature(fn, guards=False),
+                         **declared_domain, **explicit}
         sig = callable_signature(fn)
 
-        def _check_scalar(value, bounds) -> bool:
+        def _check_scalar(value, bounds, slot: bool = False) -> bool:
             """`True` when `value` is a candidate this `bounds` shape
             could ever be violated by, an `Interval`/`"Z"`/`"N"`/a
             `Domain` with no discrete-set piece can only ever be
@@ -447,7 +545,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             exempt a missing value from a domain that explicitly
             excludes it."""
             if is_missing(value):
-                return domain_contains(value, bounds)
+                return domain_contains(value, bounds, slot=slot)
             if getattr(bounds, "base_type", None) == "L":
                 # a language domain judges every value, a string first
                 # of all; nothing is exempt from it
@@ -455,15 +553,14 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             numeric_only = (isinstance(bounds, (str, tuple))
                             or (hasattr(bounds, "pieces")
                                 and not any(isinstance(p, frozenset) for p in bounds.pieces)))
-            if numeric_only and isinstance(value, complex) \
-                    and not isinstance(value, (int, float)):
-                # a complex value IS a candidate against a numeric
-                # bound: domain_contains reads a zero-imaginary complex
-                # as the real number it equals and rejects a genuinely
-                # imaginary one, never silently exempt.
-                return domain_contains(value, bounds)
-            if numeric_only and (not isinstance(value, (int, float)) or isinstance(value, bool)):
-                return True   # not a candidate, exempt, not a violation
+            # a number of any numeric type (a bool, a numpy scalar, a
+            # Fraction, a Decimal, a complex) is judged by its value;
+            # a zero-imaginary complex reads as the real number it is
+            member = number_member(value, bounds)
+            if member is not None:
+                return member
+            if numeric_only:
+                return True   # not a number: not a candidate, exempt
             return domain_contains(value, bounds)
 
         def _violation(name: str, value) -> str | None:
@@ -494,13 +591,15 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             if isinstance(value, (list, tuple)) or (
                     hasattr(value, "__iter__") and not isinstance(value, (str, bytes, dict))):
                 for i, el in enumerate(value):
-                    if not _check_scalar(el, bounds):
+                    if not _check_scalar(el, bounds, slot=True):
                         return (f"={value!r} has element {i} ({el!r}) outside its declared "
                                 f"domain {render_domain(bounds, show_missing=True)}")
                 return None
             if not _check_scalar(value, bounds):
                 return f"={value!r} outside its declared domain {render_domain(bounds, show_missing=True)}"
             return None
+
+        policies = _policies_from_declared_claims(fn, key, root)
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
@@ -510,6 +609,19 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
                 problem = _violation(name, value)
                 if problem is not None:
                     raise DomainError(f"{fn.__name__}(): {name}{problem}")
+            if policies:
+                # a policy that says f raises on a missing or absent input
+                # rejects it here; drops and propagates are checked on the
+                # result
+                arguments = dict(bound.arguments)
+                refused = _policy_guard(fn, policies, arguments)
+                if refused is not None:
+                    raise refused
+                out = fn(*args, **kwargs)
+                broken = _policy_exit(policies, arguments, out)
+                if broken is not None:
+                    raise MissingValueError(f"{fn.__name__}(): {broken}")
+                return out
             return fn(*args, **kwargs)
 
         wrapper.__mathema_enforced_domain__ = merged_domain
@@ -557,7 +669,13 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     or a space a claim's own binding states, `for A in R^(30,15)`) has
     the rank and the fixed sizes its dimensions state, and a dimension
     name shared across parameters agrees across the actual arguments; a
-    runtime type reports its shape the way its adapter reads it. At
+    runtime type reports its shape the way its adapter reads it, and a
+    table of equal columns against two dimensions is its rows by its
+    columns. A space a claim binds also states its entries: every entry
+    of `R^(30,15)` is a real number (an imaginary entry, an infinity,
+    text or a bool is outside), every entry of `[0, 1]^30` lies in
+    `[0, 1]`, and a missing entry follows the space's own missing rule.
+    A marker alone states a shape and nothing about the entries. At
     exit, the result matches the return marker with the names this call
     bound (`Vec("m")` after `a` was 3 by 4 means length 3). Each
     failure names the parameter (or the result), the shape found and
@@ -592,6 +710,7 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     about, so `assuming <premise>, <law>` and a guard for `<premise>`
     are the same precondition stated once."""
     import ast
+    import dataclasses
     import functools
 
     from .conjecture import _parse_assuming_links, _split_top_and
@@ -657,6 +776,13 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
                 _domain_from_declared_claims(fn, key, root))
         except ValueError as e:
             raise DomainError(f"enforce_dimensions(): {e}") from e
+        # an enforce_domain guard already on fn judges every number of a
+        # parameter it covers, in its own words, so stacking the two in
+        # either order reports a number outside the domain the same way
+        covered = set(getattr(fn, "__mathema_enforced_domain__", None) or ())
+        plan = dataclasses.replace(
+            plan, numbers_judged_elsewhere=frozenset(
+                covered & set(plan.elements)))
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):

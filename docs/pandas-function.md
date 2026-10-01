@@ -119,8 +119,8 @@ mathema.Record(sharpe) · source, no side effects · form 099872a2a5ee
   FALSIFY leverage_invariant: let s = mathema.f.scale_seq, let c be [0.1,
       10.0]:float|missing, for returns in [-0.1, 0.1]^n:float|missing,
       f(s(returns, c)) ~= f(returns)
-           counterexample returns=[0.0], c=4.26366: the computation returns NaN
-               here (f returned nan)
+           counterexample returns=[0.0], c=4.2636586502253655: the computation
+               returns NaN here (f returned nan)
 ```
 
 Read the witness. `returns=[0.0]` is a series of one day. Its standard
@@ -208,7 +208,7 @@ print(record.probes[0].counterexample)
 <!-- example: pandas output -->
 ```text
 falsified
-returns=[-0.0272559, -0.089997, 0.00605701, -0.0117273]; c=0.1: 26.317059661412703 vs -11.673709413201967
+returns=[-0.027255878198803082, -0.08999703650149866, 0.006057006177454, -0.011727268815354505]; c=0.1: 26.317059661412703 vs -11.673709413201967
 ```
 
 Four days of returns, each shifted up by 0.1: a Sharpe ratio of 26.3

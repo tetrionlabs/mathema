@@ -22,6 +22,8 @@ def _write_funcs(path, add_body="    return a + b"):
     path.write_text(
         "def add(a: float, b: float) -> float:\n" + add_body + "\n\n\n"
         "def clamp01(x: float) -> float:\n"
+        "    if x != x:\n"
+        "        return x\n"
         "    return min(1.0, max(0.0, x))\n\n\n"
         "def gated_sqrt(x: float) -> float:\n"
         "    if x < 0:\n"

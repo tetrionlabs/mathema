@@ -35,13 +35,13 @@ _LANGUAGE_ROWS = (
 #: the verdict every row with an example function lands on, or
 #: `(verdict, text the witness contains)`
 PINNED: dict = {
-    "abs_bars": "falsified",
+    "abs_bars": "proven",
     "abs_bars_compound": "proven",
     "assuming_inequality": "proven",
     "assuming_is_defined": "proven",
     "assuming_is_defined_pinned": "proven",
     "assuming_is_defined_postfix": "proven",
-    "assuming_named_claim": "skipped",
+    "assuming_named_claim": "proven",
     "bound_function_nested_in_f": "proven",
     "certificate_convex_lower": "proven",
     "certificate_convex_upper": "proven",
@@ -57,8 +57,8 @@ PINNED: dict = {
     "domain_blackboard_reals": "proven",
     "domain_closed_interval": "proven",
     "domain_open_interval": "proven",
-    "domain_subset_integer": "skipped",
-    "domain_subset_symbol": "skipped",
+    "domain_subset_integer": "proven",
+    "domain_subset_symbol": "proven",
     "finite_domain_discrete_set": "proven",
     "finite_domain_pinned": "proven",
     "finite_domain_small_range": "proven",
@@ -83,8 +83,8 @@ PINNED: dict = {
     "latex_varphi": "proven",
     "let_alias": "proven",
     "let_alias_for_under_test": "proven",
-    "let_free_var_closed": "skipped",
-    "let_free_var_typed": "skipped",
+    "let_free_var_closed": "proven",
+    "let_free_var_typed": "proven",
     "matrix_determinant_bars_compound": "proven",
     "membership_interval_reduces_to_chain": "proven",
     "multiply_dot": "proven",
@@ -95,12 +95,31 @@ PINNED: dict = {
     "power_superscript": "proven",
     "power_superscript_negative": "proven",
     "premise_relates_two_params": "proven",
-    "raises_typed": "skipped:misspecified",
+    # a function that always raises holds; one that raises only below
+    # zero is falsified at zero, and proves over the negative numbers
+    "raises_typed": {"removed_endpoint": "holds",
+                     "checked_sqrt": ("falsified",
+                                      "returned 0.0 instead of raising")},
+    "raises_typed_region": "proven",
+    "state_safe_env_write": ("falsified", "changes os.environ"),
+    "state_safe_global_rng": ("falsified",
+                              "advances the shared random generator"),
+    "deterministic_trap": ("falsified",
+                           "draws from the shared random generator"),
+    "deterministic_nan_agrees": "proven",
+    "deterministic_hidden_read": ("falsified", "reads os.environ"),
+    "enforce_domain_guard": "proven",
+    "enforce_domain_guard_unbound": "proven",
+    "state_safe_logging": "proven",
+    "state_safe_logging_config_trap": ("falsified",
+                                       "_pricing_log.setLevel"),
+    "state_safe_passed_generator": "proven",
+    "reproducible_passed_generator": "proven",
     "real_domain_is_not_finite": "holds",
     "recurrence_identity": "proven",
     "relation_approx_unicode": "proven",
-    "relation_eq": "falsified",
-    "relation_le_unicode": "falsified",
+    "relation_eq": "proven",
+    "relation_le_unicode": "proven",
     "sigmoid_bounded_above": "proven",
     "sigmoid_bounded_below": "proven",
     "sigmoid_density_integrates": "proven",
@@ -135,6 +154,38 @@ PINNED: dict = {
     "space_excluded_fixed": ("falsified", "A of shape (31, 15)"),
     "space_excluded_by_construction": "proven",
     "dim_premise_against_fixed": "skipped",
+    # the missing section: a policy row per behaviour and kind, the
+    # member and premise forms, the traps and the gates
+    "missing_propagates": "holds",
+    "missing_drops": "holds",
+    "missing_trap_silent_drop": ("falsified", "rate = nan: f returned 1.0"),
+    "missing_raises": "proven",
+    "missing_converts": "holds",
+    "missing_introduces": "holds",
+    "missing_introduces_by_shape": "holds",
+    "absent_raises": "holds",
+    "absent_drops": "proven",
+    "absent_propagates": "holds",
+    "absent_converts": "holds",
+    "missing_member_null": "holds",
+    "missing_member_nan": "holds",
+    "missing_class_row_contradicted": ("falsified", "positions = [null]: f raised TypeError"),
+    "missing_premise_values_remain": "holds",
+    "missing_premise_no_values": "holds",
+    "missing_premise_all_na_raises": "holds",
+    "missing_member_defined": "holds",
+    "missing_trap_comparison": "holds",
+    "missing_predicate_sugar": "holds",
+    "absent_none_spelling": "holds",
+    "is_missing_safe_gate": "proven",
+    "is_missing_safe_gate_falsified": ("falsified", "positions = [null]: f raised TypeError"),
+    "is_absent_safe_gate": "holds",
+    "is_absent_safe_gate_falsified": ("falsified", "score = None: f raised TypeError"),
+    "is_empty_safe_hole": ("falsified", "returns = [] (an empty numpy.ndarray)"),
+    "is_empty_safe_identity": "proven",
+    "absent_field_raises": "holds",
+    "is_absent_safe_field": ("falsified", "trade.memo = null (absent): f raised TypeError"),
+    "absent_key_left_out": "holds",
     # the norm written with double bars, each against its function in
     # mathema/_lexicon_numpy.py
     "norm_bars_euclidean": "proven",
@@ -170,10 +221,10 @@ PINNED: dict = {
     "matrix_norm_bars_spectral": "holds",
     "matrix_norm_bars_spectral_below_frobenius": "holds",
     "let_scale_seq_sharpe_premise": "proven",
-    "let_scale_seq_sharpe_trap": ("falsified", "returns=[0.0]"),
+    "let_scale_seq_sharpe_trap": ("falsified", "returns = [0.0]"),
     "let_shift_seq_range": "holds",
     "let_shift_seq_mean_moves": "falsified",
-    "assuming_spread_positive": "proven",
+    "assuming_spread_positive": "holds",
     "dim_call_premise": "holds",
 }
 if importlib.util.find_spec("mathema_language") is None:
@@ -266,20 +317,21 @@ def test_every_spelling_is_a_render_parse_render_fixed_point():
     assert not drifted, "rendered claims drift on reparse:\n" + "\n".join(drifted)
 
 
-def test_a_rendered_domain_always_states_its_missing_policy():
+def test_a_rendered_domain_always_states_what_it_admits():
     """Terse input, explicit output: nothing has to say anything about
     missing values, and a rendered domain always does."""
     from mathema.conjecture import claim
     from mathema.spec import render_claim_text
 
     allowed = claim("for x in [0,10], f(x) >= 0")
-    assert "∪ {∅}" in render_claim_text(allowed, unicode=True)
-    assert "|missing" in render_claim_text(allowed, unicode=False)
+    assert "∪ {absent, ∅}" in render_claim_text(allowed, unicode=True)
+    assert "|absent|missing" in render_claim_text(allowed, unicode=False)
 
     excluded = claim("for x in [0,10] \\ {missing}, f(x) >= 0")
-    assert "\\ {∅}" in render_claim_text(excluded, unicode=True)
-    assert "|missing" not in render_claim_text(excluded, unicode=False)
-    assert "\\ {missing}" in render_claim_text(excluded, unicode=False)
+    # the type clause states what it admits, so the excluded hole needs
+    # no exclusion beside it
+    assert "⊂ ℝ ∪ {absent}" in render_claim_text(excluded, unicode=True)
+    assert ": float|absent," in render_claim_text(excluded, unicode=False)
 
     from mathema.spec import canonical_claim_text
     for conjecture in (allowed, excluded):
@@ -367,27 +419,7 @@ def test_every_paired_spelling_survives_the_verified_record():
     store could contradict itself on the second run: the record held a
     weaker claim than the one adjudicated, and nothing noticed until a
     field run did."""
-    _ROW_STILL_DRIFTS = {"bound_function_nested_in_f"}
-    drift = lexicon_checks.check_verified_record(CORE, skip=_ROW_STILL_DRIFTS)
-    for key, (_before, after, p2, _statement) in \
-            lexicon_checks.verified_record_verdicts(CORE).items():
-        if key not in _ROW_STILL_DRIFTS:
-            continue
-        # the one known, tracked drift. Its BINDING half is now closed:
-        # canonical text keeps real function names, so a scope-bound
-        # second function rebinds from f's module on reconstruction
-        # rather than arriving as an orphan short name that resolves to
-        # nothing. What is left is narrower and is not a lost reference:
-        # the reconstructed expression is a harder one for the derive
-        # route, which returns `undecided` where the original proved.
-        # Pinned exactly, not tolerated.
-        assert after == "unknown", (
-            f"{key} now reaches {after!r}; the tracked drift changed, "
-            f"re-examine it rather than editing this pin")
-        assert p2.meta.get("mathema.derive_status") == "undecided", (
-            f"{key} is unknown for a NEW reason ({p2.meta}); an "
-            f"uncorroborated disproof here would be a different and more "
-            f"serious problem")
+    drift = lexicon_checks.check_verified_record(CORE, skip=set())
     assert not drift, ("a record row adjudicates differently than the "
                        "claim it recorded:\n" + "\n".join(drift))
 
@@ -505,3 +537,39 @@ def test_every_row_lands_on_its_pinned_verdict():
     expected = {**{key: None for key in LEXICON}, **PINNED}
     assert lexicon_checks.check_verdicts(CORE, expected) == []
 
+
+
+def test_the_equality_row_is_proven_and_its_float_companion_is_the_computation():
+    import mathema
+    from mathema.lexicon import celsius_round_trip
+    rows = {p.name: p for p in mathema.check(
+        celsius_round_trip, claims=[LEXICON["relation_eq"]]).probes}
+    (name,) = [n for n in rows if n.endswith("[float]")]
+    main = rows[name[:-len("[float]")]]
+    assert (main.verdict, main.route) == ("proven", "derive")
+    assert rows[name].verdict == "falsified", rows[name].note
+
+
+def test_the_hidden_read_row_names_the_read():
+    from mathema.conjecture import check_conjectures, claim
+    from mathema.lexicon import price_in_fx
+    (p,) = check_conjectures(price_in_fx,
+                             [claim(LEXICON["deterministic_hidden_read"])])
+    assert p.verdict == "falsified"
+    assert "price_in_fx reads os.environ" in p.counterexample, p
+
+
+@pytest.mark.parametrize("key, query", [
+    ("raises_typed_region", "raises in a range"),
+    ("state_safe_env_write", "environment variable"),
+    ("state_safe_global_rng", "global random"),
+    ("deterministic_trap", "same answer twice"),
+    ("deterministic_nan_agrees", "nan determinism"),
+    ("deterministic_hidden_read", "hidden input"),
+    ("enforce_domain_guard", "enforce_domain guard"),
+])
+def test_the_rows_for_state_and_determinism_are_found_by_what_a_reader_types(
+        key, query):
+    from mathema.lexicon import TAGS, search
+    assert TAGS.get(key), key
+    assert key in [k for k, _law in search(query, limit=8)], (key, search(query))

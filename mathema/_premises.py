@@ -223,7 +223,7 @@ def _constant_sequence_draw(param: str, ddof: int, domain: dict):
             corners = [ends[0], ends[1], (ends[0] + ends[1]) / 2]
 
     def draw(rng: _random.Random, size):
-        n = size if size is not None else rng.randint(2, 8)
+        n = size if size is not None else rng.randint(1, 8)
         n = max(n, ddof + 1)
         if corners and rng.random() < 0.5:
             c = rng.choice(corners)
@@ -276,7 +276,7 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None) -> dict
         if mat is not None and c == 0:
             from .matrices import _synth_singular
             return mat, (lambda rng, size:
-                         _synth_singular(size or rng.randint(2, 5), rng))
+                         _synth_singular(size or rng.randint(1, 5), rng))
         spread = _spread_param(node, kinds)
         if spread is not None and c == 0:
             return spread[0], _constant_sequence_draw(*spread, domain or {})
@@ -533,11 +533,12 @@ def _bound_ends(bound) -> "tuple[float, float, bool, bool] | None":
     reads as the whole real line), None for any other bound shape."""
     import math
 
-    from .domain import Domain
+    from .domain import Domain, _sentinel_piece, numeric_excluded
     if bound is None:
         return -math.inf, math.inf, False, False
     if isinstance(bound, Domain) and bound.base_type == "R" \
-            and not bound.pieces and not bound.excluded and not bound.dims:
+            and not [p for p in bound.pieces if not _sentinel_piece(p)] \
+            and not numeric_excluded(bound) and not bound.dims:
         return -math.inf, math.inf, False, False
     if isinstance(bound, tuple) and len(bound) == 2 \
             and all(isinstance(e, (int, float)) and not isinstance(e, bool)

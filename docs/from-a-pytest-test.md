@@ -86,7 +86,7 @@ grep -m1 counterexample .mathema/verified/numpy.ptp.yaml
 
 <!-- example: ptp output -->
 ```text
-      counterexample: "a=[-27.2559, -89.997, 6.05701, -11.7273], axis=None, out=None, keepdims=<no value>: 96.05404267895265 vs 6.057006177453999"
+      counterexample: "a=[-27.25587819880309, -89.99703650149866, 6.057006177453999, -11.727268815354506], axis=None, out=None, keepdims=<no value>: 96.05404267895265 vs 6.057006177453999"
 ```
 
 Four values, all but one negative: the range is 96.05 and the largest
@@ -137,10 +137,10 @@ declared layer: claims/numpy.claims.yaml now declares
 
 `holds over 160 trials`, on the probe route: the corrected claim is the
 test's sentence, run at 160 vectors mathema chose. The record's sampling
-line says how: `a~[-100.0, 100.0]^n, ..., seed=20260718, n=160`, vectors
-of two to eight entries drawn inside the range; the line also names
-`axis`, `out` and `keepdims`, which the note says were held at numpy's
-defaults. It is evidence, not proof. The corrected claim carries `route:
+line says how: `a~[-100.0, 100.0]^n, seed=20260718, n=160`, vectors of
+two to eight entries drawn inside the range. `axis`, `out` and `keepdims`
+are not on it, since nothing drew them: the note says they were held at
+numpy's defaults. It is evidence, not proof. The corrected claim carries `route:
 probe`, which `accept` wrote, so the derive route was not tried for it;
 the first attempt's record shows what it met: `derive: underivable (a is
 a vector or matrix, which the scalar derive route does not read, and the

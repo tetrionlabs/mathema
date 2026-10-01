@@ -175,7 +175,7 @@ def test_one_side_raising_where_the_other_returns_falsifies():
         funcs={"g": partial_twin}, route="probe")])
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "g raised ValueError" in p.counterexample
-    a = float(p.counterexample.split("a=")[1].split(",")[0])
+    a = float(p.counterexample.split("a = ")[1].split(",")[0])
     assert a < 0
 
 
@@ -229,7 +229,7 @@ def test_a_sequence_argument_counterexample_formats_cleanly():
         route="probe")])
     assert p.verdict == "falsified"
     assert " vs " in (p.counterexample or "")
-    assert "xs=" in p.counterexample
+    assert "xs = " in p.counterexample
 
 
 def test_fallthrough_route_reflects_what_actually_ran():

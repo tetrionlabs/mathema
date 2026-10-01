@@ -6,15 +6,20 @@ line with how its functions call libraries.
 Two kinds of change, each printed:
 
 - A call to a library function that passes a non-default literal
-  argument (`np.mean(a, axis=1)`) that no row of that function pins
+  argument (`np.mean(a, axis=0)`) that no row of that function pins
   gains rows pinning it: every unpinned row of the function is copied
-  with the arguments bound first (`let axis be 1, dim(a) >= 1`), named
-  after the row and the pins (`is_defined@axis=1`) and noting the call
-  site. The rows go into the project's compendium file for the library
-  (`claims/<library>.claims.yaml`, created with `compendium:` and a
-  `versions:` range from the installed version when there is none),
-  where they are unverified until `mathema verify` adjudicates them. An
-  argument that is not a literal is reported and not pinned.
+  with the arguments bound first (`let axis be 0, dim(a) >= 1`), named
+  after the row and the pins (`is_defined@axis=0`) and noting the call
+  site. Each pinned row is adjudicated against the installed library
+  first and written only when it holds or is proven over its stated
+  domain, its float companion included; any other verdict is reported
+  with its counterexample or reason and the row is left out
+  (`let axis be 1, dim(a) >= 1` is falsified, since a one-dimensional
+  `a` has no axis 1). The rows go into the project's compendium file
+  for the library (`claims/<library>.claims.yaml`, created with
+  `compendium:` and a `versions:` range from the installed version
+  when there is none). An argument that is not a literal is reported
+  and not pinned.
 - A row whose own `versions:` range excludes the installed library, of
   a function the project calls, that `mathema verify` recorded as
   holding or proven on the installed version, has its range widened to
@@ -189,6 +194,65 @@ def _pinned_row(row: dict, pins: dict, site: CallSite) -> dict:
                      f"{site.line}), which passes {tag}")}
 
 
+def _adjudicated(key: str, current: list, added: list, root: str,
+                 library_claims: dict) -> dict:
+    """Intent:
+        `{row name: (verdict, why)}` for each pinned row in `added`,
+        adjudicated against the installed library function beside the
+        function's `current` rows (which its premises may name). A
+        row's verdict is its weakest, with its float companion's
+        counted: a falsified companion is a falsified row. `why` is the
+        counterexample or the note. Every row is `unknown` when the
+        library function does not resolve.
+    """
+    from . import external_premises
+    from .. import check
+    from ..conjecture import InvalidConjecture, _resolve_func_ref
+    from ..spec import entry_claims
+    fn = _resolve_func_ref(key, root=root)
+    if fn is None:
+        return {row["name"]: ("unknown", "the function does not resolve")
+                for row in added}
+    rows = [{k: v for k, v in r.items() if k != "verdict"}
+            for r in current]
+    out: dict = {}
+    readable = []
+    for row in added:
+        # a pinned row that does not read as a claim is unknown on its
+        # own, never taking the rows beside it with it
+        try:
+            entry_claims({"claims": [row]})
+        except InvalidConjecture as e:
+            out[row["name"]] = ("unknown", str(e))
+            continue
+        readable.append(row)
+    if not readable:
+        return out
+    try:
+        rec = check(fn, claims=entry_claims({"claims": rows + readable}),
+                    known_premises=external_premises(
+                        root, library_claims=library_claims))
+    except InvalidConjecture as e:
+        out.update({row["name"]: ("unknown", str(e)) for row in readable})
+        return out
+    rank = {"falsified": 0, "unknown": 1, "holds": 2, "proven": 3}
+    for row in readable:
+        name = row["name"]
+        own = [p for p in rec.probes
+               if p.name == name or p.name.startswith(name + "[")]
+        if not own:
+            out[name] = ("unknown", "it was not adjudicated")
+            continue
+        worst = min(own, key=lambda p: rank.get(
+            p.verdict.split(":", 1)[0], 1))
+        verdict = worst.verdict.split(":", 1)[0]
+        if verdict not in rank:
+            verdict = "unknown"
+        why = str(worst.counterexample or "") or (worst.note or "")
+        out[name] = (verdict, why)
+    return out
+
+
 def _project_files(root: str) -> dict:
     """Intent:
         `{library: path}` for the project's own compendium files (the
@@ -278,6 +342,7 @@ def plan_update(root: str = ".") -> dict:
 
     from . import (_installed_version, _version_in_range, install,
                    load_library_claims, resolved_calls, row_pins)
+    from ..families import claim_base_name
     from ..spec import load_verified
 
     root = os.path.abspath(root)
@@ -286,6 +351,7 @@ def plan_update(root: str = ".") -> dict:
     files = _project_files(root)
     edited: dict = {}
     lines: list = []
+    falsified: dict = {}
 
     def target(library: str) -> "tuple[str, dict]":
         path = files.get(library) or os.path.join(
@@ -313,26 +379,54 @@ def plan_update(root: str = ".") -> dict:
         entry = data.get(site.key)
         current = list((entry or {}).get("claims") or []) if entry else \
             [dict(r) for r in rows]
-        if any(row_pins(r) == site.pins for r in current):
+        unpinned = [r for r in current if not row_pins(r) and r.get("name")]
+        if not unpinned:
+            if not any(row_pins(r) == site.pins for r in current):
+                lines.append(f"{site.key}: the call in {site.caller} passes "
+                             f"{site.pins}, and the function has no rows to "
+                             f"pin")
             continue
-        base = [r for r in current if not row_pins(r) and r.get("name")]
+        # a row already pinned to these arguments covers its unpinned
+        # namesake (`definition@ddof=1` covers `definition`)
+        covered = {claim_base_name(str(r.get("name"))) for r in current
+                   if row_pins(r) == site.pins}
+        base = [r for r in unpinned
+                if claim_base_name(str(r.get("name"))) not in covered]
         if not base:
-            lines.append(f"{site.key}: the call in {site.caller} passes "
-                         f"{site.pins}, and the function has no rows to pin")
             continue
         added = [_pinned_row(r, site.pins, site) for r in base]
+        settled = _adjudicated(site.key, current, added, root,
+                               library_claims)
+        kept = []
+        for row in added:
+            verdict, why = settled.get(row["name"], ("unknown", ""))
+            if verdict in ("proven", "holds"):
+                kept.append((row, verdict))
+                continue
+            recorded = ""
+            if verdict == "falsified":
+                falsified.setdefault(site.key, (current, []))[1].append(row)
+                recorded = (f"; recorded falsified in "
+                            f".mathema/verified/{site.key}.yaml")
+            lines.append(f"{site.key}: {row['name']} ({row['statement']}) "
+                         f"not added for the call in {site.caller} (line "
+                         f"{site.line}): {verdict} against the installed "
+                         f"library{f', {why}' if why else ''}{recorded}")
+        if not kept:
+            continue
         if entry is None:
             # the project's entry shadows the bundled one: carry its rows
             current = [{k: v for k, v in r.items() if k in (
                 "name", "statement", "route", "note", "versions")}
                 for r in current]
-        data[site.key] = {**(entry or {}), "claims": current + added}
+        data[site.key] = {**(entry or {}),
+                          "claims": current + [row for row, _v in kept]}
         rel = os.path.relpath(path, root)
-        for row in added:
+        for row, verdict in kept:
             lines.append(f"{site.key}: add {row['name']} ({row['statement']})"
                          f" to {rel} for the call in {site.caller} (line "
-                         f"{site.line}); unverified until mathema verify "
-                         f"runs")
+                         f"{site.line}); {verdict} against the installed "
+                         f"library, recorded when mathema verify runs")
 
     # widen a used, locally verified row whose own range excludes the
     # installed version
@@ -366,8 +460,11 @@ def plan_update(root: str = ".") -> dict:
                 lines.append(f"{key}: widened {row.get('name')}'s versions "
                              f"from {spec!r} to {wider!r} ({seen['verdict']} "
                              f"on {library} {installed})")
-    changed = {p: d for p, d in edited.items() if _differs(p, d)}
-    return {"files": changed, "lines": lines}
+    # a file this run would create holding no function's rows is not
+    # written
+    changed = {p: d for p, d in edited.items() if _differs(p, d) and (
+        os.path.exists(p) or set(d) - {"compendium", "versions"})}
+    return {"files": changed, "lines": lines, "falsified": falsified}
 
 
 def _differs(path: str, data: dict) -> bool:
@@ -388,7 +485,9 @@ def run_update(root: str = ".", dry_run: bool = False) -> list:
     """
     from ..spec import write_yaml
     plan = plan_update(root)
-    lines = list(plan["lines"])
+    lines = [line.replace("; recorded falsified in",
+                          "; would be recorded falsified in (dry run)")
+             if dry_run else line for line in plan["lines"]]
     for path, data in sorted(plan["files"].items()):
         rel = os.path.relpath(path, os.path.abspath(root))
         if _comments_beyond_header(path):
@@ -405,6 +504,34 @@ def run_update(root: str = ".", dry_run: bool = False) -> list:
             f"project")
         write_yaml(path, data, header=header)
         lines.append(f"wrote {rel}")
-    if not plan["files"]:
+    if not dry_run:
+        for key, (current, rows) in sorted(plan["falsified"].items()):
+            _record_falsified(key, current, rows, root)
+    if not plan["files"] and not plan["falsified"]:
         lines.append("nothing to change")
     return lines
+
+
+def _record_falsified(key: str, current: list, rows: list,
+                      root: str) -> None:
+    """Intent:
+        Write the library function's verified record with its `current`
+        rows and the pinned `rows` the installed library falsified,
+        adjudicated together, so each falsification stands in the
+        record with its witness. The record's membership keeps them:
+        every later `mathema verify` adjudicates and reports them like
+        any other row of the function.
+    """
+    from . import external_premises, load_library_claims
+    from .. import check
+    from ..conjecture import _resolve_func_ref
+    from ..spec import entry_claims, record as write_record
+    fn = _resolve_func_ref(key, root=root)
+    if fn is None:
+        return
+    claims = [{k: v for k, v in r.items() if k != "verdict"}
+              for r in current] + list(rows)
+    rec = check(fn, claims=entry_claims({"claims": claims}),
+                known_premises=external_premises(
+                    root, library_claims=load_library_claims(root)))
+    write_record(rec, key=key, root=root, claims=claims)

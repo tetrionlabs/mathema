@@ -11,25 +11,31 @@ versions: ">=2,<4"
 pandas.Series.shift:
   claims:
     - name: shifted
-      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[1:] == a[:-1]"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a)[1:] == a[:-1]"
       note: "periods defaults to 1; position 0 is missing."
     - name: shifted@periods=2
-      statement: "let periods be 2, for a in R^n \\ {∅}, assuming dim(a) >= 3, f(a)[2:] == a[:-2]"
+      statement: "let periods be 2, for a in R^n, assuming dim(a) >= 3, f(a)[2:] == a[:-2]"
+    - name: shifted@periods=-1
+      statement: "let periods be -1, for a in R^n, assuming dim(a) >= 2, f(a)[:-1] == a[1:]"
+      note: "A negative period shifts the other way; the last position is missing."
 
 pandas.Series.diff:
   claims:
     - name: differences
-      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] - a[:-1]"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] - a[:-1]"
       note: "periods defaults to 1; position 0 is missing."
+    - name: differences@periods=2
+      statement: "let periods be 2, for a in R^n \\ {∅}, assuming dim(a) >= 3, f(a)[2:] ~= a[2:] - a[:-2]"
+      note: "The change over two positions; positions 0 and 1 are missing."
 
 pandas.Series.pct_change:
   claims:
     - name: changes
-      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2 and min(abs(a)) > 0, f(a)[1:] ~= a[1:] / a[:-1] - 1"
+      statement: "for a in R^n, assuming dim(a) >= 2 and min(abs(a)) > 0, f(a)[1:] ~= a[1:] / a[:-1] - 1"
       note: "The relative change from the previous element; position 0 is missing, and a zero previous element gives an infinite or missing change."
 
 pandas.Series.size:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == dim(a)"
+      statement: "for a in R^n, f(a) == dim(a)"
       note: "Every position, missing or not; count(a) counts the positions with a value."

@@ -21,7 +21,7 @@ import unicodedata
 from ._float_text import exact_float_text
 from .records import (SUPPORTED_VERDICTS, classify_verdict,
                       pseudo_infinity_range, statement_text)
-from .routes import examine_predicates
+from .routes import examine_predicates, is_proof_route
 
 # The CDD spec version this module's writer/reader conforms to: see the
 # sibling claim-driven-development repo's v0.2.0/record-schema.md and
@@ -275,7 +275,7 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
             row["note"] = p.note
         if p.sketch:
             row["sketch"] = p.sketch
-        if p.condition and ((p.route or "").split(":", 1)[0] == "derive"
+        if p.condition and (is_proof_route(p.route)
                             or p.condition.startswith("let |inf| be ")):
             row["condition"] = p.condition
         row["route"] = p.route
@@ -297,15 +297,21 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
         # reads either shape identically
         row_meta = ({**(p.meta or {}), "mathema.stratum": p.stratum}
                     if getattr(p, "stratum", None) else (p.meta or None))
+        if row_meta and isinstance(row_meta.get("mathema.policy"), dict):
+            # a policy row's record states what it has, no empty fields
+            row_meta = {**row_meta, "mathema.policy": {
+                k: v for k, v in row_meta["mathema.policy"].items()
+                if v is not None and v != ""}}
         if row_meta:
             row["meta"] = row_meta
         source = (p.meta or {}).get("mathema.surface")
-        if not include_suggestions and (
+        if not include_suggestions and not (p.meta or {}).get("mathema.policy") and (
                 source == "mathema"
                 or str(p.note or "").startswith("conjectured by mathema")):
             # a suggestion mathema volunteered is an AUTHORING-surface
             # helper, not a record of fact: it never enters the
-            # verified layer at all. Adoption (mathema claims --adopt)
+            # verified layer at all (the missing-value policy rows are
+            # the exception: they are the function's recorded posture). Adoption (mathema claims --adopt)
             # writes it into the declared spec, where it becomes an
             # ordinary claim adjudicated and gated like any other.
             continue
@@ -467,7 +473,8 @@ def save_spec(ex, path: str) -> str:
 # Keys are dotted names (module.qualname) so many files share one namespace.
 # ---------------------------------------------------------------------------
 
-def claims_fingerprint(raw_claims: list, grammar: str = "mathema") -> str:
+def claims_fingerprint(raw_claims: list, grammar: str = "mathema",
+                       fn=None) -> str:
     """A stable hash of a declared claim set's portable identity. For
     each claim, its `fingerprint_text` (the canonical ascii rendering
     of the parsed claim, advisory `-->` regions stripped) beside the
@@ -491,7 +498,9 @@ def claims_fingerprint(raw_claims: list, grammar: str = "mathema") -> str:
     as unchanged (or as changed).
 
     `mathema verify` uses this alongside the form hash: unchanged code
-    plus an unchanged claim set is what "fresh" actually means."""
+    plus an unchanged claim set is what "fresh" actually means. With
+    `fn`, each claim's bindings are completed from its annotations
+    first, so a claim and its record's canonical text hash alike."""
     import hashlib
 
     def sort_key(c):
@@ -502,7 +511,9 @@ def claims_fingerprint(raw_claims: list, grammar: str = "mathema") -> str:
         cgrammar = c.get("grammar", grammar)
         statement = (c.get("statement") or c.get("law") or "").strip()
         if cgrammar == "mathema":
-            statement = fingerprint_text(_declared_conjecture(c, grammar))
+            from .sync import _completed
+            statement = fingerprint_text(_completed(
+                _declared_conjecture(c, grammar), fn))
         parts.append(f"{c.get('name', '')}|{statement}|{c.get('route', 'best')}"
                      f"|{cgrammar}|{c.get('tolerance')}")
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
@@ -835,7 +846,7 @@ def authored_route(row: dict) -> str:
 
 def record(ex, key: str | None = None, root: str = ".",
           claims: list | None = None, declared_intent: str | None = None,
-          grammar: str = "mathema") -> str:
+          grammar: str = "mathema", fn=None) -> str:
     """Write this explanation into the machine layer of the project store:
     one file per function under .mathema/verified/. `claims` (the declared
     entry's raw claim dicts this record was checked against, if any) gets
@@ -867,7 +878,7 @@ def record(ex, key: str | None = None, root: str = ".",
                 f"restore it from git, and run again")
     spec = to_spec(ex)
     spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [],
-                                                                grammar)
+                                                                grammar, fn)
     _stamp_authored_routes(spec, claims or [])
     if declared_intent and not spec.get("intent"):
         # the declared layer's intent is the skeleton when the
@@ -1279,7 +1290,7 @@ class ClaimsFileError(ValueError):
 _CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
                  "grammar", "funcs", "pseudo_infinity", "meta", "authored",
                  "source", "family", "note", "versions")
-_ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references",
+_ENTRY_FIELDS = ("claims", "defines", "intent", "grammar", "meta", "references",
                  "pseudo_infinity", "runtime_types")
 
 
@@ -1467,11 +1478,19 @@ def validate_claims_file(data, rel_path: str) -> None:
         problem = _runtime_types_problem(entry.get("runtime_types"))
         if problem:
             fail(key, f"`runtime_types`: {problem}")
+        problem = _defines_problem(key, entry.get("defines"))
+        if problem:
+            fail(key, f"`defines`: {problem}")
         claims = entry.get("claims")
         if claims is None:
             continue
         if not isinstance(claims, list):
             fail(key, f"`claims` is a {type(claims).__name__}, not a list")
+        from .policy import contradicting_policies
+        clash = contradicting_policies(
+            [c.get("statement") for c in claims if isinstance(c, dict)])
+        if clash:
+            fail(key, clash)
         seen: set = set()
         for i, c in enumerate(claims, 1):
             if not isinstance(c, dict):
@@ -1545,6 +1564,83 @@ def validate_claims_file(data, rel_path: str) -> None:
                     problem = _domain_problem(bound)
                     if problem:
                         fail(key, f"{label}: `domain` for {param}: {problem}")
+
+
+def _defines_problem(key: str, value) -> "str | None":
+    """Intent:
+        Why a claims-file entry's `defines:` is refused, in the words the
+        refusal prints, or None when it is absent or a list of
+        definition rows (`missing := {null, nan}`, or a record of one
+        under `definition:`) whose spellings the key's runtime type can
+        realise.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return (f"a {type(value).__name__}, not a list of definition rows "
+                f"(`- \"missing := {{null, nan}}\"`)")
+    from .grammar import InvalidDefinition, parse_definition
+    from .runtime_types import adapter, spellings
+    found = adapter(str(key))
+    holes: list = []
+    for row in value:
+        text = row.get("definition") if isinstance(row, dict) else row
+        if not isinstance(text, str):
+            return (f"{row!r} is not a definition row; write it as text, "
+                    f"`- \"missing := {{null, nan}}\"`")
+        try:
+            word, members, extends = parse_definition(text)
+        except InvalidDefinition as e:
+            return str(e)
+        if found is not None:
+            known = spellings(found)
+            for spelling in members:
+                if spelling not in known:
+                    return (f"{found.name} has no spelling {spelling!r}; its "
+                            f"spellings are {', '.join(sorted(known)) or 'none'}")
+            if word == "missing":
+                if extends:
+                    holes += [m for m in getattr(found, "MISSING_MEMBERS", ())
+                              if m not in holes]
+                holes += [m for m in members if m not in holes]
+    if found is not None:
+        # one value may be both the absence and a hole member (its
+        # position decides which it is), never two different hole members
+        clash = _same_value_twice(holes, spellings(found))
+        if clash is not None:
+            first, second, shown = clash
+            return (f"{found.name} names one value, {shown}, as two hole "
+                    f"members, {first} and {second}")
+    return None
+
+
+def _same_value_twice(words: list, known: dict) -> "tuple | None":
+    """Intent:
+        The first two of `words` whose realised values are the same value
+        (by identity, or both NaN, or equal), with that value's repr, or
+        None when every word realises a different value.
+    """
+    seen: list = []
+    for word in words:
+        realise = known.get(word, (None, None))[0]
+        if realise is None:
+            continue
+        try:
+            value = realise()
+        except Exception:
+            continue
+        for other, earlier in seen:
+            try:
+                same = (value is earlier
+                        or (isinstance(value, float) and isinstance(earlier, float)
+                            and value != value and earlier != earlier)
+                        or bool(value == earlier))
+            except Exception:
+                same = False
+            if same:
+                return other, word, repr(value)
+        seen.append((word, value))
+    return None
 
 
 def _runtime_types_problem(value) -> "str | None":
@@ -1883,8 +1979,7 @@ def _let_sections(cj) -> list:
     for name in sorted(cj.free_vars or ()):
         bound = (cj.domain or {}).get(name)
         if bound is not None:
-            from .domain import render_domain_bound
-            sections.append(f"let {name} be {render_domain_bound(bound)}")
+            sections.append(f"let {name} be {_render_constant(bound, False, True)}")
     for name, value in sorted((getattr(cj, "param_pins", None) or {}).items()):
         sections.append(f"let {name} be {value!r}")
     return sections
@@ -2065,7 +2160,12 @@ def _ordered_real_param_names(cj, excluded: set) -> list:
     from ._scan import blank_strings
 
     seen: list = []
-    for text in (cj.lhs, cj.rhs):
+    # the right-hand side of `raises(...)` names an exception, and a
+    # membership's names a domain: neither holds a parameter
+    sides = (cj.lhs,) if (cj.relation == "raises"
+                          or getattr(cj, "rhs_bound", None) is not None) \
+        else (cj.lhs, cj.rhs)
+    for text in sides:
         if isinstance(text, str):
             for name in _IDENTIFIER.findall(blank_strings(text)):
                 if name not in excluded and name not in seen:
@@ -2173,10 +2273,11 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     reassigns a symbol something else in the same claim already uses.
 
     `suppress_glyphs` handles a real parameter named exactly `pi`, `oo`,
-    `inf` or `infinity` (`_math_vocab._MATH_ATTRS`' keys, minus `e`,
-    which has no distinct unicode glyph at all, `_print_Exp1` always
-    prints `"e"`, so there's nothing to suppress; the printer then
-    writes the parameter's own name). Renaming was tried here first and
+    `inf` or `infinity` (`_math_vocab._MATH_ATTRS`' keys; the printer
+    then writes the parameter's own name), and any bound name `e` (a
+    parameter, a `let` name, a function or a rename target), for which
+    `_print_Exp1` writes Euler's number as `exp(1)` instead of `e`, so
+    the constant and the name read back apart. Renaming was tried here first and
     rejected: `grammar._node_to_sympy` has no concept of any one
     function's real parameter names, so it always resolves a bare
     `pi`/`oo` to the math constant regardless, by the time a claim
@@ -2284,6 +2385,13 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     # the positional pool shortens real parameters only
     pool_renames = auto_short_names(long_params, [], unicode=unicode, taken=taken)
     param_renames.update({n: pool_renames[n] for n in long_params})
+    # a name `e` the claim binds (a parameter, a `let` name, a function,
+    # or a display rename) prints as that name, so Euler's number prints
+    # as `exp(1)` beside it
+    bound = (declared | set(cj.free_vars) | set(cj.funcs)
+             | set(param_renames.values()) | set(func_renames.values()))
+    if "e" in bound:
+        suppress_glyphs = suppress_glyphs | {"e"}
     return param_renames, func_renames, suppress_glyphs
 
 
@@ -2338,7 +2446,8 @@ def fingerprint_text(cj) -> str:
 
 def render_claim_text(cj, *, unicode: bool | None = None,
                       long_param_threshold: int = 8,
-                      canonical: bool = False) -> str:
+                      canonical: bool = False,
+                      show_missing: bool = True) -> str:
     """The alternative to declare()'s structured-dict shape: one
     parseable string a person can copy straight back into `claim(...)`
     and get an equivalent Conjecture, domain/funcs/free_vars
@@ -2402,13 +2511,39 @@ def render_claim_text(cj, *, unicode: bool | None = None,
 
     Bars around a matrix read as its determinant, so the `abs` of a
     matrix the claim's domain declares keeps its call spelling."""
+    if getattr(cj, "relation", None) == "policy":
+        from .policy import parse_policy, policy_text
+        body = f"{cj.lhs} {cj.rhs}".strip()
+        stated = parse_policy((f"{cj.assuming}, " if cj.assuming else "") + body)
+        return policy_text(stated) if stated is not None else body
     from .grammar import _BAR_MATRICES, bars_over_matrices
     from .linalg import declared_matrix_names
     mats = declared_matrix_names(cj.domain) | _BAR_MATRICES.get()
     with bars_over_matrices(mats):
         return _render_claim_text(cj, unicode=unicode,
                                   long_param_threshold=long_param_threshold,
-                                  canonical=canonical)
+                                  canonical=canonical,
+                                  show_missing=show_missing)
+
+
+def _render_binding(name: str, bound, unicode: bool, show_missing: bool) -> str:
+    """Intent:
+        One `for` binding's domain as the claim text states it: a path
+        into a language's member (`o.lines[*].qty`) spells the hole
+        class as the word in both modes and admits neither kind unless
+        it says so.
+    """
+    from .domain import PATH_DEFAULTS, render_domain
+    path = not name.isidentifier()
+    return render_domain(bound, ascii_mode=not unicode, show_missing=show_missing,
+                         words=path, defaults=PATH_DEFAULTS if path else None)
+
+
+def _infinity_spelled(text: str, unicode: bool) -> str:
+    """A domain's text with an infinite bound spelled `∞` in unicode, so a
+    line spells infinity one way in its domain and its law."""
+    import re as _re
+    return _re.sub(r"\binf\b", "∞", text) if unicode else text
 
 
 def _domain_text(bound, unicode: bool, show_missing: bool) -> str:
@@ -2426,12 +2561,11 @@ def _domain_text(bound, unicode: bool, show_missing: bool) -> str:
 
 def _render_claim_text(cj, *, unicode: bool | None,
                        long_param_threshold: int,
-                       canonical: bool) -> str:
+                       canonical: bool, show_missing: bool = True) -> str:
     """Intent:
         `render_claim_text`'s rendering, under whatever bar reading
         `grammar.bars_over_matrices` has set.
     """
-    from .conjecture import GRAMMAR
     from .grammar import (display_len, display_norm_bars, get_unicode_output,
                           norm_bars_written, render_law_expr)
     from ._providers import get_provider, report_provider_failure
@@ -2453,12 +2587,12 @@ def _render_claim_text(cj, *, unicode: bool | None,
     # crashes a render.
     provider = None if canonical else get_provider("symbology")
     sep = ", "
-    domain_show_missing = True
+    domain_show_missing = show_missing
     if provider is not None:
-        show_missing = getattr(provider, "show_missing", None)
-        if show_missing is not None:
+        provider_says = getattr(provider, "show_missing", None)
+        if provider_says is not None:
             try:
-                result = show_missing(cj)
+                result = provider_says(cj)
             except Exception as exc:
                 report_provider_failure("symbology", exc)
                 result = None
@@ -2573,7 +2707,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
         # as written, never through the expression renderer
         lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs,
                 mats))
-        statement = f"{lhs} {_REL_GLYPH[cj.relation]} {cj.rhs}"
+        statement = f"{lhs} {_REL_GLYPH[cj.relation]} {_membership_rhs(cj, unicode)}"
     else:
         lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs,
                 mats))
@@ -2584,12 +2718,10 @@ def _render_claim_text(cj, *, unicode: bool | None,
         # the negation is part of the claim, whatever shape the
         # statement took above
         statement = f"not {statement}"
-    # over a language, the length of a value reads as `len(...)`;
-    # `len` is sugar for `dim(..., 0)`, so the text reparses to the
-    # same canonical form
-    language_len = getattr(cj, "grammar", "") == f"{GRAMMAR}/language"
-    if language_len:
-        statement = display_len(statement)
+    # the length of a value reads as `len(...)`; `len` is sugar for
+    # `dim(..., 0)`, so the text reparses to the same canonical form
+    language_len = True
+    statement = display_len(statement)
     # a norm the author wrote with double bars is displayed with them,
     # the order a subscript (`||x||_2`, `‖x‖₂`); `norm(...)` written as
     # the call stays the call. The canonical text keeps the call in
@@ -2626,8 +2758,10 @@ def _render_claim_text(cj, *, unicode: bool | None,
     # display symbol for it is introduced as an alias of that name
     # (`let g = numpy.exp, let E = g`), which the reparse resolves back
     # to the same function under the same name, so the claim is the same
+    under_test: frozenset = getattr(cj, "under_test", frozenset())
     let_segments = [f"let {name} = {ref}"
                     for name, ref in func_refs.items()
+                    if name not in under_test
                     # a parse-time placeholder (a bare call name awaiting
                     # scope resolution, value == its own name) and a
                     # scope-bound name have no binding to state
@@ -2638,7 +2772,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
                      for name, symbol in sorted(param_renames.items())]
     let_segments += [
         f"let {name} be "
-        f"{_domain_text(cj.domain[name], unicode, domain_show_missing)}"
+        f"{_infinity_spelled(_render_constant(cj.domain[name], unicode, domain_show_missing), unicode)}"
         for name in sorted(cj.free_vars) if name in cj.domain]
     let_segments += [f"let {name} be {value!r}" for name, value in
                      sorted((getattr(cj, "param_pins", None) or {}).items())]
@@ -2654,7 +2788,7 @@ def _render_claim_text(cj, *, unicode: bool | None,
     for_segments = [
         f"{_display_symbol(param_renames[name]) if name in param_renames else name} "
         f"{membership} "
-        f"{_domain_text(bound, unicode, domain_show_missing)}"
+        f"{_infinity_spelled(_render_binding(name, bound, unicode, domain_show_missing), unicode)}"
         for name, bound in cj.domain.items() if name not in cj.free_vars]
 
     parts = []
@@ -2698,3 +2832,37 @@ def _render_claim_text(cj, *, unicode: bool | None,
     if not parts:
         return statement
     return sep.join(parts) + sep + statement
+
+
+def _render_constant(bound, unicode: bool, show_missing: bool) -> str:
+    """A claim constant's bound (`let c be [-5.0, 5.0]`): its interval
+    alone when it admits nothing missing, as a constant's bound does
+    unless the claim writes otherwise, else the whole domain."""
+    from .domain import MissingDefaults, _as_domain, admitted, render_domain
+    dom = _as_domain(bound)
+    absent, holes = admitted(dom, dom.policy or MissingDefaults(False, (), "constant",
+                                                                 annotated=False))
+    if not absent and not holes and not dom.explicit_type and dom.base_type == "R":
+        return render_domain(bound, ascii_mode=not unicode, show_missing=False,
+                             always_show_type=False)
+    return render_domain(bound, ascii_mode=not unicode, show_missing=show_missing)
+
+
+def _membership_rhs(cj, unicode: bool) -> str:
+    """A membership's right-hand side as written, except a set of missing
+    words (`{missing}`, `{None}`), which renders in the words of the
+    mode: `{∅}` in unicode, `{absent}` for absence."""
+    from .domain import _as_domain, is_sentinel, render_domain
+    bound = cj.rhs_bound
+    members = bound if isinstance(bound, frozenset) else None
+    if members is None:
+        try:
+            dom = _as_domain(bound)
+        except Exception:
+            return cj.rhs
+        if len(dom.pieces) != 1 or not isinstance(dom.pieces[0], frozenset):
+            return cj.rhs
+        members = dom.pieces[0]
+    if not members or not all(is_sentinel(v) for v in members):
+        return cj.rhs
+    return render_domain(bound, ascii_mode=not unicode)

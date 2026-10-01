@@ -124,7 +124,8 @@ def test_the_true_claim_on_the_same_function_still_proves(tmp_path, monkeypatch)
     import mathema
     fn = _manhattan(tmp_path, monkeypatch)
     (p,) = mathema.claims.check_conjectures(
-        fn, [mathema.claim("f(x, y) >= 0", route="derive")])
+        fn, [mathema.claim("assuming len(x) == len(y), f(x, y) >= 0",
+                           route="derive")])
     assert p.verdict == "proven", p.sketch
 
 

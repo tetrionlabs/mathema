@@ -238,9 +238,12 @@ def test_trials_budget_is_configurable():
 
     r = mathema.check(double, trials=10)
     # a falsification stops at its first witness, so its n counts the
-    # trials run up to it, never more than the budget
+    # trials run up to it, never more than the budget; a policy row's n
+    # counts the calls at missing inputs among those trials
+    policy = [p for p in r.probes if (p.meta or {}).get("mathema.policy")]
     assert all(p.n == 10 for p in r.probes
-               if p.n and p.verdict != "falsified")
+               if p.n and p.verdict != "falsified" and p not in policy)
+    assert policy and all(p.n <= 10 for p in policy)
     assert all(p.n <= 10 for p in r.probes if p.n)
 
 
@@ -306,11 +309,16 @@ def test_domain_restricts_probes_and_reports_enforcement():
 
     r = mathema.check(ema2, domain={"alpha": (0.0, 1.0)})
     vs = {p.name: p.verdict for p in r.probes}
-    # the convex-combination certificate proves the bound outright
-    # (the fold's weights are nonnegative and sum to 1 here); before
-    # it, in-domain sampling could only reach holds
-    assert vs["bounded_lower"] == "proven"
-    assert vs["bounded_upper"] == "proven"
+    # the convex-combination certificate proves each bound outright
+    # over non-empty lists (the fold's weights are nonnegative and sum
+    # to 1 here); ema2([]) reads x[0] with no emptiness guard, so the
+    # empty-input line is falsified, and each claim with it
+    rows = {p.name: p for p in r.probes}
+    for name in ("bounded_lower", "bounded_upper"):
+        assert vs[name] == "falsified", (name, vs[name])
+        assert "convex-combination certificate" in (rows[name].sketch or "")
+        assert rows[name].counterexample.startswith("x = []")
+    assert vs["is_empty_safe[x]"] == "falsified"
     # enforcement is not synthesized behind a mode any more: undeclared
     # means unreported; DECLARING excluded_outside_domain makes the
     # unenforced exclusion a real falsification with the witness
@@ -594,7 +602,8 @@ def test_probe_claim_carries_its_sampling_meta(tmp_path):
     # statement/domain on a probe row) are omitted rather than written as
     # placeholders
     assert det["meta"] and "mathema.sampling" in det["meta"]
-    assert "note" not in det and "sketch" not in det and "condition" not in det
+    # the note says what f did at each missing input the claim drew
+    assert "sketch" not in det and "condition" not in det
     assert (tmp_path / ".mathema" / "verified").exists()
 
 
@@ -653,7 +662,7 @@ def test_conjecture_pipeline_core():
     assert by["odd"].verdict == "proven"
     assert by["nonnegative"].verdict == "falsified" and by["nonnegative"].counterexample
     assert by["shift_aux"].verdict == "falsified"     # aux var sampled and reported
-    assert "c=" in by["shift_aux"].counterexample
+    assert "c = " in by["shift_aux"].counterexample
     assert by["evil"].verdict == "skipped" and "disallowed" in by["evil"].note
     assert "funcs=" not in by["evil"].note   # never suggest binding a dunder
     assert by["attr"].verdict == "skipped"
@@ -766,7 +775,7 @@ def test_load_claims_parses_authoring_shape_and_skips_derive_route(tmp_path):
 def test_cli_check_ci_gate(tmp_path, capsys):
     f = tmp_path / "m.py"
     f.write_text(
-        "def ema(x: list, alpha: float) -> float:\n"
+        "def ema(x: list[float], alpha: float) -> float:\n"
         "    y = x[0]\n"
         "    for v in x[1:]:\n"
         "        y = alpha * v + (1 - alpha) * y\n"
@@ -786,7 +795,7 @@ def test_cli_check_ci_gate(tmp_path, capsys):
 def test_check_formats(tmp_path, capsys):
     f = tmp_path / "m.py"
     f.write_text(
-        "def ema(x: list, alpha: float) -> float:\n"
+        "def ema(x: list[float], alpha: float) -> float:\n"
         "    y = x[0]\n"
         "    for v in x[1:]:\n"
         "        y = alpha * v + (1 - alpha) * y\n"
@@ -797,8 +806,14 @@ def test_check_formats(tmp_path, capsys):
     rpt = tmp_path / "claims.json"
     # suggestions no longer count as claims: declare one explicitly so
     # the report has adopted content to verify
+    # ema reads x[0] with no emptiness guard, so a claim over every
+    # length is falsified by its empty-input line; one over a fixed
+    # length has none
     assert main(["check", str(f), "--format", "json",
-                 "--claim", "f(x, 1.0) == x[-1]",
+                 "--claim", "f(x, 1.0) == x[-1]"]) == 1
+    capsys.readouterr()
+    assert main(["check", str(f), "--format", "json",
+                 "--claim", "for x in R^3, f(x, 1.0) == x[-1]",
                  "--output", str(rpt)]) == 0
     data = _json.loads(rpt.read_text())
     assert data["tool"] == "mathema" and data["CDD_spec_version"]

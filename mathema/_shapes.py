@@ -190,10 +190,10 @@ def in_space(value, bound, sizes: "dict | None" = None) -> bool:
     container by its shape and its elements, a number only in a scalar
     domain (a number is not a member of `R^(3,4)`). A named axis takes
     the size `sizes` binds to the name, when it binds one. A leaf that
-    is not a member of the element domain, a missing value included,
-    makes the container not a member, the container form of the scalar
-    rule that a missing value is a member of nothing."""
-    from .domain import domain_contains, is_missing
+    is not a member of the element domain makes the container not a
+    member; a missing leaf is a member only where the element domain
+    admits its member (a `None` leaf read as the `null` hole)."""
+    from .domain import domain_contains
     dims = dims_of(bound)
     if not dims:
         return domain_contains(value, bound)
@@ -201,8 +201,7 @@ def in_space(value, bound, sizes: "dict | None" = None) -> bool:
     if shape is None or shape == () or not fits(shape, dims, sizes):
         return False
     element = dataclasses.replace(bound, dims=())
-    return all(not is_missing(v) and domain_contains(v, element)
-               for v in leaves(value))
+    return all(domain_contains(v, element, slot=True) for v in leaves(value))
 
 
 def axis_sizes(domain: dict, values: dict) -> dict:
@@ -532,6 +531,8 @@ class DimensionPlan:
     params: dict
     result: "tuple | None" = None
     result_source: "str | None" = None
+    elements: dict = dataclasses.field(default_factory=dict)
+    numbers_judged_elsewhere: frozenset = frozenset()
 
 
 def dimension_plan(shapes: dict, domains: dict) -> DimensionPlan:
@@ -591,8 +592,79 @@ def dimension_plan(shapes: dict, domains: dict) -> DimensionPlan:
                   for p, (dims, source) in params.items()}
     result = (tuple(str(d) for d in shapes["return"].dims)
               if "return" in shapes else None)
+    # a space a claim binds states its entries as well as its shape
+    elements = {p: dataclasses.replace(domains[p], dims=())
+                for p in params
+                if dims_of(domains.get(p)) and dataclasses.is_dataclass(
+                    domains[p])}
     return DimensionPlan(params, result,
-                         marker_text(result) if result is not None else None)
+                         marker_text(result) if result is not None else None,
+                         elements)
+
+
+def _table_as_matrix(value, rank: int) -> "tuple | None":
+    """Intent:
+        The `(rows, columns)` shape of a table whose columns are all of
+        one length, read as the matrix it holds when the declared rank
+        is two; None for anything else.
+    """
+    from .runtime_types import AbstractTable, observe
+    if rank != 2:
+        return None
+    seen = observe(value)
+    if not isinstance(seen, AbstractTable) or not seen.columns:
+        return None
+    lengths = {len(c) for c in seen.columns.values()}
+    if len(lengths) != 1:
+        return None
+    return (lengths.pop(), len(seen.columns))
+
+
+def _entry_outside(value, element,
+                   numbers_judged_elsewhere: bool = False) -> "tuple | None":
+    """Intent:
+        `(entry,)` for the first entry of a container value outside the
+        element domain, or None when every entry is a member. A missing
+        entry is judged by the element domain's own missing rule; any
+        other entry must be a number of the element domain
+        (`domain.number_member`), so text, a bool, an imaginary number
+        and an infinity in a bare real set are outside.
+        With `numbers_judged_elsewhere` (an `enforce_domain` guard on
+        the same parameter judges every number), only an entry that is
+        not a number is reported here.
+    """
+    from .domain import domain_contains, is_missing, number_member
+    kind = getattr(getattr(value, "dtype", None), "kind", None)
+    if (numbers_judged_elsewhere and kind in ("i", "u", "f", "c", "b")
+            and type(value).__module__ == "numpy"):
+        return None
+    if (kind in ("i", "u", "f") and type(value).__module__ == "numpy"
+            and getattr(element, "base_type", None) == "R"
+            and not element.pieces and not element.excluded):
+        # a numeric array against the bare reals: only an infinity is
+        # outside, found without visiting every entry in Python
+        flat = value.ravel()
+        if kind != "f":
+            return None
+        import numpy
+        hits = numpy.flatnonzero(numpy.isinf(flat))
+        return (flat[hits[0]].item(),) if hits.size else None
+    entries = leaves(value)
+    if (kind == "f" and type(value).__module__ == "numpy"
+            and str(getattr(value, "dtype", "")) != "float64"):
+        # a narrower or wider float keeps its own type, so each entry
+        # meets an endpoint parsed in that type
+        entries = iter(value.ravel())
+    for leaf in entries:
+        if is_missing(leaf):
+            if not numbers_judged_elsewhere and not domain_contains(
+                    leaf, element):
+                return (leaf,)
+            continue
+        member = number_member(leaf, element)
+        if member is None or (not member and not numbers_judged_elsewhere):
+            return (leaf,)
+    return None
 
 
 def entry_problem(plan: DimensionPlan, arguments: dict) -> tuple:
@@ -610,6 +682,8 @@ def entry_problem(plan: DimensionPlan, arguments: dict) -> tuple:
         value = arguments[p]
         shape = observed_shape(value)
         if shape is None or len(shape) != len(dims):
+            shape = _table_as_matrix(value, len(dims)) or shape
+        if shape is None or len(shape) != len(dims):
             return (f"{p} {describe(shape, value)}; {source} expects "
                     f"{expected(dims)}", bound)
         for n, d in zip(shape, dims):
@@ -626,6 +700,14 @@ def entry_problem(plan: DimensionPlan, arguments: dict) -> tuple:
                         f"{describe(other_shape)}, so {p} must "
                         f"{must(dims, sizes)}", bound)
             bound.setdefault(d, (n, p, shape))
+        element = plan.elements.get(p)
+        if element is not None:
+            outside = _entry_outside(
+                value, element, p in plan.numbers_judged_elsewhere)
+            if outside is not None:
+                return (f"{p} has the entry {outside[0]!r}, outside "
+                        f"{domain_text(element)}; {source} expects every "
+                        f"entry in it", bound)
     return None, bound
 
 

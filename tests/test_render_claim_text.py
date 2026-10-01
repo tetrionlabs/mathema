@@ -43,7 +43,7 @@ def test_render_claim_text_reassembles_for_and_let_clauses():
         assert reparsed.funcs == cj.funcs
         assert set(reparsed.domain) == set(cj.domain)
         # the rendered domain now always states its resolved type and
-        # missing-value policy explicitly (`:float`, `∪ {∅}`), which
+        # missing-value policy explicitly (` : float`, `∪ {None, ∅}`), which
         # reparses into a differently-shaped but semantically identical
         # Domain object (an explicit MISSING piece where the original
         # had none at all), compare membership behavior, the real
@@ -61,7 +61,7 @@ def test_render_claim_text_defaults_to_the_global_unicode_setting():
         set_unicode_output(True)
         assert "⊂" in render_claim_text(cj)
         set_unicode_output(False)
-        assert ":int" in render_claim_text(cj) and "⊂" not in render_claim_text(cj)
+        assert " : int" in render_claim_text(cj) and "⊂" not in render_claim_text(cj)
     finally:
         set_unicode_output(prior)   # restore what was actually set before
 
@@ -95,19 +95,19 @@ def test_top_level_reexport_matches_grammar_module():
 def test_integer_typed_bound_renders_without_decimal_points():
     text = render_domain(claim("for n in [1, 100] subset Z, f(n) >= 0").domain["n"],
                          ascii_mode=True, show_missing=False)
-    assert text == "[1, 100]:int"
+    assert text == "[1, 100] : int"
 
 
 def test_fractional_endpoint_in_an_integer_domain_is_not_silently_truncated():
     from mathema.grammar import Domain, Interval
     dom = Domain(base_type="Z", pieces=(Interval(0.5, 100.0),))
-    assert render_domain(dom, ascii_mode=True, show_missing=False) == "[0.5, 100]:int"
+    assert render_domain(dom, ascii_mode=True, show_missing=False) == "[0.5, 100] : int"
 
 
 def test_ascii_mode_prefers_a_python_style_type_annotation_over_the_word():
     from mathema.grammar import Domain, Interval
     dom = Domain(base_type="Z", pieces=(Interval(0.0, 1.0),))
-    assert render_domain(dom, ascii_mode=True, show_missing=False) == "[0, 1]:int"
+    assert render_domain(dom, ascii_mode=True, show_missing=False) == "[0, 1] : int"
     assert render_domain(dom, ascii_mode=False, show_missing=False) == "[0, 1] ⊂ ℤ"
 
 
@@ -121,7 +121,7 @@ def test_open_integer_interval_does_not_collapse_to_a_shifted_closed_one():
     from mathema.grammar import Domain, Interval
     dom = Domain(base_type="Z", pieces=(Interval(0.0, 10.0, closed_lo=False,
                                                  closed_hi=False),))
-    assert render_domain(dom, ascii_mode=True, show_missing=False) == "(0, 10):int"
+    assert render_domain(dom, ascii_mode=True, show_missing=False) == "(0, 10) : int"
 
 
 def test_greek_letter_round_trips_through_all_three_input_spellings():
@@ -199,7 +199,7 @@ def test_long_real_parameter_name_auto_lets_in_unicode_only():
 
     short = claim("for velocity in [0, 100], f(velocity) >= 0")
     assert render_claim_text(short, unicode=True) == \
-        "∀ velocity ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, f(velocity) ≥ 0"
+        "∀ velocity ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(velocity) ≥ 0"
 
     long = claim("for acceleration in [0, 100], f(acceleration) >= 0")
     unicode_text = render_claim_text(long, unicode=True)
@@ -271,7 +271,7 @@ def test_short_function_alias_is_never_renamed():
 
     cj = claim("let g = numpy.exp, for x in [0, 10], g(x) >= 1")
     assert render_claim_text(cj, unicode=True) == \
-        "let g = numpy.exp, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, g(x) ≥ 1"
+        "let g = numpy.exp, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, g(x) ≥ 1"
 
 
 def test_a_function_alias_is_rendered_as_written_whatever_its_length():
@@ -308,7 +308,7 @@ def test_a_real_parameter_named_pi_or_oo_suppresses_the_glyph_not_renamed():
 
     cj = claim("for pi in [0, 100], f(pi) >= 0")
     unicode_text = render_claim_text(cj, unicode=True)
-    assert unicode_text == "∀ pi ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, f(pi) ≥ 0"
+    assert unicode_text == "∀ pi ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(pi) ≥ 0"
     assert "π" not in unicode_text and "let" not in unicode_text
 
     cj2 = claim("for oo in [0, 100], f(oo) >= 0")
@@ -324,7 +324,7 @@ def test_a_real_parameter_named_e_is_untouched_no_glyph_to_suppress():
 
     cj = claim("for e in [0, 100], f(e) >= 0")
     assert render_claim_text(cj, unicode=True) == \
-        "∀ e ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, f(e) ≥ 0"
+        "∀ e ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(e) ≥ 0"
 
 
 def test_pi_used_only_as_the_constant_is_unaffected_by_the_suppression():
@@ -354,7 +354,7 @@ def test_real_parameters_named_sum_prod_or_d_render_safely_as_bare_names():
     for name in ("Sum", "Prod", "d"):
         cj = claim(f"for {name} in [0, 100], f({name}) >= 0")
         unicode_text = render_claim_text(cj, unicode=True)
-        assert unicode_text == f"∀ {name} ∈ [0.0, 100.0] ⊂ ℝ ∪ {{∅}}, f({name}) ≥ 0"
+        assert unicode_text == f"∀ {name} ∈ [0.0, 100.0] ⊂ ℝ ∪ {{absent, ∅}}, f({name}) ≥ 0"
 
 
 def test_non_greek_unicode_identifier_is_left_alone_in_ascii_mode():

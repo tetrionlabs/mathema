@@ -36,8 +36,8 @@ print(render_claim_text(c))
 
 <!-- example: alphabets output -->
 ```text
-let x = acceleration, let θ = theta, ∀ θ ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, f(θ, x) ≥ 0
-for theta in [0.0, 1.0]:float|missing, acceleration in [0.0, 100.0]:float|missing, f(theta, acceleration) >= 0
+let x = acceleration, let θ = theta, ∀ θ ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, x ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(θ, x) ≥ 0
+for theta in [0.0, 1.0] : float|absent|missing, acceleration in [0.0, 100.0] : float|absent|missing, f(theta, acceleration) >= 0
 ```
 
 Both are the same claim and both parse back. Unicode is the default;
@@ -52,17 +52,25 @@ read. Both renames are declared as `let` bindings in the claim itself,
 so nothing is lost: the rendered line still says exactly which symbol
 stands for which parameter, and reparsing it gives the claim back.
 
-## Type suffixes and the missing value
+## Type suffixes and the missing values
 
-The ASCII form writes `[0.0, 1.0]:float|missing` where the Unicode form
-writes `[0.0, 1.0] ⊂ ℝ ∪ {∅}`. Both say the same two things: the
-interval, and that a missing value is part of the declared input space.
-A missing value is allowed unless the domain excludes it with `\ {∅}`,
-whether or not a type is stated: `[0, 100] ⊂ Z` renders
-`[0, 100] ⊂ ℤ ∪ {∅}`, and `[0, 100] ⊂ Z \ {∅}` renders
-`[0, 100] ⊂ ℤ \ {∅}`. The rendering always shows which of those you
-got, because a silently different input space is the kind of thing that
-makes a proof mean less than a reader assumes.
+The ASCII form writes `[0.0, 1.0] : float|absent|missing` where the
+Unicode form writes `[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}`. Both say the same
+three things: the interval, that the object may be absent (`absent`,
+which `None` also spells), and that its slot may hold a hole
+(`missing`, `∅`); see [missing values](missing-values.md) for the two
+words. A domain renders what it admits and never what it
+excludes, in the order `absent`, `missing`, then
+member words (`nan`, `NA`, `null`, `NaT`). A type clause admits what
+it lists and nothing else, so `[0, 100] ⊂ Z` renders `[0, 100] ⊂ ℤ`
+whatever the parameter's annotation; an exclusion renders only on a
+domain with no type clause, where it removes something the annotation
+would admit (`ℝⁿ \ {∅}`). A bare interval or a bare named space
+(`[0, 1]`, `ℝⁿ`) states nothing and takes what the annotation admits. A
+space puts its slot's holes inside the power, `([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ`,
+and after the type, whether the whole vector may be absent. The rendering always shows which of these you got, because a
+silently different input space is the kind of thing that makes a proof
+mean less than a reader assumes.
 
 ## LaTeX
 
@@ -125,8 +133,8 @@ With the package installed, a claim over `spot` and `strike` renders
 in the desk's own notation:
 
 ```text
-default        : ∀ spot ∈ [1.0, 500.0] ⊂ ℝ ∪ {∅}, strike ∈ [1.0, 500.0] ⊂ ℝ ∪ {∅}, f(spot, strike) ≥ 0
-with provider  : let S = spot, let K = strike, ∀ S ∈ [1.0, 500.0] ⊂ ℝ ∪ {∅}, K ∈ [1.0, 500.0] ⊂ ℝ ∪ {∅}, f(S, K) ≥ 0
+default        : ∀ spot ∈ [1.0, 500.0] ⊂ ℝ ∪ {absent, ∅}, strike ∈ [1.0, 500.0] ⊂ ℝ ∪ {absent, ∅}, f(spot, strike) ≥ 0
+with provider  : let S = spot, let K = strike, ∀ S ∈ [1.0, 500.0] ⊂ ℝ ∪ {absent, ∅}, K ∈ [1.0, 500.0] ⊂ ℝ ∪ {absent, ∅}, f(S, K) ≥ 0
 ```
 
 The `let` bindings come for free. mathema states every rename it made,

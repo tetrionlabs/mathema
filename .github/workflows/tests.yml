@@ -70,6 +70,68 @@ jobs:
         run: python -c "import importlib.util, sys; sys.exit(importlib.util.find_spec('mathema_language') is not None)"
       - run: python -m pytest -q
 
+  # The bundled compendium rows adjudicated against the libraries
+  # (`--library-rows`): a red here is a library that changed under a
+  # row, or a row that misreads it. Runs when a bundled compendium file
+  # or the lock file changes, weekly, and on demand: on the floor and
+  # ceiling interpreters with the libraries pip resolves today, and on
+  # the oldest numpy, pandas and polars the bundled files declare, so
+  # each declared version range is exercised at both ends.
+  library-rows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.10"
+            libraries: ""
+          - python-version: "3.13"
+            libraries: ""
+          - python-version: "3.10"
+            libraries: "numpy==1.24.* pandas==2.0.* polars==1.0.*"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: a compendium file or the lock file changed
+        id: changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "schedule" ] || [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT" = "pull_request" ]; then
+            range="origin/$BASE_REF...HEAD"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            range="HEAD~1...HEAD"
+          else
+            range="$BEFORE...HEAD"
+          fi
+          if git diff --name-only "$range" mathema/compendium uv.lock | grep -q .; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.changed.outputs.run == 'true'
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - if: steps.changed.outputs.run == 'true'
+        run: pip install -e '.[test]'
+      - if: steps.changed.outputs.run == 'true' && matrix.libraries != ''
+        env:
+          LIBRARIES: ${{ matrix.libraries }}
+        run: pip install $LIBRARIES
+      - if: steps.changed.outputs.run == 'true'
+        run: python -m pytest -n 4 -q -m library_rows --library-rows
+
   # `requires-python` is deliberately unbounded above (capping it
   # would strand users on a new interpreter until we cut a release),
   # so pip WILL install mathema on a Python newer than anything

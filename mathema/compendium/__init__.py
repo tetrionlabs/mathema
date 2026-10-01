@@ -196,7 +196,8 @@ def row_pins(row: dict) -> dict:
         The library parameters a row pins, `{parameter: value}`: each
         `let p be None/True/False` binding, and each `let p be <number>`
         whose name the statement never reads (`let axis be 1, dim(a) >=
-        1`). {} for a row that pins nothing or does not parse.
+        1`); a keyword argument of the same name (`std(a, ddof=1)`) is
+        not a read. {} for a row that pins nothing or does not parse.
     """
     import re
 
@@ -208,7 +209,9 @@ def row_pins(row: dict) -> dict:
         return {}
     pins = dict(getattr(cj, "param_pins", None) or {})
     text = " ".join(str(t) for t in (cj.lhs, cj.rhs, cj.assuming) if t)
-    named = set(re.findall(r"\b[A-Za-z_]\w*\b", text))
+    # a name followed by a single `=` is a keyword argument of a grammar
+    # word (`std(a, ddof=1)`), not a read of that name
+    named = set(re.findall(r"\b([A-Za-z_]\w*)\b(?!\s*=(?!=))", text))
     for name in sorted(cj.free_vars or ()):
         point = _single_point((cj.domain or {}).get(name))
         if point is not None and name not in named:
@@ -379,7 +382,10 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         stamp_library_rows(data, tag)
         mark_row_versions(data, library, aliases)
         for key, entry in data.items():
-            if isinstance(entry, dict):
+            if isinstance(entry, dict) and not (entry.get("defines")
+                                                and not entry.get("claims")):
+                # a key that only defines its runtime's missing values
+                # (`defines:`) has no function claims to register
                 out[key] = {"entry": entry, "compendium": library,
                             "versions": versions, "source": where,
                             "bundled": path in shipped}
@@ -1000,8 +1006,11 @@ def register_library_claims(root: "str | None" = ".") -> list:
         return list(_INSTALLED.get("names", []))
     uninstall()
     library_claims = load_library_claims(root)
+    apply_definitions(root)
     rows: list = []
     names: list = []
+    defined: set = set()
+    from ..conjecture import region_row_kind
     for key, info in sorted(library_claims.items()):
         for row in info["entry"].get("claims") or []:
             if not row_is_fact(row):
@@ -1019,6 +1028,9 @@ def register_library_claims(root: "str | None" = ".") -> list:
                         f"{key} ({info['source']}) registers no region: "
                         f"{reason}", stacklevel=2)
                 continue
+            if region_row_kind(str(row.get("name") or "")) == "is_defined" \
+                    and (built is not None or _states_totality(row)):
+                defined.add(key)
             if built is None:
                 continue
             if built.stratum == "computation":
@@ -1039,11 +1051,31 @@ def register_library_claims(root: "str | None" = ".") -> list:
             rows.append((key, build))
             names.append((key, str(row.get("name"))))
     _INSTALLED.update(root=marker, rows=rows, names=names,
-                      keys=frozenset(library_claims), objects=None)
+                      keys=frozenset(library_claims), objects=None,
+                      defined=frozenset(defined))
     from ..hazards import register_hazard_generator
     register_hazard_generator("compendium",
                               _boundary_generator(library_claims))
     return names
+
+
+def _states_totality(row: dict) -> bool:
+    """Whether a library row is the bare `is_defined(f)` with no domain:
+    the function has a value at every argument."""
+    from ..conjecture import claim
+    try:
+        cj = claim(str(row.get("statement") or row.get("law") or ""),
+                   name=row.get("name") or None)
+    except Exception:
+        return False
+    return cj.relation == "is_defined" and not cj.domain
+
+
+def defined_keys() -> frozenset:
+    """The registered library claim keys whose files state an
+    `is_defined` row (bare or a region): where each is defined is a
+    stated fact."""
+    return _INSTALLED.get("defined") or frozenset()
 
 
 def install(root: str = ".") -> None:
@@ -1100,6 +1132,95 @@ def library_key_of(fn) -> "str | None":
     return None
 
 
+def _entry_definitions(key: str, entry: dict, source: str) -> list:
+    """Intent:
+        The definition rows a claims-file entry states under `defines:`,
+        each a `runtime_types.Definition`, in order. A row is the text
+        `<word> := {<members>}` or a record of one (`definition:`).
+    """
+    from ..grammar import parse_definition
+    from ..runtime_types import Definition
+    out = []
+    for row in entry.get("defines") or []:
+        text = row.get("definition") if isinstance(row, dict) else row
+        word, members, extends = parse_definition(str(text))
+        out.append(Definition(key, word, members, extends, str(text), source))
+    return out
+
+
+def load_definitions(root: "str | None" = ".") -> dict:
+    """Intent:
+        Every definition row the claims files state, by layer:
+        `{"bundled": [...], "compendium": [...], "claims": [...]}`, the
+        bundled compendium files first, then a project's compendium
+        files, then its ordinary claims files. `root=None` reads the
+        bundled files only. A bundled or project compendium file counts
+        only when its library applies, as its claims do.
+
+    Raises:
+        spec.ClaimsFileError: a claims file that does not read, a
+            definition row that does not parse, or a spelling its key's
+            runtime type cannot realise.
+    """
+    from ..spec import claims_file_paths, read_claims_file
+    bundled = _bundled_dir()
+    out: dict = {"bundled": [], "compendium": [], "claims": []}
+    paths = [(p, True) for p in claims_file_paths(bundled)]
+    if root is not None:
+        paths += [(p, False) for p in claims_file_paths(root, exclude=(bundled,))]
+    for path, shipped in paths:
+        where = _display_path(path, root or ".")
+        data = read_claims_file(path, where)
+        if not data:
+            continue
+        rows: list = []
+        for key, entry in data.items():
+            if isinstance(entry, dict) and entry.get("defines"):
+                origin = (f"compendium {data['compendium']}"
+                          + (", bundled" if shipped else f", {where}")
+                          if "compendium" in data else f"claims file {where}")
+                rows.extend(_entry_definitions(key, entry, origin))
+        if not rows:
+            continue
+        if "compendium" in data:
+            library, versions, aliases = pop_library_fields(dict(data))
+            if applicable_tag(library, versions, aliases) is None:
+                continue
+            out["bundled" if shipped else "compendium"].extend(rows)
+        else:
+            out["claims"].extend(rows)
+    return out
+
+
+def apply_definitions(root: "str | None" = ".") -> list:
+    """Register every definition row `load_definitions(root)` finds, layer
+    by layer, and return them in the order they apply."""
+    from ..runtime_types import set_definitions
+    layers = load_definitions(root)
+    for layer, rows in layers.items():
+        set_definitions(layer, rows)
+    return [row for layer in ("bundled", "compendium", "claims")
+            for row in layers[layer]]
+
+
+def definition_records(rows=None) -> list:
+    """Intent:
+        The record of each definition row in force: `{key, definition,
+        verdict, route, source, members}`, the verdict `trusted` and the
+        route `axiom` (a definition is taken at face value, never
+        adjudicated), `members` the spellings the row's word stands for
+        on its key once every layer up to it has applied.
+    """
+    from ..runtime_types import definitions, members
+    out = []
+    for row in rows if rows is not None else definitions():
+        out.append({"key": row.key, "definition": row.text,
+                    "verdict": "trusted", "route": "axiom",
+                    "source": row.source,
+                    "members": list(members(row.key, row.word))})
+    return out
+
+
 def ensure_bundled() -> None:
     """Intent:
         Register the bundled library claims when no library claims are
@@ -1122,8 +1243,11 @@ def uninstall(root: "str | None" = None) -> None:
     for key, build in _INSTALLED["rows"]:
         unregister_lemmas(key, [build])
     _INSTALLED.update(root=None, rows=[], names=[], keys=frozenset(),
-                      objects=None)
+                      objects=None, defined=frozenset())
     _COMPUTATION.clear()
+    from ..runtime_types import set_definitions
+    for layer in ("bundled", "compendium", "claims"):
+        set_definitions(layer, ())
     from ..hazards import _GENERATORS
     _GENERATORS.pop("compendium", None)
 

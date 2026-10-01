@@ -114,7 +114,10 @@ claim you wrote.
 ## 3. Start from a suggestion
 
 For one function, `mathema claims --suggest` renders the standard claims
-mathema would check, each with the route it would take:
+mathema would check, each with the route it would take, in three
+sections: claims that stand alone, questions with candidate answers
+(which way f moves or bends in each parameter), and claims likely to be
+unknowable (none here):
 
 <!-- example: codebase run -->
 ```bash
@@ -124,13 +127,25 @@ mathema claims billing.fees.discounted --suggest --root .
 <!-- example: codebase output match=subset -->
 ```text
 billing.fees.discounted: 17 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
-  - monotonic_increasing[price]: d(f(price, rate), price) >= 0  [route best]  [aspect: monotonicity[price]]
-  - monotonic_decreasing[price]: d(f(price, rate), price) <= 0  [route best]  [aspect: monotonicity[price]]
-  - affine[price]: d(f(price, rate), price, price) == 0  [route best]  [aspect: shape[price]]
-  - convex[price]: d(f(price, rate), price, price) >= 0  [route best]  [aspect: shape[price]]
-  - concave[price]: d(f(price, rate), price, price) <= 0  [route best]  [aspect: shape[price]]
-  - monotonic_increasing[rate]: d(f(price, rate), rate) >= 0  [route best]  [aspect: monotonicity[rate]]
-  - monotonic_decreasing[rate]: d(f(price, rate), rate) <= 0  [route best]  [aspect: monotonicity[rate]]
+ individual claims:
+  - commutative: f(price, rate) == f(rate, price)  [route best]
+  - associative: f(f(price, rate), c) == f(price, f(rate, c))  [route best]
+  - is_deterministic: f(price, rate) == f(price, rate)  [route best]
+  - is_state_safe: f(price, rate) == f(price, rate)  [route best]
+  - is_numerically_stable: g(f, price, rate) == 1  [route best]
+  - is_representation_safe[price]: is_representation_safe(price)  [route examine]
+  - is_representation_safe[rate]: is_representation_safe(rate)  [route examine]
+ questions with candidate answers (adopt every answer that holds):
+  monotonicity[price]:
+    - monotonic_increasing[price]: d(f(price, rate), price) >= 0  [route best]
+    - monotonic_decreasing[price]: d(f(price, rate), price) <= 0  [route best]
+  shape[price]:
+    - affine[price]: d(f(price, rate), price, price) == 0  [route best]
+    - convex[price]: d(f(price, rate), price, price) >= 0  [route best]
+    - concave[price]: d(f(price, rate), price, price) <= 0  [route best]
+  monotonicity[rate]:
+    - monotonic_increasing[rate]: d(f(price, rate), rate) >= 0  [route best]
+    - monotonic_decreasing[rate]: d(f(price, rate), rate) <= 0  [route best]
 ```
 
 A suggestion is not verified and never gates until someone adopts it. A
@@ -183,13 +198,13 @@ print(p.verdict, p.counterexample)
 
 <!-- example: codebase output -->
 ```text
-falsified rate=-2.72559 -> -32.66347642639832, rate=4.92258 -> 34.39055087522713 (not decreasing)
+falsified rate=-2.72559 -> -32.66347642639832, rate=4.92258 -> 34.39055087522713 at price = -8.76733 (not decreasing)
 ```
 
 The derivative of `price * (1 - rate)` in `rate` is `-price`, which is
 positive when the price is negative, and the claim said nothing about
-prices. Both values were computed at the same price, which the witness
-does not print; either one solves to -8.77. (`d(f(price, rate), rate)` is
+prices. Both values were computed at the same price, the one the witness
+prints after `at`. (`d(f(price, rate), rate)` is
 the derivative in `rate`; [the claim grammar](grammar.md#calculus) lists
 the calculus forms.) The suggestion was right about the function and silent about its
 domain, which is the usual state of a suggestion. Say what the function
@@ -281,15 +296,17 @@ mathema coverage billing --root .
 ```text
 2 passed in 0.05s
 100%  billing.fees.discounted  [test+probe+derive]
-100%  billing.fees.late_fee  [probe+derive]
+100%  billing.fees.late_fee  [probe]
 100%  billing.fees.settle  [test+probe+derive]
 
 implementation coverage: 100%
 ```
 
-`late_fee` has no claim of its own and still reads `probe+derive`:
+`late_fee` has no claim of its own, so it reads `probe` alone:
 `coverage` runs mathema's standard claims about a function while tracing
-it, and a proof of any of them counts the body as modelled.
+it, and the lines they ran count, but a proof counts the body as
+modelled only for a claim included for the function and recorded by the
+sweep, as `discounted`'s and `settle`'s are.
 [`mathema coverage`](modes/coverage.md) explains the three sources and
 what happens to a test report when the code moves on. From here, [Gate a
 pipeline with mathema verify](gate-a-pipeline.md) puts the sweep in CI,

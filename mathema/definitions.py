@@ -849,7 +849,11 @@ def _uses_meta(uses: list) -> list:
 
 
 def _rows_text(uses: list) -> str:
-    return ", ".join(dict.fromkeys(f"{r.key} {r.name}" for r in uses))
+    """`the polars.Series.sum definition row`, or several joined."""
+    names = list(dict.fromkeys(f"{r.key} {r.name}" for r in uses))
+    if len(names) == 1:
+        return f"the {names[0]} row"
+    return "the " + ", ".join(names[:-1]) + f" and {names[-1]} rows"
 
 
 def prove_through_definitions(cj, fn, facts, cj_domain: dict, assumption,
@@ -931,7 +935,7 @@ def _matrix_route(cj, facts, cj_domain, shapes, assumption, structures, fn,
     structs = dict(structures_from_signature(fn))
     for p, props in (structures or {}).items():
         structs[p] = tuple(sorted(set(structs.get(p, ())) | set(props)))
-    through = (f"through the definition rows {_rows_text(inlined.uses)} the "
+    through = (f"through {_rows_text(inlined.uses)} the "
                f"claim reads {lhs_text} {cj.relation} {rhs_text}")
     mproof = try_prove_matrix(lhs_text, rhs_text, cj.relation, facts,
                               cj_domain, shapes, structs,
@@ -1330,7 +1334,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
 
     shortest: dict = {}
     cap = EXTENSIVE_TIMEOUT_SECONDS if extensive else FAST_TIMEOUT_SECONDS
-    through = f"through the definition rows {_rows_text(inlined.uses)}"
+    through = f"through {_rows_text(inlined.uses)}"
     try:
         outcome = _with_timeout(decide, cap)
         if empty_only[0] and outcome.get("proven"):
@@ -1416,7 +1420,8 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
     """
     import random
 
-    from .conjecture import _resolve_func_ref
+    from .conjecture import _resolve_bound_ref
+    from .corroboration import INCONCLUSIVE
     from .gates import _fmt_point, _point_evaluator
     from .symbolic._proof_support import ProofResult
     wheres: list = []
@@ -1438,7 +1443,7 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
     remedy = " and ".join(dict.fromkeys(remedies))
     bound_funcs = {}
     for name, ref in (cj.funcs or {}).items():
-        bound_funcs[name] = ref if callable(ref) else _resolve_func_ref(ref)
+        bound_funcs[name] = ref if callable(ref) else _resolve_bound_ref(ref)
     deps = None
     if all(v is not None for v in bound_funcs.values()):
         try:
@@ -1469,6 +1474,8 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
                         continue
                     if held is False:
                         detail = deps["probe_finite"](point)
+                        if detail is INCONCLUSIVE:
+                            detail = None
                         shown = _fmt_point(point, deps["names"])
                         return ProofResult(
                             "disproven", meta={**meta,

@@ -31,6 +31,7 @@ corrupt) residual:
 Every dependency is injected, evaluator, sampler, in-domain predicate,
 corner points, so the engine has no hidden coupling.
 """
+import math
 import random
 from dataclasses import dataclass, field
 from typing import Callable
@@ -80,10 +81,36 @@ def _is_number(v) -> bool:
         return False
 
 
+_ULP_STEPS = 4
+
+
+def _ulp_neighbours(base: dict) -> list[dict]:
+    """Intent:
+        The floats within `_ULP_STEPS` ulps of a witness: for each step
+        k, every coordinate moved k ulps down, then k ulps up, then each
+        coordinate moved alone. An exact witness (an irrational root)
+        rounds to one float, and the claim can break at a neighbour
+        while holding at that float.
+    """
+    out: list[dict] = []
+    for k in range(1, _ULP_STEPS + 1):
+        for direction in (-math.inf, math.inf):
+            def step(v, d=direction, k=k):
+                for _ in range(k):
+                    v = math.nextafter(v, d)
+                return v
+            out.append({n: step(v) for n, v in base.items()})
+            if len(base) > 1:
+                for n in base:
+                    out.append({**base, n: step(base[n])})
+    return out
+
+
 def _seed_points(witness: dict | None, names: list[str]) -> list[dict]:
     """Intent:
         The candidates to try FIRST when reproducing a disproof: the
-        exact witness derive supplied, then small perturbations of it,
+        exact witness derive supplied, the floats a few ulps either side
+        of it, then small perturbations of it,
         so a narrow failure region reproduces cheaply before blind
         sampling.
 
@@ -104,6 +131,7 @@ def _seed_points(witness: dict | None, names: list[str]) -> list[dict]:
         return []
     points = [{**fixed, **base}]
     if base:
+        points.extend({**fixed, **pt} for pt in _ulp_neighbours(base))
         for delta in _PERTURBATIONS:
             points.append({**fixed, **{n: base[n] * (1.0 + delta) + delta
                                        for n in base}})
@@ -148,6 +176,12 @@ def corroborate_disproof(evaluate: Callable[[dict], "bool | None"],
                          reason="no in-domain counterexample reproduced")
 
 
+#: what `probe_finite` returns at a point that says nothing either way
+#: (the claim's own evaluation failed there): neither a failure nor an
+#: agreement, so it is not counted among the executed points
+INCONCLUSIVE = "<inconclusive>"
+
+
 def sweep_stability(probe_finite: Callable[[dict], "str | None"],
                     names: list[str], *, sample: Callable, corners: list,
                     admits: Callable[[dict], bool],
@@ -159,8 +193,9 @@ def sweep_stability(probe_finite: Callable[[dict], "str | None"],
         division, sqrt, log or exp breaks in float), then `budget`
         sampled interior points. `probe_finite(point)` returns a failure
         description (a raise, a NaN, or an inf or a deviation past a
-        magnitude-scaled tolerance where the relation fails) or None
-        when the code agrees with the relation there.
+        magnitude-scaled tolerance where the relation fails), None
+        when the code agrees with the relation there, or `INCONCLUSIVE`
+        when the point says nothing, which is not counted.
 
     Notes:
         Returns the first fragile point (one real break falsifies,
@@ -178,6 +213,8 @@ def sweep_stability(probe_finite: Callable[[dict], "str | None"],
         out.in_flight = point
         detail = probe_finite(point)
         out.in_flight = None
+        if detail is INCONCLUSIVE:
+            continue
         out.checked += 1
         if detail is not None:
             out.fragile_point, out.detail = point, detail

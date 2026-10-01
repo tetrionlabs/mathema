@@ -206,7 +206,7 @@ def test_an_overflow_region_is_computation_the_proof_stands_and_the_companion_fa
     assert parent.route == "derive", parent.route
     assert companion.verdict == "falsified", (companion.verdict,
                                               companion.note)
-    assert "x=1000" in (companion.counterexample or "")
+    assert "x = 1000" in (companion.counterexample or "")
     assert "returned inf" in (companion.sketch or ""), companion.sketch
 
 
