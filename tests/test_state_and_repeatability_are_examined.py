@@ -151,3 +151,39 @@ def test_the_else_of_a_branch_the_domain_always_takes_is_named_as_dead():
     assert p.verdict == "falsified"
     assert "not (x < 10) never holds there" in p.counterexample, \
         p.counterexample
+
+
+def test_a_helper_filling_a_list_the_call_made_is_no_write():
+    p = _row(ex.fresh_buffer, "is_state_safe(f)")
+    assert (p.verdict, p.route) == ("proven", "examine"), (p.verdict, p.note)
+
+
+@pytest.mark.parametrize("fn, site", [
+    (ex.passes_param, "passes its argument xs to _fill, and _fill changes "
+                      "its argument buf"),
+    (ex.asarray_sort, "changes its argument xs (b.sort())"),
+    (ex.branch_rebind, "changes its argument xs (xs.append(1.0))"),
+    (ex.np_copyto, "changes its argument xs (np.copyto(xs, 0.0))"),
+    (ex.median_overwrite, "reorder its argument xs (overwrite_input=True)"),
+    (ex.frame_fill, "changes its argument df in place (inplace=True)"),
+])
+def test_a_write_through_a_helper_an_alias_or_a_library_writer(fn, site):
+    p = _row(fn, "is_state_safe(f)")
+    assert p.verdict == "falsified", (fn.__name__, p.verdict, p.note)
+    assert site in p.counterexample, (fn.__name__, p.counterexample)
+
+
+def test_the_sort_function_returns_a_copy_and_writes_nothing():
+    p = _row(ex.np_sort, "is_state_safe(f)")
+    assert (p.verdict, p.route) == ("proven", "examine"), (p.verdict, p.note)
+
+
+def test_a_draw_without_a_seed_is_never_proven_deterministic():
+    p = _row(ex.frame_sample, "is_deterministic(f)")
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert "with no seed" in p.note, p.note
+    p = _row(ex.random_rank, "is_deterministic(f)")
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "ranks ties at random with no seed" in p.counterexample
+    p = _row(ex.frame_sample_seeded, "is_deterministic(f)")
+    assert (p.verdict, p.route) == ("proven", "examine"), (p.verdict, p.note)

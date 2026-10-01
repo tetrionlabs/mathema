@@ -40,6 +40,7 @@ import ast
 import builtins
 import inspect
 import os
+import re
 import sys
 import sysconfig
 import textwrap
@@ -76,6 +77,10 @@ class Effects:
     guards: dict = field(default_factory=dict)
     #: the branch conditions around the statement being examined
     branch: tuple = ()
+    #: writes the function makes to one of its own parameters, as
+    #: (parameter, site): a caller decides whether what it passes there
+    #: is its own object or one from outside the call
+    arg_writes: list = field(default_factory=list)
 
     def add(self, site: Site) -> None:
         bucket = {"write": self.writes, "hidden_read": self.hidden_reads,
@@ -166,6 +171,10 @@ _LIBRARY = {
     "numpy.dot": "threaded", "numpy.matmul": "threaded",
     "numpy.vdot": "threaded", "numpy.inner": "threaded",
     "numpy.tensordot": "threaded", "numpy.einsum": "threaded",
+    "numpy.copyto": "writes_first", "numpy.put": "writes_first",
+    "numpy.place": "writes_first", "numpy.putmask": "writes_first",
+    "numpy.fill_diagonal": "writes_first",
+    "numpy.put_along_axis": "writes_first",
 }
 #: numpy submodules whose functions run threaded reductions
 _THREADED_MODULES = frozenset({"numpy.linalg"})
@@ -191,7 +200,7 @@ _MUTATING_METHODS = frozenset({
     "setflags", "partition", "shuffle", "__setitem__", "__delitem__",
     "setLevel", "addHandler", "removeHandler", "addFilter", "removeFilter",
     "setFormatter", "seed", "set_state", "setstate", "write", "writelines",
-    "close", "flush", "send", "drop_duplicates_inplace",
+    "close", "flush", "send", "drop_duplicates_inplace", "scatter", "set",
 })
 #: method names that read and do not change the object, on any type the
 #: claim's domain admits (numbers, strings, containers, arrays, frames)
@@ -335,6 +344,77 @@ def _immutable(value) -> bool:
 _CACHE: dict = {}
 
 
+#: library functions that hand back their first argument itself when
+#: it is already what they would make (an array of the asked type)
+_ALIASING = frozenset({
+    "numpy.asarray", "numpy.asanyarray", "numpy.ascontiguousarray",
+    "numpy.asfortranarray", "numpy.atleast_1d", "numpy.atleast_2d",
+    "numpy.atleast_3d", "numpy.ravel", "numpy.reshape", "numpy.squeeze",
+    "numpy.transpose", "numpy.asarray_chkfinite", "numpy.ndarray.view",
+})
+
+
+def _returns_its_argument(qualified: str, node: ast.Call) -> bool:
+    """Whether a call of `qualified` may return its first argument
+    itself: an aliasing numpy function, or `numpy.array` asked not to
+    copy."""
+    if qualified in _ALIASING:
+        return True
+    if qualified == "numpy.array":
+        return any(k.arg == "copy" and not (
+            isinstance(k.value, ast.Constant) and k.value.value is True)
+            for k in node.keywords)
+    return False
+
+
+def _joined(*origins: dict) -> dict:
+    """The origins of names after paths that may each have run: a name
+    fresh on one path and from outside on another is from outside; two
+    different outside origins leave it unresolved."""
+    out: dict = {}
+    for name in set().union(*origins):
+        seen = [o[name] for o in origins if name in o]
+        outside = [o for o in seen if o[0] != "fresh"]
+        if not outside:
+            out[name] = seen[0]
+        elif all(o == outside[0] for o in outside):
+            out[name] = outside[0]
+        else:
+            out[name] = ("unresolved", name)
+    return out
+
+
+def _argument_for(fn, node: ast.Call, param: str, bound=None,
+                  constructing: bool = False):
+    """The expression a call passes for `param` of `fn`, `bound` for a
+    method's first parameter, or None when the call's arguments cannot
+    be matched (a starred argument or a `**` mapping)."""
+    if any(isinstance(a, ast.Starred) for a in node.args) or any(
+            k.arg is None for k in node.keywords):
+        return None
+    try:
+        names = list(inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        return None
+    if bound is not None or constructing:
+        if names and names[0] == param:
+            return bound
+        names = names[1:]
+    for keyword in node.keywords:
+        if keyword.arg == param:
+            return keyword.value
+    if param in names and names.index(param) < len(node.args):
+        return node.args[names.index(param)]
+    try:
+        default = inspect.signature(fn).parameters[param].default
+    except (TypeError, ValueError, KeyError):
+        return None
+    if default is inspect.Parameter.empty or _immutable(default):
+        return ast.Constant(None)
+    # a mutable default is one object every call shares
+    return "default"
+
+
 def examine(fn, generator: "str | None" = None,
             constructing: bool = False) -> Effects:
     """Intent:
@@ -399,6 +479,14 @@ class _Examiner:
         for stmt in body:
             self.visit(stmt)
         self.effects.settle()
+        own = f"{self.name} "
+        for site in self.effects.writes:
+            if not site.text.startswith(own):
+                continue
+            for p in params:
+                if re.search(rf"its argument {re.escape(p)}\b", site.text):
+                    self.effects.arg_writes.append((p, site))
+                    break
         return self.effects
 
     # -- what a name or expression is --------------------------------------
@@ -440,6 +528,10 @@ class _Examiner:
         if callee[0] == "value" and _qualified(callee[1]) in _SHARED_RESULTS:
             # the call returns an object other code holds too
             return ("value", None, self._shown(node))
+        if callee[0] == "value" and node.args and _returns_its_argument(
+                _qualified(callee[1]) or "", node):
+            # an array already of the asked type comes back as itself
+            return self._origin_of(node.args[0])
         return ("fresh",)
 
     def _shown(self, node) -> str:
@@ -508,17 +600,33 @@ class _Examiner:
             self.expr(node.test)
             test = ast.unparse(node.test)
             outer = self.effects.branch
+            before = dict(self.origin)
+            after = []
             for taken, stmts in ((True, node.body), (False, node.orelse)):
+                self.origin = dict(before)
                 self.effects.branch = (*outer, (test, taken))
                 for stmt in stmts:
                     self.visit(stmt)
+                after.append(self.origin)
             self.effects.branch = outer
+            self.origin = _joined(*after)
             return
         if isinstance(node, (ast.For, ast.AsyncFor)):
             self.expr(node.iter)
+            before = dict(self.origin)
             self._bind(node.target, ("fresh",))
-            for stmt in (*node.body, *node.orelse):
+            for stmt in (*node.body, *node.body, *node.orelse):
+                # twice: a name the body rebinds late is what an early
+                # statement sees on the next pass
                 self.visit(stmt)
+            self.origin = _joined(before, self.origin)
+            return
+        if isinstance(node, ast.While):
+            self.expr(node.test)
+            before = dict(self.origin)
+            for stmt in (*node.body, *node.body, *node.orelse):
+                self.visit(stmt)
+            self.origin = _joined(before, self.origin)
             return
         if isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
@@ -746,13 +854,48 @@ class _Examiner:
         self.effects.module_reads.add((self.module, shown, text))
         self.effects.add(Site("unknown", text))
 
-    def _reach(self, fn) -> None:
-        """Examine a project function this body reaches, and merge it."""
+    def _reach(self, fn, node: "ast.Call | None" = None,
+               bound=None, constructing: bool = False) -> None:
+        """Examine a project function this body reaches, and merge it.
+        At a call (`node`), a write the callee makes to one of its own
+        parameters is a write here only when the argument passed there
+        is not an object this call made; `bound` is the expression a
+        method is called on, the first parameter of the callee."""
         if _project_source(fn) is None:
             self._library(fn, _qualified(fn) or getattr(fn, "__name__", "?"),
                           None)
             return
-        self.effects.merge(examine(fn))
+        found = examine(fn, constructing=constructing)
+        if node is None:
+            self.effects.merge(found)
+            return
+        passed = {site for _p, site in found.arg_writes}
+        for site in (*found.writes, *found.hidden_reads,
+                     *found.order_sensitive, *found.unknowns):
+            if site not in passed:
+                self.effects.add(site)
+        self.effects.module_writes |= found.module_writes
+        self.effects.module_reads |= found.module_reads
+        callee = getattr(fn, "__name__", "f")
+        for p, site in found.arg_writes:
+            arg = _argument_for(fn, node, p, bound, constructing)
+            if arg is None:
+                self.effects.add(Site("unknown", f"{self.name} calls "
+                                      f"{callee} with arguments mathema "
+                                      f"cannot match to its parameters, "
+                                      f"and {site.text}"))
+                continue
+            if arg == "default":
+                self.effects.add(Site("write", f"{self.name} calls {callee} "
+                                      f"without {p}, and {site.text}, the "
+                                      f"default every call shares"))
+                continue
+            changed = self._outside(self._origin_of(arg))
+            if changed is not None:
+                self._note_module_write(self._origin_of(arg))
+                self.effects.add(Site("write", f"{self.name} passes "
+                                      f"{changed} to {callee}, and "
+                                      f"{site.text}"))
 
     def call(self, node: ast.Call) -> None:
         for arg in node.args:
@@ -818,6 +961,29 @@ class _Examiner:
                               f"{self._shown(func)}, which mathema cannot "
                               f"read"))
 
+    def _seedless_draw(self, owner, method: str, node: ast.Call) -> None:
+        """A table or series method that draws at random when no seed is
+        given: pandas `sample` (`random_state`), polars `sample` and
+        `shuffle` (`seed`), and a rank that breaks ties at random."""
+        seeded = any(k.arg in ("random_state", "seed") and not (
+            isinstance(k.value, ast.Constant) and k.value.value is None)
+            for k in node.keywords)
+        if seeded or owner[0] == "param" and owner[1] == self.generator:
+            return
+        if method == "rank" and any(
+                k.arg == "method" and isinstance(k.value, ast.Constant)
+                and k.value.value == "random" for k in node.keywords):
+            self.effects.add(Site("hidden_read", f"{self.name} ranks ties "
+                                  f"at random with no seed "
+                                  f"({self._shown(node)})"))
+            return
+        if method == "sample" and owner[0] != "value":
+            self.effects.add(Site("unknown", f"{self.name} calls "
+                                  f"{self._shown(node.func)} with no seed, "
+                                  f"which draws from a shared random "
+                                  f"generator when {self._shown(node.func.value)}"
+                                  f" is a table or a series"))
+
     def _open(self, node: ast.Call) -> None:
         mode = node.args[1] if len(node.args) > 1 else next(
             (k.value for k in node.keywords if k.arg == "mode"), None)
@@ -831,13 +997,13 @@ class _Examiner:
 
     def _callee(self, obj, shown: str, node: ast.Call, owner=None) -> None:
         if isinstance(obj, types.FunctionType):
-            self._reach(obj)
+            self._reach(obj, node)
             self._out_keyword(node)
             return
         if isinstance(obj, type) and not issubclass(obj, BaseException) and \
                 _project_source(getattr(obj, "__init__", None)) is not None:
             # a project class: constructing it runs its __init__
-            self.effects.merge(examine(obj.__init__, constructing=True))
+            self._reach(obj.__init__, node, constructing=True)
             return
         if isinstance(obj, type) and getattr(obj, "__init__", None) is \
                 object.__init__ and obj.__module__ not in ("builtins",):
@@ -845,7 +1011,9 @@ class _Examiner:
         if isinstance(obj, types.MethodType) and isinstance(
                 getattr(obj, "__func__", None), types.FunctionType) and \
                 _project_source(obj.__func__) is not None:
-            self._reach(obj.__func__)
+            self._reach(obj.__func__, node,
+                        bound=node.func.value if isinstance(
+                            node.func, ast.Attribute) else None)
             return
         self._library(obj, _qualified(obj) or shown, node, shown=shown,
                       owner=owner)
@@ -860,7 +1028,15 @@ class _Examiner:
                     self.effects.add(Site("write", f"{self.name} writes "
                                           f"its result into {changed} "
                                           f"(out=)"))
-            if keyword.arg == "inplace" and not (
+            if keyword.arg == "overwrite_input" and node.args and not (
+                    isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is False):
+                changed = self._outside(self._origin_of(node.args[0]))
+                if changed is not None:
+                    self.effects.add(Site("write", f"{self.name} lets "
+                                          f"{self._shown(node.func)} reorder "
+                                          f"{changed} (overwrite_input=True)"))
+            if keyword.arg in ("inplace", "in_place") and not (
                     isinstance(keyword.value, ast.Constant)
                     and keyword.value.value is False):
                 origin = self._origin_of(node.func.value) if isinstance(
@@ -869,7 +1045,7 @@ class _Examiner:
                 if changed is not None:
                     self.effects.add(Site("write", f"{self.name} changes "
                                           f"{changed} in place "
-                                          f"(inplace=True)"))
+                                          f"({keyword.arg}=True)"))
 
     def _library(self, obj, qualified: str, node, shown: "str | None" = None,
                  owner=None) -> None:
@@ -909,6 +1085,13 @@ class _Examiner:
             if changed is not None:
                 self.effects.add(Site("write", f"{self.name} changes "
                                       f"{changed} ({self._shown(node)})"))
+        if entry == "writes_first":
+            changed = (self._outside(self._origin_of(node.args[0]))
+                       if node is not None and node.args else None)
+            if changed is not None:
+                self.effects.add(Site("write", f"{self.name} changes "
+                                      f"{changed} ({self._shown(node)})"))
+            return
         if entry == "pure":
             return
         if entry == "seeded":
@@ -994,6 +1177,7 @@ class _Examiner:
     def _method(self, owner, method: str, node: ast.Call) -> None:
         import logging
         self._out_keyword(node)
+        self._seedless_draw(owner, method, node)
         if owner[0] == "fresh":
             return
         if owner[0] == "value" and isinstance(
@@ -1027,6 +1211,9 @@ class _Examiner:
             self._note_module_write(owner)
             self.effects.add(Site("write", f"{self.name} changes {changed} "
                                   f"({self._shown(node)})"))
+            return
+        if method in ("sample", "shuffle") and any(
+                k.arg in ("random_state", "seed") for k in node.keywords):
             return
         if method in _DRAW_METHODS and owner[0] == "param":
             self.effects.add(Site("write", f"{self.name} advances "

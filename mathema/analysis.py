@@ -519,6 +519,49 @@ def _returns_kind(fdef: ast.FunctionDef) -> str:
     return "unknown"
 
 
+#: method names that return a new object holding a copy of the data
+_COPYING_METHODS = frozenset({"copy", "flatten", "tolist", "astype"})
+#: functions that return a new object holding a copy of the data
+_COPYING_CALLS = frozenset({"list", "sorted", "tuple", "dict", "set",
+                            "copy", "deepcopy"})
+
+
+def _is_copy(value) -> bool:
+    """Whether an expression makes a new object rather than handing
+    back one it was given: a call of a copying method or function."""
+    if not isinstance(value, ast.Call):
+        return False
+    func = value.func
+    if isinstance(func, ast.Attribute):
+        return func.attr in _COPYING_METHODS or (
+            func.attr == "deepcopy")
+    return isinstance(func, ast.Name) and func.id in _COPYING_CALLS
+
+
+def _rebound_to_copy(stmts: list, name: str, lineno: int,
+                     copied: bool = False) -> bool:
+    """Whether, on every path through `stmts` before line `lineno`, the
+    name was last rebound to a copy (`copied`: whether it already was
+    on entry), so a method called on it there cannot reach the caller's
+    object."""
+    for stmt in stmts:
+        if stmt.lineno >= lineno:
+            break
+        if isinstance(stmt, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == name
+                for t in stmt.targets):
+            copied = _is_copy(stmt.value)
+        elif isinstance(stmt, ast.If):
+            copied = (_rebound_to_copy(stmt.body, name, lineno, copied)
+                      and _rebound_to_copy(stmt.orelse, name, lineno,
+                                           copied))
+        elif any(isinstance(n, (ast.Name)) and n.id == name
+                 and isinstance(n.ctx, ast.Store) for n in ast.walk(stmt)):
+            # rebound somewhere this reading does not follow
+            copied = False
+    return copied
+
+
 def _effects(fdef: ast.FunctionDef, params: list[str]) -> list[str]:
     out: list[str] = []
 
@@ -543,7 +586,8 @@ def _effects(fdef: ast.FunctionDef, params: list[str]) -> list[str]:
                     note("uses randomness")
                 elif root in _CLOCK_MODULES:
                     note("reads the clock")
-                elif f.attr in _MUTATORS and root in params:
+                elif f.attr in _MUTATORS and root in params and not \
+                        _rebound_to_copy(fdef.body, root, node.lineno):
                     note(f"mutates argument '{root}'")
         elif isinstance(node, (ast.Assign, ast.AugAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]

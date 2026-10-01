@@ -100,3 +100,37 @@ def dead_else(x: float) -> float:
     else:
         _COUNT[0] += 1
     return x
+def _fill(buf, n):
+    buf.append(n)
+def fresh_buffer(n: float) -> float:
+    buf: list = []
+    _fill(buf, n)
+    return buf[0]
+def passes_param(xs: list) -> float:
+    _fill(xs, 1.0)
+    return xs[0]
+def asarray_sort(xs: list) -> float:
+    b = np.asarray(xs)
+    b.sort()
+    return float(b[0])
+def branch_rebind(xs: list, flag: bool) -> float:
+    if flag:
+        xs = list(xs)
+    xs.append(1.0)
+    return xs[0]
+def np_sort(xs: list) -> float:
+    return float(np.sort(xs)[0])
+def np_copyto(xs: list) -> float:
+    np.copyto(xs, 0.0)
+    return 0.0
+def median_overwrite(xs: list) -> float:
+    return float(np.median(xs, overwrite_input=True))
+def frame_sample(df: list) -> float:
+    return float(df.sample(2).sum())
+def frame_sample_seeded(df: list) -> float:
+    return float(df.sample(2, random_state=0).sum())
+def random_rank(s: list) -> float:
+    return float(s.rank(method="random").sum())
+def frame_fill(df: list) -> float:
+    df.fillna(0.0, inplace=True)
+    return 0.0

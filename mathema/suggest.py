@@ -370,7 +370,7 @@ def _declared_intervals(fn, facts) -> dict:
     out: dict = {}
     for p in facts.params:
         bound = declared.get(p)
-        if getattr(bound, "dims", ()):
+        if bound is not None and getattr(bound, "dims", ()):
             # a space such as [0, 1]^n: the interval each entry lies in
             bound = dataclasses.replace(bound, dims=())
         found = _guard_interval(bound)
