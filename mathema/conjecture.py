@@ -3291,7 +3291,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
     resolve_pseudo_infinity(None, pseudo_infinity)
     facts = _effective_facts(fn, facts)
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
-    domain = domain or {}
+    # an enforce_domain() guard is the function's domain: a parameter the
+    # caller's domain leaves open ranges over what the guard admits
+    domain = {**(getattr(fn, "__mathema_enforced_domain__", None) or {}),
+              **(domain or {})}
     # the exact same sampling setup probe()'s own remaining structural
     # checks use (seeded RNG, adaptive budget, critical-point hints),
     # computed at most once per call, from the function-level domain,

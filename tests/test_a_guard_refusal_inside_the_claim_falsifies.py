@@ -66,3 +66,43 @@ def test_a_claim_whose_arguments_stay_inside_the_guard_proves(adjudicate,
     p = adjudicate(statement)
     assert (p.verdict, p.route) == ("proven", "derive"), (statement, p.verdict,
                                                           p.note)
+
+
+@enforce_domain(domain={"alpha": (0, 1)})
+def blend_toward_one(x: float, alpha: float) -> float:
+    return alpha * x + (1 - alpha) * 1.0
+
+
+@pytest.mark.parametrize("adjudicate", ["check", "check_conjectures"])
+def test_a_parameter_the_claim_leaves_unbound_ranges_over_the_guard(adjudicate):
+    statement = "for x in [1, 10], f(x, alpha) <= x"
+    if adjudicate == "check":
+        p = {q.name: q for q in check(blend_toward_one, claims=[
+            claim(statement, name="row")]).probes}["row"]
+    else:
+        (p,) = check_conjectures(blend_toward_one, [claim(statement)])
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+
+
+@enforce_domain(domain={"x": (0, 1)})
+def guarded_identity(x: float) -> float:
+    return x
+
+
+@enforce_domain(domain={"x": (0, 1), "y": (0, 1)})
+def guarded_product(x: float, y: float) -> float:
+    return x * y
+
+
+@pytest.mark.parametrize("fn, statement", [
+    (guarded_identity, "for x in [0, 1], f(2 * x) <= 0.6"),
+    (guarded_identity, "for x in [0, 0.5], f(2 * x) <= 0.6"),
+    (guarded_product, "for x in [0, 1], y in [0, 1], f(x + y, y) <= 0.5"),
+    (guarded_product, "for x in [0, 0.5], y in [0, 0.5], f(x + y, y) <= 0.1"),
+])
+def test_a_false_claim_over_a_guarded_function_is_never_proven(fn, statement):
+    for route in ("best", "derive"):
+        (p,) = check_conjectures(fn, [claim(statement, route=route)])
+        assert p.verdict != "proven", (statement, route, p.sketch)
+    (p,) = check_conjectures(fn, [claim(statement)])
+    assert p.verdict == "falsified", (statement, p.verdict, p.note)
