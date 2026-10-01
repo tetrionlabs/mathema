@@ -126,10 +126,16 @@ def test_a_quantile_level_is_read_as_written():
     assert FUNCTIONS["quantile"](_a(1.0, 1.0, 3.0, 5.0), 0.7) == 3.2
 
 
-@pytest.mark.parametrize("word", ["sum", "mean", "prod", "var", "std",
-                                  "median"])
-def test_a_missing_element_leaves_no_value(word):
-    assert math.isnan(FUNCTIONS[word](_a(1.0, math.nan, 2.0)))
+@pytest.mark.parametrize("word, value", [("sum", 3.0), ("mean", 1.5), ("prod", 2.0),
+                                         ("var", 0.25), ("std", 0.5), ("median", 1.5)])
+def test_a_reduction_reads_the_value_slots_a_missing_element_leaves(word, value):
+    # a claim word reduces over the value slots, a hole left out
+    assert FUNCTIONS[word](_a(1.0, math.nan, 2.0)) == value
+
+
+@pytest.mark.parametrize("word", ["mean", "var", "std", "median"])
+def test_a_reduction_with_no_identity_has_no_value_over_no_value_slot(word):
+    assert math.isnan(FUNCTIONS[word](_a(math.nan, math.nan)))
 
 
 def _total(a: np.ndarray) -> float:

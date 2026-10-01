@@ -76,7 +76,7 @@ def test_dot_of_matrices_is_the_matrix_product(broken_numpy):
                             [1.0, 1.0]).tolist() == [3.0, 7.0]
 
 
-def test_a_missing_element_leaves_median_and_quantile_without_a_value(
-        broken_numpy):
-    assert math.isnan(FUNCTIONS["median"]([1.0, float("nan"), 2.0]))
-    assert math.isnan(FUNCTIONS["quantile"]([1.0, float("nan")], 0.5))
+def test_median_and_quantile_read_the_value_slots(broken_numpy):
+    assert FUNCTIONS["median"]([1.0, float("nan"), 2.0]) == 1.5
+    assert FUNCTIONS["quantile"]([1.0, float("nan")], 0.5) == 1.0
+    assert math.isnan(FUNCTIONS["median"]([float("nan")]))
