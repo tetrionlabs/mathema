@@ -34,7 +34,9 @@ def test_a_false_proof_caught_by_execution_is_reported_as_a_failed_proof(
     assert parent.verdict == "falsified", (parent.verdict, parent.sketch)
     assert "the proof failed" in parent.sketch
     assert parent.counterexample
-    assert parabola(float(parent.counterexample.split("=")[1])) <= 0.3
+    head, _, reason = parent.counterexample.partition(":")
+    assert parabola(float(head.split("=")[1])) <= 0.3
+    assert "the relation fails" in reason
     assert companion.verdict == "falsified"
     assert "the proof of" in companion.sketch
     for probe in probes:

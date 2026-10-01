@@ -5641,7 +5641,8 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
         # too: the proof failed, and the claim is falsified there
         proven.verdict = "falsified"
         proven.route = "probe"
-        proven.counterexample = witness
+        # the witness with the reason the companion executed there
+        proven.counterexample = companion.counterexample or witness
         proven.condition = None
         proven.sketch = (f"the proof failed: derive reported the claim "
                          f"proven ({proven.sketch}), but at {witness} it is "
