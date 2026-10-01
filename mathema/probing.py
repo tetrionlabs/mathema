@@ -637,6 +637,10 @@ class ExecutedMissing:
                 # did not repeat
                 counted = {INDIFFERENT: self.indifferent, INCONCLUSIVE: self.inconclusive,
                            NOT_REPEATABLE: self.not_repeatable}[behaviour]
+                if behaviour == NOT_REPEATABLE:
+                    # an executed witness against determinism
+                    from .policy import record_unrepeatable
+                    record_unrepeatable(at, (output, raised), (got, err))
                 for p, _k, _m in keys_of(at):
                     counted[p] = counted.get(p, 0) + 1
                 if behaviour == INDIFFERENT:

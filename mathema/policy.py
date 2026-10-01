@@ -153,6 +153,9 @@ class Batch:
     origins: dict = field(default_factory=dict)
     # the calls where f gave None back from present inputs
     introduced: list = field(default_factory=list)
+    # the calls that answered otherwise when made again, as `(point,
+    # first answer, second answer)`, each answer `(output, raised)`
+    unrepeatable: list = field(default_factory=list)
 
 
 _BATCH: contextvars.ContextVar = contextvars.ContextVar("mathema_policy_batch",
@@ -200,6 +203,29 @@ def record_call(point: dict, output=None, raised: "str | None" = None,
     current.calls.append(Call(dict(point), output, raised, _CLAIM.get(),
                               list(keys) if keys is not None else None, behaviour,
                               indifferent))
+
+
+def record_unrepeatable(point: dict, first: tuple, second: tuple) -> None:
+    """File a call that answered otherwise when made again."""
+    current = _BATCH.get()
+    if current is not None:
+        current.unrepeatable.append((dict(point), first, second))
+
+
+def unrepeated_witness(current: "Batch | None") -> "str | None":
+    """The first call the batch made twice with two answers, as a witness:
+    `x = nan, y = 0.5: f returned 0.31, then 0.74`."""
+    from ._missing_words import point_shown, value_shown
+    if current is None or not current.unrepeatable:
+        return None
+    point, first, second = current.unrepeatable[0]
+
+    def said(answer) -> str:
+        return f"raised {answer[1]}" if answer[1] else f"returned {value_shown(answer[0])}"
+    then = said(second)
+    if not first[1] and not second[1]:
+        then = value_shown(second[0])
+    return f"{point_shown(point)}: f {said(first)}, then {then}"
 
 
 def record_introduced(point: dict) -> None:
@@ -440,6 +466,9 @@ def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
         if pieces is None:
             out.append(Call(point, value, raised, None))
             continue
+        for at, got, err, behaviour in pieces:
+            if behaviour == NOT_REPEATABLE:
+                record_unrepeatable(at, (value, raised), (got, err))
         out.extend(Call(at, got, err, None, None,
                         "drops" if behaviour == INDIFFERENT else behaviour,
                         behaviour == INDIFFERENT)
@@ -755,7 +784,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
             found = _run_floor(fn, facts, points, domain or {})
             floor = floor or bool(found)
         rows_calls += [(p, c) for c in found]
-    if stated.behaviour in ("drops", "converts", "introduces"):
+    if (stated.behaviour or "") in ("drops", "converts", "introduces"):
         # a call indifferent to the slot breaks only raises and
         # propagates: a hole read as a fixed value is consistent with the
         # other words

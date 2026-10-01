@@ -576,7 +576,8 @@ def refill(call_at, point: dict, output, raised: "str | None",
         hole filled: `[(point, output, raised, behaviour), ...]`, one per
         hole member the call held. The call is first made once more as
         it was; an answer that differs by kind (`repeats`) makes it
-        `NOT_REPEATABLE`, one entry for the whole call. The fill is a
+        `NOT_REPEATABLE`, one entry for the whole call carrying the second
+        answer. The fill is a
         value the same argument holds in another slot, else the
         parameter's value in `fills` (an interior point of its domain).
         A call holding two members is taken one member at a time, the
@@ -610,9 +611,11 @@ def refill(call_at, point: dict, output, raised: "str | None",
     if any(v is None for v in fill_of.values()):
         return None
     members = list(dict.fromkeys(m for _q, _k, m in keys))
-    if not repeats((output, raised), call_at(point)):
-        # the call made again answers otherwise: f does not repeat here
-        return [(point, output, raised, NOT_REPEATABLE)]
+    again = call_at(point)
+    if not repeats((output, raised), again):
+        # the call made again answers otherwise: f does not repeat here;
+        # the entry carries the second answer
+        return [(point, again[0], again[1], NOT_REPEATABLE)]
 
     def fill_all(at: dict, which, scale: float = 1.0) -> dict:
         return {q: (filled(v, which, _scaled(fill_of[q], scale)) if q in holding else v)

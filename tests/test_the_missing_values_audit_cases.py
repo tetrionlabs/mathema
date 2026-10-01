@@ -335,3 +335,20 @@ def test_an_indifferent_call_does_not_break_converts():
     row = _rows(second, "for x in [0, 1], y in [0, 1], f(x, y) >= 0",
                 "missing(f, x) converts")["missing_f_x_converts"]
     assert row.verdict == "unknown", (row.verdict, row.note)
+
+
+# --- a call that does not repeat is a witness against determinism ----------
+
+def jitter_at_a_hole(x: float, y: float) -> float:
+    import random
+    return y + (random.random() if x != x else 0.0)
+
+
+def test_a_refill_that_does_not_repeat_falsifies_is_deterministic():
+    rows = {r.name: r for r in check_conjectures(jitter_at_a_hole, [
+        claim("for x in [0, 1], y in [0, 1], f(x, y) >= 0", name="c", route="probe"),
+        claim("for x in [0, 1] \\ {missing}, y in [0, 1], f(x, y) == f(x, y)",
+              name="is_deterministic")])}
+    det = rows["is_deterministic"]
+    assert det.verdict == "falsified", (det.verdict, det.note)
+    assert det.counterexample.startswith("x = nan")

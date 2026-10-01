@@ -3384,7 +3384,24 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                 row.meta.setdefault("mathema.surface", cj.source)
                 _stamp_defaults(row, fn, cj)
                 out.append(row)
+        witness = _policy.unrepeated_witness(_policy.active_batch())
+        if witness:
+            out = [_unrepeatable(p, witness) if p.name == "is_deterministic"
+                   and p.verdict != "falsified" else p for p in out]
         return out
+
+
+def _unrepeatable(row, witness: str):
+    """`row`, an is_deterministic row, falsified by a call the check made
+    twice with two answers; a proof it contradicts is said to be an
+    engine defect."""
+    from dataclasses import replace as _replace
+    note = "the same call made twice gave two answers"
+    if row.verdict == "proven":
+        note += ("; this contradicts the proof above it, an engine defect worth "
+                 "reporting")
+    return _replace(row, verdict="falsified", route="probe", counterexample=witness,
+                    note=note, sketch=row.sketch if row.verdict == "proven" else None)
 
 
 def _stamp_defaults(row, fn, cj) -> None:
