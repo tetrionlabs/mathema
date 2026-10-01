@@ -1328,7 +1328,7 @@ def _path_rows(fn, covered: set, current: "Batch | None", guards: dict, name_of)
 
 def _return_rows(fn, covered: set, current: "Batch | None", name_of) -> list:
     """`absent(f) introduces` from the return type, where f gave None back
-    from present inputs and its return type declares it (FM15)."""
+    from present inputs and its return type declares it."""
     from .records import Probe
     from ._missing_words import declared_optional_return, point_shown
     calls = list(current.introduced) if current else []
@@ -1336,28 +1336,9 @@ def _return_rows(fn, covered: set, current: "Batch | None", name_of) -> list:
     if not calls or ("absent", None, None, "") in covered:
         return []
     if not declared:
-        import inspect
-        try:
-            ann = inspect.signature(fn).return_annotation
-        except (TypeError, ValueError):
-            ann = inspect.Signature.empty
-        if ann is inspect.Signature.empty:
-            return []
-        shown = ann if isinstance(ann, str) else getattr(ann, "__name__", repr(ann))
-        policy = Policy(kind="absent", behaviour=None, source="observed")
-        sentence = (f"f returned None at {point_shown(calls[0].point)} from present "
-                    f"inputs, and its return type {shown} does not declare it")
-        nxt = (f"declare the return type Optional[{shown}] if None is an answer f "
-               f"gives, or make f return a value there")
-        meta = {"mathema.policy": {"kind": "absent", "parameter": None, "member": None,
-                                   "behaviour": None, "exception": None, "premise": "",
-                                   "source": "observed", "reason": sentence,
-                                   "sentence": sentence, "next": nxt},
-                "mathema.surface": "mathema"}
-        return [Probe(name_of(policy), policy_text(policy), "falsified", n=len(calls),
-                      route="probe:counterfactual",
-                      counterexample=f"{point_shown(calls[0].point)}: f returned None",
-                      note=f"{sentence}. {nxt}", meta=meta)]
+        # a None under a return type that does not admit it fails the
+        # value claims and is_defined at that point; it has no row here
+        return []
     policy = Policy(kind="absent", behaviour="introduces", source="annotation")
     reason = (f"from the return type {declared}: f returned None at "
               f"{point_shown(calls[0].point)} from present inputs; "

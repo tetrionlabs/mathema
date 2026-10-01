@@ -2733,6 +2733,11 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     """
     if facts.tree is None:
         return None
+    if _may_return_undeclared_none(fn, facts):
+        # a None under a return type that does not admit it is no value;
+        # the region the body's raises carve says nothing about it, so
+        # the calls decide
+        return None
     import ast as _ast
 
     import sympy as _sympy
@@ -2906,6 +2911,52 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
             meta={"mathema.corroboration": "reproduced",
                   "mathema.witness_executed": True})
     return ProofResult("undecided", sketch=undecided_sketch)
+
+
+def _may_return_undeclared_none(fn, facts) -> bool:
+    """Whether f's body can hand back None (a `return None`, a bare
+    `return`, or a way to the end of the body with no return) while its
+    return type does not declare it."""
+    import ast as _ast
+
+    from ._missing_words import declared_optional_return
+    if declared_optional_return(fn):
+        return False
+    fdef = next((n for n in _ast.walk(facts.tree)
+                 if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))), None)
+    if fdef is None:
+        return False
+
+    def gives_none(value) -> bool:
+        return value is None or (isinstance(value, _ast.Constant) and value.value is None)
+    for node in _ast.walk(fdef):
+        if isinstance(node, _ast.Return) and gives_none(node.value):
+            return True
+        if isinstance(node, _ast.IfExp) and (gives_none(node.body) or gives_none(node.orelse)):
+            return True
+
+    def always_leaves(block) -> bool:
+        # every way through `block` ends at a return or a raise
+        if not block:
+            return False
+        last = block[-1]
+        if isinstance(last, (_ast.Return, _ast.Raise)):
+            return True
+        if isinstance(last, _ast.If):
+            return always_leaves(last.body) and always_leaves(last.orelse)
+        if isinstance(last, (_ast.With, _ast.AsyncWith)):
+            return always_leaves(last.body)
+        if isinstance(last, _ast.Try):
+            return (always_leaves(last.body) or always_leaves(last.orelse)) \
+                and all(always_leaves(h.body) for h in last.handlers)
+        if isinstance(last, _ast.While) and isinstance(last.test, _ast.Constant) \
+                and last.test.value is True:
+            return True
+        return False
+    body = [st for st in fdef.body if not (isinstance(st, _ast.Expr)
+                                           and isinstance(st.value, _ast.Constant)
+                                           and isinstance(st.value.value, str))]
+    return not always_leaves(body)
 
 
 def _has_value(out, exc) -> bool:
@@ -3174,6 +3225,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     from .probing import _fmt_value
     words = _REGION_WORDS[kind]
     safe = _REGION_SAFE[kind]
+    from ._missing_words import declared_optional_return
+    declared_none = bool(declared_optional_return(fn))
 
     # a library function's defaulted parameters the claim leaves alone
     # are not passed (they take their defaults); a pinned one is
@@ -3417,7 +3470,11 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             what = f"returned {_fmt_value(out)}"
         checked += 1
         n_in, n_out = n_in + bool(where), n_out + (not where)
-        if safe(out, raised) == where or (conjunct and where):
+        ok = safe(out, raised)
+        if kind == "is_defined" and raised is None and out is None and not declared_none:
+            # None under a return type that does not admit it is no value
+            ok, what = False, "returned None, which its return type does not admit"
+        if ok == where or (conjunct and where):
             continue
         at = _fmt_point(point, params)
         if bare:

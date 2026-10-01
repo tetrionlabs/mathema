@@ -410,3 +410,35 @@ def test_a_hole_in_fs_output_fails_a_claim_that_reduces_it():
         "for xs in [0, 1]^n \\ {missing}, sum(f(xs)) <= sum(xs)")])
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert row.counterexample.endswith("f returned nan"), row.counterexample
+
+
+# --- None from present inputs under a non-Optional return -----------------
+
+def none_above_half(x: float) -> float:
+    return None if x > 0.5 else x
+
+
+def test_an_undeclared_none_falsifies_the_value_claim_and_has_no_row_of_its_own():
+    import mathema
+    rec = mathema.check(none_above_half, claims=[mathema.claim(
+        "for x in [0, 1], f(x) <= 1", name="c")])
+    rows = {p.name: p for p in rec.probes}
+    assert "absent[f]" not in rows
+    value = rows["c"]
+    assert value.verdict == "falsified" or rows.get("c[float]").verdict == "falsified"
+
+
+def test_an_undeclared_none_falsifies_is_defined():
+    (row,) = check_conjectures(none_above_half, [claim("is_defined(f)")])
+    assert row.verdict == "falsified", (row.verdict, row.note)
+    assert row.counterexample.startswith("x = ")
+    assert "returned None" in row.counterexample
+
+
+def none_declared(x: float) -> Optional[float]:
+    return None if x > 0.5 else x
+
+
+def test_a_declared_none_leaves_is_defined_standing():
+    (row,) = check_conjectures(none_declared, [claim("is_defined(f)")])
+    assert row.verdict == "proven", (row.verdict, row.note)
