@@ -2667,15 +2667,16 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
             called = _claim_call_raise(fn, (lhs_src, rhs_src),
                                        dict(zip(facts.params, args)))
             if called is not None:
-                call_text, call_exc = called
+                call_text, call_args, call_exc = called
+                at = ", ".join(f"{p} = {v!r}" for p, v in call_args.items())
                 return ProofResult(
                     "disproven",
-                    sketch=f"the claim calls {call_text} at {where}, an "
-                           f"empty list the claim admits, and f raises "
-                           f"{call_exc} there, so the claim has no value; "
+                    sketch=f"the claim calls {call_text}, and f raises "
+                           f"{call_exc} at {at}, an empty list the claim "
+                           f"admits, so the claim has no value there; "
                            f"narrow it with assuming len({target}) >= 1",
-                    counterexample=where,
-                    witness=dict(zip(facts.params, args)),
+                    counterexample=at,
+                    witness=dict(call_args),
                     meta={"mathema.witness_executed": True})
             return ProofResult(
                 "undecided",
@@ -2695,30 +2696,30 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
     return None
 
 
-def _claim_call_raise(fn, srcs, point: dict) -> "tuple[str, str] | None":
+def _claim_call_raise(fn, srcs, point: dict) -> "tuple[str, dict, str] | None":
     """Intent:
-        `(call text, exception name)` for the first `f(...)` call in the
-        claim text that raises when its arguments are evaluated at
-        `point` and f is executed there, or None when every call
-        returns or an argument cannot be evaluated plainly (only names,
-        numbers, unary minus and arithmetic are read) or the call does
-        not bind to f's signature.
+        `(call text, the call's arguments by parameter, exception
+        name)` for the first `f(...)` call in the claim text that
+        raises when its arguments are evaluated at `point` the way the
+        claim evaluates them (its math functions, keywords, slices) and
+        f is executed there; None when no call raises. A call whose
+        arguments cannot be evaluated, or that does not bind to f's
+        signature, decides nothing about itself and leaves the other
+        calls to be checked.
     """
-    import operator
-    ops = {ast.Add: operator.add, ast.Sub: operator.sub,
-           ast.Mult: operator.mul, ast.Div: operator.truediv}
+    from .._linalg_eval import FUNCTIONS as vector_funcs
+    from .._math_vocab import MATH_CONSTANTS
+    from ..conjecture import _SAFE_FUNCS
+    env = {"__builtins__": {}, **_SAFE_FUNCS, **vector_funcs,
+           **MATH_CONSTANTS, **point}
+    try:
+        sig = callable_signature(fn)
+    except (TypeError, ValueError):
+        return None
 
     def value(node):
-        if isinstance(node, ast.Constant) and isinstance(
-                node.value, (int, float)) and not isinstance(node.value, bool):
-            return node.value
-        if isinstance(node, ast.Name) and node.id in point:
-            return point[node.id]
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-            return -value(node.operand)
-        if isinstance(node, ast.BinOp) and type(node.op) in ops:
-            return ops[type(node.op)](value(node.left), value(node.right))
-        raise ValueError(ast.unparse(node))
+        return eval(compile(ast.Expression(body=node), "<claim>", "eval"),
+                    env)
     for src in srcs:
         try:
             tree = ast.parse(src or "0", mode="eval")
@@ -2726,17 +2727,19 @@ def _claim_call_raise(fn, srcs, point: dict) -> "tuple[str, str] | None":
             continue
         for n in ast.walk(tree):
             if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                    and n.func.id == "f" and not n.keywords):
+                    and n.func.id == "f"):
                 continue
             try:
                 args = [value(a) for a in n.args]
-                callable_signature(fn).bind(*args)
+                kwargs = {k.arg: value(k.value) for k in n.keywords}
+                bound = sig.bind(*args, **kwargs)
             except Exception:
-                return None
+                continue
             try:
-                fn(*args)
+                fn(*args, **kwargs)
             except Exception as e:
-                return ast.unparse(n), type(e).__name__
+                return ast.unparse(n), dict(bound.arguments), \
+                    type(e).__name__
     return None
 
 
