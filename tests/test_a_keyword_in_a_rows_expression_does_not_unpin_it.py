@@ -6,8 +6,9 @@ passes the same name as a keyword (`std(a, ddof=1)`).
 The keyword names the grammar word's own parameter; it is not a read of
 the library parameter `ddof`. So `mathema compendium update` finds a
 call `np.std(a, ddof=1)` covered by the bundled `definition@ddof=1`
-row, pins only the rows that have no pinned twin (`is_defined`), writes
-no copy of `definition` under that name, and a second run succeeds.
+row, pins only the rows that have no pinned twin (`is_defined`, which
+one element breaks at ddof = 1, so it is recorded falsified), writes no
+copy of `definition` under that name, and a second run succeeds.
 """
 import os
 import subprocess
@@ -69,14 +70,15 @@ def test_update_finds_a_sample_std_call_covered_by_the_bundled_row(tmp_path):
     """)
     first = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path))
     assert first.returncode == 0, first.stderr
-    import yaml
-    written = yaml.safe_load(
-        (tmp_path / "claims" / "numpy.claims.yaml").read_text())
-    rows = {}
-    for row in written["numpy.std"]["claims"]:
-        assert row["name"] not in rows, row["name"]
-        rows[row["name"]] = row["statement"]
-    assert rows["definition@ddof=1"].endswith("f(a) ~= std(a, ddof=1)")
-    assert rows["is_defined@ddof=1"] == "let ddof be 1, dim(a) >= 1"
+    # one element has no sample deviation, so the generic region pinned
+    # at ddof = 1 is false and recorded so, never written
+    assert ("is_defined@ddof=1 (let ddof be 1, dim(a) >= 1) not added"
+            in first.stdout + first.stderr)
+    assert "falsified against the installed library" in first.stdout + first.stderr
+    # the bundled definition@ddof=1 covers the call: no copy of
+    # definition is pinned, and nothing else holds, so no file is written
+    assert "definition@ddof=1" not in first.stdout + first.stderr
+    assert not (tmp_path / "claims" / "numpy.claims.yaml").exists()
+    assert (tmp_path / ".mathema" / "verified" / "numpy.std.yaml").exists()
     again = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path))
     assert again.returncode == 0, again.stderr

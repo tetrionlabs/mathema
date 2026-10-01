@@ -71,7 +71,11 @@ def test_a_sequence_scaling_restricts_the_factor_to_keep_entries_inside():
     s = _suggested(mean_weight)["scale_equivariant"]
     assert s.domain["c"].pieces == ((0.0, 1.0),), s.domain
     rows = {p.name: p for p in check(mean_weight).probes}
-    assert rows["scale_equivariant"].verdict in ("proven", "holds")
+    row = rows["scale_equivariant"]
+    # every scaled call stays inside the domain; only the empty list,
+    # which has no mean, falls, on the empty-input line
+    assert row.verdict == "falsified", (row.verdict, row.counterexample)
+    assert row.counterexample.startswith("weights = []"), row.counterexample
 
 
 def test_a_sequence_shift_binds_the_entries_and_the_shift_together():

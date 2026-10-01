@@ -187,7 +187,7 @@ def _held_text(facts, target: str, args: list) -> str:
         shape and a first row); empty for a one-parameter function.
     """
     from ._shapes import witness_text
-    return ", ".join(f"{p} = {witness_text(v) or _witness_value(v)}"
+    return ", ".join(f"{p} = {witness_text(v) or _witness_coordinate(v)}"
                      for p, v in zip(facts.params, args) if p != target)
 
 
@@ -1245,6 +1245,14 @@ def _witness_value(value) -> str:
         return repr(value)
     from .probing import _fmt_value
     return _fmt_value(value)
+
+
+def _witness_coordinate(value) -> str:
+    """A witness coordinate at full precision (`probing._fmt_coordinate`),
+    a string by its repr, so the point reads back as the one checked."""
+    if isinstance(value, str):
+        return repr(value)
+    return _fmt_coordinate(value)
 
 
 def _why_outside(value, bounds) -> str:

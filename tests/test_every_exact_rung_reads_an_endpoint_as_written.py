@@ -73,3 +73,11 @@ def test_a_claim_short_by_a_value_below_the_double_range_is_not_proven():
     # at x = 0
     p = _one(ident, "for x in [0, 1], f(x) + log(1 + 10**-400) - 10**-400 >= 0")
     assert p.verdict != "proven"
+
+
+def test_a_guard_reads_the_claims_numbers_apart_from_its_missing_members():
+    from mathema.conjecture import _real_set
+    written = claim("for x in [1.0, 10.0] : float|missing, f(x) <= x").domain["x"]
+    assert _real_set(written) == sympy.Interval(1, 10)
+    assert _real_set(Interval(0.0, 0.3333333334)) == sympy.Interval(
+        0, sympy.Rational("0.3333333334"))

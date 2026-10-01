@@ -48,7 +48,7 @@ def _probe(fn, law):
 def test_a_sample_statistic_of_one_element_is_falsified():
     p = _probe(sample_std, "for x in R^n, f(x) >= 0")
     assert p.verdict == "falsified", (p.verdict, p.note)
-    assert p.counterexample.startswith("x=[") \
+    assert p.counterexample.startswith("x = [") \
         and p.counterexample.count(",") == 0, p.counterexample
 
 

@@ -214,16 +214,29 @@ def _adjudicated(key: str, current: list, added: list, root: str,
         return {row["name"]: ("unknown", "the function does not resolve")
                 for row in added}
     rows = [{k: v for k, v in r.items() if k != "verdict"}
-            for r in current] + added
+            for r in current]
+    out: dict = {}
+    readable = []
+    for row in added:
+        # a pinned row that does not read as a claim is unknown on its
+        # own, never taking the rows beside it with it
+        try:
+            entry_claims({"claims": [row]})
+        except InvalidConjecture as e:
+            out[row["name"]] = ("unknown", str(e))
+            continue
+        readable.append(row)
+    if not readable:
+        return out
     try:
-        rec = check(fn, claims=entry_claims({"claims": rows}),
+        rec = check(fn, claims=entry_claims({"claims": rows + readable}),
                     known_premises=external_premises(
                         root, library_claims=library_claims))
     except InvalidConjecture as e:
-        return {row["name"]: ("unknown", str(e)) for row in added}
+        out.update({row["name"]: ("unknown", str(e)) for row in readable})
+        return out
     rank = {"falsified": 0, "unknown": 1, "holds": 2, "proven": 3}
-    out: dict = {}
-    for row in added:
+    for row in readable:
         name = row["name"]
         own = [p for p in rec.probes
                if p.name == name or p.name.startswith(name + "[")]

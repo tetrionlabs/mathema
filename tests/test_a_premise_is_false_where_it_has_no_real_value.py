@@ -46,4 +46,4 @@ def test_a_claim_false_inside_a_root_premise_is_still_falsified():
         gap, [claim("assuming sqrt(x) > 0.5, for x in [-1, 1], f(x) > 0")],
         extensive=True)
     assert p.verdict == "falsified"
-    assert p.counterexample == "x=0.5"
+    assert p.counterexample == "x = 0.5"

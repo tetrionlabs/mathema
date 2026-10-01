@@ -189,10 +189,14 @@ def test_a_norm_is_not_positive_at_the_zero_vector():
     law = "for x in R^n, f(x) > 0"
     p = _one(norm_of, law, route="derive")
     assert p.verdict != "proven", (p.verdict, p.sketch)
-    # false at x = [0.0, ...], the zero vector every claim over R^n meets
+    # false at the zero vector, which R^n meets at every length,
+    # length 1 included
     p = _one(norm_of, law, extensive=True)
     assert p.verdict == "falsified", (p.verdict, p.note)
-    assert "[0, 0" in p.counterexample, p.counterexample
+    point = p.counterexample.split(":")[0]
+    assert point.startswith("x = [") and set(
+        point[len("x = ["):].rstrip("]").replace(" ", "").split(",")) == {"0"}, \
+        p.counterexample
 
 
 @pytest.mark.needs_full_proof_budget

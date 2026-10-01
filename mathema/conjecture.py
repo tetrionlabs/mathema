@@ -6768,6 +6768,26 @@ def _adjudicate_examined(ctx: "_ClaimContext", fn, facts) -> "Probe":
                  note=note, meta=meta)
 
 
+def _numeric_pieces(pieces) -> list:
+    """Intent:
+        A bound's pieces over the numbers alone: each finite set without
+        its sentinels (`∅`, `None`), and a set of sentinels only left
+        out. A value claim's mathematics is over the numbers; the
+        sentinels are its missing and absence companions' business.
+    """
+    from .domain import is_sentinel
+    out = []
+    for piece in pieces:
+        if isinstance(piece, frozenset):
+            numbers = frozenset(v for v in piece if not is_sentinel(v)
+                                and v is not None)
+            if numbers:
+                out.append(numbers)
+            continue
+        out.append(piece)
+    return out
+
+
 def _guard_interval(bound) -> "tuple | None":
     """Intent:
         `(lo, hi, closed_lo, closed_hi)` for a guard bound that is one
@@ -6776,6 +6796,7 @@ def _guard_interval(bound) -> "tuple | None":
     """
     pieces = getattr(bound, "pieces", None)
     if pieces is not None:
+        pieces = _numeric_pieces(pieces)
         if getattr(bound, "base_type", "R") != "R" or len(pieces) != 1 \
                 or getattr(bound, "dims", ()):
             return None
@@ -6803,11 +6824,12 @@ def _real_set(bound):
     single = _guard_interval(bound)
     if single is not None:
         lo, hi, closed_lo, closed_hi = single
-        return sympy.Interval(
-            -sympy.oo if lo == -math.inf else sympy.nsimplify(lo),
-            sympy.oo if hi == math.inf else sympy.nsimplify(hi),
-            not closed_lo, not closed_hi)
+        from .domain import exact_number
+        return sympy.Interval(exact_number(lo), exact_number(hi),
+                              not closed_lo, not closed_hi)
     pieces = getattr(bound, "pieces", None)
+    if pieces is not None:
+        pieces = _numeric_pieces(pieces)
     base = getattr(bound, "base_type", None)
     if base not in ("R", "Z", "N") or getattr(bound, "dims", ()):
         return None
@@ -6817,8 +6839,9 @@ def _real_set(bound):
     parts = []
     for piece in pieces:
         if isinstance(piece, frozenset):
+            from .domain import exact_number
             try:
-                parts.append(sympy.FiniteSet(*[sympy.nsimplify(v)
+                parts.append(sympy.FiniteSet(*[exact_number(v)
                                                for v in piece]))
             except Exception:
                 return None

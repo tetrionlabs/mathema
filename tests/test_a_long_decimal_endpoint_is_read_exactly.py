@@ -41,5 +41,5 @@ def test_a_root_just_inside_a_long_endpoint_breaks_a_strict_claim():
 def test_a_strict_claim_over_a_long_endpoint_is_falsified_at_the_root(law):
     (p,) = check_conjectures(negated_square, [claim(law)], extensive=True)
     assert p.verdict == "falsified"
-    assert p.counterexample == "x=0.34729635533386066"
+    assert p.counterexample == "x = 0.34729635533386066"
     assert negated_square(0.34729635533386066) == 0.0
