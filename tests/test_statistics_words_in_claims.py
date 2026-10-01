@@ -53,10 +53,12 @@ def _verdict(fn, law):
 
 
 @pytest.mark.parametrize("fn, true, false", [
-    (sample_std, "for xs in R^n, f(xs) ~= std(xs, ddof=1)",
-     "for xs in R^n, f(xs) ~= std(xs)"),
-    (sample_std, "for xs in R^n, f(xs) ~= sqrt(var(xs, ddof=1))",
-     "for xs in R^n, f(xs) ~= sqrt(var(xs, ddof=0))"),
+    (sample_std, "for xs in R^n, assuming dim(xs) >= 2, "
+                 "f(xs) ~= std(xs, ddof=1)",
+     "for xs in R^n, assuming dim(xs) >= 2, f(xs) ~= std(xs)"),
+    (sample_std, "for xs in R^n, assuming dim(xs) >= 2, "
+                 "f(xs) ~= sqrt(var(xs, ddof=1))",
+     "for xs in R^n, assuming dim(xs) >= 2, f(xs) ~= sqrt(var(xs, ddof=0))"),
     (population_var, "for xs in R^n, f(xs) ~= var(xs)",
      "for xs in R^n, f(xs) ~= var(xs, ddof=1)"),
     (running_total, "for xs in R^n, f(xs) ~= cumsum(xs)",
@@ -76,6 +78,19 @@ def test_each_word_holds_where_true_and_falsifies_its_sibling(fn, true,
     assert p.verdict == "holds", (true, p.verdict, p.note, p.counterexample)
     p = _verdict(fn, false)
     assert p.verdict == "falsified", (false, p.verdict, p.note)
+
+
+@pytest.mark.parametrize("law", [
+    "for xs in R^n, f(xs) ~= std(xs, ddof=1)",
+    "for xs in R^n, f(xs) ~= sqrt(var(xs, ddof=1))",
+])
+def test_a_sample_spread_has_no_value_at_length_one(law):
+    # R^n holds the one-element vector, where the sample deviation
+    # divides by zero: the claim needs `assuming dim(xs) >= 2`
+    p = _verdict(sample_std, law)
+    assert p.verdict == "falsified", (law, p.verdict, p.note)
+    shown = p.counterexample.split("]")[0]
+    assert shown.count(",") == 0, p.counterexample
 
 
 @pytest.mark.parametrize("fn, true, false", [
