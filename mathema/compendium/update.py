@@ -337,6 +337,7 @@ def plan_update(root: str = ".") -> dict:
     files = _project_files(root)
     edited: dict = {}
     lines: list = []
+    falsified: dict = {}
 
     def target(library: str) -> "tuple[str, dict]":
         path = files.get(library) or os.path.join(
@@ -380,10 +381,15 @@ def plan_update(root: str = ".") -> dict:
             if verdict in ("proven", "holds"):
                 kept.append((row, verdict))
                 continue
+            recorded = ""
+            if verdict == "falsified":
+                falsified.setdefault(site.key, (current, []))[1].append(row)
+                recorded = (f"; recorded falsified in "
+                            f".mathema/verified/{site.key}.yaml")
             lines.append(f"{site.key}: {row['name']} ({row['statement']}) "
                          f"not added for the call in {site.caller} (line "
                          f"{site.line}): {verdict} against the installed "
-                         f"library{f', {why}' if why else ''}")
+                         f"library{f', {why}' if why else ''}{recorded}")
         if not kept:
             continue
         if entry is None:
@@ -432,8 +438,11 @@ def plan_update(root: str = ".") -> dict:
                 lines.append(f"{key}: widened {row.get('name')}'s versions "
                              f"from {spec!r} to {wider!r} ({seen['verdict']} "
                              f"on {library} {installed})")
-    changed = {p: d for p, d in edited.items() if _differs(p, d)}
-    return {"files": changed, "lines": lines}
+    # a file this run would create holding no function's rows is not
+    # written
+    changed = {p: d for p, d in edited.items() if _differs(p, d) and (
+        os.path.exists(p) or set(d) - {"compendium", "versions"})}
+    return {"files": changed, "lines": lines, "falsified": falsified}
 
 
 def _differs(path: str, data: dict) -> bool:
@@ -454,7 +463,9 @@ def run_update(root: str = ".", dry_run: bool = False) -> list:
     """
     from ..spec import write_yaml
     plan = plan_update(root)
-    lines = list(plan["lines"])
+    lines = [line.replace("; recorded falsified in",
+                          "; would be recorded falsified in (dry run)")
+             if dry_run else line for line in plan["lines"]]
     for path, data in sorted(plan["files"].items()):
         rel = os.path.relpath(path, os.path.abspath(root))
         if _comments_beyond_header(path):
@@ -471,6 +482,34 @@ def run_update(root: str = ".", dry_run: bool = False) -> list:
             f"project")
         write_yaml(path, data, header=header)
         lines.append(f"wrote {rel}")
-    if not plan["files"]:
+    if not dry_run:
+        for key, (current, rows) in sorted(plan["falsified"].items()):
+            _record_falsified(key, current, rows, root)
+    if not plan["files"] and not plan["falsified"]:
         lines.append("nothing to change")
     return lines
+
+
+def _record_falsified(key: str, current: list, rows: list,
+                      root: str) -> None:
+    """Intent:
+        Write the library function's verified record with its `current`
+        rows and the pinned `rows` the installed library falsified,
+        adjudicated together, so each falsification stands in the
+        record with its witness. The record's membership keeps them:
+        every later `mathema verify` adjudicates and reports them like
+        any other row of the function.
+    """
+    from . import external_premises, load_library_claims
+    from .. import check
+    from ..conjecture import _resolve_func_ref
+    from ..spec import entry_claims, record as write_record
+    fn = _resolve_func_ref(key, root=root)
+    if fn is None:
+        return
+    claims = [{k: v for k, v in r.items() if k != "verdict"}
+              for r in current] + list(rows)
+    rec = check(fn, claims=entry_claims({"claims": claims}),
+                known_premises=external_premises(
+                    root, library_claims=load_library_claims(root)))
+    write_record(rec, key=key, root=root, claims=claims)

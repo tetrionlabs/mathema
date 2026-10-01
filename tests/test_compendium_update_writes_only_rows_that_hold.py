@@ -58,16 +58,38 @@ def _rows(root):
             .get("claims") or []}
 
 
-def test_a_pinned_row_the_library_breaks_is_not_written(tmp_path):
+def _recorded(root, key):
+    path = root / ".mathema" / "verified" / f"{key}.yaml"
+    entry = (yaml.safe_load(path.read_text()) or {}).get(key) or {}
+    return {c["name"]: c for c in entry.get("claims") or []}
+
+
+def test_a_pinned_row_the_library_breaks_is_recorded_falsified(tmp_path):
     _project(tmp_path, 1)
     r = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path))
     assert r.returncode == 0, r.stderr
+    # not written into the project's compendium file as a row it states
     assert "is_defined@axis=1" not in _rows(tmp_path), r.stdout
     line = next(ln for ln in r.stdout.splitlines()
                 if "is_defined@axis=1" in ln)
     assert "falsified" in line and "not added" in line, r.stdout
-    v = _cli(tmp_path, "verify", "--root", str(tmp_path))
-    assert "is_defined@axis=1" not in v.stdout, v.stdout
+    assert "recorded" in line, line
+    assert not (tmp_path / "claims" / "numpy.claims.yaml").exists()
+    # the falsification is growing knowledge: it is in numpy.mean's
+    # verified record, with the witness
+    row = _recorded(tmp_path, "numpy.mean")["is_defined@axis=1"]
+    assert row["verdict"] == "falsified", row
+    assert "AxisError" in str(row.get("counterexample")), row
+    # and verify keeps reporting it like any falsified row
+    for _ in range(2):
+        v = _cli(tmp_path, "verify", "--root", str(tmp_path))
+        numpy_line = next(ln for ln in v.stdout.splitlines()
+                          if ln.split()[1:2] == ["numpy.mean:"])
+        assert numpy_line.startswith("FAIL") and "falsified" in numpy_line, \
+            v.stdout
+        assert v.returncode != 0, v.stdout
+        row = _recorded(tmp_path, "numpy.mean")["is_defined@axis=1"]
+        assert row["verdict"] == "falsified", row
 
 
 def test_a_pinned_row_that_holds_is_written(tmp_path):
