@@ -397,3 +397,16 @@ def test_a_rows_floor_draws_the_other_parameters_past_the_guards():
     assert points and all(0 <= pt["y"] <= 1 for pt in points), points
     row = _rows(guarded_sum, "missing(f, x) propagates")["missing_f_x_propagates"]
     assert row.verdict == "holds", (row.verdict, row.note)
+
+
+# --- a hole f puts in its output from present inputs fails a reduction ----
+
+def nan_above_half(xs: np.ndarray) -> np.ndarray:
+    return np.where(xs > 0.5, np.nan, xs)
+
+
+def test_a_hole_in_fs_output_fails_a_claim_that_reduces_it():
+    (row,) = check_conjectures(nan_above_half, [claim(
+        "for xs in [0, 1]^n \\ {missing}, sum(f(xs)) <= sum(xs)")])
+    assert row.verdict == "falsified", (row.verdict, row.note)
+    assert row.counterexample.endswith("f returned nan"), row.counterexample

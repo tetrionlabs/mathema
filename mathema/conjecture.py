@@ -8321,11 +8321,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             checked += 1
             cx = f"{_point_text(args)}: {call_hole[0][0]} returned {call_hole[0][1]}"
             break
-        if not missing_in and (holds_nan(lv) or holds_nan(rv)):
+        if not missing_in and (holds_nan(lv) or holds_nan(rv) or call_nan[0] == "f"):
             # a NaN computed from inputs that are not missing is no
             # value, like a raise: every value relation fails at this
             # in-domain point, `!=` included, and the witness names
-            # the callee that returned it
+            # the callee that returned it; f's own nan fails it even
+            # where the claim's words read past it (`sum(f(xs))`)
             checked += 1
             cx = (f"{_point_text(args)}: {call_nan[0]} returned nan"
                   if call_nan[0] is not None else
