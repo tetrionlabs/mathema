@@ -274,17 +274,45 @@ def _behaviour_of(call: Call) -> str:
                          unseen_kinds(call.point, _keys(call)))
 
 
+#: the module namespace of the function under check, where an exception
+#: name a call raised or a row states is looked up
+_SCOPE: contextvars.ContextVar = contextvars.ContextVar("mathema_policy_scope",
+                                                        default=None)
+
+
+@contextmanager
+def exceptions_of(fn):
+    """Exception names read inside are looked up in `fn`'s module."""
+    token = _SCOPE.set(getattr(fn, "__globals__", None) or {})
+    try:
+        yield
+    finally:
+        _SCOPE.reset(token)
+
+
+def _exception_type(name: str):
+    """The exception class a name stands for, a builtin or one `fn`'s
+    module reaches (`MissingInput`, `decimal.InvalidOperation`), or
+    None."""
+    import builtins
+    head, *rest = name.split(".")
+    found = getattr(builtins, head, None) if not rest else None
+    if found is None:
+        found = (_SCOPE.get() or {}).get(head)
+        for part in rest:
+            found = getattr(found, part, None)
+    return found if isinstance(found, type) and issubclass(found, BaseException) else None
+
+
 def _raised_matches(raised: "str | None", expected: "str | None") -> bool:
     """Whether an exception name is the one a `raises(...)` names, or a
-    subclass of a built-in one."""
+    subclass of it, as the long form `raises(f(x), E)` reads it."""
     if expected is None or raised is None:
         return True
     if raised == expected.rsplit(".", 1)[-1]:
         return True
-    import builtins
-    got, want = getattr(builtins, raised, None), getattr(builtins, expected, None)
-    return (isinstance(got, type) and isinstance(want, type)
-            and issubclass(got, want))
+    got, want = _exception_type(raised), _exception_type(expected)
+    return got is not None and want is not None and issubclass(got, want)
 
 
 def _floor_points(fn, facts, param: str, kind: str, members: list,

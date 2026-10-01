@@ -229,3 +229,21 @@ def test_a_guard_returning_a_name_that_holds_a_value_drops():
 
 def test_a_guard_returning_nan_for_none_converts():
     assert guard_policies(analyze(nan_literal))[("x", "absent", "None")][0] == "converts"
+
+
+# --- a subclass of the stated exception satisfies the row ------------------
+
+class MissingInput(ValueError):
+    pass
+
+
+def refuses_none(x: Optional[float]) -> float:
+    if x is None:
+        raise MissingInput("x is None")
+    return x
+
+
+def test_a_subclass_of_the_stated_exception_satisfies_a_policy_row():
+    rows = _rows(refuses_none, "absent(f, x) raises(ValueError)", "is_absent_safe(f)")
+    assert rows["absent_f_x_raises_ValueError"].verdict == "proven"
+    assert rows["is_absent_safe[f]"].verdict == "proven"

@@ -3328,7 +3328,8 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     values = [c for c in built if getattr(c, "relation", None) != "policy"
               and c not in gates and c not in scalar_empty]
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
-            matrices_in_view(fn_mats | runtime_mats), _policy.batch():
+            matrices_in_view(fn_mats | runtime_mats), _policy.batch(), \
+            _policy.exceptions_of(fn):
         out = _check_conjectures(
             fn, values, domain=domain, trials=trials,
             trials_scale=trials_scale, facts=facts, extensive=extensive,
