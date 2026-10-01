@@ -71,3 +71,14 @@ def test_a_point_whose_claim_evaluation_fails_is_never_counted_as_a_pass():
                             budget=5)
     assert sweep.checked == 0
     assert sweep.fragile_point is None
+
+
+def less_one(x: float) -> float:
+    return x - 1
+
+
+def test_a_claim_with_no_value_at_a_point_never_passes_there():
+    (p,) = check_conjectures(less_one, [claim(
+        "for x in [1, 1], f(x) / f(x) == 1", route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "ZeroDivisionError" in (p.counterexample or ""), p.counterexample

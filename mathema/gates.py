@@ -338,11 +338,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         except Exception as e:
             # a raise FROM THE FUNCTION at an in-domain point is a
             # genuine failure of a value claim (the pedantic raise
-            # rule), so it reproduces a disproof, and so does an index
-            # outside a sequence the claim reads; any other plumbing
-            # raise stays inconclusive
-            return False if calls_raised[0] or isinstance(e, IndexError) \
-                else None
+            # rule), so it reproduces a disproof, and so does the
+            # claim's own expression having no value (an index outside
+            # a sequence it reads, a division by zero); any other
+            # plumbing raise stays inconclusive
+            return False if calls_raised[0] or isinstance(
+                e, (IndexError, ZeroDivisionError)) else None
         if calls_nonfinite[0] is not None:
             # a nan or an infinity the code returned for finite inputs
             # is no value: against a value every relation fails. Two
@@ -408,13 +409,15 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             lv, rv = _values(point)
         except Exception as e:
             # a raise from the function under test is a computation
-            # failure, and so is an index outside a sequence the claim
-            # reads; the law's own plumbing failing otherwise says
+            # failure, and so is the claim's own expression having no
+            # value (an index outside a sequence it reads, a division
+            # by zero); the law's own plumbing failing otherwise says
             # nothing about the code, and is no agreement either
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
-            if isinstance(e, IndexError):
-                return f"the claim's own index raises IndexError here ({e})"
+            if isinstance(e, (IndexError, ZeroDivisionError)):
+                return (f"the claim's own expression raises "
+                        f"{type(e).__name__} here ({e})")
             return INCONCLUSIVE
         if calls_nonfinite[0] is not None:
             # no value at a finite input: an overflow, a pole, a nan.
