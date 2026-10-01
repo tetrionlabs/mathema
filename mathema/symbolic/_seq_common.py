@@ -655,6 +655,93 @@ def _fold_premises(assumption, build, view, bound_context):
                                        set(view.lengths.values()))
 
 
+def _index_needs(srcs, seqs) -> dict:
+    """`{name: least length}` for the literal indices the claim text
+    reads into a sequence: `x[3]` needs four elements, `x[-1]` one."""
+    needs: dict = {}
+    for src in srcs:
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            continue
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name) \
+                    and n.value.id in seqs:
+                idx = _literal_int_index(n.slice)
+                if idx is None:
+                    continue
+                least = idx + 1 if idx >= 0 else -idx
+                needs[n.value.id] = max(needs.get(n.value.id, 0), least)
+    return needs
+
+
+def signature_shapes(fn) -> dict:
+    """The Shape markers `fn`'s signature declares, `{}` when it has
+    none or they cannot be read."""
+    from ..types import shapes_from_signature
+    try:
+        return dict(shapes_from_signature(fn))
+    except Exception:
+        return {}
+
+
+def _length_ties(names, domain: dict, assumption,
+                 shapes: "dict | None" = None) -> dict:
+    """`{name: representative}` grouping the sequences the claim makes
+    one length: two sequences bound over one dimension (`for a, b in
+    R^n`, or both `R^3`), or a premise equating their lengths
+    (`len(a) == len(b)`, or each `== 3`). A sequence the claim does
+    not bind takes its signature's Shape marker from `shapes`."""
+    import re
+
+    from .._shapes import dims_of
+    parent = {n: n for n in names}
+
+    def root(n):
+        while parent[n] != n:
+            n = parent[n]
+        return n
+
+    def join(a, b):
+        ra, rb = root(a), root(b)
+        if ra != rb:
+            lo, hi = sorted((ra, rb))
+            parent[hi] = lo
+    by_dim: dict = {}
+    for n in names:
+        dims = dims_of((domain or {}).get(n)) or dims_of((shapes or {}).get(n))
+        if dims:
+            by_dim.setdefault(("dim", dims[0]), []).append(n)
+    length = re.compile(r"^\s*(?:len\(\s*(\w+)\s*\)|dim\(\s*(\w+)\s*"
+                        r"(?:,\s*0\s*)?\))\s*$")
+    for lhs, rel, rhs in assumption or ():
+        if rel != "==":
+            continue
+        sides = []
+        for side in (str(lhs), str(rhs)):
+            m = length.match(side)
+            if m:
+                sides.append(("seq", m.group(1) or m.group(2)))
+            elif side.strip().isdigit():
+                sides.append(("dim", side.strip()))
+            else:
+                sides.append(None)
+        if None in sides:
+            continue
+        (ka, a), (kb, b) = sides
+        if ka == "seq" and kb == "seq":
+            if a in parent and b in parent:
+                join(a, b)
+        elif ka == "seq" and a in parent:
+            by_dim.setdefault((kb, b), []).append(a)
+        elif kb == "seq" and b in parent:
+            by_dim.setdefault((ka, a), []).append(b)
+    for group in by_dim.values():
+        for other in group[1:]:
+            join(group[0], other)
+    return {n: root(n) for n in names}
+
+
 def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
                   relation: str, domain: dict | None = None,
                   tolerance: float | None = None,
@@ -686,6 +773,22 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
         empty = None
     if empty is not None:
         return empty
+    from ._prove import length_admitted, lengths_judged
+    judged = lengths_judged()
+    shapes = signature_shapes(fn)
+    for name, least in sorted(_index_needs((lhs_src, rhs_src),
+                                           view.seqs).items()
+                              if judged else ()):
+        short = [k for k in range(least)
+                 if length_admitted(name, k, domain, assumption,
+                                    shapes) is not False]
+        if short:
+            return ProofResult(
+                "undecided",
+                sketch=f"the claim indexes {name} past its end where "
+                       f"len({name}) == {short[0]}, which the claim admits "
+                       f"(the index raises IndexError there); state it: "
+                       f"assuming len({name}) >= {least}")
     domain = dict(domain or {})
     if view.other_params:
         # the claim's own quantifier wins; the signature's
@@ -755,6 +858,21 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     if isinstance(lhs, tuple) or isinstance(rhs, tuple):
         return ProofResult("unliftable", sketch=f"cannot compare a tuple-valued "
                            f"expression against a {view.kind} lift")
+    present = [n for n, ib in view.seqs.items()
+               if lhs.has(ib) or rhs.has(ib)]
+    ties = _length_ties(present, domain, assumption, shapes)
+    if judged and len(set(ties.values())) > 1:
+        firsts = {}
+        for n in sorted(present):
+            firsts.setdefault(ties[n], n)
+        a, b = sorted(firsts.values())[:2]
+        return ProofResult(
+            "undecided",
+            sketch=f"the claim admits {a} and {b} of different lengths, "
+                   f"where the {view.kind} reads them position by position "
+                   f"and the code can raise; bind both over one length "
+                   f"(for {a} in R^n, {b} in R^n) or state it: assuming len({a}) "
+                   f"== len({b})")
     folded = _fold_premises(assumption, build, view, bound_context)
     if isinstance(folded, ProofResult):
         return folded

@@ -15,6 +15,8 @@ fallback applies).
 from __future__ import annotations
 
 import ast
+import contextlib
+import contextvars
 from dataclasses import dataclass, field, replace
 
 import sympy
@@ -2466,47 +2468,119 @@ def _first_axis_length(seq, axis):
     return len(seq)
 
 
-def _premises_admit_empty(name: str, assumption) -> bool:
-    """Whether the `assuming` conjuncts put the empty list in `name`'s
-    domain: at least one of them reads `len(name)` (canonically
-    `dim(name, 0)`), and every one that reads it holds at length
-    zero."""
+#: whether a proof is judged at every sequence length the claim admits
+#: (the empty list, two lengths that differ, a length too short for a
+#: literal index); off while a family claim whose statement asks about
+#: agreement or accuracy rather than a value is adjudicated
+_JUDGE_LENGTHS: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "mathema_judge_lengths", default=True)
+
+
+@contextlib.contextmanager
+def lengths_unjudged():
+    """Within the block, proofs are not judged at the sequence lengths
+    their claim admits (see `_JUDGE_LENGTHS`)."""
+    token = _JUDGE_LENGTHS.set(False)
+    try:
+        yield
+    finally:
+        _JUDGE_LENGTHS.reset(token)
+
+
+def lengths_judged() -> bool:
+    return _JUDGE_LENGTHS.get()
+
+
+def length_admitted(name: str, k: int, domain, assumption,
+                    shapes: "dict | None" = None) -> "bool | None":
+    """Intent:
+        Whether the claim admits the sequence `name` at length `k`: True
+        when its binding and every premise that reads `name` hold for a
+        list of that length, False when the binding or a premise
+        excludes it, None when a premise reads more than this one
+        sequence and so cannot be read at `k` alone.
+
+    Notes:
+        An unbound sequence admits every length, the empty list
+        included; one over a dimension name the claim does not bind
+        (`x in R^n`, `Shape("n")`) admits every length from one, and
+        the empty list is None, since whether the name ranges over zero
+        is not settled; a fixed length (`R^3`) admits only itself, and
+        a dimension name the claim binds to whole numbers (`n in [2, 5]
+        subset Z`) admits those. A premise with no value at the list
+        (`max(x) > 0` at the empty list) excludes it.
+    """
     import re
-    pattern = re.compile(rf"\b(?:len\(\s*{re.escape(name)}\s*\)"
-                         rf"|dim\(\s*{re.escape(name)}\s*,\s*0\s*\))")
+
+    from .._shapes import dims_of, fixed_size
+    from ..domain import domain_contains
+    domain = domain or {}
+    dims = dims_of(domain.get(name)) or dims_of((shapes or {}).get(name))
+    if dims:
+        size = fixed_size(dims[0])
+        if size is not None and size != k:
+            return False
+        token = domain.get(dims[0]) if size is None else None
+        if token is not None:
+            try:
+                if not domain_contains(float(k), token):
+                    return False
+            except Exception:
+                return None
+        elif size is None and k == 0:
+            # whether a dimension name ranges over zero is not settled,
+            # so the empty list may be admitted
+            premises = _premises_hold(
+                [(lhs, rel, rhs) for lhs, rel, rhs in assumption or ()
+                 if re.search(rf"\b{re.escape(name)}\b", f"{lhs} {rhs}")],
+                {name: []})
+            return False if premises is False else None
+    pattern = re.compile(rf"\b{re.escape(name)}\b")
+    reading = [(lhs, rel, rhs) for lhs, rel, rhs in assumption or ()
+               if pattern.search(f"{lhs} {rhs}")]
+    return _premises_hold(reading, {name: [0.0] * k})
+
+
+def _premises_hold(assumption, point: dict) -> "bool | None":
+    """Whether every `assuming` conjunct holds at `point`: False when one
+    fails or has no value there (an index past the end, the maximum of
+    an empty list), None when one cannot be evaluated here."""
     ops = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
            "<=": lambda a, b: a <= b, ">=": lambda a, b: a >= b,
            "<": lambda a, b: a < b, ">": lambda a, b: a > b}
-    mentioned = False
+    env = {"len": len, "dim": _first_axis_length, "sum": sum, "max": max,
+           "min": min, "abs": abs, **point}
+    answer: "bool | None" = True
     for lhs, rel, rhs in assumption or ():
-        text = f"{lhs} {rhs}"
-        if not pattern.search(text):
+        if rel not in ops:
+            answer = None
             continue
-        mentioned = True
         try:
-            env = {"len": len, "dim": _first_axis_length, name: []}
             lv = eval(compile(str(lhs), "<premise>", "eval"),
                       {"__builtins__": {}}, env)
             rv = eval(compile(str(rhs), "<premise>", "eval"),
                       {"__builtins__": {}}, env)
             holds = ops[rel](lv, rv)
-        except Exception:
-            # it reads more than this one length: whether it holds at
-            # length zero depends on values this check does not choose
+        except (IndexError, ValueError, ZeroDivisionError):
             return False
+        except Exception:
+            answer = None
+            continue
         if not holds:
             return False
-    return mentioned
+    return answer
 
 
 def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                           assumption) -> "ProofResult | None":
     """Intent:
-        A disproof with an executed witness when the claim's premises
-        admit the empty list for a sequence parameter, the claim calls
-        f at its own parameters, and f raises when called with the
-        empty list there; an undecided result when f raises but the
-        claim calls it at other arguments; None otherwise.
+        A disproof with an executed witness when the claim admits the
+        empty list for a sequence parameter (see `length_admitted`: an
+        unbound list does), the claim calls f at its own parameters,
+        and f raises when called with the empty list there; an
+        undecided result when f raises but the claim calls it at other
+        arguments, or its premises may admit the empty list; None
+        otherwise.
 
     Notes:
         A fold's closed form has a value at length zero (the initial
@@ -2517,9 +2591,18 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
     import random
 
     from ..probing import _synth
+    from ._seq_common import _length_ties, signature_shapes
+    if not lengths_judged():
+        return None
+    shapes = signature_shapes(fn)
     seqs = [p for p in facts.params
             if facts.param_kinds.get(p) in SEQUENCE_KINDS]
-    targets = [p for p in seqs if _premises_admit_empty(p, assumption)]
+    bound_admits = {p: length_admitted(p, 0, domain, None, shapes)
+                    for p in seqs}
+    ties = _length_ties(seqs, domain, assumption, shapes)
+    targets = [p for p in seqs if bound_admits[p] is not False
+               and length_admitted(p, 0, domain, assumption,
+                                   shapes) is not False]
     if not targets:
         return None
     identity = True
@@ -2534,17 +2617,34 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                                               for a in n.args] != list(facts.params):
                 identity = False
     rng = random.Random(0)
+    admitted: dict = {}
     for target in targets:
-        args: list = []
-        for p in facts.params:
-            if p == target:
-                args.append([])
+        # every sequence the claim ties to the target's length is empty
+        # with it, and the point must satisfy the claim's premises
+        group = {p for p in seqs if ties[p] == ties[target]}
+        if any(bound_admits[p] is False for p in group):
+            continue
+        args = None
+        for _attempt in range(8):
+            drawn: list = []
+            for p in facts.params:
+                if p in group:
+                    drawn.append([])
+                    continue
+                kind = facts.param_kinds.get(p, "float")
+                try:
+                    drawn.append(_synth(kind, rng, (domain or {}).get(p)))
+                except Exception:
+                    return None
+            held = _premises_hold(assumption, dict(zip(facts.params, drawn)))
+            if held is False:
                 continue
-            kind = facts.param_kinds.get(p, "float")
-            try:
-                args.append(_synth(kind, rng, (domain or {}).get(p)))
-            except Exception:
-                return None
+            args = drawn
+            admitted[target] = (None if held is None or any(
+                bound_admits[p] is None for p in group) else True)
+            break
+        if args is None:
+            continue
         try:
             fn(*args)
         except Exception as e:
@@ -2552,17 +2652,24 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
         else:
             continue
         where = ", ".join(f"{p} = {a!r}" for p, a in zip(facts.params, args))
+        if admitted[target] is None:
+            return ProofResult(
+                "undecided",
+                sketch=f"f raises {exc} on the empty list ({where}), which "
+                       f"the claim may admit for {target}; state it: "
+                       f"assuming len({target}) >= 1")
         if not identity:
             return ProofResult(
                 "undecided",
-                sketch=f"f raises {exc} on the empty list the premises admit "
+                sketch=f"f raises {exc} on the empty list the claim admits "
                        f"for {target} ({where}), and the claim calls f at "
-                       f"other arguments")
+                       f"other arguments; state it: assuming len({target}) "
+                       f">= 1")
         return ProofResult(
             "disproven",
-            sketch=f"f raises {exc} at {where}, an empty list the premises "
-                   f"admit, so the claim has no value there; narrow the "
-                   f"premise to len({target}) >= 1, or state the raising "
+            sketch=f"f raises {exc} at {where}, an empty list the claim "
+                   f"admits, so the claim has no value there; narrow it "
+                   f"with assuming len({target}) >= 1, or state the raising "
                    f"case as its own raises(...) claim",
             counterexample=where,
             witness=dict(zip(facts.params, args)),

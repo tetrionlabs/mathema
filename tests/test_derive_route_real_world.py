@@ -236,7 +236,8 @@ def test_sample_variance_two_pass_proves():
     # pass's Sum inside its summand, which plain sympy.simplify() can't
     # handle without raising, see symbolic.py's own _safe_simplify.
     results = check_conjectures(
-        sample_variance_two_pass, [claim("f(xs) == f(xs)", route="derive")])
+        sample_variance_two_pass,
+        [claim("assuming len(xs) >= 1, f(xs) == f(xs)", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -278,7 +279,8 @@ def test_rms_proves():
     # lift_fold() always declined it, but the accumulator's own
     # coefficient is still exactly 1 (pure addition), which is all
     # lift_sum() needs: no telescoping required, just Sum(v**2, ...).
-    results = check_conjectures(rms, [claim("f(signal) == f(signal)", route="derive")])
+    results = check_conjectures(rms, [claim(
+        "assuming len(signal) >= 1, f(signal) == f(signal)", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -292,7 +294,8 @@ def test_dot_product_proves():
     # to the fresh Sum index itself, and the update expression
     # subscripts *both* sequences by it.
     results = check_conjectures(
-        dot_product, [claim("f(a, b) == f(a, b)", route="derive")])
+        dot_product, [claim("for a in R^n, b in R^n, assuming len(a) >= 1, "
+                            "f(a, b) == f(a, b)", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -335,7 +338,9 @@ def test_dot_weights_proves():
     # recognized directly (lift_dot(), no general vector type needed):
     # Sum(weights[k]*features[k], (k, 0, L-1)).
     results = check_conjectures(
-        dot_weights, [claim("f(weights, features) == f(weights, features)", route="derive")])
+        dot_weights, [claim("for weights in R^n, features in R^n, "
+                            "f(weights, features) == f(weights, features)",
+                            route="derive")])
     assert results[0].verdict == "proven"
 
 

@@ -514,6 +514,28 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
                                    OutputPredicateFamily))
 
 
+def _lengths_scope(cj, family, facts):
+    """Intent:
+        The context a derive attempt runs in: a family claim that asks
+        whether calls agree with each other (`is_deterministic`,
+        `is_reproducible`, `is_state_safe`) or how accurate they are
+        (`is_numerically_stable`) is not judged at the sequence lengths
+        where the call raises, which say nothing about agreement or
+        accuracy; every other claim is.
+    """
+    import contextlib
+
+    from .symbolic._prove import lengths_unjudged
+    base = families.claim_base_name(cj.name)
+    try:
+        agreement = (base in _SELF_AGREEMENT_FAMILIES
+                     or base == "is_numerically_stable") \
+            and _statement_is_family_claim(cj, base, family, facts)
+    except Exception:
+        agreement = False
+    return lengths_unjudged() if agreement else contextlib.nullcontext()
+
+
 def _resolve_func_ref(ref: str, *, root: str = "."):
     """A dotted `module.qualname` string (a mathema-internal helper, or
     any other importable function, the same shape a spec key already
@@ -5378,12 +5400,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         family_proof = _chained_definedness_proof(
             family_derive, fn, facts, cj, cj_domain, assumption)
     else:
-        family_proof = (families.call_route(family_derive, fn, facts,
-                                            cj.lhs, cj.rhs, cj.relation,
-                                            domain=cj_domain,
-                                            tolerance=cj.tolerance,
-                                            assumption=assumption)
-                        if family_derive is not None else None)
+        with _lengths_scope(cj, family, facts):
+            family_proof = (families.call_route(family_derive, fn, facts,
+                                                cj.lhs, cj.rhs, cj.relation,
+                                                domain=cj_domain,
+                                                tolerance=cj.tolerance,
+                                                assumption=assumption)
+                            if family_derive is not None else None)
     if family_proof is not None and cj.negated:
         # the not-form: a decided positive claim decides its negation
         # the other way (the falsifying witness IS the proof); an
@@ -5660,11 +5683,12 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         proof = try_prove_raises(fn, facts, cj.lhs, cj.rhs or None,
                                  domain=cj_domain)
     else:
-        proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
-                          domain=cj_domain, tolerance=cj.tolerance,
-                          extensive=extensive, funcs=bound_funcs or None,
-                          assumption=assumption,
-                          assume_defined=ctx.assume_defined)
+        with _lengths_scope(cj, family, facts):
+            proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
+                              domain=cj_domain, tolerance=cj.tolerance,
+                              extensive=extensive, funcs=bound_funcs or None,
+                              assumption=assumption,
+                              assume_defined=ctx.assume_defined)
         if definitions_hint is not None \
                 and proof.status in ("undecided", "unliftable"):
             from .symbolic._proof_support import ProofResult

@@ -3,11 +3,10 @@
 """A fold claim that admits the empty sequence is judged on what the
 code does with one.
 
-A sequence parameter's default domain is the nonempty lists (an empty
-one is a precondition the code states by reading `xs[0]` or dividing by
-`len(xs)`). A premise such as `assuming len(xs) == 0` puts the empty
-list inside the claim's domain, and there `mean([])` raises
-ZeroDivisionError, whatever the closed form says at length zero.
+An unbound sequence parameter admits every length, the empty list
+included, and so does a premise such as `assuming len(xs) == 0`; there
+`mean([])` raises ZeroDivisionError, whatever the closed form says at
+length zero. `assuming len(xs) >= 1` excludes it.
 """
 from mathema.conjecture import check_conjectures, claim
 
