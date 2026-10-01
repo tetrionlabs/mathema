@@ -1793,7 +1793,18 @@ _CLAIM_FUNCTION_REGIONS: dict = {
 }
 
 
-def _claim_side_regions(src: str, build, complex_names: set) -> list:
+def _integer_valued_over(expr, integer_names: set) -> bool:
+    """Whether `expr` is an integer at every point, reading the names
+    whose domain admits only integers as integers."""
+    swap = {s: sympy.Dummy(str(s), integer=True) for s in expr.free_symbols
+            if str(s) in integer_names}
+    if len(swap) != len(expr.free_symbols):
+        return False
+    return bool(expr.subs(swap).is_integer)
+
+
+def _claim_side_regions(src: str, build, complex_names: set,
+                        integer_names: "set | None" = None) -> list:
     """Intent:
         The regions where the claim's own expression `src` has no real
         value, read from its syntax before sympy evaluates anything (a
@@ -1806,8 +1817,12 @@ def _claim_side_regions(src: str, build, complex_names: set) -> list:
         base with a negative exponent, and a negative base with an
         exponent not known to be an integer; a function its row of
         `_CLAIM_FUNCTION_REGIONS`. A region stated over real arguments
-        is left out when the operand reads a name bound to C.
+        is left out when the operand reads a name bound to C. A name in
+        `integer_names` reads as an integer. An operand under a limit,
+        integral, sum or product that reads its bound variable
+        contributes nothing.
     """
+    integer_names = integer_names or set()
     try:
         tree = ast.parse(src or "0", mode="eval")
     except SyntaxError:
@@ -1828,8 +1843,24 @@ def _claim_side_regions(src: str, build, complex_names: set) -> list:
         return any(isinstance(n, ast.Name) and n.id in complex_names
                    for n in ast.walk(node))
 
+    # an operand reading a variable a limit, integral, sum or product
+    # binds is never evaluated over the claim's domain
+    bound_reads: set = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id in ("lim", "integrate", "Sum", "Prod",
+                                     "cauchy_pv") \
+                and len(node.args) >= 2 and isinstance(node.args[1], ast.Name):
+            bound = node.args[1].id
+            for sub in ast.walk(node):
+                if any(isinstance(n, ast.Name) and n.id == bound
+                       for n in ast.walk(sub)):
+                    bound_reads.add(id(sub))
+
     out: list = []
     for node in ast.walk(tree):
+        if id(node) in bound_reads:
+            continue
         if isinstance(node, ast.BinOp) \
                 and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
             divisor = lifted(node.right)
@@ -1848,7 +1879,9 @@ def _claim_side_regions(src: str, build, complex_names: set) -> list:
                         ast.unparse(node)))
             integral = exponent.is_integer or (
                 exponent.is_number and exponent.is_real
-                and float(exponent).is_integer())
+                and float(exponent).is_integer()) or (
+                bool(exponent.free_symbols)
+                and _integer_valued_over(exponent, integer_names))
             if not integral and not complex_operand(node.left):
                 out.append((sympy.Lt(base, 0), ast.unparse(node)))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
@@ -1871,20 +1904,35 @@ def _claim_side_regions(src: str, build, complex_names: set) -> list:
 
 def _claim_side_verdict(lhs_src: str, rhs_src: str, build, domain: dict,
                         params: dict, assumed_gaps: list,
-                        assumed_nonzero: list) -> "ProofResult | None":
+                        assumed_nonzero: list,
+                        int_params: "set | None" = None) -> "ProofResult | None":
     """Intent:
         Whether the claim's own sides have a real value at every point
         of the domain: None when each region where one has none is
         provably empty there (or outside the premises), a disproof
         naming a point inside an explicitly bound domain where one
         holds (the corroboration gate executes it), else undecided.
+        `int_params` names the parameters called with an int.
     """
     from ._proof_support import (_nonneg_certificate, _positive_certificate,
                                  _relational_truth_over_domain)
     from ..probing import _bound_is_complex
+    from ..domain import bound_assumptions
     complex_names = {n for n, b in domain.items() if _bound_is_complex(b)}
-    regions = (_claim_side_regions(lhs_src, build, complex_names)
-               + _claim_side_regions(rhs_src, build, complex_names))
+    integer_names = set()
+    for n, b in domain.items():
+        try:
+            if (bound_assumptions(b) or {}).get("integer"):
+                integer_names.add(n)
+        except Exception:
+            continue
+    integer_names |= {str(s) for s in params.values()
+                      if getattr(s, "is_integer", False)}
+    integer_names |= set(int_params or ())
+    regions = (_claim_side_regions(lhs_src, build, complex_names,
+                                   integer_names)
+               + _claim_side_regions(rhs_src, build, complex_names,
+                                     integer_names))
     if not regions:
         return None
     names = {str(sym): sym for sym in params.values()}
@@ -3587,7 +3635,9 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             side_verdict = _capped(
                 lambda: _claim_side_verdict(
                     lhs_src, rhs_src, lambda src: build(src, aux), domain,
-                    lifted.params, assumed_gaps, assumed_nonzero),
+                    lifted.params, assumed_gaps, assumed_nonzero,
+                    {p for p, k in (facts.param_kinds or {}).items()
+                     if k == "int"}),
                 _EXT if extensive else _FAST)
         except TimeoutError:
             side_verdict = ProofResult(
