@@ -9,8 +9,11 @@ import mathema
 
 
 def _note(fn, claim):
+    # the claim's own row, not its companions (the empty-input line
+    # sits under every value claim)
     (row,) = [p for p in mathema.check(fn, claims=[claim]).probes
-              if p.name != "callable"]
+              if p.name != "callable"
+              and not (p.meta or {}).get("mathema.companion_of")]
     return row.note or ""
 
 
