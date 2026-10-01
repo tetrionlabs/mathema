@@ -183,7 +183,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: codebase output -->
 ```text
-falsified rate=-2.72559 -> -32.66347642639832, rate=4.92258 -> 34.39055087522713 (not decreasing)
+falsified rate=-2.7255878198803085 -> -32.66347642639832, rate=4.922577492583454 -> 34.39055087522713 (not decreasing)
 ```
 
 The derivative of `price * (1 - rate)` in `rate` is `-price`, which is

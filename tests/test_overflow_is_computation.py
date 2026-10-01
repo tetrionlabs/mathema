@@ -105,7 +105,7 @@ def test_a_float_power_overflow_is_a_computation_failure():
         assert proof.verdict == "proven", (law, proof.verdict, proof.note)
         assert proof.condition == "∀ x ∈ ℝ", proof.condition
         assert companion.verdict == "falsified", (law, companion.note)
-        assert companion.counterexample in ("x=-1.79769e+308", "x=1.79769e+308"), \
+        assert companion.counterexample in ("x=-1.7976931348623157e+308", "x=1.7976931348623157e+308"), \
             companion.counterexample
         assert "raises OverflowError" in companion.sketch, companion.sketch
     proof, companion = _pair(cubed, "for x in [-1e100, 1e100], f(-x) == -f(x)",

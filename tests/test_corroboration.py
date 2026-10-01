@@ -81,7 +81,7 @@ def test_an_unbounded_exp_claim_is_proven_and_its_computation_overflows():
     proof, companion = _pair(grow, "f(x) == exp(x)")
     assert proof.verdict == "proven"
     assert companion.verdict == "falsified"
-    assert companion.counterexample == "x=1.79769e+308"
+    assert companion.counterexample == "x=1.7976931348623157e+308"
     assert "raises OverflowError" in companion.sketch
     proof, companion = _pair(grow, "for x in [-700, 700], f(x) == exp(x)")
     assert (proof.verdict, companion.verdict) == ("proven", "holds")
