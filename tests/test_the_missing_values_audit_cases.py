@@ -155,3 +155,34 @@ def test_na_nat_and_a_decimal_nan_from_present_inputs_fail_a_value_claim():
             assert row.verdict == "falsified", (fn.__name__, text, row.note)
             assert row.counterexample.endswith(f"f returned {word}"), row.counterexample
 
+
+# --- a raise the hole did not cause says nothing about the hole ------------
+
+def root_plus(x: float, y: float) -> float:
+    import math
+    return math.sqrt(x) + y
+
+
+def distinct_total(xs: list) -> float:
+    vals = [x for x in xs if x is not None and x == x]
+    if len(set(vals)) != len(vals):
+        raise ValueError("duplicate values")
+    return sum(vals)
+
+
+def test_a_raise_from_another_parameter_is_not_the_holes():
+    from mathema._missing_policy import INCONCLUSIVE, refill
+
+    def call_at(point):
+        try:
+            return root_plus(**point), None
+        except Exception as exc:
+            return None, type(exc).__name__
+    out = refill(call_at, {"x": -8.77, "y": float("nan")}, None, "ValueError",
+                 {"x": 0.5, "y": 0.5})
+    assert [b for *_r, b in out] == [INCONCLUSIVE]
+
+
+def test_a_raise_the_filled_call_repeats_is_not_the_holes():
+    row = _rows(distinct_total, "missing(f, xs) drops")["missing_f_xs_drops"]
+    assert row.verdict != "falsified", (row.verdict, row.counterexample)

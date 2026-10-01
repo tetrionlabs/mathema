@@ -570,22 +570,26 @@ def refill(call_at, point: dict, output, raised: "str | None",
         hole filled: `[(point, output, raised, behaviour), ...]`, one per
         hole member the call held. The call is first made once more as
         it was; an answer that differs by kind (`repeats`) makes it
-        `NOT_REPEATABLE`, one entry for the whole call. The fill is a value the same argument
-        holds in another slot, else the parameter's value in `fills` (an
-        interior point of its domain). A call holding two members is
-        taken one member at a time, the other members filled, and each
-        member's behaviour read from that call. Per member, in order: a
-        raise `raises`; the filled call, whose inputs are complete,
-        raising or giving back no value at all is `INCONCLUSIVE` (the
-        value rule reports that no-value); a hole in the output that
-        stays when the input's hole is filled `introduces` (it does not
-        come from the input); a hole that goes with it `propagates`,
-        however far it spread; a value every fill leaves the same (the
-        fill, twice it, and 0.9 of it) is `NOT_READ` (f never read the
-        hole); a value a fill changes `drops`. A no-value of the other kind in the output `converts`,
-        by the count rule. None when the call cannot be refilled: it
-        holds an absence or a path, or a holding parameter has neither
-        a present value nor a fill.
+        `NOT_REPEATABLE`, one entry for the whole call. The fill is a
+        value the same argument holds in another slot, else the
+        parameter's value in `fills` (an interior point of its domain).
+        A call holding two members is taken one member at a time, the
+        other members filled, and each member's behaviour read from that
+        call. Per member, in order: a raise `raises`, unless the call
+        with the hole filled raises too, when the raise is something
+        else's and the call `INCONCLUSIVE`; the filled call, whose inputs
+        are complete, raising or giving back no value at all is
+        `INCONCLUSIVE` (the value rule reports that no-value); a hole in
+        the output that stays when the input's hole is filled
+        `introduces` (it does not come from the input); a hole that goes
+        with it `propagates`, however far it spread; a value every fill
+        leaves the same (the fill, twice it, and 0.9 of it) is
+        `NOT_READ` (f never read the hole); a value a fill changes
+        `drops`. A no-value of the other kind in the output `converts`,
+        by the count rule. A raise the members cause only together is
+        filed under each. None when the call cannot be refilled: it
+        holds an absence or a path, or a holding parameter has neither a
+        present value nor a fill.
 
     Notes:
         `call_at(point)` calls f at the arguments by name and returns
@@ -616,7 +620,10 @@ def refill(call_at, point: dict, output, raised: "str | None",
         else:
             at, got, err = point, output, raised
         if err is not None:
-            out.append((at, got, err, "raises"))
+            # a raise that stays when the hole is filled comes from
+            # something else in the call
+            _full, full_err = call_at(fill_all(at, [m]))
+            out.append((at, got, err, INCONCLUSIVE if full_err is not None else "raises"))
             continue
         if classify_call(at, got) == "converts":
             out.append((at, got, None, "converts"))
@@ -633,7 +640,8 @@ def refill(call_at, point: dict, output, raised: "str | None",
                 else "drops"
         out.append((at, got, None, behaviour))
     if raised is not None and len(members) > 1 \
-            and not any(b == "raises" for *_r, b in out):
+            and not any(b in ("raises", INCONCLUSIVE) for *_r, b in out) \
+            and call_at(fill_all(point, members))[1] is None:
         # the call raised with its members together and no member raises
         # alone: the raise is the combination's, filed under every member
         out.append((point, output, raised, "raises"))
