@@ -1129,9 +1129,17 @@ def _in_float_type(float_type):
         its literal parsed in `float_type`, a numpy float type (`0.1` in
         float32 is float32("0.1")); anything else unchanged.
     """
+    import warnings
+
     def read(value):
         if isinstance(value, float) and math.isfinite(value):
-            parsed = float_type(repr(value))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                parsed = float_type(repr(value))
+            if not math.isfinite(float(parsed)):
+                # beyond the type's range the literal parses to the
+                # signed infinity, above or below every finite value
+                return math.copysign(math.inf, value)
             return fractions.Fraction(*parsed.as_integer_ratio())
         return value
     return read
@@ -1176,7 +1184,9 @@ def number_member(value, bounds) -> "bool | None":
         literal parses to, an exact number (an int, a numpy integer, a
         Fraction, a Decimal) against the number as written, 1/10. A
         numpy float narrower or wider than float64 meets the literal
-        parsed in its own type (float32 against float32("0.1")).
+        parsed in its own type (float32 against float32("0.1")); an
+        endpoint beyond that type's range reads as its signed infinity,
+        and an infinite argument still lies outside a finite endpoint.
     """
     import decimal
     import numbers
@@ -1196,7 +1206,8 @@ def number_member(value, bounds) -> "bool | None":
     float_type = type(value)
     if (float_type.__module__ == "numpy" and float_type.__name__ != "float64"
             and hasattr(value, "as_integer_ratio")
-            and isinstance(v, (float, fractions.Fraction))):
+            and isinstance(v, (float, fractions.Fraction))
+            and not (isinstance(v, float) and math.isinf(v))):
         return domain_contains(v, _written_domain(bounds,
                                                   _in_float_type(float_type)))
     return domain_contains(v, bounds)

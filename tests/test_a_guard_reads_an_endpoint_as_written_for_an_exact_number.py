@@ -15,6 +15,7 @@ import pytest
 
 from mathema import claims_decorator
 from mathema.authoring import DomainError, enforce_domain
+from mathema.domain import Interval
 
 np = pytest.importorskip("numpy")
 
@@ -108,3 +109,41 @@ def test_an_array_of_narrow_floats_meets_the_endpoint_in_its_type():
     from mathema.authoring import DimensionError
     with pytest.raises(DimensionError):
         total(np.full(3, np.nextafter(np.float32("0.1"), np.float32(1))))
+
+
+@pytest.mark.parametrize("float_type,big", [(np.float16, 1e5),
+                                            (np.float32, 1e39)],
+                         ids=["float16", "float32"])
+def test_an_endpoint_beyond_a_narrow_type_reads_as_its_infinity(float_type,
+                                                                 big):
+    @enforce_domain({"x": (0, big)})
+    def scaled(x: float) -> float:
+        return 2 * x
+
+    @enforce_domain({"x": Interval(-big, 0.0, False, True)})
+    def below(x: float) -> float:
+        return x
+
+    for value in (float_type(1.0), np.finfo(float_type).max):
+        assert scaled(value) == 2 * value
+    assert below(float_type(-1.0)) == float_type(-1.0)
+    assert below(-np.finfo(float_type).max) == -np.finfo(float_type).max
+    # an infinite argument is still outside a finite endpoint
+    with pytest.raises(DomainError):
+        scaled(float_type(np.inf))
+    with pytest.raises(DomainError):
+        below(float_type(-np.inf))
+
+
+def test_a_float16_array_against_an_endpoint_beyond_its_range():
+    from mathema import enforce_dimensions
+    from mathema.authoring import DimensionError
+
+    @enforce_dimensions()
+    @claims_decorator("for xs in [0, 1e5]^3, f(xs) >= 0")
+    def total(xs: np.ndarray) -> float:
+        return float(np.asarray(xs, dtype=float).sum())
+
+    assert total(np.ones(3, dtype=np.float16)) == 3.0
+    with pytest.raises(DimensionError):
+        total(np.full(3, np.inf, dtype=np.float16))
