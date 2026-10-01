@@ -3167,6 +3167,38 @@ def _effective_facts(fn, facts=None):
     return analyze_source(fn)
 
 
+def _receiver_params_bound(fn, facts, conjectures):
+    """Intent:
+        The facts of a library method read as a function of its
+        receiver (`runtime_types.receiver_form`), with each positional
+        parameter that has a default (`lower=None` of
+        `pandas.Series.clip`) and that some claim binds in its domain
+        added to the parameters, in signature order, so that claim
+        samples it and passes it. Any other function's facts are
+        returned as they are.
+    """
+    import dataclasses
+    if getattr(fn, "__mathema_receiver_params__", None) is None:
+        return facts
+    try:
+        sig = callable_signature(fn).parameters
+    except (TypeError, ValueError):
+        return facts
+    bound = {name for cj in conjectures
+             for name in (getattr(cj, "domain", None) or {})}
+    extra = {name for name, param in sig.items()
+             if name in bound and name not in facts.params
+             and param.kind in (param.POSITIONAL_ONLY,
+                                param.POSITIONAL_OR_KEYWORD)}
+    if not extra:
+        return facts
+    params = [name for name in sig
+              if name in extra or name in facts.params]
+    params += [name for name in facts.params if name not in params]
+    kinds = {**facts.param_kinds, **{name: "unknown" for name in extra}}
+    return dataclasses.replace(facts, params=params, param_kinds=kinds)
+
+
 @quiet_while_probing
 def check_conjectures(fn, conjectures: list[Conjecture],
                       domain: dict | None = None, trials: int | None = None,
@@ -3289,7 +3321,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
     # the function and project levels, validated before any claim runs
     # so a bad value refuses the whole call
     resolve_pseudo_infinity(None, pseudo_infinity)
-    facts = _effective_facts(fn, facts)
+    facts = _receiver_params_bound(fn, _effective_facts(fn, facts),
+                                   conjectures)
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     domain = domain or {}
     # the exact same sampling setup probe()'s own remaining structural
