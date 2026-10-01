@@ -27,13 +27,14 @@ def _one(fn, law):
 
 
 @pytest.mark.needs_full_proof_budget
-def test_a_strict_lower_bound_above_the_maximum_is_not_proven():
+def test_a_strict_lower_bound_above_the_maximum_is_falsified():
     # x - x^2 is at most 1/4 on [0.2, 0.8], so `> 0.3` is false
-    # everywhere.
-    p = _one(hump, "for x in [0.2, 0.8], f(x) > 0.3")
-    assert p.verdict != "proven"
-    q = _one(hump, "for x in [0.2, 0.8], 0.3 < f(x)")
-    assert q.verdict != "proven"
+    # everywhere; the witness is the exact sample x = 1/2.
+    for law in ("for x in [0.2, 0.8], f(x) > 0.3",
+                "for x in [0.2, 0.8], 0.3 < f(x)"):
+        p = _one(hump, law)
+        assert p.verdict == "falsified", law
+        assert p.counterexample == "x=0.5", law
 
 
 @pytest.mark.needs_full_proof_budget
@@ -56,13 +57,15 @@ def test_root_isolation_decides_strict_relations_by_sign_and_roots():
     dom = {"x": Interval(0.2, 0.8, True, True)}
     diff = x - x ** 2 - sympy.Rational(3, 10)
     gt = _sturm_decide(diff, ">", dom, {"x": x})
-    assert gt is None or gt.status == "disproven"
+    assert gt.status == "disproven"
+    assert gt.witness == {"x": sympy.Rational(1, 2)}
     lt = _sturm_decide(diff, "<", dom, {"x": x})
     assert lt is not None and lt.status == "proven"
     sq = -(x ** 3 - 3 * x + 1) ** 2
     root_dom = {"x": Interval(0.0, 1.0, True, True)}
     strict = _sturm_decide(sq, "<", root_dom, {"x": x})
-    assert strict is None or strict.status == "disproven"
+    assert strict.status == "disproven"
+    assert strict.witness == {"x": sympy.CRootOf(x ** 3 - 3 * x + 1, 1)}
     assert _sturm_decide(sq, "<=", root_dom, {"x": x}).status == "proven"
 
 
@@ -71,6 +74,7 @@ def test_a_root_at_a_closed_endpoint_breaks_a_strict_relation():
     # x on [0, 1] is zero at the closed endpoint 0, so `x > 0` fails
     # there; on (0, 1] it holds.
     closed = _sturm_decide(x, ">", {"x": Interval(0.0, 1.0, True, True)}, {"x": x})
-    assert closed is None or closed.status == "disproven"
-    if closed is not None:
-        assert closed.witness == {"x": 0}
+    assert closed.status == "disproven"
+    assert closed.witness == {"x": 0}
+    opened = _sturm_decide(x, ">", {"x": Interval(0.0, 1.0, False, True)}, {"x": x})
+    assert opened.status == "proven"

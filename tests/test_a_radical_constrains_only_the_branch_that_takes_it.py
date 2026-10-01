@@ -34,7 +34,8 @@ def test_the_other_branch_of_a_square_root_is_still_checked():
     (p,) = check_conjectures(
         root_or_gap, [claim("for x in [-1, 1], y in [-1, 1], f(x, y) >= 0")],
         extensive=True)
-    assert p.verdict != "proven"
+    assert p.verdict == "falsified"
+    assert p.counterexample.startswith("(-1, 1)")
     assert root_or_gap(-1.0, 1.0) == -2.0
 
 
@@ -54,4 +55,5 @@ def test_the_solver_finds_the_point_on_the_branch_without_the_root():
     box = {"x": Interval(-1.0, 1.0, True, True),
            "y": Interval(-1.0, 1.0, True, True)}
     result = _smt.nlsat_decide(expr, ">=", box, {"x": x, "y": y})
-    assert result is None or result.status == "disproven"
+    assert result.status == "disproven"
+    assert result.counterexample == "x = -1/2, y = 0"
