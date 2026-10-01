@@ -237,6 +237,9 @@ def test_a_repeat_compares_by_kind():
     assert repeats((NAN, None), (float("nan"), None))
     assert repeats((None, "ValueError"), (None, "ValueError"))
     assert not repeats((None, "ValueError"), (None, "TypeError"))
-    assert not repeats((0.0, None), (-0.0, None))
+    # two answers within floating-point accuracy are one answer
+    assert repeats((0.0, None), (-0.0, None))
+    assert repeats((1.0, None), (1.0 + 1e-12, None))
+    assert not repeats((1.0, None), (1.001, None))
     assert repeats(([1.0, NAN], None), ([1.0, NAN], None))
     assert not repeats(([1.0, 2.0], None), ([1.0, 2.5], None))

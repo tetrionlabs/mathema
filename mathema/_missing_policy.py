@@ -448,10 +448,17 @@ INCONCLUSIVE = "inconclusive"
 NOT_REPEATABLE = "not repeatable at this point"
 
 
+#: the allowance two runs of one call may differ by and still agree: the
+#: default tolerance plus floating-point accuracy scaled to the values, as
+#: a computation line compares
+REPEAT_SLACK, REPEAT_RELATIVE = 1e-9, 1e-7
+
+
 def repeats(first: tuple, second: tuple) -> bool:
-    """Whether two runs of one call, each `(output, raised)`, agree by
-    kind: the same exception type, nan with nan, every other float
-    exactly (the sign of zero included), containers slot by slot."""
+    """Whether two runs of one call, each `(output, raised)`, agree: the
+    same exception type, nan with nan, every other float within the
+    default tolerance and floating-point accuracy, containers slot by
+    slot."""
     import math
     if first[1] is not None or second[1] is not None:
         return first[1] == second[1]
@@ -471,7 +478,9 @@ def repeats(first: tuple, second: tuple) -> bool:
         if isinstance(x, float) and isinstance(y, float):
             if math.isnan(x) or math.isnan(y):
                 return math.isnan(x) and math.isnan(y)
-            return x == y and math.copysign(1.0, x) == math.copysign(1.0, y)
+            if math.isinf(x) or math.isinf(y):
+                return x == y
+            return abs(x - y) <= REPEAT_SLACK + REPEAT_RELATIVE * max(abs(x), abs(y), 1.0)
         wx, wy = _hole_word(x), _hole_word(y)
         if wx is not None or wy is not None:
             return wx == wy
