@@ -92,8 +92,14 @@ def vector_floor(holes: list, admits_zero: bool, length_free: bool,
 
 
 def _pairs(holes: list) -> list:
-    """Every two of the admitted hole values, in order."""
-    return [(h, g) for i, h in enumerate(holes) for g in holes[i + 1:]]
+    """Every two of the admitted hole values, in order, that one
+    container can hold apart: `pd.NA` is a nullable column's hole, which
+    pandas turns `nan` into and an object column of numbers does not
+    aggregate, so it pairs with nothing."""
+    def alone(h) -> bool:
+        return type(h).__name__ == "NAType"
+    return [(h, g) for i, h in enumerate(holes) for g in holes[i + 1:]
+            if not (alone(h) or alone(g))]
 
 
 def matrix_floor(holes: list, admits_zero: bool, absent: bool = False) -> list:
