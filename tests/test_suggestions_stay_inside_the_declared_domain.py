@@ -5,14 +5,19 @@ declared domain. A suggested claim that transforms an argument
 (`f(c * x)`, `f(g(xs, c))`, `f(-x)`, `f(y, x)`) binds its variables, in
 the grammar's own `for` and `let` forms, so every transformed argument
 stays inside the domain the signature or a guard declares; when no such
-binding exists the suggestion is not made. A function with no declared
-domain gets the suggestions it always got."""
+binding exists the suggestion is not made. Idempotence and
+associativity feed the function's own output back in, so they are
+stated over the whole declared domain: an output that leaves it is a
+call outside it, and the row falsifies with that call as the witness.
+A function with no declared domain gets the suggestions it always
+got."""
 import math
 
 import pytest
 
-from mathema import check, enforce_domain
+from mathema import check, claims_decorator, enforce_dimensions, enforce_domain
 from mathema.suggest import suggest_claims
+from mathema.types import Vec
 
 
 @enforce_domain(domain={"weights": (0, 1)})
@@ -53,6 +58,8 @@ def _suggested(fn):
                                 cubed_signal, total_weight])
 def test_no_suggested_row_is_refused_by_the_guard(fn):
     for p in check(fn).probes:
+        if p.name in ("idempotent", "associative"):
+            continue
         assert "DomainError" not in str(p.counterexample), (
             fn.__name__, p.name, p.statement, p.counterexample)
         assert "DomainError" not in (p.note or ""), (fn.__name__, p.name,
@@ -75,7 +82,6 @@ def test_a_sequence_shift_binds_the_entries_and_the_shift_together():
 def test_symmetry_is_not_suggested_where_minus_x_leaves_the_guard():
     names = set(_suggested(unit_root))
     assert "even" not in names and "odd" not in names
-    assert "idempotent" not in names
 
 
 def test_symmetry_over_a_symmetric_guard_is_suggested_bound_to_it():
@@ -95,10 +101,70 @@ def test_commutativity_binds_both_arguments_to_where_either_slot_admits():
     s = _suggested(total_weight)["commutative"]
     assert tuple(s.domain["a"]) == (0.0, 1.0) and \
         tuple(s.domain["b"]) == (0.0, 1.0), s.domain
-    assert "associative" not in _suggested(total_weight)
+
+
+def test_idempotence_is_stated_over_the_whole_declared_domain():
+    s = _suggested(doubled_share)["idempotent"]
+    assert tuple(s.domain["x"]) == (0.0, 1.0), s.domain
+    rows = {p.name: p for p in check(doubled_share).probes}
+    # f(1) = 2 leaves [0, 1], so f(f(1)) is a call the guard refuses
+    assert rows["idempotent"].verdict == "falsified"
+    assert "DomainError" in rows["idempotent"].counterexample
+
+
+def test_associativity_binds_both_arguments_and_c_to_their_domains():
+    s = _suggested(total_weight)["associative"]
+    assert tuple(s.domain["a"]) == (0.0, 1.0), s.domain
+    assert tuple(s.domain["b"]) == (0.0, 2.0), s.domain
+    assert tuple(s.domain["c"].pieces[0]) == (0.0, 2.0), s.domain
+    rows = {p.name: p for p in check(total_weight).probes}
+    assert rows["associative"].verdict == "falsified"
+    assert "DomainError" in rows["associative"].counterexample
 
 
 def test_a_function_with_no_declared_domain_keeps_its_suggestions():
     s = _suggested(plain_mean)
     assert s["scale_equivariant"].domain["c"].pieces == ((-5.0, 5.0),)
     assert "weights" not in s["translation_equivariant"].domain
+
+
+SEEN: list = []
+
+
+@enforce_domain()
+@claims_decorator("for xs in [0, 1]^n, f(xs) >= 0")
+def share_total(xs: Vec("n")) -> float:
+    """Sum of shares, each guarded to [0, 1] by the space the claim binds."""
+    return sum(xs)
+
+
+@enforce_dimensions()
+@claims_decorator("for xs in [0, 1]^30, f(xs) >= 0")
+def share_total_30(xs: Vec("n")) -> float:
+    """Sum of thirty shares, the space the claim binds fixing the size
+    and the entries."""
+    SEEN.extend(v for v in xs if isinstance(v, (int, float))
+                and math.isfinite(v))
+    return sum(xs)
+
+
+def test_a_space_in_a_guard_bounds_the_suggested_transforms_entrywise():
+    s = _suggested(share_total)
+    assert s["scale_equivariant"].domain["c"].pieces == ((0.0, 1.0),), \
+        s["scale_equivariant"].domain
+    assert s["translation_equivariant"].domain["xs"].pieces == \
+        ((0.25, 0.75),), s["translation_equivariant"].domain
+    for p in check(share_total).probes:
+        assert "DomainError" not in str(p.counterexample), (
+            p.name, p.statement, p.counterexample)
+
+
+def test_every_entry_drawn_lies_in_the_space_enforce_dimensions_guards():
+    SEEN.clear()
+    check(share_total_30)
+    assert SEEN
+    # a value comparison's round-off estimate recomputes each draw with
+    # every entry moved by a few units in its last place; any other
+    # entry outside [0, 1] is a draw from outside the space
+    outside = sorted({v for v in SEEN if not -1e-12 <= v <= 1 + 1e-12})
+    assert not outside, outside[:10]

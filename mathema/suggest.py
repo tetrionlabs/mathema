@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 
 import ast
+import dataclasses
 import os
 
 from . import families as _families
@@ -356,8 +357,9 @@ def _declared_intervals(fn, facts) -> dict:
     """Intent:
         `{param: (lo, hi)}` for every parameter the signature or a guard
         declares a single real interval for (a sequence's entries by
-        the interval its guard admits for each); a parameter with no
-        such declared domain is absent.
+        the interval its guard admits for each, a space `[lo, hi]^n` by
+        its entries' interval); a parameter with no such declared
+        domain is absent.
     """
     from .conjecture import _guard_interval
     from .types import domain_from_signature
@@ -367,7 +369,11 @@ def _declared_intervals(fn, facts) -> dict:
         return {}
     out: dict = {}
     for p in facts.params:
-        found = _guard_interval(declared.get(p))
+        bound = declared.get(p)
+        if getattr(bound, "dims", ()):
+            # a space such as [0, 1]^n: the interval each entry lies in
+            bound = dataclasses.replace(bound, dims=())
+        found = _guard_interval(bound)
         if found is not None:
             out[p] = (found[0], found[1])
     return out
@@ -566,9 +572,12 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
                              name="even", source="mathema", route="best"))
             out.append(claim(f"{mirrored.format(p=p)}f(-{p}) == -f({p})",
                              name="odd", source="mathema", route="best"))
-        if p not in declared:
-            out.append(claim(f"f(f({p})) == f({p})", name="idempotent",
-                             source="mathema", route="best"))
+        # over the whole working domain: an output that leaves it makes
+        # f(f(p)) a call outside it, which falsifies with that witness
+        whole = (f"for {p} in {_interval_words(declared[p])}, "
+                 if p in declared else "")
+        out.append(claim(f"{whole}f(f({p})) == f({p})", name="idempotent",
+                         source="mathema", route="best"))
     closed_form = (_loop_closed_form(fn, facts)
                    if facts.params
                    and facts.returns_kind in ("scalar", "int")
@@ -604,13 +613,22 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
             out.append(claim(f"{bind}f({p1}, {p2}) == f({p2}, {p1})",
                              name="commutative", source="mathema",
                              route="best"))
-        if p1 not in declared and p2 not in declared:
-            # f(f(p1, p2), c) passes the function's own output back in,
-            # whose range nothing states
-            aux = "c" if "c" not in facts.params else "aux_c"
-            out.append(claim(f"let {aux} be [-5, 5], "
-                             f"f(f({p1}, {p2}), {aux}) == f({p1}, f({p2}, {aux}))",
-                             name="associative", source="mathema", route="best"))
+        # over the whole working domain, the third argument c in the
+        # second slot's: an inner result that leaves it is a call
+        # outside it, which falsifies with that witness
+        aux = "c" if "c" not in facts.params else "aux_c"
+        if p1 in declared or p2 in declared:
+            spans = {q: declared.get(q, (-math.inf, math.inf))
+                     for q in (p1, p2)}
+            third = spans[p2] if p2 in declared else (-5, 5)
+            bind = ", ".join(f"{q} in {_interval_words(spans[q])}"
+                             for q in (p1, p2))
+            prefix = (f"for {bind}, let {aux} be {_interval_words(third)}, ")
+        else:
+            prefix = f"let {aux} be [-5, 5], "
+        out.append(claim(f"{prefix}f(f({p1}, {p2}), {aux}) == "
+                         f"f({p1}, f({p2}, {aux}))",
+                         name="associative", source="mathema", route="best"))
 
     # f(...) == f(...) genuinely re-evaluates fn twice with the same
     # synthesized arguments on the probe route (check_conjectures shares
