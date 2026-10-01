@@ -6030,6 +6030,10 @@ def _complete_missing(cj, fn) -> tuple:
         defaults = _for_element_domain(defaults, bound)
         # a domain already completed carries the exclusions completion
         # added; only a binding's own text is checked for holes
+        from .domain import ABSENT_UNSET, unset_refusal
+        if ABSENT_UNSET in _written_sentinels(bound):
+            # a call always passes a parameter
+            return completed, notes, unset_refusal(p), resolution
         written_holes = [] if getattr(bound, "policy", None) is not None else [
             v for v in _written_sentinels(bound) if v.kind == "missing"]
         if written_holes and not defaults.members:
