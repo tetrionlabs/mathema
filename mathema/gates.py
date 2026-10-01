@@ -418,11 +418,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             from .conjecture import claim_side_has_no_value
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
-            if claim_side_has_no_value(e):
-                return f"the claim's own side has no real value here ({e})"
             if isinstance(e, (IndexError, ZeroDivisionError)):
                 return (f"the claim's own expression raises "
                         f"{type(e).__name__} here ({e})")
+            if claim_side_has_no_value(e):
+                return f"the claim's own side has no real value here ({e})"
             return INCONCLUSIVE
         if calls_nonfinite[0] is not None:
             # no value at a finite input: an overflow, a pole, a nan.

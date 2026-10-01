@@ -7329,16 +7329,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # claim's samples
                 continue
             if not call_raised[0]:
-                if claim_side_has_no_value(e):
-                    # the claim's own side has no real value at this
-                    # in-domain point: the claim is wrong there
-                    checked += 1
-                    cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: "
-                          f"the claim's own side has no real value here "
-                          f"({e}); narrow the claim's domain to where "
-                          f"every side of it is real")
-                    break
-                elif isinstance(e, (IndexError, ZeroDivisionError)):
+                if isinstance(e, (IndexError, ZeroDivisionError)):
                     # the claim's own expression has no value at this
                     # in-domain point: an index outside a sequence it
                     # reads (a literal `[9]` past the end of a result),
@@ -7348,6 +7339,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           f"the claim's own expression raised "
                           f"{type(e).__name__} ({e}); narrow the claim's "
                           f"domain to where it has a value")
+                    break
+                elif claim_side_has_no_value(e):
+                    # the claim's own side has no real value at this
+                    # in-domain point: the claim is wrong there
+                    checked += 1
+                    cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: "
+                          f"the claim's own side has no real value here "
+                          f"({e}); narrow the claim's domain to where "
+                          f"every side of it is real")
                     break
                 # the law's own plumbing failed, not the function,
                 # a broken sample, never a counterexample
