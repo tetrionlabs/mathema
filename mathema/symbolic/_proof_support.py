@@ -79,9 +79,21 @@ def _affine_sign_by_corners(target, domain: dict, params: dict) -> bool | None:
             return None
     except sympy.PolynomialError:
         return None
+    from ..domain import exact_number
+    exact_target = _exact_floats(target)
     signs = set()
     for corner in itertools.product(*bounded.values()):
-        signs.add(float(target.subs(dict(zip(syms, corner)))) >= 0)
+        point = {sym: exact_number(v) for sym, v in zip(syms, corner)}
+        value = exact_target.subs(point)
+        if value is sympy.nan or not value.is_comparable:
+            return None
+        if value.is_infinite:
+            signs.add(bool(value > 0))
+            continue
+        sign = _verified_sign(value)
+        if sign is None:
+            return None
+        signs.add(sign >= 0)
     return signs.pop() if len(signs) == 1 else None
 
 
@@ -192,15 +204,25 @@ def _resolve_clamps(expr, domain: dict, params: dict):
     it. Only ever collapses when one side's whole range provably never
     overlaps the other's, an overlapping or partially-declared pair
     is left alone, never guessed at."""
+    from ..domain import exact_number
     bounds = {}
     for p, sym in params.items():
         lo_hi = domain.get(p)
         if isinstance(lo_hi, tuple) and len(lo_hi) == 2:
-            bounds[sym] = (float(lo_hi[0]), float(lo_hi[1]))
+            bounds[sym] = (exact_number(lo_hi[0]), exact_number(lo_hi[1]))
+
+    def at_most(a, b) -> bool:
+        # a <= b decided exactly, an infinite end included
+        if a is -sympy.oo or b is sympy.oo:
+            return True
+        if a is sympy.oo or b is -sympy.oo:
+            return False
+        sign = _verified_sign(_exact_floats(sympy.sympify(b - a)))
+        return sign is not None and sign >= 0
 
     def bound_of(node):
         if node.is_number:
-            c = float(node)
+            c = _exact_floats(node)
             return c, c
         if node in bounds:
             return bounds[node]
@@ -220,7 +242,7 @@ def _resolve_clamps(expr, domain: dict, params: dict):
             return None
         if not (lo.is_finite and hi.is_finite):
             return None
-        return float(lo), float(hi)
+        return _exact_floats(lo), _exact_floats(hi)
 
     subs = {}
     for node in expr.atoms(sympy.Min, sympy.Max):
@@ -234,14 +256,14 @@ def _resolve_clamps(expr, domain: dict, params: dict):
         lo_a, hi_a = bound_a
         lo_b, hi_b = bound_b
         if isinstance(node, sympy.Min):
-            if hi_a <= lo_b:
+            if at_most(hi_a, lo_b):
                 subs[node] = a
-            elif hi_b <= lo_a:
+            elif at_most(hi_b, lo_a):
                 subs[node] = b
         else:
-            if hi_a <= lo_b:
+            if at_most(hi_a, lo_b):
                 subs[node] = b
-            elif hi_b <= lo_a:
+            elif at_most(hi_b, lo_a):
                 subs[node] = a
     return expr.subs(subs) if subs else expr
 
@@ -343,21 +365,23 @@ def _resolve_mod(expr, domain: dict, params: dict):
     `Mod` from the expression entirely for a domain this narrow, so the
     question `.equals()` ends up answering is a plain, honestly
     decidable one."""
+    from ..domain import exact_number
     subs = {}
     for p, sym in params.items():
         lo_hi = domain.get(p)
         if not isinstance(lo_hi, tuple):
             continue
-        lo, hi = lo_hi
-        if lo < 0:
+        lo, hi = exact_number(lo_hi[0]), exact_number(lo_hi[1])
+        if not (lo.is_comparable and hi.is_comparable) or bool(lo < 0):
             continue
         closed_hi = getattr(lo_hi, "closed_hi", True)
         for node in expr.atoms(sympy.Mod):
             base, modulus = node.args
             if base != sym or not modulus.is_number:
                 continue
-            m = float(modulus)
-            if hi < m or (hi == m and not closed_hi):
+            gap = _verified_sign(_exact_floats(modulus) - hi) \
+                if hi.is_finite else None
+            if gap == 1 or (gap == 0 and not closed_hi):
                 subs[node] = sym
     return expr.subs(subs) if subs else expr
 
@@ -1790,7 +1814,9 @@ def _verified_sign(value):
         `is_negative` says True). Exact zero and rational values decide
         structurally; everything else must agree at two working
         precisions (30 and 50 digits) or the answer is None, an
-        undecided, never a confidently wrong verdict.
+        undecided, never a confidently wrong verdict. 0 only when sympy
+        proves the value zero: a value too small for a double is still
+        signed.
     """
     if value.is_zero:
         return 0
@@ -1799,13 +1825,13 @@ def _verified_sign(value):
     try:
         a, b = value.evalf(30), value.evalf(50)
         if a.is_comparable and b.is_comparable:
-            fa, fb = float(a), float(b)
-            if fa > 0 and fb > 0:
+            # the signs of the evaluated Floats themselves, never of a
+            # double conversion, which underflows a value below about
+            # 1e-308 to zero
+            if a.is_positive and b.is_positive:
                 return 1
-            if fa < 0 and fb < 0:
+            if a.is_negative and b.is_negative:
                 return -1
-            if fa == 0 and fb == 0:
-                return 0
     except (TypeError, ValueError, OverflowError):
         pass
     return None
@@ -2895,7 +2921,7 @@ def _attained_zero(target, domain: dict, params: dict,
         root leaves the claim undecided, never proven). The root is
         verified by exact substitution before being trusted.
     """
-    from ..domain import domain_contains
+    from ..domain import exact_membership
     syms = list(params.values())
     if not syms:
         return None
@@ -2918,11 +2944,7 @@ def _attained_zero(target, domain: dict, params: dict,
                 ok = False
                 break
             bound = domain.get(name_of[s])
-            try:
-                if bound is not None and not domain_contains(float(v), bound):
-                    ok = False
-                    break
-            except Exception:
+            if bound is not None and exact_membership(v, bound) is not True:
                 ok = False
                 break
             point[name_of[s]] = v
@@ -2952,23 +2974,17 @@ _RELATION_DECIDERS = {
 
 def _exact(v):
     """Intent:
-        Snap a float to an exact Integer or Rational when the round
-        trip is lossless. Falls back to the original value otherwise.
+        A float as the exact number it names (`domain.exact_number`):
+        the shortest decimal that reads back as it, as a Rational.
+        Anything else passes through.
 
     Notes:
         sympy.refine's Abs-sign handler only fires when every bound in
         an assumption set is exact. One Float anywhere in the
-        conjunction disables it. Upcasting everything to Float instead
-        of downcasting to exact does not help either, both confirmed
-        directly against sympy.
+        conjunction disables it.
     """
-    if not isinstance(v, float):
-        return v
-    exact = sympy.nsimplify(v, rational=False)
-    try:
-        return exact if abs(float(exact) - v) < 1e-9 else v
-    except TypeError:
-        return v
+    from ..domain import exact_number
+    return exact_number(v)
 
 
 def _split_domain_pieces(lo, hi, closed_lo: bool, closed_hi: bool, split_points):

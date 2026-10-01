@@ -2311,6 +2311,12 @@ def _roots_outside_domain(locus, domain: dict) -> bool:
     if not isinstance(roots, sympy.FiniteSet):
         return False
 
+    if not plane:
+        # each real root against the bound's exact endpoints: a root a
+        # double cannot tell from an endpoint is still inside or outside
+        from ..domain import exact_membership
+        return all(exact_membership(r, bound) is False for r in roots)
+
     def number(r):
         # a root on the real line as the real number it is, else complex
         value = complex(r)

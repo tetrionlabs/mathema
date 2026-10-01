@@ -2071,6 +2071,44 @@ def _interval_sign_kwargs(piece) -> dict | None:
     return None
 
 
+def exact_number(v):
+    """Intent:
+        A domain value as the exact number it names, for the symbolic
+        side: a finite float is the shortest decimal that reads back as
+        it (`repr`), as a sympy Rational, so `0.3` is 3/10; an infinite
+        float is sympy's infinity; anything else passes through.
+    """
+    import math
+
+    import sympy
+    if isinstance(v, bool) or not isinstance(v, float):
+        return v
+    if math.isinf(v):
+        return sympy.oo if v > 0 else -sympy.oo
+    if v != v:
+        return v
+    return sympy.Rational(repr(v))
+
+
+def exact_membership(value, bound) -> "bool | None":
+    """Intent:
+        Whether an exact sympy number (a root, possibly irrational) lies
+        in the declared bound, decided in exact arithmetic against the
+        bound's exact endpoints: True, False, or None when sympy cannot
+        settle it.
+    """
+    import sympy
+    try:
+        verdict = bound_to_sympy_set(bound).contains(value)
+    except Exception:
+        return None
+    if verdict is sympy.true:
+        return True
+    if verdict is sympy.false:
+        return False
+    return None
+
+
 def bound_context(sym, bound):
     """The relational-predicate half of the projection: everything the
     declared bound states that no fixed symbol-assumption keyword can
@@ -2084,7 +2122,7 @@ def bound_context(sym, bound):
     import sympy
 
     def interval_predicate(piece):
-        lo, hi = piece
+        lo, hi = exact_number(piece[0]), exact_number(piece[1])
         lo_pred = (sympy.Q.gt(sym, lo) if not getattr(piece, "closed_lo", True)
                   else sympy.Q.ge(sym, lo))
         hi_pred = (sympy.Q.lt(sym, hi) if not getattr(piece, "closed_hi", True)
@@ -2098,7 +2136,8 @@ def bound_context(sym, bound):
     if isinstance(bound, Domain) and bound.base_type == "C":
         # ordering predicates have no complex reading; only exclusions
         # survive as facts.
-        ne_clauses = [sympy.Q.ne(sym, v) for v in bound.excluded if v is not MISSING]
+        ne_clauses = [sympy.Q.ne(sym, exact_number(v)) for v in bound.excluded
+                      if v is not MISSING]
         if not ne_clauses:
             return None
         return sympy.And(*ne_clauses) if len(ne_clauses) > 1 else ne_clauses[0]
@@ -2106,14 +2145,16 @@ def bound_context(sym, bound):
         piece_preds = []
         for piece in bound.pieces:
             if isinstance(piece, frozenset):
-                eqs = [sympy.Eq(sym, v) for v in piece if v is not MISSING]
+                eqs = [sympy.Eq(sym, exact_number(v)) for v in piece
+                       if v is not MISSING]
                 if eqs:
                     piece_preds.append(sympy.Or(*eqs) if len(eqs) > 1 else eqs[0])
             elif isinstance(piece, tuple):
                 piece_preds.append(interval_predicate(piece))
         clause = (sympy.Or(*piece_preds) if len(piece_preds) > 1
                  else (piece_preds[0] if piece_preds else None))
-        ne_clauses = [sympy.Q.ne(sym, v) for v in bound.excluded if v is not MISSING]
+        ne_clauses = [sympy.Q.ne(sym, exact_number(v)) for v in bound.excluded
+                      if v is not MISSING]
         parts = ([clause] if clause is not None else []) + ne_clauses
         if not parts:
             return None
@@ -2251,8 +2292,9 @@ def bound_to_sympy_set(bound):
 
     def piece_set(piece):
         if isinstance(piece, frozenset):
-            return sympy.FiniteSet(*[v for v in piece if v is not MISSING])
-        lo, hi = piece
+            return sympy.FiniteSet(*[exact_number(v) for v in piece
+                                     if v is not MISSING])
+        lo, hi = exact_number(piece[0]), exact_number(piece[1])
         return sympy.Interval(lo, hi,
                               left_open=not getattr(piece, "closed_lo", True),
                               right_open=not getattr(piece, "closed_hi", True))
@@ -2269,7 +2311,8 @@ def bound_to_sympy_set(bound):
         _require_known_base_type(bound)
         return sympy.S.Reals   # a bare explicit "R"
     if isinstance(bound, frozenset):
-        return sympy.FiniteSet(*[v for v in bound if v is not MISSING])
+        return sympy.FiniteSet(*[exact_number(v) for v in bound
+                                 if v is not MISSING])
     if isinstance(bound, tuple) and len(bound) == 2:
         return piece_set(bound)
     if isinstance(bound, Domain):
@@ -2287,7 +2330,8 @@ def bound_to_sympy_set(bound):
             result = sympy.Intersection(covered, base)
         else:
             result = base
-        real_excluded = [v for v in bound.excluded if v is not MISSING]
+        real_excluded = [exact_number(v) for v in bound.excluded
+                         if v is not MISSING]
         if real_excluded:
             result = sympy.Complement(result, sympy.FiniteSet(*real_excluded))
         return result
