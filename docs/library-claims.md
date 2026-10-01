@@ -62,7 +62,7 @@ mathema compendium status --root .
     mathema/compendium/numpy/reductions.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/scalars.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/statistics.claims.yaml (bundled, >=1.24,<3, in range)
-  numpy.percentile  1 call, 1 row: 0 verified locally, 0 trusted, 0 falsified, 1 unsettled
+  numpy.percentile  1 call, 2 rows: 0 verified locally, 0 trusted, 0 falsified, 2 unsettled
   numpy.sqrt        1 call, 2 rows: 0 verified locally, 0 trusted, 0 falsified, 2 unsettled
   numpy.std         1 call, 3 rows: 0 verified locally, 0 trusted, 0 falsified, 3 unsettled
   no claims: numpy.ptp
@@ -93,7 +93,7 @@ mathema verify --root .
 
 <!-- example: library output -->
 ```text
-ok   numpy.percentile: library claims from mathema/compendium/numpy/statistics.claims.yaml; no baseline record; 1 proven, 1 holds, 0 falsified
+ok   numpy.percentile: library claims from mathema/compendium/numpy/statistics.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
 ok   numpy.sqrt: library claims from mathema/compendium/numpy/scalars.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
 ok   numpy.std: library claims from mathema/compendium/numpy/reductions.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
 ok   risk.spread: no baseline record; 1 proven, 1 holds, 0 falsified
@@ -117,7 +117,7 @@ mathema compendium status --root .
 
 <!-- example: library output match=subset -->
 ```text
-  numpy.percentile  1 call, 1 row: 1 verified locally, 0 trusted, 0 falsified, 0 unsettled
+  numpy.percentile  1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.sqrt        1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.std         1 call, 3 rows: 3 verified locally, 0 trusted, 0 falsified, 0 unsettled
   no claims: numpy.ptp
@@ -178,7 +178,7 @@ mathema compendium status --root .
     mathema/compendium/numpy/scalars.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/statistics.claims.yaml (bundled, >=1.24,<3, in range)
     claims/numpy.claims.yaml (project, >=2,<3, in range)
-  numpy.percentile  1 call, 1 row: 1 verified locally, 0 trusted, 0 falsified, 0 unsettled
+  numpy.percentile  1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.ptp         1 call, 1 row: 1 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.sqrt        1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.std         1 call, 3 rows: 3 verified locally, 0 trusted, 0 falsified, 0 unsettled

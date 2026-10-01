@@ -96,9 +96,9 @@ def test_every_bundled_definition_row_holds_against_the_installed_library(
 def test_the_numbers_of_bundled_definition_rows():
     counted = {relative: len(_definition_rows(relative))
                for relative in _FILES}
-    assert counted == {"numpy/reductions.claims.yaml": 5,
+    assert counted == {"numpy/reductions.claims.yaml": 6,
                        "numpy/definitions.claims.yaml": 13,
-                       "numpy/definitions_2_4.claims.yaml": 1,
+                       "numpy/definitions_2_4.claims.yaml": 2,
                        "pandas/series.claims.yaml": 10,
                        "polars/series.claims.yaml": 11}
 

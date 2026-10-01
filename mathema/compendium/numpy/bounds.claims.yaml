@@ -31,3 +31,6 @@ numpy.clip:
       note: "Limits a to [a_min, a_max]; reversed bounds (a_min > a_max) are not checked, and the result is a_max."
     - name: clip_upper
       statement: "assuming a_min <= a_max, for a in [-1e6, 1e6], f(a, a_min, a_max) <= a_max"
+    - name: definition
+      statement: "for a in R^n \\ {∅}, a_min in [-1e6, 1e6], a_max in [-1e6, 1e6], assuming a_min <= a_max, f(a, a_min, a_max) ~= ((a + a_min + abs(a - a_min)) / 2 + a_max - abs((a + a_min + abs(a - a_min)) / 2 - a_max)) / 2"
+      note: "A vector clipped element by element: the larger of each element and a_min, then the smaller of that and a_max, each written as a midpoint and half a gap."
