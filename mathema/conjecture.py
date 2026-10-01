@@ -4660,14 +4660,22 @@ def _validate_claim(cj, statement: str, note: str, facts,
             if "disallowed" in str(e):
                 return Probe(cj.name, statement, "skipped", route=None,
                              note=f"{note}; {e}")
-    if cj.relation == "raises" and fn is not None:
+    if fn is not None:
         # the TypeError a call that does not fit the signature raises
         # comes from the claim's own malformed text, never from the
         # function, so it can neither satisfy nor refute the claim
-        mismatch = _call_arity_mismatch(cj.lhs, fn, param_set)
-        if mismatch is not None:
-            return Probe(cj.name, statement, "skipped:misspecified",
-                         route=None, note=f"{note}; {mismatch}")
+        sides = [cj.lhs] if cj.relation == "raises" else [cj.lhs, cj.rhs]
+        try:
+            pinned = frozenset(call_defaults(fn, cj)[1])
+        except Exception:
+            pinned = frozenset()
+        for side in sides:
+            mismatch = (_call_arity_mismatch(side, fn, param_set, pinned)
+                        if side else None)
+            if mismatch is not None:
+                return Probe(cj.name, statement, "skipped:misspecified",
+                             route=None, note=f"{note}; {mismatch}")
+    if cj.relation == "raises" and fn is not None:
         if cj.rhs and _resolve_exception_type(cj.rhs, fn) is None:
             return Probe(cj.name, statement, "skipped:misspecified",
                          route=None,
@@ -6051,7 +6059,8 @@ def _sympy_zero():
 
 
 
-def _call_arity_mismatch(src: str, fn, param_set: set) -> str | None:
+def _call_arity_mismatch(src: str, fn, param_set: set,
+                         pinned: frozenset = frozenset()) -> str | None:
     """Intent:
         The reason a call to `f` in the claim text `src` cannot bind to
         `fn`'s signature (too many or too few arguments, an unknown
@@ -6060,7 +6069,8 @@ def _call_arity_mismatch(src: str, fn, param_set: set) -> str | None:
 
     Notes:
         A starred argument is not counted and makes the check decline
-        for that call. A parameter literally named `f` makes `f(...)`
+        for that call. A `pinned` parameter (`let p be ...`) the call
+        does not pass itself is passed for it. A parameter literally named `f` makes `f(...)`
         ambiguous, so the check declines entirely.
     """
     if "f" in param_set:
@@ -6078,8 +6088,11 @@ def _call_arity_mismatch(src: str, fn, param_set: set) -> str | None:
                 or any(k.arg is None for k in node.keywords):
             continue
         try:
-            sig.bind(*([None] * len(node.args)),
-                     **{k.arg: None for k in node.keywords})
+            given_kw = {k.arg: None for k in node.keywords}
+            bound = sig.bind_partial(*([None] * len(node.args)), **given_kw)
+            sig.bind(*([None] * len(node.args)), **given_kw,
+                     **{p: None for p in pinned
+                        if p not in bound.arguments and p in sig.parameters})
         except TypeError:
             params = list(sig.parameters)
             given = len(node.args) + len(node.keywords)

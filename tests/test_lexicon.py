@@ -83,8 +83,9 @@ PINNED: dict = {
     "latex_varphi": "proven",
     "let_alias": "proven",
     "let_alias_for_under_test": "proven",
-    "let_free_var_closed": "skipped",
-    "let_free_var_typed": "skipped",
+    # f(x) does not bind to gibbs_free_energy(dh, t, ds): misspecified
+    "let_free_var_closed": "skipped:misspecified",
+    "let_free_var_typed": "skipped:misspecified",
     "matrix_determinant_bars_compound": "proven",
     "membership_interval_reduces_to_chain": "proven",
     "multiply_dot": "proven",

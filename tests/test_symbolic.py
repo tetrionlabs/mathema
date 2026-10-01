@@ -1281,15 +1281,23 @@ def test_fold_claim_symbolic_alpha_is_falsified_never_falsely_proven():
 
 
 def test_fold_claim_wrong_argument_count_is_skipped_not_an_error():
+    # f(x) cannot bind to ema(x, alpha): the claim is misspecified
     results = check_conjectures(ema, [claim("f(x) == x[-1]", route="derive")])
-    assert results[0].verdict == "unknown"
+    assert results[0].verdict == "skipped:misspecified"
 
 
 def test_fold_claim_non_bare_first_argument_is_skipped():
-    # the fold lift declines the sliced argument; probing then
-    # evaluates the slice for real, and with alpha = 1.0 the average
-    # collapses to the last element, so the claim holds empirically
+    # the fold lift declines the sliced argument; the unbound list
+    # admits the empty list, where the claim's own call ema([], 1.0)
+    # raises: an executed witness against the claim
     results = check_conjectures(ema, [claim("f(x[1:], 1.0) == x[-1]", route="derive")])
+    assert results[0].verdict == "falsified"
+    assert "x = []" in (results[0].counterexample or "")
+    # narrowed to two elements or more, probing evaluates the slice for
+    # real, and with alpha = 1.0 the average collapses to the last
+    # element, so the claim holds empirically
+    results = check_conjectures(ema, [claim(
+        "assuming len(x) >= 2, f(x[1:], 1.0) == x[-1]", route="derive")])
     assert results[0].verdict == "holds"
 
 
