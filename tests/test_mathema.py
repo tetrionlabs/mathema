@@ -306,11 +306,21 @@ def test_domain_restricts_probes_and_reports_enforcement():
 
     r = mathema.check(ema2, domain={"alpha": (0.0, 1.0)})
     vs = {p.name: p.verdict for p in r.probes}
-    # the convex-combination certificate proves the bound outright
-    # (the fold's weights are nonnegative and sum to 1 here); before
-    # it, in-domain sampling could only reach holds
-    assert vs["bounded_lower"] == "proven"
-    assert vs["bounded_upper"] == "proven"
+    # the suggested bounds admit the empty list, where ema2 reads x[0]
+    # and raises: an executed witness against each
+    assert vs["bounded_lower"] == "falsified"
+    assert vs["bounded_upper"] == "falsified"
+    # narrowed to the nonempty lists, the convex-combination
+    # certificate proves each bound outright (the fold's weights are
+    # nonnegative and sum to 1 here)
+    narrowed = mathema.check(ema2, domain={"alpha": (0.0, 1.0)}, claims=[
+        mathema.claims.claim("assuming len(x) >= 1, min(x) <= f(x, alpha)",
+                             name="lower"),
+        mathema.claims.claim("assuming len(x) >= 1, f(x, alpha) <= max(x)",
+                             name="upper")])
+    nv = {p.name: p.verdict for p in narrowed.probes}
+    assert nv["lower"] == "proven"
+    assert nv["upper"] == "proven"
     # enforcement is not synthesized behind a mode any more: undeclared
     # means unreported; DECLARING excluded_outside_domain makes the
     # unenforced exclusion a real falsification with the witness

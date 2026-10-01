@@ -234,8 +234,15 @@ def test_every_plain_sampled_probe_carries_a_confidence_meta():
         assert 1 <= conf["stars"] <= 4
 
 
+#: the suggested lower bound on ema, narrowed to the nonempty lists
+#: (ema reads x[0], so the empty list has no value and falsifies the
+#: unnarrowed suggestion there)
+_BOUNDED_LOWER = mathema.claims.claim(
+    "assuming len(x) >= 1, min(x) <= f(x, alpha)", name="bounded_lower")
+
+
 def test_check_end_to_end_still_reports_real_confidence_meta():
-    rec = mathema.check(ema)
+    rec = mathema.check(ema, claims=[_BOUNDED_LOWER])
     bounded = next(p for p in rec.probes if p.name == "bounded_lower")
     assert bounded.verdict == "falsified"
     assert "mathema.confidence" in bounded.meta
@@ -290,7 +297,7 @@ def test_bounded_counterexample_names_which_side_failed_and_by_what_margin():
     # "(args): lv vs rv" shape, not a bespoke "result=... > max(x)=..."
     # message the old hardcoded check built. Real, minor loss of
     # message detail; the args and both compared values are still there.
-    r = mathema.check(ema)
+    r = mathema.check(ema, claims=[_BOUNDED_LOWER])
     bounded = next(p for p in r.probes if p.name == "bounded_lower")
     assert bounded.verdict == "falsified"
     assert ": " in bounded.counterexample and " vs " in bounded.counterexample

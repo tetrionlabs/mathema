@@ -675,6 +675,39 @@ def _index_needs(srcs, seqs) -> dict:
     return needs
 
 
+def _shared_reads(view: "SeqLiftView", exprs) -> list:
+    """The pairs of sequences the lift reads over one length: two that
+    share a length symbol (a dot product), or one indexed by a sum that
+    runs over another's length (`for i in range(len(a)): a[i] * b[i]`
+    reads `b` at the positions of `a`)."""
+    owner = {}
+    for name, length in view.lengths.items():
+        if length is not None:
+            owner.setdefault(length, []).append(name)
+    by_base = {ib: name for name, ib in view.seqs.items()}
+    pairs: set = set()
+    for names in owner.values():
+        for a in names:
+            for b in names:
+                if a < b:
+                    pairs.add((a, b))
+    for e in exprs:
+        if not hasattr(e, "atoms"):
+            continue
+        for total in e.atoms(sympy.Sum, sympy.Product):
+            for var, _lo, hi in total.limits:
+                runs = [n for length, names in owner.items()
+                        if hi.has(length) for n in names]
+                for ix in total.function.atoms(sympy.Indexed):
+                    name = by_base.get(ix.base)
+                    if name is None or not ix.indices[0].has(var):
+                        continue
+                    for a in runs:
+                        if a != name:
+                            pairs.add(tuple(sorted((a, name))))
+    return sorted(pairs)
+
+
 def signature_shapes(fn) -> dict:
     """The Shape markers `fn`'s signature declares, `{}` when it has
     none or they cannot be read."""
@@ -861,11 +894,10 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     present = [n for n, ib in view.seqs.items()
                if lhs.has(ib) or rhs.has(ib)]
     ties = _length_ties(present, domain, assumption, shapes)
-    if judged and len(set(ties.values())) > 1:
-        firsts: dict = {}
-        for n in sorted(present):
-            firsts.setdefault(ties[n], n)
-        a, b = sorted(firsts.values())[:2]
+    untied = [pair for pair in _shared_reads(view, (lhs, rhs))
+              if ties.get(pair[0]) != ties.get(pair[1])]
+    if judged and untied:
+        a, b = untied[0]
         return ProofResult(
             "undecided",
             sketch=f"the claim admits {a} and {b} of different lengths, "

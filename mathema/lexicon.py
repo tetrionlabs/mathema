@@ -448,9 +448,9 @@ LEXICON: dict[str, str] = {
         "assuming is_defined(f) --> sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, "
         "for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)"),
     # certificates: a proof that names the sound rule that closed it
-    "certificate_convex_lower": ("for alpha in [0, 1], "
+    "certificate_convex_lower": ("for alpha in [0, 1], assuming len(x) >= 1, "
                                 "min(x) <= f(x, alpha)"),
-    "certificate_convex_upper": ("for alpha in [0, 1], "
+    "certificate_convex_upper": ("for alpha in [0, 1], assuming len(x) >= 1, "
                                 "f(x, alpha) <= max(x)"),
     "certificate_quadratic": ("let |inf| be 1e100, "
                               "for s1 in [0.05,0.5], s2 in [0.05,0.5], "

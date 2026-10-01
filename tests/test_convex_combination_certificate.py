@@ -37,8 +37,8 @@ def _one(fn, law):
 
 
 def test_the_bounds_prove_under_convex_weights(ema):
-    lower = _one(ema, "for alpha in [0, 1], min(x) <= f(x, alpha)")
-    upper = _one(ema, "for alpha in [0, 1], f(x, alpha) <= max(x)")
+    lower = _one(ema, "for alpha in [0, 1], assuming len(x) >= 1, min(x) <= f(x, alpha)")
+    upper = _one(ema, "for alpha in [0, 1], assuming len(x) >= 1, f(x, alpha) <= max(x)")
     for p in (lower, upper):
         assert p.verdict == "proven", (p.verdict, p.note)
         assert "convex-combination certificate" in (p.sketch or "")
@@ -46,7 +46,7 @@ def test_the_bounds_prove_under_convex_weights(ema):
 
 
 def test_mirrored_spellings_prove_too(ema):
-    p = _one(ema, "for alpha in [0, 1], f(x, alpha) >= min(x)")
+    p = _one(ema, "for alpha in [0, 1], assuming len(x) >= 1, f(x, alpha) >= min(x)")
     assert p.verdict == "proven", (p.verdict, p.note)
 
 

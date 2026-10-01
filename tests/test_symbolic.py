@@ -871,13 +871,15 @@ def test_fold_claim_scaled_return_and_alpha_one_collapse_together_proven():
     # claim; the two now have to compose correctly, not just work in
     # isolation.
     results = check_conjectures(
-        ema_scaled, [claim("f(x, 1.0, 2.0) == 2 * x[-1]", route="derive")])
+        ema_scaled, [claim("assuming len(x) >= 1, f(x, 1.0, 2.0) == 2 * x[-1]",
+                            route="derive")])
     assert results[0].verdict == "proven"
 
 
 def test_fold_claim_post_processed_return_zero_factor_collapses_proven():
     results = check_conjectures(
-        mean_of_list, [claim("f(x) * 0.0 == 0.0", route="derive")])
+        mean_of_list, [claim("assuming len(x) >= 1, f(x) * 0.0 == 0.0",
+                              route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -889,7 +891,8 @@ def test_fold_claim_law_can_call_a_math_function():
     # math_function's own comment for why this checks the sketch text
     # rather than the verdict.
     results = check_conjectures(
-        mean_of_list, [claim("abs(f(x)) >= 0.0", route="derive")])
+        mean_of_list, [claim("assuming len(x) >= 1, abs(f(x)) >= 0.0",
+                              route="derive")])
     haystack = (results[0].sketch or "") + (results[0].note or "")
     assert "NameError" not in haystack
     assert "Abs(" in haystack
@@ -962,7 +965,8 @@ def test_lift_dot_closed_form_matches_real_execution():
 
 def test_dot_claim_reflexivity_proven():
     results = check_conjectures(
-        dot_ab, [claim("f(a, b) == f(a, b)", route="derive")])
+        dot_ab, [claim("for a in R^n, b in R^n, assuming len(a) >= 1, "
+                       "f(a, b) == f(a, b)", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -997,7 +1001,8 @@ def test_dot_claim_law_can_call_a_math_function():
     # own sign-decidability gap on an unassumed Abs is a separate,
     # pre-existing limitation this test isn't meant to close.
     results = check_conjectures(
-        dot_ab, [claim("abs(f(a, b)) >= 0.0", route="derive")])
+        dot_ab, [claim("assuming len(a) == len(b), assuming len(a) >= 1, "
+                       "abs(f(a, b)) >= 0.0", route="derive")])
     haystack = (results[0].sketch or "") + (results[0].note or "")
     assert "NameError" not in haystack
     assert "Abs(" in haystack
@@ -1162,7 +1167,8 @@ def test_lift_sum_two_pass_variance_closed_form_matches_real_execution():
 
 def test_sum_claim_index_dot_reflexivity_proven():
     results = check_conjectures(
-        index_dot, [claim("f(a, b) == f(a, b)", route="derive")])
+        index_dot, [claim("for a in R^n, b in R^n, assuming len(a) >= 1, "
+                          "f(a, b) == f(a, b)", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1178,7 +1184,8 @@ def test_sum_claim_two_pass_variance_reflexivity_proven():
     # summand (via `mean`), which plain sympy.simplify() can't handle
     # without raising.
     results = check_conjectures(
-        two_pass_variance, [claim("f(xs) == f(xs)", route="derive")])
+        two_pass_variance, [claim("assuming len(xs) >= 1, f(xs) == f(xs)",
+                                  route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1256,7 +1263,8 @@ def test_lift_fold_external_init_empty_sequence_returns_initial_value():
 # --- proving claims against a fold lift (try_prove_fold, via check_conjectures) ---
 
 def test_fold_claim_alpha_one_collapses_to_last_element_proven():
-    results = check_conjectures(ema, [claim("f(x, 1.0) == x[-1]", route="derive")])
+    results = check_conjectures(ema, [claim("assuming len(x) >= 1, f(x, 1.0) == x[-1]",
+                                 route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1395,12 +1403,14 @@ def test_proven_fold_claim_reaches_the_reasoning_chain():
         def __init__(self, facts, probes):
             self.facts, self.probes, self.lifted, self.concepts = facts, probes, None, []
 
-    results = check_conjectures(ema, [claim("f(x, 1.0) == x[-1]", route="derive")])
+    results = check_conjectures(ema, [claim("assuming len(x) >= 1, f(x, 1.0) == x[-1]",
+                                 route="derive")])
     assert results[0].verdict == "proven"
     chain = reasoning_chain(_Record(analyze_source(ema), results))
     derivation_steps = [c for c in chain if c["step"] == "derivation"]
     assert len(derivation_steps) == 1
-    assert derivation_steps[0]["claim"] == "f(x, 1.0) = x[-1]"
+    assert derivation_steps[0]["claim"] == \
+        "assuming dim(x, 0) >= 1, f(x, 1.0) = x[-1]"
     assert derivation_steps[0]["basis"] == results[0].sketch and results[0].sketch
 
 
@@ -1423,7 +1433,8 @@ def test_proven_scalar_claim_quantifier_reflects_a_declared_domain():
 
 
 def test_proven_fold_claim_quantifies_over_the_sequence():
-    results = check_conjectures(ema, [claim("f(x, 1.0) == x[-1]", route="derive")])
+    results = check_conjectures(ema, [claim("assuming len(x) >= 1, f(x, 1.0) == x[-1]",
+                                 route="derive")])
     assert results[0].verdict == "proven"
     assert results[0].condition == "∀ x ∈ Seq(ℝ)"
 
@@ -1433,7 +1444,8 @@ def test_proven_fold_claim_merges_a_free_scalar_parameter_without_a_name_collisi
     # pool would otherwise also assign to a remapped scalar, a real
     # bug this test locks in the fix for.
     results = check_conjectures(
-        ema, [claim("f(x, alpha) == f(x, alpha)", route="derive")])
+        ema, [claim("assuming len(x) >= 1, f(x, alpha) == f(x, alpha)",
+                     route="derive")])
     assert results[0].verdict == "proven"
     assert results[0].condition is not None
     assert "x ∈ Seq(ℝ)" in results[0].condition
@@ -1479,7 +1491,8 @@ def test_humanize_renders_eq_and_power_readably():
 
 
 def test_proof_sketch_uses_humanized_piecewise_not_raw_sympy_repr():
-    results = check_conjectures(ema, [claim("f(x, 1.0) == x[-1]", route="derive")])
+    results = check_conjectures(ema, [claim("assuming len(x) >= 1, f(x, 1.0) == x[-1]",
+                                 route="derive")])
     assert results[0].verdict == "proven"
     assert "Piecewise" not in results[0].sketch
     assert "when L = 1" in results[0].sketch
@@ -1740,7 +1753,8 @@ def test_degenerate_domain_pins_through_the_fold_route_too():
     # defined earlier in this file, a second, differently-parameterized
     # `ema` here would silently shadow it at module scope.
     results = check_conjectures(
-        ema, [claim("for alpha in [1, 1], f(x, alpha) == x[-1]", route="derive")])
+        ema, [claim("for alpha in [1, 1], assuming len(x) >= 1, "
+                     "f(x, alpha) == x[-1]", route="derive")])
     assert results[0].verdict == "proven"
 
 

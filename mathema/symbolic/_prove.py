@@ -2605,7 +2605,7 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                                    shapes) is not False]
     if not targets:
         return None
-    identity = True
+    identity, calls_f = True, False
     for src in (lhs_src, rhs_src):
         try:
             tree = ast.parse(src or "0", mode="eval")
@@ -2613,9 +2613,14 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
             return None
         for n in ast.walk(tree):
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
-                    and n.func.id == "f" and [getattr(a, "id", None)
-                                              for a in n.args] != list(facts.params):
-                identity = False
+                    and n.func.id == "f":
+                calls_f = True
+                if [getattr(a, "id", None) for a in n.args] \
+                        != list(facts.params):
+                    identity = False
+    if not calls_f:
+        # a claim that never calls f has a value wherever f raises
+        return None
     rng = random.Random(0)
     admitted: dict = {}
     for target in targets:

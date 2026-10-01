@@ -32,7 +32,7 @@ def _point(text: str) -> dict:
 
 @pytest.mark.needs_full_proof_budget
 def test_a_sequence_fold_disproof_records_a_witness_that_reproduces():
-    [p] = check_conjectures(ema, [claim("f(x, alpha) == x[-1]",
+    [p] = check_conjectures(ema, [claim("assuming len(x) >= 1, f(x, alpha) == x[-1]",
                                         route="derive")])
     assert p.verdict == "falsified"
     assert p.counterexample
@@ -44,7 +44,7 @@ def test_a_sequence_fold_disproof_records_a_witness_that_reproduces():
 
 @pytest.mark.needs_full_proof_budget
 def test_a_true_sequence_fold_claim_is_still_proven():
-    [p] = check_conjectures(ema, [claim("f(x, 1.0) == x[-1]",
+    [p] = check_conjectures(ema, [claim("assuming len(x) >= 1, f(x, 1.0) == x[-1]",
                                         route="derive")])
     assert p.verdict == "proven"
 

@@ -130,6 +130,7 @@ def test_registering_a_replacement_dot_family_reroutes_try_prove():
     # this fake family's own, otherwise-unreachable verdict.
     families.register("dot_product", _FakeDotFamily())
     results = check_conjectures(
-        _dot_ab, [claim("f(a, b) == f(a, b)", route="derive")])
+        _dot_ab, [claim("assuming len(a) == len(b), assuming len(a) >= 1, "
+                        "f(a, b) == f(a, b)", route="derive")])
     assert results[0].verdict == "proven"
     assert "test's fake family" in results[0].sketch
