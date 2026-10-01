@@ -64,6 +64,12 @@ numpy.diff:
       statement: "let n be 2, for a in R^n \\ {∅}, assuming dim(a) >= 3, f(a) ~= a[2:] - 2 * a[1:-1] + a[:-2]"
       note: "The second differences."
 
+numpy.ptp:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) == max(a) - min(a)"
+      note: "Peak to peak: the greatest element less the least."
+
 numpy.cov:
   claims:
     - name: of_a_vector
