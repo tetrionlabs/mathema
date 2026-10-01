@@ -7720,6 +7720,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                if c not in pinned]
     call_raised = [None]   # the LABEL of the callee that raised, or None
     call_nan = [None]      # the LABEL of the first callee to return a NaN
+    # the first callee to return a hole of another member (`pd.NA`, `NaT`,
+    # a Decimal NaN), as `(label, member)`
+    call_hole: list = [None]
     # the LABEL and sign of the first callee to return an infinity for
     # finite arguments
     call_inf: list = [None, 0]
@@ -7762,6 +7765,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 raise ComplexResult(label, value)
             if call_nan[0] is None and holds_nan(value):
                 call_nan[0] = label
+            elif call_hole[0] is None and missing_class(value) == "hole":
+                from .domain import member_of
+                call_hole[0] = (label, member_of(value) or "a hole")
             if call_inf[0] is None:
                 sign = holds_inf(value)
                 if sign and not any(
@@ -7879,7 +7885,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if trial == smallest_trial:
             rng = _random_mod.Random(_RNG_SEED + 2)
         f_call.record(executed_record, dict(zip(kinds, args)))
-        call_raised[0] = call_nan[0] = call_inf[0] = None
+        call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
         outside_draw[0] = False
         trial_sizes: dict = (
             _draw_trial_sizes(resolver, shape_lo, shape_hi, shape_groups, rng)
@@ -8291,6 +8297,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # executed missing inputs, never judged
             executed_record.classified += 1
             continue
+        if not missing_in and call_hole[0] is not None:
+            # a hole of any member computed from inputs that are not
+            # missing is no value, as a NaN is
+            checked += 1
+            cx = f"{_point_text(args)}: {call_hole[0][0]} returned {call_hole[0][1]}"
+            break
         if not missing_in and (holds_nan(lv) or holds_nan(rv)):
             # a NaN computed from inputs that are not missing is no
             # value, like a raise: every value relation fails at this

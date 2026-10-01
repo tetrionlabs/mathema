@@ -126,3 +126,32 @@ def test_an_array_holding_a_hole_for_the_empty_input_fails():
 def test_an_empty_array_for_the_empty_input_passes():
     (row,) = check_conjectures(standardised, [claim("is_empty_safe(xs)")])
     assert row.verdict == "proven", (row.verdict, row.counterexample)
+
+
+# --- a hole of any member from present inputs is no value ------------------
+
+pd = pytest.importorskip("pandas")
+
+
+def na_at_the_top(x: float) -> float:
+    return pd.NA if x > 0.9 else x
+
+
+def nat_at_the_top(x: float):
+    return pd.NaT if x > 0.9 else x
+
+
+def decimal_nan_at_the_top(x: float):
+    import decimal
+    return decimal.Decimal("NaN") if x > 0.9 else decimal.Decimal(str(x))
+
+
+def test_na_nat_and_a_decimal_nan_from_present_inputs_fail_a_value_claim():
+    for fn, word in ((na_at_the_top, "NA"), (nat_at_the_top, "NaT"),
+                     (decimal_nan_at_the_top, "nan")):
+        for text in ("for x in [0, 1] \\ {missing}, f(x) != 5",
+                     "for x in [0, 1] \\ {missing}, f(x) <= 1"):
+            (row,) = check_conjectures(fn, [claim(text)])
+            assert row.verdict == "falsified", (fn.__name__, text, row.note)
+            assert row.counterexample.endswith(f"f returned {word}"), row.counterexample
+
