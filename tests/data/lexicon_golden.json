@@ -144,6 +144,11 @@
   "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, x ∈ [1.0, 10.0] ⊂ ℝ ∪ {∅}, f(x, α) ≤ x",
   "ascii": "for alpha in [0.0, 1.0]:float|missing, x in [1.0, 10.0]:float|missing, f(x, alpha) <= x"
  },
+ "enforce_domain_guard_unbound": {
+  "input": "for x in [1, 10], f(x, alpha) <= x",
+  "unicode": "let α = alpha, ∀ x ∈ [1.0, 10.0] ⊂ ℝ ∪ {∅}, f(x, α) ≤ x",
+  "ascii": "for x in [1.0, 10.0]:float|missing, f(x, alpha) <= x"
+ },
  "domain_open_interval": {
   "input": "for x in (0, 1), f(x) >= 0",
   "unicode": "∀ x ∈ (0.0, 1.0) ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
@@ -253,6 +258,26 @@
   "input": "is_deterministic(f)",
   "unicode": "f is deterministic",
   "ascii": "is_deterministic(f)"
+ },
+ "state_safe_logging": {
+  "input": "is_state_safe(f)",
+  "unicode": "f is state safe",
+  "ascii": "is_state_safe(f)"
+ },
+ "state_safe_logging_config_trap": {
+  "input": "is_state_safe(f)",
+  "unicode": "f is state safe",
+  "ascii": "is_state_safe(f)"
+ },
+ "state_safe_passed_generator": {
+  "input": "is_state_safe(f)",
+  "unicode": "f is state safe",
+  "ascii": "is_state_safe(f)"
+ },
+ "reproducible_passed_generator": {
+  "input": "is_reproducible(f)",
+  "unicode": "f is reproducible",
+  "ascii": "is_reproducible(f)"
  },
  "matrix_symmetric": {
   "input": "is_symmetric(A)",

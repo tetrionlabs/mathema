@@ -140,7 +140,16 @@ def largest_singular_value(A: np.ndarray) -> float:
 
 #: the lexicon rows each function demonstrates, in the shape of
 #: `mathema.lexicon.EXAMPLE_FUNCTIONS`
+def simulated_return(mu: float, rng: np.random.Generator) -> float:
+    """One simulated return around a mean, drawn from the generator the
+    caller passes in, what "state_safe_passed_generator" and
+    "reproducible_passed_generator" demonstrate."""
+    return mu + 0.01 * rng.standard_normal()
+
+
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
+    "simulated_return": (simulated_return, ["state_safe_passed_generator",
+                                            "reproducible_passed_generator"]),
     "euclidean_length": (euclidean_length, [
         "norm_bars_euclidean", "norm_bars_two", "norm_bars_chain",
         "norm_bars_homogeneous", "norm_bars_homogeneous_sign_trap",

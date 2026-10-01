@@ -42,6 +42,7 @@ this module exercises."""
 from __future__ import annotations
 
 import functools
+import logging
 import math
 import os
 import random
@@ -137,6 +138,9 @@ LEXICON: dict[str, str] = {
     # guard admits: a blend of x with 1 never exceeds x when x is at
     # least 1
     "enforce_domain_guard": "for alpha in [0, 1], x in [1, 10], f(x, alpha) <= x",
+    # a parameter the claim leaves unbound ranges over what the guard
+    # admits: alpha in [0, 1] here comes from the guard alone
+    "enforce_domain_guard_unbound": "for x in [1, 10], f(x, alpha) <= x",
     "domain_open_interval": "for x in (0, 1), f(x) >= 0",
     "domain_subset_integer": "for n in [0, 100] subset Z, f(n) >= 0",
     # a subscripted sequence element: no algebraic reading, carried
@@ -176,6 +180,14 @@ LEXICON: dict[str, str] = {
     "deterministic_trap": "is_deterministic(f)",
     "deterministic_nan_agrees": "is_deterministic(f)",
     "deterministic_hidden_read": "is_deterministic(f)",
+    # emitting a log record through the standard library is not a state
+    # change; changing a logger's level is
+    "state_safe_logging": "is_state_safe(f)",
+    "state_safe_logging_config_trap": "is_state_safe(f)",
+    # drawing from a generator the caller passes in moves the caller's
+    # own generator, not shared state; the same seed gives the same draw
+    "state_safe_passed_generator": "is_state_safe(f)",
+    "reproducible_passed_generator": "is_reproducible(f)",
     # matrix structure predicates: a property of a matrix VALUE, on a
     # bare parameter (a precondition) or an f(...) output. The postfix
     # `A is symmetric` is sugar folding to the canonical call form.
@@ -653,6 +665,8 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "safety_predicate_function_wide", "state_safe_env_write",
         "state_safe_global_rng", "deterministic_trap",
         "deterministic_nan_agrees", "deterministic_hidden_read",
+        "state_safe_logging", "state_safe_logging_config_trap",
+        "state_safe_passed_generator", "reproducible_passed_generator",
         "matrix_symmetric",
         "matrix_symmetric_postfix", "matrix_symmetric_output",
         "matrix_positive_definite", "matrix_finite",
@@ -705,6 +719,7 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "latex_left_right_bars"),
     "domains": (
         "domain_excluded_point", "enforce_domain_guard",
+        "enforce_domain_guard_unbound",
         "domain_discrete_strings",
         "domain_natural_numbers", "domain_complex", "relation_approx",
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
@@ -768,6 +783,14 @@ SECTIONS: dict[str, tuple[str, ...]] = {
 # find `%`, and someone looking for "for all" should find `∀`. Keep it
 # to vocabulary a newcomer would actually type.
 TAGS: dict[str, tuple[str, ...]] = {
+    "enforce_domain_guard_unbound": ("guard", "unbound parameter",
+                                     "enforce_domain"),
+    "state_safe_logging": ("logging", "log record", "state", "audit log"),
+    "state_safe_logging_config_trap": ("logging", "log level", "state",
+                                       "trap"),
+    "state_safe_passed_generator": ("generator", "rng", "random", "state"),
+    "reproducible_passed_generator": ("reproducible", "generator", "seed",
+                                      "rng"),
     "raises_typed_region": ("raises", "exception", "in a range", "region",
                             "precondition"),
     "state_safe_env_write": ("state", "side effect", "environment variable",
@@ -1317,6 +1340,27 @@ def log_return(p0: float, p1: float) -> float:
     return math.log(p1 / p0) if p0 > 0 and p1 > 0 else math.nan
 
 
+#: a logger of the pricing service's own, attached to no handlers
+_audit_log = logging.Logger("pricing.audit")
+_pricing_log = logging.getLogger("mathema.lexicon.pricing")
+
+
+def price_with_audit_log(price: float) -> float:
+    """A price with 20 percent added, logged on the way, what
+    "state_safe_logging" demonstrates: emitting a log record changes no
+    state."""
+    _audit_log.info("pricing %s", price)
+    return round(price * 1.2, 2)
+
+
+def quiet_pricing(price: float) -> float:
+    """The same price, after turning the pricing logger down to
+    warnings, what "state_safe_logging_config_trap" demonstrates: a
+    logger's level is shared configuration."""
+    _pricing_log.setLevel(logging.WARNING)
+    return round(price * 1.2, 2)
+
+
 def price_in_fx(price: float) -> float:
     """A price converted at the rate the environment holds, what
     "deterministic_hidden_read" demonstrates: a read two back-to-back
@@ -1725,7 +1769,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
                                   "deterministic_trap"]),
     "log_return": (log_return, ["deterministic_nan_agrees"]),
     "price_in_fx": (price_in_fx, ["deterministic_hidden_read"]),
-    "blend": (blend, ["enforce_domain_guard"]),
+    "blend": (blend, ["enforce_domain_guard", "enforce_domain_guard_unbound"]),
+    "price_with_audit_log": (price_with_audit_log, ["state_safe_logging"]),
+    "quiet_pricing": (quiet_pricing, ["state_safe_logging_config_trap"]),
     "sharpe_annualised": (sharpe_annualised, [
         "let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap"]),
     "triangular_number": (triangular_number, [
