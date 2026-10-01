@@ -895,16 +895,29 @@ def _real_only(real_fn):
     return call
 
 
-def _real_or_complex(real_fn, complex_fn):
+def _linalg_eval_words():
+    """The module holding the claim words' exact arithmetic."""
+    from . import _linalg_eval
+    return _linalg_eval
+
+
+def _real_or_complex(real_fn, complex_fn, exact_fn=None):
     """A law function that computes a complex argument (a Python or
     numpy complex) with its `cmath` counterpart and anything else with
     its `math` one; a real argument outside the real domain raises
-    `_NoRealValue`."""
+    `_NoRealValue`, and an exact rational beyond float range (the value
+    a claim word keeps there) is computed with `exact_fn`, when given."""
+    from fractions import Fraction
     real_call = _real_only(real_fn)
 
     def call(v):
         if isinstance(v, complex):
             return complex_fn(complex(v))
+        if exact_fn is not None and isinstance(v, Fraction):
+            try:
+                return real_call(v)
+            except OverflowError:
+                return exact_fn(v)
         return real_call(v)
     call.__name__ = getattr(real_fn, "__name__", "call")
     return call
@@ -927,11 +940,15 @@ _SAFE_FUNCS = {
     "Abs": abs, "Min": min, "Max": max,
     # over C (a complex argument) each elementary function is its
     # principal complex value, as the derive route reads it
-    "sqrt": _real_or_complex(math.sqrt, _cmath.sqrt),
+    "sqrt": _real_or_complex(math.sqrt, _cmath.sqrt,
+                             lambda v: _linalg_eval_words().exact_sqrt(v)),
     "exp": _real_or_complex(math.exp, _cmath.exp),
-    "log": _real_or_complex(math.log, _cmath.log),
-    "log10": _real_or_complex(math.log10, _cmath.log10),
-    "log2": _real_or_complex(math.log2, lambda z: _cmath.log(z, 2)),
+    "log": _real_or_complex(math.log, _cmath.log,
+                            lambda v: _linalg_eval_words().exact_log(v)),
+    "log10": _real_or_complex(math.log10, _cmath.log10,
+                              lambda v: _linalg_eval_words().exact_log(v, 10)),
+    "log2": _real_or_complex(math.log2, lambda z: _cmath.log(z, 2),
+                             lambda v: _linalg_eval_words().exact_log(v, 2)),
     "sin": _real_or_complex(math.sin, _cmath.sin),
     "cos": _real_or_complex(math.cos, _cmath.cos),
     "tan": _real_or_complex(math.tan, _cmath.tan),
@@ -3548,6 +3565,38 @@ def _effective_facts(fn, facts=None):
     return analyze_source(fn)
 
 
+def _receiver_params_bound(fn, facts, conjectures):
+    """Intent:
+        The facts of a library method read as a function of its
+        receiver (`runtime_types.receiver_form`), with each positional
+        parameter that has a default (`lower=None` of
+        `pandas.Series.clip`) and that some claim binds in its domain
+        added to the parameters, in signature order, so that claim
+        samples it and passes it. Any other function's facts are
+        returned as they are.
+    """
+    import dataclasses
+    if getattr(fn, "__mathema_receiver_params__", None) is None:
+        return facts
+    try:
+        sig = callable_signature(fn).parameters
+    except (TypeError, ValueError):
+        return facts
+    bound = {name for cj in conjectures
+             for name in (getattr(cj, "domain", None) or {})}
+    extra = {name for name, param in sig.items()
+             if name in bound and name not in facts.params
+             and param.kind in (param.POSITIONAL_ONLY,
+                                param.POSITIONAL_OR_KEYWORD)}
+    if not extra:
+        return facts
+    params = [name for name in sig
+              if name in extra or name in facts.params]
+    params += [name for name in facts.params if name not in params]
+    kinds = {**facts.param_kinds, **{name: "unknown" for name in extra}}
+    return dataclasses.replace(facts, params=params, param_kinds=kinds)
+
+
 @quiet_while_probing
 def check_conjectures(fn, conjectures: list[Conjecture],
                       domain: dict | None = None, trials: int | None = None,
@@ -3670,7 +3719,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
     # the function and project levels, validated before any claim runs
     # so a bad value refuses the whole call
     resolve_pseudo_infinity(None, pseudo_infinity)
-    facts = _effective_facts(fn, facts)
+    facts = _receiver_params_bound(fn, _effective_facts(fn, facts),
+                                   conjectures)
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     # an enforce_domain() guard is the function's domain: a parameter the
     # caller's domain leaves open ranges over what the guard admits

@@ -14,6 +14,12 @@ numpy.mean:
       note: "Arithmetic mean; the mean of an empty array is nan with a RuntimeWarning, never raises."
     - name: definition
       statement: "for a in R^n \\ {∅}, f(a) ~= mean(a)"
+    - name: definition@axis=0
+      statement: "let axis be 0, for a in R^(m,n) \\ {∅}, f(a) ~= mean(a, axis=0)"
+      note: "The mean of each column of a matrix."
+    - name: definition@axis=1
+      statement: "let axis be 1, for a in R^(m,n) \\ {∅}, f(a) ~= mean(a, axis=1)"
+      note: "The mean of each row of a matrix."
 
 numpy.std:
   claims:
@@ -44,3 +50,9 @@ numpy.average:
     - name: is_defined
       statement: "dim(a) >= 1"
       note: "Weighted average; without weights an empty array returns nan with a RuntimeWarning, like mean. Weights that sum to zero raise ZeroDivisionError."
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= mean(a)"
+      note: "Without weights, the arithmetic mean."
+    - name: weighted
+      statement: "for a in R^n \\ {∅}, weights in R^n \\ {∅}, assuming min(weights) > 0, f(a, None, weights) ~= sum(a * weights) / sum(weights)"
+      note: "Stated for positive weights of the same length, passed third (axis None)."

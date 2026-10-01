@@ -22,6 +22,7 @@ import dataclasses
 import math
 import random
 from dataclasses import dataclass
+from fractions import Fraction
 
 import sympy
 
@@ -410,7 +411,20 @@ def plain_value(v):
 
 
 def _is_number(v) -> bool:
-    return isinstance(v, (int, float, complex)) and not isinstance(v, bool)
+    return isinstance(v, (int, float, complex, Fraction)) \
+        and not isinstance(v, bool)
+
+
+def _exact_pair(*values):
+    """`values` with each finite float read as the exact rational it is
+    when one of them is an exact rational (a claim word's value beyond
+    float range), so they compare and subtract without overflowing;
+    unchanged otherwise. An infinity or nan stays the float it is."""
+    if not any(isinstance(v, Fraction) for v in values):
+        return values
+    return tuple(Fraction(v) if isinstance(v, (int, float))
+                 and not isinstance(v, bool) and math.isfinite(v) else v
+                 for v in values)
 
 
 def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
@@ -421,6 +435,15 @@ def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
         return False
     if holds_inf(u) or holds_inf(v):
         return u == v
+    if isinstance(u, Fraction) or isinstance(v, Fraction):
+        if isinstance(u, complex) or isinstance(v, complex):
+            return False
+        u, v = _exact_pair(u, v)
+        if not math.isfinite(abs_tol):
+            return True
+        allowed = max(Fraction(rel_tol) * max(abs(u), abs(v)),
+                      Fraction(abs_tol))
+        return abs(u - v) <= allowed
     if isinstance(u, complex) or isinstance(v, complex):
         return cmath.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
     return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
@@ -534,6 +557,7 @@ def _scalar_relation(a, b, relation: str, slack: float,
         if exact_inequality:
             return not (a == b)
         return not _close(a, b, tolerance=slack, rel_tol=rel_tol)
+    a, b, slack = _exact_pair(a, b, slack)
     if relation == "<=":
         return a <= b + slack
     if relation == ">=":
@@ -681,6 +705,9 @@ def holds_nan(value) -> bool:
         try:
             import numpy
             arr = numpy.asarray(value)
+            if arr.dtype.kind == "O":
+                return any(holds_nan(v) for v in arr.ravel().tolist()
+                           if isinstance(v, (float, complex, list, tuple)))
             if arr.dtype.kind != "c":
                 arr = arr.astype(float)
             return bool(numpy.isnan(arr).any())
@@ -713,6 +740,10 @@ def holds_inf(value) -> int:
         try:
             import numpy
             arr = numpy.asarray(value)
+            if arr.dtype.kind == "O":
+                return holds_inf([v for v in arr.ravel().tolist()
+                                  if isinstance(v, (float, complex, list,
+                                                    tuple))])
             if arr.dtype.kind == "c":
                 arr = numpy.concatenate([arr.real.ravel(), arr.imag.ravel()])
             else:

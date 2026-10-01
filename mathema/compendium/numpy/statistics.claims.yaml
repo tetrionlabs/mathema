@@ -1,9 +1,11 @@
 # Definition rows and bounds for numpy's statistics: what each function
 # computes, stated in the grammar's own words over inputs with nothing
 # missing (numpy's nan-ignoring functions then compute the plain
-# statistic). A function with no grammar word of its own (median,
-# percentile, quantile) states the range its value lies in. mathema's
-# own test suite verifies each row against the installed numpy.
+# statistic). median, quantile and percentile also state the range
+# their value lies in; quantile and percentile interpolate linearly
+# (method='linear', the default), as the grammar's quantile does.
+# mathema's own test suite verifies each row against the installed
+# numpy.
 compendium: numpy
 versions: ">=1.24,<3"
 
@@ -31,21 +33,48 @@ numpy.median:
   claims:
     - name: within_range
       statement: "for a in R^n \\ {∅}, min(a) <= f(a) <= max(a)"
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= median(a)"
+      note: "The middle element, or the mean of the two middle elements for an even length."
+    - name: definition@axis=0
+      statement: "let axis be 0, for a in R^(m,n) \\ {∅}, f(a) ~= median(a, axis=0)"
+      note: "The median of each column of a matrix."
 
 numpy.percentile:
   claims:
     - name: within_range
       statement: "for a in R^n \\ {∅}, q in [0, 100], min(a) <= f(a, q) <= max(a)"
+    - name: definition
+      statement: "for a in R^n \\ {∅}, q in [0, 100], f(a, q) ~= quantile(a, q / 100)"
+      note: "The q-th percentile is the (q / 100)-quantile, interpolated linearly."
 
 numpy.quantile:
   claims:
     - name: within_range
       statement: "for a in R^n \\ {∅}, q in [0, 1], min(a) <= f(a, q) <= max(a)"
+    - name: definition
+      statement: "for a in R^n \\ {∅}, q in [0, 1], f(a, q) ~= quantile(a, q)"
+      note: "Stated for one q; q outside [0, 1] raises ValueError."
 
 numpy.diff:
   claims:
     - name: definition
       statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= a[1:] - a[:-1]"
+    - name: definition@n=2
+      statement: "let n be 2, for a in R^n \\ {∅}, assuming dim(a) >= 3, f(a) ~= a[2:] - 2 * a[1:-1] + a[:-2]"
+      note: "The second differences."
+
+numpy.ptp:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) == max(a) - min(a)"
+      note: "Peak to peak: the greatest element less the least."
+
+numpy.cov:
+  claims:
+    - name: of_a_vector
+      statement: "for m in R^n \\ {∅}, assuming dim(m) >= 2, f(m) ~= var(m, ddof=1)"
+      note: "One vector is one variable: its sample variance (ddof 1, numpy's default here, unlike var)."
 
 numpy.nansum:
   claims:

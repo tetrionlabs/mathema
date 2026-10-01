@@ -21,6 +21,21 @@ numpy.linalg.norm:
       statement: "let ord be 1, for x in R^n \\ {∅}, f(x) ~= sum(abs(x))"
     - name: definition@ord=2
       statement: "let ord be 2, for x in R^n \\ {∅}, f(x) ~= sqrt(sum(x ** 2))"
+    - name: definition@ord=inf
+      statement: "let ord be inf, for x in R^n \\ {∅}, f(x) == max(abs(x))"
+      note: "The largest magnitude among the elements."
+
+numpy.linalg.qr:
+  claims:
+    - name: factors
+      statement: "for a in R^(n,n) \\ {∅}, f(a)[0] @ f(a)[1] ~= a"
+      note: "The reduced factorisation (mode='reduced'): Q times R is the matrix."
+
+numpy.linalg.svd:
+  claims:
+    - name: factors
+      statement: "for a in R^(n,n) \\ {∅}, f(a)[0] @ diag(f(a)[1]) @ f(a)[2] ~= a"
+      note: "U, the singular values S and Vh: U times diag(S) times Vh is the matrix."
 
 numpy.linalg.solve:
   claims:

@@ -48,6 +48,17 @@ def sharpe(returns: pd.Series):
     return returns.mean() / returns.std()
 
 
+_MULTIPLY_ROW = """\
+compendium: pandas
+versions: ">=2"
+
+pandas.Series.multiply:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\\\ {∅}, other in [-1e6, 1e6], f(a, other) ~= a * other"
+"""
+
+
 @pytest.fixture()
 def project(tmp_path):
     (tmp_path / "claims").mkdir()
@@ -160,12 +171,13 @@ def test_a_record_is_stale_when_its_definition_rows_change(project,
         import pandas as pd
 
 
-        def sem_ratio(returns: pd.Series):
-            """Mean return over its standard error."""
-            return returns.mean() / returns.sem()
+        def doubled_sharpe(returns: pd.Series):
+            """Twice the mean return over its standard deviation."""
+            return (returns.mean() + returns.multiply(1.0).mean()) \
+                / returns.std()
         '''))
     (project / "claims" / "quant.claims.yaml").write_text(yaml.safe_dump({
-        "qpkg.quant.sem_ratio": {"claims": [
+        "qpkg.quant.doubled_sharpe": {"claims": [
             {"name": "leverage_invariant", "statement": _LEVERAGE}]}}))
     monkeypatch.syspath_prepend(str(project))
     sys.modules.pop("qpkg", None)
@@ -173,18 +185,18 @@ def test_a_record_is_stale_when_its_definition_rows_change(project,
 
     def verdict():
         record = yaml.safe_load((project / ".mathema" / "verified"
-                                 / "qpkg.quant.sem_ratio.yaml").read_text())
+                                 / "qpkg.quant.doubled_sharpe.yaml").read_text())
         return {c["name"]: c for c in
-                record["qpkg.quant.sem_ratio"]["claims"]}[
+                record["qpkg.quant.doubled_sharpe"]["claims"]}[
             "leverage_invariant"]["verdict"]
     _verify(project)
     assert verdict() == "holds"
-    (project / "claims" / "pandas.claims.yaml").write_text(_SEM_ROW)
+    (project / "claims" / "pandas.claims.yaml").write_text(_MULTIPLY_ROW)
     result = _verify(project)
     assert not result.problems, result.lines
-    assert "ok   qpkg.quant.sem_ratio: definition rows changed" in \
+    assert "ok   qpkg.quant.doubled_sharpe: definition rows changed" in \
         "\n".join(result.lines), result.lines
     assert verdict() == "proven"
     result = _verify(project)
-    assert "ok   qpkg.quant.sem_ratio: fresh" in "\n".join(result.lines), \
+    assert "ok   qpkg.quant.doubled_sharpe: fresh" in "\n".join(result.lines), \
         result.lines

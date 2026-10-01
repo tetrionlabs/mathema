@@ -196,7 +196,8 @@ def row_pins(row: dict) -> dict:
         The library parameters a row pins, `{parameter: value}`: each
         `let p be None/True/False` binding, and each `let p be <number>`
         whose name the statement never reads (`let axis be 1, dim(a) >=
-        1`). {} for a row that pins nothing or does not parse.
+        1`); a keyword argument of the same name (`std(a, ddof=1)`) is
+        not a read. {} for a row that pins nothing or does not parse.
     """
     import re
 
@@ -208,7 +209,9 @@ def row_pins(row: dict) -> dict:
         return {}
     pins = dict(getattr(cj, "param_pins", None) or {})
     text = " ".join(str(t) for t in (cj.lhs, cj.rhs, cj.assuming) if t)
-    named = set(re.findall(r"\b[A-Za-z_]\w*\b", text))
+    # a name followed by a single `=` is a keyword argument of a grammar
+    # word (`std(a, ddof=1)`), not a read of that name
+    named = set(re.findall(r"\b([A-Za-z_]\w*)\b(?!\s*=(?!=))", text))
     for name in sorted(cj.free_vars or ()):
         point = _single_point((cj.domain or {}).get(name))
         if point is not None and name not in named:

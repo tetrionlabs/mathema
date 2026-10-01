@@ -15,12 +15,18 @@ pandas.Series.shift:
       note: "periods defaults to 1; position 0 is missing."
     - name: shifted@periods=2
       statement: "let periods be 2, for a in R^n \\ {∅}, assuming dim(a) >= 3, f(a)[2:] == a[:-2]"
+    - name: shifted@periods=-1
+      statement: "let periods be -1, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[:-1] == a[1:]"
+      note: "A negative period shifts the other way; the last position is missing."
 
 pandas.Series.diff:
   claims:
     - name: differences
       statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] - a[:-1]"
       note: "periods defaults to 1; position 0 is missing."
+    - name: differences@periods=2
+      statement: "let periods be 2, for a in R^n \\ {∅}, assuming dim(a) >= 3, f(a)[2:] ~= a[2:] - a[:-2]"
+      note: "The change over two positions; positions 0 and 1 are missing."
 
 pandas.Series.pct_change:
   claims:

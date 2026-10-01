@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Suite-wide pytest wiring: the `--extensive` flag that opts into the
-extensive-ladder proof corpus, the `needs_full_proof_budget` marker
+extensive-ladder proof corpus, the `--library-rows` flag that opts into
+adjudicating the bundled compendium rows against the installed
+libraries, the `needs_full_proof_budget` marker
 for tests whose assertion depends on a proof actually finishing, and
 isolation from capability providers installed in the environment.
 
@@ -11,7 +13,12 @@ path and ladder), so they are skipped by default and run on command:
     python -m pytest --extensive tests/test_extensive_proofs.py
 
 They parallelize cleanly under pytest-xdist (`-n auto`) when it is
-installed, since every case is a self-contained adjudication."""
+installed, since every case is a self-contained adjudication.
+
+A test marked `library_rows` checks a library (or mathema's reading of
+it) rather than mathema, so it is skipped by default too:
+
+    python -m pytest -n 4 -q -m library_rows --library-rows"""
 import pytest
 
 
@@ -93,6 +100,9 @@ def _library_claims_isolated():
 def pytest_addoption(parser):
     parser.addoption("--extensive", action="store_true", default=False,
                      help="run the extensive-ladder proof corpus (slower, opt-in)")
+    parser.addoption("--library-rows", action="store_true", default=False,
+                     help="adjudicate the bundled compendium rows against the "
+                          "installed libraries (opt-in)")
 
 
 def pytest_configure(config):
@@ -109,15 +119,25 @@ def pytest_configure(config):
         "markers",
         "slow_docs_example: a documentation example that takes more than "
         "a few seconds to run, see tests/test_docs_outputs.py")
+    config.addinivalue_line(
+        "markers",
+        "library_rows: adjudicates bundled compendium rows against the "
+        "installed library; skipped unless --library-rows is given")
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("--extensive"):
-        return
-    skip = pytest.mark.skip(reason="extensive-ladder corpus: run with --extensive")
-    for item in items:
-        if "extensive_proofs" in item.keywords:
-            item.add_marker(skip)
+    opt_in = {"extensive_proofs": ("--extensive", "extensive-ladder corpus: "
+                                   "run with --extensive"),
+              "library_rows": ("--library-rows", "adjudicates library rows "
+                               "against the installed library: run with "
+                               "--library-rows")}
+    for marker, (option, reason) in opt_in.items():
+        if config.getoption(option):
+            continue
+        skip = pytest.mark.skip(reason=reason)
+        for item in items:
+            if marker in item.keywords:
+                item.add_marker(skip)
 
 # --- the proof budget, and why a test may need it raised ---------------
 #
