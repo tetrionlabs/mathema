@@ -380,3 +380,20 @@ def test_a_drawn_container_holding_two_members_is_realised_with_both():
     listed = realise([None, nan, 0.5], Detection("list", "vec", ""))
     assert listed[0] is None and listed[1] != listed[1]
     assert pl.Series([None, nan]).mean() != pl.Series([None, nan]).mean()
+
+
+# --- the floor draws other parameters inside the function's own guards ----
+
+def guarded_sum(x: float, y: float) -> float:
+    if not (0 <= y <= 1):
+        raise ValueError("y")
+    return x + y
+
+
+def test_a_rows_floor_draws_the_other_parameters_past_the_guards():
+    from mathema.policy import _floor_points
+    points = _floor_points(guarded_sum, analyze(guarded_sum), "x", "missing",
+                           ["nan"], {})
+    assert points and all(0 <= pt["y"] <= 1 for pt in points), points
+    row = _rows(guarded_sum, "missing(f, x) propagates")["missing_f_x_propagates"]
+    assert row.verdict == "holds", (row.verdict, row.note)

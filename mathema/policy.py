@@ -391,8 +391,9 @@ def _floor_points(fn, facts, param: str, kind: str, members: list,
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     from .probing import signature_defaults
     defaulted = signature_defaults(fn)
-    others = {q: _synth(k, rng, (domain or {}).get(q)) for q, k in kinds.items()
-              if q != param and q not in defaulted}
+    others = _past_guards(fn, facts, param, domain, {
+        q: _synth(k, rng, (domain or {}).get(q)) for q, k in kinds.items()
+        if q != param and q not in defaulted})
     values: list = []
     container = kinds.get(param) in SEQUENCE_KINDS
     if kind == "absent":
@@ -423,9 +424,12 @@ def _floor_points(fn, facts, param: str, kind: str, members: list,
         values = [v for w in members for v in realise_sentinel(member_sentinel(w))]
     order = list(facts.params)
     # the other parameters as drawn, then each scalar one at its corners
-    variants = [others] + [{**others, q: end} for q in others
-                           for end in _corners((domain or {}).get(q))
-                           if kinds.get(q) not in SEQUENCE_KINDS]
+    variants = [others] + [v for v in ({**others, q: end} for q in others
+                                       for end in _corners((domain or {}).get(q))
+                                       if kinds.get(q) not in SEQUENCE_KINDS)
+                           # a corner one of f's guards refuses is outside
+                           # the working domain
+                           if _past_guards(fn, facts, param, domain, v) is v]
     return [{q: point[q] for q in sorted(point, key=lambda q: order.index(q)
                                           if q in order else len(order))}
             for point in ({**base, param: v} for v in values for base in variants)]
@@ -1766,15 +1770,70 @@ def _admits_none(ann) -> bool:
 
 
 def _others(fn, facts, param: str, domain: dict) -> dict:
-    """The parameters beside `param`, drawn inside their domains."""
+    """The parameters beside `param`, drawn inside their working domain."""
     import random
 
     from ._sampling import _RNG_SEED
     from .probing import _synth, signature_defaults
     rng = random.Random(_RNG_SEED)
     defaulted = signature_defaults(fn)
-    return {q: _synth(facts.param_kinds.get(q, "unknown"), rng, (domain or {}).get(q))
-            for q in facts.params if q != param and q not in defaulted}
+    return _past_guards(fn, facts, param, domain, {
+        q: _synth(facts.param_kinds.get(q, "unknown"), rng, (domain or {}).get(q))
+        for q in facts.params if q != param and q not in defaulted})
+
+
+def _past_guards(fn, facts, param: str, domain: dict, drawn: dict) -> dict:
+    """Intent:
+        `drawn`, the parameters beside `param`, moved inside the
+        function's working domain: where one of its own raising guards
+        (`if not (0 <= y <= 1): raise ...`) would refuse the draw, each
+        parameter is tried at a few values of its domain (the midpoint
+        and finite ends, or 0, 1 and -1) until no guard refuses it; the
+        draw as it was when none does. A guard on `param` itself is left
+        to the row.
+    """
+    import itertools
+
+    from . import _timeout as _timeout_mod
+    from ._timeout import _with_timeout
+    from .conjecture import _representative_values
+    scalars = [q for q in drawn if isinstance(drawn[q], (int, float))
+               and not isinstance(drawn[q], bool)]
+    if not scalars or facts.tree is None or not facts.branch_count:
+        return drawn
+
+    def guards() -> list:
+        from .symbolic._conditioned import lift_piecewise
+        pw = lift_piecewise(fn, facts)
+        return [cond for cond, _name in (pw.raise_guards if pw is not None else [])]
+    try:
+        found = _with_timeout(guards, _timeout_mod.FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return drawn
+    except Exception:
+        return drawn
+    found = [c for c in found if all(str(sym) in drawn for sym in c.free_symbols)]
+    if not found:
+        return drawn
+
+    def refused(point: dict) -> bool:
+        for cond in found:
+            try:
+                if bool(cond.subs({sym: point[str(sym)] for sym in cond.free_symbols})):
+                    return True
+            except Exception:
+                return True
+        return False
+    if not refused(drawn):
+        return drawn
+    choices = [[drawn[q], *_representative_values(facts.param_kinds.get(q, "scalar"),
+                                                  (domain or {}).get(q))]
+               for q in scalars]
+    for values in itertools.islice(itertools.product(*choices), 64):
+        point = {**drawn, **dict(zip(scalars, values))}
+        if not refused(point):
+            return point
+    return drawn
 
 
 _UNSET = object()
