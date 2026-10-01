@@ -302,9 +302,11 @@ def test_domain_variants_of_one_law_keep_distinct_rows(tmp_path):
     ]
     def declared(rec):
         # the rows the claims themselves produce; each proof also
-        # spawns its `[float]` companion row
+        # spawns its `[float]` companion row, and the record carries
+        # the policy row mathema writes for the parameter
         return [p for p in rec.probes
-                if "mathema.companion_of" not in (p.meta or {})]
+                if "mathema.companion_of" not in (p.meta or {})
+                and "mathema.policy" not in (p.meta or {})]
 
     # identical auto-names are refused, asking for explicit names
     from mathema.conjecture import InvalidConjecture, claim

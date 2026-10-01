@@ -147,8 +147,11 @@ def test_a_marker_named_axis_takes_the_bindings_fixed_size(mod):
     mod.SEEN.clear()
     rec = mathema.check(mod.total_marked, claims=[text])
     assert set(mod.SEEN) == {(30,)}, sorted(set(mod.SEEN))
-    assert not [q.name for q in rec.probes if q.verdict == "falsified"], [
-        (q.name, q.counterexample) for q in rec.probes if q.verdict == "falsified"]
+    # a policy row is what `sum` does with a null slot, a question of its
+    # own; every draw it made is still at the fixed length
+    shape_rows = [q for q in rec.probes if "mathema.policy" not in (q.meta or {})]
+    assert not [q.name for q in shape_rows if q.verdict == "falsified"], [
+        (q.name, q.counterexample) for q in shape_rows if q.verdict == "falsified"]
 
 
 def test_the_guard_never_rejects_the_engines_own_draws():

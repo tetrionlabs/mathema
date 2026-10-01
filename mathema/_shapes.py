@@ -190,10 +190,10 @@ def in_space(value, bound, sizes: "dict | None" = None) -> bool:
     container by its shape and its elements, a number only in a scalar
     domain (a number is not a member of `R^(3,4)`). A named axis takes
     the size `sizes` binds to the name, when it binds one. A leaf that
-    is not a member of the element domain, a missing value included,
-    makes the container not a member, the container form of the scalar
-    rule that a missing value is a member of nothing."""
-    from .domain import domain_contains, is_missing
+    is not a member of the element domain makes the container not a
+    member; a missing leaf is a member only where the element domain
+    admits its member (a `None` leaf read as the `null` hole)."""
+    from .domain import domain_contains
     dims = dims_of(bound)
     if not dims:
         return domain_contains(value, bound)
@@ -201,8 +201,7 @@ def in_space(value, bound, sizes: "dict | None" = None) -> bool:
     if shape is None or shape == () or not fits(shape, dims, sizes):
         return False
     element = dataclasses.replace(bound, dims=())
-    return all(not is_missing(v) and domain_contains(v, element)
-               for v in leaves(value))
+    return all(domain_contains(v, element, slot=True) for v in leaves(value))
 
 
 def axis_sizes(domain: dict, values: dict) -> dict:

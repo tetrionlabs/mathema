@@ -188,7 +188,7 @@ def test_a_max_length_marker_infers_the_refined_language(text_adaptor):
 
     (p,) = check_conjectures(pad, [claim("len(f(s)) == 8")])
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
-    assert "inferred s in L[letters, len <= 8]|missing" in p.note, p.note
+    assert "inferred s in L[letters, len <= 8] from" in p.note, p.note
 
 
 def test_a_language_domain_says_missing_in_both_modes(letters):
@@ -196,8 +196,9 @@ def test_a_language_domain_says_missing_in_both_modes(letters):
     # languages, so a language domain spells the missing value as a word
     for unicode in (True, False):
         shown = render_claim_text(claim("for s in L[letters], f(s) == s"), unicode=unicode)
+        assert "L[letters]," in shown and "∅" not in shown, shown
+        shown = render_claim_text(claim("for s in L[letters] | {missing}, f(s) == s"),
+                                  unicode=unicode)
         assert "L[letters]|missing" in shown and "∅" not in shown, shown
-        shown = render_claim_text(claim("for s in L[letters] \\ {∅}, f(s) == s"), unicode=unicode)
-        assert "L[letters] \\ {missing}" in shown and "∅" not in shown, shown
     shown = render_claim_text(claim("for x in [0, 1], f(x) >= 0"), unicode=True)
-    assert "∪ {∅}" in shown, "a numeric domain keeps its glyph"
+    assert "∪ {absent, ∅}" in shown, "a numeric domain keeps its glyph"

@@ -29,7 +29,7 @@ def _restriction(region):
 
 
 def _witness_x(probe) -> float:
-    m = re.search(r"\bx=([-+0-9.e]+)", probe.counterexample or "")
+    m = re.search(r"\bx = ([-+0-9.e]+)", probe.counterexample or "")
     assert m, probe.counterexample
     return float(m.group(1))
 

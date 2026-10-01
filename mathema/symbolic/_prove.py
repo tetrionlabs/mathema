@@ -2665,7 +2665,8 @@ def _claim_side_requirements(src: str) -> list:
 
 
 def _claim_side_value_gate(sources, build, aux, domain, bound_context,
-                           params, extensive) -> "ProofResult | None":
+                           params, extensive,
+                           integer_names: "set | None" = None) -> "ProofResult | None":
     """Intent:
         Whether the claim's own expression has a real value at every
         point of the domain. None when every requirement is proven (or
@@ -2675,8 +2676,11 @@ def _claim_side_value_gate(sources, build, aux, domain, bound_context,
 
     Notes:
         A requirement over a name the domain does not bound (a bound
-        variable, an aux) is not checked here.
+        variable, an aux) is not checked here. A name in
+        `integer_names` (an int parameter, a domain of integers) reads
+        as an integer in an exponent.
     """
+    integer_names = integer_names or set()
     unsettled = None
     names = set(params)
     for src in sources:
@@ -2687,6 +2691,18 @@ def _claim_side_value_gate(sources, build, aux, domain, bound_context,
                 if req[0] == "pow":
                     base = build(ast.unparse(req[1]), aux)
                     exponent = build(ast.unparse(req[2]), aux)
+                    if not getattr(exponent, "is_integer", False) \
+                            and hasattr(exponent, "free_symbols") \
+                            and exponent.free_symbols \
+                            and _integer_valued_over(exponent, integer_names):
+                        # the same exponent over integer symbols, so its
+                        # sign questions read it as an integer
+                        swap = {sym: sympy.Dummy(str(sym), integer=True,
+                                                 **({"nonnegative": True}
+                                                    if sym.is_nonnegative
+                                                    else {}))
+                                for sym in exponent.free_symbols}
+                        exponent = exponent.subs(swap)
                     if getattr(exponent, "is_integer", False) and \
                             exponent.is_nonnegative:
                         continue
@@ -3634,7 +3650,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             except Exception:
                 summary = None
             sketch = "function body is not derivable"
-            if summary:
+            if facts.tree is None:
+                sketch = ("function body could not be read: a builtin "
+                          "or compiled function has no Python source")
+            elif summary:
                 sketch = f"{sketch}, {summary}"
             else:
                 sketch = (f"{sketch} in v1: contains a loop, branch, recursion, "
@@ -3881,9 +3900,18 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         lhs, rhs = _pin(lhs), _pin(rhs)
 
     if relation in ("==", "~=", "!=", "<", "<=", ">", ">="):
+        from ..domain import bound_assumptions as _assumptions_of
+        integer_names = {p for p, k in (facts.param_kinds or {}).items()
+                         if k == "int"}
+        for name, bound in domain.items():
+            try:
+                if (_assumptions_of(bound) or {}).get("integer"):
+                    integer_names.add(name)
+            except Exception:
+                continue
         side_gate = _claim_side_value_gate(
             [lhs_src, rhs_src], build, aux, domain, bound_context,
-            lifted.params, extensive)
+            lifted.params, extensive, integer_names)
         if side_gate is not None and side_gate.status == "disproven":
             return side_gate
         if side_gate is not None and _walk_notes is not None:

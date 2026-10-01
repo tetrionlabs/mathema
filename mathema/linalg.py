@@ -445,20 +445,23 @@ def static_rank(node, ranks: dict):
 
 def norm_notes(cj, ranks: dict) -> list:
     """Intent:
-        One line per bare norm the claim spells with double bars
-        (`||x||`, no order), naming the norm it resolves to: the
-        Euclidean norm of a vector, the Frobenius norm of a matrix, the
-        absolute value of a number, and either norm when the argument's
-        rank cannot be read from the claim (a call of `f`, a bound
-        function).
+        One line per norm the claim writes with no order (`||x||` or
+        `norm(x)`), naming the norm it resolves to: the Euclidean norm
+        of a vector, the Frobenius norm of a matrix, the absolute value
+        of a number, and either norm when the argument's rank cannot be
+        read from the claim (a call of `f`, a bound function). The line
+        names the norm in the spelling the claim wrote.
 
     Notes:
-        `ranks` is `array_ranks`' `{name: rank}`. A norm written as the
-        call `norm(x)`, or with an order written, gets no line.
+        `ranks` is `array_ranks`' `{name: rank}`. A norm with an order
+        written gets no line.
     """
+    import re
+
     from .grammar import display_norm_bars, norm_bars_written
-    if not norm_bars_written(getattr(cj, "raw", "")):
-        return []
+    raw = getattr(cj, "raw", "") or ""
+    bars = norm_bars_written(raw)
+    written = re.sub(r"\s", "", raw)
     sides = [cj.lhs, cj.rhs] + [rhs for _lhs, _rel, rhs in (cj.links or [])]
     out: list = []
     for side in sides:
@@ -473,7 +476,10 @@ def norm_notes(cj, ranks: dict) -> list:
                 continue
             arg_node = node.args[0]
             arg = ast.unparse(arg_node)
-            shown = display_norm_bars(f"norm({arg})")
+            call = f"norm({arg})"
+            shown = (display_norm_bars(call)
+                     if bars and re.sub(r"\s", "", call) not in written
+                     else call)
             # a name declared over `R^(m,n)` is a matrix whatever its
             # column count, so one column is still a Frobenius norm
             declared = (cj.domain or {}).get(arg_node.id) \

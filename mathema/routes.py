@@ -36,7 +36,8 @@ DERIVE_ONLY_FORMS = frozenset({"d", "lim", "integrate", "Sum", "Prod",
 # records, spec, acceptance, and the adjudication loop all read it
 # from here.
 SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_builtin_safe",
-                               "is_missing_safe", "is_extremity_safe",
+                               "is_missing_safe", "is_absent_safe",
+                               "is_extremity_safe",
                                "is_representation_safe", "is_empty_safe",
                                "is_arbitrary_input_safe",
                                "is_compendium_safe",
@@ -242,3 +243,12 @@ def unsupported_forms(route: str, cj) -> list[str]:
         return []
     capable = ROUTE_CAPABILITIES.get(route, frozenset())
     return sorted(required_forms(cj) - capable)
+
+
+def is_proof_route(route: "str | None") -> bool:
+    """Intent:
+        Whether a row's route names a proof: `derive` and its subroutes,
+        or `examine` (a proof from the function's structure), which
+        share the strongest rung of the evidence ladder.
+    """
+    return (route or "").split(":", 1)[0] in ("derive", "examine")

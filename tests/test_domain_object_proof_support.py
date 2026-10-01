@@ -92,21 +92,22 @@ def test_union_domain_gets_no_symbol_level_sign_assumption():
 
 def test_proof_sketch_domain_rendering_states_missing_policy_explicitly():
     lenient = _dom("for x in [0, 100], True")
-    # stating a type (⊂ Z) never excludes missing by default, only an
-    # explicit exclusion clause does, regardless of type.
-    typed_but_included = _dom("for x in [0, 100] \\subset Z, True")
+    # a stated type admits the missing values it lists and no other;
+    # what it excludes is never rendered
+    typed_but_included = _dom("for x in [0, 100] \\subset Z ∪ {∅}, True")
     strict = _dom("for x in [0, 100] \\subset Z \\ {missing}, True")
-    assert render_domain(strict, ascii_mode=False).endswith("\\ {∅}")
-    assert render_domain(typed_but_included, ascii_mode=False).endswith("∪ {∅}")
+    assert render_domain(strict, ascii_mode=False) == "[0, 100] ⊂ ℤ"
+    assert render_domain(typed_but_included, ascii_mode=False).endswith("⊂ ℤ ∪ {∅}")
+    assert render_domain(lenient, ascii_mode=False).endswith("⊂ ℝ ∪ {absent, ∅}")
     assert lenient != strict
 
 
-def test_quantifier_clause_states_missing_included_for_a_bare_named_type():
+def test_quantifier_clause_is_over_the_named_set():
     # a hand-built domain dict may pass "Z"/"N" directly (not through a
-    # Domain object); this bare-string shape must state the same
-    # missing-included-by-default policy the Domain-object path does.
-    assert _quantifier_clause({"x"}, ["x"], {"x": "Z"}, set()) == "∀ x ∈ ℤ ∪ {∅}"
-    assert _quantifier_clause({"x"}, ["x"], {"x": "N"}, set()) == "∀ x ∈ ℕ ∪ {∅}"
+    # Domain object); a proof's quantifier is over the numbers, the
+    # missing values any domain admits being the computation's
+    assert _quantifier_clause({"x"}, ["x"], {"x": "Z"}, set()) == "∀ x ∈ ℤ"
+    assert _quantifier_clause({"x"}, ["x"], {"x": "N"}, set()) == "∀ x ∈ ℕ"
 
 
 # --- end-to-end: the derive route accepts an excluded/union domain

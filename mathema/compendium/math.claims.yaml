@@ -13,6 +13,12 @@ math.sqrt:
     - name: sqrt_nonneg
       statement: "for x in [0, inf], f(x) >= 0"
       note: "Square root; raises ValueError for x < 0 and never returns a complex result."
+    - name: nan_propagates
+      statement: "missing(f, x) propagates"
+      note: "sqrt(nan) is nan."
+    - name: none_raises
+      statement: "absent(f, x) raises(TypeError)"
+      note: "sqrt(None) raises TypeError."
 
 math.exp:
   claims:

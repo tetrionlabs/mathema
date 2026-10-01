@@ -970,11 +970,7 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     reserved = {n for n in view.seqs if len(n) == 1}
     scalar_clause = _quantifier_clause(scalar_names, view.sig_params, domain or {},
                                        reserved=reserved)
-    if fixed:
-        seq_part = ", ".join(f"{n} ∈ ℝ^{fixed[n]}" if n in fixed
-                             else f"{n} ∈ Seq(ℝ)" for n in view.seqs)
-    else:
-        seq_part = f"{', '.join(view.seqs)} ∈ Seq(ℝ)"
+    seq_part = _seq_quantifier(view.seqs, domain or {}, fixed or {})
     if scalar_clause is None:
         quantifier = f"∀ {seq_part}"
     elif scalar_clause.startswith("where "):
@@ -983,3 +979,31 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     else:
         quantifier = scalar_clause.replace("∀ ", f"∀ {seq_part}, ", 1)
     return replace(result, quantifier=quantifier)
+
+
+def _seq_quantifier(seqs, domain: dict, fixed: dict | None = None) -> str:
+    """The quantifier over sequence parameters: one whose length a
+    binding fixes over `ℝ^k`, any other over its declared element
+    domain at every length (`xs ∈ [0.0, 1.0]ⁿ ⊂ ℝ, xs of every
+    length`), or `Seq(ℝ)` for one the claim does not bound."""
+    from ..domain import _as_domain, render_domain
+    parts, lengths = [], []
+    for name in seqs:
+        if fixed and name in fixed:
+            parts.append(f"{name} ∈ ℝ^{fixed[name]}")
+            continue
+        bound = domain.get(name)
+        dom = None
+        try:
+            dom = _as_domain(bound) if bound is not None else None
+        except Exception:
+            dom = None
+        if dom is None or not dom.dims:
+            parts.append(f"{name} ∈ Seq(ℝ)")
+            continue
+        parts.append(f"{name} ∈ {render_domain(bound, ascii_mode=False, show_missing=False)}")
+        lengths.append(name)
+    text = ", ".join(parts)
+    if lengths:
+        text += f", {' and '.join(lengths)} of every length"
+    return text

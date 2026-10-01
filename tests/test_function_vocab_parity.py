@@ -197,7 +197,7 @@ def test_postfix_factorial_adjudicates_on_both_routes(tmp_path):
             "for n in [1,5] subset Z, f(n) == n!", route="derive")])[0]
         assert r.verdict == "proven", (r.verdict, r.note)
         # the record renders the resolved call form explicitly
-        assert r.statement == "for n in [1, 5]:int|missing, f(n) = factorial(n)"
+        assert r.statement == "for n in [1, 5] : int, f(n) = factorial(n)"
     finally:
         sys.path.remove(str(tmp_path))
         del sys.modules["facmod"]

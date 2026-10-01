@@ -43,32 +43,32 @@ scalar parameter. This is the real, unedited result:
 ```text
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
-           counterexample alpha=-5.443236208490118 -> -504886.9526187774, alpha=10 -> -2491080.279764588 (not increasing)
+           counterexample alpha = -5.44324 -> -504886.9526187774, alpha = 10 -> -2491080.279764588 (not increasing)
   FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
-           counterexample alpha=-8.34574795816681 -> 1100.270649780719, alpha=10 -> 1138.3250235869998 (not decreasing)
+           counterexample alpha = -8.34575 -> 1100.270649780719, alpha = 10 -> 1138.3250235869998 (not decreasing)
   FALSIFY affine[alpha]: d(f(x, alpha), alpha, alpha) = 0
-           counterexample alpha=8.525712759507694, h=0.02: curvature estimate 3.64706e+06 does not settle affine
+           counterexample alpha = 8.52571, h = 0.02: curvature estimate 3.64706e+06 does not settle affine
   FALSIFY convex[alpha]: d(f(x, alpha), alpha, alpha) >= 0
-           counterexample alpha=1.5543807597370485, h=0.02: curvature estimate -49.227 does not settle convex
+           counterexample alpha = 1.55438, h = 0.02: curvature estimate -49.227 does not settle convex
   FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
-           counterexample alpha=7.328890596825083, h=0.02: curvature estimate 4463.56 does not settle concave
+           counterexample alpha = 7.32889, h = 0.02: curvature estimate 4463.56 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=192)
-  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=20)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (968 entries across 192 draws, sizes (2, 1) to (8, 1))
+  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (20 draws)
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([-1e+06, 743856.7191514841, -1e+06, -640263.6078931459], -0.09037042486765046): -1000000.0 vs -1219873.1423334838
+           counterexample x = [-993714, 311292, -166437, 620054, 0, 999998, -999998], alpha = 6.79181: -999998.0 vs -53425523112.88785
   FALSIFY bounded_upper: f(x, alpha) <= max(x)
-           counterexample ([-18798.03541021503, -1e+06, 614127.441618376, -980079.3615590786, 539619.4612110942], -3.7627260640882447): 359952260.7389567 vs 614127.441618376
+           counterexample x = [551081, 0, 0, 937864, -860102, -288141, 726070], alpha = -4.23217: 10840391161.550304 vs 937863.7282631358
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([0, -233861.67814398045, -563794.7964955454, -582346.1050754676, 312625.6951079741], 9.38242035612738): 969404644.5167232 vs 4408328610.953807
-  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
-  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)
-  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
-  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=48)
+           counterexample x = [567047, -597790, -1e+06, 223930, 683724, -934060, -933610], alpha = -1.67919: 425108676.6026794 vs -181372134.92932475
+  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
+  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha) (227 entries across 51 draws, sizes (1, 1) to (8, 1))
+  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ
+  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha) (227 entries across 51 draws, sizes (1, 1) to (8, 1))
 ```
 
 Every counterexample names the inputs that produced it, so a failure is
@@ -76,14 +76,15 @@ a thing you can paste into a REPL rather than a claim to take on faith.
 Two of these are genuinely informative rather than noise. The bounds
 fail because nothing here constrains `alpha` to `[0, 1]`, and outside
 that range `ema` is not a weighted average at all, which the sampler
-demonstrates at `alpha=-3.8`. `permutation_invariant` fails because
+demonstrates at `alpha = -3.8`. `permutation_invariant` fails because
 `ema` is order-sensitive by design, which is what "exponentially
 weighted" means. mathema does not know that is intentional, so it
 reports the counterexample and lets a reader judge it.
 
-Note `is_deterministic` came back `proven`, not `holds`. It did not need
-sampling: the body lifts to a closed symbolic form, and a closed form
-has no state to vary with. `n=192` elsewhere is not a flat constant
+Note `is_deterministic` and `is_state_safe` came back `proven` with no
+trial count. mathema never runs a function to answer them: it reads
+`ema`'s source and found nothing it reads beyond its arguments and
+nothing it writes outside the call. `n=192` elsewhere is not a flat constant
 either, it is a trial budget decided once per call from `ema`'s own
 structure and the domain it is checked over (128 by default, +32 for
 the loop, +32 for a domain as wide as `x`'s). See [mathema check](modes/check.md#the-trial-budget)
@@ -116,18 +117,18 @@ the picture, not just the wording (an excerpt, from the bounds on):
 
 <!-- example: ema output match=subset -->
 ```text
-  proven  bounded_lower: min(x) ≤ f(x, alpha)
-  holds   bounded_lower[float]: min(x) <= f(x, alpha) (n=44)
-  proven  bounded_upper: f(x, alpha) ≤ max(x)
-  holds   bounded_upper[float]: f(x, alpha) <= max(x) (n=44)
+  proven  bounded_lower: min(x) <= f(x, alpha)
+  holds   bounded_lower[float]: min(x) <= f(x, alpha) (225 entries across 47 draws, sizes (1, 1) to (8, 1))
+  proven  bounded_upper: f(x, alpha) <= max(x)
+  holds   bounded_upper[float]: f(x, alpha) <= max(x) (225 entries across 47 draws, sizes (1, 1) to (8, 1))
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([695629.2871130437, -872086.2787172227, 877239.3110456879, -920417.4965787603, 645545.4207910832, -723837.3934154942], 0.4738724462163818): -245875.01695061612 vs 158020.8572389645
-  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ ∪ {∅}
-  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)
-  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ ∪ {∅}
-  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=48)
+           counterexample x = [-999998, 978369, 111462, -869239, -926712, -999998, -1e+06, 894282], alpha = 0.499951: -11445.14869760722 vs -341186.2123510968
+  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ
+  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha) (227 entries across 51 draws, sizes (1, 1) to (8, 1))
+  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
+           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [0, 1] ⊂ ℝ
+  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha) (227 entries across 51 draws, sizes (1, 1) to (8, 1))
 ```
 
 Both bounds flip to `proven`. Inside `[0, 1]` each step of the loop is
@@ -180,10 +181,15 @@ print(mathema.check(ema, claims=collapses))
 <!-- example: ema output -->
 ```text
 mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
-  holds   collapses_probed: f(x, 1.0) = x[-1] (n=160)
+  holds   collapses_probed: f(x, 1.0) = x[-1] (700 entries across 131 draws, sizes (2, 1) to (8, 1))
+           inferred alpha=1 from the claim's own literal argument; at x = [null, null] f raised TypeError; at x = [nan, nan, nan, nan, nan, nan] f gave nan back
   proven  collapses_derived: f(x, 1.0) = x[-1]
-           ∀ x ∈ Seq(ℝ)
-  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (n=42)
+           ∀ x ∈ Seq(ℝ); missing for x (list) means null or nan
+  holds   collapses_derived[float]: f(x, 1.0) = x[-1] (250 entries across 55 draws, sizes (1, 1) to (8, 1))
+           the float64 computation of collapses_derived ran at 55 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raised TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back
+  FALSIFY missing[x]: f has no single policy for a missing x
+           f gives a hole back at x = [nan, nan, nan, nan, nan, nan], alpha = 1.0; at x = [null, null], alpha = 1.0 it raises TypeError instead; at x = [null] it converts the null slot to an absent result
+           to state each case, write `assuming len(x) == 1, missing(f, x, null) converts`, `assuming len(x) >= 2, missing(f, x, null) raises(TypeError)` and `missing(f, x, nan) propagates`; or make f treat a missing x one way
 ```
 
 Both say the claim is true, but they are not the same kind of true.
@@ -237,7 +243,7 @@ ema:
     pure: true
     claims_fingerprint: "222d9f293690"
     pin: "none"
-    integrity: "v2:082d761b8dba056b"
+    integrity: "v2:e0be9708f5e45643"
   math: null
   claims:
     - name: "collapses_derived"
@@ -250,14 +256,14 @@ ema:
     - name: "collapses_derived[float]"
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
-      n: 42
-      note: "the computation of collapses_derived in float64, executed at 42 points (every domain corner, then sampled interior points); unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
+      n: 55
+      note: "the float64 computation of collapses_derived ran at 55 points: null, nan, every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at an all-null list f raised TypeError; at x = [null] it converts the null slot to an absent result; at x = [nan] f gave nan back"
       route: "probe"
     - name: "collapses_probed"
       statement: "f(x, 1.0) = x[-1]"
       verdict: "holds"
-      n: 160
-      note: "inferred alpha=1 from the claim's own literal argument"
+      n: 131
+      note: "inferred alpha=1 from the claim's own literal argument; at x = [null, null] f raised TypeError; at x = [nan, nan, nan, nan, nan, nan] f gave nan back"
       route: "probe"
   concepts:
     - "summation"
@@ -272,13 +278,13 @@ ema:
       basis: "read off the AST"
     - step: "evidence"
       claim: "f(x, 1.0) = x[-1]"
-      basis: "probed, n=160"
+      basis: "probed, n=131"
     - step: "derivation"
       claim: "f(x, 1.0) = x[-1]"
       basis: "when L = 1: x[0]; otherwise x[L - 1] and x[L - 1] simplify identically"
     - step: "evidence"
       claim: "f(x, 1.0) = x[-1]"
-      basis: "probed, n=42"
+      basis: "probed, n=55"
     - step: "situating"
       claim: "instantiates: summation, folded-sum"
       basis: "deterministic concept tagging"

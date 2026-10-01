@@ -114,7 +114,8 @@ def test_an_integer_domain_reaches_the_code_as_an_int():
     # integer, so every executed point, corners included, is an int
     probes, _ = _check(count_up, "for n in {2, 3, 4}, f(n) == n")
     assert probes["law"].verdict == "proven"
-    assert probes["law[float]"].verdict == "holds", probes["law[float]"].sketch
+    # every point of the finite set was executed: no companion
+    assert "law[float]" not in probes
     probes, _ = _check(count_up, "for n in [2, 10] ⊂ Z, f(n) == n")
     assert probes["law[float]"].verdict == "holds", probes["law[float]"].sketch
 
@@ -282,8 +283,9 @@ def test_a_family_claim_spawns_no_float_companion():
                if (p.meta or {}).get("mathema.companion_of", "")
                .split("[", 1)[0] in registered]
     assert not spawned, spawned
-    assert probes["is_deterministic"].meta["mathema.float_companion"] == \
-        "none (a claim family adjudicates this claim)"
+    assert probes["is_deterministic"].route == "examine"
+    assert "mathema.float_companion" not in (probes["is_deterministic"].meta
+                                              or {})
     for law in ("scale_equivariant", "translation_equivariant"):
         # the mathematics over non-empty inputs is proven and its sketch
         # kept; ema reads x[0], so the empty-input line falsifies the
@@ -326,7 +328,7 @@ def test_a_numpy_overflow_falsifies_the_companion_at_the_corner(
     comp = probes["law[float]"]
     assert comp.verdict == "falsified", comp.note
     assert "f returned inf" in comp.sketch
-    assert comp.counterexample and "x=" in comp.counterexample
+    assert comp.counterexample and "x = " in comp.counterexample
 
 
 def add(a: float, b: float) -> float:

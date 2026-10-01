@@ -62,7 +62,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: falsify output -->
 ```text
-falsified price=-8767334983.247744, rate=0.3637206090059846
+falsified price = -8.76733e+09, rate = 0.363721
 ```
 
 The claim is wrong, not the code. A negative price multiplied by
@@ -87,15 +87,17 @@ print(p.condition)
 <!-- example: falsify output -->
 ```text
 proven
-where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}
+where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ, y ∈ [0.0, 1.0] ⊂ ℝ
 ```
 
 `proven`, not `holds`. mathema did not run `discounted` on a thousand
 random prices and shrug, it lifted the body to a symbolic expression
 and decided the inequality algebraically, so the result covers every
 price in that range rather than the ones a sampler happened to pick.
-The region it proved over is printed back explicitly, including the
-`∪ {∅}` that says a missing value is part of the declared input space.
+The region it proved over is printed back explicitly, and it is over
+the reals: the NaN a `price: float` admits is not a real number, so the
+proof leaves it to the float computation, whose record lists what f did
+at nan.
 
 That difference is the whole idea: `holds` is evidence, `proven` is
 proof, and mathema always tells you which one you have. The full
@@ -124,7 +126,7 @@ mathema check pricing.py
 
 <!-- example: docstring output -->
 ```text
-ok   pricing.discounted: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   pricing.discounted: source, no side effects; claims 4/4 adjudicated (1 proven, 3 holds, 0 falsified)
 ```
 
 The second claim is the proof's `[float]` companion: every claim the derive
@@ -159,21 +161,21 @@ pricing.discounted:
   identity:
     form: "d2ab6eef1b84"
   claims:
-    - name: "never_raises_price"
-      statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
-      verdict: "proven"
-      sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative"
-      condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
-      route: "derive"
-      authored:
-        surface: "docstring"
-        ref: "pricing.discounted:docstring:L1"
-        route: "best"
-    - name: "never_raises_price[float]"
-      statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
+    - name: "missing[price]"
+      statement: "missing(f, price) propagates"
       verdict: "holds"
-      n: 44
-      note: "the computation of never_raises_price in float64, executed at 44 points (every domain corner, then sampled interior points)"
+      n: 1
+      note: "default for a float, which may be nan; confirmed on the 46 draws of never_raises_price[float]. Keep it by writing it (mathema claims pricing.discounted --write), or change the word to raises or drops if f should do otherwise"
+      route: "probe:counterfactual"
+      authored:
+        surface: "suggested"
+      meta:
+        mathema.policy:
+    - name: "never_raises_price[float]"
+      statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
+      verdict: "holds"
+      n: 46
+      note: "the float64 computation of never_raises_price ran at 46 points: nan, every corner and 40 interior points; at price = nan f gave nan back; at rate = nan f gave nan back"
       route: "probe"
 ```
 

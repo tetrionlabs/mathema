@@ -44,11 +44,25 @@ class SyncReport:
     index_path: str | None = None
 
 
-def _identity(statement: str, domain: "dict | None" = None) -> "tuple | None":
+def _completed(cj, fn):
+    """The conjecture with its own bindings completed from `fn`'s
+    annotations, the form its record states."""
+    if fn is None:
+        return cj
+    from dataclasses import replace
+
+    from .conjecture import _complete_missing
+    completed = _complete_missing(cj, fn)[0]
+    return replace(cj, domain=completed) if completed else cj
+
+
+def _identity(statement: str, domain: "dict | None" = None,
+              fn=None) -> "tuple | None":
     """Intent:
         A claim's identity: the `fingerprint_text` of the claim this
         text states, any side `domain` dict merged the same way
-        `entry_claims` merges one. Every spelling of one claim (an
+        `entry_claims` merges one, its bindings completed from `fn`'s
+        annotations when `fn` is given. Every spelling of one claim (an
         inline quantifier, a split-out domain field, a verified row's
         canonical statement) lands on the same string.
 
@@ -59,21 +73,85 @@ def _identity(statement: str, domain: "dict | None" = None) -> "tuple | None":
         a conflict on an unparseable claim simply vanished.
     """
     from .spec import _declared_conjecture, fingerprint_text
-    return (fingerprint_text(_declared_conjecture(
-        {"statement": statement, "domain": domain})),)
+    return (fingerprint_text(_completed(_declared_conjecture(
+        {"statement": statement, "domain": domain}), fn)),)
 
 
-def _claim_identity(c: dict) -> "tuple | None":
+def _claim_identity(c: dict, fn=None) -> "tuple | None":
     statement = c.get("statement") or c.get("law") or ""
     if not statement:
         return None
-    return _identity(statement, c.get("domain"))
+    return _identity(statement, c.get("domain"), fn)
 
 
-def _row_identity(row: dict) -> "tuple | None":
+def _row_identity(row: dict, fn=None) -> "tuple | None":
     """A verified row's identity: its statement is the canonical text,
     self-contained, so it reads exactly like a declared claim's."""
-    return _claim_identity(row)
+    return _claim_identity(row, fn)
+
+
+#: the release whose canonical text first states what a domain admits
+IDENTITY_RELEASE = "0.6.1"
+
+
+def _without_missing_policy(c: dict) -> "str | None":
+    """Intent:
+        A claim's canonical text with every missing-value statement left
+        out (no sentinel in any binding, none rendered), so two
+        spellings that differ only in what they say about missing
+        values read alike.
+    """
+    from dataclasses import replace
+
+    from .domain import Domain, _as_domain, is_sentinel
+    from .spec import _declared_conjecture, render_claim_text
+    statement = c.get("statement") or c.get("law") or ""
+    if not statement:
+        return None
+
+    def strip(bound):
+        if bound is None or isinstance(bound, str):
+            return bound
+        dom = _as_domain(bound)
+        pieces = tuple(frozenset(v for v in p if not is_sentinel(v))
+                       if isinstance(p, frozenset) else p for p in dom.pieces)
+        pieces = tuple(p for p in pieces if not (isinstance(p, frozenset) and not p))
+        return Domain(base_type=dom.base_type, pieces=pieces,
+                      excluded=frozenset(v for v in dom.excluded
+                                         if not is_sentinel(v)),
+                      explicit_type=dom.explicit_type, dims=dom.dims)
+
+    cj = _declared_conjecture({"statement": statement, "domain": c.get("domain")})
+    cj = replace(cj, domain={p: strip(b) for p, b in cj.domain.items()})
+    return render_claim_text(cj, unicode=False, canonical=True,
+                             show_missing=False)
+
+
+def _written_by_an_earlier_release(row: dict) -> bool:
+    """Whether a verified row's statement is not the canonical text this
+    release writes for it: a row recorded before the canonical domain
+    spelling moved."""
+    from .spec import _declared_conjecture, canonical_claim_text
+    statement = row.get("statement") or ""
+    try:
+        return canonical_claim_text(_declared_conjecture(
+            {"statement": statement, "domain": row.get("domain")})) != statement
+    except Exception:
+        return False
+
+
+def release_moved(c: dict, row: dict) -> bool:
+    """Intent:
+        Whether an authored claim and its verified row differ only
+        because the canonical text moved in `IDENTITY_RELEASE`: the row
+        was written by an earlier release, and the two read alike once
+        every missing-value statement is left out.
+    """
+    try:
+        return (_written_by_an_earlier_release(row)
+                and _without_missing_policy(c) == _without_missing_policy(row))
+    except Exception:
+        return False
 
 
 def _checked_differently(c: dict, row: dict) -> bool:
@@ -171,7 +249,18 @@ def claim_conflicts(fn, file_entry: dict,
                 # nothing, so there is no verdict for the record to
                 # keep: the authored claim is adjudicated as written
                 continue
-            fp_a, fp_v = _claim_identity(c), _row_identity(v)
+            fp_a, fp_v = _claim_identity(c, fn), _row_identity(v, fn)
+            if fp_a and fp_v and fp_a != fp_v \
+                    and not _checked_differently(c, v) and release_moved(c, v):
+                # the canonical text moved under the claim, the author
+                # changed nothing: adjudicated as written, and reported
+                # once for the whole run rather than claim by claim
+                seen.add((name, "supersession"))
+                out.append({"kind": "release-move", "claim": name,
+                            "surface": surface,
+                            "authored": _display_claim(c),
+                            "verified": v.get("statement")})
+                continue
             if fp_a and fp_v and (fp_a != fp_v
                                   or _checked_differently(c, v)):
                 seen.add((name, "supersession"))
@@ -187,8 +276,8 @@ def claim_conflicts(fn, file_entry: dict,
         d = doc_claims.get(name)
         if d is None:
             continue
-        if (_claim_identity(d) and _claim_identity(c)
-                and _claim_identity(d) != _claim_identity(c)):
+        if (_claim_identity(d, fn) and _claim_identity(c, fn)
+                and _claim_identity(d, fn) != _claim_identity(c, fn)):
             out.append({"kind": "authoring", "claim": name,
                         "docstring": _display_claim(d),
                         "docstring_raw": d,
@@ -436,7 +525,8 @@ def sync(targets: list, root: str = ".",
         v_entry = (verified_store.get(key) or {}).get("entry")
         report.conflicts.extend(
             {"key": key, **c}
-            for c in claim_conflicts(fn, file_entry, v_entry))
+            for c in claim_conflicts(fn, file_entry, v_entry)
+            if c.get("kind") != "release-move")
         entry = materialize_entry(fn, key, root)
         report.materialized.append(key)
         v_entry = (verified_store.get(key) or {}).get("entry")

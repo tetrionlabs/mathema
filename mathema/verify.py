@@ -39,6 +39,13 @@ def _claim_fields(c) -> tuple[str, str, dict, str]:
     return (c.name or "", c.verdict or "", c.meta or {}, str(c.note or ""))
 
 
+def _claim_statement(c) -> str:
+    """A claim's statement, from a live Probe or a stored claim dict."""
+    if isinstance(c, dict):
+        return str(c.get("statement") or "")
+    return str(getattr(c, "statement", "") or "")
+
+
 def _volunteered(meta: dict, note: str) -> bool:
     """Intent:
         True when mathema itself conjectured this claim (a suggestion):
@@ -61,6 +68,14 @@ class GateReport:
     owned: int = 0
     skipped: int = 0
     foreign: list = field(default_factory=list)
+    # of the proven, the built-in ones mathema adds (dependencies_current)
+    builtin_proven: int = 0
+    # the unknown claims by name, each with its one-line reason
+    unknown_reasons: list = field(default_factory=list)
+    # the clauses of the policy rows mathema wrote that do not hold
+    unaccounted: list = field(default_factory=list)
+    # the clauses of the declared policy rows that are falsified
+    policy_problems: list = field(default_factory=list)
 
     @property
     def refuted(self) -> int:
@@ -68,6 +83,82 @@ class GateReport:
         `invalidated` together: the `refuted` stance of the claim-row
         vocabulary."""
         return self.falsified + self.invalidated
+
+
+#: whether the missing-value policy rows mathema writes are gated and
+#: counted as claims: a contradicted default or a raise no claim accounts
+#: for is then falsified, and fails as any falsified claim does; off, they
+#: are reported beside the counts and the function passes
+POLICY_ROWS_GATE = True
+
+
+def _unaccounted_text(report) -> str:
+    """One clause per policy row mathema wrote that does not hold:
+    `; missing[x]: f drops a missing x (nan in, 1.0 out), the row says
+    propagates; change the word or the code`, `; absent[x]: f raised
+    TypeError at x = None, and no claim says it may (state
+    `absent(f, x) raises(TypeError)`)`, or an empty string."""
+    found = getattr(report, "unaccounted", None) or []
+    return "".join(f"; {text}" for text in found)
+
+
+def _policy_clause(name: str, statement: str, pol: dict) -> "str | None":
+    """The clause a verify or check line carries for one policy row that
+    does not hold, from the row's own meta: the row, what f does, whose
+    word it contradicts, and the one next step."""
+    import re as _re
+    nxt = pol.get("next") or ""
+    first = _re.search(r"`([^`]+)`", nxt)
+    to_write = first.group(1) if first else None
+    if pol.get("sentence"):
+        sentence = pol["sentence"]
+        if sentence.startswith("f has no single policy"):
+            rows = len(_re.findall(r"`[^`]+`", nxt.split("; or ", 1)[0]))
+            return (f"{name}: {sentence}" + (f", {rows} rows to state" if rows > 1
+                                              else ""))
+        if "does not declare it" in sentence:
+            return (f"{name}: {sentence}; declare the return type Optional, or return a "
+                    f"value")
+        tail = (f"; state `{to_write}` or handle None" if pol.get("kind") == "absent"
+                and to_write else f"; state `{to_write}` or change f" if to_write else "")
+        return f"{name}: {sentence}{tail}"
+    reason = pol.get("reason") or ""
+    m = _re.search(r"f (\w+) instead: (.+)$", reason)
+    lib = _re.match(r"from (\S+)'s own policy row, which f calls; f (.+?) instead at (.+)$",
+                    reason)
+    if lib:
+        return (f"{name}, {lib.group(1)}'s row says {pol.get('behaviour')} "
+                f"{_when_words(pol.get('premise') or '')} and f {lib.group(2)} at "
+                f"{lib.group(3)}".replace("  ", " ")
+                + (f"; state `{to_write}` or change f" if to_write else ""))
+    if not m:
+        return None
+    did, entry = m.group(1), m.group(2)
+    kind = pol.get("kind") or "missing"
+    param = pol.get("parameter") or "input"
+    word = statement.split(") ", 1)[-1] if ") " in statement else pol.get("behaviour")
+    whose = ("mathema's default says" if pol.get("source") == "default"
+             else "the row says")
+    if did == "raises":
+        exc = entry.rsplit(", ", 1)[-1].replace("raised ", "")
+        slot = _re.match(r"a (\S+) slot in", entry)
+        where = (f"at a {slot.group(1)} slot of {param}" if slot
+                 else f"at {param} = None" if kind == "absent" else f"at a missing {param}")
+        what = f"f raises {exc} {where}"
+    else:
+        what = (f"f {did} {param} = None ({entry})" if kind == "absent"
+                else f"f {did} a missing {param} ({entry})")
+    remedy = (f"; write `{to_write}` or change f" if to_write
+              else "; change the word or the code")
+    return f"{name}, {what} where {whose} {word}{remedy}"
+
+
+def _when_words(premise: str) -> str:
+    if premise.endswith(">= 1"):
+        return "when values remain"
+    if premise.endswith("== 0"):
+        return "when every slot is missing"
+    return ""
 
 
 def summary_counts(counts) -> str:
@@ -80,8 +171,14 @@ def summary_counts(counts) -> str:
     get = ((lambda k: counts.get(k, 0)) if isinstance(counts, dict)
            else (lambda k: getattr(counts, "owned" if k == "accepted_risk"
                                    else k)))
-    parts = [f"{get('proven')} proven", f"{get('holds')} holds",
-             f"{get('falsified')} falsified"]
+    builtin = (counts.get("builtin_proven", 0) if isinstance(counts, dict)
+               else getattr(counts, "builtin_proven", 0))
+    proven = f"{get('proven')} proven"
+    if builtin and get("proven") > builtin:
+        mine = get("proven") - builtin
+        proven += (f" ({mine} claim{'s' if mine != 1 else ''}, {builtin} "
+                   f"built-in)")
+    parts = [proven, f"{get('holds')} holds", f"{get('falsified')} falsified"]
     for key, word in (("invalidated", "invalidated"), ("unknown", "unknown"),
                       ("skipped", "skipped"),
                       ("accepted_risk", "accepted risk")):
@@ -149,9 +246,14 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
                 p.note = row.get("note") or p.note
 
 
+#: the short name a summary line gives a falsified gate claim
+_GATE_LABELS = {"is_missing_safe": "gate", "is_absent_safe": "gate",
+                "is_empty_safe": "empty"}
+
+
 def gate(claims, *, strict: bool,
          accepted_risk: frozenset = frozenset(),
-         unresolved=()) -> GateReport:
+         unresolved=(), key: "str | None" = None) -> GateReport:
     """Apply the one gate policy to a set of adjudicated claims (live
     Probes or stored claim dicts, mixed freely).
 
@@ -164,12 +266,31 @@ def gate(claims, *, strict: bool,
     surface).
     """
     r = GateReport()
+    gate_fails: list = []
     for c in claims:
         name, verdict, meta, note = _claim_fields(c)
         if "mathema.foreign_grammar" in meta:
             r.foreign.append(c)
             continue
-        if _volunteered(meta, note):
+        statement = _claim_statement(c)
+        label = next((lab for rel, lab in _GATE_LABELS.items()
+                      if statement.startswith(rel + "(")), None)
+        if label and classify_verdict(verdict) == "falsified":
+            reason = ((meta.get("mathema.gate") or {}).get("reason")
+                      or (c.get("counterexample") if isinstance(c, dict)
+                          else getattr(c, "counterexample", None)) or "")
+            gate_fails.append(f"{label} ({statement}) falsified: {reason}"
+                              + (f"; mathema claims {key} prints the rows to state"
+                                 if key and label == "gate" else ""))
+        pol = meta.get("mathema.policy")
+        if pol and classify_verdict(verdict) == "falsified":
+            clause = _policy_clause(name, _claim_statement(c), pol)
+            if clause and _volunteered(meta, note) and not POLICY_ROWS_GATE:
+                if clause not in r.unaccounted:
+                    r.unaccounted.append(clause)
+            elif clause:
+                r.policy_problems.append(clause)
+        if _volunteered(meta, note) and not (pol and POLICY_ROWS_GATE):
             continue
         kind = classify_verdict(verdict)
         if verdict == "skipped:unknown_but_accepted":
@@ -178,6 +299,8 @@ def gate(claims, *, strict: bool,
             continue
         if kind == "proven":
             r.proven += 1
+            if meta.get("mathema.surface") == "builtin":
+                r.builtin_proven += 1
         elif kind == "holds":
             r.holds += 1
         elif kind == "falsified":
@@ -189,20 +312,36 @@ def gate(claims, *, strict: bool,
                 r.owned += 1
             else:
                 r.unknown += 1
+                r.unknown_reasons.append((name, _first_sentence(note)))
         elif kind == "skipped":
             r.skipped += 1
     # a falsified or invalidated claim is a failing check, in every
     # mode; strictness only governs structurally-skipped claims, never
     # wrong or undecided ones
     if r.falsified:
-        r.problems.append(f"{r.falsified} falsified claim(s)")
+        # a falsified gate names itself and its reason, and the policy
+        # rows under it are the same fact; else the policy rows name
+        # themselves and the one-word edit; any other falsified claim is
+        # counted
+        r.problems.extend(gate_fails)
+        if r.policy_problems and not gate_fails:
+            n = len(r.policy_problems)
+            r.problems.append(f"{n} policy row{'s' if n != 1 else ''} to settle: "
+                              + "; ".join(r.policy_problems)
+                              + (f" (mathema claims {key})" if key else ""))
+        others = r.falsified - len(r.policy_problems) - len(gate_fails)
+        if others > 0:
+            r.problems.append(f"{others} falsified claim(s)")
     if r.invalidated:
         r.problems.append(f"{r.invalidated} invalidated claim(s)")
     if r.unknown:
         # an unaccepted unknown is an open epistemic gap: it fails in
         # every mode until it is resolved or a human owns the risk
         # (mathema accept --as risk)
-        r.problems.append(f"{r.unknown} unknown claim(s)")
+        named = [f"{n} unknown: {why}" if why else f"{n} unknown"
+                 for n, why in r.unknown_reasons]
+        r.problems.append("; ".join(named) if named else
+                          f"{r.unknown} unknown claim(s)")
     if strict and (r.skipped or r.owned):
         # accepted risk is visible relaxation, not laundering: lenient
         # proceeds past it, strict still refuses it
@@ -226,6 +365,18 @@ def _entry_at(path: str, key: str) -> dict:
             return (yaml.safe_load(fh) or {}).get(key) or {}
     except OSError:
         return {}
+
+
+def _first_sentence(note) -> str:
+    """A note's first clause, short enough for a summary line: `x = nan
+    gives nan, nothing to compare`."""
+    text = (note or "").strip()
+    head = text.split(". ", 1)[0].split("; ", 1)[0]
+    head = head.replace("the only listed point, ", "")
+    head = head.replace(", gives", " gives").replace(", raises", " raises")
+    head = head.replace(" back, so there is no value to compare with",
+                        ", nothing to compare with")
+    return head[:120]
 
 
 def _accepted_risk(entry: dict | None) -> frozenset:
@@ -406,7 +557,7 @@ def _drop_retired_declared(key: str, current_claims: list,
         stmt = row.get("statement") or row.get("law") or ""
         # a statement-less retired row (an older record's shape) cannot
         # be law-compared and retires its name outright
-        matchers.append((row["name"], _same_law_as(stmt) if stmt else None))
+        matchers.append((row["name"], _same_law_as(stmt, key) if stmt else None))
     if not matchers:
         return current_claims, []
     kept: list = []
@@ -444,11 +595,32 @@ def _born_falsified_hint(key: str, probes: list,
               if d.get("name")}
     fresh = [p for p in probes
              if classify_verdict(getattr(p, "verdict", "")) == "falsified"
-             and getattr(p, "name", None) not in known]
+             and getattr(p, "name", None) not in known
+             and (getattr(p, "meta", None) or {}).get("mathema.surface") != "mathema"]
     if not fresh:
         return []
+    lines = []
+    for p in list(fresh):
+        gate_meta = (getattr(p, "meta", None) or {}).get("mathema.gate") or {}
+        if gate_meta.get("reason"):
+            lines.append(f"note {key}: gate ({p.statement}) falsified on first "
+                         f"adjudication: {gate_meta['reason']}. State the rows mathema "
+                         f"claims {key} prints, or change f; the claim is kept until "
+                         f"you do.")
+            fresh.remove(p)
+            continue
+        pol = (getattr(p, "meta", None) or {}).get("mathema.policy") or {}
+        clause = _policy_clause(p.name, p.statement, pol) if pol else None
+        if clause:
+            lines.append(f"note {key}: {p.name} falsified on first adjudication; "
+                         + clause[len(str(p.name)):].lstrip(":,").strip().replace(
+                             "; change the word or the code",
+                             ". Change the word in the claims file, or change f."))
+            fresh.remove(p)
+    if not fresh:
+        return lines
     names = ", ".join(sorted(str(p.name) for p in fresh))
-    return [f"note {key}: {names} falsified on first adjudication. A "
+    return lines + [f"note {key}: {names} falsified on first adjudication. A "
             f"declared claim is kept until a human decides it (fix the "
             f"code, `mathema accept {key} <claim> --as discovery`, or "
             f"supersede it). To try a spelling first, "
@@ -484,9 +656,11 @@ def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
         stmt = getattr(p, "statement", "") or ""
         if any(n == name and (same is None or same(stmt))
                for n, same in matchers):
-            if (getattr(p, "meta", None) or {}).get("mathema.companion_of"):
-                # a retired float companion is respawned by every proof
-                # of its parent; retirement is the standing disposition
+            if (getattr(p, "meta", None) or {}).get("mathema.companion_of") \
+                    or (getattr(p, "meta", None) or {}).get("mathema.surface") == "mathema":
+                # a retired float companion is respawned by every proof of
+                # its parent, and a retired policy row by every check;
+                # retirement is the standing disposition
                 continue
             if name not in already_noted:
                 notes.append(
@@ -642,6 +816,13 @@ def resolve_claims_file(target: str, root: str = ".") -> "str | None":
     return None
 
 
+def _defines_only(entry) -> bool:
+    """Whether a claims-file entry only states its runtime's definitions
+    (`defines:`) and no claim: a key with nothing to adjudicate."""
+    return (isinstance(entry, dict) and bool(entry.get("defines"))
+            and not entry.get("claims"))
+
+
 def claims_file_entries(path: str, root: str,
                         library_claims: dict) -> "tuple[dict, bool, list]":
     """Intent:
@@ -670,7 +851,7 @@ def claims_file_entries(path: str, root: str,
     entries: dict = {}
     if library is None:
         for key, entry in data.items():
-            if isinstance(entry, dict):
+            if isinstance(entry, dict) and not _defines_only(entry):
                 entry = dict(entry)
                 if file_grammar:
                     entry.setdefault("grammar", file_grammar)
@@ -692,7 +873,7 @@ def claims_file_entries(path: str, root: str,
     stamp_library_rows(data, tag)
     mark_row_versions(data, library, aliases)
     for key, entry in data.items():
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or _defines_only(entry):
             continue
         info = library_claims.get(key)
         entries[key] = ({"entry": info["entry"], "source": info["source"]}
@@ -867,6 +1048,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        write_yaml)
 
     out = VerifyResult()
+    # claims whose record differs from what is written only because the
+    # canonical text moved in one release, reported once for the run
+    release_moved: list = []
     from .spec import foreign_grammar_warnings
     out.lines.extend(foreign_grammar_warnings(root))
     from .compendium import own_package_compendium_files
@@ -881,7 +1065,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     policy = load_policy(root)
     locks = load_locks(root)
     verified = load_verified(root)
-    declared = load_declared(root)
+    declared = {key: info for key, info in load_declared(root).items()
+                if not _defines_only((info or {}).get("entry"))}
     from .spec import unreadable_verified
     broken = unreadable_verified(root)
     # the library functions this project calls or rests a premise on
@@ -1098,6 +1283,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             from .sync import apply_verified_wins, claim_conflicts
             _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
             for conflict in _conflicts:
+                if conflict.get("kind") == "release-move":
+                    release_moved.append((key, conflict["claim"]))
+                    continue
                 if conflict.get("kind") == "supersession":
                     supersessions.setdefault(key, {})[conflict["claim"]] = \
                         conflict["authored"]
@@ -1144,7 +1332,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             entry_grammar = merged_entry.get("grammar", GRAMMAR)
             out.grammars_seen.update(c.get("grammar", entry_grammar)
                                      for c in current_claims)
-            current_fp = claims_fingerprint(current_claims, entry_grammar)
+            current_fp = claims_fingerprint(current_claims, entry_grammar, fn)
         except InvalidConjecture as e:
             if _record_has_unreadable_claim(verified_entry):
                 msg = (f"{key}: a claim in this function's verified "
@@ -1343,7 +1531,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         written = write_record(rec, key=key, root=root,
                                claims=current_claims,
                                declared_intent=merged_entry.get("intent"),
-                               grammar=entry_grammar)
+                               grammar=entry_grammar, fn=fn)
         _carry_recorded_verdicts(rec.probes, written, key)
         # the record just written carries each acceptance forward or
         # marks it stale (a changed form), so the gate reads the
@@ -1412,6 +1600,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # phase 3: gate every key through the one policy and render lines
     for key, why, claims_for_gate, rec, deps, accepted, unres, _vinfo in pending:
         is_library = key in library
+        if is_library:
+            # a library's missing-value posture is its compendium's own
+            # policy rows; the rows mathema writes for a user function
+            # are not asked of it
+            claims_for_gate = [c for c in claims_for_gate
+                               if not (_claim_fields(c)[2].get("mathema.policy")
+                                       and _claim_fields(c)[2].get("mathema.surface")
+                                       == "mathema")]
         # a library key gates like the project's own claims: a row
         # neither verified here nor accepted (`--as trusted`) fails.
         # The unresolved-global-name check is the one rule it skips:
@@ -1419,7 +1615,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # function, and a library's body is not what its rows are about
         report = gate(claims_for_gate, strict=strict,
                       accepted_risk=accepted,
-                      unresolved=() if is_library else unres)
+                      unresolved=() if is_library else unres, key=key)
         hints = (_unsettled_library_hints(key, claims_for_gate)
                  if is_library and report.problems else [])
         standing = [
@@ -1443,13 +1639,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             line = f"{state:4} {key}: fresh"
             if is_library:
                 line += f"; library claims from {library[key]}"
+            line += _unaccounted_text(report)
             if report.problems:
                 line += "; " + "; ".join(report.problems + hints)
         else:
             line = (f"{state:4} {key}: "
                     + (f"library claims from {library[key]}; "
                        if is_library else "")
-                    + f"{why}; {summary_counts(report)}")
+                    + f"{why}; {summary_counts(report)}"
+                    + _unaccounted_text(report))
             if report.foreign:
                 grammars = sorted({_claim_fields(p)[2]
                                    ["mathema.foreign_grammar"]
@@ -1493,6 +1691,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                            grammar_changes.get(key, {}))
                        for c in claims_for_gate],
         })
+    if release_moved:
+        from .sync import IDENTITY_RELEASE
+        out.lines.append(
+            f"note: fingerprints move once in {IDENTITY_RELEASE}: the rendered "
+            f"domain now states what it admits, so {len(release_moved)} "
+            f"claim{'s' if len(release_moved) != 1 else ''} recorded by an "
+            f"earlier release {'are' if len(release_moved) != 1 else 'is'} "
+            f"re-recorded under the new text; nothing the author wrote "
+            f"changed")
     return out
 
 

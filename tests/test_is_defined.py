@@ -330,7 +330,7 @@ def test_a_chained_region_wider_than_the_body_is_falsified_by_execution():
             claim("-1 <= x <= 1", name="is_defined", route=route)])
         assert p.verdict == "falsified", (route, p.verdict, p.note)
         assert "a value outside the stated region" in p.counterexample
-        m = re.search(r"\bx=([-+0-9.e]+)", p.counterexample)
+        m = re.search(r"\bx = ([-+0-9.e]+)", p.counterexample)
         assert m and float(m.group(1)) > 1
         assert _lower_only(float(m.group(1))) is not None
 

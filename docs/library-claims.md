@@ -25,9 +25,9 @@ def value_at_risk(returns: np.ndarray) -> float:
     return float(-np.percentile(returns, 5))
 
 
-def spread(returns: np.ndarray) -> float:
-    """The distance between the best and the worst day."""
-    return float(np.ptp(returns))
+def moves(returns: np.ndarray) -> np.ndarray:
+    """The change from each day to the next."""
+    return np.ediff1d(returns)
 ```
 
 <!-- example: library file=claims/risk.claims.yaml -->
@@ -40,10 +40,10 @@ risk.value_at_risk:
   claims:
     - name: within_the_worst_day
       statement: "for returns in [-0.1, 0.1]^n, f(returns) <= -min(returns)"
-risk.spread:
+risk.moves:
   claims:
-    - name: nonneg
-      statement: "for returns in [-0.1, 0.1]^n, f(returns) >= 0"
+    - name: telescopes
+      statement: "for returns in [-0.1, 0.1]^n, assuming dim(returns) >= 2, sum(f(returns)) ~= returns[-1] - returns[0]"
 ```
 
 ## 1. Ask what is known
@@ -62,10 +62,10 @@ mathema compendium status --root .
     mathema/compendium/numpy/reductions.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/scalars.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/statistics.claims.yaml (bundled, >=1.24,<3, in range)
-  numpy.percentile  1 call, 1 row: 0 verified locally, 0 trusted, 0 falsified, 1 unsettled
+  numpy.percentile  1 call, 2 rows: 0 verified locally, 0 trusted, 0 falsified, 2 unsettled
   numpy.sqrt        1 call, 2 rows: 0 verified locally, 0 trusted, 0 falsified, 2 unsettled
   numpy.std         1 call, 3 rows: 0 verified locally, 0 trusted, 0 falsified, 3 unsettled
-  no claims: numpy.ptp
+  no claims: numpy.ediff1d
 ```
 
 One block per library, headed by its installed version and the number of
@@ -76,7 +76,7 @@ library versions it applies to, and each file is marked in range or out
 of range for the numpy installed. The excerpts on this page leave out the
 heading, which names your numpy's version, and the three files for numpy
 2.4 and later, which are out of range on an older numpy. Then each called function that has rows, with how many
-are settled: none yet, since nothing has run. `numpy.ptp` has no rows at
+are settled: none yet, since nothing has run. `numpy.ediff1d` has no rows at
 all, so what it does under your inputs is a black box to mathema until
 someone states a claim about it.
 
@@ -93,12 +93,12 @@ mathema verify --root .
 
 <!-- example: library output -->
 ```text
-ok   numpy.percentile: library claims from mathema/compendium/numpy/statistics.claims.yaml; no baseline record; 1 proven, 1 holds, 0 falsified
+ok   numpy.percentile: library claims from mathema/compendium/numpy/statistics.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
 ok   numpy.sqrt: library claims from mathema/compendium/numpy/scalars.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
 ok   numpy.std: library claims from mathema/compendium/numpy/reductions.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
-ok   risk.spread: no baseline record; 1 proven, 1 holds, 0 falsified
-ok   risk.value_at_risk: no baseline record; 1 proven, 1 holds, 0 falsified
-ok   risk.volatility: no baseline record; 1 proven, 1 holds, 0 falsified
+ok   risk.spread: no baseline record; 1 proven, 2 holds, 0 falsified
+ok   risk.value_at_risk: no baseline record; 1 proven, 2 holds, 0 falsified
+ok   risk.volatility: no baseline record; 1 proven, 2 holds, 0 falsified
 0 fresh (form unchanged, skipped), 6 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -117,10 +117,10 @@ mathema compendium status --root .
 
 <!-- example: library output match=subset -->
 ```text
-  numpy.percentile  1 call, 1 row: 1 verified locally, 0 trusted, 0 falsified, 0 unsettled
+  numpy.percentile  1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.sqrt        1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.std         1 call, 3 rows: 3 verified locally, 0 trusted, 0 falsified, 0 unsettled
-  no claims: numpy.ptp
+  no claims: numpy.ediff1d
 ```
 
 Verified locally means proven or holding in this project's store, on
@@ -131,25 +131,25 @@ this machine's numpy. The gap is unchanged.
 A compendium file of your own closes the gap. It sits with your other
 claims files, names the library and the versions the row applies to, and
 its keys are the library's functions with the library's own parameter
-names (`numpy.ptp` takes `a`):
+names (`numpy.ediff1d` takes `ary`):
 
 <!-- example: library file=claims/numpy.claims.yaml -->
 ```yaml
 compendium: numpy
 versions: ">=2,<3"
 
-numpy.ptp:
+numpy.ediff1d:
   claims:
-    - name: range
-      statement: "for a in [-100, 100]^n, f(a) == max(a) - min(a)"
+    - name: differences
+      statement: "for ary in [-100, 100]^n, assuming dim(ary) >= 2, f(ary) == ary[1:] - ary[:-1]"
       route: probe
 ```
 
 `route: probe` says up front that the row is checked by running the
 function. Left out, mathema tries the derive route first and falls back
-to probing, and the record keeps why: `a is a vector or matrix, which the
-scalar derive route does not read, and the matrix algebra did not close
-the claim`. Either way the next sweep adjudicates the new row and nothing
+to probing, and the record keeps why: for `ediff1d`, that branch pruning
+could not settle whether `to_begin` and `to_end` are both None under the
+declared domain. Either way the next sweep adjudicates the new row and nothing
 else, every other record being fresh:
 
 <!-- example: library run requires=numpy -->
@@ -159,7 +159,7 @@ mathema verify --root .
 
 <!-- example: library output match=subset -->
 ```text
-ok   numpy.ptp: library claims from claims/numpy.claims.yaml; no baseline record; 1 proven, 1 holds, 0 falsified
+ok   numpy.ediff1d: library claims from claims/numpy.claims.yaml; no baseline record; 1 proven, 1 holds, 0 falsified
 6 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 ```
 
@@ -178,13 +178,13 @@ mathema compendium status --root .
     mathema/compendium/numpy/scalars.claims.yaml (bundled, >=1.24,<3, in range)
     mathema/compendium/numpy/statistics.claims.yaml (bundled, >=1.24,<3, in range)
     claims/numpy.claims.yaml (project, >=2,<3, in range)
-  numpy.percentile  1 call, 1 row: 1 verified locally, 0 trusted, 0 falsified, 0 unsettled
-  numpy.ptp         1 call, 1 row: 1 verified locally, 0 trusted, 0 falsified, 0 unsettled
+  numpy.ediff1d     1 call, 1 row: 1 verified locally, 0 trusted, 0 falsified, 0 unsettled
+  numpy.percentile  1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.sqrt        1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.std         1 call, 3 rows: 3 verified locally, 0 trusted, 0 falsified, 0 unsettled
 ```
 
-Your file is listed beside the bundled ones as `project`, and `ptp` has
+Your file is listed beside the bundled ones as `project`, and `ediff1d` has
 left the `no claims` line. A key in your file that a bundled file also
 states shadows the bundled entry for that function.
 

@@ -49,11 +49,11 @@ _NOISY = '''
 def test_a_seeded_function_is_repeatable_through_reproducibility(tmp_path):
     draw = _load(tmp_path, _SEEDED, "rep_draw").draw
     p = _one(draw, "is_repeatable(f)")
-    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert p.verdict == "proven", (p.verdict, p.note, p.counterexample)
     children = p.meta["mathema.children"]
     assert set(children) == {"is_reproducible", "is_state_safe"}, children
-    assert children["is_reproducible"] in ("holds", "proven"), children
-    assert "is_reproducible: " in (p.note or "")
+    assert children["is_reproducible"] == "proven", children
+    assert "is_reproducible: proven" in (p.sketch or "")
 
 
 def test_an_unseeded_noisy_function_is_not_repeatable(tmp_path):
@@ -66,14 +66,14 @@ def test_an_unseeded_noisy_function_is_not_repeatable(tmp_path):
                                                "is_state_safe"}
 
 
-def test_the_roll_up_never_reaches_proven(tmp_path):
+def test_the_roll_up_is_proven_when_every_child_is(tmp_path):
     half = _load(tmp_path, '''
         def half(x: float) -> float:
             """Half."""
             return x / 2
     ''', "rep_half").half
     p = _one(half, "is_repeatable(f)")
-    assert p.verdict == "holds", (p.verdict, p.note)
+    assert (p.verdict, p.route) == ("proven", "examine"), (p.verdict, p.note)
 
 
 def test_computation_safety_leaves_repeatability_out(tmp_path):
@@ -92,7 +92,8 @@ def test_is_reproducible_holds_the_seed_fixed(tmp_path):
     from mathema.conjecture import check_conjectures, claim
     (p,) = check_conjectures(draw, [claim("f(n, seed) == f(n, seed)",
                                           name="is_reproducible")])
-    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert (p.verdict, p.route) == ("proven", "examine"), (
+        p.verdict, p.note, p.counterexample)
 
 
 _SIGNATURES = [

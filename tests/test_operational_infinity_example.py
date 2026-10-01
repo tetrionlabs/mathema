@@ -33,6 +33,10 @@ def test_the_page_shows_exactly_what_the_example_prints():
                 "f(x) >= 0",
                 "let |inf| be 1e100, f(x) >= 0"]:
         for p in mathema.check(gauss, claims=[law]).probes:
+            if (p.meta or {}).get("mathema.policy"):
+                # what f does with a missing x is its own row, not part
+                # of this example
+                continue
             label = ("  [float]" if (p.meta or {}).get("mathema.companion_of")
                      else law)
             rows.append(f"{label:31} {p.verdict:9} "

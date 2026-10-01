@@ -43,5 +43,5 @@ def test_a_long_witness_shrinks_in_few_checks():
             "for s in L[counted_letters], f(s) == True")])
     finally:
         unregister_language("counted_letters")
-    assert p.verdict == "falsified" and p.counterexample.startswith("s='é':"), p.counterexample
+    assert p.verdict == "falsified" and p.counterexample.startswith("s = 'é':"), p.counterexample
     assert len(CHECKS) < 5000, len(CHECKS)

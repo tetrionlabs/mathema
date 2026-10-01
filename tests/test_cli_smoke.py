@@ -152,6 +152,8 @@ def test_check_strict_fails_on_unverifiable_claims(tmp_path):
     guarded = tmp_path / "guarded.py"
     guarded.write_text(
         "def always_raises(x: float) -> float:\n"
+        "    if x != x:\n"
+        "        raise ValueError('x is missing')\n"
         "    raise ValueError('always fails')\n"
     )
     lenient = _run("check", "guarded.py:always_raises", cwd=tmp_path)
@@ -595,10 +597,13 @@ def test_trials_scale_shrinks_the_reported_n(tmp_path):
     scaled = _run("check", "funcs.py:add", "--format", "json", *probe_claim,
                   "--trials-scale", "0.25", cwd=tmp_path)
     assert default.returncode == 0 and scaled.returncode == 0
+    # a policy row's n counts the calls at missing inputs, not draws
     default_ns = {c["n"] for f in json.loads(default.stdout)["functions"]
-                  for c in f["claims"] if c["n"]}
+                  for c in f["claims"]
+                  if c["n"] and "mathema.policy" not in (c.get("meta") or {})}
     scaled_ns = {c["n"] for f in json.loads(scaled.stdout)["functions"]
-                for c in f["claims"] if c["n"]}
+                for c in f["claims"]
+                if c["n"] and "mathema.policy" not in (c.get("meta") or {})}
     assert max(scaled_ns) < min(default_ns)
 
 
@@ -609,7 +614,8 @@ def test_trials_scale_never_drops_below_the_floor(tmp_path):
             "--trials-scale", "0.001", cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     ns = {c["n"] for f in json.loads(r.stdout)["functions"]
-         for c in f["claims"] if c["n"]}
+         for c in f["claims"]
+         if c["n"] and "mathema.policy" not in (c.get("meta") or {})}
     assert min(ns) >= 16
 
 

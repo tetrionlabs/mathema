@@ -467,13 +467,20 @@ def suggest_claims(target: str, root: str = ".") -> dict:
     raises(...) per guarded parameter. Declares, never verifies:
     nothing here is run or proven, and a suggestion never gates until
     a human adopts it. Rows are `[name, statement, route, declared,
-    aspect]`; `declared` is true when that name is already in the
-    declared layer, and `aspect` names the question a suggestion
-    competes on (`""` when it answers a question no other suggestion
-    does), so a caller reads the whole bending question `shape[x]`
-    (affine, convex, concave) as one choice rather than three
-    independent claims. Same columns `mathema claims --suggest
-    --format json` emits. A `hints` list, when present, carries
+    aspect, section, reason]`; `declared` is true when that name is
+    already in the declared layer, and `aspect` names the question a
+    suggestion answers (`""` when it answers a question no other
+    suggestion does), so a caller reads the whole bending question
+    `shape[x]` (affine, convex, concave) as one question with several
+    candidate answers, any number of which may be adopted. `section` is
+    `individual`, `question` (a candidate answer to its aspect) or
+    `unknowable` (a state or repeatability family the examination
+    cannot read far enough to decide, with the one-line `reason`;
+    never adopted unless named). An individual row whose examination
+    already sees a write or a hidden read carries that site as its
+    `reason`, since adopting it records the falsification; `reason` is
+    `""` elsewhere. Same columns `mathema claims
+    --suggest --format json` emits. A `hints` list, when present, carries
     directions to the author (not claims): a structurally bounded but
     unannotated return earns a nudge to annotate it so a bound claim can
     be offered, never a bound guessed from prose."""
@@ -486,14 +493,19 @@ def suggest_claims(target: str, root: str = ".") -> dict:
     key, fn = resolve_function(target, root)
     entry = (load_declared(root).get(key) or {}).get("entry", {})
     declared_names = {c.get("name") for c in entry.get("claims") or []}
+    from mathema.suggest import suggestion_sections
     rows = []
-    for cj in _suggest(fn, key=key, root=root):
+    from mathema.suggest import gate_suggestions
+    suggestions = _suggest(fn, key=key, root=root) + gate_suggestions(fn)
+    for cj, (section, reason) in zip(suggestions,
+                                     suggestion_sections(fn, suggestions)):
         text = claim_statement(cj).strip()
         rows.append([cj.name, text, cj.route, cj.name in declared_names,
-                     aspect_label(cj.name)])
+                     aspect_label(cj.name), section, reason])
     from mathema.suggest import bound_annotation_hint
     out = {"key": key,
-           "cols": ["name", "statement", "route", "declared", "aspect"],
+           "cols": ["name", "statement", "route", "declared", "aspect",
+                    "section", "reason"],
            "rows": rows}
     # hints are directions to the author, not claims: an unannotated but
     # structurally bounded return earns a nudge to annotate it (a bound

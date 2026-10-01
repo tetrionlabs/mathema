@@ -28,13 +28,13 @@ and clarity at the apex, so a lopsided profile has a lopsided shape. The
 overall number is the share of the full triangle that the three scores fill,
 `clarity * (implementation + intent) / 2` on the fractions, which collapses
 toward zero when any layer is empty rather than averaging politely over it.
-As an illustration of the shape (the figures are chosen for the example, not
-taken from a recorded project), implementation 100, intent 26 and clarity 50
-draw as:
+The `billing` module that [Add claims to an existing
+codebase](existing-codebase.md) builds up, after its first sweep and with
+its tests counted, draws as:
 
 <!-- illustration -->
 ```text
-        CLARITY 50
+        CLARITY 26
               ◆
              · ·
             ·   ·
@@ -42,21 +42,21 @@ draw as:
           ·       ·
          ·         ·
         ·           ·
-       ·      ●      ·
-      ·     ···       ·
-     ·    ······       ·
-    ·   ········        ·
-   ·  ···········        ·
-  · ·············         ·
- ·················         ·
+       ·             ·
+      ·               ·
+     ·                 ·
+    ·         ●         ·
+   ·        ···          ·
+  ·     ········          ·
+ ·  ··············         ·
 ●·············+···●·········◆
-  IMPL 100           INTENT 26
-        overall 32
+  IMPL 100           INTENT 31
+        overall 17
 ```
 
-Every line is exercised and intent is a quarter specified, and the overall
-comes out at 32, `0.5 * (1.00 + 0.26) / 2`, where the mean of the three would
-have said 59.
+Every line is exercised, intent is about a third specified and clarity a
+quarter pinned down, and the overall comes out at 17, `0.26 * (1.00 +
+0.31) / 2`, where the mean of the three would have said 52.
 
 Intent and clarity roll up to the project by a mean weighted by how central
 each function is in the call graph, so a function the rest of the code leans

@@ -127,19 +127,21 @@ def test_the_rendered_domain_is_a_fixed_point(text, ascii_mode):
     assert render_domain(again, ascii_mode=ascii_mode) == rendered
 
 
-def test_rendering_states_the_resolved_missing_policy():
-    included = _bound("s in L[letters]")
-    assert render_domain(included, ascii_mode=True) == "L[letters]|missing"
-    assert render_domain(included, ascii_mode=False) == "L[letters]|missing"
+def test_rendering_states_what_the_language_domain_admits():
+    bare = _bound("s in L[letters]")
+    assert render_domain(bare, ascii_mode=True) == "L[letters]"
+    assert render_domain(bare, ascii_mode=False) == "L[letters]"
+    absent = _bound("s in L[letters]|None")
+    assert render_domain(absent, ascii_mode=True) == "L[letters]|None"
+    assert render_domain(absent, ascii_mode=False) == "L[letters]|None"
     excluded = _bound("s in L[letters] \\ {∅}")
     assert render_domain(excluded, ascii_mode=True) == "L[letters] \\ {missing}"
-    assert render_domain(excluded, ascii_mode=False) == "L[letters] \\ {missing}"
 
 
 def test_a_union_with_a_finite_set_and_an_exclusion_render_as_written():
     bound = _bound('s in L[letters] | {"n/a"} \\ {""}')
     assert render_domain(bound, ascii_mode=False) == \
-        'L[letters] ∪ {"n/a"} \\ {""}|missing'
+        'L[letters] ∪ {"n/a"} \\ {""}'
 
 
 @pytest.mark.parametrize("text", SPELLINGS)
@@ -193,8 +195,9 @@ def test_membership_is_the_language_s_own():
     assert not domain_contains(b"abc", bound)
 
 
-def test_missing_is_allowed_unless_excluded():
-    assert domain_contains(None, _bound("s in L[letters]"))
+def test_a_language_admits_absence_only_when_it_says_so():
+    assert not domain_contains(None, _bound("s in L[letters]"))
+    assert domain_contains(None, _bound("s in L[letters]|None"))
     assert not domain_contains(None, _bound("s in L[letters] \\ {∅}"))
 
 
@@ -319,5 +322,6 @@ def test_a_frozen_language_ref_is_never_read_as_an_interval():
 
 def test_a_missing_member_of_a_language_set_piece_is_the_policy():
     bound = _bound('s in L[letters] | {"x", missing}')
-    assert domain_contains(None, bound)
+    assert domain_contains(float("nan"), bound)
+    assert not domain_contains(None, bound)
     assert MISSING not in bound.excluded

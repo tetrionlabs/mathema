@@ -64,7 +64,7 @@ def test_the_numpy_compendium_covers_the_expected_surface():
     # reductions are defined on a non-empty array only
     assert defined_on("numpy.mean") == ["dim(a) >= 1"]
     # bounds carry claims, not hazards
-    assert len(numpy["numpy.clip"]["claims"]) == 2
+    assert len(numpy["numpy.clip"]["claims"]) == 3
     assert numpy["numpy.tanh"]["claims"]
 
 

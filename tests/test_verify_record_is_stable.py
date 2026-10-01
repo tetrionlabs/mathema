@@ -42,5 +42,12 @@ def test_an_unnamed_claim_keeps_one_row_across_runs(tmp_path, monkeypatch, state
     for _ in range(3):
         verify_project(root=str(tmp_path))
         rows = yaml.safe_load(record.read_text())["stablerec.running_total"]["claims"]
-        declared = [r for r in rows if r.get("name") != "dependencies_current"]
+        # a companion row (the empty-input line under a claim over a
+        # sequence) belongs to its claim, once
+        companions = [r for r in rows
+                      if (r.get("meta") or {}).get("mathema.companion_of")]
+        declared = [r for r in rows if r.get("name") != "dependencies_current"
+                    and r not in companions]
         assert len(declared) == 1, [r.get("name") for r in declared]
+        names = [r.get("name") for r in companions]
+        assert len(names) == len(set(names)), names

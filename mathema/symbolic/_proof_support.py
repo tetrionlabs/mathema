@@ -444,7 +444,9 @@ def _quantifier_clause(names: set, order: list, domain: dict,
         bounds = domain.get(n)
         if bounds is None:
             return "ℝ"
-        return render_domain(bounds, ascii_mode=False)
+        # a proof is over the reals: the missing values a domain admits
+        # are the computation's, executed by its companion
+        return render_domain(bounds, ascii_mode=False, show_missing=False)
 
     groups: dict = {}
     for n in free:
@@ -2095,9 +2097,11 @@ def _assumption_rewrites(bound_context) -> list:
         if pred == sympy.Q.zero:
             out.append((rest, -const))
         else:
-            t = sympy.Dummy("assumed",
-                            positive=(pred == sympy.Q.positive),
-                            nonnegative=True)
+            # a slack ranging over every nonnegative value (every
+            # positive one for a strict premise)
+            t = (sympy.Dummy("assumed", positive=True)
+                 if pred == sympy.Q.positive
+                 else sympy.Dummy("assumed", nonnegative=True))
             out.append((rest, t - const))
     return out
 
@@ -2447,7 +2451,7 @@ def _decide_equality(lhs, rhs, diff, relation, domain, bound_context, params,
                                                bound_context, tolerance)
         if counterexample is not None:
             detail = (", confirmed nonzero at "
-                     + ", ".join(f"{s}={v:.6g}" for s, v in counterexample.items())
+                     + ", ".join(f"{s} = {v:.6g}" for s, v in counterexample.items())
                      if counterexample else "")
             return ProofResult("disproven", sketch=f"{_humanize(lhs)} ≠ {_humanize(rhs)}: "
                                f"difference simplifies to {_humanize(diff)}{detail}",

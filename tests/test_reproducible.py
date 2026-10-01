@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""is_reproducible, the WEAKER stateless member: reproducible up to
-an RNG seed; fix the seed, rerun, get the same output. Its trials
-capture and restore the recognized RNG states (stdlib random, numpy's
-legacy global) around paired calls; is_deterministic remains the
-strong member (no state, no seed, anywhere)."""
+"""is_reproducible, the member for a function that takes a seed or a
+generator: every draw must come through that parameter, so the same
+seed gives the same output. It is decided from the source, as
+is_deterministic is (no state, no seed, anywhere)."""
 import random
 import time as _time
 
@@ -34,10 +33,12 @@ def _one(fn, name):
     return probe
 
 
-def test_rng_draw_is_reproducible_up_to_the_seed_but_not_deterministic():
+def test_a_draw_from_the_global_generator_is_neither_reproducible_nor_deterministic():
     rep = _one(seeded_noise, "is_reproducible")
-    assert rep.verdict == "holds"
-    assert rep.route == "probe:algorithmic"
+    assert rep.verdict == "falsified"
+    assert rep.route == "examine"
+    assert "draws from the shared random generator (random.random)" in \
+        rep.counterexample
     det = _one(seeded_noise, "is_deterministic")
     assert det.verdict == "falsified"
 
@@ -45,14 +46,14 @@ def test_rng_draw_is_reproducible_up_to_the_seed_but_not_deterministic():
 def test_clock_reads_are_not_reproducible_by_any_seed():
     probe = _one(clocked, "is_reproducible")
     assert probe.verdict == "falsified"
-    assert "different results" in probe.counterexample
+    assert "calls time.time" in probe.counterexample
 
 
 def test_deterministic_body_is_a_fortiori_reproducible():
     probe = _one(line, "is_reproducible")
     assert probe.verdict == "proven"
     assert probe.route == "examine"
-    assert "implies reproducible" in probe.sketch
+    assert "no random generator included" in probe.sketch
 
 
 def test_suggestions_gate_reproducibility_on_structural_randomness():

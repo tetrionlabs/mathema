@@ -16,9 +16,9 @@ _MODULE = '''
 import numpy as np
 
 
-def entries(A: np.ndarray) -> float:
-    """Sum of every entry."""
-    return float(A.sum())
+def spread(A: np.ndarray) -> float:
+    """Largest entry minus smallest: 0 exactly for a constant matrix."""
+    return float(A.max() - A.min())
 
 
 def gram_trace(A: np.ndarray) -> float:
@@ -39,8 +39,10 @@ def mod(tmp_path):
 
 
 def test_a_probe_witness_prints_the_shape_and_a_first_row(mod):
-    (p,) = check_conjectures(mod.entries, [claim(
-        "for A in [0, 1]^(30,15), f(A) < 0", route="probe")])
+    # a constant matrix meets the claim, so the witness is a matrix
+    # whose entries differ
+    (p,) = check_conjectures(mod.spread, [claim(
+        "for A in [0, 1]^(30,15), f(A) == 0", route="probe")])
     assert p.verdict == "falsified", (p.verdict, p.note)
     cx = p.counterexample or ""
     assert "30 by 15" in cx, cx

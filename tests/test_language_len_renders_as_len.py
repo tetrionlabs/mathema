@@ -14,8 +14,8 @@ from mathema.spec import render_claim_text
 
 
 @pytest.mark.parametrize("unicode, expected", [
-    (True, "∀ s ∈ L[ascii]|missing, len(f(s)) ≤ len(s)"),
-    (False, "for s in L[ascii]|missing, len(f(s)) <= len(s)"),
+    (True, "∀ s ∈ L[ascii], len(f(s)) ≤ len(s)"),
+    (False, "for s in L[ascii], len(f(s)) <= len(s)"),
 ])
 def test_length_over_a_language_renders_as_len(unicode, expected):
     cj = claim("for s in L[ascii], len(f(s)) <= len(s)")
@@ -53,24 +53,24 @@ def test_a_premise_over_a_language_renders_len():
 def test_len_nested_inside_a_call_argument_renders_as_len():
     cj = claim("for s in L[ascii], f(len(s)) == len(f(s))")
     assert render_claim_text(cj, unicode=False) == \
-        "for s in L[ascii]|missing, f(len(s)) = len(f(s))"
+        "for s in L[ascii], f(len(s)) = len(f(s))"
 
 
 def test_a_string_literal_spelling_dim_is_left_alone():
     cj = claim("for s in L[ascii], f(s + 'dim(s, 0)') == len(s)")
     shown = render_claim_text(cj, unicode=False)
-    assert "'dim(s, 0)'" in shown and "= len(s)" in shown
+    assert '"dim(s, 0)"' in shown and "= len(s)" in shown
 
 
 def test_a_second_axis_keeps_dim():
     cj = claim("for s in L[ascii], dim(f(s), 1) == len(s)")
     assert render_claim_text(cj, unicode=False) == \
-        "for s in L[ascii]|missing, dim(f(s), 1) = len(s)"
+        "for s in L[ascii], dim(f(s), 1) = len(s)"
 
 
 @pytest.mark.parametrize("unicode", [True, False])
-def test_outside_the_language_dialect_dim_stays(unicode):
+def test_outside_the_language_dialect_len_reads_as_len_too(unicode):
     cj = claim("assuming len(x) == len(y), f(x, y) == f(y, x)")
     assert cj.grammar == "mathema"
     assert render_claim_text(cj, unicode=unicode).startswith(
-        "assuming dim(x, 0) == dim(y, 0), ")
+        "assuming len(x) == len(y), ")

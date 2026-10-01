@@ -248,6 +248,15 @@ def claim_row(c, *, accepted_risk: frozenset = frozenset()) -> dict:
            "gates": (source != "suggested"
                      and "mathema.foreign_grammar" not in meta),
            "evidence": {"n": n or None}}
+    pol = meta.get("mathema.policy")
+    if isinstance(pol, dict):
+        # a policy row says whose word it is, why it reads this way and
+        # the next step; mathema's own ones gate like any claim
+        row["source"] = pol.get("source") or row["source"]
+        row["reason"] = pol.get("sentence") or pol.get("reason") or row["reason"]
+        if pol.get("next"):
+            row["next"] = pol["next"]
+        row["gates"] = "mathema.foreign_grammar" not in meta
     if name in accepted_risk:
         row["accepted"] = "risk"
     if meta.get("mathema.let_warning"):
@@ -398,6 +407,8 @@ def statement_text(relation: str, lhs: str, rhs: str | None) -> str:
         return f"raises({lhs}, {rhs})" if rhs else f"raises({lhs})"
     if relation in examine_predicates():
         return f"{relation}({lhs})"
+    if relation == "policy":
+        return f"{lhs} {rhs}".strip()
     return f"{lhs} {relation} {rhs}"
 
 

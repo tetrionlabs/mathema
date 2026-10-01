@@ -202,42 +202,49 @@ for n in Z, ...                                # bare, unbounded, still a stated
 
 ### Missing values
 
-A sequence-typed parameter (a `list`/array/Series, not a scalar) can
-contain a missing value, `None`, NaN, or another library's own null
-sentinel. Whether that's allowed is governed by one rule, applied the
-same way regardless of which library produced the vector: **a missing
-value is allowed unless the domain excludes it with `\ {∅}`.** Stating a
-type does not change this.
+A value can be not there in two ways: **absent** (`None`, the object
+itself) and **missing** (a hole in a slot: `nan`, a `None` element,
+`pd.NA`). A domain says which it admits (`: float|missing`, `\ {absent}`),
+and a binding without a type clause takes that from the annotation. What
+a function does with each is its policy, stated as a claim
+(`missing(f, x) propagates`). [Missing values](missing-values.md) is the
+full account. The statement shows what the domain admits:
 
+<!-- example: missing-default run -->
+```python
+import math
+import mathema
+
+def root(x: float) -> float:
+    return math.sqrt(x)
+
+row = mathema.check(root, claims=["for x in [0, 1], f(x) >= 0"]).probes[0]
+print(row.statement)
+print(row.meta["mathema.missing"]["admitted"])
 ```
-for x in [0, 100], ...              # missing allowed
-for x in [0, 100] ⊂ Z, ...          # missing allowed
-for x in [0, 100] \ {∅}, ...        # missing excluded
-for x in [0, 100] ⊂ Z \ {∅}, ...    # missing excluded
+
+<!-- example: missing-default output -->
+```text
+for x in [0.0, 1.0] : float|missing, f(x) >= 0
+{'x': {'absent': False, 'missing': ['nan']}}
 ```
 
-The missing-value sentinel is `∅`, or the ASCII spellings
-`missing`/`NA`/`nan`. Writing `∪ {∅}` (or `∪ {missing}`) states the
-default explicitly and changes nothing.
+The canonical text lists what the domain admits in the order `absent`,
+`missing`, then member words, fused onto the type in ASCII and written
+as a union in unicode. It shows an exclusion only when the exclusion
+removes something the annotation would admit and no type clause says
+so already. Every spelling from an earlier release
+(`[0.0, 1.0]:float|missing`, `∪ {∅}`, `\ {∅}`) still reads and comes
+back in this form:
 
-Detection is dependency-free: `None`, a Python/numpy/pandas float NaN
-(all ordinary IEEE-754 under the hood, caught by one self-inequality
-check with no import of any of them), and a small, extensible set of
-other known missing-sentinel type names (pandas' `pd.NA`/`pd.NaT`,
-neither of which is NaN-like), never a hard dependency on any one
-data-science library.
+<!-- example: missing-spelling run inline -->
+```python
+from mathema import claim
+from mathema.spec import render_claim_text
 
-Input stays terse, nothing above is required beyond an ordinary
-interval, but every place mathema *renders* a domain back (a proof
-sketch's `∀ x ∈ ...` clause, `enforce_domain()`'s own violation message)
-always states the resolved missing-value policy explicitly, via the same
-`∪ {∅}` / `\ {∅}` notation, never left for a reader to infer from what's
-absent:
-
-```
-∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}     # from [0, 100]: missing allowed
-∀ x ∈ [0, 100] ⊂ ℤ ∪ {∅}         # from [0, 100] ⊂ Z: missing allowed
-∀ x ∈ [0, 100] ⊂ ℤ \ {∅}         # from [0, 100] ⊂ Z \ {∅}: missing excluded
+render_claim_text(claim("for x in [0, 1] ⊂ ℝ ∪ {None, ∅}, f(x) >= 0"), unicode=False)  # 'for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0'
+render_claim_text(claim("for x in [0, 1] : float|None, f(x) >= 0"), unicode=True)  # '∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent}, f(x) ≥ 0'
+render_claim_text(claim("for xs in [0, 1]^n : float|missing, f(xs) >= 0"), unicode=False)  # 'for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0'
 ```
 
 `enforce_domain()` checks a sequence argument element by element
@@ -270,8 +277,8 @@ alphabet: `ascii` (`str.isascii`), `latin-1` (what the codec encodes),
 `json.loads` accepts) and more; [Language domains](language.md) lists
 them and shows how to register your own. An alphabet language is a
 Kleene star: it contains the empty string, and `L[ascii] \ {""}` is
-the way to exclude it. Union with a finite set of members and the
-missing-value policy read exactly as they do for a numeric domain:
+the way to exclude it. Union with a finite set of members, and what the domain admits,
+read exactly as they do for a numeric domain:
 `L[alnum] ∪ {"n/a"}`, `L[ascii] \ {missing}`. A length bound goes inside
 the brackets, `L[ascii, len <= 80]`, `L[unicode, len > 20]` or
 `L[unicode, len in [1, 80]]`, lengths counted in code points as Python's
@@ -307,7 +314,7 @@ mark), then random members, and it never draws a value outside the
 language. Every record states what a
 language resolved to (`meta["mathema.language"]`: the name, its
 source, its level and kind, and its persisted form), and the
-statement carries the resolved missing-value policy as usual. The
+statement carries what the domain admits, as usual. The
 derive route has no reading of a string, so it declines with the
 reason rather than proving real-only facts about a symbol standing in
 for one; a finite language (an enumeration a package registers) is
@@ -452,6 +459,31 @@ safety family. Whether the code REJECTS out-of-domain input is the
 declared `excluded_outside_domain(p)` claim, stated explicitly,
 opted into with the `excluding` keyword, or auto-declared by
 `@enforce_domain` (the decorator that makes it true).
+
+`@enforce_domain` also reads the function's policy claims, what it
+does with a value that is not there. It is opt-in, like every
+enforcement. A `raises` row rejects the input at entry: under
+`absent(f, x) raises(TypeError)`, `f(None)` raises the `TypeError` the
+row names ("enforce_domain is active and raised TypeError because x is
+None"; a row naming no exception raises mathema's `DomainError`); under
+`missing(f, xs, null) raises(ValueError)`, `f([1.0, None])` raises
+`ValueError` because `xs` holds a `null` slot, while a `nan` slot passes
+through. A `drops`
+or `propagates` row is checked at exit, by counting the output's
+no-value slots: under `missing(f, x) propagates`, a function that
+returns `1.0` for `nan` raises there. `converts` and `introduces`
+enforce nothing.
+
+`is_missing_safe(f)` and `is_absent_safe(f)` are the gates over those
+rows: every parameter that admits the kind has a policy the code
+follows at every member. Proven when each member's policy is derived
+(a guard in the body, a library's own policy row f calls) or stated
+and confirmed; holds when some member is confirmed by execution alone,
+even when f was called at every case; falsified on a policy the code
+contradicts, a member treated more than one way, a raise no claim
+accounts for, or a None from present inputs the return type does not
+declare. mathema never asserts them for you; `mathema claims KEY
+--suggest` offers them.
 
 ### `mathema.suggest_claims(fn)`
 
@@ -674,17 +706,24 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 ```
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7982b776d687
-  holds   result_dimensions: softmax(scores) has length n for scores of length n (n=32)
-  holds   is_deterministic: f(scores) = f(scores) (n=192)
-  holds   is_state_safe: f(scores) = f(scores) (n=48)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (n=192)
-  holds   preserves_length: dim(f(scores), 0) = dim(scores, 0) (n=192)
+  holds   result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
+  holds   is_deterministic: f(scores) = f(scores) (835 entries across 155 draws, sizes (1, 1) to (8, 1))
+           derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
+  holds   is_state_safe: f(scores) = f(scores) (48 draws)
+  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (949 entries across 192 draws, sizes (1, 1) to (8, 1))
+  holds   preserves_length: len(f(scores)) = len(scores) (809 entries across 154 draws, sizes (1, 1) to (8, 1))
+           at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
   FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
-           counterexample scores=[0, 6.122252531363742]: [0.0021887084924676944, 0.9978112915075322] vs [0.0, 6.122252531363742]
-  holds   preserves_type: type(f(scores)) = type(scores) (n=192)
+           counterexample scores = [0, 0]: [0.5, 0.5] vs [0.0, 0.0]
+  holds   preserves_type: type(f(scores)) = type(scores) (805 entries across 152 draws, sizes (1, 1) to (8, 1))
+           at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
   FALSIFY is_sorted_output: is_sorted_output(f(scores))
-           counterexample ([4.863044763960913, 8.452104637465645, -9.060585851436255, -3.616447789128965]): output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
-  holds   sums_to_one: sum(f(scores)) = 1 (n=192)
+           counterexample scores = [4.86304, 8.4521, -9.06059, -3.61645]: output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
+  holds   sums_to_one: sum(f(scores)) = 1 (741 entries across 151 draws, sizes (1, 1) to (8, 1))
+           derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
+  FALSIFY missing[scores, null]: missing(f, scores, null) propagates   [mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError]
+           if the raise is intended, write `missing(f, scores, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept softmax missing[scores, null] --as discovery --corrected "missing(f, scores, null) raises(TypeError)"
+  holds   missing[scores, nan]: missing(f, scores, nan) propagates   [default for a list slot that may be nan; confirmed on the draws of is_deterministic, preserves_length, preserves_type and sums_to_one. Keep it by writing it (mathema claims softmax --write), or change the word to raises or drops if f should do otherwise]
 ```
 
 `result_dimensions` came from the `Annotated[list, Shape("n")]` hints,

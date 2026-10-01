@@ -113,7 +113,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: ratio output -->
 ```text
-falsified x=0: f raised ZeroDivisionError, g returned 1
+falsified x = 0: f raised ZeroDivisionError, g returned 1
 ```
 
 `=:=` compares behaviour, so a point where both sides raise the same
@@ -122,7 +122,7 @@ are proven equivalent over `[-1, 1]`, both raising `ZeroDivisionError`
 at `x = 0`. Different exception types at the same point are a
 disagreement, and the executed pair is the witness: against a version
 that raises `ValueError` at zero, the claim is falsified with
-`x=0: f raised ZeroDivisionError, g raised ValueError`. A complex
+`x = 0: f raised ZeroDivisionError, g raised ValueError`. A complex
 result from one side counts as a raise, unless that side is annotated
 `complex` or the claim is over `C`. A declared tolerance is the whole allowance the two values get;
 with none declared, they may differ by 1e-9 plus 1e-9 times the

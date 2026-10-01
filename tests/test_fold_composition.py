@@ -70,7 +70,7 @@ def test_shift_proves_exactly_when_the_weights_sum_to_one(folds):
     q = _one(folds.total, "let c be [1, 5], f(xs) + c == f(g(xs, c))",
              {"g": "mathema.f.shift_seq"}, route="best")
     assert q.verdict == "falsified"
-    assert q.counterexample and "xs=[" in q.counterexample
+    assert q.counterexample and "xs = [" in q.counterexample
     assert (q.meta or {}).get("mathema.corroboration") == "reproduced"
 
 

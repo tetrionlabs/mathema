@@ -193,6 +193,9 @@ def verified_record_verdicts(src: LexiconSource) -> dict:
     out = {}
     for fn, keys in src.example_functions.values():
         laws = [claim(src.rows[k], name=k) for k in keys]
+        # a function's record rows are repopulated together, as `verify`
+        # does, so a gate reads the stated rows beside it
+        first, rebuilt_all = {}, []
         for p in check_conjectures(fn, laws):
             row = {"name": p.name, "statement": p.statement,
                    "route": (p.route or "best").split(":", 1)[0]}
@@ -207,8 +210,14 @@ def verified_record_verdicts(src: LexiconSource) -> dict:
                 out[p.name] = (p.verdict, f"will not reconstruct ({type(exc).__name__}: {exc})",
                                None, p.statement)
                 continue
-            (p2,) = check_conjectures(fn, [rebuilt])
-            out[p.name] = (p.verdict, p2.verdict, p2, p.statement)
+            first[p.name] = p
+            rebuilt_all.append(rebuilt)
+        again = {p2.name: p2 for p2 in check_conjectures(fn, rebuilt_all)} \
+            if rebuilt_all else {}
+        for name, p in first.items():
+            p2 = again.get(name)
+            out[name] = (p.verdict, p2.verdict if p2 is not None else "not adjudicated",
+                         p2, p.statement)
     return out
 
 
@@ -224,15 +233,23 @@ def check_verified_record(src: LexiconSource, *, skip=()) -> list:
 
 def check_missing_policy(src: LexiconSource) -> list:
     from .conjecture import claim
+    from .domain import stated
     from .spec import canonical_claim_text, render_claim_text
     out = []
     for key, law in src.rows.items():
         cj = claim(law)
         if not cj.domain or all(isinstance(b, frozenset) for b in cj.domain.values()):
             continue
+        # a binding that does not state its missing-value policy renders
+        # the default it resolves to; a stated one renders what it lists
+        # a claim's own constant (`let c be [0, 1]`) admits nothing
+        # missing and says nothing about it
+        unstated = any(not stated(b) for p, b in cj.domain.items()
+                       if p.isidentifier() and p not in (cj.free_vars or ()))
         for unicode_mode in (True, False):
             shown = render_claim_text(cj, unicode=unicode_mode)
-            if "∅" not in shown and "missing" not in shown:
+            if unstated and not any(word in shown for word in
+                                    ("absent", "None", "missing", "∅")):
                 out.append(f"{key}: the rendered domain states no missing policy: {shown}")
             if canonical_claim_text(claim(shown)) != canonical_claim_text(cj):
                 out.append(f"{key}: the rendered missing policy reparses to another claim")
@@ -281,8 +298,13 @@ def check_verdicts(src: LexiconSource, expected: dict) -> list:
     """Every row against its example function lands on `expected[key]`,
     a verdict or `(verdict, text the witness contains)`; a row two
     example functions demonstrate to different ends pins one of those
-    per function, `{function name: verdict or (verdict, text)}`."""
+    per function, `{function name: verdict or (verdict, text)}`. A row
+    is adjudicated in one batch with the claims declared on its example
+    function, as `verify` does, so a premise naming a sibling claim
+    resolves to it."""
+    from .authoring import declared_from_function
     from .conjecture import check_conjectures, claim
+    from .spec import entry_claims
     out = [f"{key}: no pinned verdict" for key in sorted(set(src.rows) - set(expected))]
     for fn, keys in src.example_functions.values():
         for key in keys:
@@ -292,7 +314,11 @@ def check_verdicts(src: LexiconSource, expected: dict) -> list:
             if want is None:
                 continue
             verdict, witness = (want, None) if isinstance(want, str) else want
-            (p,) = check_conjectures(fn, [claim(src.rows[key])])
+            row = claim(src.rows[key])
+            siblings = [c for c in entry_claims(
+                {"claims": declared_from_function(fn)}) if c.name != row.name]
+            (p,) = [q for q in check_conjectures(fn, [row, *siblings])
+                    if q.name == row.name]
             if p.verdict != verdict:
                 out.append(f"{key}: {p.verdict}, pinned {verdict} ({p.note})")
             elif witness is not None and witness not in str(p.counterexample):
