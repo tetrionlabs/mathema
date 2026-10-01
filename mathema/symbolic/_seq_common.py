@@ -898,6 +898,11 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
               if ties.get(pair[0]) != ties.get(pair[1])]
     if judged and untied:
         a, b = untied[0]
+        from ._prove import _mismatch_raise
+        witness = _mismatch_raise(fn, lhs_src, rhs_src, (a, b), domain,
+                                  assumption, shapes)
+        if witness is not None:
+            return witness
         return ProofResult(
             "undecided",
             sketch=f"the claim admits {a} and {b} of different lengths, "

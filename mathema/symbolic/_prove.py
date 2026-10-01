@@ -2682,6 +2682,79 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
     return None
 
 
+def _mismatch_raise(fn, lhs_src: str, rhs_src: str, pair: tuple, domain,
+                    assumption, shapes) -> "ProofResult | None":
+    """Intent:
+        A disproof with an executed witness when the claim admits the
+        two sequences of `pair` at different lengths, calls f at its
+        own parameters, and f raises there: each is drawn at a length
+        its binding admits (two and one element, then the reverse),
+        every other argument from its declared domain, at a point the
+        claim's premises hold. None otherwise.
+    """
+    import random
+
+    from ..analysis import analyze_source
+    from ..probing import _synth
+    from ._seq_common import _length_ties
+    try:
+        facts = analyze_source(fn)
+    except Exception:
+        return None
+    for src in (lhs_src, rhs_src):
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            return None
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+                    and n.func.id == "f" and [getattr(a, "id", None)
+                                              for a in n.args] != list(facts.params):
+                return None
+    seqs = [p for p in facts.params
+            if facts.param_kinds.get(p) in SEQUENCE_KINDS]
+    ties = _length_ties(seqs, domain, assumption, shapes)
+    a, b = pair
+    rng = random.Random(0)
+    for la, lb in ((2, 1), (1, 2)):
+        if length_admitted(a, la, domain, None, shapes) is False \
+                or length_admitted(b, lb, domain, None, shapes) is False:
+            continue
+        for _attempt in range(8):
+            args: list = []
+            for p in facts.params:
+                if ties.get(p) is not None and ties.get(p) == ties.get(a):
+                    args.append([float(k + 1) for k in range(la)])
+                elif ties.get(p) is not None and ties.get(p) == ties.get(b):
+                    args.append([float(k + 1) for k in range(lb)])
+                else:
+                    try:
+                        args.append(_synth(facts.param_kinds.get(p, "float"),
+                                           rng, (domain or {}).get(p)))
+                    except Exception:
+                        return None
+            if _premises_hold(assumption, dict(zip(facts.params, args))) \
+                    is not True:
+                continue
+            try:
+                fn(*args)
+            except Exception as e:
+                where = ", ".join(f"{p} = {v!r}"
+                                  for p, v in zip(facts.params, args))
+                return ProofResult(
+                    "disproven",
+                    sketch=f"f raises {type(e).__name__} at {where}, where "
+                           f"the claim admits {a} and {b} of different "
+                           f"lengths, so the claim has no value there; bind "
+                           f"both over one length (for {a} in R^n, {b} in "
+                           f"R^n) or state it: assuming len({a}) == len({b})",
+                    counterexample=where,
+                    witness=dict(zip(facts.params, args)),
+                    meta={"mathema.witness_executed": True})
+            break
+    return None
+
+
 def _derivative_kink(fn, facts, lhs_src: str, rhs_src: str,
                      domain) -> "str | None":
     """Intent:

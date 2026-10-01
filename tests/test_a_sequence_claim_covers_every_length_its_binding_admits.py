@@ -128,3 +128,11 @@ def test_a_dimension_name_leaves_the_empty_list_open():
     p = _derive(sample_variance_two_pass, "for xs in R^n, f(xs) >= 0")
     assert p.verdict not in ("proven", "falsified"), (p.verdict, p.sketch)
     assert "empty list" in (p.sketch or p.note or ""), (p.sketch, p.note)
+
+
+def test_two_lengths_that_differ_are_an_executed_witness():
+    p = _derive(dot_product, "assuming len(a) >= 1, assuming len(b) >= 1, "
+                             "f(a, b) == f(a, b)")
+    assert p.verdict == "falsified", (p.verdict, p.sketch)
+    assert "a = [1.0, 2.0], b = [1.0]" in (p.counterexample or ""), \
+        p.counterexample
