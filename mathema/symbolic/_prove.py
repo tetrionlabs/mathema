@@ -15,6 +15,8 @@ fallback applies).
 from __future__ import annotations
 
 import ast
+import contextlib
+import contextvars
 from dataclasses import dataclass, field, replace
 
 import sympy
@@ -421,7 +423,16 @@ def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
             # needs to know a _SymbolicArray was ever involved.
             idx = _literal_int_index(node.slice)
             if idx is not None:
-                return value.expr.subs(value.index, sympy.Integer(idx))
+                # numpy's reading of a literal index: a negative one
+                # counts from the end, and one outside the array has no
+                # element (the call raises IndexError), so the element
+                # is NaN wherever the position falls outside
+                position = sympy.Integer(idx) if idx >= 0 \
+                    else value.length + idx
+                inside = sympy.And(position >= 0, position < value.length)
+                return sympy.Piecewise(
+                    (value.expr.subs(value.index, position), inside),
+                    (sympy.nan, True))
             if isinstance(node.slice, ast.Name):
                 idx_sym = aux.setdefault(node.slice.id, sympy.Symbol(node.slice.id, real=True))
                 return value.expr.subs(value.index, idx_sym)
@@ -2842,47 +2853,115 @@ def _first_axis_length(seq, axis):
     return len(seq)
 
 
-def _premises_admit_empty(name: str, assumption) -> bool:
-    """Whether the `assuming` conjuncts put the empty list in `name`'s
-    domain: at least one of them reads `len(name)` (canonically
-    `dim(name, 0)`), and every one that reads it holds at length
-    zero."""
+#: whether a proof is judged at every sequence length the claim admits
+#: (the empty list, two lengths that differ, a length too short for a
+#: literal index); off while a family claim whose statement asks about
+#: agreement or accuracy rather than a value is adjudicated
+_JUDGE_LENGTHS: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "mathema_judge_lengths", default=True)
+
+
+@contextlib.contextmanager
+def lengths_unjudged():
+    """Within the block, proofs are not judged at the sequence lengths
+    their claim admits (see `_JUDGE_LENGTHS`)."""
+    token = _JUDGE_LENGTHS.set(False)
+    try:
+        yield
+    finally:
+        _JUDGE_LENGTHS.reset(token)
+
+
+def lengths_judged() -> bool:
+    return _JUDGE_LENGTHS.get()
+
+
+def length_admitted(name: str, k: int, domain, assumption,
+                    shapes: "dict | None" = None) -> "bool | None":
+    """Intent:
+        Whether the claim admits the sequence `name` at length `k`: True
+        when its binding and every premise that reads `name` hold for a
+        list of that length, False when the binding or a premise
+        excludes it, None when a premise reads more than this one
+        sequence and so cannot be read at `k` alone.
+
+    Notes:
+        A value claim is over non-empty sequences: an unbound sequence
+        and one over a dimension name (`x in R^n`, `Shape("n")`) admit
+        every length from one, and the empty list only where a premise
+        reads the sequence's length and holds at zero (`assuming
+        len(x) == 0`); what f does with an empty list the claim does not
+        name is the empty-input line's question (`empty_input_line`). A
+        fixed length (`R^3`) admits only itself, and a dimension name
+        the claim binds to whole numbers (`n in [2, 5] subset Z`) admits
+        those. A premise with no value at the list (`max(x) > 0` at the
+        empty list) excludes it.
+    """
     import re
-    pattern = re.compile(rf"\b(?:len\(\s*{re.escape(name)}\s*\)"
-                         rf"|dim\(\s*{re.escape(name)}\s*,\s*0\s*\))")
+
+    from .._shapes import dims_of, fixed_size
+    from ..domain import domain_contains
+    domain = domain or {}
+    dims = dims_of(domain.get(name)) or dims_of((shapes or {}).get(name))
+    if dims:
+        size = fixed_size(dims[0])
+        if size is not None and size != k:
+            return False
+        token = domain.get(dims[0]) if size is None else None
+        if token is not None:
+            try:
+                if not domain_contains(float(k), token):
+                    return False
+            except Exception:
+                return None
+    pattern = re.compile(rf"\b{re.escape(name)}\b")
+    reading = [(lhs, rel, rhs) for lhs, rel, rhs in assumption or ()
+               if pattern.search(f"{lhs} {rhs}")]
+    if k == 0 and not reading:
+        return False
+    return _premises_hold(reading, {name: [0.0] * k})
+
+
+def _premises_hold(assumption, point: dict) -> "bool | None":
+    """Whether every `assuming` conjunct holds at `point`: False when one
+    fails or has no value there (an index past the end, the maximum of
+    an empty list), None when one cannot be evaluated here."""
     ops = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
            "<=": lambda a, b: a <= b, ">=": lambda a, b: a >= b,
            "<": lambda a, b: a < b, ">": lambda a, b: a > b}
-    mentioned = False
+    env = {"len": len, "dim": _first_axis_length, "sum": sum, "max": max,
+           "min": min, "abs": abs, **point}
+    answer: "bool | None" = True
     for lhs, rel, rhs in assumption or ():
-        text = f"{lhs} {rhs}"
-        if not pattern.search(text):
+        if rel not in ops:
+            answer = None
             continue
-        mentioned = True
         try:
-            env = {"len": len, "dim": _first_axis_length, name: []}
             lv = eval(compile(str(lhs), "<premise>", "eval"),
                       {"__builtins__": {}}, env)
             rv = eval(compile(str(rhs), "<premise>", "eval"),
                       {"__builtins__": {}}, env)
             holds = ops[rel](lv, rv)
-        except Exception:
-            # it reads more than this one length: whether it holds at
-            # length zero depends on values this check does not choose
+        except (IndexError, ValueError, ZeroDivisionError):
             return False
+        except Exception:
+            answer = None
+            continue
         if not holds:
             return False
-    return mentioned
+    return answer
 
 
 def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                           assumption) -> "ProofResult | None":
     """Intent:
-        A disproof with an executed witness when the claim's premises
-        admit the empty list for a sequence parameter, the claim calls
-        f at its own parameters, and f raises when called with the
-        empty list there; an undecided result when f raises but the
-        claim calls it at other arguments; None otherwise.
+        A disproof with an executed witness when the claim admits the
+        empty list for a sequence parameter (see `length_admitted`: an
+        unbound list does), the claim calls f at its own parameters,
+        and f raises when called with the empty list there; an
+        undecided result when f raises but the claim calls it at other
+        arguments, or its premises may admit the empty list; None
+        otherwise.
 
     Notes:
         A fold's closed form has a value at length zero (the initial
@@ -2893,12 +2972,132 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
     import random
 
     from ..probing import _synth
+    from ._seq_common import _length_ties, signature_shapes
+    if not lengths_judged():
+        return None
+    shapes = signature_shapes(fn)
     seqs = [p for p in facts.params
             if facts.param_kinds.get(p) in SEQUENCE_KINDS]
-    targets = [p for p in seqs if _premises_admit_empty(p, assumption)]
+    bound_admits = {p: length_admitted(p, 0, domain, assumption, shapes)
+                    for p in seqs}
+    ties = _length_ties(seqs, domain, assumption, shapes)
+    targets = [p for p in seqs if bound_admits[p] is not False
+               and length_admitted(p, 0, domain, assumption,
+                                   shapes) is not False]
     if not targets:
         return None
-    identity = True
+    identity, calls_f = True, False
+    for src in (lhs_src, rhs_src):
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            return None
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+                    and n.func.id == "f":
+                calls_f = True
+                if [getattr(a, "id", None) for a in n.args] \
+                        != list(facts.params):
+                    identity = False
+    if not calls_f:
+        # a claim that never calls f has a value wherever f raises
+        return None
+    rng = random.Random(0)
+    admitted: dict = {}
+    for target in targets:
+        # every sequence the claim ties to the target's length is empty
+        # with it, and the point must satisfy the claim's premises
+        group = {p for p in seqs if ties[p] == ties[target]}
+        if any(bound_admits[p] is False for p in group):
+            continue
+        args = None
+        for _attempt in range(8):
+            drawn: list = []
+            for p in facts.params:
+                if p in group:
+                    drawn.append([])
+                    continue
+                kind = facts.param_kinds.get(p, "float")
+                try:
+                    drawn.append(_synth(kind, rng, (domain or {}).get(p)))
+                except Exception:
+                    return None
+            held = _premises_hold(assumption, dict(zip(facts.params, drawn)))
+            if held is False:
+                continue
+            args = drawn
+            admitted[target] = (None if held is None or any(
+                bound_admits[p] is None for p in group) else True)
+            break
+        if args is None:
+            continue
+        try:
+            fn(*args)
+        except Exception as e:
+            exc = type(e).__name__
+        else:
+            continue
+        where = ", ".join(f"{p} = {a!r}" for p, a in zip(facts.params, args))
+        if admitted[target] is None:
+            return ProofResult(
+                "undecided",
+                sketch=f"f raises {exc} on the empty list ({where}), which "
+                       f"the claim may admit for {target}; state it: "
+                       f"assuming len({target}) >= 1")
+        if not identity:
+            from .._empty_input import claim_calls
+            called = next((c for c in claim_calls(
+                fn, (lhs_src, rhs_src), dict(zip(facts.params, args)))
+                if c[2]), None)
+            if called is not None:
+                call_text, call_args, call_exc = called
+                at = ", ".join(f"{p} = {v!r}" for p, v in call_args.items())
+                return ProofResult(
+                    "disproven",
+                    sketch=f"the claim calls {call_text}, and f raises "
+                           f"{call_exc} at {at}, an empty list the claim "
+                           f"admits, so the claim has no value there; "
+                           f"narrow it with assuming len({target}) >= 1",
+                    counterexample=at,
+                    witness=dict(call_args),
+                    meta={"mathema.witness_executed": True})
+            return ProofResult(
+                "undecided",
+                sketch=f"f raises {exc} on the empty list the claim admits "
+                       f"for {target} ({where}), and the claim calls f at "
+                       f"other arguments; state it: assuming len({target}) "
+                       f">= 1")
+        return ProofResult(
+            "disproven",
+            sketch=f"f raises {exc} at {where}, an empty list the claim "
+                   f"admits, so the claim has no value there; narrow it "
+                   f"with assuming len({target}) >= 1, or state the raising "
+                   f"case as its own raises(...) claim",
+            counterexample=where,
+            witness=dict(zip(facts.params, args)),
+            meta={"mathema.witness_executed": True})
+    return None
+
+
+def _mismatch_raise(fn, lhs_src: str, rhs_src: str, pair: tuple, domain,
+                    assumption, shapes) -> "ProofResult | None":
+    """Intent:
+        A disproof with an executed witness when the claim admits the
+        two sequences of `pair` at different lengths, calls f at its
+        own parameters, and f raises there: each is drawn at a length
+        its binding admits (two and one element, then the reverse),
+        every other argument from its declared domain, at a point the
+        claim's premises hold. None otherwise.
+    """
+    import random
+
+    from ..analysis import analyze_source
+    from ..probing import _synth
+    from ._seq_common import _length_ties
+    try:
+        facts = analyze_source(fn)
+    except Exception:
+        return None
     for src in (lhs_src, rhs_src):
         try:
             tree = ast.parse(src or "0", mode="eval")
@@ -2908,41 +3107,48 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
                     and n.func.id == "f" and [getattr(a, "id", None)
                                               for a in n.args] != list(facts.params):
-                identity = False
-    rng = random.Random(0)
-    for target in targets:
-        args: list = []
-        for p in facts.params:
-            if p == target:
-                args.append([])
-                continue
-            kind = facts.param_kinds.get(p, "float")
-            try:
-                args.append(_synth(kind, rng, (domain or {}).get(p)))
-            except Exception:
                 return None
-        try:
-            fn(*args)
-        except Exception as e:
-            exc = type(e).__name__
-        else:
+    seqs = [p for p in facts.params
+            if facts.param_kinds.get(p) in SEQUENCE_KINDS]
+    ties = _length_ties(seqs, domain, assumption, shapes)
+    a, b = pair
+    rng = random.Random(0)
+    for la, lb in ((2, 1), (1, 2)):
+        if length_admitted(a, la, domain, None, shapes) is False \
+                or length_admitted(b, lb, domain, None, shapes) is False:
             continue
-        where = ", ".join(f"{p} = {a!r}" for p, a in zip(facts.params, args))
-        if not identity:
-            return ProofResult(
-                "undecided",
-                sketch=f"f raises {exc} on the empty list the premises admit "
-                       f"for {target} ({where}), and the claim calls f at "
-                       f"other arguments")
-        return ProofResult(
-            "disproven",
-            sketch=f"f raises {exc} at {where}, an empty list the premises "
-                   f"admit, so the claim has no value there; narrow the "
-                   f"premise to len({target}) >= 1, or state the raising "
-                   f"case as its own raises(...) claim",
-            counterexample=where,
-            witness=dict(zip(facts.params, args)),
-            meta={"mathema.witness_executed": True})
+        for _attempt in range(8):
+            args: list = []
+            for p in facts.params:
+                if ties.get(p) is not None and ties.get(p) == ties.get(a):
+                    args.append([float(k + 1) for k in range(la)])
+                elif ties.get(p) is not None and ties.get(p) == ties.get(b):
+                    args.append([float(k + 1) for k in range(lb)])
+                else:
+                    try:
+                        args.append(_synth(facts.param_kinds.get(p, "float"),
+                                           rng, (domain or {}).get(p)))
+                    except Exception:
+                        return None
+            if _premises_hold(assumption, dict(zip(facts.params, args))) \
+                    is not True:
+                continue
+            try:
+                fn(*args)
+            except Exception as e:
+                where = ", ".join(f"{p} = {v!r}"
+                                  for p, v in zip(facts.params, args))
+                return ProofResult(
+                    "disproven",
+                    sketch=f"f raises {type(e).__name__} at {where}, where "
+                           f"the claim admits {a} and {b} of different "
+                           f"lengths, so the claim has no value there; bind "
+                           f"both over one length (for {a} in R^n, {b} in "
+                           f"R^n) or state it: assuming len({a}) == len({b})",
+                    counterexample=where,
+                    witness=dict(zip(facts.params, args)),
+                    meta={"mathema.witness_executed": True})
+            break
     return None
 
 

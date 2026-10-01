@@ -445,6 +445,16 @@ def _domains_from_claims(claims) -> dict:
     return out
 
 
+def _matrix_names_of(fn) -> frozenset:
+    """The parameters `fn`'s signature declares as matrices, over which
+    bars in a claim (`|A|`) read as the determinant."""
+    from .types import matrix_param_names
+    try:
+        return frozenset(matrix_param_names(fn))
+    except Exception:
+        return frozenset()
+
+
 @_quiet_while_probing
 def check(fn, claims: list | None = None, domain: dict | None = None,
          trials: int | None = None,
@@ -609,7 +619,9 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         claims = suggest_claims(fn, facts=facts, extensive=extensive)
     claims = _expand_claim_keywords(claims, fn, facts, parent_domain,
                                     extensive)
-    built = [claim(c) if isinstance(c, str) else c for c in claims]
+    mats = _matrix_names_of(fn)
+    built = [claim(c, matrix_names=mats) if isinstance(c, str) else c
+             for c in claims]
     explicit = []
     for cj in built:
         entry = declare(cj)
@@ -727,7 +739,9 @@ def write_spec(fn, claims: list | None = None, root: str = ".",
     # actually checked would make `mathema verify` see a false "form
     # changed" on the very next run (the claim set it merges independently
     # wouldn't match this record's stamped fingerprint).
-    explicit = [declare(claim(c) if isinstance(c, str) else c) for c in (claims or [])]
+    mats = _matrix_names_of(fn)
+    explicit = [declare(claim(c, matrix_names=mats) if isinstance(c, str)
+                        else c) for c in (claims or [])]
     merged = merge_entries(dict(declared), {"claims": explicit},
                            on_conflict="silent")
     rec.spec_path = record(rec, key=key, root=root, claims=merged["claims"],

@@ -2863,6 +2863,10 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         # `s + "0"` into `"0" + s`, a different claim, so the whole
         # operation is one verbatim atom, rendered as written
         return _verbatim_atom(node)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _quotient(_operand(node.left, node, funcs, matrix_names),
+                         _operand(node.right, node, funcs, matrix_names),
+                         node)
     if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
         return _BINOPS[type(node.op)](
             _operand(node.left, node, funcs, matrix_names),
@@ -2914,6 +2918,32 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         if name in _SYMPY_FUNCS:
             return _SYMPY_FUNCS[name](*args)
     return _verbatim_atom(node)
+
+
+def _quotient(left, right, node: ast.BinOp):
+    """`left / right` as sympy reads it, unless that reading cancels the
+    divisor: `f(x) / f(x)` evaluates to 1 and `x*y / y` to `x`, which
+    drops the point where the divisor is zero and the quotient has no
+    value. A quotient whose evaluated form no longer divides by `right`
+    is kept unevaluated, so the claim still says it divides there; one
+    over matrices, whose products keep their written order, is kept as
+    its own parenthesised spelling."""
+    quotient = left / right
+    if getattr(right, "is_number", False) or \
+            isinstance(right, sympy.MatrixExpr) or \
+            isinstance(quotient, sympy.MatrixExpr):
+        return quotient
+    divisors = [b for b, e in (f.as_base_exp() for f in
+                               sympy.Mul.make_args(right))
+                if not b.is_number and getattr(e, "is_positive", False)]
+    inverted = {p.base for p in quotient.atoms(sympy.Pow)
+                if getattr(p.exp, "is_negative", False)}
+    if all(b in inverted for b in divisors):
+        return quotient
+    if not (left.is_commutative and right.is_commutative):
+        return sympy.Symbol(f"({ast.unparse(node)})", commutative=False)
+    return sympy.Mul(left, sympy.Pow(right, -1, evaluate=False),
+                     evaluate=False)
 
 
 def _operand(child: ast.AST, parent: ast.BinOp, funcs: frozenset,

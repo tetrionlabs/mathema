@@ -306,11 +306,16 @@ def test_domain_restricts_probes_and_reports_enforcement():
 
     r = mathema.check(ema2, domain={"alpha": (0.0, 1.0)})
     vs = {p.name: p.verdict for p in r.probes}
-    # the convex-combination certificate proves the bound outright
-    # (the fold's weights are nonnegative and sum to 1 here); before
-    # it, in-domain sampling could only reach holds
-    assert vs["bounded_lower"] == "proven"
-    assert vs["bounded_upper"] == "proven"
+    # the convex-combination certificate proves each bound outright
+    # over non-empty lists (the fold's weights are nonnegative and sum
+    # to 1 here); ema2([]) reads x[0] with no emptiness guard, so the
+    # empty-input line is falsified, and each claim with it
+    rows = {p.name: p for p in r.probes}
+    for name in ("bounded_lower", "bounded_upper"):
+        assert vs[name] == "falsified", (name, vs[name])
+        assert "convex-combination certificate" in (rows[name].sketch or "")
+        assert rows[name].counterexample.startswith("x = []")
+    assert vs["is_empty_safe[x]"] == "falsified"
     # enforcement is not synthesized behind a mode any more: undeclared
     # means unreported; DECLARING excluded_outside_domain makes the
     # unenforced exclusion a real falsification with the witness
@@ -797,8 +802,14 @@ def test_check_formats(tmp_path, capsys):
     rpt = tmp_path / "claims.json"
     # suggestions no longer count as claims: declare one explicitly so
     # the report has adopted content to verify
+    # ema reads x[0] with no emptiness guard, so a claim over every
+    # length is falsified by its empty-input line; one over a fixed
+    # length has none
     assert main(["check", str(f), "--format", "json",
-                 "--claim", "f(x, 1.0) == x[-1]",
+                 "--claim", "f(x, 1.0) == x[-1]"]) == 1
+    capsys.readouterr()
+    assert main(["check", str(f), "--format", "json",
+                 "--claim", "for x in R^3, f(x, 1.0) == x[-1]",
                  "--output", str(rpt)]) == 0
     data = _json.loads(rpt.read_text())
     assert data["tool"] == "mathema" and data["CDD_spec_version"]

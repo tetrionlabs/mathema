@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from . import _shapes
 from ._math_vocab import MATH_CONSTANTS
+from .corroboration import INCONCLUSIVE
 from .records import Probe
 from .runtime_types import SEQUENCE_KINDS
 
@@ -70,7 +71,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         holds, False = a genuine counterexample, None = can't tell);
         `probe_finite(point)` returns a computation-failure detail
         (a raise, a NaN, an inf or a deviation past a magnitude-scaled
-        tolerance where the relation fails) or None; `admits(point)` is
+        tolerance where the relation fails), None where the code
+        agrees, or `corroboration.INCONCLUSIVE` where the claim's own
+        evaluation failed; `admits(point)` is
         in-domain-and-assumption membership; `sample(name, rng)` draws
         a value respecting the parameter's declared bound; `exact`
         drops the default allowance, so a claim with no declared
@@ -336,10 +339,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # a raise FROM THE FUNCTION at an in-domain point is a
             # genuine failure of a value claim (the pedantic raise
             # rule), so it reproduces a disproof, and so does a claim
-            # side with no real value there; a plumbing raise stays
-            # inconclusive
+            # side with no value there (no real value, an index outside
+            # a sequence it reads, a division by zero); any other
+            # plumbing raise stays inconclusive
             from .conjecture import claim_side_has_no_value
-            return False if calls_raised[0] or claim_side_has_no_value(e) \
+            return False if (calls_raised[0] or claim_side_has_no_value(e)
+                             or isinstance(e, (IndexError, ZeroDivisionError))) \
                 else None
         if calls_nonfinite[0] is not None:
             # a nan or an infinity the code returned for finite inputs
@@ -406,15 +411,19 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             lv, rv = _values(point)
         except Exception as e:
             # a raise from the function under test is a computation
-            # failure, and so is a claim side with no real value; the
-            # law's own plumbing failing otherwise says nothing about
-            # the code
+            # failure, and so is a claim side with no value (no real
+            # value, an index outside a sequence it reads, a division by
+            # zero); the law's own plumbing failing otherwise says
+            # nothing about the code, and is no agreement either
             from .conjecture import claim_side_has_no_value
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
             if claim_side_has_no_value(e):
                 return f"the claim's own side has no real value here ({e})"
-            return None
+            if isinstance(e, (IndexError, ZeroDivisionError)):
+                return (f"the claim's own expression raises "
+                        f"{type(e).__name__} here ({e})")
+            return INCONCLUSIVE
         if calls_nonfinite[0] is not None:
             # no value at a finite input: an overflow, a pole, a nan.
             # Two sides at the same infinity are one extended-real

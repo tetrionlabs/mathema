@@ -73,10 +73,12 @@ class PointRuntime(Protocol):
     value and fails every relation, `!=` included; two sides at the
     same infinity are one extended-real point and agree (`==`, `<=`,
     `>=` hold there, no strict order does); a NaN agrees with nothing,
-    another NaN included. `probe_finite(point)` reports an
+    another NaN included. `probe_finite(point)` reports a
     computation-failure detail string (a raise, a NaN, an inf or a
     deviation past a magnitude-scaled tolerance where the relation
-    fails) or `None`.
+    fails), `None` where the code agrees, or
+    `corroboration.INCONCLUSIVE` where the claim's own evaluation
+    failed, which counts neither way.
     `admits(point)` is domain-and-assumption membership.
     `sample(name, rng)` draws a value respecting the parameter's
     declared bound. `corners` are the domain endpoint combinations,

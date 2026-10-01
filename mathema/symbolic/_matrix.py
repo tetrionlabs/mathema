@@ -150,6 +150,19 @@ def _vector_like(term, vectors: frozenset) -> bool:
             and bool(term.atoms(sympy.MatrixSymbol) & vectors))
 
 
+def _transpose(term, vectors: frozenset):
+    """`term.T` with numpy's reading of a 1-D vector: an expression
+    built from a vector parameter that has one axis of length 1 (a
+    column `x`, `A @ x`, or the row `x @ A`) is a 1-D array, whose
+    transpose is itself, so `x @ x.T` is the inner product, not
+    `outer(x, x)`."""
+    if isinstance(term, sympy.MatrixExpr) and 1 in term.shape \
+            and term.shape != (1, 1) \
+            and term.atoms(sympy.MatrixSymbol) & vectors:
+        return term
+    return sympy.Transpose(term)
+
+
 def _matmul(left, right, vectors: frozenset):
     """`left @ right` with numpy's reading of a 1-D vector: two
     vectors give their dot product, a vector on the left of a matrix
@@ -214,7 +227,7 @@ def _lift(node, env: dict, vectors: frozenset = frozenset()):
             and not isinstance(node.value, bool):
         return sympy.sympify(node.value)
     if isinstance(node, ast.Attribute) and node.attr == "T":
-        return sympy.Transpose(_shaped(lift(node.value), node.value))
+        return _transpose(_shaped(lift(node.value), node.value), vectors)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
         return -lift(node.operand)
     if isinstance(node, ast.BinOp):
@@ -245,7 +258,7 @@ def _lift(node, env: dict, vectors: frozenset = frozenset()):
         if name == "inv" and one:
             return sympy.Inverse(args[0])
         if name == "transpose" and one:
-            return sympy.Transpose(args[0])
+            return _transpose(_shaped(args[0], node.args[0]), vectors)
         if name == "I" and one:
             return sympy.Identity(args[0])
         if name == "matrix_power" and len(args) == 2 \
@@ -349,6 +362,86 @@ def _inverted_symbols(tree, env: dict) -> set:
             continue
         out |= getattr(term, "atoms", lambda *_: set())(sympy.MatrixSymbol)
     return out
+
+
+def _divisors(tree, env: dict, vectors: frozenset) -> list:
+    """`[(term, text)]` for every quantity the claim text divides by,
+    lifted, with its source spelling."""
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            try:
+                term = _scalar(_lift(node.right, env, vectors))
+            except (ValueError, KeyError, TypeError, sympy.ShapeError):
+                term = None
+            out.append((term, ast.unparse(node.right)))
+    return out
+
+
+def _stated_nonzero(premises, env: dict, vectors: frozenset) -> list:
+    """The lifted quantities an `assuming` clause keeps away from zero:
+    `q != 0`, `q > 0`, `q < 0`, or `q` above a positive number or below
+    a negative one."""
+    out = []
+    for lhs, rel, rhs in premises or ():
+        try:
+            a = _scalar(_lift(ast.parse(str(lhs), mode="eval"), env, vectors))
+            b = _scalar(_lift(ast.parse(str(rhs), mode="eval"), env, vectors))
+        except (ValueError, KeyError, TypeError, SyntaxError,
+                sympy.ShapeError):
+            continue
+        for q, bound, r in ((a, b, rel),
+                            (b, a, {">": "<", "<": ">", ">=": "<=",
+                                    "<=": ">="}.get(rel, rel))):
+            if not getattr(bound, "is_number", False) or q.is_number:
+                continue
+            if (r == "!=" and bound.is_zero) \
+                    or (r == ">" and bound.is_nonnegative) \
+                    or (r == ">=" and bound.is_positive) \
+                    or (r == "<" and bound.is_nonpositive) \
+                    or (r == "<=" and bound.is_negative):
+                out.append(q)
+    return out
+
+
+def _nonzero_divisor(term, invertible, stated: list, context,
+                     domain: dict) -> bool:
+    """Whether the divisor `term` is nonzero wherever the claim is
+    judged: a nonzero number; a quantity a premise keeps away from
+    zero; or a product whose every factor is nonzero, a determinant of
+    an invertible matrix, a scalar parameter whose domain excludes
+    zero, or a quantity sympy's assumptions call nonzero under the
+    claim's structure."""
+    from ..domain import bound_assumptions
+    if term is None:
+        return False
+    if term.is_number:
+        return bool(term.is_nonzero)
+    if any(_is_zero(term - q) for q in stated):
+        return True
+
+    def factor_nonzero(f) -> bool:
+        base, exp = f.as_base_exp()
+        if base.is_number:
+            return bool(base.is_nonzero)
+        if any(_is_zero(base - q) for q in stated):
+            return True
+        if isinstance(base, sympy.Determinant):
+            return base.arg in invertible
+        if isinstance(base, sympy.Symbol) and str(base) in (domain or {}):
+            kinds = bound_assumptions(domain[str(base)]) or {}
+            if kinds.get("positive") or kinds.get("negative"):
+                return True
+        for q in (sympy.Q.positive, sympy.Q.negative):
+            try:
+                if sympy.ask(q(base), context if context is not None
+                             else True) is True:
+                    return True
+            except Exception:
+                continue
+        return False
+    expanded = _expand_determinants(term)
+    return all(factor_nonzero(f) for f in sympy.Mul.make_args(expanded))
 
 
 def _expand_determinants(expr):
@@ -526,6 +619,15 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
     if extra:
         context = sympy.And(context, *extra) if context is not None \
             else sympy.And(*extra)
+    stated = _stated_nonzero(premises, env, vectors)
+    for term, text in (_divisors(lhs_tree, env, vectors)
+                       + _divisors(rhs_tree, env, vectors)):
+        if not _nonzero_divisor(term, invertible, stated, context, domain):
+            return ProofResult(
+                "undecided",
+                sketch=f"the claim divides by {text}, which may be zero "
+                       f"(the quotient has no value there); state it: "
+                       f"assuming {text} != 0")
     is_equality = relation in ("==", "~=")
     orthogonal = [mat_syms[p] for p in sorted(mat_syms)
                   if "is_orthogonal" in (structures or {}).get(p, ())]

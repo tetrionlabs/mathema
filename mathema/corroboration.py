@@ -176,6 +176,12 @@ def corroborate_disproof(evaluate: Callable[[dict], "bool | None"],
                          reason="no in-domain counterexample reproduced")
 
 
+#: what `probe_finite` returns at a point that says nothing either way
+#: (the claim's own evaluation failed there): neither a failure nor an
+#: agreement, so it is not counted among the executed points
+INCONCLUSIVE = "<inconclusive>"
+
+
 def sweep_stability(probe_finite: Callable[[dict], "str | None"],
                     names: list[str], *, sample: Callable, corners: list,
                     admits: Callable[[dict], bool],
@@ -187,8 +193,9 @@ def sweep_stability(probe_finite: Callable[[dict], "str | None"],
         division, sqrt, log or exp breaks in float), then `budget`
         sampled interior points. `probe_finite(point)` returns a failure
         description (a raise, a NaN, or an inf or a deviation past a
-        magnitude-scaled tolerance where the relation fails) or None
-        when the code agrees with the relation there.
+        magnitude-scaled tolerance where the relation fails), None
+        when the code agrees with the relation there, or `INCONCLUSIVE`
+        when the point says nothing, which is not counted.
 
     Notes:
         Returns the first fragile point (one real break falsifies,
@@ -206,6 +213,8 @@ def sweep_stability(probe_finite: Callable[[dict], "str | None"],
         out.in_flight = point
         detail = probe_finite(point)
         out.in_flight = None
+        if detail is INCONCLUSIVE:
+            continue
         out.checked += 1
         if detail is not None:
             out.fragile_point, out.detail = point, detail

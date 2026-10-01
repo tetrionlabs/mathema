@@ -521,6 +521,28 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
                                    OutputPredicateFamily))
 
 
+def _lengths_scope(cj, family, facts):
+    """Intent:
+        The context a derive attempt runs in: a family claim that asks
+        whether calls agree with each other (`is_deterministic`,
+        `is_reproducible`, `is_state_safe`) or how accurate they are
+        (`is_numerically_stable`) is not judged at the sequence lengths
+        where the call raises, which say nothing about agreement or
+        accuracy; every other claim is.
+    """
+    import contextlib
+
+    from .symbolic._prove import lengths_unjudged
+    base = families.claim_base_name(cj.name)
+    try:
+        agreement = (base in _SELF_AGREEMENT_FAMILIES
+                     or base == "is_numerically_stable") \
+            and _statement_is_family_claim(cj, base, family, facts)
+    except Exception:
+        agreement = False
+    return lengths_unjudged() if agreement else contextlib.nullcontext()
+
+
 def _resolve_func_ref(ref: str, *, root: str = "."):
     """A dotted `module.qualname` string (a mathema-internal helper, or
     any other importable function, the same shape a spec key already
@@ -3054,8 +3076,9 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
         axis be 0`, `let keepdims be True`) to its value; `problem`
         names a pinned parameter the function does not have. For any
         other function nothing is kept (its defaulted parameters are
-        sampled like the rest) and only a `None`/`True`/`False` pin is
-        passed; a number pin there stays a single-point bound.
+        sampled like the rest), a `None`/`True`/`False` pin is passed,
+        and a number pin is passed for a parameter a call to f leaves
+        out; where every call passes it, it stays a single-point bound.
 
     Notes:
         A number spelled `let p be 2` is a single-point bound, so it
@@ -3068,15 +3091,25 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
     from .compendium import library_key_of
     key = library_key_of(fn)
     pins = dict(getattr(cj, "param_pins", None) or {})
-    if key is None and not pins:
+    if key is None and not pins and not any(
+            _single_point((cj.domain or {}).get(n)) is not None
+            for n in (cj.free_vars or ())):
         return {}, {}, None
     try:
         sig = callable_signature(fn).parameters
     except (TypeError, ValueError):
         return {}, {}, None
     if key is None:
-        # any other function: a literal pin is passed, and every
-        # defaulted parameter is sampled
+        # any other function: a literal pin is passed, a number pin on
+        # a parameter some call to f leaves out is passed to that call,
+        # and every defaulted parameter is sampled
+        for name in sorted(cj.free_vars or ()):
+            point = _single_point((cj.domain or {}).get(name))
+            if point is None or name not in sig or name in pins \
+                    or not _some_call_omits(cj, fn, name):
+                continue
+            pins[name] = (int(point) if isinstance(point, float)
+                          and point.is_integer() else point)
         missing = sorted(p for p in pins if p not in sig)
         name = getattr(fn, "__qualname__", None) or "the function"
         return {}, {p: v for p, v in pins.items() if p in sig}, (
@@ -3107,6 +3140,33 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
             and p not in (cj.domain or {}) and p not in pins
             and p not in named}
     return kept, {p: v for p, v in pins.items() if takes(p)}, problem
+
+
+def _some_call_omits(cj, fn, name: str) -> bool:
+    """Whether some call to f in the claim's text binds no argument to
+    the parameter `name`."""
+    try:
+        sig = callable_signature(fn)
+    except (TypeError, ValueError):
+        return False
+    for src in (cj.lhs, cj.rhs):
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            continue
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "f"):
+                continue
+            try:
+                bound = sig.bind_partial(*([None] * len(n.args)),
+                                         **{k.arg: None for k in n.keywords
+                                            if k.arg is not None})
+            except TypeError:
+                continue
+            if name not in bound.arguments:
+                return True
+    return False
 
 
 def defaults_meta(kept: dict, pins: dict) -> dict:
@@ -3209,16 +3269,18 @@ def _value_text(value) -> str:
     return "<no value>" if text in ("<no value>", "<NoValue>") else text
 
 
-def _draw_trial_sizes(resolver, lo, hi, groups, rng):
+def _draw_trial_sizes(resolver, lo, hi, groups, rng, floor=None):
     """Sizes for one trial: the resolver draws one per distinct key
     (shared dims agree structurally), then premise equality groups
-    collapse each to a single shared draw and premise bounds apply."""
-    sizes = resolver.draw_sizes(rng, lo, hi)
+    collapse each to a single shared draw and premise bounds apply.
+    `floor` is the resolver's round of guaranteed small draws."""
+    sizes = resolver.draw_sizes(rng, lo, hi, floor=floor)
     for group in (groups or []):
         g_lo = max((lo.get(k, 1) for k in group), default=1)
         g_hi = min((hi.get(k, max(6, 4 * g_lo)) for k in group),
                    default=max(6, 4 * g_lo))
-        n = rng.randint(max(1, g_lo), max(g_lo, g_hi))
+        n = max(1, g_lo) if floor == 0 else \
+            rng.randint(max(1, g_lo), max(g_lo, g_hi))
         for k in group:
             sizes[k] = n
     return sizes
@@ -3270,6 +3332,46 @@ def _emit_position(probe, conjectures: list, declared_order: dict) -> float:
         if cj.name == name:
             return declared_order.get(id(cj), 0) + (0.5 if parent else 0)
     return 0
+
+
+def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
+                            companions: bool):
+    """Intent:
+        `(probe, lines)`: the claim's empty-input lines
+        (`_empty_input.empty_input_lines`), and the claim itself,
+        falsified with the witness of the first falsified line. A claim
+        already falsified keeps its own witness; a skipped claim has no
+        lines.
+        Without `companions` (a caller asking for the claim alone, as
+        for the float companion) the claim is its mathematics over
+        non-empty inputs and no line is made.
+    """
+    if not companions or probe.verdict.startswith("skipped"):
+        return probe, []
+    assumption = (None if ctx.assumption is None else
+                  [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
+    try:
+        from ._empty_input import empty_input_lines
+        lines = empty_input_lines(ctx.cj, fn, facts, ctx.cj_domain,
+                                  assumption)
+    except TimeoutError:
+        raise
+    except Exception:
+        return probe, []
+    broken = next((line for line in lines if line.verdict == "falsified"),
+                  None)
+    if broken is None or probe.verdict == "falsified":
+        return probe, lines
+    from dataclasses import replace as _replace
+    note = (f"{probe.note + '; ' if probe.note else ''}{broken.name} is "
+            f"falsified: {broken.note}")
+    # the verdict is the executed call's, so the route is the probe's;
+    # a proof over the non-empty inputs stays in the sketch
+    meta = {**(probe.meta or {}), "mathema.empty_input": broken.name,
+            "mathema.witness_executed": True}
+    return _replace(probe, verdict="falsified", route="probe",
+                    counterexample=broken.counterexample, note=note,
+                    meta=meta), lines
 
 
 def _emit_companion(out: list, companion: "Probe", parent: str) -> None:
@@ -4042,17 +4144,25 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     ctx, fn, facts,
                     extensive or cj.route in ("best", "examine"))
                 if derived is not None:
+                    derived, lines = _with_empty_input_lines(
+                        derived, ctx, fn, facts, float_companions)
                     out.append(stamp(derived, _cap=verdict_cap))
                     if ctx.companion is not None:
                         _emit_companion(out, _stamped(ctx.companion, cj),
                                         derived.name)
+                    if float_companions:
+                        out.extend(_stamped(line, cj, canonical=False) for line in lines)
                     continue
                 # route == "best" and the derive stage couldn't settle it:
                 # fall through to the probe stage, same as an ordinary
                 # probe claim.
             probed = _arbitrate_empirical_fallback(
                 _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
+            probed, lines = _with_empty_input_lines(probed, ctx, fn, facts,
+                                                    float_companions)
             out.append(stamp(probed, _cap=verdict_cap))
+            if float_companions:
+                out.extend(_stamped(line, cj, canonical=False) for line in lines)
         except LanguageDrawFailed as e:
             # the language produced no member to evaluate the claim at
             out.append(stamp(Probe(
@@ -4812,7 +4922,7 @@ def _free_array(bound, resolver, trial_sizes: dict, env: dict, rng,
                     size = resolver.measure(env[anchor[0]], anchor[1])
                 except (IndexError, TypeError):
                     size = None
-        sizes.append(size if size is not None else rng.randint(2, 5))
+        sizes.append(size if size is not None else rng.randint(1, 5))
 
     def build(axis):
         if axis == len(sizes):
@@ -4939,14 +5049,22 @@ def _validate_claim(cj, statement: str, note: str, facts,
             if "disallowed" in str(e):
                 return Probe(cj.name, statement, "skipped", route=None,
                              note=f"{note}; {e}")
-    if cj.relation == "raises" and fn is not None:
+    if fn is not None:
         # the TypeError a call that does not fit the signature raises
         # comes from the claim's own malformed text, never from the
         # function, so it can neither satisfy nor refute the claim
-        mismatch = _call_arity_mismatch(cj.lhs, fn, param_set)
-        if mismatch is not None:
-            return Probe(cj.name, statement, "skipped:misspecified",
-                         route=None, note=f"{note}; {mismatch}")
+        sides = [cj.lhs] if cj.relation == "raises" else [cj.lhs, cj.rhs]
+        try:
+            pinned = frozenset(call_defaults(fn, cj)[1])
+        except Exception:
+            pinned = frozenset()
+        for side in sides:
+            mismatch = (_call_arity_mismatch(side, fn, param_set, pinned)
+                        if side else None)
+            if mismatch is not None:
+                return Probe(cj.name, statement, "skipped:misspecified",
+                             route=None, note=f"{note}; {mismatch}")
+    if cj.relation == "raises" and fn is not None:
         if cj.rhs and _resolve_exception_type(cj.rhs, fn) is None:
             return Probe(cj.name, statement, "skipped:misspecified",
                          route=None,
@@ -5716,12 +5834,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         family_proof = _chained_definedness_proof(
             family_derive, fn, facts, cj, cj_domain, assumption)
     else:
-        family_proof = (families.call_route(family_derive, fn, facts,
-                                            cj.lhs, cj.rhs, cj.relation,
-                                            domain=cj_domain,
-                                            tolerance=cj.tolerance,
-                                            assumption=assumption)
-                        if family_derive is not None else None)
+        with _lengths_scope(cj, family, facts):
+            family_proof = (families.call_route(family_derive, fn, facts,
+                                                cj.lhs, cj.rhs, cj.relation,
+                                                domain=cj_domain,
+                                                tolerance=cj.tolerance,
+                                                assumption=assumption)
+                            if family_derive is not None else None)
     if family_proof is not None and cj.negated:
         # the not-form: a decided positive claim decides its negation
         # the other way (the falsifying witness IS the proof); an
@@ -6001,12 +6120,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                  domain=cj_domain)
     else:
         exact_law = True
-        proof = try_prove(fn, facts, exact_literal_text(cj.lhs),
-                          exact_literal_text(cj.rhs), cj.relation,
-                          domain=cj_domain, tolerance=cj.tolerance,
-                          extensive=extensive, funcs=bound_funcs or None,
-                          assumption=assumption,
-                          assume_defined=ctx.assume_defined)
+        with _lengths_scope(cj, family, facts):
+            proof = try_prove(fn, facts, exact_literal_text(cj.lhs),
+                              exact_literal_text(cj.rhs), cj.relation,
+                              domain=cj_domain, tolerance=cj.tolerance,
+                              extensive=extensive, funcs=bound_funcs or None,
+                              assumption=assumption,
+                              assume_defined=ctx.assume_defined)
         if definitions_hint is not None \
                 and proof.status in ("undecided", "unliftable"):
             from .symbolic._proof_support import ProofResult
@@ -6386,7 +6506,8 @@ def _sympy_zero():
 
 
 
-def _call_arity_mismatch(src: str, fn, param_set: set) -> str | None:
+def _call_arity_mismatch(src: str, fn, param_set: set,
+                         pinned: frozenset = frozenset()) -> str | None:
     """Intent:
         The reason a call to `f` in the claim text `src` cannot bind to
         `fn`'s signature (too many or too few arguments, an unknown
@@ -6395,7 +6516,8 @@ def _call_arity_mismatch(src: str, fn, param_set: set) -> str | None:
 
     Notes:
         A starred argument is not counted and makes the check decline
-        for that call. A parameter literally named `f` makes `f(...)`
+        for that call. A `pinned` parameter (`let p be ...`) the call
+        does not pass itself is passed for it. A parameter literally named `f` makes `f(...)`
         ambiguous, so the check declines entirely.
     """
     if "f" in param_set:
@@ -6413,8 +6535,11 @@ def _call_arity_mismatch(src: str, fn, param_set: set) -> str | None:
                 or any(k.arg is None for k in node.keywords):
             continue
         try:
-            sig.bind(*([None] * len(node.args)),
-                     **{k.arg: None for k in node.keywords})
+            given_kw = {k.arg: None for k in node.keywords}
+            bound = sig.bind_partial(*([None] * len(node.args)), **given_kw)
+            sig.bind(*([None] * len(node.args)), **given_kw,
+                     **{p: None for p in pinned
+                        if p not in bound.arguments and p in sig.parameters})
         except TypeError:
             params = list(sig.parameters)
             given = len(node.args) + len(node.keywords)
@@ -6978,8 +7103,13 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     for trial in range(budget + len(pinned)):
         call_raised[0] = call_nan[0] = call_inf[0] = None
         outside_draw[0] = False
+        # the first sampled trials are a claim's guaranteed small draws:
+        # length 1 and a 1-by-1 matrix, then 1-by-n, then n-by-1
+        small_round = trial - len(pinned) \
+            if 0 <= trial - len(pinned) < 3 else None
         trial_sizes: dict = (
-            _draw_trial_sizes(resolver, shape_lo, shape_hi, shape_groups, rng)
+            _draw_trial_sizes(resolver, shape_lo, shape_hi, shape_groups, rng,
+                              floor=small_round)
             if plan_dims and trial >= len(pinned) else {})
         # MATH_CONSTANTS before the per-trial parameter assignment
         # below, so a parameter named `e`/`pi` overrides the constant
@@ -7043,7 +7173,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # a fixed dimension on the table's vector domain is
                     # every column's length
                     length = (trial_sizes.get(resolver.key(p, 0))
-                              or rng.randint(2, 8))
+                              or rng.randint(1, 8))
                     v = {c: _synth("sequence", rng, column,
                                    specials=specials, length=length)
                          for c in table_columns[p]}
@@ -7059,7 +7189,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # that have the structure rather than any nested list
                     from . import matrices as _mtx
                     key = resolver.key(p, 0)
-                    n = trial_sizes.get(key) or rng.randint(2, 5)
+                    n = trial_sizes.get(key) or rng.randint(1, 5)
                     v = _mtx.synth_for(param_structures[p], n, rng)
                 elif shape is not None and (
                         shape.ndim >= 2
@@ -7082,6 +7212,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # domain and the special-value shapes; the plan
                     # only fixes a 1-D length when a premise did
                     length = trial_sizes.get(resolver.key(p, 0))
+                    if length is None and small_round == 0 \
+                            and k in SEQUENCE_KINDS:
+                        length = 1
                     v = narrowed(p, lambda p=p, k=k, length=length: _synth(
                         k, rng, cj_domain.get(p),
                         specials=specials, extra=critical_hints.get(p),
@@ -7204,6 +7337,17 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           f"the claim's own side has no real value here "
                           f"({e}); narrow the claim's domain to where "
                           f"every side of it is real")
+                    break
+                elif isinstance(e, (IndexError, ZeroDivisionError)):
+                    # the claim's own expression has no value at this
+                    # in-domain point: an index outside a sequence it
+                    # reads (a literal `[9]` past the end of a result),
+                    # or a division by zero
+                    checked += 1
+                    cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: "
+                          f"the claim's own expression raised "
+                          f"{type(e).__name__} ({e}); narrow the claim's "
+                          f"domain to where it has a value")
                     break
                 # the law's own plumbing failed, not the function,
                 # a broken sample, never a counterexample

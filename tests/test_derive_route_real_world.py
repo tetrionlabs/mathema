@@ -292,7 +292,8 @@ def test_dot_product_proves():
     # to the fresh Sum index itself, and the update expression
     # subscripts *both* sequences by it.
     results = check_conjectures(
-        dot_product, [claim("f(a, b) == f(a, b)", route="derive")])
+        dot_product, [claim("for a in R^n, b in R^n, f(a, b) == f(a, b)",
+                            route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -335,7 +336,9 @@ def test_dot_weights_proves():
     # recognized directly (lift_dot(), no general vector type needed):
     # Sum(weights[k]*features[k], (k, 0, L-1)).
     results = check_conjectures(
-        dot_weights, [claim("f(weights, features) == f(weights, features)", route="derive")])
+        dot_weights, [claim("for weights in R^n, features in R^n, "
+                            "f(weights, features) == f(weights, features)",
+                            route="derive")])
     assert results[0].verdict == "proven"
 
 

@@ -145,12 +145,25 @@ class DimResolver:
 
     def draw_sizes(self, rng: random.Random,
                    lo: "dict | None" = None,
-                   hi: "dict | None" = None) -> dict:
+                   hi: "dict | None" = None,
+                   floor: "int | None" = None) -> dict:
         """One size per distinct dimension key for a trial. Shared keys
         get one draw, so two arguments naming the same dimension agree
         by construction; a key with a premise bound draws inside it.
-        The default range keeps sequences small and cheap."""
+        The default range keeps sequences small and cheap, and starts
+        at one: a length-1 vector and a 1-by-1, 1-by-n or n-by-1
+        matrix are ordinary members of the domain.
+
+        `floor` is the round of a claim's guaranteed small draws: round
+        0 sets every free key to its least size (a length-1 vector, a
+        1-by-1 matrix), round 1 sets the first axis of every matrix to
+        its least size and the other axes to at least two (1-by-n),
+        round 2 the second axis (n-by-1); None draws normally."""
         lo, hi = lo or {}, hi or {}
+        rows = {self.key(p, 0) for p, s in self.shapes.items()
+                if s.ndim == 2}
+        cols = {self.key(p, 1) for p, s in self.shapes.items()
+                if s.ndim == 2}
         out: dict = {}
         for k in self.distinct_keys():
             if isinstance(k, str) and k.isdigit():
@@ -161,13 +174,20 @@ class DimResolver:
                 # a name a binding fixes is exactly that size
                 out[k] = self.fixed[k]
                 continue
-            # the default range matches the free sequence draw (2..8);
-            # a premise bound narrows or lowers it (a `>= 1` floor lets
-            # a length-1 vector through, the default never does), and a
-            # floor with no ceiling draws up to four times the floor
-            k_lo = lo.get(k, 2)
-            k_hi = hi.get(k, max(8, 4 * k_lo))
-            out[k] = rng.randint(max(1, k_lo), max(k_lo, k_hi))
+            # the default range matches the free sequence draw (1..8);
+            # a premise bound narrows it, and a floor with no ceiling
+            # draws up to four times the floor
+            k_lo = max(1, lo.get(k, 1))
+            k_hi = max(k_lo, hi.get(k, max(8, 4 * k_lo)))
+            least = floor == 0 or (floor == 1 and k in rows) \
+                or (floor == 2 and k in cols)
+            other = floor in (1, 2) and k in rows | cols and not least
+            if least:
+                out[k] = k_lo
+            elif other and k_hi >= 2:
+                out[k] = rng.randint(max(2, k_lo), k_hi)
+            else:
+                out[k] = rng.randint(k_lo, k_hi)
         return out
 
     def synth(self, param: str, sizes: dict, element_synth, rng: random.Random):
@@ -186,7 +206,7 @@ class DimResolver:
                 return element_synth()
             n = sizes.get(self.key(param, axis))
             if n is None:
-                n = rng.randint(2, 6)
+                n = rng.randint(1, 6)
             return [build(axis + 1) for _ in range(n)]
 
         return build(0)
