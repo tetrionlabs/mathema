@@ -2475,14 +2475,26 @@ def _sum_closed_zero(diff) -> "bool | None":
                 continue
             if branch_cond is sympy.true:
                 return False
+            # only an equality in one symbol whose real solution set is
+            # finite and complete (solveset, not solve, which may list
+            # only some solutions of sin(n) = 0)
+            if not isinstance(branch_cond, sympy.Eq) or \
+                    len(branch_cond.free_symbols) != 1:
+                return False
+            (sym,) = branch_cond.free_symbols
             try:
-                solutions = sympy.solve(branch_cond, dict=True)
+                solutions = _with_timeout(
+                    lambda: sympy.solveset(branch_cond.lhs - branch_cond.rhs,
+                                           sym, sympy.S.Reals),
+                    FAST_TIMEOUT_SECONDS)
+            except TimeoutError:
+                raise
             except Exception:
                 return False
-            if not solutions:
+            if not isinstance(solutions, sympy.FiniteSet) or not solutions:
                 return False
-            for sol in solutions:
-                if not zero(branch_expr.subs(sol), depth + 1):
+            for value in solutions:
+                if not zero(branch_expr.subs(sym, value), depth + 1):
                     return False
         return True
 

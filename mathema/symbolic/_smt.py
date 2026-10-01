@@ -75,10 +75,16 @@ class _Translator:
                               else z3mod.Real(name))
 
     def _rational(self, value) -> "object":
-        # a Float reads as its shortest round-tripping decimal, the
-        # number its digits name
-        q = Fraction(value.p, value.q) if isinstance(value, sympy.Rational) \
-            else Fraction(repr(float(value)))
+        # a double-precision Float reads as its shortest round-tripping
+        # decimal, the number its digits name; a wider Float as the
+        # exact number it holds
+        if isinstance(value, sympy.Rational):
+            q = Fraction(value.p, value.q)
+        elif isinstance(value, sympy.Float) and value._prec > 53:
+            exact = sympy.Rational(value)
+            q = Fraction(int(exact.p), int(exact.q))
+        else:
+            q = Fraction(repr(float(value)))
         return self.z3.RealVal(f"{q.numerator}/{q.denominator}")
 
     def _radical(self, base_expr, q: int):
