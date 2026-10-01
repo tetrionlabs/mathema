@@ -107,6 +107,26 @@ def _calls_f(srcs) -> bool:
     return False
 
 
+def _passed_names(srcs) -> set:
+    """Intent:
+        The names the claim's `f(...)` calls pass in their arguments:
+        `f(x[1:], 1.0)` passes `x`, `f([1.0])` passes none.
+    """
+    names: set = set()
+    for src in srcs:
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            continue
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+                    and n.func.id == "f":
+                for arg in [*n.args, *(k.value for k in n.keywords)]:
+                    names |= {m.id for m in ast.walk(arg)
+                              if isinstance(m, ast.Name)}
+    return names
+
+
 def _reads_length(name: str, assumption) -> bool:
     pattern = re.compile(rf"\b{re.escape(name)}\b")
     return any(pattern.search(f"{lhs} {rhs}")
@@ -142,8 +162,13 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
     shapes = signature_shapes(fn)
     seqs = [p for p in facts.params
             if facts.param_kinds.get(p) in SEQUENCE_KINDS]
+    passed = _passed_names(srcs)
     open_seqs = []
     for p in seqs:
+        if p not in passed:
+            # no call passes this parameter an open value (only
+            # literals): the claim never asks f about its empty list
+            continue
         dims = dims_of((cj_domain or {}).get(p)) or dims_of(shapes.get(p))
         if dims and fixed_size(dims[0]) is not None:
             continue
