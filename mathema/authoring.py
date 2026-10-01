@@ -598,6 +598,7 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     about, so `assuming <premise>, <law>` and a guard for `<premise>`
     are the same precondition stated once."""
     import ast
+    import dataclasses
     import functools
 
     from .conjecture import _parse_assuming_links, _split_top_and
@@ -663,6 +664,13 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
                 _domain_from_declared_claims(fn, key, root))
         except ValueError as e:
             raise DomainError(f"enforce_dimensions(): {e}") from e
+        # an enforce_domain guard already on fn judges every number of a
+        # parameter it covers, in its own words, so stacking the two in
+        # either order reports a number outside the domain the same way
+        covered = set(getattr(fn, "__mathema_enforced_domain__", None) or ())
+        plan = dataclasses.replace(
+            plan, numbers_judged_elsewhere=frozenset(
+                covered & set(plan.elements)))
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):

@@ -533,6 +533,7 @@ class DimensionPlan:
     result: "tuple | None" = None
     result_source: "str | None" = None
     elements: dict = dataclasses.field(default_factory=dict)
+    numbers_judged_elsewhere: frozenset = frozenset()
 
 
 def dimension_plan(shapes: dict, domains: dict) -> DimensionPlan:
@@ -620,7 +621,8 @@ def _table_as_matrix(value, rank: int) -> "tuple | None":
     return (lengths.pop(), len(seen.columns))
 
 
-def _entry_outside(value, element) -> "tuple | None":
+def _entry_outside(value, element,
+                   numbers_judged_elsewhere: bool = False) -> "tuple | None":
     """Intent:
         `(entry,)` for the first entry of a container value outside the
         element domain, or None when every entry is a member. A missing
@@ -628,9 +630,15 @@ def _entry_outside(value, element) -> "tuple | None":
         other entry must be a number of the element domain
         (`domain.number_member`), so text, a bool, an imaginary number
         and an infinity in a bare real set are outside.
+        With `numbers_judged_elsewhere` (an `enforce_domain` guard on
+        the same parameter judges every number), only an entry that is
+        not a number is reported here.
     """
     from .domain import domain_contains, is_missing, number_member
     kind = getattr(getattr(value, "dtype", None), "kind", None)
+    if (numbers_judged_elsewhere and kind in ("i", "u", "f", "c", "b")
+            and type(value).__module__ == "numpy"):
+        return None
     if (kind in ("i", "u", "f") and type(value).__module__ == "numpy"
             and getattr(element, "base_type", None) == "R"
             and not element.pieces and not element.excluded):
@@ -644,10 +652,12 @@ def _entry_outside(value, element) -> "tuple | None":
         return (flat[hits[0]].item(),) if hits.size else None
     for leaf in leaves(value):
         if is_missing(leaf):
-            if not domain_contains(leaf, element):
+            if not numbers_judged_elsewhere and not domain_contains(
+                    leaf, element):
                 return (leaf,)
             continue
-        if not number_member(leaf, element):
+        member = number_member(leaf, element)
+        if member is None or (not member and not numbers_judged_elsewhere):
             return (leaf,)
     return None
 
@@ -687,7 +697,8 @@ def entry_problem(plan: DimensionPlan, arguments: dict) -> tuple:
             bound.setdefault(d, (n, p, shape))
         element = plan.elements.get(p)
         if element is not None:
-            outside = _entry_outside(value, element)
+            outside = _entry_outside(
+                value, element, p in plan.numbers_judged_elsewhere)
             if outside is not None:
                 return (f"{p} has the entry {outside[0]!r}, outside "
                         f"{domain_text(element)}; {source} expects every "
