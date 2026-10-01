@@ -15,6 +15,7 @@ import importlib.util
 import pytest
 
 from mathema import lexicon_checks
+from mathema.compendium import _installed_version, _version_in_range
 from mathema.conjecture import claim
 from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON, get, render_both, show, sources
 from mathema.spec import render_claim_text
@@ -166,6 +167,46 @@ PINNED: dict = {
     "absent_field_raises": "holds",
     "is_absent_safe_field": ("falsified", "trade.memo = null (absent): f raised TypeError"),
     "absent_key_left_out": "holds",
+    # the norm written with double bars, each against its function in
+    # mathema/_lexicon_numpy.py
+    "norm_bars_euclidean": "proven",
+    "norm_bars_two": "proven",
+    "norm_bars_one": "proven",
+    "norm_bars_inf": "proven",
+    "norm_bars_integer_order": "holds",
+    "norm_bars_chain": "holds",
+    "norm_bars_homogeneous": "proven",
+    "norm_bars_homogeneous_sign_trap": "falsified",
+    "norm_bars_unit_vector": "proven",
+    "norm_bars_direction": "proven",
+    "norm_bars_distance": "proven",
+    "norm_bars_distance_symmetric": "proven",
+    "norm_bars_triangle": "holds",
+    "norm_bars_stopping_criterion": "holds",
+    "norm_bars_nearest_distance": "holds",
+    "norm_bars_nearest_distance_trap": "falsified",
+    "norm_bars_series_tracking_error": "proven",
+    "norm_bars_rmse": "proven",
+    "norm_bars_portfolio_weights": "proven",
+    # `numpy.dot`'s definition row applies from numpy 2.4; below it the
+    # squared length is sampled
+    "norm_bars_squared": ("proven" if _version_in_range(
+        _installed_version("numpy") or "0", ">=2.4") else "holds"),
+    "norm_bars_squared_trap": "falsified",
+    "norm_bars_order_trap": "falsified",
+    "matrix_norm_bars_frobenius": "proven",
+    "matrix_norm_bars_gram_trace": "proven",
+    "matrix_norm_bars_one": "holds",
+    "matrix_norm_bars_inf": "holds",
+    "matrix_norm_bars_order_trap": "falsified",
+    "matrix_norm_bars_spectral": "holds",
+    "matrix_norm_bars_spectral_below_frobenius": "holds",
+    "let_scale_seq_sharpe_premise": "proven",
+    "let_scale_seq_sharpe_trap": ("falsified", "returns = [0.0]"),
+    "let_shift_seq_range": "holds",
+    "let_shift_seq_mean_moves": "falsified",
+    "assuming_spread_positive": "proven",
+    "dim_call_premise": "holds",
 }
 if importlib.util.find_spec("mathema_language") is None:
     PINNED.update({key: "skipped" for key in _LANGUAGE_ROWS})
@@ -405,6 +446,8 @@ def test_search_finds_an_entry_by_a_word_it_does_not_contain():
         "brute force": "finite_domain_pinned",
         "absolute value": "abs_bars",
         "fibonacci": "recurrence_identity",
+        "manhattan": "norm_bars_one",
+        "singular value": "matrix_norm_bars_spectral",
     }
     for query, expected in cases.items():
         hits = [key for key, _law in search(query, limit=5)]

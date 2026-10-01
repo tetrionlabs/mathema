@@ -4,7 +4,14 @@
 # [x] page:id  roles         a marked example, run and compared
 # [ ] page:line               an unmarked fence that shows output
 # [-] page:line               marked as an illustration, not a run
+# [h] page:line               a command checked by hand, not run here
 
+[h] docs/agent-setup.md:19
+[h] docs/agent-setup.md:40
+[h] docs/agent-setup.md:59
+[h] docs/agent-setup.md:82
+[h] docs/agent-setup.md:99
+[h] docs/agent-setup.md:119
 [x] docs/authoring.md:raises-guard               run verdicts
 [x] docs/authoring.md:missing-default            run output
 [x] docs/authoring.md:missing-spelling           run
@@ -40,10 +47,13 @@
 [x] docs/derive-route.md:finite-set              run verdicts
 [x] docs/derive-route.md:linspace                run verdicts  (requires)
 [x] docs/evidence-ladder.md:companion            run output
+[x] docs/existing-codebase.md:codebase           file file file run output run output run output run output run output run output file file run output run output
 [ ] docs/extending.md:287
 [x] docs/findings.md:finds                       file run output run run output run output run run output
 [x] docs/findings.md:parity                      file run output
 [x] docs/first-look.md:ema                       run run output run output run output run output run output
+[x] docs/from-a-pytest-test.md:ptp               file run output run output run output file run output
+[x] docs/gate-a-pipeline.md:gate                 file file run output run output run output file run output run output
 [x] docs/grammar.md:eps                          file run output
 [x] docs/grammar.md:just-below                   run output
 [x] docs/grammar.md:half-power                   run output
@@ -56,6 +66,7 @@
 [x] docs/lemmas.md:chain                         run output
 [x] docs/lemmas.md:weakest                       run output  (after)
 [x] docs/lemmas.md:orphan                        run output  (after)
+[x] docs/library-claims.md:library               file file run output run output run output file run output run output  (requires)
 [x] docs/mathema-docstring.md:ema                file run output repl repl run output run output
 [x] docs/matrix-structure.md:semantics           run verdicts verdicts
 [x] docs/matrix-structure.md:vocabulary          run verdicts verdicts
@@ -83,6 +94,7 @@
 [x] docs/modes/check.md:softmax                  file session file session
 [x] docs/modes/claims.md:adopt                   file session run output
 [x] docs/modes/compendium.md:status              file file run output  (requires)
+[x] docs/modes/coverage.md:cov                   file run output file run output run output file run output
 [x] docs/modes/describe.md:tutorial              file run output file run session session
 [x] docs/modes/init.md:stubs                     file file session session
 [ ] docs/modes/init.md:119
@@ -94,6 +106,7 @@
 [x] docs/modes/verify.md:eager                   session
 [-] docs/modes/verify.md:403
 [x] docs/multi-function-claims.md:ratio          run output
+[x] docs/pandas-function.md:pandas               file run output run output run output run output run output run output  (requires)
 [x] docs/quickstart.md:falsify                   file run output run output run output
 [x] docs/quickstart.md:docstring                 file run output run output
 [x] docs/runtime-types.md:rt-mean                run verdicts verdicts  (requires)
@@ -102,6 +115,10 @@
 [x] docs/runtime-types.md:rt-proofs              run verdicts verdicts verdicts run output  (requires)
 [x] docs/runtime-types.md:rt-drawdown            run verdicts run output verdicts  (requires)
 [-] docs/runtime-types.md:105
+[h] docs/start.md:40
+[h] docs/start.md:71
+[h] docs/start.md:99
+[h] docs/start.md:124
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
 [ ] docs/symbology.md:135
@@ -113,4 +130,4 @@
 [-] README.md:192
 [-] README.md:290
 
-# 95 examples checked, 4 output fences not yet marked
+# 101 examples checked, 4 output fences not yet marked, 10 commands checked by hand

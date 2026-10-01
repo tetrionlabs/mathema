@@ -268,6 +268,17 @@ def _lift(node, env: dict, vectors: frozenset = frozenset()):
                 * _shaped(args[1], node.args[1])
         if name in ("abs", "Abs") and one and not _is_matrix(args[0]):
             return sympy.Abs(_scalar(args[0]))
+        if name == "sqrt" and one and not _is_matrix(args[0]):
+            return sympy.sqrt(_scalar(args[0]))
+        if name == "norm" and one and _is_matrix(args[0]):
+            # a vector's Euclidean norm is the root of its inner
+            # product; a matrix's Frobenius norm the root of the trace
+            # of its Gram matrix. An order (`norm(A, 2)`, `norm(A,
+            # inf)`) has no matrix lemma and stays with the probe
+            term = args[0]
+            if _vector_like(term, vectors):
+                return sympy.sqrt(_scalar(sympy.Transpose(term) * term))
+            return sympy.sqrt(sympy.Trace(term * sympy.Transpose(term)))
     raise ValueError(f"unsupported matrix expression {ast.unparse(node)!r}")
 
 

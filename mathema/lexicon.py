@@ -209,6 +209,73 @@ LEXICON: dict[str, str] = {
     "matrix_frobenius_norm":
         "for A in R^(n,n), norm(A) ~= sqrt(trace(A.T @ A))",
     "matrix_spectral_norm": "for A in R^(n,n), norm(A, 2) <= norm(A)",
+    # the same norms written with double bars, the order a subscript:
+    # bare bars are the Euclidean norm of a vector and the Frobenius
+    # norm of a matrix, `_1`, `_2`, `_inf` (also `_oo`, `_∞`) and an
+    # integer `_p` name the others, `_2` on a matrix the spectral norm,
+    # and `^2` after the bars is the square, never an order
+    "norm_bars_euclidean": "for x in R^n, f(x) ~= ||x||",
+    "norm_bars_two": "for x in R^n, f(x) ~= ||x||_2",
+    "norm_bars_one": "for x in R^n, f(x) ~= ||x||_1",
+    "norm_bars_inf": "for x in R^n, f(x) ~= ||x||_inf",
+    # the whole-number order: a p-norm implementation against `||x||_3`
+    "norm_bars_integer_order": "for x in R^n, f(x, 3) ~= ||x||_3",
+    # the chain of orders; it teaches the orders, since a function at
+    # either endpoint satisfies it too
+    "norm_bars_chain": "for x in R^n, ||x||_inf <= f(x) <= ||x||_1",
+    # a norm scales with the magnitude of the factor, never its sign
+    "norm_bars_homogeneous":
+        "for x in R^n, let c be [-2, 2], f(c * x) ~= |c| * ||x||",
+    "norm_bars_homogeneous_sign_trap":
+        "for x in R^n, let c be [-2, 2], f(c * x) ~= c * ||x||",
+    # a normalisation has unit length and points along its argument,
+    # away from the zero vector, which the premise excludes
+    "norm_bars_unit_vector": "assuming ||x|| > 0, for x in R^n, ||f(x)|| ~= 1",
+    "norm_bars_direction": "assuming ||x|| > 0, for x in R^n, f(x) ~= x / ||x||",
+    # a distance: the norm of the difference, symmetric, and at most
+    # the sum of the two lengths
+    "norm_bars_distance": "for x in R^n, y in R^n, f(x, y) ~= ||x - y||",
+    "norm_bars_distance_symmetric":
+        "for x in R^n, y in R^n, f(y, x) == ||x - y||",
+    "norm_bars_triangle": "for x in R^n, y in R^n, f(x, y) <= ||x|| + ||y||",
+    # a stopping criterion: the step is within the tolerance
+    "norm_bars_stopping_criterion":
+        ("for x_new in R^n, x_old in R^n, tol in [0.01, 1], "
+         "f(x_new, x_old, tol) == (||x_new - x_old|| <= tol)"),
+    # the nearest row of a matrix is no farther than its first row
+    "norm_bars_nearest_distance":
+        "for points in R^(m,n), q in R^n, f(points, q) <= ||points[0, :] - q||",
+    "norm_bars_nearest_distance_trap":
+        "for points in R^(m,n), q in R^n, f(points, q) >= ||points[0, :] - q||",
+    # a tracking error over two pandas Series, and a root mean square
+    # error
+    "norm_bars_series_tracking_error":
+        "for port in R^n, bench in R^n, f(port, bench) ~= ||port - bench||",
+    "norm_bars_rmse":
+        ("for pred in R^n, actual in R^n, "
+         "f(pred, actual) ~= ||pred - actual|| / sqrt(len(pred))"),
+    # long-only portfolio weights from positive scores sum to one, so
+    # their L1 norm is one
+    "norm_bars_portfolio_weights":
+        "for scores in [0.1, 10]^n, ||f(scores)||_1 ~= 1",
+    # `^2` after the bars is the square, never an order: a squared
+    # length is `||x||^2`, and a Manhattan length is not
+    "norm_bars_squared": "for x in R^n, f(x) ~= ||x||^2",
+    "norm_bars_squared_trap": "for x in [-1, 1]^n, f(x) ~= ||x||^2",
+    # the trap: a Manhattan length claimed as the Euclidean norm is
+    # falsified with a witness
+    "norm_bars_order_trap": "for x in [-1, 1]^n, f(x) ~= ||x||_2",
+    "matrix_norm_bars_frobenius": "for A in R^(m,n), f(A) ~= ||A||",
+    # the squared Frobenius norm is the trace of the Gram matrix
+    "matrix_norm_bars_gram_trace": "for A in R^(m,n), ||A||^2 ~= f(A)",
+    # numpy's matrix orders: `_1` the largest column sum, `_inf` the
+    # largest row sum, `_2` the largest singular value
+    "matrix_norm_bars_one": "for A in R^(m,n), f(A) ~= ||A||_1",
+    "matrix_norm_bars_inf": "for A in R^(m,n), f(A) ~= ||A||_inf",
+    "matrix_norm_bars_order_trap": "for A in R^(m,n), f(A) ~= ||A||_inf",
+    "matrix_norm_bars_spectral": "for A in R^(n,n), f(A) ~= ||A||_2",
+    "matrix_norm_bars_spectral_below_frobenius":
+        "for A in R^(n,n), f(A) <= ||A||",
     # the vocabulary words
     "vector_dot": "for x in R^n, y in R^n, dot(x, y) == dot(y, x)",
     "vector_outer": "for x in R^n, y in R^n, outer(x, y).T == outer(y, x)",
@@ -547,6 +614,36 @@ LEXICON: dict[str, str] = {
     "is_absent_safe_field": "is_absent_safe(f)",
     "absent_key_left_out": ('for order.side in {"buy", "sell"} | {None} \\ {null}, '
                             'len(f(order)) >= 1'),
+    # a series of returns: a transform bound by `let`, a statistic as a
+    # premise, and a length premise on a call -------------------------
+    # `mathema.f.scale_seq` scales every entry by `c`; a Sharpe ratio
+    # is unchanged by that, proven through the pandas definition rows
+    # for every length from 2
+    "let_scale_seq_sharpe_premise": (
+        "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "
+        "let c be [0.1, 10], assuming std(returns, ddof=1) > 0, "
+        "f(s(returns, c)) ~= f(returns)"),
+    # the same claim without its premise is falsified at `returns=[0.0]`,
+    # where the sample standard deviation is undefined and the ratio is
+    # NaN: the premise names the series the ratio is about
+    "let_scale_seq_sharpe_trap": (
+        "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "
+        "let c be [0.1, 10], f(s(returns, c)) ~= f(returns)"),
+    # `mathema.f.shift_seq` adds `c` to every entry; a range does not
+    # move (holds on the probe route)
+    "let_shift_seq_range": ("for a in [-100, 100]^n, let s = mathema.f.shift_seq, "
+                            "let c be [-5, 5], f(s(a, c)) == f(a)"),
+    # a mean does move under a shift: falsified, with the witness
+    "let_shift_seq_mean_moves": ("for xs in [-1, 1]^n, let s = mathema.f.shift_seq, "
+                                 "let c be [0.1, 1], f(s(xs, c)) ~= f(xs)"),
+    # a statistic of the vector as the premise; `std` is computed
+    # exactly, so a constant vector is outside however float rounds it
+    "assuming_spread_positive": ("for returns in [-0.1, 0.1]^n, "
+                                 "assuming std(returns, ddof=1) > 0, is_defined(f)"),
+    # a length premise written on the parameter's `dim`, beside the
+    # marker form `assuming n >= 2` ("dim_marker_premise")
+    "dim_call_premise": ("assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n, "
+                         "f(returns) >= 0"),
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -587,7 +684,21 @@ SECTIONS: dict[str, tuple[str, ...]] = {
     "linear_algebra": (
         "matrix_hadamard_trace", "matrix_power_word",
         "matrix_elementwise_abs", "vector_triangle_inequality",
-        "matrix_frobenius_norm", "matrix_spectral_norm", "vector_dot",
+        "matrix_frobenius_norm", "matrix_spectral_norm",
+        "norm_bars_euclidean", "norm_bars_two", "norm_bars_one",
+        "norm_bars_inf", "norm_bars_integer_order", "norm_bars_chain",
+        "norm_bars_homogeneous", "norm_bars_homogeneous_sign_trap",
+        "norm_bars_unit_vector", "norm_bars_direction",
+        "norm_bars_distance", "norm_bars_distance_symmetric",
+        "norm_bars_triangle", "norm_bars_stopping_criterion",
+        "norm_bars_nearest_distance", "norm_bars_nearest_distance_trap",
+        "norm_bars_series_tracking_error", "norm_bars_rmse",
+        "norm_bars_portfolio_weights", "norm_bars_squared",
+        "norm_bars_squared_trap", "norm_bars_order_trap",
+        "matrix_norm_bars_frobenius", "matrix_norm_bars_gram_trace",
+        "matrix_norm_bars_one", "matrix_norm_bars_inf",
+        "matrix_norm_bars_order_trap", "matrix_norm_bars_spectral",
+        "matrix_norm_bars_spectral_below_frobenius", "vector_dot",
         "vector_outer", "matrix_kron_transpose", "matrix_diag_trace",
         "matrix_rank_transpose", "matrix_eigvals_trace",
         "matrix_eigvalsh_positive", "matrix_cond_at_least_one",
@@ -676,6 +787,10 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "language_section", "language_missing_excluded",
         "language_closure", "language_length_bound", "containment_absent",
         "membership_interval_reduces_to_chain"),
+    "series": (
+        "let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap",
+        "let_shift_seq_range", "let_shift_seq_mean_moves",
+        "assuming_spread_positive", "dim_call_premise"),
 }
 
 
@@ -686,6 +801,51 @@ SECTIONS: dict[str, tuple[str, ...]] = {
 # find `%`, and someone looking for "for all" should find `∀`. Keep it
 # to vocabulary a newcomer would actually type.
 TAGS: dict[str, tuple[str, ...]] = {
+    "norm_bars_euclidean": ("norm", "euclidean", "length", "double bars"),
+    "norm_bars_two": ("norm", "subscript", "euclidean", "L2"),
+    "norm_bars_one": ("norm", "subscript", "manhattan", "taxicab", "L1"),
+    "norm_bars_inf": ("norm", "subscript", "infinity", "max norm",
+                      "largest magnitude"),
+    "norm_bars_integer_order": ("norm", "subscript", "p-norm", "whole number"),
+    "norm_bars_chain": ("norm", "subscript", "chain", "norm inequality"),
+    "norm_bars_homogeneous": ("norm", "euclidean", "homogeneous", "scaling",
+                              "magnitude"),
+    "norm_bars_homogeneous_sign_trap": ("norm", "falsified", "trap", "sign",
+                                        "homogeneous"),
+    "norm_bars_unit_vector": ("norm", "euclidean", "unit vector",
+                              "normalisation", "normalization", "premise"),
+    "norm_bars_direction": ("norm", "euclidean", "direction", "unit vector",
+                            "normalisation", "vector equality"),
+    "norm_bars_distance": ("norm", "euclidean", "distance"),
+    "norm_bars_distance_symmetric": ("norm", "distance", "symmetric"),
+    "norm_bars_triangle": ("norm", "distance", "triangle inequality"),
+    "norm_bars_stopping_criterion": ("norm", "distance", "converged",
+                                     "stopping", "tolerance", "boolean"),
+    "norm_bars_nearest_distance": ("norm", "distance", "nearest neighbour",
+                                   "nearest neighbor", "rows"),
+    "norm_bars_nearest_distance_trap": ("norm", "falsified", "trap",
+                                        "nearest neighbour"),
+    "norm_bars_series_tracking_error": ("norm", "pandas", "series",
+                                        "tracking error", "portfolio"),
+    "norm_bars_rmse": ("norm", "rmse", "root mean square", "error"),
+    "norm_bars_portfolio_weights": ("norm", "subscript", "portfolio",
+                                    "weights", "long only", "sum to one"),
+    "norm_bars_squared": ("norm", "euclidean", "squared", "dot product"),
+    "norm_bars_squared_trap": ("norm", "falsified", "trap", "squared",
+                               "manhattan"),
+    "norm_bars_order_trap": ("norm", "subscript", "falsified", "trap",
+                             "wrong order", "manhattan"),
+    "matrix_norm_bars_frobenius": ("norm", "frobenius", "matrix"),
+    "matrix_norm_bars_gram_trace": ("norm", "frobenius", "gram", "trace",
+                                    "matrix"),
+    "matrix_norm_bars_one": ("norm", "subscript", "matrix", "column sum"),
+    "matrix_norm_bars_inf": ("norm", "subscript", "matrix", "row sum"),
+    "matrix_norm_bars_order_trap": ("norm", "subscript", "matrix", "falsified",
+                                    "trap", "wrong order"),
+    "matrix_norm_bars_spectral": ("norm", "subscript", "spectral",
+                                  "singular value", "matrix"),
+    "matrix_norm_bars_spectral_below_frobenius": ("norm", "spectral",
+                                                  "frobenius", "matrix"),
     "vector_running_maximum": ("cummax", "running maximum", "peak"),
     "vector_drawdown_bounds": ("drawdown", "cummax"),
     "vector_between_least_and_greatest": ("min", "max", "mean bounds"),
@@ -1591,6 +1751,23 @@ def polars_mean(xs: "polars.Series") -> float:
     """The mean of a polars Series, which skips its nulls while values
     remain."""
     return float(xs.mean())
+def sharpe(returns: "pandas.Series") -> float:
+    """The Sharpe ratio of a series of returns at a zero risk-free rate,
+    unannualised: the mean over the sample standard deviation
+    ("let_scale_seq_sharpe_premise", "assuming_spread_positive")."""
+    return returns.mean() / returns.std(ddof=1)
+
+
+def spread(a) -> float:
+    """The range of a sequence: its greatest element minus its least
+    ("let_shift_seq_range")."""
+    return max(a) - min(a)
+
+
+def sample_std(returns: "pandas.Series") -> float:
+    """The sample standard deviation of a series of returns
+    ("dim_call_premise")."""
+    return returns.std(ddof=1)
 
 
 EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
@@ -1717,7 +1894,23 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "fifth_element": (fifth_element, ["dim_premise_vector_bound"]),
     "third_diagonal": (third_diagonal, ["dim_premise_square_matrix",
                                         "dim_premise_rectangular_matrix"]),
+    "sharpe": (sharpe, ["let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap",
+                        "assuming_spread_positive"]),
+    "spread": (spread, ["let_shift_seq_range"]),
+    "series_mean_shifted": (series_mean, ["let_shift_seq_mean_moves"]),
+    "sample_std": (sample_std, ["dim_call_premise"]),
 }
+
+
+# the numpy examples import numpy at the top of their own module, so
+# the derive route reads them; numpy is an extra, so the module is
+# imported only when it is installed and the rows stay text without it
+try:
+    from . import _lexicon_numpy as _numpy_examples
+except ImportError:
+    _numpy_examples = None
+if _numpy_examples is not None:
+    EXAMPLE_FUNCTIONS.update(_numpy_examples.EXAMPLE_FUNCTIONS)
 
 
 def get(key: str | int) -> str:

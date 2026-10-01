@@ -26,11 +26,12 @@ Each extra adds one capability without making it everyone's dependency.
 | Extra | Adds |
 |---|---|
 | `numpy` | array-shaped claims, matrix structure checks and array parameter synthesis |
-| `smt` | z3 as an additional decision procedure for the derive route (a native library of roughly 100 MB) |
+| `pandas` | a parameter annotated `pd.Series` or `pd.DataFrame` is sampled as one, so a claim about a pandas function runs against the object the code expects |
+| `polars` | the same for a parameter annotated `pl.Series` or `pl.DataFrame` |
+| `smt` | z3's nonlinear real arithmetic as one rung of the `extensive` proof ladder (a native library of roughly 100 MB) |
 | `mcp` | `mathema mcp serve`, which exposes mathema's checking tools to a coding agent |
 | `coverage` | reading a native `.coverage` report, so the tests you already run count toward the implementation score (a `coverage.json` export works without it) |
 | `symbology` | conventional notation for parameter and function names when claims are rendered |
-| `language` | the named languages behind `L[...]` (alphabets, `json`, a schema of your own), the hazard families over text and the row schema adaptors, from the `mathema-language` package |
 | `all` | `numpy`, `smt`, `mcp` and `coverage` together |
 
 ```bash

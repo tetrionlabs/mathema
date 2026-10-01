@@ -982,6 +982,18 @@ def _length_premise(a, b, rel: str, lengths: set):
     return None
 
 
+def _exact_length(a, b, rel: str, lengths: set):
+    """`(L, k)` when `a rel b` fixes the length `L` to the whole number
+    `k` (`dim(x) == 0`, `len(x) == 3`), else None."""
+    if rel != "==":
+        return None
+    for length, number in ((a, b), (b, a)):
+        if length in lengths and getattr(number, "is_number", False) \
+                and number.is_real and int(number) == number:
+            return length, int(number)
+    return None
+
+
 def _implied_nonzero(expr, provided: list, min_length: dict,
                      bases: "dict | None" = None) -> bool:
     """Intent:
@@ -1152,6 +1164,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     seqs: dict = {}
     lengths: dict = {}
     elements: dict = {}
+    fixed_lengths: dict = {}
     for n in sorted(names):
         table = n.split(".", 1)[0] if "." in n else None
         r = 1 if table in tables else ranks.get(n)
@@ -1168,6 +1181,9 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             dim = str(dims[0]) if dims else (table or n)
             length = lengths.setdefault(dim, sympy.Symbol(
                 f"L_{dim}", integer=True, positive=True))
+            if dim.isdigit():
+                # a literal dimension (`R^0`, `R^3`) fixes the length
+                fixed_lengths[length] = int(dim)
             element = _element_bound(bound)
             base = sympy.IndexedBase(n, real=True,
                                      **_element_sign(element))
@@ -1197,8 +1213,11 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                      if isinstance(value, Vec) else value.subs(pins))
         return value
 
+    empty_only = [False]
+
     def decide():
         required, provided = Obligations(), Obligations()
+        known_lengths = dict(fixed_lengths)
         lv = lower(lhs, required)
         rv = lower(rhs, required)
         provided_nonzero: list = []
@@ -1213,6 +1232,9 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             provided_nonzero.extend(e for e, _t in own.nonzero)
             if isinstance(a, Vec) or isinstance(b, Vec):
                 continue
+            exact = _exact_length(a, b, rel, length_symbols)
+            if exact is not None:
+                known_lengths[exact[0]] = exact[1]
             as_length = _length_premise(a, b, rel, length_symbols)
             if as_length is not None:
                 provided.need_length(*as_length)
@@ -1254,9 +1276,16 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                 unstated.append((row, _premise_text(p_lhs, rel, p_rhs)))
         unmet: list = []
         for length, least in sorted(required.min_length.items(), key=str):
-            have = provided.min_length.get(length, 1)
+            have = known_lengths.get(length,
+                                     provided.min_length.get(length, 1))
             if have < least:
                 unmet.append(("length", length, least, have))
+        for length, fixed in sorted(known_lengths.items(), key=str):
+            # a domain or premise that fixes the length at 0 names the
+            # empty vector, where a division by the length has no value
+            if fixed == 0 and not any(item[0] == "length" and item[1] == length
+                                      for item in unmet):
+                unmet.append(("length", length, 1, 0))
         for expr, text in required.nonzero:
             if not _implied_nonzero(expr, provided_nonzero,
                                     {L: max(provided.min_length.get(L, 1), k)
@@ -1264,9 +1293,14 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                                     {ib: L for ib, L in seqs.values()}):
                 unmet.append(("nonzero", expr, text,
                               max(provided.min_length.values() or [1])))
-        if unstated or unmet:
+        # only the empty vector unmet: the relation is decided for every
+        # length of at least one, and the empty vector is left to sampling
+        empty_only[0] = bool(unmet) and not unstated and all(
+            item[0] == "length" and item[2] == 1 for item in unmet)
+        if (unstated or unmet) and not empty_only[0]:
             return {"unmet": unmet, "unstated": unstated}
-        shortest.update(required.min_length)
+        if not empty_only[0]:
+            shortest.update(required.min_length)
         rel = cj.relation
         if isinstance(lv, Vec) or isinstance(rv, Vec):
             if not (isinstance(lv, Vec) and isinstance(rv, Vec)) \
@@ -1303,6 +1337,8 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     through = f"through {_rows_text(inlined.uses)}"
     try:
         outcome = _with_timeout(decide, cap)
+        if empty_only[0] and outcome.get("proven"):
+            outcome = {"empty": True}
     except TimeoutError:
         return ProofResult(
             "undecided", sketch=f"{through}, the sequence lowering "
@@ -1329,16 +1365,24 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
         return ProofResult("undecided", sketch=f"{through}: "
                            f"{outcome['undecided']}", meta=meta)
     vectors = ", ".join(sorted(seqs))
+    if outcome.get("empty"):
+        return ProofResult(
+            "undecided", meta=meta,
+            sketch=f"{through}, lowered to sums over {vectors}: the "
+                   f"relation holds for every length of at least one, "
+                   f"and the empty vector is left to the probe")
     if outcome.get("proven"):
         # the proof is over every length, so it covers the length a
         # binding fixes (`xs in [0, 1]^30`): the sketch keeps saying so
         # and adds the one clause every route adds for a fixed size
-        fixed_at = {L: int(dim) for dim, L in lengths.items()
-                    if str(dim).isdigit()}
+        fixed_at = fixed_lengths
         spans = ", ".join(
             f"{by_length.get(L, L)} of every length"
-            + (f" from {shortest[L]}" if shortest.get(L, 1) > 1 else "")
+            + (f" from {shortest[L]}" if shortest.get(L, 1) > 1
+               else " of at least one" if shortest.get(L) == 1 else "")
             for L in sorted(set(lengths_of(seqs)), key=str))
+        at_least_one = (" of at least one"
+                        if shortest and min(shortest.values()) == 1 else "")
         fixed_clause = ""
         if fixed_at:
             fixed_clause = "; the binding fixes " + " and ".join(
@@ -1350,8 +1394,9 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                  and detail.sketch and outcome.get("bounds") else "")
         return ProofResult(
             "proven", meta=meta,
-            sketch=f"{through}, lowered to a sum over {vectors} at a symbolic "
-                   f"length; holds for every length{lemma}{fixed_clause}",
+            sketch=f"{through}, lowered to sums over {vectors} at a symbolic "
+                   f"length: the relation holds for every length"
+                   f"{at_least_one}{lemma}{fixed_clause}",
             quantifier=(f"∀ {_over(seqs, elements)} with nothing "
                         f"missing, {spans}" if seqs else None))
     detail = outcome.get("result")

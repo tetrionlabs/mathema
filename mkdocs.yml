@@ -110,16 +110,24 @@ plugins:
 
 nav:
   - Home: index.md
+  - Start here: start.md
   - Get started:
       - Install: install.md
       - Quick start: quickstart.md
       - See what mathema finds: findings.md
       - A first look: first-look.md
       - The CDD loop, end to end: tutorial.md
+      - Claims about a pandas function: pandas-function.md
       - Case studies: case-studies.md
       - "Case study: the mean of nothing": mean-of-nothing.md
+      - How-to guides:
+          - Gate a pipeline with mathema verify: gate-a-pipeline.md
+          - See what mathema knows about a library you call: library-claims.md
+          - Add claims to an existing codebase: existing-codebase.md
+          - From a pytest test to a claim: from-a-pytest-test.md
   - Concepts:
       - Guarantees and limits: guarantees.md
+      - Verdicts and exit codes: verdicts.md
       - The evidence ladder: evidence-ladder.md
       - Intent, implementation and behaviour: three-layers.md
       - Claims transfer: claims-transfer.md
@@ -148,6 +156,7 @@ nav:
       - mathema pin: modes/pin.md
       - mathema review: modes/review.md
       - mathema badges: modes/badges.md
+      - mathema coverage: modes/coverage.md
       - mathema describe: modes/describe.md
       - mathema docsync: modes/docsync.md
       - mathema init: modes/init.md
@@ -161,6 +170,7 @@ nav:
       - Security and execution: security.md
   - Coding agents:
       - Working with coding agents: agents.md
+      - Set up mathema for a coding agent: agent-setup.md
       - The MCP interface: modes/mcp.md
   - Project:
       - Licensing: licensing-policy.md

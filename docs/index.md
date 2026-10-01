@@ -349,40 +349,15 @@ something that cannot be persuaded decide which of them are true.
 
 ## One engine, several jobs
 
-- **If you work alongside a coding agent**, mathema is the part of the loop the
-  agent cannot talk its way past: it states claims, mathema checks them, you
-  accept or reject, and the functions you have signed off stay locked. Set a
-  PIN the agent does not know and it cannot sign off for you;
-  [working with coding agents](agents.md) covers that and the optional agent
-  tooling.
-- **If you have just inherited a codebase**, [`mathema audit`](modes/audit.md)
-  is the first hour of reading done for you: every function, where it lives as
-  a ready-made `sed -n` line range, what it touches, whether anything tests or
-  claims it, and whether it could be proven, with `--index` writing the whole
-  map to a file you can keep.
-- **If you write numerical or financial code**, the derive route proves
-  identities, bounds, derivatives, limits and integrals about ordinary Python
-  functions, and the probe route goes looking for poles, overflow and
-  non-finite results where random testing would not.
-- **If you run CI**, [`mathema verify`](modes/verify.md) gates the whole
-  store and re-checks only what changed, [`mathema check`](modes/check.md)
-  speaks JUnit and GitHub annotations, and the exit codes keep a failing claim
-  apart from a broken invocation.
-- **If you review changes**, [`mathema review`](modes/review.md) shows the
-  claim-level difference since any git ref: which verdicts flipped, which
-  claims appeared or went away.
-- **If you answer to an auditor or a model validator**, every acceptance,
-  unlock and lock is in the record with who made it and when, PIN-stamped when
-  a PIN is set, under an integrity checksum that catches edits made outside
-  mathema. [Governance and audit](governance.md) sets out who can decide what,
-  and [Security and execution](security.md) states exactly what runs when a
-  claim is checked.
-- **If you set engineering standards across teams**, mathema gives
-  AI-assisted development one gate that works the same everywhere: claims live beside the
-  code they describe, every verdict is reproducible and bound to the exact
-  code that earned it, and [Guarantees and limits](guarantees.md) states what
-  each verdict is worth, so a team's evidence means the same thing in every
-  repository.
+- **If you check numerical code**, your own or the pandas and numpy calls
+  inside it: [checking a numerical library
+  function](start.md#checking-a-numerical-library-function).
+- **If you maintain a codebase with a test suite**: [adding claims to an
+  existing codebase](start.md#adding-claims-to-an-existing-codebase).
+- **If you run CI**: [gating a pipeline with mathema
+  verify](start.md#gating-a-pipeline-with-mathema-verify).
+- **If you work alongside a coding agent**: [building with a coding
+  agent](start.md#building-with-a-coding-agent).
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Case study</span><span class="brk r"></span></span>
 

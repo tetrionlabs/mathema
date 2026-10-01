@@ -70,14 +70,15 @@ symbol, and a claim pasted out of a PDF is a common way to meet one.
 | `×` | U+00D7 | times | `*` |
 | `−` | U+2212 | minus | `-` |
 | `√` | U+221A | the square root of | `sqrt` |
-| `∞` | U+221E | infinity | `oo` |
+| `∞` | U+221E | infinity, also written `oo` or `infinity` | `inf` |
 | `∂` | U+2202 | the partial derivative of | `d(` |
 | `∫` | U+222B | the integral of | `integrate(` |
 | `→` | U+2192 | tends to, inside a limit | `->` |
 | `⌊ ⌋` | U+230A, U+230B | the floor of | `floor(` |
 | `⌈ ⌉` | U+2308, U+2309 | the ceiling of | `ceil(` |
 | <code>&#124; &#124;</code> | U+007C | the absolute value of | `abs(` |
-| <code>&#124;&#124; &#124;&#124;</code> | U+007C | the norm of | `norm(` |
+| <code>&#124;&#124; &#124;&#124;</code> | U+007C | the norm of; `_1`, `_2` or `_inf` after the closing bars is the order | `norm(` |
+| `‖ ‖` | U+2016 | the norm of; `₁`, `₂` or `∞` after the closing glyph is the order | <code>&#124;&#124; &#124;&#124;</code> |
 | `²` | U+00B2 | squared, and likewise `³` and the rest | `^2` |
 
 Greek letters are accepted as themselves (`α`, `σ`, `Δ`), and so are the
@@ -249,10 +250,20 @@ engine bug.
 | `f(x)^2 >= 0` | powers with a caret |
 | <code>&#124;f(x)&#124; &lt;= 1</code> | absolute value with bars |
 | <code>for x in [0, 1], y in [0, 1], &#124;x + y - f(x, y)&#124; &lt;= ε</code> | bars around any expression; on matrices, the determinant |
+| <code>for x in R^n, f(x) ~= &#124;&#124;x&#124;&#124;_1</code> | a norm with double bars, the order a subscript; `^2` after the bars is the square |
 | `for n in [1, 5] subset Z, f(n) <= n!` | postfix factorial |
 | `f(x, 1.0) == x[-1]` | indexing into a sequence parameter |
 | `f(\alpha) ≤ 1` | a Greek name written as a LaTeX escape |
 | `for x in [1, 5], f(x) == exp(1)` | the mathematical constants and functions |
+
+Bare bars are the Euclidean norm of a vector and the Frobenius norm of a
+matrix. `_1`, `_2`, `_inf` (also `_oo`, `_∞`) and a whole number `_p`
+name the other orders; on a matrix `_1` is the largest column sum, `_2`
+the spectral norm and `_inf` the largest row sum, numpy's `ord`. The
+order is never a superscript, so <code>&#124;&#124;x&#124;&#124;^2</code>
+is the square of the norm. A claim written with the bars and one
+written with `norm(...)` are one claim: the claims file keeps the
+spelling you wrote, and the record's statement is the call form.
 
 ## Domains: where the claim applies
 
@@ -458,6 +469,8 @@ readable and lets you talk about things that are not parameters:
 | `let c be [-1e6,1e6], for x in [0,10], f(x) + c >= 0` | a free variable over a range |
 | `let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0` | a typed free variable |
 | `let compute_square_root = numpy.sqrt, for x in [0, 100], compute_square_root(x) >= 0` | a long name, kept readable |
+| `for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], assuming std(returns, ddof=1) > 0, f(s(returns, c)) ~= f(returns)` | a transform of a sequence, by dotted path: `s(returns, c)` scales every entry by `c` |
+| `for a in [-100, 100]^n, let s = mathema.f.shift_seq, let c be [-5, 5], f(s(a, c)) == f(a)` | the shift of a sequence: `s(a, c)` adds `c` to every entry |
 
 A function the claim names takes keyword arguments the way its own
 callers pass them, each a literal or a name, and the record keeps them
@@ -662,6 +675,8 @@ watered down:
 | `assuming n >= 5, for xs in R^n, f(xs) == xs[4]` | a vector at least five long |
 | `assuming n >= 3, for a in R^(n,n), f(a) == a[2][2]` | a square matrix at least 3 by 3 |
 | `assuming min(m, n) >= 3, for a in R^(m,n), f(a) == a[2][2]` | a rectangular matrix with at least three rows and three columns |
+| `assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n, f(returns) >= 0` | a vector at least two long, by the parameter's `dim` |
+| `for returns in [-0.1, 0.1]^n, assuming std(returns, ddof=1) > 0, is_defined(f)` | a statistic of the vector; the premise's `std` is computed exactly, so a constant vector is outside |
 
 A vector or matrix space is never empty, since `R^n` already means at
 least one element, so a dimension premise is needed only for a bound

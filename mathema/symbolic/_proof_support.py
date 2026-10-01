@@ -2350,6 +2350,64 @@ def _decide_disequality(lhs, rhs, diff, relation, domain, bound_context, params,
                              "is ever zero under the declared domain")
 
 
+def _min_max_split(target, domain, bound_context, params, strict: bool,
+                   tolerance: float) -> "ProofResult | None":
+    """Intent:
+        Prove `target >= 0` (or `> 0` when `strict`) by splitting a
+        `Min` or `Max` term of the sum `target` into one question per
+        argument. With `target = M + r`, `target >= 0` is `M >= -r`, and
+        `Min(u, v) >= c` holds exactly when `u >= c` and `v >= c`,
+        `Max(u, v) >= c` when `u >= c` or `v >= c`. With
+        `target = r - M` it is `M <= r`: `Max(u, v) <= c` when both are,
+        `Min(u, v) <= c` when either is. The strict forms split the
+        same way. Each argument's question goes back through the
+        ordering decision, so a nested `Min`/`Max` splits again.
+
+    Notes:
+        Returns a proof or `None`, never a disproof: a conjunction is
+        proven when every branch is proven over the whole domain, a
+        disjunction when one branch is, and a branch that fails proves
+        nothing about the pointwise "or". Runs inside the caller's
+        wall-clock cap. A term is split only when the rest of the sum
+        does not contain it, so every branch has one fewer `Min`/`Max`
+        node and the recursion ends.
+    """
+    decide = _decide_strict_ordering if strict else _decide_ordering
+    relation = ">" if strict else ">="
+    for term in sympy.Add.make_args(target):
+        if isinstance(term, (sympy.Min, sympy.Max)):
+            node, sign = term, 1
+        elif isinstance(-term, (sympy.Min, sympy.Max)):
+            node, sign = -term, -1
+        else:
+            continue
+        rest = target - sign * node
+        if rest.has(node):
+            continue
+        # sign +1: node >= -rest; sign -1: rest >= node
+        branches = [arg + rest if sign == 1 else rest - arg
+                    for arg in node.args]
+        every = isinstance(node, sympy.Min) == (sign == 1)
+        proven = []
+        for branch in branches:
+            result = decide(branch, sympy.Integer(0), branch, relation,
+                            domain, bound_context, params, tolerance)
+            if result.status == "proven":
+                proven.append(branch)
+                if not every:
+                    break
+            elif every:
+                break
+        if (every and len(proven) == len(branches)) or (not every and proven):
+            joined = " and ".join(f"{_humanize(b)} {relation} 0" for b in proven)
+            kind = "Min" if isinstance(node, sympy.Min) else "Max"
+            return ProofResult(
+                "proven",
+                sketch=f"{_humanize(target)} {relation} 0 splits over the "
+                       f"arguments of {kind}: {joined}")
+    return None
+
+
 def _decide_ordering(lhs, rhs, diff, relation, domain, bound_context, params,
                      tolerance: float = 1e-9) -> ProofResult:
     # lhs <= rhs  <=>  rhs - lhs >= 0; lhs >= rhs  <=>  lhs - rhs >= 0
@@ -2502,6 +2560,10 @@ def _decide_ordering(lhs, rhs, diff, relation, domain, bound_context, params,
                 sketch=f"nonnegative given the assuming clause: "
                        f"{_humanize(target)} is ({_humanize(ratio)}) times "
                        f"the assumed-nonnegative gap {_humanize(gap_expr)}")
+    split = _min_max_split(target, domain, bound_context, params,
+                           strict=False, tolerance=tolerance)
+    if split is not None:
+        return split
     return ProofResult("undecided",
                        sketch=f"sympy could not settle the sign of {_humanize(target)}")
 
@@ -2657,6 +2719,10 @@ def _decide_strict_ordering(lhs, rhs, diff, relation, domain, bound_context,
                    f"form may still hold",
             witness={k: float(v) for k, v in root.items()},
             disproof_hint=target)
+    split = _min_max_split(target, domain, bound_context, params,
+                           strict=True, tolerance=tolerance)
+    if split is not None:
+        return split
     return ProofResult("undecided",
                        sketch=f"sympy could not settle strict positivity "
                               f"of {_humanize(target)}")

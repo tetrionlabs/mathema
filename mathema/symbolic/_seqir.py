@@ -18,6 +18,9 @@ reduction closes the index into a sum over every position:
 | `count(v)`, `len(v)`, `dim(v)` | `L` |
 | `cumsum(v)`, `cumprod(v)` | the vector whose element `i` is the sum (product) of `v[0..i]` |
 | `dot(v, w)`, `v @ w` | `Sum(v[i]*w[i])` |
+| `norm(v)`, `norm(v, 2)` | `sqrt(Sum(v[i]**2))` |
+| `norm(v, 1)` | `Sum(Abs(v[i]))` |
+| `norm(v, inf)` | `max(abs(v))`, a number known through its bounds |
 | `min(v)`, `max(v)` | a number known through its bounds (see below) |
 | `cummax(v)`, `cummin(v)` | a fresh sequence `m` known through its bounds (see below) |
 
@@ -350,6 +353,8 @@ class Lowering:
         if name in EXTREMA and node.args and not keywords:
             values = [self.lower(a) for a in node.args]
             if len(values) == 1 and isinstance(values[0], Vec):
+                # the least or greatest element needs an element
+                self.obligations.need_length(values[0].length, 1)
                 return self.bounds.extremum(name, values[0],
                                             ast.unparse(node.args[0]))
             if len(values) > 1 and not any(isinstance(v, Vec)
@@ -373,6 +378,9 @@ class Lowering:
                 return self._dot(left, right, node)
             raise NotSymbolic(f"{ast.unparse(node)!r}: dot needs two "
                               f"vectors here")
+        if name == "norm" and node.args and set(keywords) <= {"ord"} \
+                and len(node.args) + len(keywords) in (1, 2):
+            return self._norm(node, keywords.get("ord"))
         if name in _ELEMENTWISE and len(node.args) == 1 and not keywords:
             v = self.lower(node.args[0])
             fn = (lambda e: e) if name == "float" else _SYMPY_FUNCS[name]
@@ -391,6 +399,33 @@ class Lowering:
             return fn(v)
         raise NotSymbolic(f"{ast.unparse(node)!r} is outside the sequence "
                           f"lowering")
+
+    def _norm(self, node: ast.Call, ord_keyword):
+        """`norm(v)` and `norm(v, 2)` as `sqrt(Sum(v[i]**2))`, the
+        Euclidean norm; `norm(v, 1)` as `Sum(Abs(v[i]))`, the sum of
+        magnitudes; `norm(v, inf)` as the greatest element of `abs(v)`,
+        a number known through its bounds like `max`, defined for a
+        vector with at least one element. The order is the second
+        argument or `ord=`; any other order is outside the lowering."""
+        v = self.lower(node.args[0])
+        if not isinstance(v, Vec):
+            raise NotSymbolic(f"{ast.unparse(node.args[0])!r} is not a "
+                              f"vector")
+        order_node = node.args[1] if len(node.args) == 2 else ord_keyword
+        order = "2" if order_node is None else ast.unparse(order_node)
+        if order == "2":
+            return sympy.sqrt(_reduce("sum", v.elem ** 2, v.length))
+        if order == "1":
+            return _reduce("sum", sympy.Abs(v.elem), v.length)
+        if order == "inf":
+            # the largest magnitude needs an element
+            self.obligations.need_length(v.length, 1)
+            return self.bounds.extremum(
+                "max", Vec(sympy.Abs(v.elem), v.length),
+                f"abs({ast.unparse(node.args[0])})")
+        raise NotSymbolic(f"{ast.unparse(node)!r}: the derive route reads the "
+                          f"orders 1, 2 and inf, so order {order} is left to "
+                          f"sampling")
 
     def _reduction(self, name: str, v: Vec, ddof_node, node):
         length = v.length

@@ -293,7 +293,7 @@ def test_a_one_sided_limit_keeps_its_side_in_its_identity():
     assert assert_round_trips("lim(f(x), x -> 0) == 1") \
         == "lim(f(x), x, 0) = 1"
     assert assert_round_trips("lim(f(x), x -> oo) == 0") \
-        == "lim(f(x), x, oo) = 0"
+        == "lim(f(x), x, inf) = 0"
 
 
 # identity: the missing-value policy
