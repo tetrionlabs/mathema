@@ -1957,7 +1957,7 @@ def cmd_claims(args) -> int:
             marker = " [already declared]" if cj.name in declared_names else ""
             return (f"  - {cj.name}: {claim_statement(cj)}"
                     f"  [route {cj.route}]{marker}")
-        alone = [cj for cj, (sec, _r) in zip(suggestions, sections)
+        alone = [(cj, why) for cj, (sec, why) in zip(suggestions, sections)
                  if sec == "individual"]
         asked = [cj for cj, (sec, _r) in zip(suggestions, sections)
                  if sec == "question"]
@@ -1965,8 +1965,10 @@ def cmd_claims(args) -> int:
                     if sec == "unknowable"]
         if alone:
             print(" individual claims:")
-            for cj in alone:
+            for cj, why in alone:
                 print(line(cj))
+                if why:
+                    print(f"      {why}")
         if asked:
             print(" questions with candidate answers (adopt every answer "
                   "that holds):")

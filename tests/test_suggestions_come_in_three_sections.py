@@ -4,8 +4,10 @@
 sections: claims that stand alone, questions with candidate answers
 (monotonicity, shape and symmetry per parameter, any number of which
 may hold), and claims likely to be unknowable: a state or
-repeatability family the examination of the source cannot prove,
-with the one-line reason."""
+repeatability family the examination of the source cannot read far
+enough to decide, with the one-line reason. A family whose write or
+hidden read the examination already sees stands alone, with the site
+on the line below it: adopting it records the falsification."""
 import json
 import os
 import sys
@@ -79,14 +81,16 @@ def test_what_examine_cannot_read_is_listed_as_unknowable_with_why(pkg,
     assert "      looked_up calls getattr, which mathema cannot read" in tail
 
 
-def test_a_write_examine_already_sees_is_listed_as_unknowable(pkg, capsys):
+def test_a_write_examine_already_sees_stands_alone_with_its_site(pkg,
+                                                                  capsys):
     out = _listing(pkg, "secpkg.mod.remember", capsys=capsys)
-    tail = out.split(" likely to be unknowable (adopted only when named):\n",
-                     1)[1]
-    assert "  - is_state_safe:" in tail
-    assert "remember changes os.environ" in tail
-    # nothing hidden is read, so determinism stands alone
     head = out.split(" questions with candidate answers", 1)[0]
+    assert ("  - is_state_safe: f(rate) == f(rate)  [route best]\n"
+            "      examine finds a write: remember changes os.environ "
+            "(os.environ['SECTIONS_RATE'] = ...); adopting records it as "
+            "falsified") in head, out
+    assert "likely to be unknowable" not in out
+    # nothing hidden is read, so determinism stands alone too
     assert "  - is_deterministic:" in head
     assert "SECTIONS_RATE" not in os.environ
 
@@ -98,8 +102,9 @@ def test_the_json_rows_carry_the_section_and_the_reason(pkg, capsys):
     assert payload["cols"][-2:] == ["section", "reason"]
     rows = {row[0]: row for row in payload["rows"]}
     assert rows["is_state_safe"][5:] == [
-        "unknowable", "remember changes os.environ (os.environ"
-                      "['SECTIONS_RATE'] = ...)"]
+        "individual", "examine finds a write: remember changes os.environ "
+                      "(os.environ['SECTIONS_RATE'] = ...); adopting "
+                      "records it as falsified"]
     assert rows["convex[rate]"][5:] == ["question", ""]
     assert rows["is_deterministic"][5:] == ["individual", ""]
 

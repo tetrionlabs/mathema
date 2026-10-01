@@ -475,8 +475,11 @@ def suggest_claims(target: str, root: str = ".") -> dict:
     candidate answers, any number of which may be adopted. `section` is
     `individual`, `question` (a candidate answer to its aspect) or
     `unknowable` (a state or repeatability family the examination
-    cannot prove, with the one-line `reason`; never adopted unless
-    named); `reason` is `""` elsewhere. Same columns `mathema claims
+    cannot read far enough to decide, with the one-line `reason`;
+    never adopted unless named). An individual row whose examination
+    already sees a write or a hidden read carries that site as its
+    `reason`, since adopting it records the falsification; `reason` is
+    `""` elsewhere. Same columns `mathema claims
     --suggest --format json` emits. A `hints` list, when present, carries
     directions to the author (not claims): a structurally bounded but
     unannotated return earns a nudge to annotate it so a bound claim can

@@ -897,9 +897,15 @@ def _write_suggested_claims(fn, suggestions: list, key: str | None, root: str) -
 
 #: the families examine decides, and the effects that keep each from proven
 _EXAMINED = {
-    "is_state_safe": ("writes", "unknowns"),
-    "is_deterministic": ("hidden_reads", "unknowns", "order_sensitive"),
-    "is_reproducible": ("hidden_reads", "unknowns", "order_sensitive"),
+    "is_state_safe": (("writes", "a write"),),
+    "is_deterministic": (("hidden_reads", "a hidden read"),),
+    "is_reproducible": (("hidden_reads", "a hidden read"),),
+}
+#: what leaves each examined family unknown
+_UNREAD = {
+    "is_state_safe": ("unknowns",),
+    "is_deterministic": ("unknowns", "order_sensitive"),
+    "is_reproducible": ("unknowns", "order_sensitive"),
 }
 
 
@@ -907,11 +913,12 @@ def suggestion_sections(fn, suggestions: list, facts=None) -> list:
     """Intent:
         `(section, reason)` per suggestion, in order: `"unknowable"`
         with a one-line reason for a state or repeatability family the
-        examination cannot prove (something it cannot read, or a site
-        it already sees), `"question"` for a candidate answer to a
-        question other suggestions answer too (monotonicity, shape,
-        symmetry), `"individual"` for the rest; the reason is `""`
-        outside `"unknowable"`.
+        examination cannot read far enough to decide; `"question"` for
+        a candidate answer to a question other suggestions answer too
+        (monotonicity, shape, symmetry); `"individual"` for the rest.
+        An examined family whose site the examination already sees is
+        individual, its reason naming the site: adopting it records the
+        falsification. The reason is `""` everywhere else.
     """
     from ._examine import examine
     from .claim_families import _generator_parameter
@@ -934,12 +941,22 @@ def suggestion_sections(fn, suggestions: list, facts=None) -> list:
                 except Exception:
                     effects[generator] = None
             found = effects[generator]
-            sites = ([site for kind in _EXAMINED[cj.name]
+            if found is None:
+                out.append(("unknowable", "the examination could not read "
+                                          "the function"))
+                continue
+            seen = [(what, site) for kind, what in _EXAMINED[cj.name]
+                    for site in getattr(found, kind)]
+            if seen:
+                what, site = seen[0]
+                out.append(("individual", f"examine finds {what}: "
+                                          f"{site.text}; adopting records it "
+                                          f"as falsified"))
+                continue
+            unread = [site for kind in _UNREAD[cj.name]
                       for site in getattr(found, kind)]
-                     if found is not None else [])
-            if found is None or sites:
-                out.append(("unknowable", sites[0].text if sites
-                            else "the examination could not read it"))
+            if unread:
+                out.append(("unknowable", unread[0].text))
                 continue
         out.append(("question" if aspect_label(cj.name) else "individual",
                     ""))
