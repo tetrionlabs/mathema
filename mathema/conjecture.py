@@ -965,6 +965,9 @@ def _resolve_exception_type(name: str, fn) -> "type | None":
 
     parts = name.split(".")
     if len(parts) > 1:
+        from ._claim_reach import path_refusal
+        if path_refusal(name) is not None:
+            return None
         for cut in range(len(parts) - 1, 0, -1):
             found = _walk(".".join(parts[:cut]), parts[cut:])
             if found is not None:
@@ -1491,6 +1494,13 @@ def _claim(law: str, name: str | None, source: str, route: str,
     if name is None:
         name = auto_claim_name(text)
     bound_funcs = {**let_funcs, **(funcs or {})}
+    from ._claim_reach import path_refusal
+    for bound_name, ref in bound_funcs.items():
+        refused = path_refusal(ref) if isinstance(ref, str) else None
+        if refused is not None:
+            raise InvalidConjecture(
+                f"{bound_name} = {ref}: {refused}, in the claim "
+                f"{law.strip()!r}")
     for unbound in _unbound_call_names(lhs, rhs, set(bound_funcs)):
         # a bare call name (`budget_line(...)`) is a function reference
         # awaiting scope resolution at check time; recording it now;
@@ -2552,6 +2562,42 @@ def _bind_scope_functions(cj, fn) -> str:
     return "; bound " + ", ".join(bound) if bound else ""
 
 
+def _system_reach(cj) -> "str | None":
+    """Intent:
+        Why a function the claim names reaches the system, or None: a
+        dotted reference resolved along its whole path, and a bare call
+        name bound from the function's module or the calling scope
+        judged by the function it bound to.
+    """
+    from ._claim_reach import object_refusal, walk_refusal
+    for name, ref in sorted((cj.funcs or {}).items()):
+        if isinstance(ref, str):
+            if ref == name or "." not in ref or ":" in ref:
+                continue
+            said = walk_refusal(ref)
+        elif name in (cj.scope_bound or ()):
+            said = object_refusal(
+                ref, f"{name} = {getattr(ref, '__module__', '?')}."
+                     f"{getattr(ref, '__qualname__', name)}")
+        else:
+            continue
+        if said is not None:
+            return said
+    return None
+
+
+def _resolve_bound_ref(ref: str):
+    """Intent:
+        A claim's dotted function reference resolved to its callable,
+        or None when it does not resolve or reaches the system
+        (`_claim_reach.walk_refusal`).
+    """
+    from ._claim_reach import walk_refusal
+    if "." in ref and ":" not in ref and walk_refusal(ref) is not None:
+        return None
+    return _resolve_func_ref(ref)
+
+
 def _validate(src: str, param_names: set[str],
               funcs: frozenset = frozenset()) -> tuple:
     """AST-whitelist an expression; returns (code, auxiliary names).
@@ -2903,7 +2949,7 @@ def claim_defaults(fn, cj) -> dict:
     for name, ref in sorted((cj.funcs or {}).items()):
         if ref == name:
             continue
-        target = ref if callable(ref) else _resolve_func_ref(str(ref))
+        target = ref if callable(ref) else _resolve_bound_ref(str(ref))
         key = library_key_of(target) if target is not None else None
         if key is None or key in out:
             continue
@@ -3471,6 +3517,12 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # source field), and verdicts are always mathema's own, the
         # note carries only claim-specific substance
         note = _bind_scope_functions(cj, fn).lstrip("; ")
+        reach = _system_reach(cj)
+        if reach is not None:
+            out.append(_stamped(Probe(
+                cj.name, statement, "skipped:misspecified", route=None,
+                note=f"{note}; {reach}".lstrip("; ")), cj))
+            continue
         # an explicit route that can't evaluate this claim's forms
         # (probe asked to differentiate/integrate, ...) skips up front,
         # with the reason in the sketch, never mis-adjudicated or
@@ -5326,7 +5378,7 @@ def _bound_callables(cj) -> dict:
     out = {}
     for name, v in (cj.funcs or {}).items():
         try:
-            out[name] = v if callable(v) else _resolve_func_ref(v)
+            out[name] = v if callable(v) else _resolve_bound_ref(v)
         except AttributeError:
             out[name] = None
     return out
@@ -5590,7 +5642,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     bound_funcs: dict = {}
     if ctx.extra:
         try:
-            bound_funcs = {name: (v if callable(v) else _resolve_func_ref(v))
+            bound_funcs = {name: (v if callable(v) else _resolve_bound_ref(v))
                           for name, v in cj.funcs.items()}
         except AttributeError:
             bound_funcs = dict.fromkeys(cj.funcs)
@@ -6153,7 +6205,7 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
     cj = ctx.cj
     compiled = _premises.compile_premises(cj, ctx.assumption, kinds, ctx.extra)
     try:
-        bound = {name: (v if callable(v) else _resolve_func_ref(v))
+        bound = {name: (v if callable(v) else _resolve_bound_ref(v))
                  for name, v in cj.funcs.items()}
     except AttributeError:
         bound = {}
@@ -6391,7 +6443,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # declared-schema dict shape, since a live callable has no
     # serializable representation there.
     try:
-        bound_funcs = {name: (v if callable(v) else _resolve_func_ref(v))
+        bound_funcs = {name: (v if callable(v) else _resolve_bound_ref(v))
                       for name, v in cj.funcs.items()}
     except AttributeError:
         bound_funcs = {}

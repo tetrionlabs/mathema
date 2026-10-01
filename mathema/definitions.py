@@ -1416,7 +1416,7 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
     """
     import random
 
-    from .conjecture import _resolve_func_ref
+    from .conjecture import _resolve_bound_ref
     from .gates import _fmt_point, _point_evaluator
     from .symbolic._proof_support import ProofResult
     wheres: list = []
@@ -1438,7 +1438,7 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
     remedy = " and ".join(dict.fromkeys(remedies))
     bound_funcs = {}
     for name, ref in (cj.funcs or {}).items():
-        bound_funcs[name] = ref if callable(ref) else _resolve_func_ref(ref)
+        bound_funcs[name] = ref if callable(ref) else _resolve_bound_ref(ref)
     deps = None
     if all(v is not None for v in bound_funcs.values()):
         try:

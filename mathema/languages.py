@@ -738,8 +738,12 @@ def resolve(ref) -> tuple:
         return loaded, f"entry point {_discovered_languages()[name].value}"
     detail = ""
     if "." in name:
-        obj = _import_dotted(name)
-        if obj is None:
+        from ._claim_reach import walk_refusal
+        refused = walk_refusal(name)
+        obj = _import_dotted(name) if refused is None else None
+        if refused is not None:
+            detail = refused
+        elif obj is None:
             detail = "the dotted name does not import"
         else:
             if not language_problems(obj):
