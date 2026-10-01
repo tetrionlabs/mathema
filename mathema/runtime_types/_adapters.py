@@ -250,6 +250,8 @@ class NumpyAdapter:
     def realise(self, abstract, options):
         import numpy as np
         if isinstance(abstract, AbstractMat):
+            if not abstract.rows:
+                return np.empty((0, 0))
             return np.array([list(r) for r in abstract.rows])
         if isinstance(abstract, AbstractTable):
             raise TypeError("numpy.ndarray does not carry a table")
