@@ -680,7 +680,7 @@ def _shared_reads(view: "SeqLiftView", exprs) -> list:
     share a length symbol (a dot product), or one indexed by a sum that
     runs over another's length (`for i in range(len(a)): a[i] * b[i]`
     reads `b` at the positions of `a`)."""
-    owner = {}
+    owner: dict = {}
     for name, length in view.lengths.items():
         if length is not None:
             owner.setdefault(length, []).append(name)
