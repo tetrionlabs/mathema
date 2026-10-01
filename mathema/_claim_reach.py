@@ -40,7 +40,10 @@ SYSTEM_MODULES = frozenset({
     "trace", "profile", "cProfile", "atexit", "faulthandler", "zipfile",
     "tarfile", "sqlite3", "platform", "getpass", "pwd", "grp", "tkinter",
     "turtle", "ensurepip", "venv", "distutils", "setuptools", "pip",
-    "sched",
+    "sched", "pydoc", "pickletools", "zipapp", "imp",
+    # every sympy function reads a string argument through sympify,
+    # which evaluates it as Python
+    "sympy",
 })
 
 #: dotted paths inside otherwise allowed packages that evaluate text as
@@ -54,7 +57,9 @@ CODE_RUNNERS = frozenset({
     "numpy.fromfile", "numpy.memmap", "numpy.ndarray.tofile",
     "numpy.ndarray.dump", "numpy.f2py", "numpy.distutils",
     "numpy.lib.npyio", "numpy.lib.format",
+    "numpy.ctypeslib", "numpy.DataSource", "numpy.lib._datasource",
     "pandas.eval", "pandas.read_pickle", "pandas.io",
+    "pandas.core.computation", "scipy.io", "polars.io",
     "pandas.DataFrame.eval", "pandas.DataFrame.query",
     "pandas.DataFrame.to_pickle", "pandas.Series.to_pickle",
     "pandas.DataFrame.to_csv", "pandas.Series.to_csv",
@@ -62,6 +67,19 @@ CODE_RUNNERS = frozenset({
     "sympy.lambdify", "sympy.utilities.lambdify",
     "sympy.core.sympify", "sympy.printing.preview", "sympy.preview",
     "sympy.init_session", "sympy.interactive",
+})
+
+#: in the libraries a claim commonly binds, a function of one of these
+#: names reads or writes files (`pandas.read_csv`,
+#: `pandas.DataFrame.to_parquet`, `polars.DataFrame.write_csv`)
+_IO_LIBRARIES = frozenset({"numpy", "pandas", "polars", "scipy"})
+_IO_PREFIXES = ("read_", "write_", "scan_", "sink_")
+_IO_NAMES = frozenset({
+    "to_csv", "to_excel", "to_json", "to_parquet", "to_hdf", "to_sql",
+    "to_feather", "to_stata", "to_html", "to_latex", "to_markdown",
+    "to_string", "to_xml", "to_orc", "to_clipboard", "to_pickle",
+    "load", "save", "dump", "tofile", "fromfile", "loadtxt", "savetxt",
+    "genfromtxt", "memmap", "fromregex",
 })
 
 #: the builtins that run text or reach objects by name, refused by
@@ -130,6 +148,11 @@ def path_refusal(path: str) -> "str | None":
     if runner is not None:
         return (f"`{path}` reaches the system: {runner} runs text as code "
                 f"or reads and writes files, which a claim may not name")
+    last = parts[-1]
+    if parts[0] in _IO_LIBRARIES and len(parts) > 1 and (
+            last in _IO_NAMES or last.startswith(_IO_PREFIXES)):
+        return (f"`{path}` reaches the system: {last} reads or writes "
+                f"files, which a claim may not name")
     return None
 
 
@@ -180,9 +203,14 @@ def object_refusal(obj, path: str) -> "str | None":
     module = getattr(target, "__module__", None)
     if not isinstance(module, str):
         module = getattr(type(target), "__module__", "") or ""
-    if _top(module) in SYSTEM_MODULES:
+    if _top(module) in SYSTEM_MODULES or _below(module, CODE_RUNNERS):
         return (f"`{path}` reaches the system: it comes from the module "
                 f"{_shown(module)!r}, which a claim may not name")
+    name = getattr(target, "__name__", None)
+    if (isinstance(name, str) and _top(module) in _IO_LIBRARIES
+            and (name in _IO_NAMES or name.startswith(_IO_PREFIXES))):
+        return (f"`{path}` reaches the system: {name} reads or writes "
+                f"files, which a claim may not name")
     owner = getattr(obj, "__self__", None)
     if isinstance(owner, types.ModuleType):
         return object_refusal(owner, path)

@@ -73,9 +73,14 @@ def test_a_dunder_on_the_path_is_refused_at_parse(path):
 
 
 @pytest.mark.parametrize("path", ["sympy.sympify", "sympy.parse_expr",
-                                  "sympy.lambdify", "pandas.eval",
+                                  "sympy.lambdify", "sympy.simplify",
+                                  "pandas.eval", "pydoc.locate",
                                   "operator.attrgetter",
-                                  "operator.methodcaller", "numpy.load"])
+                                  "operator.methodcaller", "numpy.load",
+                                  "numpy.savetxt", "pandas.read_csv",
+                                  "pandas.DataFrame.to_parquet",
+                                  "polars.read_csv",
+                                  "polars.DataFrame.write_csv"])
 def test_a_function_that_runs_text_or_reflects_is_refused(path):
     with pytest.raises(InvalidConjecture, match="reaches the system"):
         claim(f"let g = {path}, g('1') == 1")
@@ -103,6 +108,7 @@ _REACH = '''
     import os as osmod
     from os import system
     from shutil import rmtree
+    from pandas import read_csv
 
     exec_alias = exec
 
@@ -128,6 +134,7 @@ def reach_module(tmp_path, monkeypatch):
     ("reachmod.exec_alias", "builtins"),
     ("reachmod.rmtree", "shutil"),
     ("reachmod.osmod.system", "os"),
+    ("reachmod.read_csv", "read_csv"),
     ("random._os.system", "os"),
 ])
 def test_a_system_function_reached_through_an_allowed_module_is_refused(
