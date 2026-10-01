@@ -5161,6 +5161,50 @@ def _guard_interval(bound) -> "tuple | None":
     return None
 
 
+def _real_set(bound):
+    """Intent:
+        A real domain bound (an interval, a union of intervals, a
+        finite set of numbers, the reals or the integers) as the sympy
+        set it is, open ends kept open; None for anything else.
+    """
+    import sympy
+    if bound is None:
+        return None
+    single = _guard_interval(bound)
+    if single is not None:
+        lo, hi, closed_lo, closed_hi = single
+        return sympy.Interval(
+            -sympy.oo if lo == -math.inf else sympy.nsimplify(lo),
+            sympy.oo if hi == math.inf else sympy.nsimplify(hi),
+            not closed_lo, not closed_hi)
+    pieces = getattr(bound, "pieces", None)
+    base = getattr(bound, "base_type", None)
+    if base not in ("R", "Z", "N") or getattr(bound, "dims", ()):
+        return None
+    if not pieces:
+        return {"R": sympy.S.Reals, "Z": sympy.S.Integers,
+                "N": sympy.S.Naturals0}[base]
+    parts = []
+    for piece in pieces:
+        if isinstance(piece, frozenset):
+            try:
+                parts.append(sympy.FiniteSet(*[sympy.nsimplify(v)
+                                               for v in piece]))
+            except Exception:
+                return None
+            continue
+        found = _real_set(piece)
+        if found is None:
+            return None
+        parts.append(found)
+    joined = sympy.Union(*parts)
+    if base == "Z":
+        joined = joined & sympy.S.Integers
+    if base == "N":
+        joined = joined & sympy.S.Naturals0
+    return joined
+
+
 def _guard_refuses_part_of_the_claim(ctx: "_ClaimContext", fn, facts
                                      ) -> "str | None":
     """Intent:
@@ -5196,36 +5240,30 @@ def _guard_refuses_part_of_the_claim(ctx: "_ClaimContext", fn, facts
                     and node.func.id in names):
                 continue
             for p, arg in zip(facts.params, node.args):
-                guard = _guard_interval(enforced.get(p))
-                if guard is None or facts.param_kinds.get(p) in SEQUENCE_KINDS:
+                if p not in enforced or \
+                        facts.param_kinds.get(p) in SEQUENCE_KINDS:
                     continue
                 text = ast.unparse(arg)
 
-                def inside(text=text, guard=guard):
+                def inside(text=text, bound=enforced.get(p)):
+                    allowed = _real_set(bound)
+                    if allowed is None:
+                        return False
                     variables = sorted(
                         {n.id for n in ast.walk(ast.parse(text, mode="eval"))
                          if isinstance(n, ast.Name)})
                     if len(variables) != 1:
                         return False
                     (name,) = variables
-                    region = _guard_interval(ctx.cj_domain.get(name))
-                    if region is None:
+                    where = _real_set(ctx.cj_domain.get(name))
+                    if where is None:
                         return False
                     sym = sympy.Symbol(name, real=True)
                     expr = sympy.sympify(text, locals={name: sym})
-                    where = sympy.Interval(region[0], region[1],
-                                           not region[2], not region[3])
+                    if expr == sym:
+                        return where.is_subset(allowed) is True
                     reached = sympy.imageset(sympy.Lambda(sym, expr), where)
-                    if not isinstance(reached, sympy.Interval):
-                        allowed = sympy.Interval(guard[0], guard[1],
-                                                 not guard[2], not guard[3])
-                        return reached.is_subset(allowed) is True
-                    low, high = float(reached.inf), float(reached.sup)
-                    above = (low > guard[0] or (low == guard[0] and (
-                        guard[2] or reached.left_open)))
-                    below = (high < guard[1] or (high == guard[1] and (
-                        guard[3] or reached.right_open)))
-                    return above and below
+                    return reached.is_subset(allowed) is True
 
                 try:
                     ok = _with_timeout(inside, FAST_TIMEOUT_SECONDS)
@@ -7061,7 +7099,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # 5.6) with the clamp remedy instead of the domain one.
             slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
             boundary = False
-            for direction in (1.0, -1.0):
+            # a refusal by the function's own mathema guard is the guard
+            # doing its job at its own boundary, never a float wobble
+            from .authoring import DomainError as _GuardRefusal
+            refused = isinstance(e, _GuardRefusal)
+            for direction in ((1.0, -1.0) if not refused else ()):
                 jenv = dict(env)
                 for p in kinds:
                     v = jenv[p]

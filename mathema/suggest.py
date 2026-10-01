@@ -147,6 +147,31 @@ def _raise_guard_types(fdef, params: list[str]) -> dict[str, str]:
 
 
 
+def _value_guarded(fdef, params: list[str]) -> set:
+    """Intent:
+        The parameters an `if ...: raise` guard compares by value (an
+        order or an equality), which can cut real numbers out of the
+        working domain; a guard that only tests for nan, None or
+        emptiness cuts no real number.
+    """
+    pset = set(params)
+    out: set = set()
+    for node in ast.walk(fdef):
+        if not (isinstance(node, ast.If) and any(
+                isinstance(stmt, ast.Raise) for stmt in node.body)):
+            continue
+        for part in ast.walk(node.test):
+            if not isinstance(part, ast.Compare):
+                continue
+            sides = [part.left, *part.comparators]
+            self_test = len({ast.dump(side) for side in sides}) == 1
+            if not self_test and not all(
+                    isinstance(op, (ast.Is, ast.IsNot)) for op in part.ops):
+                out |= {n.id for n in ast.walk(part)
+                        if isinstance(n, ast.Name)} & pset
+    return out
+
+
 def _resolvable(ref: str) -> bool:
     """Whether a dotted function reference imports here, so a
     suggestion never names a binding the machine cannot honor."""
@@ -381,7 +406,8 @@ def _declared_intervals(fn, facts) -> dict:
 
 def _widest_piece(fn, p: str) -> "tuple | None":
     """Intent:
-        `(lo, hi)` of the widest interval of a parameter whose declared
+        `(lo, hi, closed_lo, closed_hi)` of the widest interval of a
+        parameter whose declared
         domain (or entry domain) is a union of several real intervals,
         or None when it is not such a union.
     """
@@ -394,21 +420,55 @@ def _widest_piece(fn, p: str) -> "tuple | None":
     if not pieces or len(pieces) < 2 or getattr(bound, "base_type",
                                                 "R") != "R":
         return None
+    from .conjecture import _guard_interval
     spans = []
     for part in pieces:
-        if isinstance(part, (tuple, list)) and len(part) == 2:
-            try:
-                spans.append((float(part[0]), float(part[1])))
-            except (TypeError, ValueError):
-                return None
-        else:
+        found = _guard_interval(part)
+        if found is None:
             return None
+        spans.append(found)
     return max(spans, key=lambda ab: ab[1] - ab[0])
 
 
+def _num_words(value) -> str:
+    """A bound as written: a whole number without a decimal point, any
+    other number by its shortest exact float spelling, never rounded."""
+    import sympy
+    if value is sympy.oo or value == math.inf:
+        return "oo"
+    if value is -sympy.oo or value == -math.inf:
+        return "-oo"
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return repr(number)
+
+
+def _open_entries(fn, p: str) -> "tuple | None":
+    """`(lo, hi, closed_lo, closed_hi)` of a parameter's declared entry
+    interval when it is open at an end, else None."""
+    from .conjecture import _guard_interval
+    from .types import domain_from_signature
+    try:
+        bound = domain_from_signature(fn).get(p)
+    except Exception:
+        return None
+    if bound is not None and getattr(bound, "dims", ()):
+        import dataclasses
+        bound = dataclasses.replace(bound, dims=())
+    found = _guard_interval(bound)
+    if found is None or (found[2] and found[3]):
+        return None
+    return found
+
+
 def _interval_words(bounds) -> str:
-    lo, hi = bounds
-    return f"[{lo:g}, {hi:g}]"
+    lo, hi = bounds[0], bounds[1]
+    closed_lo = bounds[2] if len(bounds) > 2 else True
+    closed_hi = bounds[3] if len(bounds) > 3 else True
+    return (("[" if closed_lo and not math.isinf(lo) else "(")
+            + f"{_num_words(lo)}, {_num_words(hi)}"
+            + ("]" if closed_hi and not math.isinf(hi) else ")"))
 
 
 def _mirror_binding(bounds) -> "str | None":
@@ -864,14 +924,19 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         # entries with the shift, so every transformed entry stays in it
         # entries declared as a union of intervals are bound to its
         # widest piece, so a scaled or shifted entry stays in that piece
-        piece = _widest_piece(fn, xs)
-        entry_bounds = piece if piece is not None else declared.get(xs)
+        piece = _widest_piece(fn, xs) or _open_entries(fn, xs)
+        entry_bounds = piece[:2] if piece is not None else declared.get(xs)
+        # an entry domain open at an end keeps the factor and the shift
+        # off their own ends, so no moved entry lands on the open end
+        open_end = piece is not None and not (piece[2] and piece[3])
         factor = _scale_factor_range((-5.0, 5.0), [entry_bounds])
         if factor is not None:
             within = (f"for {xs} in {_interval_words(piece)}^n, "
                       if piece is not None else "")
+            factor_words = _interval_words(
+                (*factor, not open_end, not open_end))
             out.append(_made(f"{within}let {aux} be "
-                             f"{_interval_words(factor)}, "
+                             f"{factor_words}, "
                              f"{aux}*{call} == f(g({xs}, {aux}){rest_str})",
                              name="scale_equivariant", source="mathema",
                              route="best", funcs={"g": "mathema.f.scale_seq"}))
@@ -880,7 +945,9 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
             entries, offsets = shift
             bind = (f"for {xs} in {_interval_words(entries)}^n, "
                     if entries is not None else "")
-            out.append(_made(f"{bind}let {aux} be {_interval_words(offsets)}, "
+            offset_words = _interval_words(
+                (*offsets, not open_end, not open_end))
+            out.append(_made(f"{bind}let {aux} be {offset_words}, "
                              f"{call} + {aux} == f(g({xs}, {aux}){rest_str})",
                              name="translation_equivariant", source="mathema",
                              route="best", funcs={"g": "mathema.f.shift_seq"}))
@@ -944,8 +1011,11 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         out.append(_made(f"raises({call}, {exc_name})", name=f"raises[{p}]",
                          source="mathema", route="best"))
 
-    if cut:
-        out = [_bound_to_cut(cj, made.get(cj.name), cut) for cj in out]
+    premises, blocked = _guard_premises(fn, facts, cut)
+    if cut or premises or blocked:
+        out = [kept for kept in (
+            _bound_to_cut(cj, made.get(cj.name), cut, premises, blocked)
+            for cj in out) if kept is not None]
     if write:
         _write_suggested_claims(fn, out, key=key, root=root)
     return out
@@ -954,7 +1024,8 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
 #: suggestions about the raising region itself, or decided from the
 #: source, which a guard cut does not bind
 _UNCUT = ("raises[", "is_defined", "is_deterministic", "is_state_safe",
-          "is_reproducible", "excluded_outside_domain")
+          "is_reproducible", "excluded_outside_domain", "is_missing_safe",
+          "is_empty_safe", "is_absent_safe")
 
 
 def _whole(found):
@@ -982,12 +1053,7 @@ def _pieces(found) -> list:
 
 
 def _end_words(value) -> str:
-    import sympy
-    if value is sympy.oo:
-        return "oo"
-    if value is -sympy.oo:
-        return "-oo"
-    return f"{float(value):g}"
+    return _num_words(value)
 
 
 def _set_words(found) -> "str | None":
@@ -1000,9 +1066,30 @@ def _set_words(found) -> "str | None":
         return None
     return " ∪ ".join(
         ("(" if part.left_open or part.start.is_infinite else "[")
-        + f"{_end_words(part.start)}, {_end_words(part.end)}"
+        + f"{_inward_words(part.start, True)}, "
+        + f"{_inward_words(part.end, False)}"
         + (")" if part.right_open or part.end.is_infinite else "]")
         for part in parts)
+
+
+def _inward_words(value, lower: bool) -> str:
+    """An interval end as written: a number a float spells exactly (a
+    decimal the guard was written with) as that float, any other (an
+    irrational root, a third) as the nearest float on the inside, so
+    the binding never reaches past the guard."""
+    import sympy
+    if value.is_infinite:
+        return _end_words(value)
+    number = float(value)
+    rational = value.is_Rational and all(
+        prime in (2, 5) for prime in sympy.factorint(value.q))
+    if not rational:
+        exact = sympy.nsimplify(number, rational=True)
+        if lower and exact < value:
+            number = math.nextafter(number, math.inf)
+        elif not lower and exact > value:
+            number = math.nextafter(number, -math.inf)
+    return _num_words(number)
 
 
 def _single_interval(found) -> "tuple | None":
@@ -1024,81 +1111,193 @@ def _mirrored_set(found):
 
 def _guard_cut_domains(fn, facts, declared: dict) -> dict:
     """Intent:
-        `{param: sympy set}` for every real scalar parameter whose own
-        raise guards (the conditions of the function's explicit
-        conditional raises, read by the piecewise lift the derive route
-        uses) cut the real line, each set the reals (or the declared
-        interval) minus every guard that reads that parameter alone. A
-        parameter no such guard cuts is absent.
+        `{param: sympy set}`: the working domain of every real scalar
+        parameter that a raise guard of the function reads alone, or
+        whose declared domain is open at an end or made of several
+        pieces: the declared domain (the reals when none) minus every
+        such guard's region, endpoints and openness as written. Other
+        parameters are absent; `_guard_premises` covers guards that read
+        several parameters.
     Raises:
-        Nothing: a guard sympy cannot read as a set, or one that runs
-        past the fast cap, cuts nothing.
+        Nothing: a guard sympy cannot read is left to `_guard_premises`,
+        which reports the parameter as not representable.
     """
     import sympy
-    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    if not (facts.branch_count and not facts.loops and not facts.recursion):
-        return {}
+    from .conjecture import _guard_interval, _real_set
+    from .types import domain_from_signature
     try:
-        from .symbolic._conditioned import lift_piecewise
-        lifted = lift_piecewise(fn, facts)
+        bounds = domain_from_signature(fn)
     except Exception:
-        return {}
-    if lifted is None:
-        return {}
+        bounds = {}
     out: dict = {}
     for p in facts.params:
         if facts.param_kinds.get(p) != "scalar":
             continue
-        raising = sympy.S.EmptySet
-        for cond, _exc in getattr(lifted, "raise_guards", ()) or ():
-            if cond is sympy.false or not hasattr(cond, "free_symbols"):
-                continue
-            names = {str(sym) for sym in cond.free_symbols}
-            if names != {p}:
-                continue
-            (sym,) = cond.free_symbols
-            real = sympy.Symbol(str(sym), real=True)
-            try:
-                region = _with_timeout(
-                    lambda c=cond.subs(sym, real): c.as_set(),
-                    FAST_TIMEOUT_SECONDS)
-            except Exception:
-                continue
-            if not isinstance(region, (sympy.Interval, sympy.Union,
-                                       sympy.FiniteSet)) and \
-                    region is not sympy.S.EmptySet:
-                continue
-            raising = raising | region
-        if raising is sympy.S.EmptySet:
+        base = _real_set(bounds.get(p)) if p in bounds else sympy.S.Reals
+        if base is None:
             continue
-        base = _as_set(declared[p]) if p in declared else sympy.S.Reals
+        raising = _single_guard_region(fn, facts, p)
+        single = _guard_interval(bounds.get(p)) if p in bounds else None
+        plain = single is not None and single[2] and single[3]
+        if raising is sympy.S.EmptySet and (p not in bounds or plain):
+            continue
         out[p] = base - raising
     return out
 
 
-def _bound_to_cut(cj, source, cut: dict):
+def _lifted_guards(fn, facts) -> "list | None":
+    """The raise guards the piecewise lift reads from the function's
+    own conditional raises, [] when it has none, None when it has
+    some the lift cannot read."""
+    if not facts.branch_count:
+        return []
+    if facts.loops or facts.recursion:
+        return None
+    try:
+        from .symbolic._conditioned import lift_piecewise
+        lifted = lift_piecewise(fn, facts)
+    except Exception:
+        return None
+    if lifted is None:
+        return None if _raise_guard_types(facts.tree, facts.params) else []
+    return list(getattr(lifted, "raise_guards", ()) or ())
+
+
+def _guard_region(cond):
+    """The set of reals where a one-variable guard holds, or None when
+    sympy cannot read it as a set within the fast cap."""
+    import sympy
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    (sym,) = cond.free_symbols
+    real = sympy.Symbol(str(sym), real=True)
+    try:
+        region = _with_timeout(lambda c=cond.subs(sym, real): c.as_set(),
+                               FAST_TIMEOUT_SECONDS)
+    except Exception:
+        return None
+    if region is sympy.S.EmptySet or isinstance(
+            region, (sympy.Interval, sympy.Union, sympy.FiniteSet)):
+        return region
+    return None
+
+
+def _single_guard_region(fn, facts, p: str):
+    """Where the guards that read parameter `p` alone raise."""
+    import sympy
+    raising = sympy.S.EmptySet
+    for cond, _exc in _lifted_guards(fn, facts) or ():
+        if cond is sympy.false or not hasattr(cond, "free_symbols"):
+            continue
+        if {str(sym) for sym in cond.free_symbols} != {p}:
+            continue
+        region = _guard_region(cond)
+        if region is not None:
+            raising = raising | region
+    return raising
+
+
+def _guard_premises(fn, facts, cut: dict) -> "tuple[list, set]":
+    """Intent:
+        `(premises, blocked)`: for each raise guard that reads several
+        parameters, the claim-grammar texts of its negation, as
+        `(parameters, texts)`, the joint working domain an `assuming`
+        premise states; and the parameters whose guards cannot be
+        stated so (a guard the lift cannot read, one sympy cannot set,
+        a path guard whose negation is not a conjunction), over which
+        no suggestion is made.
+    """
+    import sympy
+    from .conjecture import _negated_guard_texts
+    from .symbolic._base import NEGATED_REL, REL_TEXT
+    guarded = set(_raise_guard_types(facts.tree, facts.params)) & \
+        _value_guarded(facts.tree, facts.params)
+    lifted = _lifted_guards(fn, facts)
+    if lifted is None:
+        return [], {p for p in guarded}
+    premises: list = []
+    blocked: set = set()
+    read: set = set()
+    for cond, _exc in lifted:
+        if cond is sympy.false or not hasattr(cond, "free_symbols"):
+            continue
+        names = {str(sym) for sym in cond.free_symbols}
+        if len(names) == 1:
+            if _guard_region(cond) is None:
+                blocked |= names
+            read |= names
+            continue
+        if isinstance(cond, sympy.And):
+            # a path guard: drop the conditions the parameters' own
+            # working domains already settle
+            rest = []
+            for arg in cond.args:
+                own = {str(sym) for sym in arg.free_symbols}
+                if len(own) == 1:
+                    (q,) = own
+                    region = _guard_region(arg)
+                    if q in cut and region is not None and \
+                            cut[q].is_subset(region) is True:
+                        continue
+                rest.append(arg)
+            cond = rest[0] if len(rest) == 1 else sympy.And(*rest)
+        texts = (_negated_guard_texts(cond, NEGATED_REL, REL_TEXT)
+                 if not isinstance(cond, sympy.And) else [])
+        if texts:
+            premises.append((names, texts))
+        else:
+            blocked |= names
+        read |= names
+    blocked |= guarded - read - set(cut)
+    return premises, blocked
+
+
+#: suggestions that call f at a transformed argument (a mirror, a swap,
+#: its own output, a scaled or shifted value), which a guard on several
+#: parameters can refuse whatever the premise
+_TRANSFORMS = ("even", "odd", "idempotent", "commutative", "associative",
+               "scale_equivariant", "translation_equivariant",
+               "permutation_invariant", "self_concat_additive",
+               "order_invariant")
+
+
+def _bound_to_cut(cj, source, cut: dict, premises: list = (),
+                  blocked: set = frozenset()):
     """A suggestion with every parameter a guard cuts bound to what the
-    guard leaves, unless the suggestion binds it already or is about
-    the raising region itself."""
+    guard leaves, and every guard on several parameters it touches
+    stated as an `assuming` premise; None when it would cross a guard
+    that cannot be stated. A suggestion about the raising region itself
+    is left as it is."""
     if source is None or cj.name.startswith(_UNCUT):
         return cj
     text, kw = source
-    import re as _re
+
+    def mentions(p: str) -> bool:
+        # every suggestion here calls f with all its parameters, a family
+        # predicate on one parameter included
+        return True
+    if any(mentions(p) for p in blocked):
+        return None
+    assumed = [t for params, texts in premises
+               if any(mentions(p) for p in params) for t in texts]
+    if assumed and cj.name.split("[", 1)[0] in _TRANSFORMS:
+        return None
     bound = set((getattr(cj, "domain", None) or {}).keys())
     binds = []
     for p, found in cut.items():
-        if p in bound or not _re.search(rf"\b{_re.escape(p)}\b", text):
+        if p in bound or not mentions(p):
             continue
         words = _set_words(found)
         if words is None:
-            return cj
+            return None
         binds.append(f"{p} in {words}")
-    if not binds:
+    if not binds and not assumed:
         return cj
+    prefix = (f"for {', '.join(binds)}, " if binds else "") + (
+        f"assuming {' and '.join(assumed)}, " if assumed else "")
     try:
-        return claim(f"for {', '.join(binds)}, {text}", **kw)
+        return claim(prefix + text, **kw)
     except Exception:
-        return cj
+        return None
 
 
 def _write_suggested_claims(fn, suggestions: list, key: str | None, root: str) -> str:

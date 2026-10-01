@@ -220,6 +220,12 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
             v2 = _call_with_target(fn, facts, target, args, x2)
         except Exception:
             return None
+        try:
+            if not (math.isfinite(float(v1)) and math.isfinite(float(v2))):
+                # an overflow or a nan says nothing about direction
+                return None
+        except (TypeError, ValueError):
+            pass
         ok = (v1 <= v2 + 1e-9) if increasing else (v1 >= v2 - 1e-9)
         if ok:
             return True
@@ -261,6 +267,13 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
             v_mid = _call_with_target(fn, facts, target, args, x0)
             v_hi = _call_with_target(fn, facts, target, args, x0 + h)
         except Exception:
+            return None
+        try:
+            values = (float(v_lo), float(v_mid), float(v_hi))
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(v) for v in values):
+            # an overflow or a nan says nothing about how f bends
             return None
         second_diff = v_lo - 2 * v_mid + v_hi
         # curvature, not the raw second difference: dividing by h*h
