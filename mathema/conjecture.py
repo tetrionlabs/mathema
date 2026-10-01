@@ -839,14 +839,44 @@ def _runtime_det(value) -> float:
     return float(np.linalg.det(np.asarray(value, dtype=float)))
 
 
+class _NoRealValue(ValueError):
+    """A function in the claim's own expression has no real value at the
+    argument it was given (`sqrt(-0.5)`, `log(0)`, `gamma(-1)`)."""
+
+
+def claim_side_has_no_value(exc: BaseException) -> bool:
+    """Intent:
+        Whether an exception from evaluating the claim's own expression
+        (not the function under test) means the claim has no real value
+        at that point: one of its functions left its real domain, or it
+        divided by zero.
+    """
+    return isinstance(exc, (_NoRealValue, ZeroDivisionError))
+
+
+def _real_only(real_fn):
+    """A law function whose domain error is raised as `_NoRealValue`."""
+    def call(v):
+        try:
+            return real_fn(v)
+        except ValueError as e:
+            name = getattr(real_fn, "__name__", "call")
+            raise _NoRealValue(f"{name}({v!r}) has no real value") from e
+    call.__name__ = getattr(real_fn, "__name__", "call")
+    return call
+
+
 def _real_or_complex(real_fn, complex_fn):
     """A law function that computes a complex argument (a Python or
     numpy complex) with its `cmath` counterpart and anything else with
-    its `math` one."""
+    its `math` one; a real argument outside the real domain raises
+    `_NoRealValue`."""
+    real_call = _real_only(real_fn)
+
     def call(v):
         if isinstance(v, complex):
             return complex_fn(complex(v))
-        return real_fn(v)
+        return real_call(v)
     call.__name__ = getattr(real_fn, "__name__", "call")
     return call
 
@@ -887,14 +917,14 @@ _SAFE_FUNCS = {
     # is gamma-based), so both routes compute the same mathematical
     # object; math.gamma's own pole raises at non-positive integers
     # behave like any other raising sample.
-    "factorial": lambda v: math.gamma(v + 1),
+    "factorial": _real_only(lambda v: math.gamma(v + 1)),
     "asin": _real_or_complex(math.asin, _cmath.asin),
     "acos": _real_or_complex(math.acos, _cmath.acos),
     "atan": _real_or_complex(math.atan, _cmath.atan),
     "sinh": _real_or_complex(math.sinh, _cmath.sinh),
     "cosh": _real_or_complex(math.cosh, _cmath.cosh),
     "tanh": _real_or_complex(math.tanh, _cmath.tanh),
-    "gamma": math.gamma, "lgamma": math.lgamma,
+    "gamma": _real_only(math.gamma), "lgamma": _real_only(math.lgamma),
     "erf": math.erf, "erfc": math.erfc,
     # complex accessors (the derive route's re/im/conjugate/arg): each
     # accepts a plain real too, so a claim using them adjudicates on
@@ -6837,6 +6867,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # claim's samples
                 continue
             if not call_raised[0]:
+                if claim_side_has_no_value(e):
+                    # the claim's own side has no real value at this
+                    # in-domain point: the claim is wrong there
+                    checked += 1
+                    cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: "
+                          f"the claim's own side has no real value here "
+                          f"({e}); narrow the claim's domain to where "
+                          f"every side of it is real")
+                    break
                 # the law's own plumbing failed, not the function,
                 # a broken sample, never a counterexample
                 continue
