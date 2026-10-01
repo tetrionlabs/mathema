@@ -2332,26 +2332,49 @@ def _unbound_call_names(lhs: str, rhs: str, existing: set) -> list[str]:
 
 
 def _collect_definedness_guards(fn, facts) -> list:
-    """Every raise-region guard of fn itself: registered partiality
-    lemmas plus explicit raise branches from the piecewise lift. An
-    explicit raise counts whatever its exception type, `raise
-    OverflowError` included, since it is the author defining the
-    function (P2)."""
+    """Every raise-region guard of fn itself; see `_definedness_guards`."""
+    return _definedness_guards(fn, facts)[0]
+
+
+def _definedness_guards(fn, facts) -> "tuple[list, list]":
+    """Intent:
+        `(guards, gaps)`: every raise-region guard of fn itself,
+        registered partiality lemmas plus explicit raise branches from
+        the piecewise lift, and the reasons the list may be incomplete
+        (a statement the walk stopped at, an operation whose region does
+        not lift, a call whose definedness is not known, explicit raises
+        the piecewise lift could not read). An explicit raise counts
+        whatever its exception type, `raise OverflowError` included,
+        since it is the author defining the function (P2).
+    """
     from .symbolic._conditioned import lift_piecewise
-    from .symbolic._partiality import partiality_guards
+    from .symbolic._partiality import partiality_walk
     guards: list = []
+    gaps: list = []
+    opaque: list = []
     try:
-        guards += partiality_guards(fn, facts)
+        walked, unread = partiality_walk(fn, facts, opaque_out=opaque)
+        guards += walked
+        if unread:
+            gaps.append(unread)
     except Exception:
-        pass
+        gaps.append("the raise-region pass failed")
+    gaps += opaque
+    raises = facts.tree is not None and any(
+        isinstance(node, ast.Raise) for node in ast.walk(facts.tree))
     if facts.branch_count and not facts.loops and not facts.recursion:
         try:
             pw = lift_piecewise(fn, facts)
             if pw is not None:
                 guards += pw.raise_guards
+            elif raises:
+                gaps.append("the explicit raises do not lift")
         except Exception:
-            pass
-    return guards
+            if raises:
+                gaps.append("the explicit raises do not lift")
+    elif raises:
+        gaps.append("the explicit raises do not lift")
+    return guards, gaps
 
 
 def _negated_guard_texts(cond, negate, op_text) -> list[str]:
@@ -2388,7 +2411,8 @@ def _negated_guard_texts(cond, negate, op_text) -> list[str]:
     return [f"{flipped.lhs} {op_text[type(flipped)]} {flipped.rhs}"]
 
 
-def _definedness_region_structured(fn, facts) -> list:
+def _definedness_region_structured(fn, facts,
+                                   gaps: "list | None" = None) -> list:
     """Intent:
         The region where fn itself returns, as sympy relationals over
         fn's OWN parameter symbols; one per raise guard, negated,
@@ -2397,6 +2421,13 @@ def _definedness_region_structured(fn, facts) -> list:
         (`_definedness_region`) and the is_defined family's
         equivalence check both read from here, so they can never
         disagree about what the region is.
+
+    Notes:
+        When `gaps` is a list, the reasons the returned conjuncts may
+        not be the whole region are appended to it: the guard
+        collection's own gaps, and each guard whose negation is not a
+        conjunction of relations (`x` a non-positive integer, a divisor
+        that is zero everywhere).
     """
     import sympy
 
@@ -2408,9 +2439,19 @@ def _definedness_region_structured(fn, facts) -> list:
             negated_rels.append(rel)
 
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    guards = _collect_definedness_guards(fn, facts)
+    guards, collection_gaps = _definedness_guards(fn, facts)
+    dropped: list = []
+
+    def drop(cond) -> None:
+        dropped.append(f"the region where {cond} has no expressible "
+                       f"complement")
     deferred: list = []
     for cond, _exc in guards:
+        if any(isinstance(sym, sympy.Dummy) for sym in cond.free_symbols):
+            # a loop body's guard over its trip index: the region is
+            # where SOME trip meets it, which no conjunct states
+            drop(cond)
+            continue
         # note: simple (and Or-shaped) guards yield conjuncts directly;
         # And-shaped path guards wait for the second pass below (an
         # unsatisfiable one, Eq(x, 0) & (x > 0), simplifies away
@@ -2426,11 +2467,15 @@ def _definedness_region_structured(fn, facts) -> list:
             if isinstance(cond, sympy.And):
                 deferred.append(cond)
                 continue
+        if cond is sympy.false:
+            continue
         for piece in ([cond] if not isinstance(cond, sympy.Or)
                       else list(cond.args)):
             flip = negate.get(type(piece))
             if flip is not None and piece is not sympy.false:
                 emit(flip(piece.lhs, piece.rhs))
+            elif piece is not sympy.false:
+                drop(piece)
     for cond in deferred:
         # a path guard And(a1, ..., an) negates to a disjunction, not
         # a region conjunct on its own. But wherever every arg except
@@ -2441,10 +2486,13 @@ def _definedness_region_structured(fn, facts) -> list:
         # so not(a1 & ... & an) is exactly not(a_rest).
         rest = [arg for arg in cond.args
                 if not any(arg == negated for negated in negated_rels)]
-        if len(rest) == 1:
-            flip = negate.get(type(rest[0]))
-            if flip is not None:
-                emit(flip(rest[0].lhs, rest[0].rhs))
+        flip = negate.get(type(rest[0])) if len(rest) == 1 else None
+        if flip is not None:
+            emit(flip(rest[0].lhs, rest[0].rhs))
+        else:
+            drop(cond)
+    if gaps is not None:
+        gaps.extend(collection_gaps + dropped)
     return negated_rels
 
 
@@ -2532,6 +2580,70 @@ def _defined_expansion(fn, facts, cj) -> str:
     if not conds:
         return ""
     return " and ".join(conds)
+
+
+def _outside_definedness(fn, facts, cj):
+    """Intent:
+        A predicate over a claim's points: True where some call to f in
+        the claim meets one of f's raise guards (the region `assuming f
+        is defined` leaves out, exactly as the proof reads it), or where
+        that cannot be decided at the point. Every point is outside when
+        a call's arguments do not lift.
+    """
+    import sympy
+
+    from .symbolic._base import NotSymbolic, _bind_params, _expr_to_sympy
+    guards = _collect_definedness_guards(fn, facts)
+    if not guards:
+        return None
+    try:
+        params, _aggregate = _bind_params(fn, facts)
+    except Exception:
+        return lambda point: True
+    regions: list = []
+    for src in (cj.lhs, cj.rhs):
+        if not src:
+            continue
+        try:
+            tree = ast.parse(str(src), mode="eval")
+        except SyntaxError:
+            return lambda point: True
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "f"):
+                continue
+            subs = {}
+            for p, arg in zip(facts.params, node.args):
+                sym = params.get(p)
+                try:
+                    val = _expr_to_sympy(arg, dict(params))
+                except NotSymbolic:
+                    return lambda point: True
+                if sym is None or isinstance(val, tuple):
+                    return lambda point: True
+                subs[sym] = val
+            for cond, _exc in guards:
+                regions.append(cond.subs(subs, simultaneous=True))
+
+    def outside(point: dict) -> bool:
+        for region in regions:
+            values = {}
+            for sym in region.free_symbols:
+                value = point.get(str(sym))
+                if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                        or not math.isfinite(value):
+                    return True
+                values[sym] = sympy.Rational(value)
+            try:
+                truth = region.subs(values)
+            except Exception:
+                return True
+            if truth is sympy.false:
+                continue
+            return True
+        return False
+    return outside
 
 
 def _calling_scope() -> dict:
@@ -4240,6 +4352,15 @@ def _stamp_examine_route(probe, cj, fn, facts) -> None:
     if not is_safety:
         return
     root, _, _sub = probe.route.partition(":")
+    if (root == "derive" and probe.verdict == "falsified"
+            and region_row_kind(cj.name) == "is_defined"
+            and (probe.meta or {}).get("mathema.corroboration")
+            == "reproduced"):
+        # an is_defined falsification is decided by executing the
+        # function at a point the computed region suggested, an
+        # analytically seeded execution, never by the structure alone
+        probe.route = "probe:semi_analytical"
+        return
     if root == "derive":
         # a structural mechanism established the predicate (proven-
         # capable); the extensive-ladder detail folds into the plain
@@ -5381,9 +5502,12 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                        "mathema.float_companion":
                            "none (a claim family adjudicates this claim)"}
         return
+    excluded = (_outside_definedness(fn, facts, ctx.cj)
+                if ctx.assume_defined else None)
     companion = _float_companion(proven, ctx.cj, fn, facts, ctx.cj_domain,
                                  bound_funcs, assum=assumption,
-                                 budget=ctx.companion_budget)
+                                 budget=ctx.companion_budget,
+                                 excluded=excluded)
     if companion is None:
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion":
@@ -5393,6 +5517,24 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     proven.meta = {**(proven.meta or {}),
                    "mathema.float_companion": companion.name}
     ctx.companion = companion
+    witness = (companion.meta or {}).get("mathema.proof_contradicted")
+    if witness:
+        # an executed point where the claim is false in exact arithmetic
+        # too: the proof failed, and the claim is falsified there
+        proven.verdict = "falsified"
+        proven.route = "probe"
+        proven.counterexample = witness
+        proven.condition = None
+        proven.sketch = (f"the proof failed: derive reported the claim "
+                         f"proven ({proven.sketch}), but at {witness} it is "
+                         f"false in exact arithmetic and in the executed "
+                         f"computation")
+        proven.stratum = {"mathematics": "unsound", "blame": "claim",
+                          "witness": witness}
+        proven.meta = {**proven.meta,
+                       "mathema.corroboration": "reproduced",
+                       "mathema.witness_executed": True,
+                       "mathema.proof_contradicted": witness}
 
 
 def _same_univariate_region(fn, facts, links) -> "bool | None":
@@ -5424,8 +5566,9 @@ def _same_univariate_region(fn, facts, links) -> "bool | None":
         if rel not in ops or isinstance(left, tuple) or isinstance(right, tuple):
             return None
         stated.append(ops[rel](left, right))
-    computed = list(_definedness_region_structured(fn, facts))
-    if not computed:
+    gaps: list = []
+    computed = list(_definedness_region_structured(fn, facts, gaps))
+    if not computed or gaps:
         return None
     region_s, region_c = _sympy.And(*stated), _sympy.And(*computed)
     free = region_s.free_symbols | region_c.free_symbols

@@ -1446,6 +1446,8 @@ def _interval_bounds(expr, domain: dict, params: dict):
         return None
 
     box = {}
+    # the symbols whose declared bound holds both its ends
+    closed: set = set()
     for p, sym in params.items():
         bound = domain.get(p)
         if bound == "C" or getattr(bound, "base_type", None) == "C":
@@ -1459,6 +1461,9 @@ def _interval_bounds(expr, domain: dict, params: dict):
             try:
                 sset = bound_to_sympy_set(bound)
                 lo, hi = _exact(sset.inf), _exact(sset.sup)
+                if sset.contains(sset.inf) is sympy.true \
+                        and sset.contains(sset.sup) is sympy.true:
+                    closed.add(sym)
             except TimeoutError:
                 raise
             except Exception:
@@ -1489,7 +1494,23 @@ def _interval_bounds(expr, domain: dict, params: dict):
     for s in expr.free_symbols:
         if s not in box:
             box[s] = sympy.AccumBounds(-sympy.oo, sympy.oo)
-    return _interval_hull(expr, box)
+    hull = _interval_hull(expr, box)
+    if isinstance(hull, sympy.AccumBounds) \
+            and not (hull.min.is_finite and hull.max.is_finite) \
+            and all(_finite_entry(box[s]) for s in expr.free_symbols) \
+            and all(s in closed for s in expr.free_symbols):
+        # an infinite end over a closed bounded box: no open end for it
+        # to be approached at, so the expression has a pole inside the
+        # box, where it has no value, and the hull bounds nothing
+        return None
+    return hull
+
+
+def _finite_entry(entry) -> bool:
+    """Whether one box entry (an `AccumBounds` or a number) is bounded."""
+    if isinstance(entry, sympy.AccumBounds):
+        return bool(entry.min.is_finite and entry.max.is_finite)
+    return bool(getattr(entry, "is_finite", False))
 
 
 def _min_max_hull(e):
@@ -1837,6 +1858,34 @@ def _verified_sign(value):
     return None
 
 
+def _integrality_truth(cond, domain: dict, params: dict):
+    """Intent:
+        Decide `Eq(u, floor(u))` (u is an integer) or its `Ne` over the
+        domain box when u's range there holds no integer: the equality
+        holds nowhere and the inequality everywhere. None otherwise.
+    """
+    if not isinstance(cond, (sympy.Eq, sympy.Ne)):
+        return None
+    lhs, rhs = cond.lhs, cond.rhs
+    if isinstance(lhs, sympy.floor):
+        lhs, rhs = rhs, lhs
+    if not (isinstance(rhs, sympy.floor) and rhs.args[0] == lhs):
+        return None
+    bounds = _interval_bounds(lhs, domain, params)
+    if bounds is None:
+        return None
+    lo = bounds.min if isinstance(bounds, sympy.AccumBounds) else bounds
+    hi = bounds.max if isinstance(bounds, sympy.AccumBounds) else bounds
+    try:
+        if not (lo.is_finite and hi.is_finite):
+            return None
+        if bool(sympy.ceiling(lo) > hi):
+            return isinstance(cond, sympy.Ne)
+    except TypeError:
+        return None
+    return None
+
+
 def _relational_truth_over_domain(cond, domain: dict, params: dict):
     """Intent:
         Decide one sympy relational (or And/Or of them) over the
@@ -1870,6 +1919,9 @@ def _relational_truth_over_domain(cond, domain: dict, params: dict):
     if not isinstance(cond, sympy.core.relational.Relational):
         return None
     gap = cond.lhs - cond.rhs
+    integral = _integrality_truth(cond, domain, params)
+    if integral is not None:
+        return integral
     bounds = _interval_bounds(gap, domain, params)
     if bounds is None:
         return None

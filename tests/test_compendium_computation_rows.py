@@ -99,17 +99,22 @@ def test_computation_rows_are_in_the_computation_registry():
     assert computation_region("numpy.sqrt") == []
 
 
-def test_a_machine_failure_raises_row_is_computation(tmp_path):
+def test_a_machine_failure_raises_row_is_computation(tmp_path, monkeypatch):
     from mathema.compendium import computation_region, register_library_claims
     from mathema.symbolic._partiality import _PARTIALITY_LEMMAS
-    _write(tmp_path / "claims" / "math.claims.yaml", """
-        compendium: math
-        math.acosh:
+    from tests.test_compendium import install_throwaway_library
+    key = install_throwaway_library(tmp_path, monkeypatch)
+    _write(tmp_path / "claims" / "ramp_kit.claims.yaml", """
+        compendium: ramp_kit
+        ramp_kit.ramp:
           claims:
             - name: is_defined
               statement: 'x >= 1'
             - name: below_one_raises
               statement: 'for x in [-10, 10], assuming x < 1, raises(f(x), ValueError)'
+    """)
+    _write(tmp_path / "claims" / "math.claims.yaml", """
+        compendium: math
         math.cosh:
           claims:
             - name: is_overflow_safe
@@ -118,12 +123,12 @@ def test_a_machine_failure_raises_row_is_computation(tmp_path):
               statement: 'for x in (710.475860073944, oo), raises(f(x), OverflowError)'
     """)
     names = register_library_claims(str(tmp_path))
-    assert ("math.acosh", "is_defined") in names
-    assert ("math.acosh", "below_one_raises") in names
+    assert (key, "is_defined") in names
+    assert (key, "below_one_raises") in names
     assert ("math.cosh", "is_overflow_safe") in names
     assert ("math.cosh", "cosh_overflow_raises") in names
     # a ValueError is the author's contract: mathematics, on derive
-    assert [label for _b, label in _PARTIALITY_LEMMAS["math.acosh"]] == [
+    assert [label for _b, label in _PARTIALITY_LEMMAS[key]] == [
         "no value", "ValueError"]
     # an OverflowError is the machine giving out: computation only
     assert "math.cosh" not in _PARTIALITY_LEMMAS

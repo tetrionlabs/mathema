@@ -2356,6 +2356,9 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
                 return False
         return True
 
+    from .probing import _bound_is_complex
+    # over real arguments a complex result is no value
+    real_only = not any(_bound_is_complex(b) for b in (domain or {}).values())
     executed = 0
 
     def search():
@@ -2379,11 +2382,12 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
                     for p, v in point.items()}
             executed += 1
             try:
-                fn(**call)
+                out = fn(**call)
             except Exception:
                 returned = False
             else:
-                returned = True
+                returned = _has_value(out, None) and not (
+                    real_only and isinstance(out, complex) and out.imag != 0)
             if returned != claimed:
                 return call
         return None
@@ -2460,12 +2464,16 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 
     import sympy as _sympy
 
-    from .conjecture import _definedness_region
     from .grammar import normalize as _normalize
     from .symbolic import ProofResult
     from .symbolic._base import NotSymbolic, _expr_to_sympy
 
-    computed = _definedness_region(fn, facts)
+    region_gaps: list = []
+    from .conjecture import _definedness_region_structured
+    from .symbolic._base import REL_TEXT as rel_of
+    structured = _definedness_region_structured(fn, facts, region_gaps)
+    computed = [f"{rel.lhs} {rel_of[type(rel)]} {rel.rhs}"
+                for rel in structured]
 
     def to_expr(src: str):
         env = {p: _sympy.Symbol(p, real=True) for p in facts.params}
@@ -2478,10 +2486,8 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 
     # the SAME structural region the suggestion and expansion read;
     # one source, so the family can never disagree with them
-    from .conjecture import _definedness_region_structured
-    from .symbolic._base import REL_TEXT as rel_of
     computed_rels = [(rel_of[type(rel)], rel.lhs - rel.rhs)
-                     for rel in _definedness_region_structured(fn, facts)]
+                     for rel in structured]
     computed_gaps = [gap for _rel, gap in computed_rels]
 
     # the premises a witness must satisfy, as (gap, relation) pairs; a
@@ -2498,6 +2504,25 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         return _witnessed_disproof(sketch, fn, facts, gaps, says_defined,
                                    domain, premises)
 
+    def incomplete(sketch: str, gaps: list, says_defined):
+        # the computed region is not the whole definedness region: only
+        # an executed disagreement decides
+        point, _executed = _definedness_witness(fn, facts, gaps,
+                                                says_defined, domain,
+                                                premises)
+        if point is not None:
+            from .gates import _fmt_point
+            return ProofResult(
+                "disproven", sketch=sketch,
+                counterexample=_fmt_point(point, list(facts.params)),
+                meta={"mathema.corroboration": "reproduced",
+                      "mathema.witness_executed": True})
+        return ProofResult(
+            "undecided",
+            sketch=f"is_defined: the definedness region of the current "
+                   f"body is not known in full ({region_gaps[0]}), so "
+                   f"the claim is left to execution")
+
     if relation == "is_defined":
         # the BARE predicate (`is_defined(f)` / `f is defined`) states
         # no region, so it reads as the other half of the overload:
@@ -2505,6 +2530,13 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         # region at all; falsified when it has one and a point in the
         # domain executes and raises. A stated region falls through
         # to the restriction reading below.
+        if region_gaps:
+            return incomplete(
+                "is_defined: f is not defined everywhere, an executed "
+                "call has no value"
+                + (", and it returns at most on " + " and ".join(computed)
+                   if computed else ""),
+                computed_gaps, lambda point: True)
         if not computed:
             return ProofResult(
                 "proven",
@@ -2529,6 +2561,11 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         return None if value is None else _gap_satisfies(relation, value)
 
     witness_gaps = computed_gaps + [stated_gap]
+    if region_gaps:
+        return incomplete(
+            "is_defined: the stated region disagrees with the current "
+            "body at an executed point",
+            witness_gaps, stated_says_defined)
     if not computed:
         return disproof(
             "is_defined: the current body has no raise regions at "
