@@ -1762,6 +1762,187 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
     return None
 
 
+def _nonpositive_integer_region(u):
+    """Where `u` is 0, -1, -2, ...: the poles of the gamma function."""
+    return sympy.And(sympy.Le(u, 0), sympy.Eq(u, sympy.floor(u)))
+
+
+#: the claim grammar's functions with no real value somewhere: name ->
+#: builder of the region over the lifted argument(s), and whether the
+#: region is a statement over real arguments only
+_CLAIM_FUNCTION_REGIONS: dict = {
+    "sqrt": (lambda u: sympy.Lt(u, 0), True),
+    "log": (lambda u, *b: sympy.Or(sympy.Le(u, 0),
+                                   *[sympy.Le(v, 0) for v in b],
+                                   *[sympy.Eq(v, 1) for v in b]), True),
+    "ln": (lambda u: sympy.Le(u, 0), True),
+    "log2": (lambda u: sympy.Le(u, 0), True),
+    "log10": (lambda u: sympy.Le(u, 0), True),
+    "asin": (lambda u: sympy.Gt(sympy.Abs(u), 1), True),
+    "acos": (lambda u: sympy.Gt(sympy.Abs(u), 1), True),
+    "atanh": (lambda u: sympy.Ge(sympy.Abs(u), 1), True),
+    "acosh": (lambda u: sympy.Lt(u, 1), True),
+    "tan": (lambda u: sympy.Eq(sympy.cos(u), 0), False),
+    "sec": (lambda u: sympy.Eq(sympy.cos(u), 0), False),
+    "cot": (lambda u: sympy.Eq(sympy.sin(u), 0), False),
+    "csc": (lambda u: sympy.Eq(sympy.sin(u), 0), False),
+    "gamma": (_nonpositive_integer_region, False),
+    "lgamma": (_nonpositive_integer_region, False),
+    "loggamma": (_nonpositive_integer_region, False),
+    "factorial": (lambda u: _nonpositive_integer_region(u + 1), False),
+}
+
+
+def _claim_side_regions(src: str, build, complex_names: set) -> list:
+    """Intent:
+        The regions where the claim's own expression `src` has no real
+        value, read from its syntax before sympy evaluates anything (a
+        built `x/x` is already 1): `[(region, text)]`, one per division,
+        power and partial grammar function, each operand lifted on its
+        own. An operand that does not lift contributes nothing.
+
+    Notes:
+        A division contributes its divisor's zero set; a power a zero
+        base with a negative exponent, and a negative base with an
+        exponent not known to be an integer; a function its row of
+        `_CLAIM_FUNCTION_REGIONS`. A region stated over real arguments
+        is left out when the operand reads a name bound to C.
+    """
+    try:
+        tree = ast.parse(src or "0", mode="eval")
+    except SyntaxError:
+        return []
+
+    def lifted(node):
+        try:
+            value = build(ast.unparse(node))
+        except TimeoutError:
+            raise
+        except Exception:
+            return None
+        if isinstance(value, tuple) or not isinstance(value, sympy.Basic):
+            return None
+        return value
+
+    def complex_operand(node) -> bool:
+        return any(isinstance(n, ast.Name) and n.id in complex_names
+                   for n in ast.walk(node))
+
+    out: list = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) \
+                and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+            divisor = lifted(node.right)
+            if divisor is not None and divisor.free_symbols:
+                out.append((sympy.Eq(divisor, 0), ast.unparse(node)))
+            elif divisor is not None and divisor.is_zero:
+                out.append((sympy.true, ast.unparse(node)))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            base, exponent = lifted(node.left), lifted(node.right)
+            if base is None or exponent is None:
+                continue
+            if exponent.is_number and exponent.is_real \
+                    and exponent >= 0 and float(exponent).is_integer():
+                continue
+            out.append((sympy.And(sympy.Eq(base, 0), sympy.Lt(exponent, 0)),
+                        ast.unparse(node)))
+            integral = exponent.is_integer or (
+                exponent.is_number and exponent.is_real
+                and float(exponent).is_integer())
+            if not integral and not complex_operand(node.left):
+                out.append((sympy.Lt(base, 0), ast.unparse(node)))
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id in _CLAIM_FUNCTION_REGIONS \
+                and not node.keywords:
+            builder, real_only = _CLAIM_FUNCTION_REGIONS[node.func.id]
+            if real_only and complex_operand(node):
+                continue
+            args = [lifted(a) for a in node.args]
+            if not args or any(a is None for a in args):
+                continue
+            try:
+                region = builder(*args)
+            except TypeError:
+                continue
+            out.append((region, ast.unparse(node)))
+    return [(region, text) for region, text in out
+            if region is not sympy.false]
+
+
+def _claim_side_verdict(lhs_src: str, rhs_src: str, build, domain: dict,
+                        params: dict, assumed_gaps: list,
+                        assumed_nonzero: list) -> "ProofResult | None":
+    """Intent:
+        Whether the claim's own sides have a real value at every point
+        of the domain: None when each region where one has none is
+        provably empty there (or outside the premises), a disproof
+        naming a point inside an explicitly bound domain where one
+        holds (the corroboration gate executes it), else undecided.
+    """
+    from ._proof_support import (_nonneg_certificate, _positive_certificate,
+                                 _relational_truth_over_domain)
+    from ..probing import _bound_is_complex
+    complex_names = {n for n, b in domain.items() if _bound_is_complex(b)}
+    regions = (_claim_side_regions(lhs_src, build, complex_names)
+               + _claim_side_regions(rhs_src, build, complex_names))
+    if not regions:
+        return None
+    names = {str(sym): sym for sym in params.values()}
+    assumptions = _AssumptionContext(gaps=list(assumed_gaps),
+                                     nonzero=list(assumed_nonzero))
+    for region, text in regions:
+        ext = {**names, **{str(s): s for s in region.free_symbols
+                           if str(s) not in names}}
+        if _relational_truth_over_domain(region, domain, ext) is False:
+            continue
+        if assumptions.excludes_guard(region, domain, ext):
+            continue
+        gap = (sympy.expand(region.lhs - region.rhs)
+               if isinstance(region, (sympy.Lt, sympy.Le, sympy.Eq))
+               else None)
+        try:
+            if isinstance(region, sympy.Lt) \
+                    and _nonneg_certificate(gap, domain, ext) is not None:
+                continue
+            if isinstance(region, (sympy.Eq, sympy.Le)) and (
+                    _positive_certificate(gap, domain, ext) is not None
+                    or (isinstance(region, sympy.Eq)
+                        and _positive_certificate(-gap, domain, ext)
+                        is not None)):
+                continue
+        except TimeoutError:
+            raise
+        except Exception:
+            pass
+        candidates = _witness_candidates(ext, domain)
+        witness = None
+        if candidates is not None:
+            points, base = candidates
+            witness = _find_guard_witness(region, points, base, ext, domain,
+                                          assumptions)
+        explicit = all(str(s) in domain for s in region.free_symbols)
+        if witness is not None and explicit:
+            where = ", ".join(f"{name} = {_witness_value_text(witness[sym])}"
+                              for name, sym in ext.items() if sym in witness)
+            return ProofResult(
+                "disproven",
+                sketch=f"the claim's own side has no real value at {where}: "
+                       f"{text} has none where {_cond_text(region)}, which "
+                       f"the declared domain does not exclude; narrow the "
+                       f"claim's domain to where every side of it is real",
+                counterexample=where,
+                witness=_witness_numbers(
+                    {name: witness[sym] for name, sym in ext.items()
+                     if sym in witness}))
+        return ProofResult(
+            "undecided",
+            sketch=f"the claim's own side may have no real value inside the "
+                   f"declared domain: {text} has none where "
+                   f"{_cond_text(region)}, which neither a witness nor an "
+                   f"exclusion settles")
+    return None
+
+
 def _witness_numbers(point: dict) -> "dict | None":
     """A witness point with each coordinate as a Python number: a sympy
     integer as an int, any other real value as a float. None when some
@@ -3398,6 +3579,24 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                                         sketch=f"{raise_verdict.sketch}; "
                                                f"{piecewise_hint}")
             return _mechanized(raise_verdict)
+    if not lhs_tuple:
+        from .._timeout import (EXTENSIVE_TIMEOUT_SECONDS as _EXT,
+                                FAST_TIMEOUT_SECONDS as _FAST,
+                                _with_timeout as _capped)
+        try:
+            side_verdict = _capped(
+                lambda: _claim_side_verdict(
+                    lhs_src, rhs_src, lambda src: build(src, aux), domain,
+                    lifted.params, assumed_gaps, assumed_nonzero),
+                _EXT if extensive else _FAST)
+        except TimeoutError:
+            side_verdict = ProofResult(
+                "undecided",
+                sketch="whether the claim's own sides have a real value "
+                       "over the domain exceeded its wall clock",
+                meta={"mathema.timeout": "fast"})
+        if side_verdict is not None:
+            return _mechanized(side_verdict)
     try:
         if lhs_tuple:
             # a claim against a tuple-valued f(...) (a function returning
