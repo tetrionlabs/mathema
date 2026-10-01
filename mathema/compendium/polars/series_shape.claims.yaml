@@ -3,8 +3,12 @@
 # missing; the receiver of `prices.shift()` is `a`. A shift leaves its
 # first `n` positions null, and diff, pct_change and a rolling window
 # read from one, so each row states the positions that carry a value,
-# read by slicing: `f(a)[1:]`. mathema's own test suite verifies each
-# row against the installed polars.
+# read by slicing: `f(a)[1:]`. A rolling window matches the window's
+# own sum from polars 1.35.1 on; before it a large element leaving the
+# window took small elements' digits with it, so those rows apply from
+# 1.35.1.
+# mathema's own test suite verifies each row against the installed
+# polars.
 compendium: polars
 versions: ">=1,<2"
 
@@ -34,15 +38,18 @@ polars.Series.rolling_mean:
     - name: windows@window_size=2
       statement: "let window_size be 2, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[1:] ~= (a[1:] + a[:-1]) / 2"
       note: "The mean of each element and the one before it; position 0 is null."
+      versions: ">=1.35.1,<2"
     - name: windows@window_size=3
       statement: "let window_size be 3, for a in R^n \\ {∅}, assuming dim(a) >= 3, f(a)[2:] ~= (a[2:] + a[1:-1] + a[:-2]) / 3"
       note: "The mean of each element and the two before it; positions 0 and 1 are null."
+      versions: ">=1.35.1,<2"
 
 polars.Series.rolling_sum:
   claims:
     - name: windows@window_size=2
       statement: "let window_size be 2, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] + a[:-1]"
       note: "The sum of each element and the one before it; position 0 is null."
+      versions: ">=1.35.1,<2"
 
 polars.Series.ewm_mean:
   claims:
