@@ -35,3 +35,8 @@ def test_a_region_crossing_the_gap_is_never_proven():
 def test_a_region_inside_one_piece_is_still_proven():
     p = _row("for x in [0.5, 2], f(x) == x")
     assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+
+
+def test_a_region_admitting_a_hole_is_proven_over_its_numbers():
+    p = _row("for x in [0.5, 2] | {missing}, f(x) == x")
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
