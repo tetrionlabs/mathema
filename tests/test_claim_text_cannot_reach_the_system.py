@@ -233,3 +233,27 @@ def test_a_language_or_exception_named_inside_a_system_module_is_refused():
         resolve(LanguageRef("os.path"))
     assert _resolve_exception_type("subprocess.CalledProcessError",
                                    _f) is None
+
+
+@pytest.mark.parametrize("stmt", [
+    "let g = operator.add, for x in [0, 1], g(x, x) == 2*x",
+    "let g = operator.mul, for x in [0, 1], g(x, x) == x^2",
+    "let g = operator.neg, for x in [0, 1], g(x) == -x",
+    "let g = operator.truediv, for x in [1, 2], g(x, 2) == x/2",
+    "let g = operator.abs, for x in [-1, 1], g(x) >= 0",
+])
+def test_a_plain_operator_function_keeps_working(stmt):
+    rec = mathema.check(_f, claims=[claim(stmt, name="c")])
+    row = next(p for p in rec.probes if p.name == "c")
+    assert row.verdict in ("proven", "holds"), (row.verdict, row.note)
+
+
+def test_itemgetter_on_its_own_is_allowed():
+    assert claim("let g = operator.itemgetter, g(0)([1.0]) == 1").funcs
+
+
+@pytest.mark.parametrize("path", ["operator.call", "_operator.attrgetter",
+                                  "_operator.methodcaller", "_operator.call"])
+def test_the_operator_callables_that_reach_code_are_refused(path):
+    with pytest.raises(InvalidConjecture, match="reaches the system"):
+        claim(f"let g = {path}, g(1) == 1")

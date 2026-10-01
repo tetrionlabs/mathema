@@ -50,7 +50,8 @@ SYSTEM_MODULES = frozenset({
 #: code, load a pickle, read or write files, or reach an attribute by
 #: name; a path equal to one of these, or below it, is refused
 CODE_RUNNERS = frozenset({
-    "operator.attrgetter", "operator.methodcaller", "_operator",
+    "operator.attrgetter", "operator.methodcaller", "operator.call",
+    "_operator.attrgetter", "_operator.methodcaller", "_operator.call",
     "functools.singledispatch",
     "numpy.load", "numpy.save", "numpy.savez", "numpy.savez_compressed",
     "numpy.savetxt", "numpy.loadtxt", "numpy.genfromtxt",
