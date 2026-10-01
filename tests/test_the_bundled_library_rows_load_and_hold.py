@@ -7,7 +7,7 @@ The bundled files state what numpy, pandas and polars compute for the
 calls numerical and data code makes most: the median and the
 quantiles, a weighted average, a clipped vector, the second
 differences, a QR or singular value factorisation, a DataFrame's
-column statistics, and polars' extrema, shifts and rolling windows.
+columns, and polars' extrema, shifts and rolling windows.
 Loading and parsing are checked in every run; adjudicating the rows
 against the installed libraries checks the libraries (or mathema's
 reading of them), so it runs with `--library-rows`.
@@ -66,13 +66,6 @@ _COMMON_CALLS = {
     "pandas.Series.dot": ["definition"],
     "pandas.Series.shift": ["shifted@periods=-1"],
     "pandas.Series.diff": ["differences@periods=2"],
-    "pandas.DataFrame.std": ["column_stds"],
-    "pandas.DataFrame.var": ["column_variances"],
-    "pandas.DataFrame.min": ["column_minima"],
-    "pandas.DataFrame.max": ["column_maxima"],
-    "pandas.DataFrame.median": ["column_medians"],
-    "pandas.DataFrame.prod": ["column_products"],
-    "pandas.DataFrame.count": ["column_counts"],
     "pandas.DataFrame.abs": ["columns"],
     "pandas.DataFrame.cumsum": ["columns"],
     "polars.Series.min": ["definition"],

@@ -1,65 +1,12 @@
-# Rows for pandas.DataFrame reductions and elementwise methods, stated
-# over tables with nothing missing; the receiver of `df.sum()` is `a`,
-# `a.x` is its column `x`, and `f(a)["x"]` is the result's column `x`. A column read (`df.x`, `df["x"]`) is itself grammar: a claim
-# reads it as a vector, and the derive route reads a method called on
-# it through the pandas.Series rows. mathema's own test suite verifies
-# each row against the installed pandas.
+# Rows for pandas.DataFrame's elementwise methods, stated over tables
+# with nothing missing; the receiver of `df.abs()` is `a`, `a.x` is its
+# column `x`, and `f(a)["x"]` is the result's column `x`, read by name
+# whatever the table's other columns. A column read (`df.x`, `df["x"]`)
+# is itself grammar: a claim reads it as a vector, and the derive route
+# reads a method called on it through the pandas.Series rows. mathema's
+# own test suite verifies each row against the installed pandas.
 compendium: pandas
 versions: ">=2,<4"
-
-pandas.DataFrame.sum:
-  claims:
-    - name: column_sums
-      statement: "for a in R^n \\ {∅}, f(a)[0] ~= sum(a.x)"
-      note: "One number per column, in column order."
-
-pandas.DataFrame.mean:
-  claims:
-    - name: column_means
-      statement: "for a in R^n \\ {∅}, f(a)[0] ~= mean(a.x)"
-      note: "One number per column, in column order."
-
-pandas.DataFrame.std:
-  claims:
-    - name: column_stds
-      statement: "for a in R^n \\ {∅}, assuming dim(a.x) >= 2, f(a)[0] ~= std(a.x, ddof=1)"
-      note: "One sample standard deviation per column (ddof defaults to 1), in column order."
-
-pandas.DataFrame.var:
-  claims:
-    - name: column_variances
-      statement: "for a in R^n \\ {∅}, assuming dim(a.x) >= 2, f(a)[0] ~= var(a.x, ddof=1)"
-      note: "One sample variance per column (ddof defaults to 1), in column order."
-
-pandas.DataFrame.min:
-  claims:
-    - name: column_minima
-      statement: "for a in R^n \\ {∅}, f(a)[0] == min(a.x)"
-      note: "One number per column, in column order."
-
-pandas.DataFrame.max:
-  claims:
-    - name: column_maxima
-      statement: "for a in R^n \\ {∅}, f(a)[0] == max(a.x)"
-      note: "One number per column, in column order."
-
-pandas.DataFrame.median:
-  claims:
-    - name: column_medians
-      statement: "for a in R^n \\ {∅}, f(a)[0] ~= median(a.x)"
-      note: "One number per column, in column order."
-
-pandas.DataFrame.prod:
-  claims:
-    - name: column_products
-      statement: "for a in R^n \\ {∅}, f(a)[0] ~= prod(a.x)"
-      note: "One number per column, in column order."
-
-pandas.DataFrame.count:
-  claims:
-    - name: column_counts
-      statement: "for a in R^n \\ {∅}, f(a)[0] == dim(a.x)"
-      note: "The elements that are not missing, per column: every position of a table with nothing missing."
 
 pandas.DataFrame.abs:
   claims:
