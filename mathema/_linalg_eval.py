@@ -209,10 +209,35 @@ def largest_gap(lv, rv) -> float:
         return 0.0
     try:
         gaps = np.abs(np.asarray(lv, dtype=float) - np.asarray(rv, dtype=float))
+    except OverflowError:
+        return _exact_largest_gap(lv, rv)
     except (TypeError, ValueError):
         return 0.0
     finite = gaps[np.isfinite(gaps)]
     return float(finite.max()) if finite.size else 0.0
+
+
+def _exact_largest_gap(lv, rv) -> float:
+    """`largest_gap` where a side holds an exact value beyond float
+    range: each finite difference taken exactly, the largest rounded to
+    a float, a difference beyond float range left out with the
+    non-finite ones."""
+    from fractions import Fraction
+    np = _np()
+    a = np.asarray(lv, dtype=object).ravel().tolist()
+    b = np.asarray(rv, dtype=object).ravel().tolist()
+    if len(b) == 1 and len(a) > 1:
+        b = b * len(a)
+    if len(a) == 1 and len(b) > 1:
+        a = a * len(b)
+    best = 0.0
+    for x, y in zip(a, b):
+        try:
+            gap = abs(Fraction(x) - Fraction(y))
+            best = max(best, float(gap))
+        except (TypeError, ValueError, OverflowError):
+            continue
+    return best
 
 
 #: how far each input moves, relatively, to measure a draw's round-off
