@@ -2043,8 +2043,21 @@ def _interpret_assumption(cj, conjectures):
                   if c is not cj and getattr(c, "name", None)
                   in {name for name, _ in refs}]
         return ("verdict", text, refs, lemmas)
-    if re.search(r"\bis\s+(falsified|unknown)\b", text):
-        return None   # other lemma-verdict spellings stay uninterpreted
+    other_verdict = re.search(
+        r"(?:^|\band\s+)([A-Za-z_]\w*(?:\.\w+)*)\s+is\s+"
+        r"(falsified|unknown)\b", text)
+    if other_verdict is not None:
+        # a premise rests on a claim that holds or is proven; any other
+        # verdict word is refused rather than read as no premise at all
+        ref, word = other_verdict.group(1), other_verdict.group(2)
+        names = {getattr(c, "name", None) for c in conjectures
+                 if c is not cj}
+        missing = ("" if ref in names else
+                   f"; and {ref!r} names no claim in this batch")
+        return skip(f"`assuming {ref} is {word}` is not a premise mathema "
+                    f"reads: a premise rests on a claim that holds or is "
+                    f"proven (`assuming {ref} holds`, `assuming {ref} is "
+                    f"proven`){missing}")
     pinned_name = re.fullmatch(r"([A-Za-z_]\w*(?:\.\w+)*)\s*(?:-->|=>|⟹)\s*(.+)",
                                text, re.DOTALL)
     if pinned_name is not None:
