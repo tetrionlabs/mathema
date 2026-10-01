@@ -839,13 +839,27 @@ def _runtime_det(value) -> float:
     return float(np.linalg.det(np.asarray(value, dtype=float)))
 
 
-def _real_or_complex(real_fn, complex_fn):
+def _linalg_eval_words():
+    """The module holding the claim words' exact arithmetic."""
+    from . import _linalg_eval
+    return _linalg_eval
+
+
+def _real_or_complex(real_fn, complex_fn, exact_fn=None):
     """A law function that computes a complex argument (a Python or
     numpy complex) with its `cmath` counterpart and anything else with
-    its `math` one."""
+    its `math` one; an exact rational beyond float range (the value a
+    claim word keeps there) with `exact_fn`, when given."""
+    from fractions import Fraction
+
     def call(v):
         if isinstance(v, complex):
             return complex_fn(complex(v))
+        if exact_fn is not None and isinstance(v, Fraction):
+            try:
+                return real_fn(v)
+            except OverflowError:
+                return exact_fn(v)
         return real_fn(v)
     call.__name__ = getattr(real_fn, "__name__", "call")
     return call
@@ -868,11 +882,15 @@ _SAFE_FUNCS = {
     "Abs": abs, "Min": min, "Max": max,
     # over C (a complex argument) each elementary function is its
     # principal complex value, as the derive route reads it
-    "sqrt": _real_or_complex(math.sqrt, _cmath.sqrt),
+    "sqrt": _real_or_complex(math.sqrt, _cmath.sqrt,
+                             lambda v: _linalg_eval_words().exact_sqrt(v)),
     "exp": _real_or_complex(math.exp, _cmath.exp),
-    "log": _real_or_complex(math.log, _cmath.log),
-    "log10": _real_or_complex(math.log10, _cmath.log10),
-    "log2": _real_or_complex(math.log2, lambda z: _cmath.log(z, 2)),
+    "log": _real_or_complex(math.log, _cmath.log,
+                            lambda v: _linalg_eval_words().exact_log(v)),
+    "log10": _real_or_complex(math.log10, _cmath.log10,
+                              lambda v: _linalg_eval_words().exact_log(v, 10)),
+    "log2": _real_or_complex(math.log2, lambda z: _cmath.log(z, 2),
+                             lambda v: _linalg_eval_words().exact_log(v, 2)),
     "sin": _real_or_complex(math.sin, _cmath.sin),
     "cos": _real_or_complex(math.cos, _cmath.cos),
     "tan": _real_or_complex(math.tan, _cmath.tan),

@@ -517,6 +517,35 @@ def _exact_variance(values: list, ddof):
                         for a, b in zip(re, im)) / n
 
 
+def exact_log(x, base=None) -> float:
+    """The logarithm of an exact positive rational beyond float range,
+    from the logarithms of its numerator and denominator (Python reads
+    a whole number of any size); `base` None is the natural logarithm.
+
+    Raises:
+        ValueError: `x` is not positive.
+    """
+    if x <= 0:
+        raise ValueError("math domain error")
+    if base == 2:
+        return math.log2(x.numerator) - math.log2(x.denominator)
+    if base == 10:
+        return math.log10(x.numerator) - math.log10(x.denominator)
+    return math.log(x.numerator) - math.log(x.denominator)
+
+
+def exact_sqrt(x):
+    """The square root of an exact non-negative rational, rounded once
+    (see `_exact_sqrt`).
+
+    Raises:
+        ValueError: `x` is negative.
+    """
+    if x < 0:
+        raise ValueError("math domain error")
+    return _exact_sqrt(x)
+
+
 def _exact_sqrt(x):
     """The square root of an exact non-negative rational, rounded once;
     beyond float range it stays exact to 60 significant digits."""
@@ -588,26 +617,37 @@ def _count(*args, axis=None):
                    dtype=float) if a.ndim > 1 else int(a.shape[axis])
 
 
-def _cumulative(numpy_name):
-    """`cumsum` or `cumprod`: the running sums or products, a matrix
-    read in row order without `axis`, along it with one."""
-    def running(*args, axis=None):
-        return getattr(_np(), numpy_name)(_values(args), axis=axis)
-    running.__name__ = numpy_name
-    return running
+def _running(of_list, word):
+    """A running word: entry `i` is `of_list` of elements `0..i`; a
+    matrix is read in row order without `axis`, along it with one."""
+    def entries(values):
+        out = [of_list(values[:i + 1]) for i in range(len(values))]
+        np = _np()
+        if all(isinstance(v, float) for v in out):
+            return np.array(out, dtype=float)
+        if all(isinstance(v, (float, complex)) for v in out):
+            return np.array(out, dtype=complex)
+        result = np.empty(len(out), dtype=object)
+        result[:] = out
+        return result
 
-
-def _running_extremum(ufunc_name, word):
-    """`cummax` or `cummin`: the running maximum or minimum, element
-    `i` the greatest (least) of elements `0..i`; a matrix is read in
-    row order without `axis`, along it with one."""
     def running(*args, axis=None):
-        a = _values(args)
+        a = _raw(args)
         if axis is None:
-            a, axis = a.ravel(), 0
-        return getattr(_np(), ufunc_name).accumulate(a, axis=axis)
+            return entries([_element(v) for v in a.ravel()])
+        return _np().apply_along_axis(
+            lambda v: entries([_element(x) for x in v]), axis, a)
     running.__name__ = word
     return running
+
+
+def _extremum(pick):
+    """The greatest (`pick` is max) or least (min) element of a list by
+    exact comparison; no value (nan) where `_ordered` gives none."""
+    def of_list(values):
+        ordered = _ordered(values)
+        return math.nan if ordered is None else _rounded(pick(ordered))
+    return of_list
 
 
 def _ordered(values: list):
@@ -847,10 +887,11 @@ FUNCTIONS = {
     "max": _reduction(builtins.max, "max"),
     "mean": _mean, "prod": _prod,
     "std": _moment("std"), "var": _moment("var"), "count": _count,
-    "cumsum": _cumulative("cumsum"), "cumprod": _cumulative("cumprod"),
+    "cumsum": _running(_exact_sum, "cumsum"),
+    "cumprod": _running(_product, "cumprod"),
     "median": _median, "quantile": _quantile,
-    "cummax": _running_extremum("maximum", "cummax"),
-    "cummin": _running_extremum("minimum", "cummin"),
+    "cummax": _running(_extremum(max), "cummax"),
+    "cummin": _running(_extremum(min), "cummin"),
     "det": _det, "inv": _inv, "trace": _trace, "transpose": _transpose,
     "I": _identity, "matrix_power": _matrix_power,
     "dot": _dot, "outer": _outer, "kron": _kron, "diag": _diag,
