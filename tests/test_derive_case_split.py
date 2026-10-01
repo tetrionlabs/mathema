@@ -37,12 +37,10 @@ def test_exact_snaps_a_lossless_float_to_an_integer():
     assert snapped.is_Integer
 
 
-def test_exact_leaves_a_non_exact_float_unchanged():
-    # 0.1 itself round-trips cleanly to the exact Rational(1, 10),
-    # not a bug, nsimplify correctly recognizes a simple rational. A
-    # value with no clean rational (or recognized constant) match
-    # within tolerance is the real "falls back unchanged" case.
-    assert _exact(0.123456789012345) == 0.123456789012345
+def test_exact_reads_a_float_as_the_decimal_written():
+    # every digit is kept, and no nearby closed form is substituted
+    assert _exact(0.123456789012345) == sympy.Rational("0.123456789012345")
+    assert _exact(0.3333333334) == sympy.Rational("0.3333333334")
 
 
 def test_case_split_proves_an_abs_claim_undecided_in_a_single_context():

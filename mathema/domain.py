@@ -2075,13 +2075,18 @@ def exact_number(v):
     """Intent:
         A domain value as the exact number it names, for the symbolic
         side: a finite float is the shortest decimal that reads back as
-        it (`repr`), as a sympy Rational, so `0.3` is 3/10; an infinite
-        float is sympy's infinity; anything else passes through.
+        it (`repr`), as a sympy Rational, so `0.3` is 3/10; an int is a
+        sympy Integer; an infinite float is sympy's infinity; anything
+        else passes through.
     """
     import math
 
     import sympy
-    if isinstance(v, bool) or not isinstance(v, float):
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return sympy.Integer(v)
+    if not isinstance(v, float):
         return v
     if math.isinf(v):
         return sympy.oo if v > 0 else -sympy.oo

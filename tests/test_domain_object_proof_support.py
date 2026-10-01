@@ -30,7 +30,7 @@ def test_bound_context_for_a_single_interval_piece_is_a_plain_and():
     x = sympy.Symbol("x", real=True)
     dom = _dom("for x in [0, 1] \\subset Z, True")
     ctx = bound_context(x, dom)
-    assert ctx == sympy.And(sympy.Q.ge(x, 0.0), sympy.Q.le(x, 1.0))
+    assert ctx == sympy.And(sympy.Q.ge(x, 0), sympy.Q.le(x, 1))
 
 
 def test_bound_context_for_a_union_is_an_or_of_each_piece():
@@ -52,11 +52,12 @@ def test_bound_context_carries_a_q_ne_fact_for_each_excluded_value():
     assert sympy.Q.ne(x, 0) in (ctx.args if isinstance(ctx, sympy.And) else [ctx])
 
 
-def test_bound_context_keeps_a_float_excluded_value_a_float():
+def test_bound_context_reads_a_float_excluded_value_as_written():
     x = sympy.Symbol("x", real=True)
     dom = _dom("for x in [-1, 1] \\ {0.5}, True")
     ctx = bound_context(x, dom)
-    assert sympy.Q.ne(x, 0.5) in (ctx.args if isinstance(ctx, sympy.And) else [ctx])
+    assert sympy.Q.ne(x, sympy.Rational(1, 2)) in (
+        ctx.args if isinstance(ctx, sympy.And) else [ctx])
 
 
 def test_bound_context_never_states_a_q_ne_fact_for_missing_itself():

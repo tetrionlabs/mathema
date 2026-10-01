@@ -367,27 +367,7 @@ def test_every_paired_spelling_survives_the_verified_record():
     store could contradict itself on the second run: the record held a
     weaker claim than the one adjudicated, and nothing noticed until a
     field run did."""
-    _ROW_STILL_DRIFTS = {"bound_function_nested_in_f"}
-    drift = lexicon_checks.check_verified_record(CORE, skip=_ROW_STILL_DRIFTS)
-    for key, (_before, after, p2, _statement) in \
-            lexicon_checks.verified_record_verdicts(CORE).items():
-        if key not in _ROW_STILL_DRIFTS:
-            continue
-        # the one known, tracked drift. Its BINDING half is now closed:
-        # canonical text keeps real function names, so a scope-bound
-        # second function rebinds from f's module on reconstruction
-        # rather than arriving as an orphan short name that resolves to
-        # nothing. What is left is narrower and is not a lost reference:
-        # the reconstructed expression is a harder one for the derive
-        # route, which returns `undecided` where the original proved.
-        # Pinned exactly, not tolerated.
-        assert after == "unknown", (
-            f"{key} now reaches {after!r}; the tracked drift changed, "
-            f"re-examine it rather than editing this pin")
-        assert p2.meta.get("mathema.derive_status") == "undecided", (
-            f"{key} is unknown for a NEW reason ({p2.meta}); an "
-            f"uncorroborated disproof here would be a different and more "
-            f"serious problem")
+    drift = lexicon_checks.check_verified_record(CORE, skip=set())
     assert not drift, ("a record row adjudicates differently than the "
                        "claim it recorded:\n" + "\n".join(drift))
 
