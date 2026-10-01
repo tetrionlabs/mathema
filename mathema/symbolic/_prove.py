@@ -3112,8 +3112,9 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                else _subs_one_maybe_array(expr, subs))
 
     def _nonidentity_call_args(src: str) -> bool:
-        # does the law call f itself with anything other than a bare
-        # parameter name? `f(-partial, sigma)` substitutes a
+        # does the law call f itself with anything other than each
+        # parameter in its own position? `f(-partial, sigma)` or
+        # `f(y, x)` substitutes a
         # transformed argument into f's PRE-BAKED body, whose sign
         # resolution belonged to the original argument, the false-
         # disproof hazard. Two argument shapes cannot trigger it: a
@@ -3133,9 +3134,13 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                     and node.func.id == "f":
                 for i, a in enumerate(node.args):
-                    if isinstance(a, ast.Name) and a.id in lifted.params:
-                        continue
                     if i >= len(param_order):
+                        return True
+                    if isinstance(a, ast.Name) and a.id in lifted.params:
+                        if a.id == param_order[i]:
+                            continue
+                        # another parameter in this position: its own
+                        # domain, not this position's, holds here
                         return True
                     try:
                         value = ast.literal_eval(a)
@@ -3156,29 +3161,19 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                         return True
         return False
 
-    def _sign_sensitive(expr) -> bool:
-        parts = expr if isinstance(expr, tuple) else (expr,)
-        for e in parts:
-            base = e.expr if isinstance(e, _SymbolicArray) else e
-            if hasattr(base, "has") and base.has(sympy.Abs, sympy.sign,
-                                                 sympy.Max, sympy.Min):
-                return True
-        return False
-
     keep_plain = lifted.branch_complete or (
-        _sign_sensitive(lifted.expr)
-        and (_nonidentity_call_args(lhs_src)
-             or (bool(rhs_src) and _nonidentity_call_args(rhs_src))))
+        _nonidentity_call_args(lhs_src)
+        or (bool(rhs_src) and _nonidentity_call_args(rhs_src)))
     if keep_plain and subs:
         # a piecewise lift keeps its plain symbols: baking a sign
         # assumption in would collapse the branches the declared domain
         # doesn't select, which is only sound for bare-parameter calls.
-        # The same applies to a sign-SENSITIVE body (Abs/sign/Min/Max)
-        # when the law substitutes a transformed argument: sympy
-        # collapses Abs(positive_sym) to the symbol at bake time, so a
-        # later f(-partial, ...) substitution lands in a body whose
-        # sign resolution belonged to the ORIGINAL argument (the
-        # Abs-under-negated-argument false falsification). The domain
+        # The same applies whenever the law passes f anything but each
+        # parameter in its own position: sympy simplifies the body
+        # under the baked assumptions (Abs(positive_sym) becomes the
+        # symbol, sqrt(x**2) becomes x), so a later f(-partial, ...) or
+        # f(y, x) substitution lands in a body whose simplification
+        # belonged to the ORIGINAL argument's domain. The domain
         # still acts, through bound_context and pins, both remapped
         # back onto the original symbols here.
         inverse = {new_sym: old_sym for old_sym, new_sym in subs.items()}
