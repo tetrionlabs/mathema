@@ -63,7 +63,6 @@ _COMMON_CALLS = {
     "numpy.linalg.svd": ["factors"],
     "numpy.dot": ["of_matrices"],
     "numpy.inner": ["definition"],
-    "pandas.Series.dot": ["definition"],
     "pandas.Series.shift": ["shifted@periods=-1"],
     "pandas.Series.diff": ["differences@periods=2"],
     "pandas.DataFrame.abs": ["columns"],

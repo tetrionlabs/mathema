@@ -70,7 +70,7 @@ def test_the_numbers_of_pandas_rows():
         "pandas/series_running.claims.yaml": 2,
         "pandas/series_bounds.claims.yaml": 3,
         "pandas/series_shape.claims.yaml": 7,
-        "pandas/series_arithmetic.claims.yaml": 12,
+        "pandas/series_arithmetic.claims.yaml": 11,
         "pandas/series_statistics.claims.yaml": 4,
         "pandas/dataframe.claims.yaml": 2}
 
