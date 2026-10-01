@@ -1899,7 +1899,7 @@ def _claim_side_verdict(lhs_src: str, rhs_src: str, build, domain: dict,
             continue
         gap = (sympy.expand(region.lhs - region.rhs)
                if isinstance(region, (sympy.Lt, sympy.Le, sympy.Eq))
-               else None)
+               else sympy.nan)
         try:
             if isinstance(region, sympy.Lt) \
                     and _nonneg_certificate(gap, domain, ext) is not None:
