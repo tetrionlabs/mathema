@@ -105,7 +105,10 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
         point is rational, so each sign is computed exactly; this
         rung never trusts floating point. Roots themselves evaluate to
         zero, which satisfies a non-strict ordering, so they need no
-        separate check there; for `!=` a root inside the domain is the
+        separate check there. For `!=`, `<` and `>` a root inside the
+        domain (a closed endpoint included) breaks the relation, so
+        those need a root-free domain before the sign of the regions
+        is considered, and a root inside the domain is the
         counterexample itself.
     """
     if relation in ("==", "~="):
@@ -155,12 +158,7 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
 
     live = [(a, b) for (a, b), _mult in isolating if not root_excluded(a, b)]
 
-    if relation == "!=":
-        if not live:
-            return ProofResult("proven", sketch=f"{_humanize(diff)} has no real "
-                               f"root on the declared interval (exact root "
-                               "isolation), so it is never zero",
-                               meta={"mathema.derive_route": "sturm"})
+    if relation in ("!=", "<", ">") and live:
         if may_disprove:
             try:
                 roots = sympy.real_roots(poly)
@@ -176,6 +174,11 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
                                    counterexample=f"{pname} = {sympy.nsimplify(inside[0])}",
                                    witness={pname: inside[0]})
         return None
+    if relation == "!=":
+        return ProofResult("proven", sketch=f"{_humanize(diff)} has no real "
+                           f"root on the declared interval (exact root "
+                           "isolation), so it is never zero",
+                           meta={"mathema.derive_route": "sturm"})
 
     # every maximal sign region between consecutive roots needs one
     # exact rational sample whose polynomial value is nonzero. The
@@ -213,14 +216,18 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
                 return None
             samples.append(pt)
 
-    want_nonneg = relation == ">="
+    want_nonneg = relation in (">=", ">")
     bad = [pt for pt in samples
            if (value_at(pt).is_negative if want_nonneg
                else value_at(pt).is_positive)]
     if not bad:
+        settled = ("it has no real root on the declared interval, and the "
+                   "interval has the required sign"
+                   if relation in ("<", ">") else
+                   "every root-free region of the declared interval has the "
+                   "required sign")
         return ProofResult("proven", sketch=f"sign of {_humanize(diff)} settled "
-                           "exactly by real-root isolation: every root-free "
-                           "region of the declared interval has the required sign",
+                           f"exactly by real-root isolation: {settled}",
                            meta={"mathema.derive_route": "sturm"})
     if may_disprove:
         witness = next((pt for pt in bad
