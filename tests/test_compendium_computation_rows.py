@@ -104,7 +104,7 @@ def test_a_machine_failure_raises_row_is_computation(tmp_path):
     from mathema.symbolic._partiality import _PARTIALITY_LEMMAS
     _write(tmp_path / "claims" / "math.claims.yaml", """
         compendium: math
-        math.acosh:
+        math.erfc:
           claims:
             - name: is_defined
               statement: 'x >= 1'
@@ -118,12 +118,12 @@ def test_a_machine_failure_raises_row_is_computation(tmp_path):
               statement: 'for x in (710.475860073944, oo), raises(f(x), OverflowError)'
     """)
     names = register_library_claims(str(tmp_path))
-    assert ("math.acosh", "is_defined") in names
-    assert ("math.acosh", "below_one_raises") in names
+    assert ("math.erfc", "is_defined") in names
+    assert ("math.erfc", "below_one_raises") in names
     assert ("math.cosh", "is_overflow_safe") in names
     assert ("math.cosh", "cosh_overflow_raises") in names
     # a ValueError is the author's contract: mathematics, on derive
-    assert [label for _b, label in _PARTIALITY_LEMMAS["math.acosh"]] == [
+    assert [label for _b, label in _PARTIALITY_LEMMAS["math.erfc"]] == [
         "no value", "ValueError"]
     # an OverflowError is the machine giving out: computation only
     assert "math.cosh" not in _PARTIALITY_LEMMAS

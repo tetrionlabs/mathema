@@ -2272,26 +2272,49 @@ def _unbound_call_names(lhs: str, rhs: str, existing: set) -> list[str]:
 
 
 def _collect_definedness_guards(fn, facts) -> list:
-    """Every raise-region guard of fn itself: registered partiality
-    lemmas plus explicit raise branches from the piecewise lift. An
-    explicit raise counts whatever its exception type, `raise
-    OverflowError` included, since it is the author defining the
-    function (P2)."""
+    """Every raise-region guard of fn itself; see `_definedness_guards`."""
+    return _definedness_guards(fn, facts)[0]
+
+
+def _definedness_guards(fn, facts) -> "tuple[list, list]":
+    """Intent:
+        `(guards, gaps)`: every raise-region guard of fn itself,
+        registered partiality lemmas plus explicit raise branches from
+        the piecewise lift, and the reasons the list may be incomplete
+        (a statement the walk stopped at, an operation whose region does
+        not lift, a call whose definedness is not known, explicit raises
+        the piecewise lift could not read). An explicit raise counts
+        whatever its exception type, `raise OverflowError` included,
+        since it is the author defining the function (P2).
+    """
     from .symbolic._conditioned import lift_piecewise
-    from .symbolic._partiality import partiality_guards
+    from .symbolic._partiality import partiality_walk
     guards: list = []
+    gaps: list = []
+    opaque: list = []
     try:
-        guards += partiality_guards(fn, facts)
+        walked, unread = partiality_walk(fn, facts, opaque_out=opaque)
+        guards += walked
+        if unread:
+            gaps.append(unread)
     except Exception:
-        pass
+        gaps.append("the raise-region pass failed")
+    gaps += opaque
+    raises = facts.tree is not None and any(
+        isinstance(node, ast.Raise) for node in ast.walk(facts.tree))
     if facts.branch_count and not facts.loops and not facts.recursion:
         try:
             pw = lift_piecewise(fn, facts)
             if pw is not None:
                 guards += pw.raise_guards
+            elif raises:
+                gaps.append("the explicit raises do not lift")
         except Exception:
-            pass
-    return guards
+            if raises:
+                gaps.append("the explicit raises do not lift")
+    elif raises:
+        gaps.append("the explicit raises do not lift")
+    return guards, gaps
 
 
 def _negated_guard_texts(cond, negate, op_text) -> list[str]:
@@ -2328,7 +2351,8 @@ def _negated_guard_texts(cond, negate, op_text) -> list[str]:
     return [f"{flipped.lhs} {op_text[type(flipped)]} {flipped.rhs}"]
 
 
-def _definedness_region_structured(fn, facts) -> list:
+def _definedness_region_structured(fn, facts,
+                                   gaps: "list | None" = None) -> list:
     """Intent:
         The region where fn itself returns, as sympy relationals over
         fn's OWN parameter symbols; one per raise guard, negated,
@@ -2337,6 +2361,13 @@ def _definedness_region_structured(fn, facts) -> list:
         (`_definedness_region`) and the is_defined family's
         equivalence check both read from here, so they can never
         disagree about what the region is.
+
+    Notes:
+        When `gaps` is a list, the reasons the returned conjuncts may
+        not be the whole region are appended to it: the guard
+        collection's own gaps, and each guard whose negation is not a
+        conjunction of relations (`x` a non-positive integer, a divisor
+        that is zero everywhere).
     """
     import sympy
 
@@ -2348,9 +2379,19 @@ def _definedness_region_structured(fn, facts) -> list:
             negated_rels.append(rel)
 
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    guards = _collect_definedness_guards(fn, facts)
+    guards, collection_gaps = _definedness_guards(fn, facts)
+    dropped: list = []
+
+    def drop(cond) -> None:
+        dropped.append(f"the region where {cond} has no expressible "
+                       f"complement")
     deferred: list = []
     for cond, _exc in guards:
+        if any(isinstance(sym, sympy.Dummy) for sym in cond.free_symbols):
+            # a loop body's guard over its trip index: the region is
+            # where SOME trip meets it, which no conjunct states
+            drop(cond)
+            continue
         # note: simple (and Or-shaped) guards yield conjuncts directly;
         # And-shaped path guards wait for the second pass below (an
         # unsatisfiable one, Eq(x, 0) & (x > 0), simplifies away
@@ -2366,11 +2407,15 @@ def _definedness_region_structured(fn, facts) -> list:
             if isinstance(cond, sympy.And):
                 deferred.append(cond)
                 continue
+        if cond is sympy.false:
+            continue
         for piece in ([cond] if not isinstance(cond, sympy.Or)
                       else list(cond.args)):
             flip = negate.get(type(piece))
             if flip is not None and piece is not sympy.false:
                 emit(flip(piece.lhs, piece.rhs))
+            elif piece is not sympy.false:
+                drop(piece)
     for cond in deferred:
         # a path guard And(a1, ..., an) negates to a disjunction, not
         # a region conjunct on its own. But wherever every arg except
@@ -2381,10 +2426,13 @@ def _definedness_region_structured(fn, facts) -> list:
         # so not(a1 & ... & an) is exactly not(a_rest).
         rest = [arg for arg in cond.args
                 if not any(arg == negated for negated in negated_rels)]
-        if len(rest) == 1:
-            flip = negate.get(type(rest[0]))
-            if flip is not None:
-                emit(flip(rest[0].lhs, rest[0].rhs))
+        flip = negate.get(type(rest[0])) if len(rest) == 1 else None
+        if flip is not None:
+            emit(flip(rest[0].lhs, rest[0].rhs))
+        else:
+            drop(cond)
+    if gaps is not None:
+        gaps.extend(collection_gaps + dropped)
     return negated_rels
 
 
@@ -5244,8 +5292,9 @@ def _same_univariate_region(fn, facts, links) -> "bool | None":
         if rel not in ops or isinstance(left, tuple) or isinstance(right, tuple):
             return None
         stated.append(ops[rel](left, right))
-    computed = list(_definedness_region_structured(fn, facts))
-    if not computed:
+    gaps: list = []
+    computed = list(_definedness_region_structured(fn, facts, gaps))
+    if not computed or gaps:
         return None
     region_s, region_c = _sympy.And(*stated), _sympy.And(*computed)
     free = region_s.free_symbols | region_c.free_symbols

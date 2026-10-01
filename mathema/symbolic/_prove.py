@@ -1549,8 +1549,11 @@ def _defined_assumptions(sub_conds: list) -> "tuple[list, list, list]":
 
 def _returns_no_value(out) -> bool:
     """Whether a call's result is a nan or an infinity (a scalar, or an
-    array with any non-finite element)."""
+    array with any non-finite element), or a complex number off the
+    real line, which has no value over the reals."""
     import math
+    if isinstance(out, complex) and out.imag != 0:
+        return True
     try:
         return not math.isfinite(complex(out).real) \
             or not math.isfinite(complex(out).imag)
@@ -2341,7 +2344,12 @@ def _loop_proof_raise_gate(fn, facts, domain, proof: ProofResult) -> ProofResult
         return proof
     from ._partiality import NO_VALUE
     for cond, exc in guards:
-        if _cond_truth_over(cond, domain or {}) is True:
+        # a loop body's guard reads its range index, a nonnegative
+        # integer at every trip
+        indices = {str(sym): (0, float("inf")) for sym in cond.free_symbols
+                   if isinstance(sym, sympy.Dummy) and sym.is_integer
+                   and sym.is_nonnegative}
+        if _cond_truth_over(cond, {**(domain or {}), **indices}) is True:
             continue
         fails = ("have no value" if exc == NO_VALUE else f"raise {exc}")
         return ProofResult(

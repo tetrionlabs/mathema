@@ -1002,6 +1002,8 @@ def register_library_claims(root: "str | None" = ".") -> list:
     library_claims = load_library_claims(root)
     rows: list = []
     names: list = []
+    defined: set = set()
+    from ..conjecture import region_row_kind
     for key, info in sorted(library_claims.items()):
         for row in info["entry"].get("claims") or []:
             if not row_is_fact(row):
@@ -1019,6 +1021,9 @@ def register_library_claims(root: "str | None" = ".") -> list:
                         f"{key} ({info['source']}) registers no region: "
                         f"{reason}", stacklevel=2)
                 continue
+            if region_row_kind(str(row.get("name") or "")) == "is_defined" \
+                    and (built is not None or _states_totality(row)):
+                defined.add(key)
             if built is None:
                 continue
             if built.stratum == "computation":
@@ -1039,11 +1044,31 @@ def register_library_claims(root: "str | None" = ".") -> list:
             rows.append((key, build))
             names.append((key, str(row.get("name"))))
     _INSTALLED.update(root=marker, rows=rows, names=names,
-                      keys=frozenset(library_claims), objects=None)
+                      keys=frozenset(library_claims), objects=None,
+                      defined=frozenset(defined))
     from ..hazards import register_hazard_generator
     register_hazard_generator("compendium",
                               _boundary_generator(library_claims))
     return names
+
+
+def _states_totality(row: dict) -> bool:
+    """Whether a library row is the bare `is_defined(f)` with no domain:
+    the function has a value at every argument."""
+    from ..conjecture import claim
+    try:
+        cj = claim(str(row.get("statement") or row.get("law") or ""),
+                   name=row.get("name") or None)
+    except Exception:
+        return False
+    return cj.relation == "is_defined" and not cj.domain
+
+
+def defined_keys() -> frozenset:
+    """The registered library claim keys whose files state an
+    `is_defined` row (bare or a region): where each is defined is a
+    stated fact."""
+    return _INSTALLED.get("defined") or frozenset()
 
 
 def install(root: str = ".") -> None:
@@ -1122,7 +1147,7 @@ def uninstall(root: "str | None" = None) -> None:
     for key, build in _INSTALLED["rows"]:
         unregister_lemmas(key, [build])
     _INSTALLED.update(root=None, rows=[], names=[], keys=frozenset(),
-                      objects=None)
+                      objects=None, defined=frozenset())
     _COMPUTATION.clear()
     from ..hazards import _GENERATORS
     _GENERATORS.pop("compendium", None)

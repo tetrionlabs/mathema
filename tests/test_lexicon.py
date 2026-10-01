@@ -173,7 +173,7 @@ PINNED: dict = {
     "let_scale_seq_sharpe_trap": ("falsified", "returns=[0.0]"),
     "let_shift_seq_range": "holds",
     "let_shift_seq_mean_moves": "falsified",
-    "assuming_spread_positive": "proven",
+    "assuming_spread_positive": "holds",
     "dim_call_premise": "holds",
 }
 if importlib.util.find_spec("mathema_language") is None:

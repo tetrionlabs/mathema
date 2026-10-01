@@ -1667,6 +1667,34 @@ def _verified_sign(value):
     return None
 
 
+def _integrality_truth(cond, domain: dict, params: dict):
+    """Intent:
+        Decide `Eq(u, floor(u))` (u is an integer) or its `Ne` over the
+        domain box when u's range there holds no integer: the equality
+        holds nowhere and the inequality everywhere. None otherwise.
+    """
+    if not isinstance(cond, (sympy.Eq, sympy.Ne)):
+        return None
+    lhs, rhs = cond.lhs, cond.rhs
+    if isinstance(lhs, sympy.floor):
+        lhs, rhs = rhs, lhs
+    if not (isinstance(rhs, sympy.floor) and rhs.args[0] == lhs):
+        return None
+    bounds = _interval_bounds(lhs, domain, params)
+    if bounds is None:
+        return None
+    lo = bounds.min if isinstance(bounds, sympy.AccumBounds) else bounds
+    hi = bounds.max if isinstance(bounds, sympy.AccumBounds) else bounds
+    try:
+        if not (lo.is_finite and hi.is_finite):
+            return None
+        if bool(sympy.ceiling(lo) > hi):
+            return isinstance(cond, sympy.Ne)
+    except TypeError:
+        return None
+    return None
+
+
 def _relational_truth_over_domain(cond, domain: dict, params: dict):
     """Intent:
         Decide one sympy relational (or And/Or of them) over the
@@ -1700,6 +1728,9 @@ def _relational_truth_over_domain(cond, domain: dict, params: dict):
     if not isinstance(cond, sympy.core.relational.Relational):
         return None
     gap = cond.lhs - cond.rhs
+    integral = _integrality_truth(cond, domain, params)
+    if integral is not None:
+        return integral
     bounds = _interval_bounds(gap, domain, params)
     if bounds is None:
         return None

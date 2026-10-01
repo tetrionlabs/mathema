@@ -242,7 +242,7 @@ def test_library_rows_reach_the_partiality_registry_with_their_labels(
     from mathema.symbolic._partiality import _PARTIALITY_LEMMAS
     _write(tmp_path / "claims" / "math.claims.yaml", """
         compendium: math
-        math.acosh:
+        math.erfc:
           claims:
             - name: is_defined
               statement: 'x >= 1'
@@ -250,9 +250,9 @@ def test_library_rows_reach_the_partiality_registry_with_their_labels(
               statement: 'for x in [-10, 10], assuming x < 1, raises(f(x), ValueError)'
     """)
     names = register_library_claims(str(tmp_path))
-    assert ("math.acosh", "is_defined") in names
-    assert ("math.acosh", "below_one_raises") in names
-    rows = _PARTIALITY_LEMMAS["math.acosh"]
+    assert ("math.erfc", "is_defined") in names
+    assert ("math.erfc", "below_one_raises") in names
+    rows = _PARTIALITY_LEMMAS["math.erfc"]
     assert [label for _b, label in rows] == [NO_VALUE, "ValueError"]
     u = sympy.Symbol("u", real=True)
     assert rows[0][0](u) == sympy.Lt(u, 1)
@@ -262,9 +262,9 @@ def test_library_rows_reach_the_partiality_registry_with_their_labels(
     assert raises_region.subs(u, -11) == sympy.false
     # the same root again is a no-op; another root replaces these rows
     install(str(tmp_path))
-    assert len(_PARTIALITY_LEMMAS["math.acosh"]) == 2
+    assert len(_PARTIALITY_LEMMAS["math.erfc"]) == 2
     install(".")
-    assert "math.acosh" not in _PARTIALITY_LEMMAS
+    assert "math.erfc" not in _PARTIALITY_LEMMAS
 
 
 def test_a_row_whose_region_does_not_build_is_reported_once(tmp_path):

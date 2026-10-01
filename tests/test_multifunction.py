@@ -87,8 +87,9 @@ def test_derivative_claims_span_both_functions():
     # tangency claim needs (its full identity is only true at the
     # optimum, so this proves the ratio's own closed form instead)
     r = _verdict(cobb_douglas_utility,
-                 "for a in [0.1,0.9], d(f(x,y,a),x)/d(f(x,y,a),y) "
-                 "== a*y/((1-a)*x)", route="derive")
+                 "for x in [0.5,100], y in [0.5,100], a in [0.1,0.9], "
+                 "d(f(x,y,a),x)/d(f(x,y,a),y) == a*y/((1-a)*x)",
+                 route="derive")
     assert r.verdict == "proven"
 
 
@@ -146,7 +147,7 @@ def test_counterexample_respects_let_declared_free_variable_domains():
     # outside the declared domain falsifies nothing
     r = _verdict(cobb_douglas_utility,
                  "let I be [10,1000], let px be [0.5,20], let py be [0.5,20], "
-                 "for a in [0.1,0.9], "
+                 "for x in [0.5,100], y in [0.5,100], a in [0.1,0.9], "
                  "d(f(x,y,a),x)/d(f(x,y,a),y) == d(budget_line(x,I,px,py),x)",
                  route="derive")
     # false away from the optimum, but a calculus form has no point
