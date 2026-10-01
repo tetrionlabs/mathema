@@ -267,3 +267,14 @@ def test_a_claim_through_cummax_holds_where_the_series_skips_holes():
     (row,) = check_conjectures(series_top, [claim(
         "for xs in [0, 1]^n, f(xs) == max(cummax(xs))")])
     assert row.verdict != "falsified", row.counterexample
+
+
+# --- a library's row speaks for its own runtime type -----------------------
+
+def numpy_mean_of_series(xs: pd.Series) -> float:
+    return float(np.mean(xs))
+
+
+def test_a_numpy_row_is_not_composed_onto_a_pandas_argument():
+    from mathema.policy import composed_policies
+    assert composed_policies(numpy_mean_of_series, analyze(numpy_mean_of_series)) == {}

@@ -1523,7 +1523,10 @@ def composed_policies(fn, facts) -> dict:
     elif isinstance(owner, ast.Name) and len(expr.args) == 1 \
             and isinstance(expr.args[0], ast.Name) and expr.args[0].id in facts.params:
         module = getattr(scope.get(owner.id), "__name__", None)
-        if module:
+        held = runtime.get(expr.args[0].id)
+        # a library's rows speak for its own values: numpy's mean of a
+        # pandas Series is pandas' reduction, which skips holes
+        if module and (held is None or held.split(".")[0] == module.split(".")[0]):
             param, key = expr.args[0].id, f"{module}.{expr.func.attr}"
     if key is None or key not in rows or param in rebound:
         # a parameter the body gives another value may reach the call
