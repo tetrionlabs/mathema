@@ -24,6 +24,10 @@ def cube(x: float) -> float:
     return x ** 3
 
 
+def less_one(x: float) -> float:
+    return x - 1
+
+
 def square(x: float) -> float:
     return x * x
 
@@ -47,6 +51,7 @@ def shifted_reciprocal_square(x: float) -> float:
     (ident, "for x in [-1, 1], f(x) == x**(1/2)*x**(1/2)"),
     (cube, "for x in [-1, 1], (f(x) + x**2)/x**2 >= 0"),
     (square, "for x in [-1, 1], f(x) + 1/x**2 >= 0"),
+    (less_one, "for x in [0, 2], f(x) / f(x) == 1"),
 ])
 def test_a_claim_side_with_no_value_in_the_domain_is_not_proven(fn, text):
     (p,) = check_conjectures(fn, [claim(text, route="derive")])
