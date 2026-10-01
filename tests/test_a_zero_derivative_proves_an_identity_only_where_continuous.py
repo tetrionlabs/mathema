@@ -6,6 +6,7 @@ it can jump, so an identity like `atan(tan(x)) == x` holds on
 `[-1, 1]` but not on `[0, 3]`, and `atan2(y, x) == atan(y / x)` holds
 for positive `x` but not across the negative x axis."""
 import math
+import re
 
 import pytest
 import sympy
@@ -36,7 +37,7 @@ def test_an_identity_across_a_pole_of_tan_is_falsified():
     # tan has a pole at pi/2 inside [0, 3]; atan(tan(x)) = x - pi past it.
     p = _one(atan_of_tan, "for x in [0, 3], f(x) == x")
     assert p.verdict == "falsified"
-    x = float(p.counterexample.split("=")[1])
+    x = float(re.search(r"(-?[0-9.]+)", p.counterexample).group(1))
     assert math.pi / 2 < x <= 3
 
 
@@ -51,7 +52,12 @@ def test_the_same_identity_away_from_the_pole_is_proven_by_its_derivative():
 def test_atan2_is_not_atan_of_the_ratio_across_the_negative_axis():
     p = _one(angle, "for x in [-3, 3], y in [-3, 3], f(x, y) == atan(y/x)")
     assert p.verdict == "falsified"
-    point = dict(part.strip().split("=") for part in p.counterexample.split(","))
+    point = dict(re.findall(r"\b([xy])\s*=\s*(-?[0-9.]+)", p.counterexample))
+    assert float(point["x"]) <= 0
+    # away from x = 0, where y/x has no value, the branch alone fails
+    p = _one(angle, "for x in [-3, -0.5], y in [-3, 3], f(x, y) == atan(y/x)")
+    assert p.verdict == "falsified"
+    point = dict(re.findall(r"\b([xy])\s*=\s*(-?[0-9.]+)", p.counterexample))
     assert float(point["x"]) < 0
 
 

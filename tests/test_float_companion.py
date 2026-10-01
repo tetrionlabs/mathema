@@ -285,7 +285,12 @@ def test_a_family_claim_spawns_no_float_companion():
     assert probes["is_deterministic"].meta["mathema.float_companion"] == \
         "none (a claim family adjudicates this claim)"
     for law in ("scale_equivariant", "translation_equivariant"):
-        assert probes[law].verdict == "proven"
+        # the mathematics over non-empty inputs is proven and its sketch
+        # kept; ema reads x[0], so the empty-input line falsifies the
+        # headline at x = [], and float64 breaks the law on its own line
+        assert probes[law].verdict == "falsified", law
+        assert "[]" in (probes[law].counterexample or ""), law
+        assert probes[law].sketch, law
         assert probes[f"{law}[float]"].verdict == "falsified", law
 
 
