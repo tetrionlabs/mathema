@@ -2701,7 +2701,8 @@ def _claim_call_raise(fn, srcs, point: dict) -> "tuple[str, str] | None":
         claim text that raises when its arguments are evaluated at
         `point` and f is executed there, or None when every call
         returns or an argument cannot be evaluated plainly (only names,
-        numbers, unary minus and arithmetic are read).
+        numbers, unary minus and arithmetic are read) or the call does
+        not bind to f's signature.
     """
     import operator
     ops = {ast.Add: operator.add, ast.Sub: operator.sub,
@@ -2729,6 +2730,7 @@ def _claim_call_raise(fn, srcs, point: dict) -> "tuple[str, str] | None":
                 continue
             try:
                 args = [value(a) for a in n.args]
+                callable_signature(fn).bind(*args)
             except Exception:
                 return None
             try:

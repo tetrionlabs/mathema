@@ -807,8 +807,13 @@ def test_check_formats(tmp_path, capsys):
     rpt = tmp_path / "claims.json"
     # suggestions no longer count as claims: declare one explicitly so
     # the report has adopted content to verify
+    # ema reads x[0], so the claim names the nonempty lists it covers;
+    # unnarrowed, the empty list is a witness against it
     assert main(["check", str(f), "--format", "json",
-                 "--claim", "f(x, 1.0) == x[-1]",
+                 "--claim", "f(x, 1.0) == x[-1]"]) == 1
+    capsys.readouterr()
+    assert main(["check", str(f), "--format", "json",
+                 "--claim", "assuming len(x) >= 1, f(x, 1.0) == x[-1]",
                  "--output", str(rpt)]) == 0
     data = _json.loads(rpt.read_text())
     assert data["tool"] == "mathema" and data["CDD_spec_version"]

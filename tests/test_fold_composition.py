@@ -87,7 +87,8 @@ def test_the_battery_equivariances_prove_on_a_linear_fold_with_a_value_at_empty(
     rows = {p.name: p for p in mathema.check(folds.ema).probes}
     for name in ("scale_equivariant", "translation_equivariant"):
         assert rows[name].verdict != "proven", (name, rows[name].verdict)
-        assert "empty list" in (rows[name].note or ""), rows[name].note
+        assert "x = []" in (rows[name].counterexample or ""), \
+            rows[name].counterexample
 
 
 def test_an_unregistered_transform_still_refuses_loudly(folds):
