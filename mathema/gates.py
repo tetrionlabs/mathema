@@ -1078,7 +1078,8 @@ def _finite_arguments(args, kwargs) -> bool:
 
 
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
-                     assum=(), budget=None) -> "Probe | None":
+                     assum=(), budget=None,
+                     excluded=None) -> "Probe | None":
     """Intent:
         The computation claim a derive proof spawns. `parent` is proven in
         exact arithmetic, which is all a derive `proven` says; the
@@ -1102,7 +1103,10 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         `unknown`, naming the point that was executing. `budget`, when
         given, is the total number of points drawn, corners included
         (the caller's trials); otherwise every corner plus the
-        corroboration budget of interior points.
+        corroboration budget of interior points. `excluded`, when given,
+        is a predicate over points that the claim's premises leave out
+        beyond its relations (`assuming f is defined`): such a point is
+        never executed.
     """
     from . import corroboration as C
     from ._sampling import representation_reach
@@ -1117,6 +1121,9 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                             sequences=True)
     if deps is None:
         return None
+    if excluded is not None:
+        admits = deps["admits"]
+        deps["admits"] = lambda point: admits(point) and not excluded(point)
     name = companion_name(parent.name, descriptor)
     top = float(representation.max_magnitude or representation_reach())
     reach = cap if cap is not None else (-top, top)

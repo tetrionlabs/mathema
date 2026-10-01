@@ -2522,6 +2522,70 @@ def _defined_expansion(fn, facts, cj) -> str:
     return " and ".join(conds)
 
 
+def _outside_definedness(fn, facts, cj):
+    """Intent:
+        A predicate over a claim's points: True where some call to f in
+        the claim meets one of f's raise guards (the region `assuming f
+        is defined` leaves out, exactly as the proof reads it), or where
+        that cannot be decided at the point. Every point is outside when
+        a call's arguments do not lift.
+    """
+    import sympy
+
+    from .symbolic._base import NotSymbolic, _bind_params, _expr_to_sympy
+    guards = _collect_definedness_guards(fn, facts)
+    if not guards:
+        return None
+    try:
+        params, _aggregate = _bind_params(fn, facts)
+    except Exception:
+        return lambda point: True
+    regions: list = []
+    for src in (cj.lhs, cj.rhs):
+        if not src:
+            continue
+        try:
+            tree = ast.parse(str(src), mode="eval")
+        except SyntaxError:
+            return lambda point: True
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "f"):
+                continue
+            subs = {}
+            for p, arg in zip(facts.params, node.args):
+                sym = params.get(p)
+                try:
+                    val = _expr_to_sympy(arg, dict(params))
+                except NotSymbolic:
+                    return lambda point: True
+                if sym is None or isinstance(val, tuple):
+                    return lambda point: True
+                subs[sym] = val
+            for cond, _exc in guards:
+                regions.append(cond.subs(subs, simultaneous=True))
+
+    def outside(point: dict) -> bool:
+        for region in regions:
+            values = {}
+            for sym in region.free_symbols:
+                value = point.get(str(sym))
+                if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                        or not math.isfinite(value):
+                    return True
+                values[sym] = sympy.Rational(value)
+            try:
+                truth = region.subs(values)
+            except Exception:
+                return True
+            if truth is sympy.false:
+                continue
+            return True
+        return False
+    return outside
+
+
 def _calling_scope() -> dict:
     """Intent:
         The merged local variables of every non-mathema frame on the
@@ -5249,9 +5313,12 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                        "mathema.float_companion":
                            "none (a claim family adjudicates this claim)"}
         return
+    excluded = (_outside_definedness(fn, facts, ctx.cj)
+                if ctx.assume_defined else None)
     companion = _float_companion(proven, ctx.cj, fn, facts, ctx.cj_domain,
                                  bound_funcs, assum=assumption,
-                                 budget=ctx.companion_budget)
+                                 budget=ctx.companion_budget,
+                                 excluded=excluded)
     if companion is None:
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion":
