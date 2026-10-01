@@ -2664,6 +2664,19 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                        f"the claim may admit for {target}; state it: "
                        f"assuming len({target}) >= 1")
         if not identity:
+            called = _claim_call_raise(fn, (lhs_src, rhs_src),
+                                       dict(zip(facts.params, args)))
+            if called is not None:
+                call_text, call_exc = called
+                return ProofResult(
+                    "disproven",
+                    sketch=f"the claim calls {call_text} at {where}, an "
+                           f"empty list the claim admits, and f raises "
+                           f"{call_exc} there, so the claim has no value; "
+                           f"narrow it with assuming len({target}) >= 1",
+                    counterexample=where,
+                    witness=dict(zip(facts.params, args)),
+                    meta={"mathema.witness_executed": True})
             return ProofResult(
                 "undecided",
                 sketch=f"f raises {exc} on the empty list the claim admits "
@@ -2679,6 +2692,49 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
             counterexample=where,
             witness=dict(zip(facts.params, args)),
             meta={"mathema.witness_executed": True})
+    return None
+
+
+def _claim_call_raise(fn, srcs, point: dict) -> "tuple[str, str] | None":
+    """Intent:
+        `(call text, exception name)` for the first `f(...)` call in the
+        claim text that raises when its arguments are evaluated at
+        `point` and f is executed there, or None when every call
+        returns or an argument cannot be evaluated plainly (only names,
+        numbers, unary minus and arithmetic are read).
+    """
+    import operator
+    ops = {ast.Add: operator.add, ast.Sub: operator.sub,
+           ast.Mult: operator.mul, ast.Div: operator.truediv}
+
+    def value(node):
+        if isinstance(node, ast.Constant) and isinstance(
+                node.value, (int, float)) and not isinstance(node.value, bool):
+            return node.value
+        if isinstance(node, ast.Name) and node.id in point:
+            return point[node.id]
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            return -value(node.operand)
+        if isinstance(node, ast.BinOp) and type(node.op) in ops:
+            return ops[type(node.op)](value(node.left), value(node.right))
+        raise ValueError(ast.unparse(node))
+    for src in srcs:
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            continue
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "f" and not n.keywords):
+                continue
+            try:
+                args = [value(a) for a in n.args]
+            except Exception:
+                return None
+            try:
+                fn(*args)
+            except Exception as e:
+                return ast.unparse(n), type(e).__name__
     return None
 
 

@@ -136,3 +136,14 @@ def test_two_lengths_that_differ_are_an_executed_witness():
     assert p.verdict == "falsified", (p.verdict, p.sketch)
     assert "a = [1.0, 2.0], b = [1.0]" in (p.counterexample or ""), \
         p.counterexample
+
+
+@pytest.mark.parametrize("law", [
+    "f(x, 1.0) == x[-1]",
+    "f(x, 0.5) <= x[0] + 1e300",
+])
+def test_a_raise_at_the_claims_own_arguments_on_the_empty_list_falsifies(law):
+    for route in ("derive", "best"):
+        (p,) = check_conjectures(ema, [claim(law, route=route)])
+        assert p.verdict == "falsified", (law, route, p.verdict, p.note)
+        assert "x = []" in (p.counterexample or ""), p.counterexample
