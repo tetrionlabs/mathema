@@ -5362,6 +5362,30 @@ def _bound_callables(cj) -> dict:
     return out
 
 
+_NUMBER_LITERAL = re.compile(
+    r"(?<![\w.])(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?(?![\w.])")
+
+
+def overlong_literals(text: str) -> list[str]:
+    """Intent:
+        The number literals in a claim's text that a double does not
+        read exactly as written: the literal's decimal value differs
+        from the decimal the nearest double prints as
+        (`0.30000000000000000001` reads as 0.3). Strings are skipped.
+    """
+    from decimal import Decimal, InvalidOperation
+    found = []
+    for m in _NUMBER_LITERAL.finditer(blank_strings(text or "")):
+        literal = m.group(0)
+        try:
+            value = float(literal)
+            if math.isfinite(value) and Decimal(repr(value)) != Decimal(literal):
+                found.append(literal)
+        except (ValueError, OverflowError, InvalidOperation):
+            continue
+    return found
+
+
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        extensive: bool) -> "Probe | None":
     """Intent:
@@ -5735,6 +5759,17 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         swept = _brute_force_fallback()
         if swept is not None:
             proof = swept
+    overlong = overlong_literals(cj.raw or "")
+    if overlong and proof.status in ("proven", "disproven"):
+        # the parse read these literals as the nearest double, a
+        # different number from the one written, so a symbolic verdict
+        # on the parsed claim is not a verdict on the written one
+        from .symbolic._proof_support import ProofResult
+        proof = ProofResult(
+            "undecided",
+            sketch=(f"{', '.join(overlong)} has more digits than a double "
+                    f"carries, and the proof reads every number exactly as "
+                    f"written, so it does not decide this claim"))
     inlined = getattr(facts, "_inlined_globals", None)
     if inlined:
         # the lift read module-level constants as their current
