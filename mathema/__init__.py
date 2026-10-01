@@ -547,24 +547,6 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     site claim is the most deliberate of the three; see
     authoring.declared_from_function's own decorator-over-docstring rule
     for the same reasoning one layer in).
-
-    The process-wide state `_process_state` watches (the environment,
-    the working directory, sys.path, the global random generators,
-    logging's configuration) is read before any row calls fn and put
-    back afterwards, and every `is_state_safe` trial starts from that
-    reading, so a write another row already made is still seen.
-    """
-    from . import _process_state
-    with _process_state.pristine():
-        return _check(fn, claims, domain, trials, trials_scale, extensive,
-                      declared, known_premises, pseudo_infinity,
-                      runtime_types)
-
-
-def _check(fn, claims, domain, trials, trials_scale, extensive, declared,
-           known_premises, pseudo_infinity, runtime_types) -> Record:
-    """Intent:
-        The body of `check`, run inside its process-state reading.
     """
     from .compendium import ensure_bundled
     from .probing import _RISK, _SPECIALS

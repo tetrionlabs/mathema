@@ -380,9 +380,9 @@ nothing behind.
 
 | Spelling | What you learn | Usual fix |
 |---|---|---|
-| `is_deterministic` | two calls with the same inputs give the same result: floats match exactly, the sign of zero included, NaN agrees with NaN, and a raise agrees with a raise of the same type. A body that reads the clock, the environment or a file holds with a note saying two back-to-back calls cannot see that input change | remove the hidden input (a clock, a global counter, an unseeded random draw) |
-| `is_reproducible` | the same inputs give the same output once the random seed is fixed; a parameter named `seed`, `rng`, `random_state` or `key`, or one annotated as a numpy `Generator` or `RandomState` or a `random.Random`, is the seed, held fixed while nothing else varies | draw from a generator the caller can seed |
-| `is_state_safe` | the call changes nothing outside itself: no argument mutated, no global written, and no process state changed (the environment, the working directory, `sys.path`, the global random generators, logging's configuration). Emitting a log record through the standard library's own logging, and drawing from a generator passed in, are not changes; mathema puts the process state back after each trial | copy before modifying, and return the result instead of storing it |
+| `is_deterministic` | the result depends on the arguments alone. mathema reads the source (and the source of every project function it reaches) and never runs it: a read of the environment, the clock, a file, a module-level value the call changes, or a draw from a shared random generator falsifies, with that read as the witness. A threaded reduction (numpy `dot`, `matmul`, `@`, `linalg`) whose rounding can depend on how its work is split, or anything mathema cannot read, leaves it `unknown` with the reason | remove the hidden input (a clock, a global counter, an unseeded random draw) |
+| `is_reproducible` | for a function that takes a seed or a generator (a parameter named `seed`, `rng`, `random_state` or `key`, or one annotated as a numpy `Generator` or `RandomState` or a `random.Random`), every draw comes through that parameter and nothing else the arguments do not carry is read, so the same seed gives the same answer. It is read from the source, as `is_deterministic` is | draw from a generator the caller can seed |
+| `is_state_safe` | the call changes nothing outside itself: no argument mutated, no global written, and no process state changed (the environment, the working directory, `sys.path`, the global random generators, logging's configuration). mathema reads the source, following aliases (`ys = xs`, `e = os.environ`) and the project functions it calls, and never runs it: a write falsifies with its site as the witness, even one in a branch the domain never reaches (the witness then says so too), and anything it cannot read (`getattr`, `exec`, a library function it has no entry for) leaves it `unknown` with the reason. Emitting a log record through the standard library's own logging, and drawing from a generator passed in, are not changes | copy before modifying, and return the result instead of storing it |
 | `is_order_invariant(f)` | reserved for a later release: the same answer whatever order a reduction runs in | |
 
 A reserved family is a known claim that is `skipped` in this release,
@@ -400,9 +400,10 @@ seed decides how: a function that takes a seed or a generator is held
 to `is_reproducible` (same seed, same answer), any other to
 `is_deterministic` (same input, same answer), and `is_state_safe`
 always joins. Each roll-up is declared by the author, never suggested;
-it is `holds` at best, never `proven`, its note names each child's
-verdict, and a falsified child falsifies it with that child's name and
-witness.
+its note names each child's verdict, and a falsified child falsifies it
+with that child's name and witness. `is_computation_safe` is `holds` at
+best, never `proven`; `is_repeatable` is `proven` when every child is,
+since its children are read from the source and never sampled.
 `is_finite_valued` is a documented roll-up, not a registered family:
 `is_defined` and `is_overflow_safe` over the domain together say the
 function returns a finite value everywhere on it.

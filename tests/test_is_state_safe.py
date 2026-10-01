@@ -3,10 +3,9 @@
 """is_state_safe, the mutation member of the stateless cluster:
 calling the function mutates no external state, no argument in
 place, no global, no module attribute. WRITES only; external reads
-are is_deterministic's territory. Structure proves via the
-write-free certificate or a full lift; the snapshot trials falsify
-with the mutated target as witness and hold otherwise (an unexecuted
-branch may hide a write, so trials never establish)."""
+are is_deterministic's territory. It is decided by examining the
+source, never by running it: a write site falsifies with the site as
+the witness, and a body with none is proven."""
 
 from mathema.analysis import analyze_source
 from mathema.conjecture import check_conjectures, claim
@@ -48,30 +47,26 @@ def test_write_free_body_proves_structurally():
     probe = _one(line)
     assert probe.verdict == "proven"
     assert probe.route == "examine"
-    assert "no state to mutate" in probe.sketch
+    assert "writes nothing outside the call" in probe.sketch
 
 
 def test_argument_mutation_falsifies_with_the_argument_named():
     probe = _one(pusher)
     assert probe.verdict == "falsified"
-    assert probe.route == "probe:algorithmic"
-    assert "mutated its own argument 'xs'" in probe.counterexample
+    assert probe.route == "examine"
+    assert "changes its argument xs (xs.append(1.0))" in probe.counterexample
 
 
 def test_module_state_mutation_falsifies_with_the_name():
     before = _TALLY["count"]
     probe = _one(tallying)
     assert probe.verdict == "falsified"
-    assert "_TALLY" in probe.counterexample
-    assert _TALLY["count"] > before   # the trials really ran the body
+    assert "the module-level _TALLY" in probe.counterexample
+    assert _TALLY["count"] == before   # examined, never run
 
 
 def test_local_mutation_is_not_external_state():
-    # vals.sort() mutates a LOCAL: the walk skips locals, but the
-    # method call denies the write-free certificate only for
-    # parameters and external roots, structure proves? No: the body
-    # doesn't lift and the certificate holds (no external site), so
-    # this proves structurally
+    # vals.sort() changes a list made in the call, not anything outside
     probe = _one(local_sorter)
     assert probe.verdict == "proven"
     assert probe.route == "examine"

@@ -675,15 +675,15 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form 7982b776d687
   holds   result_dimensions: softmax(scores) has length n for scores of length n (n=32)
-  holds   is_deterministic: f(scores) = f(scores) (n=192)
-  holds   is_state_safe: f(scores) = f(scores) (n=48)
+  proven  is_deterministic: f(scores) = f(scores)
+  proven  is_state_safe: f(scores) = f(scores)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (n=192)
   holds   preserves_length: dim(f(scores), 0) = dim(scores, 0) (n=192)
   FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
-           counterexample scores=[9.83855, 9.83855, 9.83855, 9.83855, 9.83855, 9.83855]: [0.16666666666666666, 0.16666666666666666, 0.16666666666666666, 0.16666666666666666, 0.16666666666666666, 0.16666666666666666] vs [9.83854560220593, 9.83854560220593, 9.83854560220593, 9.83854560220593, 9.83854560220593, 9.83854560220593]
+           counterexample scores=[-8.13206, -6.17214, -0.832786]: [0.0006723474377274163, 0.004772831305142381, 0.9945548212571302] vs [-8.132061477037995, -6.1721417315681215, -0.83278620418141]
   holds   preserves_type: type(f(scores)) = type(scores) (n=192)
   FALSIFY is_sorted_output: is_sorted_output(f(scores))
-           counterexample ([-4.92825, 1.00852, -4.16649, -9.94993, 4.86832, -4.51207, 3.19611, -0.196087]): output [4.577803455248231e-05, 0.01733651727151816, 9.805808396106198e-05, 3.0183327231243976e-07, 0.8227185675191795, 6.940687166375063e-05, 0.15453369303840714, 0.005197677347445511] fails is_sorted_output
+           counterexample ([-5.78462, -6.76313, 4.51586, -3.07262, 1.75718, 5.92931, -2.81912]): output [6.496400125721198e-06, 2.4418098026252313e-06, 0.19324795344643012, 9.783172626586042e-05, 0.012247148106973004, 0.7942720698675141, 0.00012605864288850975] fails is_sorted_output
   holds   sums_to_one: sum(f(scores)) = 1 (n=192)
 ```
 

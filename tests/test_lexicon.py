@@ -101,18 +101,20 @@ PINNED: dict = {
                      "checked_sqrt": ("falsified",
                                       "returned 0.0 instead of raising")},
     "raises_typed_region": "proven",
-    "state_safe_env_write": ("falsified", "os.environ (FX_RATE set to"),
-    "state_safe_global_rng": ("falsified", "the global state of random"),
-    "deterministic_trap": ("falsified", "two calls returned"),
-    "deterministic_nan_agrees": "holds",
-    "deterministic_hidden_read": "holds",
+    "state_safe_env_write": ("falsified", "changes os.environ"),
+    "state_safe_global_rng": ("falsified",
+                              "advances the shared random generator"),
+    "deterministic_trap": ("falsified",
+                           "draws from the shared random generator"),
+    "deterministic_nan_agrees": "proven",
+    "deterministic_hidden_read": ("falsified", "reads os.environ"),
     "enforce_domain_guard": "proven",
     "enforce_domain_guard_unbound": "proven",
     "state_safe_logging": "proven",
     "state_safe_logging_config_trap": ("falsified",
-                                       "changed the logger 'mathema.lexicon.pricing'"),
+                                       "_pricing_log.setLevel"),
     "state_safe_passed_generator": "proven",
-    "reproducible_passed_generator": "holds",
+    "reproducible_passed_generator": "proven",
     "real_domain_is_not_finite": "holds",
     "recurrence_identity": "proven",
     "relation_approx_unicode": "proven",
@@ -540,7 +542,8 @@ def test_the_hidden_read_row_names_the_read():
     from mathema.lexicon import price_in_fx
     (p,) = check_conjectures(price_in_fx,
                              [claim(LEXICON["deterministic_hidden_read"])])
-    assert "the body reads os.environ" in p.note, p.note
+    assert p.verdict == "falsified"
+    assert "price_in_fx reads os.environ" in p.counterexample, p
 
 
 @pytest.mark.parametrize("key, query", [

@@ -24,10 +24,8 @@ this module registering itself as an import side effect.
 """
 from __future__ import annotations
 
-from ._signatures import module_scope
 import math
 import random
-import sys
 
 from ._sampling import _finite_bounds as _finite_bounds, _synth_scalar as _synth_scalar
 from .f import _is_nonfinite as _is_nonfinite
@@ -906,228 +904,97 @@ def _extreme_probe(fn, facts, cj, domain: dict, rng: random.Random,
                              f"leaves float range there: the call {what}"))
 
 
+def _examined_verdict(found: list, unread: list, clean: str,
+                      effects=None, domain: dict | None = None):
+    """Intent:
+        The ProofResult of an examination: disproven at the first site
+        found (its sentence is the witness), undecided naming what could
+        not be read, proven otherwise, saying what the examination
+        established (`clean`). A site whose enclosing branch cannot run
+        anywhere in `domain` still disproves, and its witness says so.
+    """
+    from .symbolic import ProofResult
+    if found:
+        witness = found[0].text
+        guard = (effects.guards.get(found[0], ()) if effects is not None
+                 else ())
+        dead = _branch_dead_over(guard, domain)
+        if dead:
+            witness += (f"; the branch it sits in cannot run over the "
+                        f"domain ({dead} never holds there)")
+        return ProofResult("disproven", sketch=witness,
+                           counterexample=witness)
+    if unread:
+        return ProofResult("undecided", sketch="; ".join(
+            site.text for site in unread))
+    return ProofResult("proven", sketch=f"examined from its source: the "
+                                        f"function {clean}")
+
+
+def _branch_dead_over(guard: tuple, domain: dict | None) -> "str | None":
+    """Intent:
+        The branch condition, of those in `guard` (pairs of a condition's
+        source and whether the branch is its body or its else), that no
+        point of `domain` satisfies, or None when none is shown to fail
+        everywhere. A condition counts only when it reads a single
+        parameter the domain bounds by an interval; any other is taken
+        as possibly true.
+    Raises:
+        Nothing: a condition sympy cannot read, or one whose solving
+        runs past the fast cap, is taken as possibly true.
+    """
+    if not guard or not domain:
+        return None
+    import sympy
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    for source, taken in guard:
+        shown = source if taken else f"not ({source})"
+        try:
+            condition = sympy.sympify(
+                source, locals={name: sympy.Symbol(name, real=True)
+                                for name in domain})
+        except Exception:
+            continue
+        if not taken:
+            condition = sympy.Not(condition)
+        names = {str(sym) for sym in getattr(condition, "free_symbols", ())}
+        if len(names) != 1:
+            continue
+        (name,) = names
+        bounds = domain.get(name)
+        if not (isinstance(bounds, (list, tuple)) and len(bounds) == 2
+                and all(isinstance(b, (int, float)) for b in bounds)):
+            continue
+        lo, hi = (sympy.oo if b == math.inf else -sympy.oo if b == -math.inf
+                  else sympy.nsimplify(b) for b in bounds)
+        symbol = next(iter(condition.free_symbols))
+        try:
+            found = _with_timeout(
+                lambda c=condition, x=symbol, a=lo, b=hi: sympy.solveset(
+                    c, x, sympy.Interval(a, b)), FAST_TIMEOUT_SECONDS)
+        except Exception:
+            continue
+        if found is sympy.S.EmptySet:
+            return shown
+    return None
+
+
 def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                           relation: str, domain: dict | None = None,
                           tolerance: float | None = None):
     """Intent:
-        The structural half of is_state_safe (the mutation member of
-        the stateless cluster): calling the function mutates no
-        external state, no argument in place, no global, no module
-        attribute. Proven under the write-free certificate (no
-        syntactic external-write site anywhere in the body, every
-        name resolved) or a full lift (an expression has nothing to
-        mutate with). A detected write site stays undecided (None):
-        structure can't tell whether the writing branch executes, so
-        the snapshot trials decide.
-
-    Notes:
-        WRITES only, deliberately: external READS are
-        is_deterministic's territory; together the two bracket the
-        purity story core-side (the T0-T5 tiering itself is not a
-        core concern). rhs_src/relation/tolerance kept for protocol
-        uniformity.
+        is_state_safe by examination (`_examine.examine`): falsified at
+        the first write outside the call (the site is the witness),
+        undecided with the reasons when something cannot be read, and
+        proven when the body and every project function it reaches
+        write nothing outside the call. A draw from a generator passed
+        in is the caller's and is not a write.
     """
-    from ._process_state import log_emissions_only, writer_calls
-    from .hazards import _state_writes, _write_free
-    from .symbolic import ProofResult, lift
-    if writer_calls(fn, facts):
-        # a bare call of a process-state writer (os.putenv, random.seed,
-        # a draw from the global generator) is a write site the
-        # certificate below does not see
-        return None
-    generator = _generator_parameter(fn, facts)
-    if generator is not None:
-        writes = _state_writes(facts)
-        draws = [w for w in writes if w.get("kind") == "argument_method_call"
-                 and w.get("target") == generator]
-        if (draws and len(draws) == len(writes)
-                and not getattr(facts, "unresolved", None)
-                and not getattr(facts, "global_vars", None)):
-            return ProofResult(
-                "proven",
-                sketch=f"the only calls that could write are draws from the "
-                       f"generator passed in as {generator}, which belongs to "
-                       f"the caller and is expected to move; there is no "
-                       f"other argument mutation, no global or module write "
-                       f"and no dynamic escape (is_reproducible judges the "
-                       f"draws)")
-    if _write_free(facts):
-        return ProofResult(
-            "proven",
-            sketch="no external-write site exists in the body (no "
-                   "argument mutation, no global or module write, no "
-                   "dynamic escape) and every name resolves; there "
-                   "is no state to mutate")
-    if log_emissions_only(fn, facts):
-        return ProofResult(
-            "proven",
-            sketch="the only external calls in the body emit log records, "
-                   "which change no state; there is no argument mutation, "
-                   "no global or module write and no dynamic escape")
-    try:
-        lifted = lift(fn, facts)
-    except Exception:
-        lifted = None
-    if lifted is not None:
-        return ProofResult(
-            "proven",
-            sketch="the body lifts to a closed expression, which "
-                   "mutates nothing by construction")
-    return None
-
-
-def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                 trials: int):
-    """Empirical half of is_state_safe: deep-copy the arguments and
-    snapshot the function's module globals (data entries only) and the
-    process-wide state (`_process_state`) before a call, compare after,
-    an observed mutation falsifies naming the mutated target. The
-    process-wide state is put back after every call. Clean rounds hold:
-    an unexecuted branch may still hide a write, so trials never
-    establish this fact."""
-    import copy
-    import types
-
-    from . import _process_state
-    if not facts.params:
-        return None
-    target = facts.params[0]
-    module_dict = module_scope(fn)
-    # a generator passed in is drawn fresh for each call and its moving
-    # is not counted: it belongs to the caller
-    generator = _generator_parameter(fn, facts)
-    build_generator = (_seed_factory(fn, generator)
-                       if generator is not None else None)
-
-    def data_globals():
-        out = {}
-        for name, value in module_dict.items():
-            if name.startswith("__"):
-                continue
-            if isinstance(value, (types.ModuleType, types.FunctionType,
-                                  types.BuiltinFunctionType, types.MethodType,
-                                  type)):
-                continue
-            out[name] = value
-        return out
-
-    def trial(args):
-        call_args = list(args)
-        call_args[facts.params.index(target)] = _synth(
-            facts.param_kinds.get(target, "unknown"), rng,
-            domain.get(target))
-        placed = _placed(dict(zip(facts.params, call_args)), rng)
-        if placed is None:
-            return None
-        call_args = [placed[p] for p in facts.params]
-        seed = None
-        if build_generator is not None:
-            seed = rng.randint(0, 2 ** 31 - 1)
-            call_args[facts.params.index(generator)] = build_generator(seed)
-        try:
-            originals = copy.deepcopy(call_args)
-        except Exception:
-            return None
-        before = data_globals()
-        try:
-            before_copy = {k: copy.deepcopy(v) for k, v in before.items()}
-        except Exception:
-            before_copy = None
-        isolation = None
-        raised = None
-        # another row may already have made the write this trial looks
-        # for: start from the state as it was before the check
-        restore_failed.extend(_process_state.back_to_pristine())
-        try:
-            with _process_state.isolated(fn) as isolation, \
-                    _pinned_float_env():
-                fn(*call_args)
-        except Exception as exc:
-            raised = exc
-        finally:
-            if isolation is not None and isolation.restore_failed:
-                restore_failed.extend(isolation.restore_failed)
-        env_calls = isolation.c_environ_calls
-        changed = isolation.changes()
-        then = (f", and then raised {type(raised).__name__}"
-                if raised is not None else "")
-        called = (f"calling {getattr(fn, '__name__', 'f')} with "
-                  + ", ".join(
-                      f"{p} = "
-                      + ((_generator_text(v, seed) if p == generator else None)
-                         or _witness_value(v))
-                      for p, v in zip(facts.params, originals)))
-        if changed:
-            return f"{called} changed {'; '.join(changed)}{then}"
-        if raised is not None and not env_calls:
-            return None   # a raising point that changed nothing says nothing
-        if env_calls:
-            # a direct os.putenv or os.unsetenv: a write to the C
-            # environment, which os.environ does not show
-            writer, name = env_calls[0]
-            return (f"{called} ran {writer}({name!r}), which changes the "
-                    f"environment this process passes to its subprocesses, "
-                    f"where os.environ cannot see it{then}")
-        for p, original, after in zip(facts.params, originals, call_args):
-            if p == generator:
-                continue
-            same = (original == after
-                    or (isinstance(original, float) and original != original
-                        and isinstance(after, float) and after != after))
-            if not same:
-                return (f"calling the function mutated its own argument "
-                        f"{p!r}: {original!r} became {after!r}")
-        after_globals = data_globals()
-        if set(after_globals) != set(before):
-            changed = sorted(set(after_globals) ^ set(before))
-            return (f"calling the function changed module state: "
-                    f"{', '.join(changed)}")
-        if before_copy is not None:
-            for name, value in before_copy.items():
-                current = after_globals[name]
-                if current is not before[name]:
-                    # rebound to a different object: a real change,
-                    # whatever the type, and no comparison needed
-                    return (f"calling the function rebound module-level "
-                            f"{name!r}: {value!r} became {current!r}")
-                if type(current).__eq__ is object.__eq__:
-                    # equality is identity for this type, and `value` is
-                    # a deep copy, so the comparison below can only ever
-                    # say "changed", which is how a module carrying
-                    # `from __future__ import annotations` got reported
-                    # as mutating its `annotations` global, with a
-                    # witness whose before and after printed identically
-                    # (`__future__._Feature` defines no `__eq__`). The
-                    # object is the same one; in-place mutation of a
-                    # type like this is simply not detectable here, and
-                    # claiming it is a false positive.
-                    continue
-                try:
-                    unchanged = bool(current == value)
-                except Exception:
-                    # a numpy array (or anything else whose `==` is
-                    # elementwise) has no single truth value, the
-                    # identity check above already covered rebinding,
-                    # so say nothing rather than raise
-                    continue
-                if not unchanged:
-                    return (f"calling the function mutated module-level "
-                            f"{name!r}: {value!r} became {current!r}")
-        return True
-
-    restore_failed: list = []
-    result = _probe_trials(fn, facts, target, domain, rng,
-                           max(trials // 4, 8), trial)
-    if restore_failed:
-        said = sorted(set(restore_failed))
-        return (*result, None, {
-            "mathema.restore_failed": said,
-            "mathema.caveat": ("mathema could not restore "
-                               + "; ".join(said) + " after a trial; this "
-                               "process may differ from before the check, "
-                               "so restart it before trusting later "
-                               "results")})
-    return result
+    from ._examine import examine
+    effects = examine(fn, _generator_parameter(fn, facts))
+    return _examined_verdict(effects.writes, effects.unknowns,
+                             "writes nothing outside the call",
+                             effects, domain)
 
 
 def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -1392,283 +1259,43 @@ def _is_deterministic_derive(fn, facts, lhs_src: str, rhs_src: str,
                              relation: str, domain: dict | None = None,
                              tolerance: float | None = None):
     """Intent:
-        The structural half of is_deterministic (the STRONG member of
-        the stateless cluster): the function runs the same way every
-        time, nothing external can change state within it and no
-        seed is involved anywhere. A body that lifts to a closed
-        symbolic form is deterministic by construction: the form has
-        no state to vary with. Undecided (None) otherwise, and for a
-        body that reads the clock, the environment or a file;
-        `_deterministic_probe` is the runtime half.
-
-    Notes:
-        The maths is deterministic by definition; determinism is the
-        COMPUTATION's claim. Deterministic implies reproducible
-        (the weaker, up-to-a-seed member below). rhs_src/relation/
-        tolerance kept for protocol uniformity.
+        is_deterministic by examination (`_examine.examine`): falsified
+        at the first hidden input (the environment, the clock, a file, a
+        module-level value the call changes, a draw from a shared
+        generator), undecided with the reasons when something cannot be
+        read or a threaded reduction is reached, proven when the result
+        depends on the arguments alone.
     """
-    from ._process_state import hidden_reads
-    from .symbolic import ProofResult, lift
-    if hidden_reads(fn, facts):
-        # a read of the clock, the environment or a file is an input
-        # the lift does not see
-        return None
-    try:
-        lifted = lift(fn, facts)
-    except Exception:
-        return None
-    if lifted is None:
-        return None
-    return ProofResult(
-        "proven",
-        sketch="the body lifts to a closed symbolic form, which is "
-               "deterministic by construction; there is no state for "
-               "the same inputs to vary with")
+    from ._examine import examine
+    effects = examine(fn)
+    return _examined_verdict(effects.hidden_reads,
+                             [*effects.unknowns, *effects.order_sensitive],
+                             "reads nothing its arguments do not carry",
+                             effects, domain)
 
 
-def _same_float(a: float, b: float) -> bool:
-    """Two floats agree exactly, the sign of zero included; a NaN agrees
-    with a NaN whatever its payload."""
-    if a != a and b != b:
-        return True
-    return a == b and math.copysign(1.0, a) == math.copysign(1.0, b)
-
-
-def _same_complex(a: complex, b: complex) -> bool:
-    return _same_float(a.real, b.real) and _same_float(a.imag, b.imag)
-
-
-def _same_array(first, second) -> "bool | None":
-    import numpy
-    if first.shape != second.shape or first.dtype != second.dtype:
-        return False
-    if first.dtype.kind in "fc":
-        a, b = first.ravel(), second.ravel()
-        return all(_same_complex(complex(x), complex(y))
-                   if first.dtype.kind == "c"
-                   else _same_float(float(x), float(y)) for x, y in zip(a, b))
-    if first.dtype.kind == "O":
-        return _same_kind(first.ravel().tolist(), second.ravel().tolist())
-    return bool(numpy.array_equal(first, second))
-
-
-def _same_kind(first, second) -> "bool | None":
-    """Whether two outcomes of the same call agree by kind: floats of
-    any width exactly (the sign of zero counts, a NaN agrees with a NaN),
-    complex numbers part by part, Decimals the same way, element by
-    element inside a list, tuple, dict or array, pandas objects by
-    values, index and dtype, and the same exception type (an outcome
-    that raised is its exception's type). None when the comparison
-    cannot tell: an object with no equality of its own (two equal ones
-    are two identities), an iterator (comparing it would consume it), or
-    a comparison that raises."""
-    import collections.abc
-    import decimal
-    import numbers
-    first_raised = isinstance(first, type) and issubclass(first, BaseException)
-    second_raised = isinstance(second, type) and issubclass(second, BaseException)
-    if first_raised or second_raised:
-        return first is second
-    try:
-        import numpy
-    except ImportError:
-        numpy = None
-    if numpy is not None:
-        if isinstance(first, numpy.ndarray) and isinstance(second, numpy.ndarray):
-            return _same_array(first, second)
-        if isinstance(first, numpy.generic) and isinstance(second, numpy.generic):
-            if type(first) is not type(second):
-                return False
-            first, second = first.item(), second.item()
-    if isinstance(first, decimal.Decimal) and isinstance(second, decimal.Decimal):
-        if first.is_nan() or second.is_nan():
-            return first.is_nan() and second.is_nan()
-        return first == second and first.is_signed() == second.is_signed()
-    if isinstance(first, float) and isinstance(second, float):
-        return _same_float(first, second)
-    if isinstance(first, complex) and isinstance(second, complex):
-        return _same_complex(first, second)
-    if (isinstance(first, (list, tuple)) and isinstance(second, (list, tuple))
-            and type(first) is type(second)):
-        if len(first) != len(second):
-            return False
-        verdicts = [_same_kind(a, b) for a, b in zip(first, second)]
-        if False in verdicts:
-            return False
-        return None if None in verdicts else True
-    if isinstance(first, dict) and isinstance(second, dict):
-        if first.keys() != second.keys():
-            return False
-        return _same_kind([first[k] for k in first], [second[k] for k in first])
-    pandas = sys.modules.get("pandas")
-    if pandas is not None and isinstance(first, (pandas.Series, pandas.DataFrame)):
-        if type(first) is not type(second):
-            return False
-        try:
-            if not first.index.equals(second.index):
-                return False
-            if isinstance(first, pandas.DataFrame) and not (
-                    first.columns.equals(second.columns)
-                    and first.dtypes.equals(second.dtypes)):
-                return False
-            if isinstance(first, pandas.Series) and first.dtype != second.dtype:
-                return False
-            return _same_array(first.to_numpy(), second.to_numpy())
-        except Exception:
-            return None
-    if isinstance(first, collections.abc.Iterator) \
-            or isinstance(second, collections.abc.Iterator):
-        return None
-    if type(first) is type(second) and type(first).__eq__ is object.__eq__:
-        return None
-    if isinstance(first, numbers.Number) and isinstance(second, numbers.Number) \
-            and type(first) is not type(second):
-        return False if first != second else None
-    try:
-        return bool(first == second)
-    except Exception:
-        return None
-
-
-def _outcome_text(outcome) -> str:
-    if isinstance(outcome, type) and issubclass(outcome, BaseException):
-        return f"raised {outcome.__name__}"
-    return f"returned {outcome!r}"
-
-
-def _deterministic_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                         trials: int):
-    """Empirical half of is_deterministic: two calls at the same inputs
-    (each given its own copy of the arguments) compared by kind
-    (`_same_kind`). Divergence falsifies with both outcomes as witness;
-    agreement across trials holds. A body that reads the clock, the
-    environment or a file (`_process_state.hidden_reads`) holds with a
-    note naming the read, since two back-to-back calls cannot see it
-    change."""
-    import copy
-
-    from ._process_state import hidden_reads
-    if not facts.params:
-        return None
-    target = facts.params[0]
-
-    def outcome(call_args):
-        try:
-            with _pinned_float_env():
-                return fn(*call_args)
-        except Exception as exc:
-            return type(exc)
-
-    def trial(args):
-        call_args = list(args)
-        call_args[facts.params.index(target)] = _synth(
-            facts.param_kinds.get(target, "unknown"), rng, domain.get(target))
-        placed = _placed(dict(zip(facts.params, call_args)), rng)
-        if placed is None:
-            return None
-        call_args = [placed[p] for p in facts.params]
-        try:
-            second_args = copy.deepcopy(call_args)
-        except Exception:
-            return None
-        first, second = outcome(call_args), outcome(second_args)
-        agree = _same_kind(first, second)
-        if agree is None:
-            # the comparison cannot tell; not a trial
-            uncomparable.append(first)
-            return None
-        if agree:
-            return True
-        shown = ", ".join(f"{p} = {_witness_value(v)}"
-                          for p, v in zip(facts.params, second_args))
-        returned = [not (isinstance(o, type) and issubclass(o, BaseException))
-                    for o in (first, second)]
-        if all(returned):
-            return f"at {shown}, two calls returned {first!r} and {second!r}"
-        return (f"at {shown}, the first call {_outcome_text(first)} and the "
-                f"second {_outcome_text(second)}")
-
-    uncomparable: list = []
-    result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
-    if result[0] == "skipped" and uncomparable:
-        import collections.abc
-        value = uncomparable[0]
-        if isinstance(value, collections.abc.Iterator):
-            kind = ("generators" if isinstance(value, collections.abc.Generator)
-                    else "iterators")
-            why = (f"two calls return {kind}, and comparing them would use "
-                   f"them up")
-        else:
-            name = type(value).__name__
-            why = (f"two calls return {name} objects, and {name} defines no "
-                   f"equality, so mathema cannot tell whether they agree. "
-                   f"Give {name} an __eq__, or claim what its fields are")
-        return ("skipped", 0, why)
-    reads = hidden_reads(fn, facts)
-    kept = _module_state_kept(fn, facts)
-    caveats = []
-    if reads:
-        caveats.append(f"the body reads {', '.join(reads)}, which does not "
-                       f"change between two back-to-back calls, so this "
-                       f"holds only while it stays as it is")
-    if kept:
-        names = ", ".join(f"the module-level {n}" for n in kept)
-        caveats.append(f"the body reads and writes {names}, so a later call "
-                       f"can differ where two back-to-back calls agree")
-    if result[0] == "holds" and caveats:
-        return (*result, None, {"mathema.caveat": "; ".join(caveats)})
-    return result
-
-
-def _module_state_kept(fn, facts) -> list:
-    """Intent:
-        The module-level values the body writes (a counter, a cache), by
-        name: state one call leaves for the next, which paired calls can
-        miss when it changes behaviour only after many calls.
-    """
-    import logging
-    import types
-
-    from .hazards import _state_writes
-    scope = module_scope(fn)
-    out: list = []
-    for w in _state_writes(facts):
-        name = str(w.get("target", "")).split(".")[0]
-        value = scope.get(name)
-        if (w.get("kind") in ("external_write", "external_method_call",
-                              "global")
-                and name in scope and name not in out
-                and not isinstance(value, (types.ModuleType, types.FunctionType,
-                                           types.BuiltinFunctionType,
-                                           types.MethodType, type,
-                                           logging.Logger,
-                                           logging.LoggerAdapter))):
-            # a logger emitting a record keeps nothing for the next call
-            out.append(name)
-    return out
 
 
 def _is_reproducible_derive(fn, facts, lhs_src: str, rhs_src: str,
                             relation: str, domain: dict | None = None,
                             tolerance: float | None = None):
     """Intent:
-        The structural half of is_reproducible (the WEAKER member of
-        the stateless cluster): reproducible UP TO an RNG seed, fix
-        the seed, rerun, get the same output. A deterministic body is
-        a fortiori reproducible, so this accepts determinism's own
-        proof (the lift); everything else falls to the paired
-        seed-restored trials.
+        is_reproducible by examination: as is_deterministic, with every
+        draw allowed only from the generator or seed the function takes
+        (`seed_parameter`), so all its randomness comes through that
+        parameter.
     """
-    proof = _is_deterministic_derive(fn, facts, lhs_src, rhs_src,
-                                     relation, domain=domain,
-                                     tolerance=tolerance)
-    if proof is None:
-        return None
-    from .symbolic import ProofResult
-    return ProofResult(
-        "proven",
-        sketch="deterministic by construction (the body lifts to a "
-               "closed form), and deterministic implies reproducible")
+    from ._examine import examine
+    generator = _generator_parameter(fn, facts)
+    effects = examine(fn, generator)
+    return _examined_verdict(effects.hidden_reads,
+                             [*effects.unknowns, *effects.order_sensitive],
+                             "draws only from the generator it is passed "
+                             "and reads nothing else its arguments do not "
+                             "carry" if generator else
+                             "reads nothing its arguments do not carry, "
+                             "no random generator included",
+                             effects, domain)
 
 
 #: parameter names read as a seed or a random generator
@@ -1743,148 +1370,6 @@ def seed_parameter(fn, facts) -> "str | None":
     return None
 
 
-def _seed_factory(fn, param: str):
-    """Intent:
-        A function from an integer seed to the value `param` is passed:
-        a fresh numpy `Generator`, `RandomState` or `random.Random`
-        seeded with it when the annotation names one, else the integer
-        itself.
-    """
-    import inspect
-    try:
-        annotation = callable_signature(fn).parameters[param].annotation
-    except (TypeError, ValueError, KeyError):
-        annotation = None
-    kind = (None if annotation is inspect.Parameter.empty
-            else _seed_annotation_kind(annotation))
-    if kind == "generator":
-        import numpy
-        return numpy.random.default_rng
-    if kind == "random_state":
-        import numpy
-        return numpy.random.RandomState
-    if kind == "random":
-        return random.Random
-    if param in ("rng", "random_state"):
-        # a generator parameter no annotation names: a numpy Generator,
-        # or the standard library's when numpy is absent
-        try:
-            import numpy
-            return numpy.random.default_rng
-        except ImportError:
-            return random.Random
-    return lambda s: s
-
-
-def _generator_text(value, seed: int) -> "str | None":
-    """Intent:
-        The call that rebuilds a generator a trial passed in
-        (`numpy.random.default_rng(1234)`), so a witness naming it can be
-        rerun; None for a value that is not one.
-    """
-    kinds = {"Generator": "numpy.random.default_rng",
-             "RandomState": "numpy.random.RandomState",
-             "Random": "random.Random"}
-    name = kinds.get(type(value).__name__)
-    return f"{name}({seed})" if name else None
-
-
-def _same_result(first, second) -> bool:
-    """Whether two results of the same call agree: equal values, equal
-    arrays, or NaN in the same places."""
-    try:
-        import numpy
-        if isinstance(first, numpy.ndarray) or isinstance(second,
-                                                          numpy.ndarray):
-            return bool(numpy.array_equal(numpy.asarray(first),
-                                          numpy.asarray(second),
-                                          equal_nan=True))
-    except ImportError:
-        pass
-    try:
-        if first == second:
-            return True
-    except Exception:
-        return False
-    return (isinstance(first, float) and isinstance(second, float)
-            and first != first and second != second)
-
-
-def _reproducible_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                        trials: int):
-    """Empirical half of is_reproducible: two calls at the same inputs
-    with the same seed must return the same value. When the function
-    takes a seed or a generator (`seed_parameter`), the seed is held
-    fixed across the pair (a fresh generator of the annotated type,
-    built from the same integer seed, for each call) and every other
-    argument is drawn once and passed to both. Otherwise the recognized
-    global RNG state (the stdlib `random` global state, and numpy's
-    legacy global state when numpy is importable) is captured and
-    restored between the two calls. Divergence falsifies with the pair
-    as witness; a raising point says nothing about seeds and is not
-    counted. Agreement across trials holds (specific seeds were tested,
-    not all)."""
-    if not facts.params:
-        return None
-    seed = seed_parameter(fn, facts)
-    target = seed if seed is not None else facts.params[0]
-    build = _seed_factory(fn, seed) if seed is not None else None
-
-    def rng_states():
-        states = [("random", random.getstate, random.setstate)]
-        try:
-            import numpy
-            states.append(("numpy", numpy.random.get_state,
-                           numpy.random.set_state))
-        except Exception:
-            pass
-        return states
-
-    def trial(args):
-        call_args = list(args)
-        index = facts.params.index(target)
-        if build is not None:
-            fixed = rng.randint(0, 2 ** 31 - 1)
-            call_args[index] = build(fixed)
-        else:
-            call_args[index] = _synth(
-                facts.param_kinds.get(target, "unknown"), rng,
-                domain.get(target))
-        placed = _placed(dict(zip(facts.params, call_args)), rng,
-                         keep=(target,) if build is not None else ())
-        if placed is None:
-            return None
-        call_args = [placed[p] for p in facts.params]
-        captured = [(setter, getter()) for _, getter, setter in rng_states()]
-        try:
-            with _pinned_float_env():
-                first = fn(*call_args)
-        except Exception:
-            return None   # a raising point says nothing about seeds
-        for setter, state in captured:
-            setter(state)
-        if build is not None:
-            call_args[index] = build(fixed)
-        try:
-            with _pinned_float_env():
-                second = fn(*call_args)
-        except Exception as exc:
-            return (f"same inputs, same seed: the first call returned "
-                    f"{first!r} but the second raised "
-                    f"{type(exc).__name__}")
-        if not _same_result(first, second):
-            if build is not None:
-                return (f"same inputs, the same {seed} ({fixed}), "
-                        f"different results: {first!r} then {second!r}, "
-                        f"the computation is not reproducible from its "
-                        f"seed")
-            return (f"same inputs, same restored RNG state, different "
-                    f"results: {first!r} then {second!r}, the "
-                    f"computation is not reproducible up to its seed")
-        return True
-
-    return _probe_trials(fn, facts, target, domain, rng,
-                         max(trials // 4, 8), trial)
 
 
 def _is_empty_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -2569,7 +2054,8 @@ class SafetyFamily(_NamedClaimFamily):
                  suggest_targets=None,
                  probe_route="probe:algorithmic",
                  whole_function: bool = False,
-                 reserved: "str | None" = None):
+                 reserved: "str | None" = None,
+                 examined_only: bool = False):
         family_routes = {"derive": _guarded_safety_derive(
             derive, outside_domain=base_name in _OUTSIDE_DOMAIN_FAMILIES)}
         if probe is not None:
@@ -2586,6 +2072,9 @@ class SafetyFamily(_NamedClaimFamily):
         # spelling is adjudicated as one claim, not expanded into the
         # conjunction over every numeric parameter
         self.whole_function = whole_function
+        # a member decided by examining the source alone: its derive half
+        # always answers, and nothing about it runs the function
+        self.examined_only = examined_only
         # a member defined but not adjudicated in this release: both
         # halves report `skipped` with this reason, so a claim naming it
         # is a known claim that is not yet decided, never a misspelling
@@ -4228,19 +3717,29 @@ def _repeatable_children(fn, facts, cj, domain: dict) -> list:
 def _is_repeatable_derive(fn, facts, lhs_src: str, rhs_src: str,
                           relation: str, domain: dict | None = None,
                           tolerance: float | None = None):
-    """Structural half of is_repeatable: decline. The roll-up is the
-    conjunction of its children's verdicts and holds at best."""
-    return None
-
-
-def _repeatable_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                      trials: int):
-    """Empirical half of is_repeatable(f): the roll-up (`_roll_up`) of
-    `_repeatable_children`."""
-    from ._premises import unguarded
-    fn = unguarded(fn)
-    return _roll_up(fn, facts, _repeatable_children(fn, facts, cj, domain),
-                    trials)
+    """Intent:
+        is_repeatable from its children (`_repeatable_children`), each
+        examined: falsified when a child is, with that child's witness;
+        proven when every child is proven; undecided otherwise, naming
+        the undecided children.
+    """
+    from .conjecture import check_conjectures
+    from .symbolic import ProofResult
+    children = _repeatable_children(fn, facts, None, domain or {})
+    probes = check_conjectures(fn, children, facts=facts)
+    meta = {"mathema.children": {p.name: p.verdict for p in probes}}
+    for p in probes:
+        if p.verdict == "falsified":
+            return ProofResult("disproven",
+                               sketch=f"{p.name} is falsified",
+                               counterexample=f"{p.name}: {p.counterexample}",
+                               meta=meta)
+    if all(p.verdict == "proven" for p in probes):
+        return ProofResult("proven", sketch="; ".join(
+            f"{p.name}: proven" for p in probes), meta=meta)
+    return ProofResult("undecided", sketch="; ".join(
+        f"{p.name}: {p.verdict} ({p.note or p.sketch or 'no reason given'})"
+        for p in probes if p.verdict != "proven"), meta=meta)
 
 
 def _roll_up(fn, facts, children: list, trials: int):
@@ -4384,19 +3883,15 @@ def _register_builtin_claim_families() -> None:
         "excluded_outside_domain", derive=_excluded_outside_domain_derive,
         probe=_excluded_probe))
     # the stateless cluster's name-keyed members (claim NAMES, not
-    # predicate relations). is_deterministic is the STRONG one: its
-    # empirical half is paired calls compared by kind. is_reproducible is
-    # weaker (up to an RNG seed): its probe runs paired calls with
-    # the recognized RNG states captured and restored.
-    _families.register("is_deterministic", SafetyFamily(
-        "is_deterministic", derive=_is_deterministic_derive,
-        probe=_deterministic_probe))
-    _families.register("is_reproducible", SafetyFamily(
-        "is_reproducible", derive=_is_reproducible_derive,
-        probe=_reproducible_probe))
-    _families.register("is_state_safe", SafetyFamily(
-        "is_state_safe", derive=_is_state_safe_derive,
-        probe=_state_probe))
+    # predicate relations), decided by examining the source only:
+    # is_deterministic (what flows in), is_reproducible (the same up to
+    # a seed or generator the function takes), is_state_safe (what
+    # flows out)
+    for _name, _derive in (("is_deterministic", _is_deterministic_derive),
+                           ("is_reproducible", _is_reproducible_derive),
+                           ("is_state_safe", _is_state_safe_derive)):
+        _families.register(_name, SafetyFamily(
+            _name, derive=_derive, whole_function=True, examined_only=True))
     # reserved: named now, adjudicated later, never suggested; a
     # platform (GPU, JIT, distributed) is named in the bracketed
     # computation descriptor, never in a family name
@@ -4414,4 +3909,4 @@ def _register_builtin_claim_families() -> None:
     # author, never battery-suggested
     _families.register("is_repeatable", SafetyFamily(
         "is_repeatable", derive=_is_repeatable_derive,
-        probe=_repeatable_probe, whole_function=True))
+        whole_function=True, examined_only=True))

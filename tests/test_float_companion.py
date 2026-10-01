@@ -282,8 +282,9 @@ def test_a_family_claim_spawns_no_float_companion():
                if (p.meta or {}).get("mathema.companion_of", "")
                .split("[", 1)[0] in registered]
     assert not spawned, spawned
-    assert probes["is_deterministic"].meta["mathema.float_companion"] == \
-        "none (a claim family adjudicates this claim)"
+    assert probes["is_deterministic"].route == "examine"
+    assert "mathema.float_companion" not in (probes["is_deterministic"].meta
+                                              or {})
     for law in ("scale_equivariant", "translation_equivariant"):
         assert probes[law].verdict == "proven"
         assert probes[f"{law}[float]"].verdict == "falsified", law

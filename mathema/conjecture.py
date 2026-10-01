@@ -3731,6 +3731,19 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # generic stage applies
             out.append(stamp(_adjudicate_equivalence(ctx, fn, facts)))
             continue
+        if getattr(ctx.family, "examined_only", False) and not (
+                cj.relation == families.claim_base_name(cj.name)
+                or (cj.relation == "==" and (cj.lhs or "").replace(" ", "")
+                    == (cj.rhs or "").replace(" ", ""))):
+            # a claim that shares the family's name and states something
+            # else is an ordinary claim
+            ctx.family = None
+        if getattr(ctx.family, "examined_only", False):
+            # decided by examining the source, on every route: nothing
+            # about this family runs the function
+            out.append(stamp(_adjudicate_examined(ctx, fn, facts),
+                             _cap=verdict_cap))
+            continue
         from .probing import LanguageDrawFailed
         try:
             if call_pins:
@@ -3752,26 +3765,6 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 derived = _adjudicate_derive(
                     ctx, fn, facts,
                     extensive or cj.route in ("best", "examine"))
-                if (derived is not None and derived.verdict == "falsified"
-                        and cj.route != "derive"
-                        and families.claim_base_name(cj.name)
-                        == "is_deterministic"
-                        and cj.relation == "=="
-                        and (cj.lhs or "").replace(" ", "")
-                        == (cj.rhs or "").replace(" ", "")):
-                    # a proof reads `f(x) == f(x)` as false only where
-                    # the call has no value (it raises, or returns
-                    # NaN), and determinism compares two calls by kind,
-                    # where those agree; the family's paired calls decide
-                    ctx.derive_undecided = Probe(
-                        cj.name, statement, "unknown", route="derive",
-                        sketch=derived.sketch,
-                        note=f"{ctx.note}; the derive route found inputs "
-                             f"where the call raises or returns NaN; two "
-                             f"calls there agree, so the paired calls "
-                             f"decide",
-                        meta={"mathema.derive_status": "undecided"})
-                    derived = None
                 if derived is not None:
                     out.append(stamp(derived, _cap=verdict_cap))
                     if ctx.companion is not None:
@@ -5100,6 +5093,49 @@ def _derive_line_coverage(fn, facts, domain):
     except (OSError, TypeError):
         return None
     return {first_line - 1 + ln for ln in live}
+
+
+def _adjudicate_examined(ctx: "_ClaimContext", fn, facts) -> "Probe":
+    """Intent:
+        The row for a family decided by examination alone: proven,
+        falsified with the examined site as the witness, or unknown with
+        what could not be read, on the examine route.
+    """
+    cj, statement, note = ctx.cj, ctx.statement, ctx.note
+    derive = ctx.family.routes()["derive"]
+    try:
+        proof = families.call_route(derive, fn, facts, cj.lhs, cj.rhs,
+                                    cj.relation, domain=ctx.cj_domain,
+                                    tolerance=cj.tolerance)
+    except TimeoutError:
+        raise
+    except Exception as exc:
+        return Probe(cj.name, statement, "unknown", route="examine",
+                     note=f"{note}; the examination failed: "
+                          f"{type(exc).__name__}: {exc}".lstrip("; "))
+    if proof is not None and cj.negated:
+        if proof.status == "proven":
+            proof = replace_proof(proof, "disproven",
+                                  "the positive claim is proven, so its "
+                                  "negation is falsified: " + (proof.sketch or ""))
+        elif proof.status == "disproven":
+            proof = replace_proof(proof, "proven",
+                                  "the positive claim is falsified, and that "
+                                  "evidence proves the negation: "
+                                  + (proof.counterexample or proof.sketch or ""))
+    meta = dict(getattr(proof, "meta", None) or {}) or None
+    if proof is None or proof.status not in ("proven", "disproven"):
+        why = (proof.sketch if proof is not None and proof.sketch
+               else "the examination could not decide it")
+        return Probe(cj.name, statement, "unknown", route="examine",
+                     sketch=getattr(proof, "sketch", None),
+                     note=f"{note}; {why}".lstrip("; "), meta=meta)
+    if proof.status == "proven":
+        return Probe(cj.name, statement, "proven", route="examine",
+                     sketch=proof.sketch, note=note, meta=meta)
+    return Probe(cj.name, statement, "falsified", route="examine",
+                 sketch=proof.sketch, counterexample=proof.counterexample,
+                 note=note, meta=meta)
 
 
 def _guard_interval(bound) -> "tuple | None":

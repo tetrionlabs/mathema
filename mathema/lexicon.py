@@ -1329,14 +1329,15 @@ def remember_fx_rate(rate: float) -> float:
 def noisy_quote(price: float) -> float:
     """A price with a little noise from the global random generator, what
     "state_safe_global_rng" and "deterministic_trap" demonstrate: the
-    draw advances shared state, and two calls disagree."""
+    draw advances shared state, and reads it as an input the arguments
+    do not carry."""
     return price * (1 + 0.001 * random.gauss(0, 1))
 
 
 def log_return(p0: float, p1: float) -> float:
     """The log return from p0 to p1, NaN where either price is not
-    positive, what "deterministic_nan_agrees" demonstrates: NaN from two
-    calls agrees."""
+    positive, what "deterministic_nan_agrees" demonstrates: a NaN answer is
+    still a deterministic one."""
     return math.log(p1 / p0) if p0 > 0 and p1 > 0 else math.nan
 
 
@@ -1363,8 +1364,8 @@ def quiet_pricing(price: float) -> float:
 
 def price_in_fx(price: float) -> float:
     """A price converted at the rate the environment holds, what
-    "deterministic_hidden_read" demonstrates: a read two back-to-back
-    calls cannot see change."""
+    "deterministic_hidden_read" demonstrates: a read of an input the
+    arguments do not carry."""
     return price * float(os.environ.get("FX_RATE", "1"))
 
 

@@ -33,9 +33,7 @@ def price_logging_every_level(x: float) -> float:
 
 
 def price_and_configure(x: float) -> float:
-    # force: the root logger already has handlers under a test runner,
-    # and basicConfig without it would change nothing
-    logging.basicConfig(level=logging.DEBUG, force=True)
+    logging.basicConfig(level=logging.DEBUG)
     return 2 * x
 
 
@@ -77,16 +75,17 @@ def test_a_logger_obtained_by_name_is_recognised():
         found, err)
 
 
-def test_a_handler_the_standard_library_does_not_define_blocks_the_proof():
+def test_a_handler_the_standard_library_does_not_define_is_named():
     # this test runner's own capturing handlers are such handlers
     p = _state_safe(price_with_audit_log)
-    assert p.route != "examine" and p.verdict == "holds", (p.verdict, p.route)
+    assert p.verdict == "unknown", (p.verdict, p.route)
+    assert "LogCaptureHandler.emit, which mathema cannot read" in p.note
 
 
 def test_configuring_logging_is_falsified_with_the_state_named():
     p = _state_safe(price_and_configure)
     assert p.verdict == "falsified", (p.verdict, p.note)
-    assert "logging's root configuration" in p.counterexample
+    assert "logging.basicConfig" in p.counterexample
 
 
 # --- only the standard library's own emission is benign ------------------------

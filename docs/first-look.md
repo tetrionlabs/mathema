@@ -53,7 +53,6 @@ mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
   FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
            counterexample alpha=7.32889, h=0.02: curvature estimate 4463.56 does not settle concave
   proven  is_deterministic: f(x, alpha) = f(x, alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
   proven  is_state_safe: f(x, alpha) = f(x, alpha)
   holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=192)
   holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=20)
@@ -81,9 +80,10 @@ demonstrates at `alpha=-3.8`. `permutation_invariant` fails because
 weighted" means. mathema does not know that is intentional, so it
 reports the counterexample and lets a reader judge it.
 
-Note `is_deterministic` came back `proven`, not `holds`. It did not need
-sampling: the body lifts to a closed symbolic form, and a closed form
-has no state to vary with. `n=192` elsewhere is not a flat constant
+Note `is_deterministic` and `is_state_safe` came back `proven` with no
+trial count. mathema never runs a function to answer them: it reads
+`ema`'s source and found nothing it reads beyond its arguments and
+nothing it writes outside the call. `n=192` elsewhere is not a flat constant
 either, it is a trial budget decided once per call from `ema`'s own
 structure and the domain it is checked over (128 by default, +32 for
 the loop, +32 for a domain as wide as `x`'s). See [mathema check](modes/check.md#the-trial-budget)
