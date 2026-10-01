@@ -1,0 +1,20 @@
+# Rows for the order statistics of a polars.Series, stated over Series
+# with nothing missing; the receiver of `returns.median()` is `a`.
+# quantile interpolates to the nearest element by default
+# (interpolation='nearest'), which the grammar's quantile does not
+# (it interpolates linearly), so its row states only the range the
+# value lies in. mathema's own test suite verifies each row against
+# the installed polars.
+compendium: polars
+versions: ">=1,<2"
+
+polars.Series.median:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, f(a) ~= median(a)"
+      note: "The mean of the two middle elements for an even length."
+
+polars.Series.quantile:
+  claims:
+    - name: within_range
+      statement: "for a in R^n \\ {∅}, quantile in [0, 1], min(a) <= f(a, quantile) <= max(a)"

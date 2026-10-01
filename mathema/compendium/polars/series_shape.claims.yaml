@@ -1,0 +1,51 @@
+# Rows for the polars.Series methods that move elements between
+# positions or read a window of them, stated over Series with nothing
+# missing; the receiver of `prices.shift()` is `a`. A shift leaves its
+# first `n` positions null, and diff, pct_change and a rolling window
+# read from one, so each row states the positions that carry a value,
+# read by slicing: `f(a)[1:]`. mathema's own test suite verifies each
+# row against the installed polars.
+compendium: polars
+versions: ">=1,<2"
+
+polars.Series.shift:
+  claims:
+    - name: shifted
+      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[1:] == a[:-1]"
+      note: "n defaults to 1; position 0 is null."
+    - name: shifted@n=-1
+      statement: "let n be -1, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[:-1] == a[1:]"
+      note: "A negative n shifts the other way; the last position is null."
+
+polars.Series.diff:
+  claims:
+    - name: differences
+      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] - a[:-1]"
+      note: "n defaults to 1; position 0 is null."
+
+polars.Series.pct_change:
+  claims:
+    - name: changes
+      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2 and min(abs(a)) > 0, f(a)[1:] ~= a[1:] / a[:-1] - 1"
+      note: "The relative change from the previous element; position 0 is null."
+
+polars.Series.rolling_mean:
+  claims:
+    - name: windows@window_size=2
+      statement: "let window_size be 2, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[1:] ~= (a[1:] + a[:-1]) / 2"
+      note: "The mean of each element and the one before it; position 0 is null."
+    - name: windows@window_size=3
+      statement: "let window_size be 3, for a in R^n \\ {∅}, assuming dim(a) >= 3, f(a)[2:] ~= (a[2:] + a[1:-1] + a[:-2]) / 3"
+      note: "The mean of each element and the two before it; positions 0 and 1 are null."
+
+polars.Series.rolling_sum:
+  claims:
+    - name: windows@window_size=2
+      statement: "let window_size be 2, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] + a[:-1]"
+      note: "The sum of each element and the one before it; position 0 is null."
+
+polars.Series.ewm_mean:
+  claims:
+    - name: recursion@adjust=False,alpha=0.5
+      statement: "let alpha be 0.5, let adjust be False, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a)[1:] ~= 0.5 * f(a)[:-1] + 0.5 * a[1:]"
+      note: "Unadjusted, each element is the previous mean moved halfway to the new element; element 0 is a[0]."
