@@ -1386,6 +1386,8 @@ def _interval_bounds(expr, domain: dict, params: dict):
         return None
 
     box = {}
+    # the symbols whose declared bound holds both its ends
+    closed: set = set()
     for p, sym in params.items():
         bound = domain.get(p)
         if bound == "C" or getattr(bound, "base_type", None) == "C":
@@ -1399,6 +1401,9 @@ def _interval_bounds(expr, domain: dict, params: dict):
             try:
                 sset = bound_to_sympy_set(bound)
                 lo, hi = _exact(sset.inf), _exact(sset.sup)
+                if sset.contains(sset.inf) is sympy.true \
+                        and sset.contains(sset.sup) is sympy.true:
+                    closed.add(sym)
             except TimeoutError:
                 raise
             except Exception:
@@ -1432,10 +1437,11 @@ def _interval_bounds(expr, domain: dict, params: dict):
     hull = _interval_hull(expr, box)
     if isinstance(hull, sympy.AccumBounds) \
             and not (hull.min.is_finite and hull.max.is_finite) \
-            and all(_finite_entry(box[s]) for s in expr.free_symbols):
-        # an infinite end over a bounded box: the expression may have a
-        # pole inside it, where it has no value, so the hull bounds
-        # nothing
+            and all(_finite_entry(box[s]) for s in expr.free_symbols) \
+            and all(s in closed for s in expr.free_symbols):
+        # an infinite end over a closed bounded box: no open end for it
+        # to be approached at, so the expression has a pole inside the
+        # box, where it has no value, and the hull bounds nothing
         return None
     return hull
 
