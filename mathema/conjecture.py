@@ -3672,7 +3672,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
     resolve_pseudo_infinity(None, pseudo_infinity)
     facts = _effective_facts(fn, facts)
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
-    domain = domain or {}
+    # an enforce_domain() guard is the function's domain: a parameter the
+    # caller's domain leaves open ranges over what the guard admits
+    domain = {**(getattr(fn, "__mathema_enforced_domain__", None) or {}),
+              **(domain or {})}
     # the exact same sampling setup probe()'s own remaining structural
     # checks use (seeded RNG, adaptive budget, critical-point hints),
     # computed at most once per call, from the function-level domain,
@@ -4122,6 +4125,19 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # generic stage applies
             out.append(stamp(_adjudicate_equivalence(ctx, fn, facts)))
             continue
+        if getattr(ctx.family, "examined_only", False) and not (
+                cj.relation == families.claim_base_name(cj.name)
+                or (cj.relation == "==" and (cj.lhs or "").replace(" ", "")
+                    == (cj.rhs or "").replace(" ", ""))):
+            # a claim that shares the family's name and states something
+            # else is an ordinary claim
+            ctx.family = None
+        if getattr(ctx.family, "examined_only", False):
+            # decided by examining the source, on every route: nothing
+            # about this family runs the function
+            out.append(stamp(_adjudicate_examined(ctx, fn, facts),
+                             _cap=verdict_cap))
+            continue
         from .probing import LanguageDrawFailed
         try:
             if call_pins:
@@ -4232,7 +4248,7 @@ def pseudo_infinity_condition(cj, facts, parent_domain: "dict | None",
     from .records import operational_infinity
     found = operational_infinity(cj)
     if (found is None or found.source == "claim"
-            or (probe.route or "").split(":", 1)[0] == "derive"):
+            or routes.is_proof_route(probe.route)):
         return probe.condition
     rest = probe.condition
     if not rest:
@@ -4300,18 +4316,33 @@ def _combine_conjunction(probes: list, name: str, statement: str,
     def corroboration(probe) -> dict:
         return {k: v for k, v in (probe.meta or {}).items()
                 if k.startswith("mathema.corroboration")
-                or k == "mathema.witness_executed"}
+                or k in ("mathema.witness_executed",
+                         "mathema.restore_failed")}
+
+    def with_caveats(note: str, parts) -> str:
+        caveats: list = []
+        for part in parts:
+            said = getattr(part, "_caveat", None)
+            if said and said not in caveats:
+                caveats.append(said)
+        return "; ".join([note, *caveats])
 
     for probe, label in zip(probes, labels):
         if probe.verdict == "falsified":
             cx = probe.counterexample
             return Probe(name, statement, "falsified", n=probe.n,
                          route=probe.route,
-                         counterexample=(f"{label}: {cx}" if cx else None),
+                         counterexample=(
+                             None if not cx
+                             # a witness that already names the part
+                             # (`at x = 1, ...`) needs no label before it
+                             else cx if f"{label} = " in str(cx)
+                             else f"{label}: {cx}"),
                          sketch=(f"{label}: {probe.sketch}" if probe.sketch
                                  else None),
-                         note=f"{what} falsified at {label}",
-                         meta=corroboration(probe))
+                         note=with_caveats(f"{what} falsified at {label}",
+                                           probes),
+                         meta=corroboration(probe) or None)
     verdicts = [p.verdict for p in probes]
     if all(v == "proven" for v in verdicts):
         # the definition rows each part's proof read through, in order
@@ -4337,10 +4368,11 @@ def _combine_conjunction(probes: list, name: str, statement: str,
         # an engine-bug flag on any part (a derive disproof nothing
         # reproduced) stays on the whole
         flagged = {k: v for p in probes for k, v in corroboration(p).items()
-                   if k.startswith("mathema.corroboration")}
+                   if k.startswith("mathema.corroboration")
+                   or k == "mathema.restore_failed"}
         uncorroborated = [lbl for p, lbl in zip(probes, labels)
                           if "UNCORROBORATED" in (p.note or "")]
-        note = f"every {unit} of the {what} holds"
+        note = with_caveats(f"every {unit} of the {what} holds", probes)
         if uncorroborated:
             note += (f"; derive reported an UNCORROBORATED disproof at "
                      f"{', '.join(uncorroborated)} (probable engine bug, "
@@ -5482,6 +5514,190 @@ def _derive_line_coverage(fn, facts, domain):
     return {first_line - 1 + ln for ln in live}
 
 
+def _adjudicate_examined(ctx: "_ClaimContext", fn, facts) -> "Probe":
+    """Intent:
+        The row for a family decided by examination alone: proven,
+        falsified with the examined site as the witness, or unknown with
+        what could not be read, on the examine route.
+    """
+    cj, statement, note = ctx.cj, ctx.statement, ctx.note
+    derive = ctx.family.routes()["derive"]
+    try:
+        proof = families.call_route(derive, fn, facts, cj.lhs, cj.rhs,
+                                    cj.relation, domain=ctx.cj_domain,
+                                    tolerance=cj.tolerance)
+    except TimeoutError:
+        raise
+    except Exception as exc:
+        return Probe(cj.name, statement, "unknown", route="examine",
+                     note=f"{note}; the examination failed: "
+                          f"{type(exc).__name__}: {exc}".lstrip("; "))
+    if proof is not None and cj.negated:
+        if proof.status == "proven":
+            proof = replace_proof(proof, "disproven",
+                                  "the positive claim is proven, so its "
+                                  "negation is falsified: " + (proof.sketch or ""))
+        elif proof.status == "disproven":
+            proof = replace_proof(proof, "proven",
+                                  "the positive claim is falsified, and that "
+                                  "evidence proves the negation: "
+                                  + (proof.counterexample or proof.sketch or ""))
+    meta = dict(getattr(proof, "meta", None) or {}) or None
+    if proof is None or proof.status not in ("proven", "disproven"):
+        why = (proof.sketch if proof is not None and proof.sketch
+               else "the examination could not decide it")
+        return Probe(cj.name, statement, "unknown", route="examine",
+                     sketch=getattr(proof, "sketch", None),
+                     note=f"{note}; {why}".lstrip("; "), meta=meta)
+    if proof.status == "proven":
+        return Probe(cj.name, statement, "proven", route="examine",
+                     sketch=proof.sketch, note=note, meta=meta)
+    return Probe(cj.name, statement, "falsified", route="examine",
+                 sketch=proof.sketch, counterexample=proof.counterexample,
+                 note=note, meta=meta)
+
+
+def _guard_interval(bound) -> "tuple | None":
+    """Intent:
+        `(lo, hi, closed_lo, closed_hi)` for a guard bound that is one
+        real interval (a pair or a real `Domain` of one such piece),
+        else None.
+    """
+    pieces = getattr(bound, "pieces", None)
+    if pieces is not None:
+        if getattr(bound, "base_type", "R") != "R" or len(pieces) != 1 \
+                or getattr(bound, "dims", ()):
+            return None
+        bound = pieces[0]
+    if isinstance(bound, (tuple, list)) and not isinstance(bound, frozenset) \
+            and len(bound) == 2:
+        try:
+            lo, hi = float(bound[0]), float(bound[1])
+        except (TypeError, ValueError):
+            return None
+        return (lo, hi, getattr(bound, "closed_lo", True),
+                getattr(bound, "closed_hi", True))
+    return None
+
+
+def _real_set(bound):
+    """Intent:
+        A real domain bound (an interval, a union of intervals, a
+        finite set of numbers, the reals or the integers) as the sympy
+        set it is, open ends kept open; None for anything else.
+    """
+    import sympy
+    if bound is None:
+        return None
+    single = _guard_interval(bound)
+    if single is not None:
+        lo, hi, closed_lo, closed_hi = single
+        return sympy.Interval(
+            -sympy.oo if lo == -math.inf else sympy.nsimplify(lo),
+            sympy.oo if hi == math.inf else sympy.nsimplify(hi),
+            not closed_lo, not closed_hi)
+    pieces = getattr(bound, "pieces", None)
+    base = getattr(bound, "base_type", None)
+    if base not in ("R", "Z", "N") or getattr(bound, "dims", ()):
+        return None
+    if not pieces:
+        return {"R": sympy.S.Reals, "Z": sympy.S.Integers,
+                "N": sympy.S.Naturals0}[base]
+    parts = []
+    for piece in pieces:
+        if isinstance(piece, frozenset):
+            try:
+                parts.append(sympy.FiniteSet(*[sympy.nsimplify(v)
+                                               for v in piece]))
+            except Exception:
+                return None
+            continue
+        found = _real_set(piece)
+        if found is None:
+            return None
+        parts.append(found)
+    joined = sympy.Union(*parts)
+    if base == "Z":
+        joined = joined & sympy.S.Integers
+    if base == "N":
+        joined = joined & sympy.S.Naturals0
+    return joined
+
+
+def _guard_refuses_part_of_the_claim(ctx: "_ClaimContext", fn, facts
+                                     ) -> "str | None":
+    """Intent:
+        Why the derive route leaves a claim to the executed guard, or
+        None: the function is wrapped by `enforce_domain()`, and some
+        call of f in the claim passes a parameter an argument that is
+        not shown, exactly, to stay inside the interval the guard
+        admits over the claim's own region.
+
+    Notes:
+        The argument's range is computed with sympy (`imageset` of the
+        argument over the claim's interval for its one variable), under
+        the wall-clock cap; anything it cannot show inside counts as
+        refused, since a proof must not reach inputs the function
+        refuses.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    if not enforced:
+        return None
+    names = {"f", getattr(fn, "__name__", "f")}
+    cj = ctx.cj
+    sides = [cj.lhs, cj.rhs, *[rhs for _l, _r, rhs in (cj.links or [])]]
+    for side in sides:
+        try:
+            tree = ast.parse(side or "", mode="eval")
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in names):
+                continue
+            for p, arg in zip(facts.params, node.args):
+                if p not in enforced or \
+                        facts.param_kinds.get(p) in SEQUENCE_KINDS:
+                    continue
+                text = ast.unparse(arg)
+
+                def inside(text=text, bound=enforced.get(p)):
+                    allowed = _real_set(bound)
+                    if allowed is None:
+                        return False
+                    variables = sorted(
+                        {n.id for n in ast.walk(ast.parse(text, mode="eval"))
+                         if isinstance(n, ast.Name)})
+                    if len(variables) != 1:
+                        return False
+                    (name,) = variables
+                    where = _real_set(ctx.cj_domain.get(name))
+                    if where is None:
+                        return False
+                    sym = sympy.Symbol(name, real=True)
+                    expr = sympy.sympify(text, locals={name: sym})
+                    if expr == sym:
+                        return where.is_subset(allowed) is True
+                    reached = sympy.imageset(sympy.Lambda(sym, expr), where)
+                    return reached.is_subset(allowed) is True
+
+                try:
+                    ok = _with_timeout(inside, FAST_TIMEOUT_SECONDS)
+                except TimeoutError:
+                    ok = False
+                except Exception:
+                    ok = False
+                if not ok:
+                    return (f"the claim calls f at {text}, which is not shown "
+                            f"to stay inside the domain its guard admits for "
+                            f"{p}, so the derive route does not prove it; the "
+                            f"executed guard decides")
+    return None
+
+
 def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
     """Intent:
         The parameter whose declared range the claim's premises leave
@@ -5805,6 +6021,16 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     # claim then gets adjudicated over a region its author excluded.
     assumption = (None if ctx.assumption is None else
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
+    refused = _guard_refuses_part_of_the_claim(ctx, fn, facts)
+    if refused is not None:
+        # the guard is the function's domain: a claim reaching inputs it
+        # refuses is not the mathematics of the body alone, and the
+        # executed guard decides it
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; {refused}",
+            meta={"mathema.derive_status": "undecided"})
+        return None
     family_derive = family.routes().get("derive") if family is not None else None
     # literals a double does not read exactly reach only the ordinary
     # prover exactly (`exact_literal_text`); every other derive route
@@ -6741,8 +6967,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     if algo_route is not None:
         # the probe is registered under "probe:algorithmic", but a member
         # may name a more specific mechanism to stamp (fuzz + shrink ->
-        # "probe:minimal_example"); evidence_rank folds any subroute back
-        # to the "probe" rung, so this is descriptive, not a strength claim.
+        # "probe:minimal_example"); the stamped subroute has its own rung
+        # on EVIDENCE_LADDER.
         probe_route = getattr(family, "probe_route", "probe:algorithmic")
         setup = sampling()
         from . import _premises
@@ -6773,7 +6999,18 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             algo_meta = copy.deepcopy(algo_meta) if algo_meta else {}
             if algo_meta.get("mathema.sampled"):
                 note = f"{note}; {algo_meta['mathema.sampled']}".lstrip("; ")
+            # a family's caveat (a hidden input, a restore that failed) is
+            # a sentence in the row's note, never a key of its own; it
+            # rides on the Probe, outside the record, for a function-wide
+            # conjunction to carry into its own note
+            caveat = algo_meta.pop("mathema.caveat", None)
+            if caveat:
+                note = f"{note}; {caveat}".lstrip("; ")
             algo_meta = algo_meta or None
+
+            def _with_caveat(row):
+                row._caveat = caveat
+                return row
             if verdict == "proven":
                 # an ESTABLISHED empirical examination: the guard only
                 # lets this through with the exhaustive-coverage
@@ -6796,16 +7033,18 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     "is_recursion_safe": "implementation:recursion-depth",
                 }.get(families.claim_base_name(cj.name)) or (
                     algo_meta or {}).get("mathema.cause")
-                return Probe(cj.name, statement, "falsified", n=checked,
-                             route=probe_route, counterexample=cx, note=note,
-                             stratum=({"blame": "implementation",
-                                       "cause": family_cause,
-                                       "witness": cx}
-                                      if family_cause else None),
-                             meta=algo_meta)
+                return _with_caveat(Probe(
+                    cj.name, statement, "falsified", n=checked,
+                    route=probe_route, counterexample=cx, note=note,
+                    stratum=({"blame": "implementation",
+                              "cause": family_cause,
+                              "witness": cx}
+                             if family_cause else None),
+                    meta=algo_meta))
             if verdict == "holds":
-                return Probe(cj.name, statement, "holds", n=checked,
-                             route=probe_route, note=note, meta=algo_meta)
+                return _with_caveat(Probe(
+                    cj.name, statement, "holds", n=checked,
+                    route=probe_route, note=note, meta=algo_meta))
             if verdict == "unknown":
                 # the family examined the function and could not
                 # settle it (a roll-up with an unsettled child): the
@@ -6988,6 +7227,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     literal_args.update({p: v for p, v in {**kept_defaults,
                                            **call_pins}.items()
                          if p in kinds and p not in literal_args})
+    # the sampling line states only the parameters actually drawn; the
+    # held ones are stated by the defaults note
+    sampled_kinds = {p: k for p, k in kinds.items()
+                     if p not in kept_defaults and p not in call_pins}
     # the domain box's corners replay with the recorded counterexamples,
     # before any random sampling
     pinned += [c for c in _domain_corners(kinds, cj_domain, literal_args)
@@ -7369,7 +7612,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # 5.6) with the clamp remedy instead of the domain one.
             slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
             boundary = False
-            for direction in (1.0, -1.0):
+            # a refusal by the function's own mathema guard is the guard
+            # doing its job at its own boundary, never a float wobble
+            from .authoring import DomainError as _GuardRefusal
+            refused = isinstance(e, _GuardRefusal)
+            for direction in ((1.0, -1.0) if not refused else ()):
                 jenv = dict(env)
                 for p in kinds:
                     v = jenv[p]
@@ -7573,7 +7820,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               eval(code_r, {"__builtins__": {}}, jenv)),
                 env, [*array_names, *(p for p in kinds
                                       if isinstance(env.get(p), float))],
-                (lv, rv))
+                (lv, rv), domain=cj_domain)
             call_raised[0] = call_nan[0] = call_inf[0] = None
             if allowance > 0 and relation_holds_elementwise(
                     lv, rv, cj.relation, slack + allowance,
@@ -7630,7 +7877,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,
                      counterexample=cx, note=note, stratum=cx_stratum,
                      meta={"mathema.sampling": _sampling_shorthand(
-                               kinds, cj_domain, checked, critical_hints,
+                               sampled_kinds, cj_domain, checked, critical_hints,
                                truncated_hints, observed_lengths,
                                set(premise_draws), runtime_names, nested,
                                lap_floor),
@@ -7651,7 +7898,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 f"magnitudes").lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
-                           kinds, cj_domain, checked, critical_hints,
+                           sampled_kinds, cj_domain, checked, critical_hints,
                            truncated_hints, observed_lengths,
                            set(premise_draws), runtime_names, nested,
                            lap_floor),
@@ -7663,7 +7910,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
 check = check_conjectures
 
 EVIDENCE_LADDER = (
-    ("derive",),
+    # a proof: from the lifted body, from the function's structure
+    # (`examine`), over every point of a finite region (brute force),
+    # and a mathematics-only proof with no float companion
+    ("derive", "examine", "derive:brute_force", "derive:math_only"),
     ("derive:extensive",),
     # A reserved, not-yet-built "numerical" evidence tier belongs here,
     # between derive:extensive and the informed-probing rung below,
@@ -7672,8 +7922,11 @@ EVIDENCE_LADDER = (
     # stronger than sampling but still short of a symbolic proof. Named
     # here so the slot isn't accidentally claimed by something smaller
     # first.
-    ("probe:semi_analytical", "probe:algorithmic"),
-    ("probe",),
+    ("probe:semi_analytical", "probe:algorithmic", "probe:minimal_example",
+     "probe:counterfactual"),
+    # a compendium definition row (`axiom`) is trusted testimony, as
+    # strong as a plain holds and never stronger
+    ("probe", "probe:lifted_numeric", "axiom"),
     ("documented",),
     ("declared",),
 )
@@ -7684,10 +7937,15 @@ EVIDENCE_LADDER = (
 # intent-provenance classes ("Where intent comes from"), included on
 # the same scale since both answer "how much should a reader trust
 # this." Each element is a tuple of one or more routes tied at that
-# rank, `probe:semi_analytical` (critical-point-informed sampling)
-# and `probe:algorithmic` (a family-provided technique, e.g. pairwise
-# monotonicity) are both "informed rather than blind" probing, from
-# different information sources, neither stronger than the other.
+# rank. `probe:semi_analytical` (critical-point-informed sampling),
+# `probe:algorithmic` (a family-provided technique, e.g. pairwise
+# monotonicity), `probe:minimal_example` (fuzzing with shrinking) and
+# `probe:counterfactual` (a policy row decided by refilling) are all
+# "informed rather than blind" probing, from different information
+# sources, none stronger than another. `probe:lifted_numeric` is
+# sampling of a numerically lifted body, level with `probe`. A
+# definition row's `axiom` route ranks with trusted testimony, level
+# with `probe`: a definition is trusted, not adjudicated.
 #
 # This ranks *how a positive verdict was reached*, not how much to
 # trust a `falsified` verdict: a claim proven true by derive is
@@ -7713,14 +7971,24 @@ def evidence_rank(route_or_class: str) -> int:
         strong as an ordinary route="probe" claim, it just tried
         derive first and reports why it fell back), but a suffix can
         also name a genuinely stronger rung of its own, as
-        `probe:algorithmic`/`probe:semi_analytical` do here. A value
+        `probe:algorithmic`/`probe:semi_analytical` do here. An unlisted
+        `derive:<mechanism>` (a language strategy's) ranks as the
+        default path ranks a wider mechanism, with `derive:extensive`;
+        `derive:language` (no mechanism named) ranks with `derive`. A value
         this ladder doesn't recognize at all (a custom route from a
         different verification technique, per record-schema.md's "Open
         for extension") ranks last, weaker than every known value,
-        never stronger.
+        never stronger. A definition row's `axiom` ranks with trusted
+        testimony, level with `probe`.
     """
-    base = route_or_class.split(":", 1)[0]
-    for candidate in (route_or_class, base):
+    base, _, sub = route_or_class.partition(":")
+    candidates = [route_or_class]
+    if base == "derive" and sub and sub not in ("language", "domain_split"):
+        # a language strategy's `derive:<mechanism>`: ranked as the
+        # default path ranks a wider mechanism, derive:extensive
+        candidates.append("derive:extensive")
+    candidates.append(base)
+    for candidate in candidates:
         for rank, rung in enumerate(EVIDENCE_LADDER):
             if candidate in rung:
                 return rank

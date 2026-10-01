@@ -263,11 +263,15 @@ def _markers(hint) -> tuple:
     return tuple(out)
 
 
-def domain_from_signature(fn) -> dict:
+def domain_from_signature(fn, guards: bool = True) -> dict:
     """Per-parameter domain implied by a bound marker (Probability,
     Positive, InRange, UnitBall, ...) on that parameter, ready to merge
     into `domain=` exactly like an explicitly declared one. A parameter
-    with no marker is absent.
+    with no marker is absent. With `guards`, a function
+    `enforce_domain()` wraps also declares the domain its guard checks,
+    and one `enforce_dimensions()` wraps the space its claims bind for
+    each parameter it guards (entries as well as shape), so every draw
+    is one the guard admits.
 
     A bound marker also asserts the value is PRESENT: the domain
     excludes the missing sentinel (nan/None/missing), so a marked
@@ -285,6 +289,23 @@ def domain_from_signature(fn) -> dict:
             if bound is not None:
                 out[name] = Domain(base_type="R", pieces=(bound,),
                                    excluded=frozenset({MISSING}))
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) if guards else None
+    for name, bound in (enforced or {}).items():
+        out[name] = tuple(bound) if isinstance(bound, list) else bound
+    shaped = (getattr(fn, "__mathema_enforced_dimensions__", None)
+              if guards else None)
+    if shaped:
+        # the space a claim binds for a parameter enforce_dimensions()
+        # guards states its entries too (`[0, 1]^30`)
+        from .authoring import _domain_from_declared_claims
+        try:
+            spaces = _domain_from_declared_claims(fn, None, ".")
+        except Exception:
+            spaces = {}
+        for name in shaped:
+            space = spaces.get(name)
+            if name not in out and getattr(space, "dims", ()):
+                out[name] = space
     return out
 
 

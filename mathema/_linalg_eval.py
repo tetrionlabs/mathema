@@ -221,7 +221,8 @@ _NUDGE = 2.0 ** -50
 _ROUNDOFF_FACTOR = 64.0
 
 
-def roundoff_allowance(evaluate, env: dict, names, sides) -> float:
+def roundoff_allowance(evaluate, env: dict, names, sides,
+                       domain: "dict | None" = None) -> float:
     """Intent:
         The round-off one draw of a claim can carry: every input named
         in `names` (arrays, table columns and float numbers) is moved
@@ -236,29 +237,52 @@ def roundoff_allowance(evaluate, env: dict, names, sides) -> float:
         moves by far more than its own value's last place, since the
         entries it cancels are large; the allowance measures that
         cancellation at the draw rather than assuming a scale.
+        An entry whose move would leave its name's bound in `domain`
+        keeps its value, so the recomputation never calls the function
+        outside the claim's domain.
     """
     import random
     np = _numpy()
     if np is None:
         return 0.0
     rng = random.Random(0x5EED)
+    from .domain import domain_contains
 
-    def nudged(value):
+    def inside(moved: float, original: float, bound) -> float:
+        if bound is None:
+            return moved
+        element = bound
+        if getattr(bound, "dims", ()):
+            import dataclasses
+            element = dataclasses.replace(bound, dims=())
+        try:
+            return moved if domain_contains(moved, element) else original
+        except Exception:
+            return original
+
+    def nudged(value, bound=None):
         if isinstance(value, Table):
-            return Table({k: nudged(v) for k, v in value.items()})
+            return Table({k: nudged(v, bound) for k, v in value.items()})
         if is_array(value) and value.dtype.kind == "f":
             signs = np.array([rng.choice((-1.0, 1.0))
                               for _ in range(value.size)]).reshape(value.shape)
-            return value * (1.0 + signs * _NUDGE)
+            moved = value * (1.0 + signs * _NUDGE)
+            if bound is None:
+                return moved
+            flat_moved, flat = moved.ravel(), value.ravel()
+            kept = np.array([inside(float(m), float(o), bound)
+                             for m, o in zip(flat_moved, flat)])
+            return kept.reshape(value.shape).astype(value.dtype)
         if isinstance(value, float):
-            return value * (1.0 + rng.choice((-1.0, 1.0)) * _NUDGE)
+            return inside(value * (1.0 + rng.choice((-1.0, 1.0)) * _NUDGE),
+                          value, bound)
         return value
     moved = [0.0, 0.0]
     for _ in range(3):
         jenv = dict(env)
         for name in names:
             if name in jenv:
-                jenv[name] = nudged(jenv[name])
+                jenv[name] = nudged(jenv[name], (domain or {}).get(name))
         try:
             with np.errstate(all="ignore"):
                 new = evaluate(jenv)

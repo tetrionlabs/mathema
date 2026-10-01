@@ -198,6 +198,11 @@ Everything a provider may import lives in
 | `families` | `SafetyFamily`, `OutputPredicateFamily`, `ProofResult`, `probe_trials`, `call_with_target`, `synth_other_params`, `format_point`, `pinned_float_env` |
 | `sampling` | `sample_bound`, `shrink` |
 
+`evidence_rank` ranks a route or an intent class, strongest lowest. A
+compendium definition row's route, `axiom`, ranks with trusted testimony,
+level with `probe`: a definition is trusted, not adjudicated, so it never
+ranks above a plain `holds`.
+
 Import from `mathema.interfaces.extension`, not from the module a name
 happens to live in today. The module is free to move; the name on this
 surface is not.

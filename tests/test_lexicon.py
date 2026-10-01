@@ -35,13 +35,13 @@ _LANGUAGE_ROWS = (
 #: the verdict every row with an example function lands on, or
 #: `(verdict, text the witness contains)`
 PINNED: dict = {
-    "abs_bars": "falsified",
+    "abs_bars": "proven",
     "abs_bars_compound": "proven",
     "assuming_inequality": "proven",
     "assuming_is_defined": "proven",
     "assuming_is_defined_pinned": "proven",
     "assuming_is_defined_postfix": "proven",
-    "assuming_named_claim": "skipped",
+    "assuming_named_claim": "proven",
     "bound_function_nested_in_f": "proven",
     "certificate_convex_lower": "proven",
     "certificate_convex_upper": "proven",
@@ -57,8 +57,8 @@ PINNED: dict = {
     "domain_blackboard_reals": "proven",
     "domain_closed_interval": "proven",
     "domain_open_interval": "proven",
-    "domain_subset_integer": "skipped",
-    "domain_subset_symbol": "skipped",
+    "domain_subset_integer": "proven",
+    "domain_subset_symbol": "proven",
     "finite_domain_discrete_set": "proven",
     "finite_domain_pinned": "proven",
     "finite_domain_small_range": "proven",
@@ -83,9 +83,8 @@ PINNED: dict = {
     "latex_varphi": "proven",
     "let_alias": "proven",
     "let_alias_for_under_test": "proven",
-    # f(x) does not bind to gibbs_free_energy(dh, t, ds): misspecified
-    "let_free_var_closed": "skipped:misspecified",
-    "let_free_var_typed": "skipped:misspecified",
+    "let_free_var_closed": "proven",
+    "let_free_var_typed": "proven",
     "matrix_determinant_bars_compound": "proven",
     "membership_interval_reduces_to_chain": "proven",
     "multiply_dot": "proven",
@@ -96,12 +95,31 @@ PINNED: dict = {
     "power_superscript": "proven",
     "power_superscript_negative": "proven",
     "premise_relates_two_params": "proven",
-    "raises_typed": "skipped:misspecified",
+    # a function that always raises holds; one that raises only below
+    # zero is falsified at zero, and proves over the negative numbers
+    "raises_typed": {"removed_endpoint": "holds",
+                     "checked_sqrt": ("falsified",
+                                      "returned 0.0 instead of raising")},
+    "raises_typed_region": "proven",
+    "state_safe_env_write": ("falsified", "changes os.environ"),
+    "state_safe_global_rng": ("falsified",
+                              "advances the shared random generator"),
+    "deterministic_trap": ("falsified",
+                           "draws from the shared random generator"),
+    "deterministic_nan_agrees": "proven",
+    "deterministic_hidden_read": ("falsified", "reads os.environ"),
+    "enforce_domain_guard": "proven",
+    "enforce_domain_guard_unbound": "proven",
+    "state_safe_logging": "proven",
+    "state_safe_logging_config_trap": ("falsified",
+                                       "_pricing_log.setLevel"),
+    "state_safe_passed_generator": "proven",
+    "reproducible_passed_generator": "proven",
     "real_domain_is_not_finite": "holds",
     "recurrence_identity": "proven",
     "relation_approx_unicode": "proven",
-    "relation_eq": "falsified",
-    "relation_le_unicode": "falsified",
+    "relation_eq": "proven",
+    "relation_le_unicode": "proven",
     "sigmoid_bounded_above": "proven",
     "sigmoid_bounded_below": "proven",
     "sigmoid_density_integrates": "proven",
@@ -486,3 +504,39 @@ def test_every_row_lands_on_its_pinned_verdict():
     expected = {**{key: None for key in LEXICON}, **PINNED}
     assert lexicon_checks.check_verdicts(CORE, expected) == []
 
+
+
+def test_the_equality_row_is_proven_and_its_float_companion_is_the_computation():
+    import mathema
+    from mathema.lexicon import celsius_round_trip
+    rows = {p.name: p for p in mathema.check(
+        celsius_round_trip, claims=[LEXICON["relation_eq"]]).probes}
+    (name,) = [n for n in rows if n.endswith("[float]")]
+    main = rows[name[:-len("[float]")]]
+    assert (main.verdict, main.route) == ("proven", "derive")
+    assert rows[name].verdict == "falsified", rows[name].note
+
+
+def test_the_hidden_read_row_names_the_read():
+    from mathema.conjecture import check_conjectures, claim
+    from mathema.lexicon import price_in_fx
+    (p,) = check_conjectures(price_in_fx,
+                             [claim(LEXICON["deterministic_hidden_read"])])
+    assert p.verdict == "falsified"
+    assert "price_in_fx reads os.environ" in p.counterexample, p
+
+
+@pytest.mark.parametrize("key, query", [
+    ("raises_typed_region", "raises in a range"),
+    ("state_safe_env_write", "environment variable"),
+    ("state_safe_global_rng", "global random"),
+    ("deterministic_trap", "same answer twice"),
+    ("deterministic_nan_agrees", "nan determinism"),
+    ("deterministic_hidden_read", "hidden input"),
+    ("enforce_domain_guard", "enforce_domain guard"),
+])
+def test_the_rows_for_state_and_determinism_are_found_by_what_a_reader_types(
+        key, query):
+    from mathema.lexicon import TAGS, search
+    assert TAGS.get(key), key
+    assert key in [k for k, _law in search(query, limit=8)], (key, search(query))

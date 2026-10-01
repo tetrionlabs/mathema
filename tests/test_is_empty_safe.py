@@ -69,11 +69,11 @@ def test_deterministic_proves_by_construction_for_a_lifted_body():
         line, [claim("f(x) == f(x)", name="is_deterministic",
                      route="best")],
         facts=analyze_source(line))
-    assert probe.verdict == "proven"
-    assert "deterministic by construction" in probe.sketch
+    assert (probe.verdict, probe.route) == ("proven", "examine")
+    assert "reads nothing its arguments do not carry" in probe.sketch
 
 
-def test_deterministic_falls_to_the_empirical_loop_for_stateful_bodies():
+def test_deterministic_is_falsified_by_a_draw_from_the_shared_generator():
     import random as _random
 
     def jittery(x: float) -> float:
@@ -83,5 +83,6 @@ def test_deterministic_falls_to_the_empirical_loop_for_stateful_bodies():
                         route="best")],
         facts=analyze_source(jittery))
     assert probe.verdict == "falsified"
-    # the generic empirical loop (not the family battery) decided this
-    assert probe.route == "probe"
+    # examined from the source, never run
+    assert probe.route == "examine"
+    assert "draws from the shared random generator" in probe.counterexample

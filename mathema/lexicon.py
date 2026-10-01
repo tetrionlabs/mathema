@@ -42,10 +42,14 @@ this module exercises."""
 from __future__ import annotations
 
 import functools
+import logging
+import math
+import os
+import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .authoring import claims as claims_decorator, enforce_dimensions
+from .authoring import claims as claims_decorator, enforce_dimensions, enforce_domain
 
 try:
     import numpy as np
@@ -130,6 +134,13 @@ LEXICON: dict[str, str] = {
     "dim_premise_against_fixed":
         "for r in [0, 1]^12, assuming len(r) == 5, f(r) >= 0",
     "domain_closed_interval": "for x in [0, 1], f(x) >= 0",
+    # a function @enforce_domain() guards is checked over the domain its
+    # guard admits: a blend of x with 1 never exceeds x when x is at
+    # least 1
+    "enforce_domain_guard": "for alpha in [0, 1], x in [1, 10], f(x, alpha) <= x",
+    # a parameter the claim leaves unbound ranges over what the guard
+    # admits: alpha in [0, 1] here comes from the guard alone
+    "enforce_domain_guard_unbound": "for x in [1, 10], f(x, alpha) <= x",
     "domain_open_interval": "for x in (0, 1), f(x) >= 0",
     "domain_subset_integer": "for n in [0, 100] subset Z, f(n) >= 0",
     # a subscripted sequence element: no algebraic reading, carried
@@ -144,6 +155,8 @@ LEXICON: dict[str, str] = {
     # adjudicate it yet)
     "outcome_reference": "f(x) > 0 => self.stays_positive",
     "raises_typed": "raises(f(x), ValueError)",
+    # the same claim over a region where the function does raise
+    "raises_typed_region": "for x in [-10, -1], raises(f(x), ValueError)",
     "is_pole_safe": "is_pole_safe(x)",
     "negated_predicate": "not is_pole_safe(x)",
     "is_extremity_safe": "is_extremity_safe(x)",
@@ -157,6 +170,24 @@ LEXICON: dict[str, str] = {
     # the function-wide spelling: the predicate over f is the
     # conjunction over every numeric parameter
     "safety_predicate_function_wide": "is_missing_safe(f)",
+    # state safety watches the process too: an environment write, a draw
+    # from the global random generator
+    "state_safe_env_write": "is_state_safe(f)",
+    "state_safe_global_rng": "is_state_safe(f)",
+    # determinism is two calls at the same inputs, compared by kind: a
+    # global draw differs, NaN agrees with NaN, and a read of the
+    # environment holds with a note saying two calls cannot see it change
+    "deterministic_trap": "is_deterministic(f)",
+    "deterministic_nan_agrees": "is_deterministic(f)",
+    "deterministic_hidden_read": "is_deterministic(f)",
+    # emitting a log record through the standard library is not a state
+    # change; changing a logger's level is
+    "state_safe_logging": "is_state_safe(f)",
+    "state_safe_logging_config_trap": "is_state_safe(f)",
+    # drawing from a generator the caller passes in moves the caller's
+    # own generator, not shared state; the same seed gives the same draw
+    "state_safe_passed_generator": "is_state_safe(f)",
+    "reproducible_passed_generator": "is_reproducible(f)",
     # matrix structure predicates: a property of a matrix VALUE, on a
     # bare parameter (a precondition) or an f(...) output. The postfix
     # `A is symmetric` is sugar folding to the canonical call form.
@@ -625,13 +656,18 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "domain_closed_interval",
         "domain_open_interval", "domain_subset_integer",
         "relation_indexing", "relation_boolean_rhs",
-        "outcome_reference", "raises_typed",
+        "outcome_reference", "raises_typed", "raises_typed_region",
         "is_pole_safe", "negated_predicate", "is_extremity_safe",
         "is_representation_safe", "is_empty_safe",
         "is_arbitrary_input_safe", "is_arbitrary_input_safe_postfix",
         "is_compendium_safe", "is_compendium_safe_scoped",
         "is_sorted_output", "output_never_none",
-        "safety_predicate_function_wide", "matrix_symmetric",
+        "safety_predicate_function_wide", "state_safe_env_write",
+        "state_safe_global_rng", "deterministic_trap",
+        "deterministic_nan_agrees", "deterministic_hidden_read",
+        "state_safe_logging", "state_safe_logging_config_trap",
+        "state_safe_passed_generator", "reproducible_passed_generator",
+        "matrix_symmetric",
         "matrix_symmetric_postfix", "matrix_symmetric_output",
         "matrix_positive_definite", "matrix_finite",
         "matrix_determinant_product", "matrix_transpose_product",
@@ -682,7 +718,9 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "latex_geqslant", "latex_varepsilon", "latex_varphi",
         "latex_left_right_bars"),
     "domains": (
-        "domain_excluded_point", "domain_discrete_strings",
+        "domain_excluded_point", "enforce_domain_guard",
+        "enforce_domain_guard_unbound",
+        "domain_discrete_strings",
         "domain_natural_numbers", "domain_complex", "relation_approx",
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex",
@@ -745,6 +783,28 @@ SECTIONS: dict[str, tuple[str, ...]] = {
 # find `%`, and someone looking for "for all" should find `∀`. Keep it
 # to vocabulary a newcomer would actually type.
 TAGS: dict[str, tuple[str, ...]] = {
+    "enforce_domain_guard_unbound": ("guard", "unbound parameter",
+                                     "enforce_domain"),
+    "state_safe_logging": ("logging", "log record", "state", "audit log"),
+    "state_safe_logging_config_trap": ("logging", "log level", "state",
+                                       "trap"),
+    "state_safe_passed_generator": ("generator", "rng", "random", "state"),
+    "reproducible_passed_generator": ("reproducible", "generator", "seed",
+                                      "rng"),
+    "raises_typed_region": ("raises", "exception", "in a range", "region",
+                            "precondition"),
+    "state_safe_env_write": ("state", "side effect", "environment variable",
+                             "os.environ", "trap"),
+    "state_safe_global_rng": ("state", "side effect", "global random",
+                              "random seed", "trap"),
+    "deterministic_trap": ("deterministic", "same answer twice", "random",
+                           "falsified", "trap"),
+    "deterministic_nan_agrees": ("deterministic", "nan determinism",
+                                 "missing", "same answer twice"),
+    "deterministic_hidden_read": ("deterministic", "hidden input",
+                                  "environment", "clock", "file"),
+    "enforce_domain_guard": ("enforce_domain guard", "guard", "decorator",
+                             "domain", "validation"),
     "norm_bars_euclidean": ("norm", "euclidean", "length", "double bars"),
     "norm_bars_two": ("norm", "subscript", "euclidean", "L2"),
     "norm_bars_one": ("norm", "subscript", "manhattan", "taxicab", "L1"),
@@ -1236,9 +1296,98 @@ def nearly_identity(x: float) -> float:
 
 
 def double(x: float) -> float:
-    """f(x) = 2x, the plain function every single-construct LEXICON
-    entry above (relation/power/abs/domain shapes) is checked against."""
+    """f(x) = 2x, the plain function most single-construct LEXICON
+    entries above (power and domain shapes, the notation) are checked
+    against."""
     return 2 * x
+
+
+def celsius_round_trip(x: float) -> float:
+    """A temperature in Celsius converted to Fahrenheit and back, what
+    "relation_eq" demonstrates: `f(x) == x`, an exact equality, proven as
+    mathematics, while its `[float]` companion is the computation."""
+    return ((x * 9 / 5) + 32 - 32) * 5 / 9
+
+
+def checked_sqrt(x: float) -> float:
+    """A square root that refuses a negative input, the second function
+    for "raises_typed": it raises only below zero, so the unbounded claim
+    is falsified at zero, and "raises_typed_region" proves it over the
+    negative numbers."""
+    if x < 0:
+        raise ValueError("negative")
+    return math.sqrt(x)
+
+
+def remember_fx_rate(rate: float) -> float:
+    """Stores an exchange rate in the environment for later calls, what
+    "state_safe_env_write" demonstrates: a write to os.environ."""
+    os.environ["FX_RATE"] = str(rate)
+    return rate
+
+
+def noisy_quote(price: float) -> float:
+    """A price with a little noise from the global random generator, what
+    "state_safe_global_rng" and "deterministic_trap" demonstrate: the
+    draw advances shared state, and reads it as an input the arguments
+    do not carry."""
+    return price * (1 + 0.001 * random.gauss(0, 1))
+
+
+def log_return(p0: float, p1: float) -> float:
+    """The log return from p0 to p1, NaN where either price is not
+    positive, what "deterministic_nan_agrees" demonstrates: a NaN answer is
+    still a deterministic one."""
+    return math.log(p1 / p0) if p0 > 0 and p1 > 0 else math.nan
+
+
+#: a logger of the pricing service's own, attached to no handlers
+_audit_log = logging.Logger("pricing.audit")
+_pricing_log = logging.getLogger("mathema.lexicon.pricing")
+
+
+def price_with_audit_log(price: float) -> float:
+    """A price with 20 percent added, logged on the way, what
+    "state_safe_logging" demonstrates: emitting a log record changes no
+    state."""
+    _audit_log.info("pricing %s", price)
+    return round(price * 1.2, 2)
+
+
+def quiet_pricing(price: float) -> float:
+    """The same price, after turning the pricing logger down to
+    warnings, what "state_safe_logging_config_trap" demonstrates: a
+    logger's level is shared configuration."""
+    _pricing_log.setLevel(logging.WARNING)
+    return round(price * 1.2, 2)
+
+
+def price_in_fx(price: float) -> float:
+    """A price converted at the rate the environment holds, what
+    "deterministic_hidden_read" demonstrates: a read of an input the
+    arguments do not carry."""
+    return price * float(os.environ.get("FX_RATE", "1"))
+
+
+def triangular_number(n: int) -> int:
+    """The n-th triangular number, 0 + 1 + ... + n, the count of pairs
+    among n + 1 items; what "domain_subset_integer" and its symbol
+    spelling demonstrate: a domain of whole numbers."""
+    return n * (n + 1) // 2
+
+
+def removed_endpoint(x: float) -> float:
+    """A function kept only to point callers at its replacement: every
+    call raises, what "raises_typed" demonstrates, a claim that the
+    function raises one named exception."""
+    raise ValueError("removed_endpoint was retired, call rate() instead")
+
+
+def simple_interest_balance(x: float) -> float:
+    """A million at five percent simple interest, after `x` years; what
+    the "let_free_var_*" entries demonstrate: `c`, a free variable the
+    claim quantifies over, with nothing in the function to alias."""
+    return 1_000_000 * (1 + 0.05 * x)
 
 
 def discount(price: float, code: float) -> float:
@@ -1258,6 +1407,14 @@ def center_of_mass_two_body(m1: float, x1: float, m2: float, x2: float) -> float
     return (m1 * x1 + m2 * x2) / (m1 + m2)
 
 
+@enforce_domain()
+@claims_decorator("for alpha in [0, 1], f(x, alpha) <= max(x, 1)")
+def blend(x: float, alpha: float) -> float:
+    """A blend of x with 1, weighted by alpha, which its guard keeps in
+    [0, 1], what "enforce_domain_guard" demonstrates."""
+    return alpha * x + (1 - alpha) * 1.0
+
+
 def gibbs_free_energy(dh: float, t: float, ds: float) -> float:
     """delta-G = delta-H - T*delta-S, undefined below absolute zero,
     what "stress_gauge_invariance" demonstrates: a free variable (`c`,
@@ -1274,7 +1431,12 @@ def quadratic_root_plus(a: float, b: float, c: float) -> float:
     """(-b + sqrt(b^2 - 4ac)) / 2a, what the `assuming_*` entries
     demonstrate: the unconditional monotonicity claim falsifies (the
     sqrt raises where the discriminant goes negative), while the same
-    claim under `assuming b^2 - 4*a*c >= 0.01` proves."""
+    claim under `assuming b^2 - 4*a*c >= 0.01` proves, and so does the
+    claim resting on `real_roots` below, which borrows its relation.
+
+    Claims:
+        real_roots: b^2 - 4*a*c >= 0.01
+    """
     import math
     return (-b + math.sqrt(b * b - 4 * a * c)) / (2 * a)
 
@@ -1542,6 +1704,13 @@ def unescape_angle(s: str) -> str:
     return s.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
 
 
+def sharpe_annualised(returns: "pandas.Series") -> float:
+    """The Sharpe ratio annualised over 252 trading days, written with a
+    power, the second function for the "let_scale_seq_sharpe_*" entries:
+    `252 ** 0.5` lowers as `sqrt(252)` does."""
+    return returns.mean() / returns.std(ddof=1) * 252 ** 0.5
+
+
 def sharpe(returns: "pandas.Series") -> float:
     """The Sharpe ratio of a series of returns at a zero risk-free rate,
     unannualised: the mean over the sample standard deviation
@@ -1594,11 +1763,29 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex", "latex_varepsilon",
     ]),
+    "celsius_round_trip": (celsius_round_trip, ["relation_eq"]),
+    "checked_sqrt": (checked_sqrt, ["raises_typed", "raises_typed_region"]),
+    "remember_fx_rate": (remember_fx_rate, ["state_safe_env_write"]),
+    "noisy_quote": (noisy_quote, ["state_safe_global_rng",
+                                  "deterministic_trap"]),
+    "log_return": (log_return, ["deterministic_nan_agrees"]),
+    "price_in_fx": (price_in_fx, ["deterministic_hidden_read"]),
+    "blend": (blend, ["enforce_domain_guard", "enforce_domain_guard_unbound"]),
+    "price_with_audit_log": (price_with_audit_log, ["state_safe_logging"]),
+    "quiet_pricing": (quiet_pricing, ["state_safe_logging_config_trap"]),
+    "sharpe_annualised": (sharpe_annualised, [
+        "let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap"]),
+    "triangular_number": (triangular_number, [
+        "domain_subset_integer", "domain_subset_symbol",
+    ]),
+    "removed_endpoint": (removed_endpoint, ["raises_typed"]),
+    "simple_interest_balance": (simple_interest_balance, [
+        "let_free_var_closed", "let_free_var_typed",
+    ]),
     "double": (double, [
-        "relation_eq", "relation_le_unicode", "power_caret", "abs_bars",
+        "power_caret",
         "domain_closed_interval", "domain_open_interval",
-        "domain_subset_integer",
-        "forall_symbol", "domain_subset_symbol",
+        "forall_symbol",
         "domain_blackboard_reals", "relation_approx_unicode",
         "power_superscript", "sqrt_symbol", "multiply_dot",
         "infinity_symbol", "floor_brackets_unicode",
@@ -1607,11 +1794,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "latex_geqslant", "latex_left_right_bars",
     ]),
     "cosine_phase": (cosine_phase, ["latex_varphi"]),
-    "discount": (discount, ["raises_typed", "inferred_literal_domain"]),
+    "discount": (discount, ["inferred_literal_domain"]),
     "center_of_mass_two_body": (center_of_mass_two_body, ["let_alias"]),
-    "gibbs_free_energy": (gibbs_free_energy, [
-        "let_free_var_closed", "let_free_var_typed", "stress_gauge_invariance",
-    ]),
+    "gibbs_free_energy": (gibbs_free_energy, ["stress_gauge_invariance"]),
     "quadratic_root_plus": (quadratic_root_plus, [
         "assuming_inequality", "assuming_named_claim",
     ]),
@@ -1632,6 +1817,7 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     ]),
     "put_call_parity_gap": (put_call_parity_gap, ["parity_identity"]),
     "logistic_standard": (logistic_standard, [
+        "relation_le_unicode", "abs_bars",
         "sigmoid_derivative", "sigmoid_symmetry", "sigmoid_limit_upper",
         "sigmoid_limit_lower", "sigmoid_density_integrates",
         "sigmoid_bounded_below", "sigmoid_bounded_above",

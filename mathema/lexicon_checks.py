@@ -281,8 +281,13 @@ def check_verdicts(src: LexiconSource, expected: dict) -> list:
     """Every row against its example function lands on `expected[key]`,
     a verdict or `(verdict, text the witness contains)`; a row two
     example functions demonstrate to different ends pins one of those
-    per function, `{function name: verdict or (verdict, text)}`."""
+    per function, `{function name: verdict or (verdict, text)}`. A row
+    is adjudicated in one batch with the claims declared on its example
+    function, as `verify` does, so a premise naming a sibling claim
+    resolves to it."""
+    from .authoring import declared_from_function
     from .conjecture import check_conjectures, claim
+    from .spec import entry_claims
     out = [f"{key}: no pinned verdict" for key in sorted(set(src.rows) - set(expected))]
     for fn, keys in src.example_functions.values():
         for key in keys:
@@ -292,7 +297,11 @@ def check_verdicts(src: LexiconSource, expected: dict) -> list:
             if want is None:
                 continue
             verdict, witness = (want, None) if isinstance(want, str) else want
-            (p,) = check_conjectures(fn, [claim(src.rows[key])])
+            row = claim(src.rows[key])
+            siblings = [c for c in entry_claims(
+                {"claims": declared_from_function(fn)}) if c.name != row.name]
+            (p,) = [q for q in check_conjectures(fn, [row, *siblings])
+                    if q.name == row.name]
             if p.verdict != verdict:
                 out.append(f"{key}: {p.verdict}, pinned {verdict} ({p.note})")
             elif witness is not None and witness not in str(p.counterexample):

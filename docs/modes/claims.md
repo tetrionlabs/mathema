@@ -16,7 +16,7 @@ mathema claims KEY --adopt NAME     # write one into the declared layer
 | Flag | Meaning |
 |---|---|
 | `key` | module-qualified function key (`functions.softmax`) |
-| `--suggest` | render the suggested standard claims with laws and exclusivity groups |
+| `--suggest` | render the suggested standard claims with laws, in three sections: individual claims, questions with candidate answers, and claims likely to be unknowable |
 | `--adopt NAME` | write the named suggestion into `claims/adopted.claims.yaml` |
 | `--root` | project root (default: the nearest ancestor holding `.mathema/` within the enclosing git repository, else that repository, else `.`; never the home directory) |
 | `--format` | `text` (default) or `json`: emit `--suggest`'s rows columnar, matching the MCP `suggest_claims` tool |
@@ -68,6 +68,7 @@ functions.softmax: no declared claims (mathema claims --suggest lists candidates
 
 $ mathema claims functions.softmax --suggest
 functions.softmax: 7 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+ individual claims:
   - is_deterministic: f(scores) == f(scores)  [route best]
   - is_state_safe: f(scores) == f(scores)  [route best]
   - is_numerically_stable: g(f, scores) == 1  [route best]
@@ -102,20 +103,39 @@ functions.softmax:
     grammar: mathema
 ```
 
-## Suggestions that answer one question (aspects)
+## The three sections
 
-The suggestion battery volunteers every candidate it knows, so a
-scalar function earns both monotonicity directions and all three
-curvature answers per parameter. Those are not independent claims:
-`monotonic_increasing[x]` and `monotonic_decreasing[x]` answer one
-question (which way does f move in x), and `affine[x]`, `convex[x]`,
-`concave[x]` answer another (which way does f bend in x). `--suggest`
-labels each such member with its `aspect[target]` (`monotonicity[x]`,
-`shape[x]`, `symmetry`), in the text row and in the `aspect` JSON
-column, so a caller reads one question with a few candidate answers
-rather than a flat cross-product. A suggestion no other suggestion
-competes with carries an empty aspect. The table is
-`mathema.families.CLAIM_ASPECTS`.
+`--suggest` lists its suggestions in three sections.
+
+- **Individual claims** stand alone: each answers a question no other
+  suggestion answers.
+- **Questions with candidate answers.** The battery volunteers every
+  candidate it knows, so a scalar function earns both monotonicity
+  directions and all three curvature answers per parameter. Those are
+  not independent claims: `monotonic_increasing[x]` and
+  `monotonic_decreasing[x]` answer one question (which way does f move
+  in x), and `affine[x]`, `convex[x]`, `concave[x]` answer another
+  (which way does f bend in x). Each question is listed by its
+  `aspect[target]` (`monotonicity[x]`, `shape[x]`, `symmetry`) with
+  its candidate answers under it. More than one answer may hold (an
+  affine function is convex and concave too), so adopt every answer
+  that does; they are never contradictions. The table is
+  `mathema.families.CLAIM_ASPECTS`.
+- **Likely to be unknowable.** `is_state_safe`, `is_deterministic` and
+  `is_reproducible` are decided by reading the function's source. When
+  that reading already sees a write or a hidden input, or meets
+  something it cannot read (`getattr`, a library function it has no
+  entry for), the suggestion is listed here with that reason on the
+  line below it. It is never adopted unless named.
+
+For example, for a function that stores a rate in the environment:
+
+<!-- illustration -->
+```
+ likely to be unknowable (adopted only when named):
+  - is_state_safe: f(rate) == f(rate)  [route best]
+      remember changes os.environ (os.environ['R'] = ...)
+```
 
 A stronger relation, a genuine contradiction where adopting a second
 member is not a refinement but a conflict, lives in the separate
@@ -143,10 +163,12 @@ columnar, the same shape and columns the MCP `suggest_claims` tool
 returns:
 
 ```
-cols: ["name", "statement", "route", "declared", "aspect"]
+cols: ["name", "statement", "route", "declared", "aspect", "section", "reason"]
 ```
 
 `declared` is true when that name is already in the declared layer,
-and `aspect` names the question a suggestion competes on (`""` when no
-other suggestion competes with it, a computed-empty value, never
-null). `--output FILE` writes it to a file instead of stdout.
+and `aspect` names the question a suggestion answers (`""` when no
+other suggestion answers it, a computed-empty value, never null).
+`section` is `individual`, `question` or `unknowable`, and `reason`
+is the one-line reason for an `unknowable` row (`""` on every other
+row). `--output FILE` writes it to a file instead of stdout.

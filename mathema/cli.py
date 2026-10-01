@@ -260,7 +260,8 @@ def _format_check(rows: list[dict], fmt: str) -> str:
     lines = []
     for r in rows:
         state = "FAIL" if r["problems"] else "ok"
-        line = (f'{state:4} {r["name"]}: {tier_word(r["tier"])}; '
+        line = (f'{state:4} {r["name"]}: '
+                f'{tier_word(r["tier"], r.get("claim_rows") or ())}; '
                 f'claims {r["coverage"]} '
                 f'adjudicated ({summary_counts(r)})')
         if r["problems"]:
@@ -1934,14 +1935,15 @@ def cmd_claims(args) -> int:
     if args.suggest and getattr(args, "format", "text") == "json":
         from .records import claim_statement
         from .families import aspect_label
-        from .suggest import bound_annotation_hint
+        from .suggest import bound_annotation_hint, suggestion_sections
+        sections = suggestion_sections(fn, suggestions)
         rows = [[cj.name, claim_statement(cj).strip(),
                  cj.route, cj.name in declared_names,
-                 aspect_label(cj.name)]
-                for cj in suggestions]
+                 aspect_label(cj.name), section, reason]
+                for cj, (section, reason) in zip(suggestions, sections)]
         payload = {"key": args.key,
                    "cols": ["name", "statement", "route", "declared",
-                            "aspect"],
+                            "aspect", "section", "reason"],
                    "rows": rows}
         hint = bound_annotation_hint(fn)
         if hint:
@@ -1949,16 +1951,44 @@ def cmd_claims(args) -> int:
         _emit_json(payload, getattr(args, "output", None))
         return 0
     if args.suggest:
+        from .families import aspect_label
+        from .records import claim_statement
+        from .suggest import suggestion_sections
         print(f"{args.key}: {len(suggestions)} suggested claim(s) "
               "(adopt with: mathema claims KEY --adopt NAME)")
-        for cj in suggestions:
+        sections = suggestion_sections(fn, suggestions)
+
+        def line(cj) -> str:
             marker = " [already declared]" if cj.name in declared_names else ""
-            from .families import aspect_label
-            label = aspect_label(cj.name)
-            aspect_note = (f"  [aspect: {label}]" if label else "")
-            from .records import claim_statement
-            print(f"  - {cj.name}: {claim_statement(cj)}"
-                  f"  [route {cj.route}]{marker}{aspect_note}")
+            return (f"  - {cj.name}: {claim_statement(cj)}"
+                    f"  [route {cj.route}]{marker}")
+        alone = [(cj, why) for cj, (sec, why) in zip(suggestions, sections)
+                 if sec == "individual"]
+        asked = [cj for cj, (sec, _r) in zip(suggestions, sections)
+                 if sec == "question"]
+        doubtful = [(cj, why) for cj, (sec, why) in zip(suggestions, sections)
+                    if sec == "unknowable"]
+        if alone:
+            print(" individual claims:")
+            for cj, why in alone:
+                print(line(cj))
+                if why:
+                    print(f"      {why}")
+        if asked:
+            print(" questions with candidate answers (adopt every answer "
+                  "that holds):")
+            questions: dict = {}
+            for cj in asked:
+                questions.setdefault(aspect_label(cj.name), []).append(cj)
+            for question, members in questions.items():
+                print(f"  {question}:")
+                for cj in members:
+                    print("  " + line(cj))
+        if doubtful:
+            print(" likely to be unknowable (adopted only when named):")
+            for cj, why in doubtful:
+                print(line(cj))
+                print(f"      {why}")
         from .suggest import bound_annotation_hint
         hint = bound_annotation_hint(fn)
         if hint:

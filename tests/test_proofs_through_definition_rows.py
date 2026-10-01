@@ -93,6 +93,19 @@ def test_a_sharpe_ratio_is_leverage_invariant_for_every_length(fn, rows):
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 
+def sharpe_power(returns: pd.Series):
+    return returns.mean() / returns.std(ddof=1) * 252 ** 0.5
+
+
+@pytest.mark.needs_full_proof_budget
+def test_an_annualised_sharpe_written_with_a_power_proves_as_with_sqrt():
+    p = _one(sharpe_power, _LEVERAGE)
+    assert p.verdict == "proven", (p.verdict, p.note, p.sketch)
+    assert p.route == "derive"
+    p = _one(sharpe_power, _SHIFT, route="derive")
+    assert p.verdict != "proven", (p.verdict, p.sketch)
+
+
 def test_a_sharpe_ratio_has_no_value_where_the_returns_do_not_vary():
     law = ("for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "
            "let c be [0.1, 10], f(s(returns, c)) ~= f(returns)")

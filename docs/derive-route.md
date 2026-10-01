@@ -962,11 +962,12 @@ conditions are each verified, never a "probably".
   of strictly positive factors, a one-variable quadratic with
   positive leading coefficient and negative discriminant. Its
   non-strict sibling covers `>=` the same way.
-- **The write-free certificate.** `is_state_safe(f)` is proven
-  structurally when the body contains no external-write site and
-  every name resolves; an unresolved or global read leaves room for
-  state the walk cannot see, so it falls to trials instead. The
-  sketch says which of the two happened.
+- **The write-free certificate.** `is_state_safe(f)` is proven on
+  the examine route when the body, and every project function it
+  reaches, contains no write outside the call and every name and
+  callee resolves; anything unresolved leaves it unknown with the
+  reason, never to trials. `is_deterministic` and `is_reproducible`
+  are certified the same way for hidden reads.
 - **Piecewise proof.** A claim over a finite value set is proven by
   splitting the domain into its stated values and proving each piece;
   the sketch lists the pieces.

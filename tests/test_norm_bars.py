@@ -9,8 +9,9 @@ same route. The order is never a superscript, so `||x||^2` is the
 square of the norm. A written `||x||` renders back as written, `||x||`
 in ascii and `‖x‖` in unicode with the order a subscript glyph, and a
 written `norm(x)` stays the call. The record's note names the norm a
-bare `||x||` resolves to: Euclidean for a vector, Frobenius for a
-matrix. Any other order is refused with the accepted orders named.
+bare `||x||` or `norm(x)` resolves to, in the spelling written:
+Euclidean for a vector, Frobenius for a matrix. Any other order is
+refused with the accepted orders named.
 """
 from __future__ import annotations
 
@@ -620,8 +621,16 @@ def test_a_written_order_needs_no_note():
     assert "norm of" not in (p.note or ""), p.note
 
 
-def test_the_call_spelling_gets_no_note():
+def test_the_call_spelling_gets_the_same_note_in_its_own_spelling():
     p = _adjudicate(euclidean_length, "for x in R^n, f(x) ~= norm(x)")
+    assert "norm(x) is the Euclidean norm of x" in (p.note or ""), p.note
+    assert "||x||" not in (p.note or ""), p.note
+    p = _adjudicate(frobenius, "for A in R^(m,n), f(A) ~= norm(A)")
+    assert "norm(A) is the Frobenius norm of A" in (p.note or ""), p.note
+
+
+def test_the_call_with_an_order_written_needs_no_note():
+    p = _adjudicate(manhattan_length, "for x in R^n, f(x) ~= norm(x, 1)")
     assert "norm of" not in (p.note or ""), p.note
 
 

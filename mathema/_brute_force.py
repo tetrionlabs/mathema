@@ -84,7 +84,10 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     Notes:
         Declines, each for its own reason:
 
-        - `facts.is_pure is not True`. Note the spelling: `None` means
+        - `facts.is_pure is not True`, or the strict examination
+          (`_examine.examine`) of the body and every project function it
+          reaches finds a write, a hidden input, an order-sensitive
+          reduction or anything it cannot read. Note the spelling: `None` means
           purity could not be established, which is not the same as
           pure, and treating it as pure would rest a proof on an
           unexamined function.
@@ -103,7 +106,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         rule the rest of the engine follows, and the point evaluator
         already reports such a point as a genuine counterexample.
     """
-    if facts.is_pure is not True:
+    if facts.is_pure is not True or not _examined_clean(fn):
         return None
     # read at call time, not bound as a default, so the budget stays one
     # knob rather than a value frozen when this module was imported
@@ -152,3 +155,20 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         quantifier=f"∀ {', '.join(names)} in the declared finite domain "
                    f"({checked} {plural})",
         meta={"mathema.derive_route": "brute_force"})
+
+
+def _examined_clean(fn) -> bool:
+    """Whether the strict examination of `fn` finds nothing that could
+    make two calls at one point differ or leave something behind.
+
+    Notes:
+        A read of a module-level value the call itself never writes is
+        no obstacle: nothing but the sweep runs while it lasts, so that
+        value is the same at every point it visits."""
+    from ._examine import examine
+    effects = examine(fn)
+    fixed = {text for _module, _name, text in effects.module_reads}
+    return not (effects.writes or effects.hidden_reads
+                or effects.order_sensitive
+                or effects.unknown_writes
+                or any(site.text not in fixed for site in effects.unknowns))

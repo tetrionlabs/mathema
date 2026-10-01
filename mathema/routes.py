@@ -242,3 +242,12 @@ def unsupported_forms(route: str, cj) -> list[str]:
         return []
     capable = ROUTE_CAPABILITIES.get(route, frozenset())
     return sorted(required_forms(cj) - capable)
+
+
+def is_proof_route(route: "str | None") -> bool:
+    """Intent:
+        Whether a row's route names a proof: `derive` and its subroutes,
+        or `examine` (a proof from the function's structure), which
+        share the strongest rung of the evidence ladder.
+    """
+    return (route or "").split(":", 1)[0] in ("derive", "examine")

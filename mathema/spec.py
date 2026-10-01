@@ -21,7 +21,7 @@ import unicodedata
 from ._float_text import exact_float_text
 from .records import (SUPPORTED_VERDICTS, classify_verdict,
                       pseudo_infinity_range, statement_text)
-from .routes import examine_predicates
+from .routes import examine_predicates, is_proof_route
 
 # The CDD spec version this module's writer/reader conforms to: see the
 # sibling claim-driven-development repo's v0.2.0/record-schema.md and
@@ -275,7 +275,7 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
             row["note"] = p.note
         if p.sketch:
             row["sketch"] = p.sketch
-        if p.condition and ((p.route or "").split(":", 1)[0] == "derive"
+        if p.condition and (is_proof_route(p.route)
                             or p.condition.startswith("let |inf| be ")):
             row["condition"] = p.condition
         row["route"] = p.route
