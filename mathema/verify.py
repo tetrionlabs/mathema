@@ -267,6 +267,10 @@ def gate(claims, *, strict: bool,
     """
     r = GateReport()
     gate_fails: list = []
+    claims = list(claims)
+    # a line under a claim mathema suggested is part of the suggestion
+    suggested = {_claim_fields(c)[0] for c in claims
+                 if _volunteered(_claim_fields(c)[2], _claim_fields(c)[3])}
     for c in claims:
         name, verdict, meta, note = _claim_fields(c)
         if "mathema.foreign_grammar" in meta:
@@ -275,13 +279,19 @@ def gate(claims, *, strict: bool,
         statement = _claim_statement(c)
         label = next((lab for rel, lab in _GATE_LABELS.items()
                       if statement.startswith(rel + "(")), None)
+        parent = meta.get("mathema.companion_of")
+        if parent is not None and parent in suggested:
+            continue
         if label and classify_verdict(verdict) == "falsified":
             reason = ((meta.get("mathema.gate") or {}).get("reason")
                       or (c.get("counterexample") if isinstance(c, dict)
                           else getattr(c, "counterexample", None)) or "")
-            gate_fails.append(f"{label} ({statement}) falsified: {reason}"
-                              + (f"; mathema claims {key} prints the rows to state"
-                                 if key and label == "gate" else ""))
+            under = f" under {parent}" if parent else ""
+            line = (f"{label} ({statement}{under}) falsified: {reason}"
+                    + (f"; mathema claims {key} prints the rows to state"
+                       if key and label == "gate" else ""))
+            if line not in gate_fails:
+                gate_fails.append(line)
         pol = meta.get("mathema.policy")
         if pol and classify_verdict(verdict) == "falsified":
             clause = _policy_clause(name, _claim_statement(c), pol)
