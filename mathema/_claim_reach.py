@@ -14,10 +14,11 @@ module's attributes (`logging.os.system`, a project module's
 `from os import system`).
 
 Every other name runs as written, in the same way as importing it and
-calling it directly in the author's own code would. A binding into third-party code whose
-purity mathema cannot establish carries a warning naming it
-(`third_party_warning`); one into mathema itself or the author's own
-project carries none.
+calling it directly in the author's own code would. A binding into
+third-party code whose effects mathema cannot establish carries a
+warning naming it (`third_party_warning`); one into mathema itself, the
+author's own project, or a function a trusted compendium covers carries
+none.
 """
 from __future__ import annotations
 
@@ -204,9 +205,7 @@ def object_refusal(obj, path: str) -> "str | None":
                     f"which runs text as code or reaches the files, which "
                     f"a claim may not name")
     target = getattr(obj, "__func__", obj)
-    module = getattr(target, "__module__", None)
-    if not isinstance(module, str):
-        module = getattr(type(target), "__module__", "") or ""
+    module = _own_module(target)
     if _top(module) in SYSTEM_MODULES or _below(module, CODE_RUNNERS):
         return (f"`{path}` reaches the system: it comes from the module "
                 f"{_shown(module)!r}, which a claim may not name")
@@ -273,29 +272,139 @@ def refuse_path(path: str) -> None:
         raise SystemReach(said)
 
 
-#: libraries whose functions mathema treats as pure: math, cmath,
-#: statistics, and numpy's numeric functions (its random generators
-#: excluded)
+#: libraries every function of which has effects mathema establishes:
+#: none beyond computing a value from its arguments
 _PURE_MODULES = frozenset({"math", "cmath", "statistics"})
 
+#: numpy functions whose effects mathema establishes, called without
+#: `out=`: they compute a new value from their arguments and write
+#: neither an argument nor process-wide state. Every numpy ufunc is
+#: established the same way.
+NUMPY_ESTABLISHED = frozenset({
+    "abs", "absolute", "all", "allclose", "amax", "amin", "any", "arange",
+    "argmax", "argmin", "argsort", "around", "array", "array_equal",
+    "asarray", "average", "clip", "concatenate", "convolve", "corrcoef",
+    "correlate", "count_nonzero", "cov", "cross", "cumprod", "cumsum",
+    "diag", "diagonal", "diff", "dot", "empty_like", "eye", "flip", "full",
+    "full_like", "gradient", "hstack", "identity", "inner", "interp",
+    "isclose", "kron", "linspace", "logspace", "matmul", "max", "mean",
+    "median", "min", "nanmax", "nanmean", "nanmedian", "nanmin",
+    "nanpercentile", "nanprod", "nanquantile", "nanstd", "nansum",
+    "nanvar", "ones", "ones_like", "outer", "percentile", "polyval",
+    "prod", "ptp", "quantile", "ravel", "reshape", "round", "sort",
+    "squeeze", "stack", "std", "sum", "tensordot", "trace", "transpose",
+    "tril", "triu", "unique", "var", "vdot", "vstack", "where", "zeros",
+    "zeros_like",
+    "linalg.cholesky", "linalg.cond", "linalg.det", "linalg.eig",
+    "linalg.eigh", "linalg.eigvals", "linalg.eigvalsh", "linalg.inv",
+    "linalg.lstsq", "linalg.matrix_power", "linalg.matrix_rank",
+    "linalg.norm", "linalg.pinv", "linalg.qr", "linalg.slogdet",
+    "linalg.solve", "linalg.svd",
+})
 
-def purity_established(obj, path: str) -> bool:
+
+def _numpy_established(obj) -> bool:
     """Intent:
-        Whether mathema can establish that the function a claim names
-        is pure (no state read or written beyond its arguments): a
-        function of math, cmath or statistics, or a numpy ufunc or
-        numeric function outside `numpy.random`.
+        Whether `obj` is a numpy ufunc or one of the functions
+        `NUMPY_ESTABLISHED` names, by identity, so an alias resolves
+        the same way.
+    """
+    numpy = sys.modules.get("numpy")
+    if numpy is None:
+        return False
+    if isinstance(obj, numpy.ufunc):
+        return True
+    for name in NUMPY_ESTABLISHED:
+        target = numpy
+        for attr in name.split("."):
+            target = getattr(target, attr, None)
+        if target is not None and target is obj:
+            return True
+    return False
+
+
+def purity_established(obj, path: str, root: str = ".") -> bool:
+    """Intent:
+        Whether mathema can establish the effects of the function a
+        claim names, that it does nothing beyond computing a value from
+        its arguments: a function of math, cmath or statistics, a numpy
+        ufunc or a function `NUMPY_ESTABLISHED` names, or a function a
+        trusted compendium covers (`trusted_compendium_key`).
+    """
+    module = _module_of(obj, path)
+    if _top(module) in _PURE_MODULES:
+        return True
+    if _numpy_established(obj):
+        return True
+    return trusted_compendium_key(obj, path, root)
+
+
+def trusted_compendium_key(obj, path: str, root: str = ".") -> bool:
+    """Intent:
+        Whether the function is a key of a trusted compendium: a
+        bundled compendium (mathema's own), or a project or dependency
+        compendium every row of whose entry for the key the project has
+        accepted as trusted (`mathema accept <key> <row> --as trusted`),
+        the acceptance not gone stale.
+    """
+    from .compendium import library_key_of, load_library_claims
+    from .spec import load_verified
+    try:
+        library = load_library_claims(root)
+    except Exception:
+        return False
+    key = path if path in library else None
+    if key is None:
+        try:
+            key = library_key_of(obj)
+        except Exception:
+            key = None
+    info = library.get(key) if key else None
+    if info is None:
+        return False
+    if info.get("bundled"):
+        return True
+    names = {c.get("name") for c in (info.get("entry") or {}).get("claims")
+             or [] if c.get("name")}
+    if not names:
+        return False
+    recorded = {c.get("name"): c for c in
+                ((load_verified(root).get(key) or {}).get("entry") or {})
+                .get("claims") or []}
+    for name in names:
+        accepted = (recorded.get(name) or {}).get("accepted") or {}
+        if accepted.get("as") != "trusted" or accepted.get("stale"):
+            return False
+    return True
+
+
+def _own_module(obj) -> str:
+    """Intent:
+        The module an object says it belongs to: its `__module__`, else
+        the module of the class a method descriptor belongs to
+        (`numpy.ndarray.fill` belongs to numpy), else its type's.
     """
     module = getattr(obj, "__module__", None)
-    if not isinstance(module, str):
-        module = getattr(type(obj), "__module__", "") or ""
-    if _top(module) in _PURE_MODULES or _top(path) in _PURE_MODULES:
-        return True
-    if _top(module) == "numpy" or _top(path) == "numpy":
-        return not (module.startswith("numpy.random")
-                    or path.startswith("numpy.random")
-                    or type(obj).__module__.startswith("numpy.random"))
-    return False
+    if isinstance(module, str):
+        return module
+    owner = getattr(obj, "__objclass__", None)
+    if owner is not None and isinstance(getattr(owner, "__module__", None),
+                                        str):
+        return owner.__module__
+    return getattr(type(obj), "__module__", "") or ""
+
+
+def _module_of(obj, path: str) -> str:
+    """Intent:
+        The module a named function belongs to: its own `__module__`,
+        except a wrapper mathema builds around a library method (a
+        receiver form of `pandas.Series.mean`), which belongs to the
+        library its path names.
+    """
+    module = _own_module(obj)
+    if _top(module) == "mathema" and path and _top(path) != "mathema":
+        return path.rsplit(".", 1)[0]
+    return module
 
 
 def _library_file(path: str) -> bool:
@@ -322,46 +431,78 @@ def os_path_within(path: str, root: str) -> bool:
         return False
 
 
-def is_project_code(obj, own_module: str = "") -> bool:
+def declared_packages(root: str = ".") -> frozenset:
+    """Intent:
+        The top-level packages a project's pyproject.toml declares as
+        its own: the project name (with `-` read as `_`), setuptools'
+        `packages`, poetry's `packages` includes and hatch's wheel
+        `packages`. Empty when there is no readable pyproject.toml.
+    """
+    import os
+    try:
+        import tomllib
+    except ImportError:
+        return frozenset()
+    try:
+        with open(os.path.join(root, "pyproject.toml"), "rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, ValueError):
+        return frozenset()
+    out: set = set()
+    name = (data.get("project") or {}).get("name")
+    if isinstance(name, str):
+        out.add(name.replace("-", "_").replace(".", "_"))
+    tool = data.get("tool") or {}
+    packages = (tool.get("setuptools") or {}).get("packages")
+    if isinstance(packages, list):
+        out.update(_top(p) for p in packages if isinstance(p, str))
+    for item in (tool.get("poetry") or {}).get("packages") or []:
+        if isinstance(item, dict) and isinstance(item.get("include"), str):
+            out.add(_top(item["include"]))
+    hatch = (((tool.get("hatch") or {}).get("build") or {})
+             .get("targets") or {}).get("wheel") or {}
+    for item in hatch.get("packages") or []:
+        if isinstance(item, str):
+            out.add(item.rstrip("/").rsplit("/", 1)[-1])
+    return frozenset(out)
+
+
+def is_project_code(obj, own_module: str = "", path: str = "",
+                    root: str = ".") -> bool:
     """Intent:
         Whether the function a claim names is mathema itself or the
-        author's own project: its module is mathema's, shares its
-        top-level package with the function under test (`own_module`),
-        or its source file lies in the working directory outside any
-        installed library.
+        author's own project: its module is mathema's, or its top-level
+        package is the top-level package of the function under test
+        (`own_module`) or one the project's pyproject.toml declares
+        (`declared_packages`), and its source is not an installed
+        library's.
     """
-    import inspect
-    import os
-    module = getattr(obj, "__module__", None) or ""
+    module = _module_of(obj, path)
     if _top(module) == "mathema":
         return True
-    if own_module and module and _top(module) == _top(own_module) \
-            and _top(own_module) != "builtins":
-        mod = sys.modules.get(module)
-        source = getattr(mod, "__file__", None) or ""
-        if not source or not _library_file(source):
-            return True
-    try:
-        source = inspect.getsourcefile(obj) or ""
-    except (TypeError, OSError):
-        source = ""
-    if not source:
-        mod = sys.modules.get(module)
-        source = getattr(mod, "__file__", None) or ""
-    return bool(source) and not _library_file(source) \
-        and os_path_within(source, os.getcwd())
+    own = {_top(own_module)} if own_module else set()
+    if _top(module) not in (own | declared_packages(root)) - {"builtins"}:
+        return False
+    mod = sys.modules.get(module)
+    source = getattr(mod, "__file__", None) or ""
+    return not (source and _library_file(source))
 
 
 def third_party_warning(binding: str, obj, path: str,
-                        own_module: str = "") -> "str | None":
+                        own_module: str = "", root: str = ".",
+                        writes_argument: bool = False) -> "str | None":
     """Intent:
         The warning a claim's result carries for one binding (`let g =
-        json.dumps`) into third-party code whose purity mathema cannot
+        json.dumps`) into third-party code whose effects mathema cannot
         establish, or None for mathema itself, the author's own
-        project, and a function whose purity is established.
+        project, and a function whose effects are established.
+        `writes_argument` (the claim passes `out=`) means its effects
+        are not established whatever the function.
     """
-    if obj is None or is_project_code(obj, own_module) \
-            or purity_established(obj, path):
+    if obj is None or is_project_code(obj, own_module, path, root):
         return None
-    return (f"{binding} calls third-party code whose purity mathema "
-            f"cannot establish, in the same way as importing it and calling it directly would")
+    if not writes_argument and purity_established(obj, path, root):
+        return None
+    return (f"{binding} calls third-party code whose effects mathema "
+            f"cannot establish, in the same way as importing it and "
+            f"calling it directly would")

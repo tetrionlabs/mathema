@@ -1,13 +1,18 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""A `let` binding calls the function it names, as importing that
-library and calling the function in your own code would. A binding into
-mathema itself or the author's own project carries nothing extra. A
-binding into third-party code whose purity mathema cannot establish
-runs, and the claim's result says so, naming the binding: in the
-record's note, in `check` output and in the MCP result. Purity is
-established for math, cmath, statistics and numpy's numeric functions;
-numpy's random generators are not pure."""
+"""A `let` binding calls the function it names, in the same way as
+importing it and calling it directly would. A binding into mathema
+itself, into the author's own project (its declared packages, or the
+top-level package of the function under test), or into a function a
+trusted compendium covers carries nothing extra. A binding into any
+other third-party code whose effects mathema cannot establish runs, and
+the claim's result says so, naming the binding: in the record's note,
+in `check` output and in the MCP result. Effects are established for
+math, cmath, statistics and a named table of numpy's numeric functions;
+a numpy function that writes its argument or process-wide state, and
+numpy's random generators, are not on it. A trusted compendium is a
+bundled one, or a project or dependency compendium whose rows for the
+key the project accepted as trusted."""
 import os
 import subprocess
 import sys
@@ -26,7 +31,7 @@ def _f(x: float) -> float:
     return x
 
 
-_WORDS = "calls third-party code whose purity mathema cannot establish"
+_WORDS = "calls third-party code whose effects mathema cannot establish"
 
 
 def _row(stmt, fn=_f):
@@ -41,6 +46,16 @@ def _row(stmt, fn=_f):
      "let g = pandas.isna"),
     ("let r = numpy.random.random, for x in [0, 1], r() >= 0",
      "let r = numpy.random.random"),
+    ("let g = numpy.copyto, for x in [0, 1], f(x) == x",
+     "let g = numpy.copyto"),
+    ("let g = numpy.put, for x in [0, 1], f(x) == x",
+     "let g = numpy.put"),
+    ("let g = numpy.seterr, for x in [0, 1], f(x) == x",
+     "let g = numpy.seterr"),
+    ("let g = numpy.set_printoptions, for x in [0, 1], f(x) == x",
+     "let g = numpy.set_printoptions"),
+    ("let g = numpy.ndarray.fill, for x in [0, 1], f(x) == x",
+     "let g = numpy.ndarray.fill"),
 ])
 def test_a_third_party_binding_carries_the_warning(stmt, binding):
     rec, row = _row(stmt)
@@ -58,6 +73,7 @@ def test_a_third_party_binding_carries_the_warning(stmt, binding):
     "let g = numpy.linalg.norm, for x in [0, 1], g(x) >= 0",
     "let g = numpy.sqrt, for x in [0, 1], g(x) >= 0",
     "let g = mathema.f.finite_no_error, for x in [0, 1], f(x) == x",
+    "let g = pandas.Series.mean, for x in [0, 1], f(x) == x",
 ])
 def test_an_established_or_mathema_binding_carries_none(stmt):
     rec, row = _row(stmt)
@@ -123,3 +139,87 @@ def test_check_output_and_mcp_show_the_warning(tmp_path, monkeypatch):
     assert rows, out
     assert any(f"let g = json.dumps {_WORDS}" in w
                for c in rows for w in c["warnings"]), rows
+
+
+def test_third_party_code_vendored_in_the_tree_carries_the_warning(
+        project, monkeypatch):
+    import pathlib
+    vendor = pathlib.Path(project.__file__).parent / "vendor"
+    _write(vendor / "thirdlib.py", '''
+        SEEN = []
+
+
+        def remember(x):
+            SEEN.append(x)
+            return x
+    ''')
+    monkeypatch.syspath_prepend(str(vendor))
+    sys.modules.pop("thirdlib", None)
+    stmt = "let g = thirdlib.remember, for x in [0, 1], f(x) == 2 * g(x)"
+    _rec, row = _row(stmt, project.f)
+    assert f"let g = thirdlib.remember {_WORDS}" in (row.note or ""), row.note
+    sys.modules.pop("thirdlib", None)
+
+
+def test_a_package_the_pyproject_declares_is_the_projects_own(project):
+    import pathlib
+    root = pathlib.Path(project.__file__).parent
+    _write(root / "pyproject.toml", '''
+        [project]
+        name = "projmod"
+
+        [tool.setuptools]
+        packages = ["helpers"]
+    ''')
+    _write(root / "helpers" / "__init__.py", '''
+        def triple(x: float) -> float:
+            return 3 * x
+    ''')
+    sys.modules.pop("helpers", None)
+    stmt = "let g = helpers.triple, for x in [0, 1], 3 * f(x) == 2 * g(x)"
+    _rec, row = _row(stmt, project.f)
+    assert _WORDS not in (row.note or ""), row.note
+    sys.modules.pop("helpers", None)
+
+
+def test_a_dependency_compendium_key_warns_until_accepted_as_trusted(
+        tmp_path, monkeypatch):
+    _write(tmp_path / "dep.py", '''
+        def f(x: float) -> float:
+            return -x
+    ''')
+    _write(tmp_path / "claims" / "operator.claims.yaml", """
+        compendium: operator
+        versions: "*"
+        operator.neg:
+          claims:
+            - name: decreasing
+              statement: 'for x in (0, 100], d(f(x), x) < 0'
+              meta: {mathema.compendium_claimed: proven}
+    """)
+    _write(tmp_path / "claims" / "dep.claims.yaml", """
+        dep.f:
+          claims:
+            - name: same
+              statement: 'let g = operator.neg, for x in [0, 1], f(x) == g(x)'
+    """)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    _cli(tmp_path, "verify", "--root", str(tmp_path))
+    sys.modules.pop("dep", None)
+    import dep
+    stmt = "let g = operator.neg, for x in [0, 1], f(x) == g(x)"
+    _rec, row = _row(stmt, dep.f)
+    assert f"let g = operator.neg {_WORDS}" in (row.note or ""), row.note
+    from mathema.acceptance import apply_acceptance, plan_acceptance
+    apply_acceptance(plan_acceptance(str(tmp_path), "operator.neg",
+                                     "decreasing", "trusted", by="test"))
+    _rec, row = _row(stmt, dep.f)
+    assert _WORDS not in (row.note or ""), row.note
+    sys.modules.pop("dep", None)
+
+
+def test_an_established_function_called_with_out_carries_the_warning():
+    _rec, row = _row("let g = numpy.add, for x in [0, 1], "
+                     "g(x, x, out=x) == 2 * x")
+    assert f"let g = numpy.add {_WORDS}" in (row.note or ""), row.note
