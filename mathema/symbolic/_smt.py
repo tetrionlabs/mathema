@@ -55,12 +55,20 @@ class _Translator:
         global to the query, so it must hold at every point of the box:
         an even root's defining constraint applies only where its base
         is nonnegative.
+
+        `undefined` collects, for every root, the condition under
+        which it is evaluated with a negative base: the Piecewise branch
+        conditions leading to it (`_path`) and `base < 0`. There the
+        expression has no real value, so the caller counts any such
+        point as a model of the negation.
     """
 
     def __init__(self, z3mod, params: dict):
         self.z3 = z3mod
         self.vars: dict = {}
         self.constraints: list = []
+        self.undefined: list = []
+        self._path: list = []
         self._aux: dict = {}
         for name, sym in params.items():
             self.vars[sym] = (z3mod.Int(name) if sym.is_integer
@@ -75,6 +83,10 @@ class _Translator:
 
     def _radical(self, base_expr, q: int):
         key = (sympy.srepr(base_expr), q)
+        # a rational power of a negative base is not real (sympy's
+        # principal root, odd q included)
+        self.undefined.append(self.z3.And(
+            *self._path, self.expr(base_expr) < 0))
         cached = self._aux.get(key)
         if cached is not None:
             return cached
@@ -145,9 +157,22 @@ class _Translator:
             last_expr, last_cond = pairs[-1]
             if last_cond is not sympy.true:
                 raise _Untranslatable(f"piecewise without a catch-all: {e}")
-            out = self.expr(last_expr)
-            for value, cond in reversed(pairs[:-1]):
-                out = z3.If(self.condition(cond), self.expr(value), out)
+            # each condition is evaluated once every earlier one is
+            # false, and each value only under its own condition
+            conds, values = [], []
+            outer = len(self._path)
+            try:
+                for value, cond in pairs[:-1]:
+                    c = self.condition(cond)
+                    self._path.append(c)
+                    values.append(self.expr(value))
+                    self._path[-1] = z3.Not(c)
+                    conds.append(c)
+                out = self.expr(last_expr)
+            finally:
+                del self._path[outer:]
+            for c, v in zip(reversed(conds), reversed(values)):
+                out = z3.If(c, v, out)
             return out
         raise _Untranslatable(f"{type(e).__name__} has no exact translation")
 
@@ -271,7 +296,8 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
     solver.set("rlimit", 10_000_000)
     for c in box + translator.constraints:
         solver.add(c)
-    solver.add(query)
+    solver.add(z3.Or(query, *translator.undefined)
+               if translator.undefined else query)
     outcome = solver.check()
 
     if outcome == z3.unsat:
@@ -300,6 +326,8 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
             return None   # an irrational algebraic model value: decline
     try:
         value = diff.subs(point)
+        if value.is_extended_real is not True:
+            return None
         holds_at_point = {"<": value < 0, "<=": value <= 0,
                           ">": value > 0, ">=": value >= 0,
                           "==": sympy.Eq(value, 0),
