@@ -106,6 +106,14 @@ def test_the_plain_probe_evaluates_the_matrix_vocabulary(fn, law, true):
 def test_identity_minus_scalars_abs_and_subscripts_sample(fn, law, true,
                                                           route):
     p = _one(fn, law, route)
+    if route == "probe" and law == "trace(c * A) ~= c * trace(A)":
+        # c is unbounded, so the computation runs it out to the float
+        # maximum, where c * A overflows: the probe is the computation
+        # and reports it
+        assert p.verdict == "falsified", (p.verdict, p.note)
+        c = float(p.counterexample.split("c = ", 1)[1].split(",", 1)[0])
+        assert abs(c) > 1e300, p.counterexample
+        return
     assert _holds(p) is true, (law, p.verdict, p.note, p.counterexample)
 
 

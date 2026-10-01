@@ -47,8 +47,7 @@ def test_the_gram_rank_through_numpy_is_not_proven():
 def test_matrix_rank_has_no_definition_row():
     rows = _rows("numpy.linalg.matrix_rank")
     assert "definition" not in rows, rows
-    assert rows == {"at_most_rank": "for A in R^(m,n) \\ {∅}, "
-                                    "f(A) <= rank(A)"}
+    assert rows == {"at_most_rank": "for A in R^(m,n), f(A) <= rank(A)"}
 
 
 def test_the_pinv_rows_are_stated_above_the_cutoff():
