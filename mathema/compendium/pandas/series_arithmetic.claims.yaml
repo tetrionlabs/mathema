@@ -52,3 +52,9 @@ pandas.Series.pow:
     - name: definition
       statement: "for a in R^n \\ {∅}, other in {0, 1, 2, 3}, f(a, other) ~= a ** other"
       note: "Stated for whole powers; a fractional power of a negative element is missing."
+
+pandas.Series.dot:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\ {∅}, other in R^n \\ {∅}, f(a, other) ~= dot(a, other)"
+      note: "The inner product with a Series of the same length."
