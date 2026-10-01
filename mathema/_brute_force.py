@@ -170,4 +170,5 @@ def _examined_clean(fn) -> bool:
     fixed = {text for _module, _name, text in effects.module_reads}
     return not (effects.writes or effects.hidden_reads
                 or effects.order_sensitive
+                or effects.unknown_writes
                 or any(site.text not in fixed for site in effects.unknowns))

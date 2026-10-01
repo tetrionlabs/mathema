@@ -59,6 +59,8 @@ def test_a_pure_function_is_never_falsified(fn):
     (A.w_tuple_unpack, "changes its argument xs (a.append(1.0))"),
     (A.w_walrus, "changes its argument xs"),
     (A.w_cond_alias, "changes its argument xs (y.append(1.0))"),
+    (A.w_dict_alias, "changes its argument xs (d['k'].append(1.0))"),
+    (A.w_for_alias, "changes its argument xs (y.append(1.0))"),
     (A.w_return_alias, "changes its argument xs (y.append(1.0))"),
     (A.w_element_of_argument, "changes an element of its argument rows"),
     (A.w_class_attr, "changes the class Counter (Counter.n += 1)"),
@@ -72,8 +74,6 @@ def test_a_write_it_follows_falsifies_with_the_site(fn, site):
 
 
 @pytest.mark.parametrize("fn, reason", [
-    (A.w_dict_alias, "may be its argument xs"),
-    (A.w_for_alias, "may be its argument xs"),
     (A.w_partial, "calls p, an object mathema cannot follow"),
 ])
 def test_a_write_it_cannot_attribute_is_unknown_with_the_reason(fn, reason):

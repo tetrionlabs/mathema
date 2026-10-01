@@ -995,7 +995,8 @@ def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     """
     from ._examine import examine
     effects = examine(fn, _generator_parameter(fn, facts))
-    return _examined_verdict(effects.writes, effects.unknowns,
+    return _examined_verdict(effects.writes,
+                             [*effects.unknowns, *effects.unknown_writes],
                              "writes nothing outside the call",
                              effects, domain)
 

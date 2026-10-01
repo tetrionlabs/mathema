@@ -70,6 +70,9 @@ class Effects:
     hidden_reads: list = field(default_factory=list)
     order_sensitive: list = field(default_factory=list)
     unknowns: list = field(default_factory=list)
+    #: writes that may reach an object from outside the call: they keep
+    #: state safety from proven, and say nothing about what is read
+    unknown_writes: list = field(default_factory=list)
     #: module-level names written, as (module, name)
     module_writes: set = field(default_factory=set)
     #: module-level names read whose value other code can change
@@ -98,11 +101,12 @@ class Effects:
         if _MAYBE in site.text:
             # a write through an object that may or may not come from
             # outside the call cannot be attributed: it is unknown
-            site = Site("unknown" if site.kind == "write" else site.kind,
-                        site.text.replace(_MAYBE, ""))
+            site = Site("unknown_write" if site.kind == "write"
+                        else site.kind, site.text.replace(_MAYBE, ""))
         bucket = {"write": self.writes, "hidden_read": self.hidden_reads,
                   "order": self.order_sensitive,
-                  "unknown": self.unknowns}[site.kind]
+                  "unknown": self.unknowns,
+                  "unknown_write": self.unknown_writes}[site.kind]
         if site not in bucket:
             bucket.append(site)
             self.guards[site] = self.branch
@@ -112,7 +116,8 @@ class Effects:
 
     def merge(self, other: "Effects") -> None:
         for site in (*other.writes, *other.hidden_reads,
-                     *other.order_sensitive, *other.unknowns):
+                     *other.order_sensitive, *other.unknowns,
+                     *other.unknown_writes):
             self.add(site)
         self.module_writes |= other.module_writes
         self.module_reads |= other.module_reads
@@ -195,6 +200,8 @@ _LIBRARY = {
     "numpy.place": "writes_first", "numpy.putmask": "writes_first",
     "numpy.fill_diagonal": "writes_first",
     "numpy.put_along_axis": "writes_first",
+    "json.dump": "writes_second", "pickle.dump": "writes_second",
+    "marshal.dump": "writes_second",
 }
 #: numpy submodules whose functions run threaded reductions
 _THREADED_MODULES = frozenset({"numpy.linalg"})
@@ -389,6 +396,13 @@ _ALIASING = frozenset({
 })
 
 
+def _SHALLOW_COPIES() -> tuple:
+    """The calls that make a new container holding the elements of the
+    one they are given (the elements themselves are not copied)."""
+    import copy
+    return (list, tuple, sorted, dict, set, frozenset, reversed, copy.copy)
+
+
 def _returns_its_argument(qualified: str, node: ast.Call) -> bool:
     """Whether a call of `qualified` may return its first argument
     itself: an aliasing numpy function, or `numpy.array` asked not to
@@ -402,6 +416,12 @@ def _returns_its_argument(qualified: str, node: ast.Call) -> bool:
     return False
 
 
+#: origins of objects the call made itself (a part of one may still
+#: come from outside, which its own origin records)
+_MADE_HERE = frozenset({"fresh", "copy", "dict", "seq", "holds", "instance",
+                        "local_fn"})
+
+
 def _joined(*origins: dict) -> dict:
     """The origins of names after paths that may each have run: a name
     fresh on one path and from outside on another is from outside; two
@@ -409,9 +429,11 @@ def _joined(*origins: dict) -> dict:
     out: dict = {}
     for name in set().union(*origins):
         seen = [o[name] for o in origins if name in o]
-        outside = [o for o in seen if o[0] != "fresh"]
+        outside = [o for o in seen if o[0] not in _MADE_HERE]
         if not outside:
-            out[name] = seen[0]
+            # a made object whose parts may come from outside wins over
+            # a plainly fresh one, so those parts stay tracked
+            out[name] = next((o for o in seen if o[0] != "fresh"), seen[0])
         elif all(o == outside[0] for o in outside):
             out[name] = outside[0]
         else:
@@ -473,6 +495,11 @@ def _unwrapped(fn):
     while True:
         code = getattr(fn, "__code__", None)
         inner = getattr(fn, "__wrapped__", None)
+        if inner is not None and code is None:
+            # a wrapper with no Python code of its own (functools.cache,
+            # lru_cache): the function it calls is what runs
+            fn = inner
+            continue
         if inner is None or code is None or not os.path.abspath(
                 code.co_filename).startswith(_MATHEMA_DIR + os.sep):
             return fn
@@ -523,27 +550,13 @@ _PART_METHODS = frozenset({
 })
 
 
-def _set_of_text(node) -> bool:
-    """Whether `node` builds a set or frozenset holding text: a set
-    display or comprehension with a string element, or set()/
-    frozenset() of a display or a string holding one."""
-    def textual(n) -> bool:
-        return isinstance(n, ast.Constant) and isinstance(
-            n.value, (str, bytes))
-    if isinstance(node, ast.Set):
-        return any(textual(e) for e in node.elts)
-    if isinstance(node, ast.SetComp):
-        return True
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-            and node.func.id in ("set", "frozenset") and node.args:
-        arg = node.args[0]
-        if textual(arg):
-            return True
-        if isinstance(arg, (ast.List, ast.Tuple, ast.Set)):
-            return any(textual(e) for e in arg.elts)
-        return isinstance(arg, (ast.ListComp, ast.GeneratorExp, ast.SetComp))
-    return False
-
+#: the method an augmented assignment calls on an object
+_IN_PLACE = {ast.Add: "__iadd__", ast.Sub: "__isub__", ast.Mult: "__imul__",
+             ast.Div: "__itruediv__", ast.FloorDiv: "__ifloordiv__",
+             ast.Mod: "__imod__", ast.Pow: "__ipow__", ast.BitOr: "__ior__",
+             ast.BitAnd: "__iand__", ast.BitXor: "__ixor__",
+             ast.MatMult: "__imatmul__", ast.LShift: "__ilshift__",
+             ast.RShift: "__irshift__"}
 
 #: calls whose result depends on the order their argument iterates in
 _ORDERED_CONSUMERS = frozenset({"iter", "list", "tuple", "enumerate",
@@ -595,14 +608,29 @@ class _Examiner:
                                   if isinstance(node, ast.Nonlocal)
                                   for n in node.names}
         self.params = params
+        #: names the body assigns to, anywhere
+        self.rebound = {t.id for node in ast.walk(tree)
+                        if isinstance(node, (ast.Assign, ast.AugAssign,
+                                             ast.AnnAssign))
+                        for target in (node.targets if isinstance(
+                            node, ast.Assign) else [node.target])
+                        for t in ast.walk(target) if isinstance(t, ast.Name)}
         self.text_sets: set = set()
+        self.numeric_params: set = set()
         for p in params:
             try:
                 note = str(inspect.signature(self.fn).parameters[p].annotation)
             except (TypeError, ValueError, KeyError):
                 note = ""
-            if re.search(r"(?:set|Set|frozenset|FrozenSet)\[(?:str|bytes)\]",
-                         note):
+            inner = re.search(r"\[([^\]]*)\]", note)
+            numeric = bool(inner) and all(
+                word.strip().split(".")[-1] in ("int", "float", "bool",
+                                                "complex")
+                for word in inner.group(1).split(","))
+            if numeric:
+                self.numeric_params.add(p)
+            if re.match(r"(?:<class ')?(?:typing\.)?(?:set|Set|frozenset|"
+                        r"FrozenSet|AbstractSet)\b", note) and not numeric:
                 self.text_sets.add(p)
         body = tree.body if isinstance(tree.body, list) else [tree.body]
         for stmt in body:
@@ -638,7 +666,9 @@ class _Examiner:
             if hasattr(builtins, node.id):
                 return ("value", getattr(builtins, node.id), node.id)
             return ("unresolved", node.id)
-        if isinstance(node, (ast.Attribute, ast.Subscript)):
+        if isinstance(node, ast.Subscript):
+            return self._indexed(node)
+        if isinstance(node, ast.Attribute):
             base = self._origin_of(node.value)
             if base[0] == "value" and isinstance(node, ast.Attribute):
                 try:
@@ -663,6 +693,19 @@ class _Examiner:
         if isinstance(node, ast.BoolOp):
             return _joined(*({"v": self._origin_of(v)}
                              for v in node.values))["v"]
+        if isinstance(node, ast.Dict) and node.keys and all(
+                isinstance(k, ast.Constant) for k in node.keys):
+            entries = tuple((k.value, self._origin_of(v))
+                            for k, v in zip(node.keys, node.values))
+            if any(self._outside(o) is not None for _k, o in entries):
+                return ("dict", entries)
+            return ("fresh",)
+        if isinstance(node, (ast.List, ast.Tuple)) and not any(
+                isinstance(e, ast.Starred) for e in node.elts):
+            items = tuple(self._origin_of(e) for e in node.elts)
+            if any(self._outside(o) is not None for o in items):
+                return ("seq", items)
+            return ("fresh",)
         if isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict)):
             parts = node.values if isinstance(node, ast.Dict) else node.elts
             held = tuple(dict.fromkeys(
@@ -671,12 +714,86 @@ class _Examiner:
             return ("holds", held) if held else ("fresh",)
         return ("fresh",)
 
+    def _indexed(self, node: ast.Subscript):
+        """The origin of `base[index]`: a value of a literal container
+        by its constant key, a slice of a list as a copy and of an array
+        as a view, an element of anything else."""
+        base = self._origin_of(node.value)
+        index = node.slice
+        if base[0] == "value":
+            return ("value", None, f"{base[2]}[...]")
+        if base[0] == "holds":
+            return ("may", base[1])
+        if base[0] in ("dict", "seq"):
+            if isinstance(index, ast.Constant):
+                found = [o for k, o in (base[1] if base[0] == "dict" else
+                                        enumerate(base[1]))
+                         if k == index.value]
+                return found[0] if found else ("fresh",)
+            return self._part_of(base)
+        if base[0] == "copy":
+            if isinstance(index, ast.Slice):
+                return base
+            return self._part_of(base[1])
+        if isinstance(index, ast.Slice) and self._outside(base) is not None:
+            kind = self._kind_of(base)
+            if kind == "list":
+                return ("copy", base)
+            if kind != "array":
+                return ("may", (base,))
+        return base
+
+    def _kind_of(self, origin) -> "str | None":
+        """What kind of container an object of `origin` is, when known:
+        "array" (an ndarray, a frame or a series, whose rows and slices
+        are views), "list" (a Python list, tuple or dict), "numbers"
+        (an element of a container declared to hold numbers), else None."""
+        if origin[0] == "element":
+            inner = self._kind_of(origin[1])
+            if inner == "array":
+                return "array"
+            root = origin[1]
+            if root[0] == "param" and root[1] in self.numeric_params:
+                return "numbers"
+            return None
+        if origin[0] == "param":
+            try:
+                note = str(inspect.signature(self.fn).parameters[
+                    origin[1]].annotation)
+            except (TypeError, ValueError, KeyError):
+                return None
+            if any(word in note for word in ("ndarray", "numpy", "np.",
+                                             "DataFrame", "Series",
+                                             "Tensor", "Array")):
+                return "array"
+            if any(note.replace("typing.", "").replace("<class '", "")
+                   .startswith(word) for word in (
+                       "list", "List", "tuple", "Tuple", "dict", "Dict",
+                       "Sequence", "MutableSequence", "Mapping")):
+                return "list"
+            return None
+        if origin[0] == "value":
+            value = origin[1]
+            if isinstance(value, (list, tuple, dict)):
+                return "list"
+            if type(value).__name__ in ("ndarray", "DataFrame", "Series"):
+                return "array"
+        return None
+
     def _part_of(self, origin):
         """The origin of an element or a part of an object of `origin`:
         a part of an object from outside the call is outside it too, a
-        part of a fresh container holding outside objects may be one."""
+        part of a fresh container holding outside objects may be one,
+        and a part of a copy is a part of what was copied."""
         if origin[0] == "holds":
             return ("may", origin[1])
+        if origin[0] == "copy":
+            return self._part_of(origin[1])
+        if origin[0] in ("dict", "seq"):
+            items = [o for _k, o in origin[1]] if origin[0] == "dict" \
+                else list(origin[1])
+            return _joined(*({"v": o} for o in items))["v"] if items \
+                else ("fresh",)
         if origin[0] in ("param", "global", "element"):
             return ("element", origin) if origin[0] != "element" else origin
         if origin[0] == "value" and self._outside(origin) is not None:
@@ -689,6 +806,14 @@ class _Examiner:
         func = node.func
         if isinstance(func, ast.Attribute):
             owner = self._origin_of(func.value)
+            if func.attr == "copy" and not node.args and not (
+                    owner[0] == "value" and isinstance(
+                        owner[1], (types.ModuleType, type))):
+                if self._kind_of(owner) == "array" or (
+                        self._outside(owner) is None
+                        and owner[0] not in ("copy", "dict", "seq", "holds")):
+                    return ("fresh",)
+                return ("copy", owner)
             if not (owner[0] == "value" and isinstance(
                     owner[1], (types.ModuleType, type))):
                 if func.attr in ("reshape", "ravel", "view", "T", "transpose",
@@ -700,6 +825,16 @@ class _Examiner:
         if callee[0] == "value" and isinstance(callee[1], types.FunctionType) \
                 and _project_source(callee[1]) is not None:
             return self._returned(callee[1], node)
+        if callee[0] == "value" and isinstance(callee[1], type) and \
+                _project_class(callee[1]):
+            return ("instance", callee[1])
+        if callee[0] == "value" and node.args and any(
+                callee[1] is maker for maker in _SHALLOW_COPIES()):
+            inner = self._origin_of(node.args[0])
+            if self._outside(inner) is not None or inner[0] in (
+                    "copy", "dict", "seq", "holds"):
+                return ("copy", inner)
+            return ("fresh",)
         if callee[0] == "value" and _qualified(callee[1]) in _SHARED_RESULTS:
             # the call returns an object other code holds too
             return ("value", None, self._shown(node))
@@ -929,12 +1064,49 @@ class _Examiner:
         origin = self._origin_of(node)
         return origin if self._outside(origin) is not None else ("fresh",)
 
+    def _numeric_items(self, node) -> bool:
+        """Whether what `node` iterates over is known to hold numbers
+        only, whose set order is the same in every process."""
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return all(isinstance(e, ast.Constant) and isinstance(
+                e.value, (int, float, complex)) for e in node.elts)
+        if isinstance(node, ast.Name):
+            return node.id in self.numeric_params
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "range":
+            return True
+        return False
+
+    def _order_varies(self, node) -> bool:
+        """Whether `node` is a set whose iteration order may change from
+        one process to the next: one that may hold strings, bytes or
+        objects hashed by identity. A set of numbers keeps one order."""
+        if isinstance(node, ast.Set):
+            return not self._numeric_items(node)
+        if isinstance(node, ast.SetComp):
+            return True
+        if isinstance(node, ast.Name):
+            return node.id in self.text_sets
+        if isinstance(node, ast.BinOp) and isinstance(
+                node.op, (ast.BitOr, ast.BitAnd, ast.Sub, ast.BitXor)):
+            return self._order_varies(node.left) or \
+                self._order_varies(node.right)
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in ("set", "frozenset"):
+                return bool(node.args) and not self._numeric_items(
+                    node.args[0])
+            if isinstance(func, ast.Attribute) and func.attr in (
+                    "union", "intersection", "difference",
+                    "symmetric_difference", "copy"):
+                return self._order_varies(func.value)
+        return False
+
     def _iterated(self, node) -> None:
         """An iteration of `node` whose order reaches the result: a set
         of strings iterates in an order that changes from one process
         to the next."""
-        if _set_of_text(node) or isinstance(node, ast.Name) and \
-                node.id in self.text_sets:
+        if self._order_varies(node):
             self.effects.add(Site("order", f"{self.name} iterates "
                                   f"{self._shown(node)}: the iteration order "
                                   f"of a set of strings varies across "
@@ -971,13 +1143,23 @@ class _Examiner:
             self.expr(node)
 
     def _store(self, target, value) -> None:
+        if isinstance(target, ast.Attribute):
+            owner = self._origin_of(target.value)
+            if owner[0] == "instance":
+                found = inspect.getattr_static(owner[1], target.attr, None)
+                setter = getattr(found, "fset", None)
+                if isinstance(setter, types.FunctionType) and \
+                        _project_source(setter) is not None:
+                    self._reach(setter, ast.Call(
+                        func=target, args=[value], keywords=[]),
+                        bound=target.value)
+                return
         if isinstance(target, (ast.Subscript, ast.Attribute)):
             self._target_parts(target)
             self._write_through(target, f"{self._shown(target)} = ...")
             return
         if isinstance(target, ast.Name):
-            if _set_of_text(value) or isinstance(value, ast.Name) and \
-                    value.id in self.text_sets:
+            if self._order_varies(value):
                 self.text_sets.add(target.id)
             else:
                 self.text_sets.discard(target.id)
@@ -1019,6 +1201,30 @@ class _Examiner:
                 self._bind(target, ("fresh",))
                 return
             origin = self.origin.get(target.id)
+            if origin and origin[0] == "instance":
+                dunder = _IN_PLACE.get(type(node.op))
+                found = (inspect.getattr_static(origin[1], dunder, None)
+                         if dunder else None)
+                if isinstance(found, types.FunctionType) and \
+                        _project_source(found) is not None:
+                    self._reach(found, ast.Call(func=target,
+                                                args=[node.value],
+                                                keywords=[]), bound=target)
+                return
+            if origin and origin[0] in ("element", "may"):
+                kind = self._kind_of(origin)
+                if kind != "numbers":
+                    label = self._outside(origin)
+                    if label is not None and kind != "array" and \
+                            not label.startswith(_MAYBE):
+                        label = _MAYBE + "an object that may be " + label
+                    if label is not None:
+                        self.effects.add(Site("write", f"{self.name} "
+                                              f"changes {label} in place "
+                                              f"({self._shown(node)})"))
+                        return
+                self.origin[target.id] = ("fresh",)
+                return
             if origin and origin[0] == "param" and isinstance(
                     node.op, (ast.Add, ast.Mult, ast.BitOr)) and \
                     self._mutable_param(origin[1]):
@@ -1027,6 +1233,19 @@ class _Examiner:
                                       f"({self._shown(node)})"))
             else:
                 self.origin[target.id] = ("fresh",)
+
+    def _never_none(self, node) -> bool:
+        """Whether an expression used as a seed is a parameter whose
+        default is not None (the caller's value is its seed)."""
+        origin = self._origin_of(node)
+        if origin[0] != "param":
+            return False
+        try:
+            default = inspect.signature(self.fn).parameters[
+                origin[1]].default
+        except (TypeError, ValueError, KeyError):
+            return False
+        return default is not None
 
     def _shared_default(self, name: str) -> bool:
         """Whether parameter `name` defaults to one mutable object."""
@@ -1108,6 +1327,9 @@ class _Examiner:
                 self.expr(node.elt)
             self.origin = before
             return
+        if isinstance(node, ast.FormattedValue):
+            # formatting a set writes its members in iteration order
+            self._iterated(node.value)
         if isinstance(node, ast.NamedExpr):
             self.expr(node.value)
             self._bind(node.target, self._origin_of(node.value))
@@ -1147,6 +1369,17 @@ class _Examiner:
             self.effects.add(Site("hidden_read", f"{self.name} reads "
                                   f"os.environ"))
             return
+        if shown in self.declared_global and shown in self.rebound:
+            self.effects.add(Site("hidden_read", f"{self.name} reads the "
+                                  f"module-level {shown}, which the call "
+                                  f"also changes"))
+            return
+        if shown in self.declared_nonlocal and shown in self.rebound:
+            self.effects.add(Site("hidden_read", f"{self.name} reads "
+                                  f"{shown}, a variable of the function that "
+                                  f"encloses it, which the call also "
+                                  f"changes"))
+            return
         if isinstance(value, (types.ModuleType, type)) or callable(value):
             if isinstance(value, types.FunctionType):
                 self._reach(value)
@@ -1175,7 +1408,7 @@ class _Examiner:
         method is called on, the first parameter of the callee."""
         if _project_source(fn) is None:
             self._library(fn, _qualified(fn) or getattr(fn, "__name__", "?"),
-                          None)
+                          node)
             return
         found = examine(fn, constructing=constructing)
         if node is None:
@@ -1183,7 +1416,8 @@ class _Examiner:
             return
         passed = {site for _p, site in found.arg_writes}
         for site in (*found.writes, *found.hidden_reads,
-                     *found.order_sensitive, *found.unknowns):
+                     *found.order_sensitive, *found.unknowns,
+                     *found.unknown_writes):
             if site not in passed:
                 self.effects.add(site)
         self.effects.module_writes |= found.module_writes
@@ -1193,7 +1427,7 @@ class _Examiner:
         for p, site in found.arg_writes:
             arg = _argument_for(fn, node, p, bound, constructing)
             if arg is None:
-                self.effects.add(Site("unknown", f"{self.name} calls "
+                self.effects.add(Site("unknown_write", f"{self.name} calls "
                                       f"{callee} with arguments mathema "
                                       f"cannot match to its parameters, "
                                       f"and {site.text}"))
@@ -1216,7 +1450,8 @@ class _Examiner:
         for keyword in node.keywords:
             self.expr(keyword.value)
         func = node.func
-        if isinstance(func, ast.Name) and func.id in _ORDERED_CONSUMERS \
+        if isinstance(func, ast.Name) and func.id in (
+                *_ORDERED_CONSUMERS, "str", "repr", "format") \
                 and node.args and func.id not in self.origin:
             self._iterated(node.args[0])
         if isinstance(func, ast.Attribute) and func.attr in ("join", "pop") \
@@ -1421,9 +1656,15 @@ class _Examiner:
             if changed is not None:
                 self.effects.add(Site("write", f"{self.name} changes "
                                       f"{changed} ({self._shown(node)})"))
-        if entry == "writes_first":
-            changed = (self._outside(self._origin_of(node.args[0]))
-                       if node is not None and node.args else None)
+        if entry in ("writes_first", "writes_second"):
+            at = 0 if entry == "writes_first" else 1
+            written = None
+            if node is not None:
+                written = node.args[at] if len(node.args) > at else next(
+                    (k.value for k in node.keywords
+                     if k.arg in ("fp", "file")), None)
+            changed = (self._outside(self._origin_of(written))
+                       if written is not None else None)
             if changed is not None:
                 self.effects.add(Site("write", f"{self.name} changes "
                                       f"{changed} ({self._shown(node)})"))
@@ -1431,10 +1672,21 @@ class _Examiner:
         if entry == "pure":
             return
         if entry == "seeded":
-            if node is not None and not node.args and not node.keywords:
+            seed = None
+            if node is not None:
+                seed = node.args[0] if node.args else next(
+                    (k.value for k in node.keywords
+                     if k.arg in ("seed", "x", "a")), None)
+            if node is not None and (seed is None or isinstance(
+                    seed, ast.Constant) and seed.value is None):
                 self.effects.add(Site("hidden_read", f"{self.name} calls "
                                       f"{name}() with no seed, which reads "
                                       f"fresh entropy"))
+            elif seed is not None and not isinstance(seed, ast.Constant) \
+                    and not self._never_none(seed):
+                self.effects.add(Site("unknown", f"{self.name} seeds "
+                                      f"{name} with {self._shown(seed)}, "
+                                      f"which may be None"))
             return
         if entry == "threaded":
             self.effects.add(Site("order", f"{self.name} calls {name}, a "
@@ -1514,7 +1766,20 @@ class _Examiner:
         import logging
         self._out_keyword(node)
         self._seedless_draw(owner, method, node)
-        if owner[0] == "fresh":
+        if owner[0] == "instance":
+            found = inspect.getattr_static(owner[1], method, None)
+            if isinstance(found, (staticmethod, classmethod)):
+                found = found.__func__
+            if isinstance(found, types.FunctionType) and \
+                    _project_source(found) is not None:
+                self._reach(found, node, bound=node.func.value)
+                return
+            if method not in _READING_METHODS:
+                self.effects.add(Site("unknown", f"{self.name} calls "
+                                      f"{self._shown(node.func)}, a method "
+                                      f"mathema cannot read"))
+            return
+        if owner[0] in ("fresh", "copy", "dict", "seq"):
             return
         if owner[0] == "value" and isinstance(
                 owner[1], (logging.Logger, logging.LoggerAdapter)):

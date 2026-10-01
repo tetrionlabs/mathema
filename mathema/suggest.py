@@ -1134,7 +1134,7 @@ _EXAMINED = {
 }
 #: what leaves each examined family unknown
 _UNREAD = {
-    "is_state_safe": ("unknowns",),
+    "is_state_safe": ("unknowns", "unknown_writes"),
     "is_deterministic": ("unknowns", "order_sensitive"),
     "is_reproducible": ("unknowns", "order_sensitive"),
 }
