@@ -88,7 +88,15 @@ def test_the_companion_reads_vector_arithmetic_as_the_proof_does():
 def test_the_probe_route_reads_the_same_premise():
     # an unliftable body keeps the claim on the probe route, where the
     # premise filters each draw; a constant draw is outside the domain
+    from mathema.claims import check_conjectures
+    law = mathema.claim("for xs in [-0.1, 0.1]^n, assuming std(xs, ddof=1) "
+                        "> 0, f(-xs) ~= -f(xs)", name="c")
+    (p,) = check_conjectures(ratio_loop, [law])
+    assert p.verdict == "holds"
+    assert p.route.startswith("probe")
+    # ratio_loop([]) divides by len(xs) with no emptiness guard: the
+    # claim's empty-input line is falsified, and the claim with it
     probes = _probes(ratio_loop, "for xs in [-0.1, 0.1]^n, "
                                  "assuming std(xs, ddof=1) > 0, f(-xs) ~= -f(xs)")
-    assert probes["c"].verdict == "holds"
-    assert probes["c"].route.startswith("probe")
+    assert probes["c"].verdict == "falsified"
+    assert probes["c"].counterexample == "xs = []"

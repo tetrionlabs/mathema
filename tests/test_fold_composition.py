@@ -75,14 +75,22 @@ def test_shift_proves_exactly_when_the_weights_sum_to_one(folds):
 
 
 def test_the_battery_equivariances_now_prove_on_linear_folds(folds):
+    # the mathematics: each equivariance is proven over non-empty lists
+    from mathema.conjecture import check_conjectures
     import mathema
-    rec = mathema.check(folds.ema)
-    rows = {p.name: p for p in rec.probes}
-    assert rows["scale_equivariant"].verdict == "proven", (
-        rows["scale_equivariant"].verdict, rows["scale_equivariant"].note)
-    assert rows["translation_equivariant"].verdict == "proven", (
-        rows["translation_equivariant"].verdict,
-        rows["translation_equivariant"].note)
+    for name in ("scale_equivariant", "translation_equivariant"):
+        law = next(c for c in mathema.suggest_claims(folds.ema)
+                   if getattr(c, "name", None) == name)
+        (p,) = check_conjectures(folds.ema, [law])
+        assert p.verdict == "proven", (name, p.verdict, p.note)
+    # the check: ema reads x[0], so its empty-input line is falsified
+    # with the empty list, and so is each claim
+    rows = {p.name: p for p in mathema.check(folds.ema).probes}
+    for name in ("scale_equivariant", "translation_equivariant"):
+        assert rows[name].verdict == "falsified", (name, rows[name].verdict)
+        assert rows[name].counterexample.startswith("x = []"), \
+            rows[name].counterexample
+    assert rows["is_empty_safe[x]"].verdict == "falsified"
 
 
 def test_an_unregistered_transform_still_refuses_loudly(folds):

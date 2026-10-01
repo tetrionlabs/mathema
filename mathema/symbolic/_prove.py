@@ -2501,14 +2501,16 @@ def length_admitted(name: str, k: int, domain, assumption,
         sequence and so cannot be read at `k` alone.
 
     Notes:
-        An unbound sequence admits every length, the empty list
-        included; one over a dimension name the claim does not bind
-        (`x in R^n`, `Shape("n")`) admits every length from one, and
-        the empty list is None, since whether the name ranges over zero
-        is not settled; a fixed length (`R^3`) admits only itself, and
-        a dimension name the claim binds to whole numbers (`n in [2, 5]
-        subset Z`) admits those. A premise with no value at the list
-        (`max(x) > 0` at the empty list) excludes it.
+        A value claim is over non-empty sequences: an unbound sequence
+        and one over a dimension name (`x in R^n`, `Shape("n")`) admit
+        every length from one, and the empty list only where a premise
+        reads the sequence's length and holds at zero (`assuming
+        len(x) == 0`); what f does with an empty list the claim does not
+        name is the empty-input line's question (`empty_input_line`). A
+        fixed length (`R^3`) admits only itself, and a dimension name
+        the claim binds to whole numbers (`n in [2, 5] subset Z`) admits
+        those. A premise with no value at the list (`max(x) > 0` at the
+        empty list) excludes it.
     """
     import re
 
@@ -2527,17 +2529,11 @@ def length_admitted(name: str, k: int, domain, assumption,
                     return False
             except Exception:
                 return None
-        elif size is None and k == 0:
-            # whether a dimension name ranges over zero is not settled,
-            # so the empty list may be admitted
-            premises = _premises_hold(
-                [(lhs, rel, rhs) for lhs, rel, rhs in assumption or ()
-                 if re.search(rf"\b{re.escape(name)}\b", f"{lhs} {rhs}")],
-                {name: []})
-            return False if premises is False else None
     pattern = re.compile(rf"\b{re.escape(name)}\b")
     reading = [(lhs, rel, rhs) for lhs, rel, rhs in assumption or ()
                if pattern.search(f"{lhs} {rhs}")]
+    if k == 0 and not reading:
+        return False
     return _premises_hold(reading, {name: [0.0] * k})
 
 
@@ -2597,7 +2593,7 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
     shapes = signature_shapes(fn)
     seqs = [p for p in facts.params
             if facts.param_kinds.get(p) in SEQUENCE_KINDS]
-    bound_admits = {p: length_admitted(p, 0, domain, None, shapes)
+    bound_admits = {p: length_admitted(p, 0, domain, assumption, shapes)
                     for p in seqs}
     ties = _length_ties(seqs, domain, assumption, shapes)
     targets = [p for p in seqs if bound_admits[p] is not False
@@ -2664,8 +2660,10 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                        f"the claim may admit for {target}; state it: "
                        f"assuming len({target}) >= 1")
         if not identity:
-            called = _claim_call_raise(fn, (lhs_src, rhs_src),
-                                       dict(zip(facts.params, args)))
+            from .._empty_input import claim_calls
+            called = next((c for c in claim_calls(
+                fn, (lhs_src, rhs_src), dict(zip(facts.params, args)))
+                if c[2]), None)
             if called is not None:
                 call_text, call_args, call_exc = called
                 at = ", ".join(f"{p} = {v!r}" for p, v in call_args.items())
@@ -2693,53 +2691,6 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
             counterexample=where,
             witness=dict(zip(facts.params, args)),
             meta={"mathema.witness_executed": True})
-    return None
-
-
-def _claim_call_raise(fn, srcs, point: dict) -> "tuple[str, dict, str] | None":
-    """Intent:
-        `(call text, the call's arguments by parameter, exception
-        name)` for the first `f(...)` call in the claim text that
-        raises when its arguments are evaluated at `point` the way the
-        claim evaluates them (its math functions, keywords, slices) and
-        f is executed there; None when no call raises. A call whose
-        arguments cannot be evaluated, or that does not bind to f's
-        signature, decides nothing about itself and leaves the other
-        calls to be checked.
-    """
-    from .._linalg_eval import FUNCTIONS as vector_funcs
-    from .._math_vocab import MATH_CONSTANTS
-    from ..conjecture import _SAFE_FUNCS
-    env = {"__builtins__": {}, **_SAFE_FUNCS, **vector_funcs,
-           **MATH_CONSTANTS, **point}
-    try:
-        sig = callable_signature(fn)
-    except (TypeError, ValueError):
-        return None
-
-    def value(node):
-        return eval(compile(ast.Expression(body=node), "<claim>", "eval"),
-                    env)
-    for src in srcs:
-        try:
-            tree = ast.parse(src or "0", mode="eval")
-        except SyntaxError:
-            continue
-        for n in ast.walk(tree):
-            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                    and n.func.id == "f"):
-                continue
-            try:
-                args = [value(a) for a in n.args]
-                kwargs = {k.arg: value(k.value) for k in n.keywords}
-                bound = sig.bind(*args, **kwargs)
-            except Exception:
-                continue
-            try:
-                fn(*args, **kwargs)
-            except Exception as e:
-                return ast.unparse(n), dict(bound.arguments), \
-                    type(e).__name__
     return None
 
 
