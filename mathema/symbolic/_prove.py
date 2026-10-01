@@ -35,7 +35,7 @@ from ..domain import InvalidDomain, render_domain_bound, split_bound_at
 from ._dot import try_prove_dot
 from ._fold import lift_fold, try_prove_fold
 from ._proof_support import (
-    ProofResult, _domain_assumptions, _free_names, _prove_relation,
+    ProofResult, _domain_assumptions, _free_names, _humanize, _prove_relation,
     _prove_relation_case_split, _quantifier_clause,
 )
 from ._sum import try_prove_sum
@@ -2361,6 +2361,129 @@ def _loop_proof_raise_gate(fn, facts, domain, proof: ProofResult) -> ProofResult
     return proof
 
 
+_CLAIM_SIDE_SKIP_CALLS = frozenset({"d", "diff", "integrate", "Integral",
+                                    "Sum", "sum", "Prod", "Product", "lim",
+                                    "limit"})
+
+
+def _claim_side_requirements(src: str) -> list:
+    """Intent:
+        The conditions under which the claim's own expression (never a
+        lifted function body) has a real value: `(kind, node)` pairs
+        for every divisor (`nonzero`), root or log argument (`nonneg`,
+        `positive`), and `(pow, base, exponent)` for every power, read
+        from the claim text. Calls that bind their own variable
+        (derivatives, integrals, sums, limits) are not entered.
+    """
+    try:
+        tree = ast.parse(src, mode="eval")
+    except SyntaxError:
+        return []
+    out: list = []
+
+    def walk(node):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id in _CLAIM_SIDE_SKIP_CALLS:
+            return
+        if isinstance(node, ast.BinOp):
+            if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+                out.append(("nonzero", node.right))
+            elif isinstance(node.op, ast.Pow):
+                out.append(("pow", node.left, node.right))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and len(node.args) == 1:
+            if node.func.id == "sqrt":
+                out.append(("nonneg", node.args[0]))
+            elif node.func.id in ("log", "log10", "log2", "ln"):
+                out.append(("positive", node.args[0]))
+        for child in ast.iter_child_nodes(node):
+            walk(child)
+
+    walk(tree)
+    return out
+
+
+def _claim_side_value_gate(sources, build, aux, domain, bound_context,
+                           params, extensive) -> "ProofResult | None":
+    """Intent:
+        Whether the claim's own expression has a real value at every
+        point of the domain. None when every requirement is proven (or
+        none applies); a disproven ProofResult with an in-domain
+        witness where one provably fails; an undecided one, whose
+        sketch names the requirement, when one is not settled.
+
+    Notes:
+        A requirement over a name the domain does not bound (a bound
+        variable, an aux) is not checked here.
+    """
+    unsettled = None
+    names = set(params)
+    for src in sources:
+        if not src:
+            continue
+        for req in _claim_side_requirements(src):
+            try:
+                if req[0] == "pow":
+                    base = build(ast.unparse(req[1]), aux)
+                    exponent = build(ast.unparse(req[2]), aux)
+                    if getattr(exponent, "is_integer", False) and \
+                            exponent.is_nonnegative:
+                        continue
+                    if getattr(exponent, "is_integer", False) and \
+                            exponent.is_negative:
+                        checks = [(base, "!=", "nonzero")]
+                    elif exponent.is_number and exponent.is_positive:
+                        checks = [(base, ">=", "nonneg")]
+                    else:
+                        checks = [(base, ">", "positive")]
+                else:
+                    operand = build(ast.unparse(req[1]), aux)
+                    rel = {"nonzero": "!=", "nonneg": ">=",
+                           "positive": ">"}[req[0]]
+                    checks = [(operand, rel, req[0])]
+            except TimeoutError:
+                raise
+            except Exception:
+                continue
+            for expr, rel, kind in checks:
+                if isinstance(expr, tuple) or not hasattr(expr, "free_symbols"):
+                    continue
+                if not {str(s) for s in expr.free_symbols} <= names:
+                    continue
+                if expr.is_number:
+                    if (rel == "!=" and expr.is_zero is False) or \
+                            (rel == ">=" and expr.is_nonnegative) or \
+                            (rel == ">" and expr.is_positive):
+                        continue
+                try:
+                    verdict = _prove_relation(expr, sympy.S.Zero, rel, domain,
+                                              bound_context, params,
+                                              extensive=extensive)
+                except TimeoutError:
+                    raise
+                except Exception:
+                    verdict = None
+                what = {"nonzero": f"{_humanize(expr)} is never zero",
+                        "nonneg": f"{_humanize(expr)} is never negative",
+                        "positive": f"{_humanize(expr)} is always positive"}[kind]
+                if verdict is not None and verdict.status == "proven":
+                    continue
+                if verdict is not None and verdict.status == "disproven" \
+                        and verdict.witness:
+                    return ProofResult(
+                        "disproven",
+                        sketch=(f"the claim's own side has no real value "
+                                f"inside the declared domain: it needs "
+                                f"{what}, which fails there"),
+                        witness=verdict.witness,
+                        meta={"mathema.claim_side_no_value": True})
+                unsettled = unsettled or ProofResult(
+                    "undecided",
+                    sketch=(f"the claim's own side needs {what} over the "
+                            f"declared domain, which is not settled"))
+    return unsettled
+
+
 def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
              domain: dict | None = None, tolerance: float | None = None,
              max_callee_depth: int = 3, extensive: bool = False,
@@ -2383,6 +2506,12 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             "undecided",
             sketch=(f"{result.sketch}; within the declared tolerance "
                     f"({tolerance:g}), so not a disproof of this claim"))
+    if result.status == "proven" and notes.get("claim_side"):
+        return ProofResult(
+            "undecided",
+            sketch=(f"{result.sketch}; not kept as a proof: "
+                    f"{notes['claim_side']}"),
+            meta=dict(result.meta))
     if result.status == "proven" and notes.get("unread") and not assume_defined:
         return ProofResult(
             "undecided",
@@ -3294,6 +3423,15 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                                       e.length.subs(pins, simultaneous=True))
             return e.subs(pins, simultaneous=True)
         lhs, rhs = _pin(lhs), _pin(rhs)
+
+    if relation in ("==", "~=", "!=", "<", "<=", ">", ">="):
+        side_gate = _claim_side_value_gate(
+            [lhs_src, rhs_src], build, aux, domain, bound_context,
+            lifted.params, extensive)
+        if side_gate is not None and side_gate.status == "disproven":
+            return side_gate
+        if side_gate is not None and _walk_notes is not None:
+            _walk_notes.setdefault("claim_side", side_gate.sketch)
 
     if isinstance(lhs, _SymbolicArray) or isinstance(rhs, _SymbolicArray):
         return ProofResult("unliftable", sketch="an array-valued expression must "
