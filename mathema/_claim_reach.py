@@ -13,8 +13,8 @@ as code or loads a pickle, and anything reached through an allowed
 module's attributes (`logging.os.system`, a project module's
 `from os import system`).
 
-Every other name runs as written, the way importing it and calling it
-in the author's own code would. A binding into third-party code whose
+Every other name runs as written, in the same way as importing it and
+calling it directly in the author's own code would. A binding into third-party code whose
 purity mathema cannot establish carries a warning naming it
 (`third_party_warning`); one into mathema itself or the author's own
 project carries none.
@@ -364,4 +364,4 @@ def third_party_warning(binding: str, obj, path: str,
             or purity_established(obj, path):
         return None
     return (f"{binding} calls third-party code whose purity mathema "
-            f"cannot establish, as importing and calling it would")
+            f"cannot establish, in the same way as importing it and calling it directly would")

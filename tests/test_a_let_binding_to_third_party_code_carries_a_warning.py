@@ -44,7 +44,7 @@ def _row(stmt, fn=_f):
 ])
 def test_a_third_party_binding_carries_the_warning(stmt, binding):
     rec, row = _row(stmt)
-    said = f"{binding} {_WORDS}, as importing and calling it would"
+    said = f"{binding} {_WORDS}, in the same way as importing it and calling it directly would"
     assert said in (row.note or ""), row.note
     assert said in (row.meta or {}).get("mathema.let_warning", []), row.meta
     assert said in repr(rec), repr(rec)

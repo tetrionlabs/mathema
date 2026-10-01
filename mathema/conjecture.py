@@ -19,8 +19,8 @@ inputs):
 Expressions are validated against an AST whitelist before evaluation:
 arithmetic, the comparisons the relation handles, the grammar's own
 functions, and calls to the functions the claim names. A dotted name in a
-claim (`let g = numpy.mean`) resolves to that function, which runs as
-importing and calling it would, except that a name reaching a refused
+claim (`let g = numpy.mean`) resolves to that function, which runs in the same way as
+importing it and calling it directly would, except that a name reaching a refused
 module (os, subprocess, builtins and the others `_claim_reach` lists) is
 refused. A binding into third-party code whose purity mathema cannot
 establish runs and carries a warning naming it.
