@@ -495,6 +495,13 @@ def add_hole_spelling(word: str) -> None:
     _HOLE_TOKENS.add(str(word))
 
 
+def unset_refusal(param: str) -> str:
+    """Why `unset` cannot describe a parameter: a call always passes it."""
+    return (f"{param} is a parameter, which every call passes, so it cannot be "
+            f"unset; unset is a key or field left out of a record. Write absent "
+            f"for {param} = None")
+
+
 def _sentinel_of(token: str, *, in_element: bool = False,
                  on_field: bool = False) -> "_Sentinel | None":
     """The sentinel a word spells, or None when it spells none. A `None`
@@ -2334,6 +2341,8 @@ def _parse_binding(part: str):
                 if v.strip():
                     value = _set_value(v, in_element=element_path,
                                        on_field=on_field and not space_dims)
+                    if value == ABSENT_UNSET and not is_path:
+                        return f"{part!r}: {unset_refusal(name)}"
                     # a parameter's `null` is its absence, the whole class
                     excluded.add(ABSENT if value == ABSENT_NULL and not is_path
                                  else value)
@@ -2368,6 +2377,8 @@ def _parse_binding(part: str):
     # a member of absence admitted by name is the class with the other
     # member excluded, one representation for every spelling
     absent_members = {s for s in unique if s.kind == "absent" and s.member}
+    if ABSENT_UNSET in absent_members and not is_path:
+        return f"{part!r}: {unset_refusal(name)}"
     if absent_members:
         unique = [s for s in unique if s not in absent_members]
         if ABSENT not in unique:

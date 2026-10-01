@@ -777,6 +777,9 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
     misspecified = none_default_misspecified(
         fn, [stated.parameter] if stated.parameter else None) \
         if stated.kind == "absent" else None
+    if stated.member == "unset" and stated.parameter and not _is_path(stated.parameter):
+        from .domain import unset_refusal
+        misspecified = unset_refusal(stated.parameter)
     if misspecified:
         return Probe(cj.name, statement, "skipped:misspecified", route=None,
                      note=misspecified, meta={**meta, "mathema.invalid_conjecture": True})
