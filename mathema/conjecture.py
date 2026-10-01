@@ -6837,6 +6837,16 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # claim's samples
                 continue
             if not call_raised[0]:
+                if isinstance(e, IndexError):
+                    # an index outside a sequence the claim reads (a
+                    # literal `[9]` past the end of a result): the claim
+                    # has no value at this in-domain point
+                    checked += 1
+                    cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: "
+                          f"the claim's own index raised IndexError ({e}); "
+                          f"narrow the claim's domain to where every index "
+                          f"is inside its sequence")
+                    break
                 # the law's own plumbing failed, not the function,
                 # a broken sample, never a counterexample
                 continue

@@ -421,7 +421,16 @@ def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
             # needs to know a _SymbolicArray was ever involved.
             idx = _literal_int_index(node.slice)
             if idx is not None:
-                return value.expr.subs(value.index, sympy.Integer(idx))
+                # numpy's reading of a literal index: a negative one
+                # counts from the end, and one outside the array has no
+                # element (the call raises IndexError), so the element
+                # is NaN wherever the position falls outside
+                position = sympy.Integer(idx) if idx >= 0 \
+                    else value.length + idx
+                inside = sympy.And(position >= 0, position < value.length)
+                return sympy.Piecewise(
+                    (value.expr.subs(value.index, position), inside),
+                    (sympy.nan, True))
             if isinstance(node.slice, ast.Name):
                 idx_sym = aux.setdefault(node.slice.id, sympy.Symbol(node.slice.id, real=True))
                 return value.expr.subs(value.index, idx_sym)

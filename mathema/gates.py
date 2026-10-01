@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from . import _shapes
 from ._math_vocab import MATH_CONSTANTS
+from .corroboration import INCONCLUSIVE
 from .records import Probe
 from .runtime_types import SEQUENCE_KINDS
 
@@ -70,7 +71,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         holds, False = a genuine counterexample, None = can't tell);
         `probe_finite(point)` returns a computation-failure detail
         (a raise, a NaN, an inf or a deviation past a magnitude-scaled
-        tolerance where the relation fails) or None; `admits(point)` is
+        tolerance where the relation fails), None where the code
+        agrees, or `corroboration.INCONCLUSIVE` where the claim's own
+        evaluation failed; `admits(point)` is
         in-domain-and-assumption membership; `sample(name, rng)` draws
         a value respecting the parameter's declared bound; `exact`
         drops the default allowance, so a claim with no declared
@@ -332,12 +335,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         _reset()
         try:
             lv, rv = _values(point)
-        except Exception:
+        except Exception as e:
             # a raise FROM THE FUNCTION at an in-domain point is a
             # genuine failure of a value claim (the pedantic raise
-            # rule), so it reproduces a disproof; a plumbing raise
-            # stays inconclusive
-            return False if calls_raised[0] else None
+            # rule), so it reproduces a disproof, and so does an index
+            # outside a sequence the claim reads; any other plumbing
+            # raise stays inconclusive
+            return False if calls_raised[0] or isinstance(e, IndexError) \
+                else None
         if calls_nonfinite[0] is not None:
             # a nan or an infinity the code returned for finite inputs
             # is no value: against a value every relation fails. Two
@@ -401,13 +406,16 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         _reset()
         try:
             lv, rv = _values(point)
-        except Exception:
-            # only a raise from the function under test is a
-            # computation failure; the law's own plumbing failing
-            # says nothing about the code
+        except Exception as e:
+            # a raise from the function under test is a computation
+            # failure, and so is an index outside a sequence the claim
+            # reads; the law's own plumbing failing otherwise says
+            # nothing about the code, and is no agreement either
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
-            return None
+            if isinstance(e, IndexError):
+                return f"the claim's own index raises IndexError here ({e})"
+            return INCONCLUSIVE
         if calls_nonfinite[0] is not None:
             # no value at a finite input: an overflow, a pole, a nan.
             # Two sides at the same infinity are one extended-real
