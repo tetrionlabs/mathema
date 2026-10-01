@@ -1111,6 +1111,41 @@ def plain_number(value):
     return value
 
 
+def _as_written(value):
+    """Intent:
+        A finite float endpoint or set member as the number its
+        shortest decimal spelling writes (`0.1` is 1/10), an exact
+        `Fraction`; anything else unchanged.
+    """
+    if isinstance(value, float) and math.isfinite(value):
+        exact = fractions.Fraction(repr(value))
+        return int(exact) if exact.denominator == 1 else exact
+    return value
+
+
+def _written_domain(bounds) -> "Domain":
+    """Intent:
+        `bounds` with every float endpoint, discrete member and excluded
+        value read as written (`_as_written`), for judging an exact
+        number.
+    """
+    import dataclasses
+
+    def piece(p):
+        if isinstance(p, frozenset):
+            return frozenset(_as_written(v) for v in p)
+        if isinstance(p, tuple) and len(p) == 2:
+            return Interval(_as_written(p[0]), _as_written(p[1]),
+                            getattr(p, "closed_lo", True),
+                            getattr(p, "closed_hi", True))
+        return p
+
+    dom = _as_domain(bounds)
+    return dataclasses.replace(
+        dom, pieces=tuple(piece(p) for p in dom.pieces),
+        excluded=frozenset(_as_written(v) for v in dom.excluded))
+
+
 def number_member(value, bounds) -> "bool | None":
     """Intent:
         Membership of one number in a numeric domain, whatever the
@@ -1120,7 +1155,16 @@ def number_member(value, bounds) -> "bool | None":
         (`plain_number`), so `np.float32(5.0)`, `Fraction(5)` and
         `Decimal(5)` are each the number 5; an infinity is not a member
         of a bare real, integer or natural set.
+
+        Each kind meets an endpoint written `0.1` in its own reading: a
+        binary float (a Python or numpy float) against the float the
+        literal parses to, an exact number (an int, a numpy integer, a
+        Fraction, a Decimal) against the number as written, 1/10.
     """
+    import decimal
+    import numbers
+    exact = (isinstance(value, (numbers.Rational, decimal.Decimal))
+             and not isinstance(value, bool))
     v = plain_number(value)
     if isinstance(v, bool):
         return False
@@ -1130,6 +1174,8 @@ def number_member(value, bounds) -> "bool | None":
     if (isinstance(v, float) and math.isinf(v) and not dom.pieces
             and dom.base_type in ("R", "Z", "N")):
         return False
+    if exact and isinstance(v, (int, fractions.Fraction)):
+        return domain_contains(v, _written_domain(bounds))
     return domain_contains(v, bounds)
 
 
