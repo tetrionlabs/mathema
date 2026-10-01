@@ -443,7 +443,6 @@ def _domains_from_claims(claims) -> dict:
     return out
 
 
-@_quiet_while_probing
 def _matrix_names_of(fn) -> frozenset:
     """The parameters `fn`'s signature declares as matrices, over which
     bars in a claim (`|A|`) read as the determinant."""
@@ -454,6 +453,7 @@ def _matrix_names_of(fn) -> frozenset:
         return frozenset()
 
 
+@_quiet_while_probing
 def check(fn, claims: list | None = None, domain: dict | None = None,
          trials: int | None = None,
          trials_scale: float = 1.0, extensive: bool = False,
