@@ -370,5 +370,4 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
         sketch="nlsat found a point violating the relation, re-confirmed "
                "by exact arithmetic",
         counterexample=witness,
-        witness={str(sym): v for sym, v in point.items()},
         meta={"mathema.derive_route": "smt_nlsat"})
