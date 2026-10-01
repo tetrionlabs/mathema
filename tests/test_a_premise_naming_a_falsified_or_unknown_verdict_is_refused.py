@@ -38,3 +38,21 @@ def test_a_premise_on_an_existing_claim_is_refused_with_the_readable_forms(
     assert row.verdict.startswith("skipped"), (row.verdict, row.note)
     assert "holds" in row.note and "is proven" in row.note, row.note
     assert "no claim" not in row.note, row.note
+
+
+def _shifted_square(x: float) -> float:
+    return x * x - 0.5
+
+
+def test_a_dropped_premise_never_falsifies_the_claim():
+    # read without its premise the claim is false at x = 0; with the
+    # premise x > 0.9 it is true, so a falsification here would come
+    # only from ignoring the premise
+    rec = mathema.check(_shifted_square, claims=[
+        claim("for x in [-1, 1], f(x) <= -1", name="wrong"),
+        claim("assuming x > 0.9 and wrong is falsified, "
+              "for x in [-1, 1], f(x) >= 0", name="c")])
+    row = next(p for p in rec.probes if p.name == "c")
+    assert row.verdict != "falsified", (row.verdict, row.counterexample)
+    assert row.verdict.startswith("skipped"), (row.verdict, row.note)
+    assert "wrong is falsified" in row.note, row.note
