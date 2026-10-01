@@ -3318,7 +3318,9 @@ class _CanonicalPrinter(StrPrinter):
         return f"lgamma({self._print(expr.args[0])})"
 
     def _print_Exp1(self, expr):
-        return "e"
+        # `e` reads back as the constant only when no bound name is `e`;
+        # `exp(1)` reads back as the constant always
+        return "exp(1)" if "e" in self._suppress_glyphs else "e"
 
     def _print_Pi(self, expr):
         # unicode only, "π" already round-trips back to "pi" on input
