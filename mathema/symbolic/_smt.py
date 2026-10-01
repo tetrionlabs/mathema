@@ -203,6 +203,23 @@ class _Translator:
                 return lhs >= rhs
             if op == ">":
                 return lhs > rhs
+        from sympy.assumptions import AppliedPredicate
+        if isinstance(c, AppliedPredicate):
+            name, args = c.function.name, [self.expr(a) for a in c.arguments]
+            zero = z3.RealVal(0)
+            unary = {"positive": lambda t: t > zero,
+                     "negative": lambda t: t < zero,
+                     "nonnegative": lambda t: t >= zero,
+                     "nonpositive": lambda t: t <= zero,
+                     "zero": lambda t: t == zero,
+                     "nonzero": lambda t: t != zero}
+            binary = {"ge": lambda a, b: a >= b, "gt": lambda a, b: a > b,
+                      "le": lambda a, b: a <= b, "lt": lambda a, b: a < b,
+                      "eq": lambda a, b: a == b, "ne": lambda a, b: a != b}
+            if len(args) == 1 and name in unary:
+                return unary[name](args[0])
+            if len(args) == 2 and name in binary:
+                return binary[name](*args)
         raise _Untranslatable(f"condition {c} has no exact translation")
 
 
@@ -274,7 +291,17 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
                 proofs_only = True
         if bound_context is not None:
             try:
-                box.append(translator.condition(bound_context))
+                # a premise is false where it has no real value: its
+                # roots' bases are nonnegative inside the region it
+                # admits, a constraint on the region, never a
+                # counterexample
+                before = len(translator.undefined)
+                try:
+                    box.append(translator.condition(bound_context))
+                    box.extend(z3.Not(u)
+                               for u in translator.undefined[before:])
+                finally:
+                    del translator.undefined[before:]
             except _Untranslatable:
                 # dropping an assumed constraint widens the region:
                 # proofs stay sound, witnesses may lie off the surface

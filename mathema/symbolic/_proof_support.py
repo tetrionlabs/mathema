@@ -654,6 +654,27 @@ def _has_equality_constraint(bound_context) -> bool:
                for atom in bound_context.atoms(AppliedPredicate))
 
 
+def _has_premise_region(bound_context) -> bool:
+    """Intent:
+        Whether the bound context carries a constraint beyond the
+        domain box: any predicate other than a bound on one symbol by
+        a number (`Q.ge(x, -1)`), such as an assumed `sqrt(x) > 1/2`.
+        A disproof that reasons over the box alone may then land off
+        the premise's region.
+    """
+    if bound_context is None:
+        return False
+    from sympy.assumptions import AppliedPredicate
+    for atom in bound_context.atoms(AppliedPredicate):
+        args = atom.arguments
+        symbols = [a for a in args if isinstance(a, sympy.Symbol)]
+        if len(symbols) > 1 or any(
+                not isinstance(a, sympy.Symbol) and not a.is_number
+                for a in args):
+            return True
+    return False
+
+
 def _piecewise_seed_points(diff, free: list, bounds: dict) -> list[dict]:
     """Intent:
         Points on the switching surfaces of `diff`'s Piecewise

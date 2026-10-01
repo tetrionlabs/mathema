@@ -658,8 +658,9 @@ def extensive_ladder(lhs, rhs, relation: str, domain: dict, bound_context,
     """
     attempted: list = []
     diff = lhs - rhs
-    from ._proof_support import _has_equality_constraint
+    from ._proof_support import _has_equality_constraint, _has_premise_region
     assumed_surface = _has_equality_constraint(bound_context)
+    premise_region = _has_premise_region(bound_context)
 
     # the ladder's aggregate deadline: however many rungs there are,
     # the total wall time is bounded. Each per-rung cap still applies;
@@ -682,13 +683,24 @@ def extensive_ladder(lhs, rhs, relation: str, domain: dict, bound_context,
             return None
         return result
 
+    def _sound_box(result):
+        # a rung that never reads the context at all (root isolation,
+        # cell refinement, a substitution) cannot disprove under any
+        # premise beyond the box either: its witness may lie outside
+        # the premise's region
+        result = _sound(result)
+        if (result is not None and result.status == "disproven"
+                and premise_region):
+            return None
+        return result
+
     attempted.append("exact real-root isolation")
-    result = _sound(_capped(lambda: _sturm_decide(diff, relation, domain, params)))
+    result = _sound_box(_capped(lambda: _sturm_decide(diff, relation, domain, params)))
     if result is not None and result.status in ("proven", "disproven"):
         return result, attempted
 
     attempted.append("interval refinement")
-    result = _sound(_capped(lambda: _refine_decide(diff, relation, domain, params)))
+    result = _sound_box(_capped(lambda: _refine_decide(diff, relation, domain, params)))
     if result is not None and result.status in ("proven", "disproven"):
         return result, attempted
 
@@ -723,12 +735,12 @@ def extensive_ladder(lhs, rhs, relation: str, domain: dict, bound_context,
     if _over_budget():
         attempted.append("stopped at the aggregate budget")
         return None, attempted
-    result = _sound(_substituted_attempts(diff, relation, domain, params,
+    result = _sound_box(_substituted_attempts(diff, relation, domain, params,
                                           attempted))
     if result is not None:
         return result, attempted
 
-    result = _sound(_capped(lambda: _joint_substituted_attempts(
+    result = _sound_box(_capped(lambda: _joint_substituted_attempts(
         diff, relation, domain, params, attempted)))
     if result is not None and result.status in ("proven", "disproven"):
         return result, attempted
