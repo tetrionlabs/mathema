@@ -33,17 +33,16 @@ def _verify(root):
                           capture_output=True, text=True, env=_env())
 
 
-_BODY = ("def keep(x: float) -> float:\n"
-         "    total = x\n"
-         "    while total > 1.0:\n"
-         "        total = total / 2.0\n"
-         "    return total\n")
+# the examine route cannot follow a function looked up by name at run
+# time, so whether the function is deterministic is genuinely unknown
+_BODY = ("import math\n\n\n"
+         "def keep(x: float) -> float:\n"
+         "    fn = getattr(math, 'fa' + 'bs')\n"
+         "    return fn(x)\n")
 
 _CLAIMS = ("funcs.keep:\n  claims:\n"
            "    - name: mystery\n"
-           "      statement: \"for x in [-1, 1], f(x) == "
-           "integrate(f(t), t, 0, x)\"\n"
-           "      route: derive\n")
+           "      statement: \"is_deterministic(f)\"\n")
 
 
 def _record(root):
@@ -61,11 +60,12 @@ def test_the_first_verify_after_a_body_change_fails_the_stale_risk(tmp_path):
     row = next(c for c in _record(tmp_path)["claims"]
                if c["name"] == "mystery")
     assert row["verdict"] == "unknown", first.stdout + first.stderr
+    assert not (row.get("meta") or {}).get("mathema.invalid_conjecture"), row
     apply_acceptance(plan_acceptance(str(tmp_path), "funcs.keep", "mystery",
                                      "risk", by="lovelace"))
     accepted = _verify(tmp_path)
     assert accepted.returncode == 0, accepted.stdout + accepted.stderr
-    funcs.write_text(_BODY.replace("total / 2.0", "0.5 * total"))
+    funcs.write_text(_BODY.replace("'fa' + 'bs'", "'f' + 'abs'"))
     changed = _verify(tmp_path)
     out = changed.stdout + changed.stderr
     assert changed.returncode != 0, out
