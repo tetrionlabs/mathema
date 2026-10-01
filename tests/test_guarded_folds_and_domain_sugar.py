@@ -34,8 +34,7 @@ def test_leading_raise_guard_no_longer_refuses_the_fold():
 
 
 def test_guard_avoided_by_the_domain_lets_the_fold_prove():
-    p = _v(guarded_ema, "for alpha in [0, 1], assuming len(x) >= 1, "
-                        "f(x, 1.0) == x[-1]")
+    p = _v(guarded_ema, "for alpha in [0, 1], f(x, 1.0) == x[-1]")
     assert p.verdict == "proven"
 
 

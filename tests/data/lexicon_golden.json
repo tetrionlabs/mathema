@@ -915,14 +915,14 @@
   "ascii": "assuming f is defined => sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, for w in [-50.0, 50.0]:float|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
  },
  "certificate_convex_lower": {
-  "input": "for alpha in [0, 1], assuming len(x) >= 1, min(x) <= f(x, alpha)",
-  "unicode": "assuming dim(x, 0) >= 1, let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, min(x) ≤ f(x, α)",
-  "ascii": "assuming dim(x, 0) >= 1, for alpha in [0.0, 1.0]:float|missing, min(x) <= f(x, alpha)"
+  "input": "for alpha in [0, 1], min(x) <= f(x, alpha)",
+  "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, min(x) ≤ f(x, α)",
+  "ascii": "for alpha in [0.0, 1.0]:float|missing, min(x) <= f(x, alpha)"
  },
  "certificate_convex_upper": {
-  "input": "for alpha in [0, 1], assuming len(x) >= 1, f(x, alpha) <= max(x)",
-  "unicode": "assuming dim(x, 0) >= 1, let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x, α) ≤ max(x)",
-  "ascii": "assuming dim(x, 0) >= 1, for alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= max(x)"
+  "input": "for alpha in [0, 1], f(x, alpha) <= max(x)",
+  "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x, α) ≤ max(x)",
+  "ascii": "for alpha in [0.0, 1.0]:float|missing, f(x, alpha) <= max(x)"
  },
  "certificate_quadratic": {
   "input": "let |inf| be 1e100, for s1 in [0.05,0.5], s2 in [0.05,0.5], rho in [-0.9,0.9], d(f(w,s1,s2,rho), w, w) >= 0",

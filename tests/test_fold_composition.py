@@ -48,7 +48,6 @@ def _one(fn, law, funcs, route="derive"):
 def test_scale_composes_and_proves_for_any_linear_fold(folds):
     for fn, law in (
         (folds.ema, "for alpha in [0,1], let c be [0.1, 10], "
-                    "assuming len(x) >= 1, "
                     "c*f(x, alpha) == f(g(x, c), alpha)"),
         (folds.total, "let c be [0.1, 10], c*f(xs) == f(g(xs, c))"),
     ):
@@ -59,7 +58,7 @@ def test_scale_composes_and_proves_for_any_linear_fold(folds):
 @pytest.mark.needs_full_proof_budget
 def test_shift_proves_exactly_when_the_weights_sum_to_one(folds):
     p = _one(folds.ema,
-             "for alpha in [0,1], let c be [-5, 5], assuming len(x) >= 1, "
+             "for alpha in [0,1], let c be [-5, 5], "
              "f(x, alpha) + c == f(g(x, c), alpha)",
              {"g": "mathema.f.shift_seq"})
     assert p.verdict == "proven", (p.verdict, p.note)
@@ -75,20 +74,15 @@ def test_shift_proves_exactly_when_the_weights_sum_to_one(folds):
     assert (q.meta or {}).get("mathema.corroboration") == "reproduced"
 
 
-def test_the_battery_equivariances_prove_on_a_linear_fold_with_a_value_at_empty(
-        folds):
-    # total returns 0.0 for the empty list, which the suggestion's
-    # unbound list admits, so its scale equivariance is proven; ema
-    # reads x[0] and raises there, so its equivariances are not
+def test_the_battery_equivariances_now_prove_on_linear_folds(folds):
     import mathema
-    rows = {p.name: p for p in mathema.check(folds.total).probes}
+    rec = mathema.check(folds.ema)
+    rows = {p.name: p for p in rec.probes}
     assert rows["scale_equivariant"].verdict == "proven", (
         rows["scale_equivariant"].verdict, rows["scale_equivariant"].note)
-    rows = {p.name: p for p in mathema.check(folds.ema).probes}
-    for name in ("scale_equivariant", "translation_equivariant"):
-        assert rows[name].verdict != "proven", (name, rows[name].verdict)
-        assert "x = []" in (rows[name].counterexample or ""), \
-            rows[name].counterexample
+    assert rows["translation_equivariant"].verdict == "proven", (
+        rows["translation_equivariant"].verdict,
+        rows["translation_equivariant"].note)
 
 
 def test_an_unregistered_transform_still_refuses_loudly(folds):

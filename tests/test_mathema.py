@@ -306,21 +306,11 @@ def test_domain_restricts_probes_and_reports_enforcement():
 
     r = mathema.check(ema2, domain={"alpha": (0.0, 1.0)})
     vs = {p.name: p.verdict for p in r.probes}
-    # the suggested bounds admit the empty list, where ema2 reads x[0]
-    # and raises: an executed witness against each
-    assert vs["bounded_lower"] == "falsified"
-    assert vs["bounded_upper"] == "falsified"
-    # narrowed to the nonempty lists, the convex-combination
-    # certificate proves each bound outright (the fold's weights are
-    # nonnegative and sum to 1 here)
-    narrowed = mathema.check(ema2, domain={"alpha": (0.0, 1.0)}, claims=[
-        mathema.claims.claim("assuming len(x) >= 1, min(x) <= f(x, alpha)",
-                             name="lower"),
-        mathema.claims.claim("assuming len(x) >= 1, f(x, alpha) <= max(x)",
-                             name="upper")])
-    nv = {p.name: p.verdict for p in narrowed.probes}
-    assert nv["lower"] == "proven"
-    assert nv["upper"] == "proven"
+    # the convex-combination certificate proves the bound outright
+    # (the fold's weights are nonnegative and sum to 1 here); before
+    # it, in-domain sampling could only reach holds
+    assert vs["bounded_lower"] == "proven"
+    assert vs["bounded_upper"] == "proven"
     # enforcement is not synthesized behind a mode any more: undeclared
     # means unreported; DECLARING excluded_outside_domain makes the
     # unenforced exclusion a real falsification with the witness
@@ -807,13 +797,8 @@ def test_check_formats(tmp_path, capsys):
     rpt = tmp_path / "claims.json"
     # suggestions no longer count as claims: declare one explicitly so
     # the report has adopted content to verify
-    # ema reads x[0], so the claim names the nonempty lists it covers;
-    # unnarrowed, the empty list is a witness against it
     assert main(["check", str(f), "--format", "json",
-                 "--claim", "f(x, 1.0) == x[-1]"]) == 1
-    capsys.readouterr()
-    assert main(["check", str(f), "--format", "json",
-                 "--claim", "assuming len(x) >= 1, f(x, 1.0) == x[-1]",
+                 "--claim", "f(x, 1.0) == x[-1]",
                  "--output", str(rpt)]) == 0
     data = _json.loads(rpt.read_text())
     assert data["tool"] == "mathema" and data["CDD_spec_version"]

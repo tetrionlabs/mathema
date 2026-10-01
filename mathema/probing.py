@@ -1255,9 +1255,9 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         return _synth_dict([], rng, specials=specials)
     if kind in SEQUENCE_KINDS:
         # `length`, when a dimension premise fixed it for this trial,
-        # overrides the free 2..8 draw so the premise holds by
+        # overrides the free 1..8 draw so the premise holds by
         # construction rather than by rejection
-        n = length if length is not None else rng.randint(2, 8)
+        n = length if length is not None else rng.randint(1, 8)
         if bounds is not None:
             # a declared element domain, generate elements that
             # respect it (recursing through _synth's own scalar
@@ -1470,7 +1470,7 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
 
     A sequence parameter states the lengths its checked samples had
     (`observed_lengths`: one length as `len=20`, several as their
-    range, none recorded as the free draw's `len∈[2,8]`) and how its
+    range, none recorded as the free draw's `len∈[1,8]`) and how its
     elements were drawn: the declared element domain (`elem~...`, the
     special shapes are not used under one), the free draw with its
     shapes, or `drawn on the premise` for a parameter in
@@ -1518,7 +1518,7 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         return f"size∈[{compact[0]},{compact[-1]}]"
 
     def sequence_text(p: str) -> str:
-        size = size_text(p, "len∈[2,8]")
+        size = size_text(p, "len∈[1,8]")
         element_bound = domain.get(p)
         if p in premise_drawn:
             draw = "drawn on the premise"
@@ -1552,7 +1552,7 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
 
     def one(p: str, k: str, bounds) -> str:
         if k == "table":
-            return (f"Table(equal-length columns, {size_text(p, 'len∈[2,8]')}, "
+            return (f"Table(equal-length columns, {size_text(p, 'len∈[1,8]')}, "
                     f"each drawn as a free Seq)")
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
