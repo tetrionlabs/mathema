@@ -183,7 +183,6 @@ def test_the_companion_sketch_names_the_covered_calls_overflow_region(ex):
             "x <= 709.78") in (companion.sketch or ""), companion.sketch
 
 
-@pytest.mark.library_rows
 def test_verify_adjudicates_the_numpy_and_math_exp_rows_by_execution(tmp_path,
                                                                     monkeypatch):
     from mathema.verify import verify_project

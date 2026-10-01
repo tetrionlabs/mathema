@@ -36,6 +36,9 @@ numpy.median:
     - name: definition
       statement: "for a in R^n \\ {∅}, f(a) ~= median(a)"
       note: "The middle element, or the mean of the two middle elements for an even length."
+    - name: definition@axis=0
+      statement: "let axis be 0, for a in R^(m,n) \\ {∅}, f(a) ~= median(a, axis=0)"
+      note: "The median of each column of a matrix."
 
 numpy.percentile:
   claims:

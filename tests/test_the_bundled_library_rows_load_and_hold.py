@@ -53,7 +53,10 @@ def _rows(relative: str) -> list:
 _COMMON_CALLS = {
     "numpy.average": ["definition", "weighted"],
     "numpy.clip": ["definition"],
-    "numpy.median": ["definition"],
+    "numpy.mean": ["definition@axis=0", "definition@axis=1"],
+    "numpy.sum": ["definition@axis=0", "definition@axis=1"],
+    "numpy.cumsum": ["definition@axis=0"],
+    "numpy.median": ["definition", "definition@axis=0"],
     "numpy.quantile": ["definition"],
     "numpy.percentile": ["definition"],
     "numpy.diff": ["definition@n=2"],

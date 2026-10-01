@@ -278,6 +278,7 @@ def plan_update(root: str = ".") -> dict:
 
     from . import (_installed_version, _version_in_range, install,
                    load_library_claims, resolved_calls, row_pins)
+    from ..families import claim_base_name
     from ..spec import load_verified
 
     root = os.path.abspath(root)
@@ -313,12 +314,20 @@ def plan_update(root: str = ".") -> dict:
         entry = data.get(site.key)
         current = list((entry or {}).get("claims") or []) if entry else \
             [dict(r) for r in rows]
-        if any(row_pins(r) == site.pins for r in current):
+        unpinned = [r for r in current if not row_pins(r) and r.get("name")]
+        if not unpinned:
+            if not any(row_pins(r) == site.pins for r in current):
+                lines.append(f"{site.key}: the call in {site.caller} passes "
+                             f"{site.pins}, and the function has no rows to "
+                             f"pin")
             continue
-        base = [r for r in current if not row_pins(r) and r.get("name")]
+        # a row already pinned to these arguments covers its unpinned
+        # namesake (`definition@ddof=1` covers `definition`)
+        covered = {claim_base_name(str(r.get("name"))) for r in current
+                   if row_pins(r) == site.pins}
+        base = [r for r in unpinned
+                if claim_base_name(str(r.get("name"))) not in covered]
         if not base:
-            lines.append(f"{site.key}: the call in {site.caller} passes "
-                         f"{site.pins}, and the function has no rows to pin")
             continue
         added = [_pinned_row(r, site.pins, site) for r in base]
         if entry is None:

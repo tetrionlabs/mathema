@@ -14,6 +14,12 @@ numpy.mean:
       note: "Arithmetic mean; the mean of an empty array is nan with a RuntimeWarning, never raises."
     - name: definition
       statement: "for a in R^n \\ {∅}, f(a) ~= mean(a)"
+    - name: definition@axis=0
+      statement: "let axis be 0, for a in R^(m,n) \\ {∅}, f(a) ~= mean(a, axis=0)"
+      note: "The mean of each column of a matrix."
+    - name: definition@axis=1
+      statement: "let axis be 1, for a in R^(m,n) \\ {∅}, f(a) ~= mean(a, axis=1)"
+      note: "The mean of each row of a matrix."
 
 numpy.std:
   claims:

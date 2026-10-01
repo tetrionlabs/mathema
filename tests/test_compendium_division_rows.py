@@ -47,7 +47,6 @@ def test_power_keeps_no_rows(key):
     assert _rows(key) == []
 
 
-@pytest.mark.library_rows
 def test_verify_adjudicates_the_division_rows_to_holds(tmp_path, monkeypatch):
     from mathema.verify import verify_project
     monkeypatch.syspath_prepend(str(tmp_path))

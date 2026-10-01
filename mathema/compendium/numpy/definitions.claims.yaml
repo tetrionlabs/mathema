@@ -16,6 +16,9 @@ numpy.cumsum:
     - name: definition
       statement: "for a in R^n \\ {∅}, f(a) ~= cumsum(a)"
       note: "The running sums: element i is the sum of the first i + 1 elements."
+    - name: definition@axis=0
+      statement: "let axis be 0, for a in R^(m,n) \\ {∅}, f(a) ~= cumsum(a, axis=0)"
+      note: "The running sums down each column of a matrix."
 
 numpy.cumprod:
   claims:
@@ -74,3 +77,9 @@ numpy.sum:
     - name: definition
       statement: "for a in R^n \\ {∅}, f(a) ~= sum(a)"
       note: "Stated for a vector: the sum of its elements. Holds by execution on every numpy the file covers."
+    - name: definition@axis=0
+      statement: "let axis be 0, for a in R^(m,n) \\ {∅}, f(a) ~= sum(a, axis=0)"
+      note: "The sum of each column of a matrix."
+    - name: definition@axis=1
+      statement: "let axis be 1, for a in R^(m,n) \\ {∅}, f(a) ~= sum(a, axis=1)"
+      note: "The sum of each row of a matrix."
