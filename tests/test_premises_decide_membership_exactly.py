@@ -40,7 +40,7 @@ def _probes(fn, text):
 def test_a_constant_sequence_has_exactly_zero_spread():
     exact = premise_functions(FUNCTIONS)
     xs = [-0.1, -0.1, -0.1]
-    assert FUNCTIONS["std"](xs, ddof=1) > 0  # the float residue this guards against
+    assert FUNCTIONS["std"](xs, ddof=1) == 0.0
     assert exact["std"](xs, ddof=1) == 0.0
     assert exact["var"](xs, ddof=1) == 0.0
     assert exact["mean"](xs) == -0.1

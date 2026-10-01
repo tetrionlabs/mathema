@@ -315,21 +315,6 @@ def _reduction(builtin_fn, numpy_name):
     return reduce
 
 
-def _mean(*args, axis=None):
-    if len(args) == 1 and _is_array_arg(args[0]):
-        out = _np().mean(args[0], axis=axis)
-        return out.item() if getattr(out, "ndim", 1) == 0 else out
-    values = list(args[0]) if len(args) == 1 else list(args)
-    return builtins.sum(values) / len(values)
-
-
-def _prod(*args, axis=None):
-    if len(args) == 1 and _is_array_arg(args[0]):
-        out = _np().prod(args[0], axis=axis)
-        return out.item() if getattr(out, "ndim", 1) == 0 else out
-    return math.prod(args[0] if len(args) == 1 else args)
-
-
 def _values(args):
     """The one vector a reduction reads: its single argument as an
     array, or its several numeric arguments gathered into one."""
@@ -340,16 +325,108 @@ def _values(args):
     return np.asarray(args, dtype=float)
 
 
-def _moment(numpy_name):
-    """`std` or `var` as numpy computes them: `ddof` is subtracted
-    from the number of positions in the divisor (0 by default, the
-    population statistic; 1 for the sample statistic), and `axis`
+def _exact_sum(values: list) -> "float | complex":
+    """The sum of a list of numbers with one final rounding
+    (`math.fsum`), its real and imaginary parts summed apart for complex
+    elements. A missing element (nan) or opposite infinities give nan;
+    a sum beyond float range gives the infinity of its sign."""
+    if any(isinstance(v, complex) for v in values):
+        return complex(_exact_sum([complex(v).real for v in values]),
+                       _exact_sum([complex(v).imag for v in values]))
+    if not all(math.isfinite(v) for v in values):
+        return builtins.sum(values, 0.0)
+    try:
+        return math.fsum(values)
+    except OverflowError:
+        return builtins.sum(values, 0.0)
+
+
+def _exact_mean(values: list) -> "float | complex":
+    """The exact sum of a list over its length; no value when empty."""
+    return _exact_sum(values) / len(values) if values else float("nan")
+
+
+def _product(values: list) -> "float | complex":
+    """The product of a list's elements, multiplied in order."""
+    return math.prod(values, start=1.0)
+
+
+def _variance(values: list, ddof) -> float:
+    """The mean squared deviation from the mean, with `ddof` taken from
+    the length in the divisor, computed in exact rational arithmetic for
+    finite real elements and rounded once. Fewer than `ddof + 1`
+    elements, or a missing element, give no value."""
+    from fractions import Fraction
+    n = len(values) - ddof
+    if n <= 0 or any(isinstance(v, complex) and not math.isfinite(abs(v))
+                     or not isinstance(v, complex) and not math.isfinite(v)
+                     for v in values):
+        return float("nan")
+    if any(isinstance(v, complex) for v in values):
+        mean = _exact_mean(values)
+        return _exact_sum([abs(v - mean) ** 2 for v in values]) / n
+    exact = [Fraction(v) for v in values]
+    mean = builtins.sum(exact) / len(exact)
+    return float(builtins.sum((v - mean) ** 2 for v in exact) / n)
+
+
+def _along(args, axis, of_list):
+    """`of_list` applied to the one vector the arguments give, or along
+    `axis` of a matrix (one value per remaining index)."""
+    a = _values(args)
+    if axis is None:
+        return of_list([_element(v) for v in a.ravel()])
+    return _np().apply_along_axis(
+        lambda v: of_list([_element(x) for x in v]), axis, a)
+
+
+def _element(v):
+    """One array element as a Python number."""
+    v = v.item() if hasattr(v, "item") else v
+    return v if isinstance(v, complex) else float(v)
+
+
+def _sum(*args, axis=None):
+    """The sum of a vector's elements, added without intermediate
+    rounding; along `axis` for a matrix. Several numbers, or one list of
+    them, are summed as Python sums them."""
+    if len(args) == 1 and _is_array_arg(args[0]):
+        return _along(args, axis, _exact_sum)
+    if axis is not None:
+        raise TypeError("sum(..., axis=) needs an array")
+    return builtins.sum(*args)
+
+
+def _mean(*args, axis=None):
+    """The exact sum of a vector's elements over its length; along
+    `axis` for a matrix."""
+    if len(args) == 1 and _is_array_arg(args[0]):
+        return _along(args, axis, _exact_mean)
+    values = list(args[0]) if len(args) == 1 else list(args)
+    return builtins.sum(values) / len(values)
+
+
+def _prod(*args, axis=None):
+    """The product of a vector's elements, multiplied in order; along
+    `axis` for a matrix."""
+    if len(args) == 1 and _is_array_arg(args[0]):
+        return _along(args, axis, _product)
+    return math.prod(args[0] if len(args) == 1 else args)
+
+
+def _moment(word):
+    """`var` or `std`: the variance is the mean squared deviation from
+    the mean, `ddof` subtracted from the number of positions in the
+    divisor (0 by default, the population statistic; 1 for the sample
+    statistic), and the standard deviation its square root; `axis`
     reduces a matrix along one axis."""
+    def of_list(values, ddof):
+        variance = _variance(values, ddof)
+        return math.sqrt(variance) if word == "std" else variance
+
     def moment(*args, ddof=0, axis=None):
-        out = getattr(_np(), numpy_name)(_values(args), ddof=ddof,
-                                         axis=axis)
-        return out.item() if getattr(out, "ndim", 1) == 0 else out
-    moment.__name__ = numpy_name
+        return _along(args, axis, lambda values: of_list(values, ddof))
+    moment.__name__ = word
     return moment
 
 
@@ -581,7 +658,7 @@ def _pinv(A):
 #: each a number's ordinary function on a number
 FUNCTIONS = {
     "abs": _abs, "Abs": _abs, "norm": _norm,
-    "sum": _reduction(builtins.sum, "sum"),
+    "sum": _sum,
     "min": _reduction(builtins.min, "min"),
     "max": _reduction(builtins.max, "max"),
     "mean": _mean, "prod": _prod,
