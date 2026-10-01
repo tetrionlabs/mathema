@@ -215,6 +215,19 @@ def gate(claims, *, strict: bool,
     return r
 
 
+def _entry_at(path: str, key: str) -> dict:
+    """Intent:
+        The record entry stored under `key` in the YAML file at `path`,
+        or an empty mapping when the file cannot be read.
+    """
+    import yaml
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return (yaml.safe_load(fh) or {}).get(key) or {}
+    except OSError:
+        return {}
+
+
 def _accepted_risk(entry: dict | None) -> frozenset:
     """Intent:
         The names of this record's claims a human has accepted as risk
@@ -1332,6 +1345,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                declared_intent=merged_entry.get("intent"),
                                grammar=entry_grammar)
         _carry_recorded_verdicts(rec.probes, written, key)
+        # the record just written carries each acceptance forward or
+        # marks it stale (a changed form), so the gate reads the
+        # accepted risk from it, never from the record it replaced
+        accepted = _accepted_risk(_entry_at(written, key))
         out.adjudicated += 1
         if key in library:
             # this key's rows now resolve premises at their local verdict

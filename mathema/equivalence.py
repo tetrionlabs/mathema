@@ -227,7 +227,7 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
         First slice: `f` on the left, one funcs=-bound name on the
         right, same arity (positional alignment).
     """
-    from .conjecture import _effective_facts, _resolve_func_ref
+    from .conjecture import _effective_facts, _resolve_bound_ref
     from .inventory import structural_complexity
 
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
@@ -240,7 +240,7 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
                           f"f =:= g with g bound via funcs= (got "
                           f"{cj.lhs!r} =:= {cj.rhs!r})")
     try:
-        bound = {name: (v if callable(v) else _resolve_func_ref(v))
+        bound = {name: (v if callable(v) else _resolve_bound_ref(v))
                  for name, v in cj.funcs.items()}
     except AttributeError:
         bound = {}

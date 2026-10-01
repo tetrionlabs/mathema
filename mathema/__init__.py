@@ -184,6 +184,8 @@ class Record:
                     line += f" (n={p.n})"
             if p.counterexample:
                 line += f"\n           counterexample {p.counterexample}"
+            for said in (p.meta or {}).get("mathema.let_warning") or ():
+                line += f"\n           warning: {said}"
             stratum = getattr(p, "stratum", None)
             if stratum:
                 # which stratum the falsification indicts, one line:

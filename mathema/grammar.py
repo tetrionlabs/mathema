@@ -1162,6 +1162,10 @@ def extract_let_bindings(
                 f"no claim after the let run; if it is the claim, write it "
                 f"with `==`: `{name} == {unmask_strings(expr, literals)}`")
         if _LET_FUNC_VALUE.match(expr):
+            from ._claim_reach import path_refusal
+            refused = path_refusal(expr)
+            if refused is not None:
+                raise InvalidDomain(f"`let {name} = {expr}`: {refused}")
             funcs[name] = expr
             text = rest
         else:

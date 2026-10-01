@@ -413,6 +413,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
     def decorator(fn):
         import functools
 
+        from .domain import number_member
         from .grammar import is_missing, domain_contains, render_domain
         from .types import domain_from_signature
 
@@ -455,15 +456,14 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             numeric_only = (isinstance(bounds, (str, tuple))
                             or (hasattr(bounds, "pieces")
                                 and not any(isinstance(p, frozenset) for p in bounds.pieces)))
-            if numeric_only and isinstance(value, complex) \
-                    and not isinstance(value, (int, float)):
-                # a complex value IS a candidate against a numeric
-                # bound: domain_contains reads a zero-imaginary complex
-                # as the real number it equals and rejects a genuinely
-                # imaginary one, never silently exempt.
-                return domain_contains(value, bounds)
-            if numeric_only and (not isinstance(value, (int, float)) or isinstance(value, bool)):
-                return True   # not a candidate, exempt, not a violation
+            # a number of any numeric type (a bool, a numpy scalar, a
+            # Fraction, a Decimal, a complex) is judged by its value;
+            # a zero-imaginary complex reads as the real number it is
+            member = number_member(value, bounds)
+            if member is not None:
+                return member
+            if numeric_only:
+                return True   # not a number: not a candidate, exempt
             return domain_contains(value, bounds)
 
         def _violation(name: str, value) -> str | None:
@@ -557,7 +557,13 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     or a space a claim's own binding states, `for A in R^(30,15)`) has
     the rank and the fixed sizes its dimensions state, and a dimension
     name shared across parameters agrees across the actual arguments; a
-    runtime type reports its shape the way its adapter reads it. At
+    runtime type reports its shape the way its adapter reads it, and a
+    table of equal columns against two dimensions is its rows by its
+    columns. A space a claim binds also states its entries: every entry
+    of `R^(30,15)` is a real number (an imaginary entry, an infinity,
+    text or a bool is outside), every entry of `[0, 1]^30` lies in
+    `[0, 1]`, and a missing entry follows the space's own missing rule.
+    A marker alone states a shape and nothing about the entries. At
     exit, the result matches the return marker with the names this call
     bound (`Vec("m")` after `a` was 3 by 4 means length 3). Each
     failure names the parameter (or the result), the shape found and
@@ -592,6 +598,7 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
     about, so `assuming <premise>, <law>` and a guard for `<premise>`
     are the same precondition stated once."""
     import ast
+    import dataclasses
     import functools
 
     from .conjecture import _parse_assuming_links, _split_top_and
@@ -657,6 +664,13 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
                 _domain_from_declared_claims(fn, key, root))
         except ValueError as e:
             raise DomainError(f"enforce_dimensions(): {e}") from e
+        # an enforce_domain guard already on fn judges every number of a
+        # parameter it covers, in its own words, so stacking the two in
+        # either order reports a number outside the domain the same way
+        covered = set(getattr(fn, "__mathema_enforced_domain__", None) or ())
+        plan = dataclasses.replace(
+            plan, numbers_judged_elsewhere=frozenset(
+                covered & set(plan.elements)))
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
