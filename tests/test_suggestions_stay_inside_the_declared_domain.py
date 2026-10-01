@@ -16,6 +16,7 @@ import math
 import pytest
 
 from mathema import check, claims_decorator, enforce_dimensions, enforce_domain
+from mathema.conjecture import claim
 from mathema.suggest import suggest_claims
 from mathema.types import Vec
 
@@ -168,3 +169,68 @@ def test_every_entry_drawn_lies_in_the_space_enforce_dimensions_guards():
     # entry outside [0, 1] is a draw from outside the space
     outside = sorted({v for v in SEEN if not -1e-12 <= v <= 1 + 1e-12})
     assert not outside, outside[:10]
+
+
+def log_guarded(x: float) -> float:
+    if x <= 0:
+        raise ValueError("log of a nonpositive number")
+    return math.log(x)
+
+
+def cut_at_zero(x: float) -> float:
+    if x == 0:
+        raise ValueError("zero")
+    if x < -1 or x > 1:
+        raise ValueError("outside")
+    return 1 / x
+
+
+def cut_inside(x: float) -> float:
+    if x < 0 or x > 1:
+        raise ValueError("outside")
+    if 0.4 < x < 0.6:
+        raise ValueError("hole")
+    return 2 * x
+
+
+_SPLIT = claim("for w in [-1, -0.5] ∪ [0.5, 3], f(w) >= -1").domain["w"]
+
+
+@enforce_domain(domain={"w": _SPLIT})
+def split_mean(w: list) -> float:
+    return sum(w) / len(w)
+
+
+def test_a_conditional_raise_cuts_the_domain_a_suggestion_binds():
+    s = _suggested(log_guarded)
+    assert tuple(s["monotonic_increasing[x]"].domain["x"]) == (0.0, math.inf)
+    rows = {p.name: p for p in check(log_guarded).probes}
+    assert rows["monotonic_increasing[x]"].verdict == "proven", (
+        rows["monotonic_increasing[x]"].counterexample)
+
+
+@pytest.mark.parametrize("fn", [log_guarded, cut_at_zero, cut_inside],
+                         ids=lambda f: f.__name__)
+def test_no_suggestion_calls_into_a_region_a_guard_raises_in(fn):
+    for p in check(fn).probes:
+        if p.name.startswith(("raises[", "idempotent")):
+            continue
+        assert "ValueError" not in str(p.counterexample), (
+            fn.__name__, p.name, p.statement, p.counterexample)
+
+
+def test_a_hole_cut_by_a_guard_stays_out_of_the_binding():
+    s = _suggested(cut_inside)
+    pieces = s["monotonic_increasing[x]"].domain["x"].pieces
+    assert [tuple(p) for p in pieces] == [(0.0, 0.4), (0.6, 1.0)], pieces
+    # no symmetric part survives the cut, so neither symmetry is asked
+    assert "even" not in s and "odd" not in s
+
+
+def test_a_shift_over_a_union_stays_in_the_widest_piece():
+    s = _suggested(split_mean)["translation_equivariant"]
+    assert tuple(s.domain["w"].pieces[0]) == (1.125, 2.375), s.domain
+    assert tuple(s.domain["c"].pieces[0]) == (-0.625, 0.625), s.domain
+    for p in check(split_mean).probes:
+        assert "DomainError" not in str(p.counterexample), (
+            p.name, p.statement, p.counterexample)
