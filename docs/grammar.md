@@ -229,7 +229,7 @@ for route in ["probe", "derive"]:
 ```text
 probe   holds
         fails by 1e-10 at (0), within the default tolerance (1e-09)
-derive  falsified x=0.0616333
+derive  falsified x=0.06163325083761284
         reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
 ```
 
@@ -555,7 +555,7 @@ for law in ["∫(f(x), x, -oo, oo) == 1",
 ```text
 ∫(f(x), x, -oo, oo) == 1        proven
 f(x) >= 0                       proven    ∀ x ∈ ℝ
-  [float]                       falsified x=-1.79769e+308
+  [float]                       falsified x=-1.7976931348623157e+308
 let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ ℝ
   [float]                       holds
 ```

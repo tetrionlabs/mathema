@@ -53,6 +53,7 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       UnreadableSpelling)
 from . import linalg
 from ._scan import _split_commas, blank_strings
+from ._float_text import exact_literal_text, overlong_literals
 from .domain import DuplicateBinding
 from .domain import operational_domain as _operational_domain
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
@@ -845,14 +846,44 @@ def _runtime_det(value) -> float:
     return float(np.linalg.det(np.asarray(value, dtype=float)))
 
 
+class _NoRealValue(ValueError):
+    """A function in the claim's own expression has no real value at the
+    argument it was given (`sqrt(-0.5)`, `log(0)`, `gamma(-1)`)."""
+
+
+def claim_side_has_no_value(exc: BaseException) -> bool:
+    """Intent:
+        Whether an exception from evaluating the claim's own expression
+        (not the function under test) means the claim has no real value
+        at that point: one of its functions left its real domain, or it
+        divided by zero.
+    """
+    return isinstance(exc, (_NoRealValue, ZeroDivisionError))
+
+
+def _real_only(real_fn):
+    """A law function whose domain error is raised as `_NoRealValue`."""
+    def call(v):
+        try:
+            return real_fn(v)
+        except ValueError as e:
+            name = getattr(real_fn, "__name__", "call")
+            raise _NoRealValue(f"{name}({v!r}) has no real value") from e
+    call.__name__ = getattr(real_fn, "__name__", "call")
+    return call
+
+
 def _real_or_complex(real_fn, complex_fn):
     """A law function that computes a complex argument (a Python or
     numpy complex) with its `cmath` counterpart and anything else with
-    its `math` one."""
+    its `math` one; a real argument outside the real domain raises
+    `_NoRealValue`."""
+    real_call = _real_only(real_fn)
+
     def call(v):
         if isinstance(v, complex):
             return complex_fn(complex(v))
-        return real_fn(v)
+        return real_call(v)
     call.__name__ = getattr(real_fn, "__name__", "call")
     return call
 
@@ -893,14 +924,14 @@ _SAFE_FUNCS = {
     # is gamma-based), so both routes compute the same mathematical
     # object; math.gamma's own pole raises at non-positive integers
     # behave like any other raising sample.
-    "factorial": lambda v: math.gamma(v + 1),
+    "factorial": _real_only(lambda v: math.gamma(v + 1)),
     "asin": _real_or_complex(math.asin, _cmath.asin),
     "acos": _real_or_complex(math.acos, _cmath.acos),
     "atan": _real_or_complex(math.atan, _cmath.atan),
     "sinh": _real_or_complex(math.sinh, _cmath.sinh),
     "cosh": _real_or_complex(math.cosh, _cmath.cosh),
     "tanh": _real_or_complex(math.tanh, _cmath.tanh),
-    "gamma": math.gamma, "lgamma": math.lgamma,
+    "gamma": _real_only(math.gamma), "lgamma": _real_only(math.lgamma),
     "erf": math.erf, "erfc": math.erfc,
     # complex accessors (the derive route's re/im/conjugate/arg): each
     # accepts a plain real too, so a claim using them adjudicates on
@@ -5496,6 +5527,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         `ctx.family` is already resolved by the orchestration loop.
     """
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
+    exact_law = False
     cj_domain, family = ctx.cj_domain, ctx.family
     # A registered family's own "derive" route is tried before
     # the ordinary derive_ineligible check below; it doesn't
@@ -5512,6 +5544,20 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     assumption = (None if ctx.assumption is None else
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
     family_derive = family.routes().get("derive") if family is not None else None
+    # literals a double does not read exactly reach only the ordinary
+    # prover exactly (`exact_literal_text`); every other derive route
+    # reads the parsed doubles, so it does not decide such a claim
+    overlong_all = overlong_literals(cj.raw or "")
+    overlong_reason = (f"{', '.join(overlong_all)} has more digits than a "
+                       f"double carries, and the proof reads every number "
+                       f"exactly as written, so it does not decide this "
+                       f"claim")
+    if overlong_all and family_derive is not None:
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; {overlong_reason}",
+            meta={"mathema.derive_status": "undecided"})
+        return None
     reserved = getattr(family, "reserved", None)
     if reserved:
         # a family defined but not adjudicated in this release: the
@@ -5622,7 +5668,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     # that applies but does not decide leaves its reason as the derive
     # note should nothing below decide the claim either.
     definitions_hint = None
-    if not ctx.assume_defined:
+    if not ctx.assume_defined and not overlong_all:
         from .definitions import prove_through_definitions
         dproof = prove_through_definitions(
             cj, fn, facts, cj_domain, assumption,
@@ -5668,7 +5714,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     if array_uses or matrix_claim:
         mproof = None
         from .symbolic._matrix_lemmas import structure_properties
-        if (not cj.negated and not cj.links
+        if (not cj.negated and not cj.links and not overlong_all
                 and (cj.relation in ("==", "~=", ">", ">=", "<", "<=", "!=")
                      or cj.relation in structure_properties())):
             _structs = dict(structures_from_signature(fn))
@@ -5777,7 +5823,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # bounded above, whatever class its rows are
         with row_fields({p: [k for k in row_domain if k.startswith(f"{p}.")]
                          for p in language_params}):
-            proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
+            exact_law = True
+            proof = try_prove(fn, facts, exact_literal_text(cj.lhs),
+                              exact_literal_text(cj.rhs), cj.relation,
                               domain={**row_domain, **cj_domain},
                               tolerance=cj.tolerance,
                               extensive=extensive, funcs=bound_funcs or None,
@@ -5809,7 +5857,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         proof = try_prove_raises(fn, facts, cj.lhs, cj.rhs or None,
                                  domain=cj_domain)
     else:
-        proof = try_prove(fn, facts, cj.lhs, cj.rhs, cj.relation,
+        exact_law = True
+        proof = try_prove(fn, facts, exact_literal_text(cj.lhs),
+                          exact_literal_text(cj.rhs), cj.relation,
                           domain=cj_domain, tolerance=cj.tolerance,
                           extensive=extensive, funcs=bound_funcs or None,
                           assumption=assumption,
@@ -5854,6 +5904,23 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         swept = _brute_force_fallback()
         if swept is not None:
             proof = swept
+    from collections import Counter
+    overlong = Counter(overlong_literals(cj.raw or ""))
+    if exact_law:
+        # the law's own literals reached the proof exactly
+        overlong -= Counter(overlong_literals(cj.lhs or "")
+                            + overlong_literals(cj.rhs or ""))
+    overlong = list(overlong)
+    if overlong and proof.status in ("proven", "disproven"):
+        # the parse read these literals as the nearest double, a
+        # different number from the one written, so a symbolic verdict
+        # on the parsed claim is not a verdict on the written one
+        from .symbolic._proof_support import ProofResult
+        proof = ProofResult(
+            "undecided",
+            sketch=(f"{', '.join(overlong)} has more digits than a double "
+                    f"carries, and the proof reads every number exactly as "
+                    f"written, so it does not decide this claim"))
     inlined = getattr(facts, "_inlined_globals", None)
     if inlined:
         # the lift read module-level constants as their current
@@ -6986,6 +7053,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # claim's samples
                 continue
             if not call_raised[0]:
+                if claim_side_has_no_value(e):
+                    # the claim's own side has no real value at this
+                    # in-domain point: the claim is wrong there
+                    checked += 1
+                    cx = (f"{_fmt(tuple(args), arg_names, shown_names)}: "
+                          f"the claim's own side has no real value here "
+                          f"({e}); narrow the claim's domain to where "
+                          f"every side of it is real")
+                    break
                 # the law's own plumbing failed, not the function,
                 # a broken sample, never a counterexample
                 continue

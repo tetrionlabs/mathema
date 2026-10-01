@@ -86,7 +86,7 @@ grep -m1 counterexample .mathema/verified/numpy.ptp.yaml
 
 <!-- example: ptp output -->
 ```text
-      counterexample: "a=[-27.2559, -89.997, 6.05701, -11.7273], axis=None, out=None, keepdims=<no value>: 96.05404267895265 vs 6.057006177453999"
+      counterexample: "a=[-27.25587819880309, -89.99703650149866, 6.057006177453999, -11.727268815354506], axis=None, out=None, keepdims=<no value>: 96.05404267895265 vs 6.057006177453999"
 ```
 
 Four values, all but one negative: the range is 96.05 and the largest

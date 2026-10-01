@@ -2173,10 +2173,11 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     reassigns a symbol something else in the same claim already uses.
 
     `suppress_glyphs` handles a real parameter named exactly `pi`, `oo`,
-    `inf` or `infinity` (`_math_vocab._MATH_ATTRS`' keys, minus `e`,
-    which has no distinct unicode glyph at all, `_print_Exp1` always
-    prints `"e"`, so there's nothing to suppress; the printer then
-    writes the parameter's own name). Renaming was tried here first and
+    `inf` or `infinity` (`_math_vocab._MATH_ATTRS`' keys; the printer
+    then writes the parameter's own name), and any bound name `e` (a
+    parameter, a `let` name, a function or a rename target), for which
+    `_print_Exp1` writes Euler's number as `exp(1)` instead of `e`, so
+    the constant and the name read back apart. Renaming was tried here first and
     rejected: `grammar._node_to_sympy` has no concept of any one
     function's real parameter names, so it always resolves a bare
     `pi`/`oo` to the math constant regardless, by the time a claim
@@ -2284,6 +2285,13 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     # the positional pool shortens real parameters only
     pool_renames = auto_short_names(long_params, [], unicode=unicode, taken=taken)
     param_renames.update({n: pool_renames[n] for n in long_params})
+    # a name `e` the claim binds (a parameter, a `let` name, a function,
+    # or a display rename) prints as that name, so Euler's number prints
+    # as `exp(1)` beside it
+    bound = (declared | set(cj.free_vars) | set(cj.funcs)
+             | set(param_renames.values()) | set(func_renames.values()))
+    if "e" in bound:
+        suppress_glyphs = suppress_glyphs | {"e"}
     return param_renames, func_renames, suppress_glyphs
 
 

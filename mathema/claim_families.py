@@ -39,7 +39,7 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
                       _missing_guard_params as _missing_guard_params,
                       _pole_bearing_params as _pole_bearing_params,
                       _restricted_domain_targets as _restricted_domain_targets)
-from .probing import (_fmt, _pinned_float_env, _points_for_probe, _pole_safety,
+from .probing import (_fmt, _fmt_coordinate, _pinned_float_env, _points_for_probe, _pole_safety,
                       _poles_by_var, _synth, call_arguments)
 from .runtime_types import SEQUENCE_KINDS
 from ._signatures import callable_signature
@@ -214,7 +214,8 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if ok:
             return True
         direction = "increasing" if increasing else "decreasing"
-        return f"{target}={x1:.6g} -> {v1!r}, {target}={x2:.6g} -> {v2!r} (not {direction})"
+        return (f"{target}={_fmt_coordinate(x1)} -> {v1!r}, "
+                f"{target}={_fmt_coordinate(x2)} -> {v2!r} (not {direction})")
 
     return _probe_trials(fn, facts, target, domain, rng, trials, trial)
 
@@ -272,7 +273,7 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
              curvature <= tol)
         if ok:
             return True
-        return (f"{target}={x0:.6g}, h={h:.3g}: curvature estimate "
+        return (f"{target}={_fmt_coordinate(x0)}, h={h:.3g}: curvature estimate "
                 f"{curvature:.6g} does not settle {kind}")
 
     return _probe_trials(fn, facts, target, domain, rng, trials, trial)
@@ -794,7 +795,7 @@ def _pole_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 candidates.append(spelled)
     return _hazard_value_probe(
         fn, facts, cj, domain, rng, trials, candidates,
-        lambda value, what: (f"{target} = {value:.6g} is admitted by the "
+        lambda value, what: (f"{target} = {_fmt_coordinate(value)} is admitted by the "
                              f"declared domain but sits at or beside a "
                              f"pole: the call {what}"))
 
@@ -887,7 +888,7 @@ def _extreme_probe(fn, facts, cj, domain: dict, rng: random.Random,
                                      pseudo_infinity=pinf)
     return _hazard_value_probe(
         fn, facts, cj, domain, rng, trials, candidates,
-        lambda value, what: (f"{target} = {value:.6g} is admitted by the "
+        lambda value, what: (f"{target} = {_fmt_coordinate(value)} is admitted by the "
                              f"declared domain but the computation "
                              f"leaves float range there: the call {what}"))
 
@@ -1904,7 +1905,7 @@ def _builtin_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 candidates.append(spelled)
     return _hazard_value_probe(
         fn, facts, cj, domain, rng, trials, candidates,
-        lambda value, what: (f"{target} = {value:.6g} is admitted by the "
+        lambda value, what: (f"{target} = {_fmt_coordinate(value)} is admitted by the "
                              f"declared domain but lies outside a "
                              f"restricted builtin's own real domain "
                              f"({', '.join(sorted(names))}): the call "

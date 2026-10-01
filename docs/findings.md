@@ -178,13 +178,13 @@ Among the results, all found with no claims written:
 <!-- example: finds output match=subset -->
 ```text
   FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([-8.45341, 4.50714, -6.81355, 9.56619, 9.82492, -3.48464], -3.87612): -8.453411994413011 vs -31170.68185339262
+           counterexample ([-8.453411994413011, 4.507135818799634, -6.8135500152940125, 9.566192837018782, 9.824915247609965, -3.484643106365011], -3.8761164035846685): -8.453411994413011 vs -31170.68185339262
   FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([0, 4.3345], -8.15071): -35.32926960780323 vs 39.66377358173939
+           counterexample ([0, 4.334503973936165], -8.150706475352633): -35.32926960780323 vs 39.66377358173939
   proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ
   FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           counterexample x=[-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha=-1.79769e+308, c=-5
+           counterexample x=[-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha=-1.7976931348623157e+308, c=-5
            [mathematics sound, implementation:numerical-instability]
   proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
            where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ

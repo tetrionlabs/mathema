@@ -3322,7 +3322,9 @@ class _CanonicalPrinter(StrPrinter):
         return f"lgamma({self._print(expr.args[0])})"
 
     def _print_Exp1(self, expr):
-        return "e"
+        # `e` reads back as the constant only when no bound name is `e`;
+        # `exp(1)` reads back as the constant always
+        return "exp(1)" if "e" in self._suppress_glyphs else "e"
 
     def _print_Pi(self, expr):
         # unicode only, "π" already round-trips back to "pi" on input
@@ -3600,6 +3602,11 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     product, commutative only as a stated identity) renders as
     written, never as `A*B = A*B`."""
     funcs = funcs | {"f"}
+    # a literal a double does not read exactly renders as the exact
+    # fraction it names, so the rendered claim reads back as the same
+    # number
+    from ._float_text import exact_literal_text
+    text = exact_literal_text(text)
     token = _ORDERED_MATRICES.set(frozenset(matrix_names))
     # a real parameter named for a constant (`pi`, `inf`) is a symbol
     # here, so `inf + 1` stays `inf + 1` rather than folding into the

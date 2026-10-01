@@ -332,12 +332,15 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         _reset()
         try:
             lv, rv = _values(point)
-        except Exception:
+        except Exception as e:
             # a raise FROM THE FUNCTION at an in-domain point is a
             # genuine failure of a value claim (the pedantic raise
-            # rule), so it reproduces a disproof; a plumbing raise
-            # stays inconclusive
-            return False if calls_raised[0] else None
+            # rule), so it reproduces a disproof, and so does a claim
+            # side with no real value there; a plumbing raise stays
+            # inconclusive
+            from .conjecture import claim_side_has_no_value
+            return False if calls_raised[0] or claim_side_has_no_value(e) \
+                else None
         if calls_nonfinite[0] is not None:
             # a nan or an infinity the code returned for finite inputs
             # is no value: against a value every relation fails. Two
@@ -401,12 +404,16 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         _reset()
         try:
             lv, rv = _values(point)
-        except Exception:
-            # only a raise from the function under test is a
-            # computation failure; the law's own plumbing failing
-            # says nothing about the code
+        except Exception as e:
+            # a raise from the function under test is a computation
+            # failure, and so is a claim side with no real value; the
+            # law's own plumbing failing otherwise says nothing about
+            # the code
+            from .conjecture import claim_side_has_no_value
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
+            if claim_side_has_no_value(e):
+                return f"the claim's own side has no real value here ({e})"
             return None
         if calls_nonfinite[0] is not None:
             # no value at a finite input: an overflow, a pole, a nan.
@@ -735,13 +742,15 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
 
 def _fmt_point(point, names):
-    """A point rendered for a counterexample string, numeric coords
-    as :.6g, discrete/string coords (a string domain member) as-is."""
+    """A point rendered for a counterexample string, a float coordinate
+    at full precision (`probing._fmt_coordinate`), discrete/string
+    coords (a string domain member) as-is."""
     parts = []
     for n in names:
         if n not in point:
             continue
         v = point[n]
+        from .probing import _fmt_coordinate
         if isinstance(v, str):
             from .probing import spell_text
             parts.append(f"{n}={spell_text(v)}")
@@ -753,8 +762,8 @@ def _fmt_point(point, names):
             # arguments
             parts.append(f"{n} = {capped}")
             continue
-        parts.append(f"{n}={v:.6g}" if isinstance(v, (int, float))
-                     and not isinstance(v, bool) else f"{n}={v!r}")
+        parts.append(f"{n}={_fmt_coordinate(v)}" if isinstance(v, float)
+                     else f"{n}={v!r}")
     return ", ".join(parts)
 
 
@@ -934,6 +943,12 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
                           "mathema.corroboration": "reproduced"}
         pt = _fmt_point(result.point, deps["names"])
         falsified.counterexample = pt or falsified.counterexample
+        detail = deps["probe_finite"](result.point)
+        if pt and isinstance(detail, str) and \
+                detail.startswith("the claim's own side has no real value"):
+            falsified.counterexample = (
+                f"{pt}: {detail}; narrow the claim's domain to where every "
+                f"side of it is real")
         if falsified.stratum is None:
             # a symbolic disproof plus a reproduced executed witness is
             # the evidence bar for indicting the mathematics itself
