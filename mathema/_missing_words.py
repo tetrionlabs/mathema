@@ -399,10 +399,18 @@ def mixed_sentence(param: str, ways_by_member: dict, raised_by_member: dict,
             return f"{param} = " + ", ".join(pt.split(" = ", 1)[1] for pt in points)
         return "; ".join(points)
 
+    # a phrase about every slot or about values remaining is said only
+    # where the witnesses show it
+    remain = container_noun and drops and not any(_all_holes(pt, param) for pt in drops)
+
+    def all_hole_seen(member: str) -> bool:
+        # another behaviour was seen where every slot held this member
+        return any(pt.count(" = ") == 1 and _all_member(pt.split(" = ", 1)[-1], member)
+                   for pt in drops + holes)
     clauses = []
     if drops:
         clauses.append(f"drops a missing slot when values remain ({where(drops[:1])})"
-                       if container_noun else f"drops the hole at {where(drops[:1])}")
+                       if remain else f"drops the hole at {where(drops[:1])}")
     if holes:
         every = container_noun and all(_all_holes(pt, param) for pt in holes)
         clauses.append(f"gives a hole back when every slot is missing ({where(holes)})"
@@ -410,7 +418,7 @@ def mixed_sentence(param: str, ways_by_member: dict, raised_by_member: dict,
     text = "f " + " and ".join(clauses) if clauses else ""
     # members that each raise the same exception when every slot holds
     # them are said once
-    whole = [(m, at) for m, at in raises if container_noun
+    whole = [(m, at) for m, at in raises if container_noun and not all_hole_seen(m)
              and _all_member(at.split(" = ", 1)[-1], m) and at.count(" = ") == 1]
     excs = {raised_by_member.get(m) for m, _at in whole}
     if len(whole) > 1 and len(excs) == 1:
@@ -422,6 +430,7 @@ def mixed_sentence(param: str, ways_by_member: dict, raised_by_member: dict,
     for member, at in raises:
         exc = raised_by_member.get(member) or "an exception"
         spot = (f"an all-{member} {container_noun}" if container_noun
+                and not all_hole_seen(member)
                 and _all_member(at.split(" = ", 1)[-1], member)
                 and at.count(" = ") == 1 else where([at]))
         text = (f"{text}; at {spot} it raises {exc} instead" if text

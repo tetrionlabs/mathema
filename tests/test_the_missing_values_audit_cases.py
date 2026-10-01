@@ -278,3 +278,14 @@ def numpy_mean_of_series(xs: pd.Series) -> float:
 def test_a_numpy_row_is_not_composed_onto_a_pandas_argument():
     from mathema.policy import composed_policies
     assert composed_policies(numpy_mean_of_series, analyze(numpy_mean_of_series)) == {}
+
+
+# --- a behaviour sentence says only what the calls showed ------------------
+
+def test_the_mixed_sentence_states_only_what_its_witnesses_show():
+    from mathema._missing_words import mixed_sentence
+    text = mixed_sentence("xs", {"nan": {"raises": "xs = [nan]",
+                                         "drops": "xs = [nan, nan, nan]"}},
+                          {"nan": "ValueError"}, "array")
+    assert text == ("f drops the hole at xs = [nan, nan, nan]; at xs = [nan] it raises "
+                    "ValueError instead")
