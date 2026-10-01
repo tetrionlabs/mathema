@@ -36,7 +36,7 @@ from .._timeout import (EXTENSIVE_TIMEOUT_SECONDS,
 from ..domain import Interval, bound_context as domain_bound_context, bound_to_sympy_set
 from ._forms import rewrite_forms, substituted_problem, substitutions
 from ._proof_support import (
-    ProofResult, _decide_relation, _exact_endpoint, _humanize,
+    ProofResult, _decide_relation, _exact_endpoint, _exact_floats, _humanize,
     _interval_hull, _prove_relation,
 )
 
@@ -135,7 +135,7 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
     rlo, rhi, widened = cover
     may_disprove = plain and not widened
     try:
-        exact = sympy.nsimplify(diff, rational=True)
+        exact = _exact_floats(diff)
         poly = sympy.Poly(exact, sym)
         dom = poly.get_domain()
         if not (dom.is_ZZ or dom.is_QQ) or poly.degree() < 1:

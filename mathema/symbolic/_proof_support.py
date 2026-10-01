@@ -1298,20 +1298,35 @@ def _exact_endpoint(v):
 
     Notes:
         A declared bound arrives as a float (2.0, 0.1); the number the
-        claim names is its decimal reading. Rationalizing it keeps
-        endpoint arithmetic exact, so an attained bound collapses to a
-        true zero (log(2)/log(2) - 1 == 0) instead of float noise the
-        sign check can't call. Anything that is not a Float passes
-        through unchanged.
+        claim names is its decimal reading, the shortest decimal that
+        reads back as the same float (`repr`), every digit kept, so
+        `0.3472963553338606` stays sixteen digits long. A Float carrying
+        more than double precision is read from its own digits.
+        Rationalizing keeps endpoint arithmetic exact, so an attained
+        bound collapses to a true zero (log(2)/log(2) - 1 == 0) instead
+        of float noise the sign check can't call. Anything that is not a
+        finite Float passes through unchanged.
     """
-    if isinstance(v, sympy.Float):
+    if isinstance(v, sympy.Float) and v.is_finite:
         try:
-            return sympy.nsimplify(v, rational=True)
+            if v._prec <= 53:
+                return sympy.Rational(repr(float(v)))
+            return sympy.Rational(str(v))
         except TimeoutError:
             raise
         except Exception:
             return v
     return v
+
+
+def _exact_floats(expr):
+    """Intent:
+        `expr` with every finite Float replaced by its decimal reading
+        (`_exact_endpoint`), so a coefficient keeps every digit it was
+        written with.
+    """
+    floats = {f: _exact_endpoint(f) for f in expr.atoms(sympy.Float)}
+    return expr.xreplace(floats) if floats else expr
 
 
 def _has_sequence_structure(expr) -> bool:

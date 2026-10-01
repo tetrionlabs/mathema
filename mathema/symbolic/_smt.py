@@ -67,8 +67,10 @@ class _Translator:
                               else z3mod.Real(name))
 
     def _rational(self, value) -> "object":
+        # a Float reads as its shortest round-tripping decimal, the
+        # number its digits name
         q = Fraction(value.p, value.q) if isinstance(value, sympy.Rational) \
-            else Fraction(float(value))
+            else Fraction(repr(float(value)))
         return self.z3.RealVal(f"{q.numerator}/{q.denominator}")
 
     def _radical(self, base_expr, q: int):
@@ -209,7 +211,7 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
     import z3
 
     from ._extensive import _bound_interval
-    from ._proof_support import ProofResult
+    from ._proof_support import ProofResult, _exact_endpoint
 
     named = {p: s for p, s in params.items() if s in diff.free_symbols}
     if not named or len(named) > 6:
@@ -235,10 +237,10 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
             lo, hi, closed_lo, closed_hi, plain = hull
             var = translator.vars[sym]
             if getattr(lo, "is_finite", False):
-                lo_t = translator.expr(sympy.nsimplify(lo, rational=True))
+                lo_t = translator.expr(_exact_endpoint(lo))
                 box.append(var >= lo_t if closed_lo else var > lo_t)
             if getattr(hi, "is_finite", False):
-                hi_t = translator.expr(sympy.nsimplify(hi, rational=True))
+                hi_t = translator.expr(_exact_endpoint(hi))
                 box.append(var <= hi_t if closed_hi else var < hi_t)
             if not plain:
                 # the hull is a superset of the real bound (an
