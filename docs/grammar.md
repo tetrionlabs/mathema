@@ -559,7 +559,7 @@ for law in ["∫(f(x), x, -oo, oo) == 1",
 ```text
 ∫(f(x), x, -oo, oo) == 1        proven
 f(x) >= 0                       proven    ∀ x ∈ ℝ
-  [float]                       falsified x = -1.79769e+308
+  [float]                       falsified x = -1.7976931348623157e+308
 let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ ℝ
   [float]                       holds
 ```
