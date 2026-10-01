@@ -93,6 +93,22 @@ def test_derivative_claims_span_both_functions():
     assert r.verdict == "proven"
 
 
+def test_the_ratio_over_every_real_x_is_falsified_where_x_is_negative():
+    # x ** a has no real value at a negative x and a fractional a, so
+    # the same claim with x unbounded fails there, at an executed point
+    r = _verdict(cobb_douglas_utility,
+                 "for a in [0.1,0.9], d(f(x,y,a),x)/d(f(x,y,a),y) "
+                 "== a*y/((1-a)*x)", route="derive")
+    assert r.verdict == "falsified", (r.verdict, r.sketch)
+    import re
+    from fractions import Fraction
+    point = {name: float(Fraction(value)) for name, value in re.findall(
+        r"\b([xya])\s*=\s*(-?[0-9./]+)", r.counterexample or "")}
+    assert point.get("x", 0) < 0, r.counterexample
+    assert isinstance(cobb_douglas_utility(point["x"], point.get("y", 1.0),
+                                           point["a"]), complex)
+
+
 def test_let_alias_of_a_same_scope_function_resolves():
     # `let g = budget_line` substitutes the bare name into the law,
     # and the name then binds from the module like a direct call
