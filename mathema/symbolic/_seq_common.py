@@ -862,7 +862,7 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
                if lhs.has(ib) or rhs.has(ib)]
     ties = _length_ties(present, domain, assumption, shapes)
     if judged and len(set(ties.values())) > 1:
-        firsts = {}
+        firsts: dict = {}
         for n in sorted(present):
             firsts.setdefault(ties[n], n)
         a, b = sorted(firsts.values())[:2]
