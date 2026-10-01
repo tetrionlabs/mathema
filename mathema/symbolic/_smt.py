@@ -58,6 +58,11 @@ class _Translator:
         self.z3 = z3mod
         self.vars: dict = {}
         self.constraints: list = []
+        # (path, divisor): z3 reads x / 0 as some value, so each
+        # division is recorded with the branch condition it is
+        # evaluated under, for the caller to ask about its zeros
+        self.divisors: list = []
+        self._path: list = []
         self._aux: dict = {}
         for name, sym in params.items():
             self.vars[sym] = (z3mod.Int(name) if sym.is_integer
@@ -83,6 +88,12 @@ class _Translator:
             self.constraints.append(base >= 0)
         self._aux[key] = y
         return y
+
+    def _divide(self, numerator, divisor):
+        path = (self.z3.And(*self._path) if self._path
+                else self.z3.BoolVal(True))
+        self.divisors.append((path, divisor))
+        return numerator / divisor
 
     def expr(self, e):
         z3 = self.z3
@@ -113,11 +124,12 @@ class _Translator:
                 b = self.expr(base)
                 if n >= 0:
                     return b ** n
-                return self.z3.RealVal(1) / (b ** (-n))
+                return self._divide(self.z3.RealVal(1), b ** (-n))
             if isinstance(exp, sympy.Rational):
                 y = self._radical(base, int(exp.q))
                 p = int(exp.p)
-                return y ** p if p >= 0 else self.z3.RealVal(1) / (y ** (-p))
+                return y ** p if p >= 0 else self._divide(self.z3.RealVal(1),
+                                                          y ** (-p))
             raise _Untranslatable(f"non-rational exponent in {e}")
         if isinstance(e, sympy.Abs):
             t = self.expr(e.args[0])
@@ -136,9 +148,19 @@ class _Translator:
             last_expr, last_cond = pairs[-1]
             if last_cond is not sympy.true:
                 raise _Untranslatable(f"piecewise without a catch-all: {e}")
+            conds = [self.condition(cond) for _value, cond in pairs[:-1]]
+            # each branch's value is evaluated only where its condition
+            # holds and no earlier one does
+            self._path.append(z3.Not(z3.Or(*conds)) if conds
+                              else z3.BoolVal(True))
             out = self.expr(last_expr)
-            for value, cond in reversed(pairs[:-1]):
-                out = z3.If(self.condition(cond), self.expr(value), out)
+            self._path.pop()
+            for k in reversed(range(len(conds))):
+                taken = z3.And(conds[k], *[z3.Not(c) for c in conds[:k]])
+                self._path.append(taken)
+                value = self.expr(pairs[k][0])
+                self._path.pop()
+                out = z3.If(conds[k], value, out)
             return out
         raise _Untranslatable(f"{type(e).__name__} has no exact translation")
 
@@ -262,7 +284,12 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
     solver.set("rlimit", 10_000_000)
     for c in box + translator.constraints:
         solver.add(c)
-    solver.add(query)
+    # a point where a division on the evaluated branch meets a zero
+    # divisor is one where the claim has no value: it answers the query
+    # as a counterexample does
+    zero_divisor = [z3.And(path, divisor == 0)
+                    for path, divisor in translator.divisors]
+    solver.add(z3.Or(query, *zero_divisor) if zero_divisor else query)
     outcome = solver.check()
 
     if outcome == z3.unsat:
@@ -291,6 +318,10 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
             return None   # an irrational algebraic model value: decline
     try:
         value = diff.subs(point)
+        if value.has(sympy.zoo, sympy.nan) or value.is_finite is False:
+            # the model sits on a zero divisor: the claim has no value
+            # there, and a later rung or the executed witness decides
+            return None
         holds_at_point = {"<": value < 0, "<=": value <= 0,
                           ">": value > 0, ">=": value >= 0,
                           "==": sympy.Eq(value, 0),
