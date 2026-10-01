@@ -24,9 +24,12 @@ pytestmark = pytest.mark.skipif(not _smt.available(),
     "for x in [-1, -0.5], f(x) <= (sqrt(x) - 1)^2",
     "for x in [-1, 1], f(x) <= (sqrt(x) - 1)^2",
 ])
-def test_a_claim_side_root_of_a_negative_base_is_not_proven(law):
+def test_a_claim_side_root_of_a_negative_base_is_falsified(law):
     (p,) = check_conjectures(zero, [claim(law)], extensive=True)
-    assert p.verdict != "proven"
+    assert p.verdict == "falsified"
+    head, detail = p.counterexample.split(":", 1)
+    assert float(head.strip("()").split("=")[-1]) < 0
+    assert "the claim's own side has no real value here (sqrt(" in detail
 
 
 def test_the_solver_does_not_prove_over_an_undefined_root():

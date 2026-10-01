@@ -38,6 +38,8 @@ def test_a_root_just_inside_a_long_endpoint_breaks_a_strict_claim():
     "for x in [0.3472963553338606, 0.5], f(x) != 0",
     "for x in [0.3472963553338606, 0.3472963553338607], f(x) < 0",
 ])
-def test_a_strict_claim_over_a_long_endpoint_is_not_proven(law):
+def test_a_strict_claim_over_a_long_endpoint_is_falsified_at_the_root(law):
     (p,) = check_conjectures(negated_square, [claim(law)], extensive=True)
-    assert p.verdict != "proven"
+    assert p.verdict == "falsified"
+    assert p.counterexample == "x=0.34729635533386066"
+    assert negated_square(0.34729635533386066) == 0.0
