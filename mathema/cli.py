@@ -2931,7 +2931,15 @@ def cmd_compendium(args) -> int:
     if not any(k.split(".")[0] == args.library for k in load_verified(root)):
         raise TargetError(f"no verified records for library "
                           f"{args.library!r} under {root}; nothing to export")
-    path = write_compendium(args.library, root=root, out=args.out)
+    notes: list = []
+    path = write_compendium(args.library, root=root, out=args.out,
+                            notes=notes)
+    for line in notes:
+        print(f"note {line}")
+    if path is None:
+        print(f"nothing written: no verified row of {args.library!r} is "
+              f"left to export")
+        return 1
     print(f"wrote the {args.library!r} compendium claims file to {path}")
     return 0
 

@@ -35,10 +35,16 @@ def _bundled_rows(name: str) -> dict:
             if isinstance(e, dict) for r in e.get("claims") or []}
 
 
-def test_exported_rows_are_the_stated_rows(tmp_path):
+def test_exported_rows_are_the_stated_rows(tmp_path, monkeypatch):
+    import mathema.compendium as comp
     from mathema.compendium.export import export_compendium
     r = _verify(tmp_path, "mathema/compendium/numpy/bounds.claims.yaml")
     assert "numpy.abs" in r.stdout, r.stdout + r.stderr
+    # bundled rows export only below the supported floor
+    real = comp._installed_version
+    monkeypatch.setattr(comp, "_installed_version",
+                        lambda lib, aliases=(): "1.24.4" if lib == "numpy"
+                        else real(lib, aliases))
     stated = _bundled_rows("bounds.claims.yaml")
     data = export_compendium("numpy", root=str(tmp_path))
     exported = {(k, row["name"]): row for k, e in data.items()
