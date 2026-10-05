@@ -325,3 +325,42 @@ def test_a_chained_claim_says_a_gate_is_no_premise_once():
         "assuming is_missing_safe(f), for xs in [0, 1]^n, 0 <= f(xs) <= 1")])
     assert row.verdict == "skipped:misspecified"
     assert "link 1" not in row.note and row.note.count("is not a premise") == 1
+
+
+def test_a_problem_after_a_command_starts_its_own_line():
+    from mathema.verify import problems_text
+    text = problems_text(["1 policy row to settle: missing[x]\n(i) change f\n"
+                          "to list them, run: mathema claims k", "c unknown: no proof"])
+    lines = text.splitlines()
+    # a command is the last thing on its line, so the next problem starts a line
+    assert lines[2] == "       to list them, run: mathema claims k", lines
+    assert lines[3] == "       c unknown: no proof", lines
+
+
+def test_a_first_falsification_note_puts_each_command_last_on_its_line():
+    from types import SimpleNamespace
+
+    from mathema.verify import _born_falsified_hint
+    p = SimpleNamespace(name="at_most_the_largest", statement="f(a) <= max(a)",
+                        meta={}, verdict="falsified")
+    (note,) = _born_falsified_hint("numpy.ptp", [p], {}, "claims/numpy.claims.yaml")
+    lines = note.splitlines()
+    assert lines[0] == ("note numpy.ptp: at_most_the_largest falsified on first "
+                        "adjudication: the installed library does not do what the "
+                        "row states:"), lines
+    assert lines[1:] == [
+        "  (i) to record the falsification as a discovery, run: mathema accept "
+        "numpy.ptp at_most_the_largest --as discovery",
+        "  (ii) correct the row in claims/numpy.claims.yaml"], lines
+
+
+def test_a_compendium_hint_puts_each_command_last_on_its_line():
+    from mathema.compendium import _compendium_hint
+    for verdict in ("unknown", None):
+        text = _compendium_hint("compendium:math", "log_monotone", "math.log", verdict)
+        commands = [line for line in text.splitlines() if "mathema accept" in line
+                    or "mathema check" in line]
+        assert commands, text
+        for line in commands:
+            # the command runs to the end of its line, after a colon
+            assert "run: mathema " in line and ";" not in line.split("run: ", 1)[1], line

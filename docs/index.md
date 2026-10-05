@@ -164,7 +164,7 @@ mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
   proven    between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
            for a in [0, 100] : int, b in [0, 100] : int
   between_reals  for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)   falsified at link 1
-    falsified  mathematics  for a in [0.0, 100.0] ⊂ ℝ, b in [0.0, 100.0] ⊂ ℝ, min(a, b) <= f(a, b) <= max(a, b)   counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
+    falsified  computation  for a in [0.0, 100.0] : float, b in [0.0, 100.0] : float, min(a, b) <= f(a, b) <= max(a, b)   counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
     holds      policy       f(a=nan)   no missing policy stated; assumed propagates
     holds      policy       f(b=nan)   no missing policy stated; assumed propagates
 ```

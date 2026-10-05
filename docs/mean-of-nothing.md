@@ -41,29 +41,40 @@ print(mathema.check(mean_return, claims=[value]))
 <!-- example: mean output -->
 ```text
 mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
-  bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = [NA]
-    holds      mathematics  for xs in ([-1.0, 1.0])^n ⊂ ℝ, -1 <= f(xs) <= 1   429 entries across 92 draws, sizes (1, 1) to (8, 1)
-    proven     policy       f([..., nan, ...])   drops, from pandas.Series.mean's own policy row, which f calls
-    falsified  policy       f([..., nan, ...])   propagates, from pandas.Series.mean's own policy row, which f calls
-                            possible fixes: (i) mathema claims returns.mean_return --adopt 'missing[xs, count == 0]'  (ii) exclude nan  (iii) handle nan at entry
+  bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = []
+    holds      computation  for xs in ([-1.0, 1.0])^n : float, -1 <= f(xs) <= 1   408 entries across 98 draws, sizes (1, 1) to (8, 1)
+    falsified  policy       f([])   f(xs) returns nan at xs = []: no value for no data, and no empty policy is stated
+                            possible fixes:
+                              (i) if nan for no data is intended, state: mean_return([]) in {missing}
+                              (ii) guard the empty input at entry
+    proven     policy       f([..., missing, ...]) assuming count(xs) >= 1   drops, from pandas.Series.mean's own policy row, which f calls
+    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   raises TypeError, where the word is propagates (from pandas.Series.mean's own policy row, which f calls)
+                            possible fixes:
+                              (i) exclude missing
+                              (ii) handle missing at entry
 ```
 
 Read it from the top. The headline is the claim as mathema resolved it:
 a float slot may be missing, so `[-1, 1]^n` became
-`([-1.0, 1.0] | {missing})^n`. The `mathematics` line holds on every
-series of values: a mean of numbers in `[-1, 1]` stays there.
+`([-1.0, 1.0] | {missing})^n`. The `computation` line holds on every
+series of values it ran: a mean of numbers in `[-1, 1]` stays there.
 
-The two `policy` lines say what `mean_return` does with a slot that is
-not there. A pandas Series slot can be `nan`, `null` (a `None` element)
-or `NA`, and mathema put each one in. `mean_return` makes one library
-call, and pandas' own policy rows (bundled with mathema) say what
-`Series.mean` does: it drops holes while values remain, and gives a hole
-back when none do. The first line is that first row, proven. The second
-is the second row, and it is falsified, which is why the headline is:
-at `xs = [NA]`, a series whose only slot is pandas' `NA`, `xs.mean()` is
+The `f([])` line is the empty series: its mean is `nan`, which counts
+as no value until a policy for the empty input is stated, and that is
+the headline's witness (the last section returns to it).
+
+The other two `policy` lines say what `mean_return` does with a slot
+that is not there. A pandas Series slot can be `nan`, `null` (a `None`
+element) or `NA`, and mathema put each one in. `mean_return` makes one
+library call, and pandas' own policy rows (bundled with mathema) say
+what `Series.mean` does: it drops holes while values remain, and gives a
+hole back when none do. Each line names its case after `assuming`. The
+first, a series with a value left (`count(xs) >= 1`), is that first row,
+proven. The second, a series with none (`count(xs) == 0`), is the second
+row, and it is falsified: at
+`xs = [NA]`, a series whose only slot is pandas' `NA`, `xs.mean()` is
 `pd.NA` and `float(pd.NA)` raises `TypeError`, where pandas' row says a
-hole comes back. Both lines print the call as `f([..., nan, ...])`; the
-witness on the headline names the series that broke the second.
+hole comes back.
 
 ## The gate: is it missing-safe?
 
@@ -78,15 +89,22 @@ print(mathema.check(mean_return, claims=[value, mathema.claim("is_missing_safe(f
 <!-- example: mean output -->
 ```text
 mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
-  bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = [NA]
-    holds      mathematics  for xs in ([-1.0, 1.0])^n ⊂ ℝ, -1 <= f(xs) <= 1   429 entries across 92 draws, sizes (1, 1) to (8, 1)
-    proven     policy       f([..., nan, ...])   drops, from pandas.Series.mean's own policy row, which f calls
-    falsified  policy       f([..., nan, ...])   propagates, from pandas.Series.mean's own policy row, which f calls
-                            possible fixes: (i) mathema claims returns.mean_return --adopt 'missing[xs, count == 0]'  (ii) exclude nan  (iii) handle nan at entry
+  bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = []
+    holds      computation  for xs in ([-1.0, 1.0])^n : float, -1 <= f(xs) <= 1   408 entries across 98 draws, sizes (1, 1) to (8, 1)
+    falsified  policy       f([])   f(xs) returns nan at xs = []: no value for no data, and no empty policy is stated
+                            possible fixes:
+                              (i) if nan for no data is intended, state: mean_return([]) in {missing}
+                              (ii) guard the empty input at entry
+    proven     policy       f([..., missing, ...]) assuming count(xs) >= 1   drops, from pandas.Series.mean's own policy row, which f calls
+    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   raises TypeError, where the word is propagates (from pandas.Series.mean's own policy row, which f calls)
+                            possible fixes:
+                              (i) exclude missing
+                              (ii) handle missing at entry
   falsified is_missing_safe[f]: is_missing_safe(f)
            xs (pandas.Series): nan and null follow pandas.Series.mean's own policy row (drops when values remain, propagates when every slot is missing); NA does not: f raises TypeError when every slot is NA
            counterexample xs = [NA]: f raised TypeError
-           state `assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)` if the raise is intended, or change f
+           (i) if the raise is intended, state: assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)
+           (ii) if not, change f
 ```
 
 The value claim's block repeats above it, since the gate is checked
@@ -109,11 +127,17 @@ print(mathema.check(mean_return, claims=[value, mathema.claim("is_empty_safe(xs)
 <!-- example: mean output -->
 ```text
 mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
-  bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = [NA]
-    holds      mathematics  for xs in ([-1.0, 1.0])^n ⊂ ℝ, -1 <= f(xs) <= 1   429 entries across 92 draws, sizes (1, 1) to (8, 1)
-    proven     policy       f([..., nan, ...])   drops, from pandas.Series.mean's own policy row, which f calls
-    falsified  policy       f([..., nan, ...])   propagates, from pandas.Series.mean's own policy row, which f calls
-                            possible fixes: (i) mathema claims returns.mean_return --adopt 'missing[xs, count == 0]'  (ii) exclude nan  (iii) handle nan at entry
+  bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = []
+    holds      computation  for xs in ([-1.0, 1.0])^n : float, -1 <= f(xs) <= 1   408 entries across 98 draws, sizes (1, 1) to (8, 1)
+    falsified  policy       f([])   f(xs) returns nan at xs = []: no value for no data, and no empty policy is stated
+                            possible fixes:
+                              (i) if nan for no data is intended, state: mean_return([]) in {missing}
+                              (ii) guard the empty input at entry
+    proven     policy       f([..., missing, ...]) assuming count(xs) >= 1   drops, from pandas.Series.mean's own policy row, which f calls
+    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   raises TypeError, where the word is propagates (from pandas.Series.mean's own policy row, which f calls)
+                            possible fixes:
+                              (i) exclude missing
+                              (ii) handle missing at entry
   falsified is_empty_safe[xs]: is_empty_safe(xs)
            counterexample xs = [] (an empty float Series): f returned nan for the empty input; raise, or return a value
 ```

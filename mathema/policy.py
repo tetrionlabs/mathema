@@ -1040,6 +1040,29 @@ def _guard_for(guards: dict, fn, p: str, kind: str, member: "str | None"):
 
 # --- what the body says ----------------------------------------------------
 
+#: the methods that mark each hole of a container, read with `.any()`
+_HOLE_MASKS = frozenset({"isna", "isnull", "is_null", "is_nan"})
+
+
+def _any_hole_check(node, params) -> "str | None":
+    """The parameter a test asks "holds a hole anywhere" of
+    (`xs.isna().any()`, `xs.is_null().any()`, `xs.hasnans`), or None."""
+    import ast
+    if isinstance(node, ast.Attribute) and node.attr == "hasnans" \
+            and isinstance(node.value, ast.Name) and node.value.id in params:
+        return node.value.id
+    if isinstance(node, ast.Call) and not node.args \
+            and isinstance(node.func, ast.Attribute) and node.func.attr == "any":
+        mask = node.func.value
+        if isinstance(mask, ast.Call) and not mask.args \
+                and isinstance(mask.func, ast.Attribute) \
+                and mask.func.attr in _HOLE_MASKS \
+                and isinstance(mask.func.value, ast.Name) \
+                and mask.func.value.id in params:
+            return mask.func.value.id
+    return None
+
+
 def guard_policies(facts) -> dict:
     """Intent:
         The policy each guard in the body states, `{(param, kind, member):
@@ -1047,7 +1070,8 @@ def guard_policies(facts) -> dict:
         `if x is None: raise TypeError` states `absent(f, x)
         raises(TypeError)`, `if x != x: return 0.0` states `missing(f,
         x, nan) drops`. `x is None` covers absence only, `x != x` and
-        `isnan(x)` the member `nan`, `isna(x)` every member and absence.
+        `isnan(x)` the member `nan`, `isna(x)` every member and absence,
+        `xs.isna().any()` (or `xs.hasnans`) every member in a container.
         A guard that returns `None` passes an absence on and turns a
         hole into an absence; one that returns `nan` (`float("nan")`,
         `math.nan`, `np.nan`) passes a hole on and turns an absence into
@@ -1119,6 +1143,10 @@ def guard_policies(facts) -> dict:
                 if isinstance(op, ast.NotEq) and isinstance(right, ast.Name) \
                         and right.id == node.left.id:
                     keys.append((node.left.id, "missing", "nan"))
+            hole_of = _any_hole_check(node, params)
+            if hole_of is not None:
+                # `xs.isna().any()`: a hole anywhere in the container
+                keys.append((hole_of, "missing", None))
             if isinstance(node, ast.Call) and node.args \
                     and isinstance(node.args[0], ast.Name) and node.args[0].id in params:
                 name = (node.func.attr if isinstance(node.func, ast.Attribute)
@@ -1668,9 +1696,50 @@ def library_policies() -> dict:
     return _LIBRARY
 
 
+#: method calls that read a sequence without changing it, allowed in the
+#: test of a raising guard
+_READING_METHODS = frozenset({"count", "isna", "isnull", "notna", "notnull",
+                              "any", "all", "sum", "is_empty", "null_count"})
+#: functions that read their argument without changing it
+_READING_FUNCTIONS = frozenset({"len", "any", "all", "isnan", "isinstance"})
+
+
+def _reads_only(test, param: str) -> bool:
+    """Whether a guard's test only reads (names, constants, comparisons,
+    `len(xs)`, `xs.count()`, `xs.empty`), never changing or binding
+    anything."""
+    import ast
+    for n in ast.walk(test):
+        if isinstance(n, ast.NamedExpr):
+            return False
+        if isinstance(n, ast.Call):
+            func = n.func
+            if isinstance(func, ast.Attribute) and func.attr in _READING_METHODS:
+                continue
+            if isinstance(func, ast.Name) and func.id in _READING_FUNCTIONS:
+                continue
+            if isinstance(func, ast.Attribute) and func.attr in _READING_FUNCTIONS:
+                continue
+            return False
+    return True
+
+
+def _raising_guard(stmt, param: str) -> bool:
+    """Whether `stmt` is a guard that only refuses a call (`if
+    xs.count() == 0: raise ...`): an `if` with no `else`, a test that
+    only reads, and a body that only raises. The parameter reaches the
+    rest of the body unchanged on every call it lets through."""
+    import ast
+    return (isinstance(stmt, ast.If) and not stmt.orelse
+            and all(isinstance(b, ast.Raise) for b in stmt.body)
+            and _reads_only(stmt.test, param))
+
+
 def _touched_before_return(tree, ret, param: str) -> bool:
     """Whether a statement of the function other than the return `ret`
-    reads or writes `param` (a guard, an in-place change, an alias)."""
+    reads or writes `param` (an in-place change, an alias, a branch
+    that returns), a raising guard aside: a guard decides only the calls
+    it refuses, and passes the others on unchanged."""
     import ast
     fdef = next((n for n in ast.walk(tree)
                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
@@ -1678,7 +1747,8 @@ def _touched_before_return(tree, ret, param: str) -> bool:
     body = fdef.body if fdef is not None else []
     for stmt in body:
         if stmt is ret or (isinstance(stmt, ast.Expr)
-                           and isinstance(stmt.value, ast.Constant)):
+                           and isinstance(stmt.value, ast.Constant)) \
+                or _raising_guard(stmt, param):
             continue
         if any(isinstance(n, ast.Name) and n.id == param
                for n in ast.walk(stmt)):

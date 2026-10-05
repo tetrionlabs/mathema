@@ -49,7 +49,7 @@ print(mathema.check(ema, claims=[]))
 ```text
 mathema.Record(ema) · source, no side effects · form b96b0b96677f
   bounded  for x in ([0.0, 1.0] | {missing})^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1   holds
-    holds      mathematics  for x in ([0.0, 1.0])^n ⊂ ℝ, alpha in [0.0, 1.0] ⊂ ℝ, f(x, alpha) <= 1   737 entries across 160 draws, sizes (1, 1) to (8, 1)
+    holds      computation  for x in ([0.0, 1.0])^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1   731 entries across 161 draws, sizes (1, 1) to (8, 1)
     holds      policy       f(x=[])
     holds      policy       f(x=[..., nan, ...])   no missing policy stated; assumed propagates
 ```
@@ -253,7 +253,7 @@ it; this is the metric meant to catch that.
 ✓ intent concise (8 words)
 ✓ Claims: block in sync (names known, no surface conflicts)
 ✓ Claims: present (1 parsed)
-· claims {13 | 1 | -} floor | actual | expected (not scored)
+· claims {14 | 1 | -} floor | actual | expected (not scored)
 ✓ domain declared (1/1)
 ✗ domain enforced
 ✓ raises covered (1/1)
@@ -309,7 +309,7 @@ ema.ema || yes           | yes         | 2/2    | no      | 1/1    | 5/6        
 
 docsync:
 key     || intent | notes | claims   | {min_expected|actual|est_applicable} || domain_declared | enforced || raises_declared || params_typed | return_typed || callees_doc_quality | callees_docsync || sync_score
-ema.ema || yes    | -     | 1 parsed | {13 | 1 | -}                         || 1/1             | no       || 1/1             || 2/2          | yes          || -                   | -               || 90%
+ema.ema || yes    | -     | 1 parsed | {14 | 1 | -}                         || 1/1             | no       || 1/1             || 2/2          | yes          || -                   | -               || 90%
 
 mean docsync 90% (how much of what each function does is surfaced as context) (1 function).
 ```

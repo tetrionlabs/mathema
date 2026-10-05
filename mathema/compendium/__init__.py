@@ -829,18 +829,21 @@ def external_premises(root: str = ".", verified: "dict | None" = None,
 
 def _compendium_hint(tag: str, name: str, key: str,
                      verdict: "str | None" = None) -> str:
+    from .._missing_words import options
     recorded = bool(verdict) and verdict != "declared"
     if recorded:
         # verify already tried: the way forward is a row it can decide
         return (f"{tag} declares {name!r} for {key}; mathema verify "
-                f"recorded it {verdict} against the installed library. To "
-                f"take it on its word, run: mathema accept {key} {name} "
-                f"--as trusted; to decide it, restate the row, then run: "
-                f"mathema check {key} --claim \"...\"")
+                f"recorded it {verdict} against the installed library:\n"
+                + options([f"to take it on its word, run: mathema accept {key} "
+                           f"{name} --as trusted",
+                           f"to decide it, restate the row, then run: mathema "
+                           f"check {key} --claim \"...\""]))
     return (f"{tag} declares {name!r} for {key}; a compendium verdict is "
-            f"never trusted silently: accept it (mathema accept {key} "
-            f"{name} --as trusted) or let mathema verify adjudicate it "
-            f"against the installed library")
+            f"never trusted silently:\n"
+            + options([f"to accept it, run: mathema accept {key} {name} --as trusted",
+                       "let mathema verify adjudicate it against the installed "
+                       "library"]))
 
 
 def _region_texts(entry: dict, families) -> list:
@@ -1280,6 +1283,73 @@ def install(root: str = ".") -> None:
     reads no project file and applies the bundled layer alone
     (`ensure_bundled`)."""
     register_library_claims(root)
+
+
+#: the files that mark a project's root directory
+_ROOT_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", ".mathema", ".git")
+
+
+def uninstalled_project_note(fn) -> "str | None":
+    """Intent:
+        The record note for `check()` on a function whose source file
+        sits in a project (the nearest directory above it with a
+        `pyproject.toml`, `setup.py`, `setup.cfg`, `.mathema` or `.git`)
+        that states compendium files of its own (looked up once per
+        process for each project) which are not installed:
+        "project compendium files under <root> were not read; to use
+        them, call: mathema.compendium.install('<root>')". None when the
+        function has no source file, no project is found, the project
+        states no compendium file, or its files are installed.
+    """
+    import inspect
+    try:
+        path = inspect.getsourcefile(_engine_unwrapped(fn))
+    except (TypeError, OSError):
+        return None
+    if not path:
+        return None
+    parts = os.path.realpath(path).split(os.sep)
+    if "site-packages" in parts or "dist-packages" in parts:
+        return None
+    here = os.path.dirname(os.path.realpath(path))
+    root = None
+    while True:
+        if any(os.path.exists(os.path.join(here, m)) for m in _ROOT_MARKERS):
+            root = here
+            break
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+    if _INSTALLED.get("root") == os.path.abspath(root):
+        return None
+    if root not in _PROJECT_FILES:
+        _PROJECT_FILES[root] = _states_compendium_files(root)
+    if not _PROJECT_FILES[root]:
+        return None
+    return (f"project compendium files under {root} were not read; to use "
+            f"them, call: mathema.compendium.install({root!r})")
+
+
+#: per project root, whether it states compendium files of its own,
+#: looked up once per process
+_PROJECT_FILES: dict = {}
+
+
+def _states_compendium_files(root: str) -> bool:
+    """Whether any claims file under `root` declares `compendium:` for a
+    library other than the project's own package."""
+    from ..spec import claims_file_paths, read_claims_file
+    for claims_path in claims_file_paths(root, exclude=(_bundled_dir(),)):
+        try:
+            data = read_claims_file(claims_path,
+                                    os.path.relpath(claims_path, root)) or {}
+        except Exception:
+            continue
+        library = data.get("compendium")
+        if isinstance(library, str) and not names_own_package(library, root):
+            return True
+    return False
 
 
 def library_key_of(fn) -> "str | None":

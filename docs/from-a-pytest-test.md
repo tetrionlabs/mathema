@@ -66,13 +66,13 @@ mathema verify claims/numpy.claims.yaml --root .
 
 <!-- example: ptp output wrap=80 -->
 ```text
-note numpy.ptp: at_most_the_largest falsified on first adjudication. A declared
-    claim is kept until a human decides it (fix the code, `mathema accept
-    numpy.ptp <claim> --as discovery`, or supersede it). To try a spelling
-    first, `mathema check numpy.ptp --claim "..."` adjudicates it and writes
-    nothing.
+note numpy.ptp: at_most_the_largest falsified on first adjudication: the
+    installed library does not do what the row states:
+  (i) to record the falsification as a discovery, run: mathema accept numpy.ptp
+      at_most_the_largest --as discovery
+  (ii) correct the row in claims/numpy.claims.yaml
 FAIL numpy.ptp: library claims from claims/numpy.claims.yaml; no baseline
-    record; 1 proven, 0 holds, 1 falsified  <- 1 falsified claim(s)
+    record; 1 proven, 1 holds, 1 falsified  <- 1 falsified claim(s)
 0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -86,7 +86,7 @@ grep -m1 counterexample .mathema/verified/numpy.ptp.yaml
 
 <!-- example: ptp output -->
 ```text
-      counterexample: "a = [-54.43236208490119], axis = None, out = None, keepdims = <no value>: 0.0 vs -54.43236208490119"
+      counterexample: "a = [-73.82223293132003, -73.82223293132003, -73.82223293132003, -73.82223293132003, -73.82223293132003], axis = None, out = None, keepdims = <no value>: 0.0 vs -73.82223293132003"
 ```
 
 One value, and a negative one: the range of `[-54.43]` is 0, and the
@@ -175,7 +175,7 @@ mathema verify claims/numpy.claims.yaml --root .
 
 <!-- example: ptp output -->
 ```text
-ok   numpy.ptp: library claims from claims/numpy.claims.yaml; claims changed; 1 proven, 3 holds, 0 falsified
+ok   numpy.ptp: library claims from claims/numpy.claims.yaml; claims changed; 1 proven, 4 holds, 0 falsified
 0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```

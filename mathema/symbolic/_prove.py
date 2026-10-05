@@ -2955,7 +2955,8 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
              max_callee_depth: int = 3, extensive: bool = False,
              _split_depth: int = 0, funcs: dict | None = None,
              assumption: "list | None" = None,
-             assume_defined: bool = False) -> ProofResult:
+             assume_defined: bool = False,
+             exclude_own_guards: bool = False) -> ProofResult:
     """See `_try_prove`. A proof is kept only when every raise region
     of the functions it reads was read too: a statement the raise-region
     pass stops at could hide a raise in the domain, and a value claim is
@@ -2963,7 +2964,8 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     notes: dict = {}
     result = _try_prove(fn, facts, lhs_src, rhs_src, relation, domain,
                         tolerance, max_callee_depth, extensive, _split_depth,
-                        funcs, assumption, assume_defined, _walk_notes=notes)
+                        funcs, assumption, assume_defined, _walk_notes=notes,
+                        exclude_own_guards=exclude_own_guards)
     if (result.status == "disproven" and tolerance is not None
             and result.meta.get("mathema.exact_disproof")):
         # a declared tolerance is part of the claim: a difference below
@@ -3457,7 +3459,8 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                _split_depth: int = 0, funcs: dict | None = None,
                assumption: "list | None" = None,
                assume_defined: bool = False,
-               _walk_notes: dict | None = None) -> ProofResult:
+               _walk_notes: dict | None = None,
+               exclude_own_guards: bool = False) -> ProofResult:
     """Attempt a symbolic proof of `lhs <relation> rhs` over the function's
     lifted body, honoring a declared domain as sympy assumptions.
 
@@ -3859,6 +3862,8 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     # standard library's partiality is a raise like any other, and the
     # same pedantic raise-region verdict below adjudicates both
     from ._partiality import partiality_walk
+    # the first `own_count` guards are f's own explicit raise branches
+    own_count = len(piecewise_guards)
     try:
         implicit, unread = partiality_walk(fn, facts, domain or {})
     except TimeoutError:
@@ -4151,13 +4156,16 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         return replace(result, quantifier=_quantifier_clause(
             names, list(lifted.params), domain))
 
-    if piecewise_guards and assume_defined:
+    own_guards = piecewise_guards[:own_count]
+    if (piecewise_guards and assume_defined) \
+            or (own_guards and exclude_own_guards):
         # `assuming defined(f)` quantifies over exactly the region
         # where every call returns: the raise regions are excluded by
         # the quantifier itself, and their negations feed the decision
         # machinery as algebraic assumptions
         triples = _call_guard_conditions(lhs_src, rhs_src, lifted,
-                                         piecewise_guards,
+                                         piecewise_guards if assume_defined
+                                         else own_guards,
                                          bound_funcs=aux_funcs_lifted)
         if triples:
             d_gaps, d_nonzero, d_preds = _defined_assumptions(
@@ -4167,7 +4175,11 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             for pred in d_preds:
                 bound_context = pred if bound_context is None \
                     else sympy.And(bound_context, pred)
-    verdict_guards = [] if assume_defined else piecewise_guards
+    # `exclude_own_guards`: a claim binding no domain is read over the
+    # working domain, where f's own raise branches refuse their inputs
+    verdict_guards = ([] if assume_defined else
+                      piecewise_guards[own_count:] if exclude_own_guards
+                      else piecewise_guards)
     if verdict_guards or aux_funcs_guards:
         from .._timeout import (EXTENSIVE_TIMEOUT_SECONDS,
                                 FAST_TIMEOUT_SECONDS, _with_timeout)

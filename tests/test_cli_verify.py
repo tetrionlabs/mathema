@@ -99,7 +99,7 @@ def test_declared_claim_file_is_adjudicated_and_derive_route_dispatches(tmp_path
     assert "funcs.add" in r.stdout
 
 
-def test_unbounded_claim_over_a_raising_guard_falsifies_and_fails_verify(tmp_path):
+def test_a_stated_domain_over_a_raising_guard_falsifies_and_fails_verify(tmp_path):
     funcs_path = tmp_path / "funcs.py"
     _write_funcs(funcs_path)
     (tmp_path / "claims").mkdir()
@@ -107,15 +107,15 @@ def test_unbounded_claim_over_a_raising_guard_falsifies_and_fails_verify(tmp_pat
         "funcs.gated_sqrt:\n"
         "  claims:\n"
         "    - name: unliftable\n"
-        '      statement: "f(x) >= 0"\n'
+        '      statement: "for x in [-1, 1], f(x) >= 0"\n'
         "      route: derive\n"
     )
     _seed_run(tmp_path, funcs_path)
 
-    # with no domain the claim covers x < 0, where gated_sqrt raises:
-    # pedantically falsified, and a falsified claim fails verify in
-    # EVERY mode (lenient only relaxes unverifiable claims, never
-    # wrong ones)
+    # the stated domain covers x < 0, where gated_sqrt raises, and a
+    # stated domain is never narrowed: pedantically falsified, and a
+    # falsified claim fails verify in EVERY mode (lenient only relaxes
+    # unverifiable claims, never wrong ones)
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout
     assert "falsified" in r.stdout

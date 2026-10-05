@@ -117,16 +117,22 @@ mathema verify --root .; echo "exit code $?"
 <!-- example: gate output wrap=80 -->
 ```text
 note fees.discounted: never_raises_price falsified on first adjudication. A
-    declared claim is kept until a human decides it (fix the code, `mathema
-    accept fees.discounted <claim> --as discovery`, or supersede it). To try a
-    spelling first, `mathema check fees.discounted --claim "..."` adjudicates it
-    and writes nothing.
+    declared claim is kept until a human decides it:
+  (i) fix the code
+  (ii) to record it as a discovery, run: mathema accept fees.discounted <claim>
+      --as discovery
+  (iii) supersede it
+  (iv) to try a spelling first, writing nothing, run: mathema check
+      fees.discounted --claim "..."
 FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no
     baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- log_monotone
-    unknown: derive route unliftable; compendium:math declares 'log_monotone'
-    for math.log; mathema verify recorded it unknown against the installed
-    library: accept it (mathema accept math.log log_monotone --as trusted) or
-    let mathema verify adjudicate it against the installed library
+    unknown: derive route unliftable
+       compendium:math declares 'log_monotone' for math.log; mathema verify
+           recorded it unknown against the installed library:
+       (i) to take it on its word, run: mathema accept math.log log_monotone
+           --as trusted
+       (ii) to decide it, restate the row, then run: mathema check math.log
+           --claim "..."
 FAIL fees.discounted: no baseline record; 1 proven, 0 holds, 1 falsified  <- 1
     falsified claim(s)
 ok   fees.late_fee: no baseline record; 1 proven, 2 holds, 0 falsified
