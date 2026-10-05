@@ -477,10 +477,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     evaluate.executed = executed  # type: ignore[attr-defined]
     evaluate.drawn = tally  # type: ignore[attr-defined]
 
-    def _exact_holds(point, tol) -> bool:
+    def _exact_decision(point, tol) -> "bool | None":
         # the claim's sides read exactly, the function's results as the
         # exact values it returned (`_exact_side`): whether the relation
-        # holds within `tol` there, False when it does not or cannot be
+        # holds within `tol` there, None when the sides cannot be
         # computed exactly
         from ._exact_side import exact_sides
         env = {**base_env, **_typed(point)}
@@ -488,11 +488,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                             {"f": fn_call, **(bound_funcs or {})})
         _reset()
         if exact is None:
-            return False
-        held = relation_holds_elementwise(
+            return None
+        return relation_holds_elementwise(
             exact[0], exact[1], cj.relation, tol,
             exact_inequality=cj.tolerance is None, rel_tol=0.0)
-        return held is True
+
+    def _exact_holds(point, tol) -> bool:
+        return _exact_decision(point, tol) is True
 
     def probe_finite(point):
         tally.add(point)
@@ -602,10 +604,17 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             except Exception:
                 return None
             scaled = slack + DEFAULT_RELATIVE_TOLERANCE * size
+            # the claim read exactly decides where it can be: a float
+            # claim side that rounds the way the code does would agree
+            # with it and hide the code's error
+            exact = _exact_decision(point, scaled)
+            if exact is True:
+                return None
+            if exact is False:
+                return ("the relation fails on the executed values, the "
+                        "claim's own side read exactly")
             held = _array_relation(lv, rv, scaled, point)
             if held is None or held:
-                return None
-            if _exact_holds(point, scaled):
                 return None
             return (f"the relation fails on the executed values ({lv!r} "
                     f"{cj.relation} {rv!r}), past the magnitude-scaled "
@@ -621,9 +630,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         scaled = slack + DEFAULT_RELATIVE_TOLERANCE * max(
             abs(lv) if not overflowed else 0.0,
             abs(rv) if not overflowed else 0.0)
-        if _relation_holds(lv, rv, scaled):
+        exact = None if overflowed else _exact_decision(point, scaled)
+        if exact is True:
             return None
-        if not overflowed and _exact_holds(point, scaled):
+        if exact is False:
+            return (f"the relation fails on the executed values ({lv!r} "
+                    f"{cj.relation} {rv!r} in float), the claim's own side "
+                    f"read exactly")
+        if _relation_holds(lv, rv, scaled):
             return None
         if overflowed:
             return (f"the computation overflows to inf here, and the "

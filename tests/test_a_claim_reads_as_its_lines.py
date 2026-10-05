@@ -77,8 +77,12 @@ def test_the_mathematics_line_keeps_its_own_verdict_under_an_empty_input_witness
     assert row.meta["mathema.mathematics"]["verdict"] == "unknown", row.meta
     lines = _lines(rec)
     start = next(i for i, line in enumerate(lines) if line.startswith("  lead  "))
-    # the probe ran the code to reach it, so it is the computation's line
-    assert lines[start + 1].split()[:2] == ["unknown", "computation"], lines[start + 1]
+    # the probe's draws all leave the claim's own side without a value,
+    # so the probe decides nothing and derive's unknown stands as the
+    # mathematics line, with the probe's reason carried (ruling of
+    # 2026-10-01: an undecided point never counts toward holds)
+    assert lines[start + 1].split()[:2] == ["unknown", "mathematics"], lines[start + 1]
+    assert "the claim's own side could not be evaluated" in lines[start + 1]
 
 
 def line_of(x: float) -> float:
