@@ -42,3 +42,16 @@ def test_a_relative_pass_that_cannot_be_evaluated_exactly_is_not_counted():
         "for x in [1e8, 1e9], f(x) == x", route="probe")])
     assert p.verdict != "falsified"
     assert "could not be evaluated in exact arithmetic" in p.note
+
+
+def a_hair_over_one(x: float) -> float:
+    return min(1.0, x) + 1e-12
+
+
+def test_a_chained_claim_keeps_the_gap_its_link_passed_within():
+    # the upper link passes only within the tolerance; the chain says so
+    (p,) = check_conjectures(a_hair_over_one, [claim(
+        "for x in [0.5, 2], 0 <= f(x) <= 1", route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.note)
+    assert "fails by 1e-12 at x = 2, within the default tolerance (1e-09)" in p.note, \
+        p.note

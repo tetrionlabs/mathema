@@ -25,7 +25,10 @@ this module registering itself as an import side effect.
 from __future__ import annotations
 
 import math
+import numbers
 import random
+from decimal import Decimal
+from fractions import Fraction
 
 from ._sampling import _finite_bounds as _finite_bounds, _synth_scalar as _synth_scalar
 from .f import _is_nonfinite as _is_nonfinite
@@ -226,13 +229,12 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 # a point with no value to order is skipped, and said
                 no_value.setdefault("at", (x, v))
                 return None
-        try:
-            if not (math.isfinite(float(v1)) and math.isfinite(float(v2))):
-                # an overflow or a nan says nothing about direction
-                return None
-        except (TypeError, ValueError):
-            pass
-        ok = (v1 <= v2 + 1e-9) if increasing else (v1 >= v2 - 1e-9)
+        e1, e2 = _exact_real(v1), _exact_real(v2)
+        if e1 is None or e2 is None:
+            # an overflow or a nan says nothing about direction
+            return None
+        slack = Fraction(1, 10 ** 9)
+        ok = (e1 <= e2 + slack) if increasing else (e1 >= e2 - slack)
         if ok:
             return True
         direction = "increasing" if increasing else "decreasing"
@@ -247,14 +249,45 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
 def _a_value(v) -> bool:
     """Whether `v` is a real number a probe can compare: not None, not a
-    NaN, not something that is no number at all."""
+    NaN, not something that is no number at all. An integer beyond float
+    range is a value."""
     if isinstance(v, bool) or v is None:
         return False
+    if isinstance(v, numbers.Integral):
+        return True
     try:
         f = float(v)
     except (TypeError, ValueError):
         return False
+    except OverflowError:
+        return True
     return f == f
+
+
+def _is_array_like(v) -> bool:
+    """Whether `v` is an array, a Series or another value whose `==`
+    answers element by element."""
+    return hasattr(v, "shape") and hasattr(v, "__array__")
+
+
+def _exact_real(v) -> "Fraction | None":
+    """A real result as the exact rational it is (an integer of any
+    size, a float, a Decimal, a Fraction), None for an infinity, a nan
+    or a value that is no real number."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, numbers.Integral):
+        return Fraction(int(v))
+    if isinstance(v, (Fraction, Decimal)):
+        try:
+            return Fraction(v)
+        except (ValueError, OverflowError):
+            return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return Fraction(f) if math.isfinite(f) else None
 
 
 def _with_no_value_note(result, fn, target: str, cj, no_value: dict):
@@ -326,7 +359,7 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if not all(math.isfinite(v) for v in values):
             # an overflow or a nan says nothing about how f bends
             return None
-        second_diff = v_lo - 2 * v_mid + v_hi
+        second_diff = values[0] - 2 * values[1] + values[2]
         # curvature, not the raw second difference: dividing by h*h
         # recovers an actual f''(x0) estimate, scale-independent of h
         # itself (a pure quadratic's curvature comes back exact
@@ -1941,6 +1974,10 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 outcomes.append((label, spelled, "raised",
                                  type(exc).__name__))
         def agrees(a, b) -> bool:
+            from .probing import values_agree
+            if _is_array_like(a) or _is_array_like(b):
+                # an array or Series result compares element by element
+                return bool(values_agree(a, b, tol, 0.0))
             if a == b:
                 return True
             if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):

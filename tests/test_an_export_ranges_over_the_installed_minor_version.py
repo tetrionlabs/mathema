@@ -5,8 +5,8 @@ file's range (`>=1.24,<1.25` on numpy 1.24.4), since its rows were
 checked against that release only. At or above the supported floor
 (`compendium.SUPPORTED_FLOORS`) the bundled rows already cover the
 library, so exporting them is refused with a note; a project's own rows
-are still exported. A package exporting its own claims keeps its
-open-ended `>=<major.minor>` range."""
+are still exported. A package exporting its own claims ranges from its
+installed major.minor up to its next major (`>=0.4,<1`)."""
 import os
 
 import pytest
@@ -71,11 +71,12 @@ def test_a_library_without_bundled_rows_takes_its_minor_range(
         ">=3.7,<3.8"
 
 
-def test_a_package_exporting_its_own_claims_keeps_an_open_range(
+def test_a_package_exporting_its_own_claims_ranges_to_its_next_major(
         tmp_path, monkeypatch):
     _installed(monkeypatch, {"mylib": "0.4.1"})
     (tmp_path / "mylib").mkdir()
     (tmp_path / "mylib" / "__init__.py").write_text("")
     _seed(tmp_path, "mylib.f", [{"name": "b", "statement": "f(x) >= 0",
                                  "verdict": "holds"}])
-    assert export_compendium("mylib", str(tmp_path))["versions"] == ">=0.4"
+    assert export_compendium("mylib", str(tmp_path))["versions"] == \
+        ">=0.4,<1"

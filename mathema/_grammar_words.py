@@ -29,13 +29,17 @@ __all__ = ["HOLES", "MATRIX", "SEQUENCE", "SYNONYMS", "WORDS", "Word",
 #: what a word does with a hole, by rule name
 HOLES = {
     "slots": "reads the value slots; a hole when every slot is one",
+    "identity": "reads the value slots; {identity} when every slot is a "
+                "hole",
     "count": "counts the value slots; 0 when every slot is a hole",
     "every slot": "counts every slot, holes included",
     "running": "a hole stays at its position; entry `i` reads the "
                "value slots among `0..i`",
     "elementwise": "a hole stays a hole",
-    "dot": "reads the positions where both vectors hold a value; a "
-           "hole when there is none",
+    "dot": "reads the positions where both vectors hold a value; 0 when "
+           "there is none",
+    "norm": "reads the value slots at every order; 0 when every slot is "
+            "a hole; a matrix's `ord=2` norm with a hole entry is a hole",
     "entries": "not read over holes: a hole entry is nan",
 }
 
@@ -57,7 +61,8 @@ class Word:
         one element every vector has), and `lowering` the symbolic
         lowerings that read it (`"sequence"`, `"matrix"`), with
         `lowered_keywords` the keywords they read (any other keyword
-        leaves the claim to sampling).
+        leaves the claim to sampling). `identity` is the value a
+        reduction with an identity gives over no value slot.
     """
     name: str
     call: str
@@ -68,12 +73,14 @@ class Word:
     least_length: "str | None" = None
     lowering: frozenset = frozenset()
     lowered_keywords: tuple = ()
+    identity: "str | None" = None
 
 
 def _w(name, call, formula, has_value="always", keywords=(), holes="entries",
-       least_length=None, lowering=(), lowered_keywords=()):
+       least_length=None, lowering=(), lowered_keywords=(), identity=None):
     return Word(name, call, formula, has_value, tuple(keywords), holes,
-                least_length, frozenset(lowering), tuple(lowered_keywords))
+                least_length, frozenset(lowering), tuple(lowered_keywords),
+                identity)
 
 
 _AXIS = (("axis", None),)
@@ -92,9 +99,9 @@ WORDS: tuple = (
        keywords=_AXIS, holes="count", lowering=_SEQ),
     # reductions
     _w("sum", "sum(x, axis=None)", "`x[0] + x[1] + ... + x[n-1]`",
-       keywords=_AXIS, holes="slots", lowering=_SEQ),
+       keywords=_AXIS, holes="identity", identity="0", lowering=_SEQ),
     _w("prod", "prod(x, axis=None)", "`x[0] * x[1] * ... * x[n-1]`",
-       keywords=_AXIS, holes="slots", lowering=_SEQ),
+       keywords=_AXIS, holes="identity", identity="1", lowering=_SEQ),
     _w("mean", "mean(x, axis=None)", "`sum(x) / n`", keywords=_AXIS,
        holes="slots", lowering=_SEQ),
     _w("var", "var(x, ddof=0, axis=None)",
@@ -142,7 +149,7 @@ WORDS: tuple = (
        "`sum(abs(x[i]))` (a matrix's largest column sum), `ord=inf` "
        "`max(abs(x[i]))` (a matrix's largest row sum), `ord=2` on a "
        "matrix the largest singular value", keywords=(("ord", None),),
-       holes="slots", lowering=(SEQUENCE, MATRIX),
+       holes="norm", lowering=(SEQUENCE, MATRIX),
        lowered_keywords=("ord",)),
     _w("outer", "outer(x, y)", "the matrix with entry `(i, j)` equal to "
        "`x[i] * y[j]`", lowering=_MAT),
@@ -225,6 +232,7 @@ def markdown_table() -> str:
             "|---|---|---|---|---|---|"]
     for w in WORDS:
         rows.append(f"| `{w.call}` | {w.formula} | {w.has_value} | "
-                    f"{_keywords_text(w)} | {HOLES[w.holes]} | "
+                    f"{_keywords_text(w)} | "
+                    f"{HOLES[w.holes].format(identity=w.identity)} | "
                     f"{_lowering_text(w)} |")
     return "\n".join(rows) + "\n"

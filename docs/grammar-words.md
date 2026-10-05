@@ -40,8 +40,8 @@ other (`axis=` among them) to the probe.
 | `len(x)` | the number of slots of `x` | always | none | counts every slot, holes included | over vectors of any length |
 | `dim(x, axis=0)` | the size of axis `axis` of `x`: a vector's length, a matrix's rows; `dim(A, 1)` its columns | always | `axis=0` | counts every slot, holes included | over vectors of any length |
 | `count(x, axis=None)` | the number of value slots of `x` | always | `axis=None` | counts the value slots; 0 when every slot is a hole | over vectors of any length |
-| `sum(x, axis=None)` | `x[0] + x[1] + ... + x[n-1]` | always | `axis=None` | reads the value slots; a hole when every slot is one | over vectors of any length |
-| `prod(x, axis=None)` | `x[0] * x[1] * ... * x[n-1]` | always | `axis=None` | reads the value slots; a hole when every slot is one | over vectors of any length |
+| `sum(x, axis=None)` | `x[0] + x[1] + ... + x[n-1]` | always | `axis=None` | reads the value slots; 0 when every slot is a hole | over vectors of any length |
+| `prod(x, axis=None)` | `x[0] * x[1] * ... * x[n-1]` | always | `axis=None` | reads the value slots; 1 when every slot is a hole | over vectors of any length |
 | `mean(x, axis=None)` | `sum(x) / n` | always | `axis=None` | reads the value slots; a hole when every slot is one | over vectors of any length |
 | `var(x, ddof=0, axis=None)` | `sum((x[i] - mean(x))^2) / (n - ddof)`, the population variance at `ddof=0` and the sample variance at `ddof=1` | `n >= ddof + 1` | `ddof=0`, `axis=None` (derive reads `ddof`) | reads the value slots; a hole when every slot is one | over vectors of any length |
 | `std(x, ddof=0, axis=None)` | `sqrt(var(x, ddof))` | `n >= ddof + 1` | `ddof=0`, `axis=None` (derive reads `ddof`) | reads the value slots; a hole when every slot is one | over vectors of any length |
@@ -54,8 +54,8 @@ other (`axis=` among them) to the probe.
 | `cummax(x, axis=None)` | entry `i` is `max(x[0..i])` | always | `axis=None` | a hole stays at its position; entry `i` reads the value slots among `0..i` | over vectors of any length |
 | `cummin(x, axis=None)` | entry `i` is `min(x[0..i])` | always | `axis=None` | a hole stays at its position; entry `i` reads the value slots among `0..i` | over vectors of any length |
 | `abs(x)` | `abs(x[i])` at every position; the absolute value of a number | always | none | a hole stays a hole | over vectors of any length |
-| `dot(x, y)` | `sum(x[i] * y[i])` for two vectors of one length; the matrix product when either argument is a matrix | the inner dimensions agree | none | reads the positions where both vectors hold a value; a hole when there is none | over vectors of any length, in matrix algebra |
-| `norm(x, ord=None)` | `sqrt(sum(x[i]^2))`, the Euclidean norm of a vector and the Frobenius norm of a matrix; `ord=1` is `sum(abs(x[i]))` (a matrix's largest column sum), `ord=inf` `max(abs(x[i]))` (a matrix's largest row sum), `ord=2` on a matrix the largest singular value | always | `ord=None` (derive reads `ord`) | reads the value slots; a hole when every slot is one | over vectors of any length, in matrix algebra |
+| `dot(x, y)` | `sum(x[i] * y[i])` for two vectors of one length; the matrix product when either argument is a matrix | the inner dimensions agree | none | reads the positions where both vectors hold a value; 0 when there is none | over vectors of any length, in matrix algebra |
+| `norm(x, ord=None)` | `sqrt(sum(x[i]^2))`, the Euclidean norm of a vector and the Frobenius norm of a matrix; `ord=1` is `sum(abs(x[i]))` (a matrix's largest column sum), `ord=inf` `max(abs(x[i]))` (a matrix's largest row sum), `ord=2` on a matrix the largest singular value | always | `ord=None` (derive reads `ord`) | reads the value slots at every order; 0 when every slot is a hole; a matrix's `ord=2` norm with a hole entry is a hole | over vectors of any length, in matrix algebra |
 | `outer(x, y)` | the matrix with entry `(i, j)` equal to `x[i] * y[j]` | always | none | not read over holes: a hole entry is nan | in matrix algebra |
 | `kron(A, B)` | the Kronecker product: block `(i, j)` is `A[i, j] * B` | always | none | not read over holes: a hole entry is nan | in matrix algebra |
 | `det(A)` | the determinant of `A` | `A` square | none | not read over holes: a hole entry is nan | in matrix algebra |
@@ -110,8 +110,10 @@ The derive route reads vectors with no holes, as definition rows are
 stated over inputs with nothing missing. What a word does with a hole
 matters to the probe and to the missing-value lines under a claim: the
 reductions read the value slots (`count`, `mean`, `std` and `sum`
-count only those), and a reduction over a vector holding only holes is
-a hole; `count` counts value slots, so it is 0 there. `len` and `dim`
-count every slot, and the running words keep a hole at its own
-position. [Missing values](missing-values.md)
+count only those). Over a vector holding only holes, a reduction with
+an identity gives it (`sum` 0, `prod` 1, `count` 0, `norm` 0, and
+`dot` 0 where no position holds a value in both vectors), and one
+without gives a hole (`mean`, `std`, `var`, `min`, `max`, `median`,
+`quantile`). `len` and `dim` count every slot, and the running words
+keep a hole at its own position. [Missing values](missing-values.md)
 describes how a claim states what a function does with one.

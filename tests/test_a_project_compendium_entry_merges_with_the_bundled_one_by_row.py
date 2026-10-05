@@ -55,8 +55,8 @@ def test_a_proof_still_meets_the_bundled_guard(tmp_path, monkeypatch):
             - name: my_bound
               statement: "for x in [1, 4], f(x) <= x"
     """)
-    _write(tmp_path / "rpkg" / "__init__.py", "")
-    _write(tmp_path / "rpkg" / "mod.py", '''
+    _write(tmp_path / "guardpkg" / "__init__.py", "")
+    _write(tmp_path / "guardpkg" / "mod.py", '''
         import numpy as np
 
 
@@ -65,7 +65,11 @@ def test_a_proof_still_meets_the_bundled_guard(tmp_path, monkeypatch):
             return float(np.sqrt(x))
     ''')
     monkeypatch.syspath_prepend(str(tmp_path))
-    from rpkg.mod import root2
+    import sys
+    # the test's own package leaves no module behind for later tests
+    for name in ("guardpkg", "guardpkg.mod"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    from guardpkg.mod import root2
     compendium.uninstall()
     compendium.install(str(tmp_path))
     try:
@@ -75,6 +79,8 @@ def test_a_proof_still_meets_the_bundled_guard(tmp_path, monkeypatch):
             "route": "derive"}])
     finally:
         compendium.uninstall()
+        for name in ("guardpkg.mod", "guardpkg"):
+            sys.modules.pop(name, None)
     (row,) = [p for p in rec.probes if p.name == "squares_back"]
     assert row.verdict != "proven", (row.verdict, row.sketch)
 

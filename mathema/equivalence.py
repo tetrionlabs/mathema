@@ -675,12 +675,14 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
             discarded["non_numeric"] += 1
             continue
         if not (_finite(fv) and _finite(gv)):
-            # no value from non-missing inputs (P4): two sides at the
-            # same infinity are one extended-real point and agree; a
-            # NaN agrees with nothing, and an infinity disagrees with a
-            # value and with the opposite infinity
+            # the two functions are the same where both have no value
+            # of one kind: two NaNs agree, whatever object carries them,
+            # and two sides at the same infinity are one extended-real
+            # point; a no-value side against a value, a NaN against an
+            # infinity, and opposite infinities disagree
             checked += 1
-            if same_infinity(fv, gv):
+            if same_infinity(fv, gv) or (missing_class(fv) == "hole"
+                                         and missing_class(gv) == "hole"):
                 continue
             cx = (_fmt(tuple(args), names=tuple(kinds))
                   + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
