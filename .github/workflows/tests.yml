@@ -71,13 +71,13 @@ jobs:
       - run: python -m pytest -q
 
   # The bundled compendium rows adjudicated against the libraries
-  # (`--library-rows`): a red here is a library that changed under a
-  # row, or a row that misreads it. Runs when a bundled compendium file
+  # (`--third-party-compendiums`): a red here is a library that changed
+  # under a row, or a row that misreads it. Runs when a bundled compendium file
   # or the lock file changes, weekly, and on demand: on the floor and
   # ceiling interpreters with the libraries pip resolves today, and on
   # the oldest numpy, pandas and polars the bundled files declare, so
   # each declared version range is exercised at both ends.
-  library-rows:
+  third-party-compendiums:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -130,7 +130,7 @@ jobs:
           LIBRARIES: ${{ matrix.libraries }}
         run: pip install $LIBRARIES
       - if: steps.changed.outputs.run == 'true'
-        run: python -m pytest -n 4 -q -m library_rows --library-rows
+        run: python -m pytest -n 4 -q -m third_party_compendiums --third-party-compendiums
 
   # `requires-python` is deliberately unbounded above (capping it
   # would strand users on a new interpreter until we cut a release),

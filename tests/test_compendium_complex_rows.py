@@ -51,7 +51,7 @@ def test_each_function_states_its_complex_behaviour(key, statement):
     assert "real inputs" in real["note"], real
 
 
-@pytest.mark.library_rows
+@pytest.mark.third_party_compendiums
 @pytest.mark.parametrize("key, statement", sorted(COMPLEX_ROWS.items()))
 def test_the_complex_rows_hold_on_numpy(key, statement):
     from mathema.compendium import ensure_bundled
