@@ -1243,13 +1243,40 @@ def uninstall(root: "str | None" = None) -> None:
     for key, build in _INSTALLED["rows"]:
         unregister_lemmas(key, [build])
     _INSTALLED.update(root=None, rows=[], names=[], keys=frozenset(),
-                      objects=None, defined=frozenset())
+                      objects=None, defined=frozenset(), runtime=None)
     _COMPUTATION.clear()
     from ..runtime_types import set_definitions
     for layer in ("bundled", "compendium", "claims"):
         set_definitions(layer, ())
     from ..hazards import _GENERATORS
     _GENERATORS.pop("compendium", None)
+
+
+def declared_runtime_types(key: str) -> dict:
+    """Intent:
+        The `runtime_types:` the installed project's claims files
+        declare for the function `key` (`{param: "pandas.Series"}`), {}
+        when no project is installed or the entry declares none. Read
+        once per installed project.
+    """
+    root = _INSTALLED.get("root")
+    if root is None or root == BUNDLED:
+        return {}
+    cached = _INSTALLED.get("runtime")
+    if cached is None or cached[0] != root:
+        from ..spec import load_declared
+        try:
+            declared = load_declared(root)
+        except Exception:
+            declared = {}
+        entries = {k: (v.get("entry") if isinstance(v, dict) else None)
+                   for k, v in declared.items()}
+        cached = (root, {k: dict(entry.get("runtime_types") or {})
+                         for k, entry in entries.items()
+                         if isinstance(entry, dict)
+                         and entry.get("runtime_types")})
+        _INSTALLED["runtime"] = cached
+    return dict(cached[1].get(key) or {})
 
 
 def computation_region(key: str, family: "str | None" = None) -> list:

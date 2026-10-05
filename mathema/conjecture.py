@@ -158,13 +158,57 @@ def _yaml_safe_args(args) -> list:
 _MAX_CORNERS = 64
 
 
+def _box_corner_arrays(bound) -> list:
+    """Intent:
+        For a vector or matrix of fixed size whose elements lie in one
+        closed finite interval (`[-0.1, 0.1]^13`, `[-1, 1]^(4,4)`), the
+        array with every element at the lower end and the one with
+        every element at the upper end, as nested lists; [] for any
+        other bound. A linear quantity of the elements, such as their
+        sum, is least and greatest at these two arrays.
+    """
+    import dataclasses
+
+    from .domain import Domain, domain_contains
+    if not isinstance(bound, Domain) or not bound.dims:
+        return []
+    try:
+        sizes = [int(d) for d in bound.dims]
+    except (TypeError, ValueError):
+        return []
+    if len(bound.pieces) != 1 or any(n < 1 for n in sizes):
+        return []
+    piece = bound.pieces[0]
+    if not (isinstance(piece, tuple) and len(piece) == 2) \
+            or getattr(piece, "bare", False):
+        return []
+    lo, hi = piece
+    try:
+        if not (math.isfinite(lo) and math.isfinite(hi)):
+            return []
+    except TypeError:
+        return []
+    element = dataclasses.replace(bound, dims=())
+    ends = [v for v, closed in ((lo, getattr(piece, "closed_lo", True)),
+                                (hi, getattr(piece, "closed_hi", True)))
+            if closed and domain_contains(v, element)]
+
+    def filled(value, axes):
+        if len(axes) == 1:
+            return [value] * axes[0]
+        return [filled(value, axes[1:]) for _ in range(axes[0])]
+    return [filled(v, sizes) for v in dict.fromkeys(ends)]
+
+
 def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
     """Intent:
         The corners of a claim's bounded domain box as argument lists,
         in `kinds` order: every combination of each parameter's included
-        endpoints, with a literal argument held at its literal. Empty
-        unless every parameter is a real or integer scalar with a finite
-        interval domain (or fixed by a literal), and when the box has
+        endpoints, with a literal argument held at its literal, and a
+        fixed-size vector or matrix at its all-lower and all-upper
+        arrays (`_box_corner_arrays`). Empty unless every parameter is a
+        real or integer scalar with a finite interval domain, such a
+        vector or matrix, or fixed by a literal, and when the box has
         more than `_MAX_CORNERS` corners.
 
     Notes:
@@ -183,9 +227,15 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
         if p in literal_args:
             choices.append([literal_args[p]])
             continue
+        bound = domain.get(p)
+        if k in SEQUENCE_KINDS:
+            filled = _box_corner_arrays(bound)
+            if not filled:
+                return []
+            choices.append(filled)
+            continue
         if k not in ("scalar", "float", "int"):
             return []
-        bound = domain.get(p)
         pieces = (bound.pieces if isinstance(bound, Domain) else (bound,))
         ends: list = []
         for piece in pieces:
@@ -5408,7 +5458,8 @@ def _bound_for_arrays(callee):
         library function (numpy, scipy, pandas, polars) receives the
         claim's arrays as they are; any other Python function receives
         plain lists, realised through the runtime types its own
-        signature names. The result is read back as an array.
+        signature names, or else its claims-file entry's
+        `runtime_types:` declares. The result is read back as an array.
     """
     from . import _linalg_eval
     module = (getattr(callee, "__module__", "") or "").split(".", 1)[0]
@@ -5417,9 +5468,14 @@ def _bound_for_arrays(callee):
         return _linalg_eval.law_callable(callee, plain_args=False)
     from types import SimpleNamespace
 
+    from .compendium import declared_runtime_types
     from .runtime_types import calling, detect_parameters
+    key = f"{getattr(callee, '__module__', '')}." \
+          f"{getattr(callee, '__qualname__', '')}"
+    declared = {str(k): str(v)
+                for k, v in declared_runtime_types(key).items()}
     try:
-        detected = detect_parameters(callee)
+        detected = detect_parameters(callee, declared or None)
     except Exception:
         detected = {}
     return _linalg_eval.law_callable(

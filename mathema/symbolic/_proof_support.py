@@ -97,6 +97,64 @@ def _affine_sign_by_corners(target, domain: dict, params: dict) -> bool | None:
     return signs.pop() if len(signs) == 1 else None
 
 
+def _linear_box_extreme(target, domain: dict):
+    """Intent:
+        For a `target` linear in symbols that each name an element of a
+        vector or a scalar the `domain` bounds by one finite interval
+        (`r[0]` in `[-0.1, 0.1]`), its least value over that box, taken
+        exactly at the corner where every term is smallest, as
+        `(least, corner text)`; None for any other target.
+
+    Notes:
+        A linear function over a box is least at a corner: each term
+        `c * x` is least at the end of `x`'s interval that `c`'s sign
+        picks. An open end is the infimum, so a least value >= 0 still
+        means the target is never negative.
+    """
+    from ..domain import Domain, exact_number
+    symbols = sorted(target.free_symbols, key=str)
+    if not symbols or len(symbols) > 4096:
+        return None
+    ends = {}
+    for sym in symbols:
+        bound = domain.get(str(sym))
+        if not isinstance(bound, Domain) or bound.dims \
+                or len(bound.pieces) != 1:
+            return None
+        piece = bound.pieces[0]
+        if not (isinstance(piece, tuple) and len(piece) == 2):
+            return None
+        lo, hi = piece
+        try:
+            if not (math.isfinite(lo) and math.isfinite(hi)):
+                return None
+        except TypeError:
+            return None
+        ends[sym] = (exact_number(lo), exact_number(hi))
+    try:
+        poly = sympy.Poly(_exact_floats(target), *symbols)
+    except (sympy.PolynomialError, sympy.GeneratorsNeeded):
+        return None
+    if poly.total_degree() > 1:
+        return None
+    least = poly.coeff_monomial(1)
+    corner = []
+    for i, sym in enumerate(symbols):
+        monomial = [0] * len(symbols)
+        monomial[i] = 1
+        c = poly.coeff_monomial(tuple(monomial))
+        if not c.is_comparable:
+            return None
+        lo, hi = ends[sym]
+        pick = lo if c >= 0 else hi
+        least += c * pick
+        corner.append(f"{sym} = {pick}")
+    if not least.is_comparable:
+        return None
+    shown = ", ".join(corner[:4]) + (", ..." if len(corner) > 4 else "")
+    return least, shown
+
+
 def _provably_signed(expr, domain: dict, params: dict, bound_context) -> bool | None:
     """`True` if `expr` is provably nonnegative under the declared
     domain, `False` if provably negative, `None` if undetermined,
@@ -2682,6 +2740,21 @@ def _decide_ordering(lhs, rhs, diff, relation, domain, bound_context, params,
                            witness=witness or _representative_point(
                                target, domain, params, bound_context),
                            meta=meta)
+
+    linear = _linear_box_extreme(target, domain)
+    if linear is not None:
+        least, corner = linear
+        if least >= 0:
+            return ProofResult(
+                "proven",
+                sketch=f"{_humanize(target)} is linear in elements that each "
+                       f"lie in an interval, so it is least at the corner "
+                       f"{corner}, where it is {least}: never negative")
+        return ProofResult(
+            "undecided",
+            sketch=f"{_humanize(target)} is linear in elements that each lie "
+                   f"in an interval and is least at the corner {corner}, "
+                   f"where it is {least} < 0; the corner is left to execution")
 
     def _is_nonneg(expr):
         # .is_nonnegative only ever consults assumptions baked

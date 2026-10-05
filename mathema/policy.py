@@ -1587,6 +1587,24 @@ def library_policies() -> dict:
     return _LIBRARY
 
 
+def _touched_before_return(tree, ret, param: str) -> bool:
+    """Whether a statement of the function other than the return `ret`
+    reads or writes `param` (a guard, an in-place change, an alias)."""
+    import ast
+    fdef = next((n for n in ast.walk(tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
+                None)
+    body = fdef.body if fdef is not None else []
+    for stmt in body:
+        if stmt is ret or (isinstance(stmt, ast.Expr)
+                           and isinstance(stmt.value, ast.Constant)):
+            continue
+        if any(isinstance(n, ast.Name) and n.id == param
+               for n in ast.walk(stmt)):
+            return True
+    return False
+
+
 def composed_policies(fn, facts) -> dict:
     """Intent:
         The policies a body inherits from the one library call it makes
@@ -1595,7 +1613,8 @@ def composed_policies(fn, facts) -> dict:
         xs.mean()` on a `pandas.Series` pandas.Series.mean's, each
         restated over the parameter (`assuming count(xs) >= 1,
         missing(f, xs) drops`). A body that does anything else with the
-        parameter inherits nothing.
+        parameter (a statement before the return reading or changing
+        it) inherits nothing.
     """
     import ast
     tree = getattr(facts, "tree", None)
@@ -1636,9 +1655,11 @@ def composed_policies(fn, facts) -> dict:
         # pandas Series is pandas' reduction, which skips holes
         if module and (held is None or held.split(".")[0] == module.split(".")[0]):
             param, key = expr.args[0].id, f"{module}.{expr.func.attr}"
-    if key is None or key not in rows or param in rebound:
-        # a parameter the body gives another value may reach the call
-        # changed, so the call's rows do not speak for it
+    if key is None or key not in rows or param in rebound \
+            or _touched_before_return(tree, returns[0], param):
+        # a parameter the body gives another value, changes in place or
+        # binds to another name may reach the call changed, so the
+        # call's rows do not speak for it
         return {}
     restated = []
     for policy in rows[key]:
