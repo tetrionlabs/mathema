@@ -327,3 +327,19 @@ def test_a_bare_check_carries_no_policy_rows():
 def test_a_written_claim_carries_the_policy_rows_of_what_it_admits():
     rec = mathema.check(clamp01, claims=[mathema.claim("for x in [0, 1], f(x) >= 0")])
     assert _policy_rows(rec) == ["missing[x]"]
+
+
+def ema(x: list[float], alpha: float) -> float:
+    y = x[0]
+    for v in x[1:]:
+        y = alpha * v + (1 - alpha) * y
+    return y
+
+
+def test_an_ignored_hole_is_said_as_ignored_and_no_drop_is_suggested():
+    # over a one-element x, ema never reads alpha
+    rec = mathema.check(ema, claims=[mathema.claim("f(x, alpha) <= max(x)")])
+    row = next(p for p in rec.probes if p.name == "missing[alpha]")
+    assert row.verdict == "falsified", row.note
+    assert "ignores" in row.note and "no fill of it changes" in row.note, row.note
+    assert "drops" not in row.note, row.note
