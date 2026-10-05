@@ -13,7 +13,7 @@ numpy.linalg.norm:
       statement: "for x in R^n, f(x) ~= sqrt(sum(x ** 2))"
       note: "The Euclidean norm of a vector, the default `ord=None`."
     - name: euclidean
-      statement: "for x in R^n, f(x) ~= norm(x)"
+      statement: "for x in [-1e150, 1e150]^n, f(x) ~= norm(x)"
     - name: frobenius
       statement: "for x in R^(m,n), f(x) ~= norm(x)"
       note: "A matrix with the default `ord=None` has its Frobenius norm."

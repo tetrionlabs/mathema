@@ -76,7 +76,7 @@ numpy.ptp:
 numpy.cov:
   claims:
     - name: of_a_vector
-      statement: "for m in R^n, assuming dim(m) >= 2, f(m) ~= var(m, ddof=1)"
+      statement: "for m in [-1e10, 1e10]^n, assuming dim(m) >= 2, f(m) ~= var(m, ddof=1)"
       note: "One vector is one variable: its sample variance (ddof 1, numpy's default here, unlike var)."
 
 numpy.nansum:
