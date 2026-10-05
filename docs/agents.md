@@ -19,12 +19,12 @@ keyboard without handing it the definition of correct.
 | propose claims and check them against the real function | accept evidence as sufficient, or own a residual risk |
 | read verdicts, counterexamples and the human-decision queue | record that a falsification was a wrong claim rather than a bug |
 | lock a function it has finished | unlock a locked function |
-| edit claims in docstrings and claims files | adopt an edited claim over the one already verified |
+| edit claims in docstrings and claims files, and adopt suggested claims (`mathema claims KEY --adopt NAME`) | accept an edited claim over the one already verified |
 
 The last row is the one people ask about. When a claim that already has a
 verified record is edited, weakened or narrowed, the verified version keeps
 being checked and the sweep reports the claim as re-authored, until a person
-adopts the change with `mathema accept KEY CLAIM --as superseded`. A claim
+accepts the change with `mathema accept KEY CLAIM --as superseded`. A claim
 deleted from every authoring surface is restored from its verified record for
 the same reason. An agent can propose a weaker claim; it cannot make the
 record forget the stronger one.

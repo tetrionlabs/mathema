@@ -170,7 +170,7 @@ they answer different questions:
 - **`authored.surface`** is *where* the claim was written, the load-bearing
   gating fact: `docstring`, `claims-file` (a declared claims file),
   `decorator`, `annotation`, `inline`, `suggested` (mathema volunteered
-  it, and a suggestion never gates until a human adopts it), `builtin` (the
+  it, and a suggestion never gates until it is adopted), `builtin` (the
   structural battery), or `compendium`.
 - **`authored.by`** is *who* proposed the claim, an optional identity: an
   AI model, a harness, or a git username. It is absent unless stated,

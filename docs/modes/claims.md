@@ -2,8 +2,9 @@
 
 The claim authoring surface for one function: list what's declared,
 render the standard claims mathema suggests for it, and adopt a
-suggestion into the declared layer. Adoption is the explicit human
-step; a suggestion never lives in any record until someone adopts it.
+suggestion into the declared layer. Adoption is an explicit step, which
+a person or an agent may take; a suggestion never lives in any record
+until it is adopted.
 
 ```bash
 mathema claims KEY                  # list the declared claims

@@ -185,7 +185,7 @@ resurrects.
 Re-authoring a claim that is already in the verified layer (the
 same name with a different statement, region, tolerance or route on
 any authoring surface) is a conflict verify flags, and the verified version keeps
-adjudicating until a human adopts the change:
+adjudicating until a person accepts the change as a supersession:
 
 ```
 mathema accept mypkg.mod.fn claim_name --as superseded
