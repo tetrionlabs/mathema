@@ -48,14 +48,14 @@ def _claim_probe(rec, name_part):
 
 def test_a_sample_statistic_of_one_element_offers_the_split_at_two(tmp_path):
     mod = _module(tmp_path)
-    rec = mathema.check(mod.sstd, claims=["for r in R^n, f(r) >= 0"])
+    rec = mathema.check(mod.sstd, claims=["for r in [-1e6, 1e6]^n, f(r) >= 0"])
     p = _claim_probe(rec, "f(r) >= 0")
     assert p.verdict == "falsified"
     assert p.meta["mathema.split"] == {"param": "r", "at": 2}
     shown = repr(rec)
     assert ('possible fixes: (i) to split at the shared cause, run: '
             'mathema claims split_mod.sstd --split '
-            '"for r in R^n, f(r) >= 0" --at "len(r) >= 2"') in shown, shown
+            '"for r in [-1e6, 1e6]^n, f(r) >= 0" --at "len(r) >= 2"') in shown, shown
 
 
 def test_an_index_past_the_end_offers_the_split_at_two(tmp_path):
@@ -84,7 +84,7 @@ def _cli(*argv, cwd):
 
 def test_the_offered_command_writes_both_rows_and_verify_passes(tmp_path):
     (tmp_path / "split_mod.py").write_text(_MODULE)
-    r = _cli("claims", "split_mod.sstd", "--split", "for r in R^n, f(r) >= 0",
+    r = _cli("claims", "split_mod.sstd", "--split", "for r in [-1e6, 1e6]^n, f(r) >= 0",
              "--at", "len(r) >= 2", "--root", str(tmp_path), cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     import yaml
@@ -92,7 +92,7 @@ def test_the_offered_command_writes_both_rows_and_verify_passes(tmp_path):
                          .read_text())
     rows = doc["split_mod.sstd"]["claims"]
     assert [(c["name"], c["statement"]) for c in rows] == [
-        ("f_r_ge_0", "assuming len(r) >= 2, for r in R^n, f(r) >= 0"),
+        ("f_r_ge_0", "assuming len(r) >= 2, for r in [-1e6, 1e6]^n, f(r) >= 0"),
         ("is_defined", "len(r) >= 2")]
     v = _cli("verify", "--root", str(tmp_path), cwd=tmp_path)
     assert v.returncode == 0, v.stdout + v.stderr

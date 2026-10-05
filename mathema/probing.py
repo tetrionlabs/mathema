@@ -1720,6 +1720,88 @@ def _classify_bound(bounds) -> str:
     return "other"
 
 
+#: the share of sequence draws taken from `_sequence_corner`
+_SEQUENCE_CORNER_SHARE = 0.15
+
+
+def _element_range(bounds) -> "tuple[float, float] | None":
+    """Intent:
+        The real interval a sequence's elements range over, `(lo, hi)`
+        with an unbounded end at the number representation's reach, or
+        None when the elements are not one real interval (an integer
+        lattice, a finite set, a union).
+    """
+    from ._sampling import _reach_ends, representation_reach
+    if bounds is None:
+        reach = representation_reach()
+        return -reach, reach
+    pieces = getattr(bounds, "pieces", None)
+    if pieces is not None:
+        def numeric(v) -> bool:
+            return isinstance(v, (int, float)) and not isinstance(v, bool)
+        # sentinels (an absence, a hole, the empty container) are not
+        # elements of the real range
+        if getattr(bounds, "base_type", "R") != "R" or any(
+                numeric(v) for v in (getattr(bounds, "excluded", None) or ())):
+            return None
+        sets = [p for p in pieces if isinstance(p, frozenset)]
+        if any(numeric(v) for p in sets for v in p):
+            return None
+        real = [p for p in pieces if not isinstance(p, frozenset)]
+        if not real:
+            reach = representation_reach()
+            return -reach, reach
+        if len(real) != 1:
+            return None
+        bounds = real[0]
+    if isinstance(bounds, tuple) and not isinstance(bounds, frozenset) \
+            and len(bounds) == 2:
+        try:
+            lo, hi, _ul, _uh = _reach_ends(bounds)
+        except (TypeError, ValueError):
+            return None
+        return lo, hi
+    return None
+
+
+def _sequence_corner(rng: random.Random, n: int, bounds) -> "list | None":
+    """Intent:
+        One sequence from the corners where float arithmetic breaks, or
+        None when the elements' domain is not one real interval:
+        entries that cancel at a large magnitude (`[M, -M, ...]`),
+        entries at the range's stated ends, or a series one ulp from
+        constant. Every entry lies inside the element range.
+    """
+    span = _element_range(bounds)
+    if span is None:
+        return None
+    lo, hi = span
+    from ._sampling import representation_reach
+    reach = representation_reach()
+    # entries at the range's own ends only where the claim states them;
+    # an unbounded side's float limit is the reach draws' business
+    stated = not (lo == -reach and hi == reach)
+    shapes = ["near-constant"] + (["edges"] if stated else [])
+    if n >= 2 and lo < 0 < hi:
+        shapes.append("cancel")
+    shape = rng.choice(shapes)
+    if shape == "cancel":
+        top = min(-lo, hi)
+        m = rng.choice([v for v in (1e16, 1e300) if 0 < v <= top]
+                       or [top])
+        rest = [rng.uniform(max(lo, -10.0), min(hi, 10.0)) for _ in range(n - 2)]
+        return [m, -m] + rest
+    if shape == "edges":
+        return [rng.choice([lo, hi]) for _ in range(n)]
+    base = rng.uniform(max(lo, -10.0), min(hi, 10.0)) if lo < hi else lo
+    up = math.nextafter(base, math.inf)
+    if up > hi:
+        up = math.nextafter(base, -math.inf)
+        if up < lo:
+            return [base] * n
+    return [base if i % 2 == 0 else up for i in range(n)]
+
+
 def _synth(kind: str, rng: random.Random, bounds=None,
           specials: "_SpecialCycle | None" = None,
           extra: list[float] | None = None,
@@ -1762,6 +1844,10 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         # overrides the free 1..8 draw so the premise holds by
         # construction rather than by rejection
         n = length if length is not None else rng.randint(1, 8)
+        if rng.random() < _SEQUENCE_CORNER_SHARE:
+            corner = _sequence_corner(rng, n, bounds)
+            if corner is not None:
+                return corner
         if bounds is not None:
             # a declared element domain, generate elements that
             # respect it (recursing through _synth's own scalar

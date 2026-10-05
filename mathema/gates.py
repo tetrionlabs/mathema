@@ -520,6 +520,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             from .conjecture import claim_side_has_no_value
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
+            if calls_nonfinite[0]:
+                # the code gave no value at a finite input, whatever the
+                # claim's own float side does there
+                return (f"{calls_nonfinite[0]}, and an infinity or a nan "
+                        f"for a finite input is no value")
             if isinstance(e, (IndexError, ZeroDivisionError)):
                 return (f"the claim's own expression raises "
                         f"{type(e).__name__} here ({e})")

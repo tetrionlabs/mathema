@@ -112,8 +112,15 @@ def _holds(p):
 @pytest.mark.parametrize("true, false", _VECTOR_CLAIMS)
 def test_one_claim_text_on_every_vector_runtime_type(fn, true, false):
     p = _one(fn, true)
-    assert _holds(p), (fn.__name__, true, p.verdict, p.note,
-                       p.counterexample)
+    if "norm(returns)**2" in true:
+        # the claim's own float side overflows at a corner draw
+        # (norm(returns)**2 past the float limit), which leaves the
+        # line unknown (rulings of 2026-10-01 and 2026-10-05)
+        assert p.verdict == "unknown", (fn.__name__, true, p.verdict, p.note)
+        assert "OverflowError" in p.note, p.note
+    else:
+        assert _holds(p), (fn.__name__, true, p.verdict, p.note,
+                           p.counterexample)
     p = _one(fn, false)
     assert p.verdict == "falsified", (fn.__name__, false, p.verdict, p.note)
 

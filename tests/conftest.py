@@ -179,6 +179,11 @@ def pytest_collection_modifyitems(config, items):
 
 _GENEROUS_FAST = 60
 _GENEROUS_EXTENSIVE = 120
+# the time a finite domain's whole sweep may take, by a timed estimate
+# of one call (`gates._SWEEP_SECONDS` for the computation line,
+# `_brute_force._SWEEP_SECONDS` for a derive brute-force proof): under
+# load the estimate grows and the sweep falls back to part of the domain
+_GENEROUS_SWEEP = 600
 
 
 @pytest.fixture(autouse=True)
@@ -196,6 +201,7 @@ def full_proof_budget(request, monkeypatch):
                             if name.startswith("mathema.") and m is not None]
     for mod in targets:
         for attr, value in (("FAST_TIMEOUT_SECONDS", _GENEROUS_FAST),
-                            ("EXTENSIVE_TIMEOUT_SECONDS", _GENEROUS_EXTENSIVE)):
+                            ("EXTENSIVE_TIMEOUT_SECONDS", _GENEROUS_EXTENSIVE),
+                            ("_SWEEP_SECONDS", _GENEROUS_SWEEP)):
             if hasattr(mod, attr):
                 monkeypatch.setattr(mod, attr, value, raising=False)

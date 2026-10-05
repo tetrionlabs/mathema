@@ -90,3 +90,16 @@ def test_the_probe_line_reads_the_claim_exactly_too():
         "for x in {0.3, 0.5}, f(x) == floor(10*x)/10", route="probe")])
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "read exactly" in p.counterexample
+
+
+def sign_of(x: float) -> float:
+    import math
+    return math.copysign(1.0, x)
+
+
+def test_a_negative_zero_literal_stays_negative_zero():
+    # the computation reads -0.0 as the float it is, which code like
+    # copysign tells apart from 0.0
+    (p,) = check_conjectures(sign_of, [claim(
+        "for x in [1, 2], f(-0.0) == -1", route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.counterexample)
