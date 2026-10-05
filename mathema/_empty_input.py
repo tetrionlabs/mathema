@@ -313,11 +313,7 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption,
         return []
     ties = _length_ties(seqs, cj_domain, assumption, shapes)
     guarded = _emptiness_guard_params(facts)
-    # an enforce_dimensions or enforce_domain wrapper refuses a shape or
-    # a value outside the declared one, an empty input among them
-    enforced = set(getattr(fn, "__mathema_enforced_dimensions__", None)
-                   or ()) | set(getattr(fn, "__mathema_enforced_domain__",
-                                        None) or ())
+    from .conjecture import deliberate_raise
     from ._linalg_eval import as_array, from_law, law_callable
     from .conjecture import _resolve_func_ref, call_defaults
     bound_funcs = {}
@@ -389,7 +385,10 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption,
                 note = f"{target} = []: {text} {did}, as {policies[0][2]} states"
                 continue
             if raised is not None:
-                if target in guarded or target in enforced:
+                # an emptiness guard in the body, or an enforce_domain or
+                # enforce_dimensions wrapper refusing the call, is a
+                # deliberate refusal; any other raise is stumbled into
+                if target in guarded or deliberate_raise(raised, fn):
                     note = (f"{target} = []: {text} {did} behind an explicit "
                             f"emptiness guard, a deliberate refusal")
                     continue

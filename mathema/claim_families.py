@@ -778,6 +778,12 @@ def _working_number_set_proof(fn, facts, param: str, names, domain: dict):
     from .symbolic._proof_support import _relational_truth_over_domain
     if not domain or param not in domain:
         return None
+    from .symbolic._partiality import _integer_bound
+    if any(facts.param_kinds.get(p) == "int"
+           and not _integer_bound(domain.get(p)) for p in facts.params):
+        # the walk reads an int-annotated parameter as an integer, but a
+        # real domain is drawn and called with non-integers too
+        return None
     opaque: list = []
     try:
         guards, unread = partiality_walk(fn, facts, domain,
