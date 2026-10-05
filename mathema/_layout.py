@@ -71,6 +71,17 @@ def _admits(main, param: str, kind: str) -> bool:
     return bool(admitted.get(kind))
 
 
+def _hole_word(main, param: str) -> str:
+    """The hole a member-less missing row is about: the parameter's one
+    admitted member (`nan` for a float), else the class, `missing`."""
+    admitted = (((main.meta or {}).get("mathema.missing") or {})
+                .get("admitted") or {}).get(param) or {}
+    members = admitted.get("missing")
+    if isinstance(members, (list, tuple)) and len(members) == 1:
+        return str(members[0])
+    return "missing"
+
+
 def _call(params: list, kinds: dict, param: str, word: str) -> str:
     """`f(nan)`, `f(xs=[..., nan, ...])`: the call a policy line names."""
     from .runtime_types import SEQUENCE_KINDS
@@ -102,11 +113,15 @@ def _policy_detail(p) -> str:
             return f"no {pol.get('kind')} policy stated; assumed {behaviour}"
         return f"no {pol.get('kind')} policy stated; {_did(p.counterexample)}"
     source = (pol.get("reason") or "").split("; ", 1)[0]
+    if _verdict(p) == "falsified" and p.counterexample:
+        # what f did, beside the word it broke
+        said = f"{_did(p.counterexample)}, where the word is {behaviour}"
+        return f"{said} ({source})" if source else said
     return f"{behaviour}, {source}" if source else behaviour
 
 
 #: the policy a row's next step says to state, as the record words it
-_STATED = re.compile(r'--corrected "([^"]+)"|(?:write|state) `([^`]+)`')
+_STATED = re.compile(r'--corrected "([^"]+)"|(?:write|state|,) `([^`]+)`')
 
 
 def _fixes(p, key: str, word: str) -> str:
@@ -117,10 +132,13 @@ def _fixes(p, key: str, word: str) -> str:
     pol = (p.meta or {}).get("mathema.policy") or {}
     # a row with no single policy needs one claim per case, not one command
     mixed = (pol.get("sentence") or "").startswith("f has no single policy")
-    found = None if mixed else _STATED.search(pol.get("next") or "")
+    stated_all = {a or b for a, b in _STATED.findall(pol.get("next") or "")}
+    # a row whose next step states one claim per member or case has no
+    # single command that settles it
+    found = None if mixed or len(stated_all) != 1 else stated_all.pop()
     fixes = []
     if found:
-        stated = found.group(1) or found.group(2)
+        stated = found
         fixes.append(f"mathema accept {key} {p.name} --as discovery "
                      f"--corrected \"{stated}\"")
     fixes += [f"exclude {word}", f"handle {word} at entry"]
@@ -207,9 +225,13 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
         for r in rows:
             pol = r.meta["mathema.policy"]
             param, kind = pol.get("parameter") or "", pol.get("kind") or ""
-            word = "None" if kind == "absent" else (pol.get("member") or "nan")
-            lines.append(_row(_verdict(r), "policy", _call(params, kinds, param, word),
-                              _policy_detail(r)))
+            word = "None" if kind == "absent" else (
+                pol.get("member") or _hole_word(main, param))
+            what = _call(params, kinds, param, word)
+            if pol.get("premise"):
+                # a row about one case of the parameter names its case
+                what += f" assuming {pol['premise']}"
+            lines.append(_row(_verdict(r), "policy", what, _policy_detail(r)))
             if _verdict(r) == "falsified":
                 falsified.append(r.counterexample)
                 lines.append(" " * 28 + _fixes(r, key, word))

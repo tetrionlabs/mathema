@@ -153,3 +153,30 @@ def test_a_chained_claim_on_a_series_keeps_its_computation_line():
     lines = _lines(rec)
     assert any(line.split()[:2] == ["holds", "computation"] for line in lines), lines
     assert any("f([])" in line for line in lines), lines
+
+
+def mean_return(xs: pd.Series) -> float:
+    return float(xs.mean())
+
+
+def test_two_policy_lines_for_one_parameter_say_which_case_each_is():
+    rec = mathema.check(mean_return, claims=[mathema.claim(
+        "for xs in [-1, 1]^n, -1 <= f(xs) <= 1", name="bounded")])
+    policy = [line for line in _lines(rec) if line.split()[1:2] == ["policy"]
+              and "f([])" not in line]
+    labels = [line.split("policy", 1)[1].strip().split("   ")[0] for line in policy]
+    assert len(labels) == len(set(labels)), policy
+    assert labels == ["f([..., missing, ...]) assuming count(xs) >= 1",
+                      "f([..., missing, ...]) assuming count(xs) == 0"], labels
+
+
+def test_a_falsified_case_says_what_f_did_and_offers_no_partial_command():
+    rec = mathema.check(mean_return, claims=[mathema.claim(
+        "for xs in [-1, 1]^n, -1 <= f(xs) <= 1", name="bounded")])
+    lines = _lines(rec)
+    at = next(i for i, line in enumerate(lines)
+              if "assuming count(xs) == 0" in line and line.split()[0] == "falsified")
+    assert "raises TypeError, where the word is propagates" in lines[at], lines[at]
+    # one claim per member settles it, so no single command is offered
+    assert lines[at + 1].strip() == (
+        "possible fixes: (i) exclude missing  (ii) handle missing at entry"), lines[at + 1]
