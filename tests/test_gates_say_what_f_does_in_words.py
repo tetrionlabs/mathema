@@ -335,3 +335,20 @@ def test_a_problem_after_a_command_starts_its_own_line():
     # a command is the last thing on its line, so the next problem starts a line
     assert lines[2] == "       to list them, run: mathema claims k", lines
     assert lines[3] == "       c unknown: no proof", lines
+
+
+def test_a_first_falsification_note_puts_each_command_last_on_its_line():
+    from types import SimpleNamespace
+
+    from mathema.verify import _born_falsified_hint
+    p = SimpleNamespace(name="at_most_the_largest", statement="f(a) <= max(a)",
+                        meta={}, verdict="falsified")
+    (note,) = _born_falsified_hint("numpy.ptp", [p], {}, "claims/numpy.claims.yaml")
+    lines = note.splitlines()
+    assert lines[0] == ("note numpy.ptp: at_most_the_largest falsified on first "
+                        "adjudication: the installed library does not do what the "
+                        "row states:"), lines
+    assert lines[1:] == [
+        "  (i) to record the falsification as a discovery, run: mathema accept "
+        "numpy.ptp at_most_the_largest --as discovery",
+        "  (ii) correct the row in claims/numpy.claims.yaml"], lines

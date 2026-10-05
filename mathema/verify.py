@@ -615,6 +615,12 @@ def _drop_retired_declared(key: str, current_claims: list,
     return kept, notes
 
 
+def _indented(text: str) -> str:
+    """`text` with each line indented two spaces, under the note it
+    belongs to."""
+    return "\n".join(f"  {line}" for line in text.splitlines())
+
+
 def _born_falsified_hint(key: str, probes: list,
                          verified_entry: dict,
                          library_source: "str | None" = None) -> list:
@@ -630,6 +636,7 @@ def _born_falsified_hint(key: str, probes: list,
         its line names the row, recording it as a discovery, and
         correcting it in that file.
     """
+    from ._missing_words import options
     from .records import classify_verdict
     known = {c.get("name") for c in (verified_entry.get("claims") or [])
              if c.get("name")}
@@ -646,9 +653,10 @@ def _born_falsified_hint(key: str, probes: list,
         gate_meta = (getattr(p, "meta", None) or {}).get("mathema.gate") or {}
         if gate_meta.get("reason"):
             lines.append(f"note {key}: gate ({p.statement}) falsified on first "
-                         f"adjudication: {gate_meta['reason']}. State the rows mathema "
-                         f"claims {key} prints, or change f; the claim is kept until "
-                         f"you do.")
+                         f"adjudication: {gate_meta['reason']}. The claim is kept "
+                         f"until one of these is done:\n"
+                         + _indented(options([f"to see the rows to state, run: "
+                                              f"mathema claims {key}", "change f"])))
             fresh.remove(p)
             continue
         pol = (getattr(p, "meta", None) or {}).get("mathema.policy") or {}
@@ -663,19 +671,22 @@ def _born_falsified_hint(key: str, probes: list,
         return lines
     names = ", ".join(sorted(str(p.name) for p in fresh))
     if library_source is not None:
-        accepts = "; ".join(f"mathema accept {key} {p.name} --as discovery"
-                            for p in sorted(fresh, key=lambda p: str(p.name)))
+        accepts = [f"to record the falsification as a discovery, run: mathema "
+                   f"accept {key} {p.name} --as discovery"
+                   for p in sorted(fresh, key=lambda p: str(p.name))]
         return lines + [
             f"note {key}: {names} falsified on first adjudication: the "
-            f"installed library does not do what the row states. Record "
-            f"the falsification as a discovery ({accepts}), or correct "
-            f"the row in {library_source}."]
+            f"installed library does not do what the row states:\n"
+            + _indented(options(accepts + [f"correct the row in {library_source}"]))]
     return lines + [f"note {key}: {names} falsified on first adjudication. A "
-            f"declared claim is kept until a human decides it (fix the "
-            f"code, `mathema accept {key} <claim> --as discovery`, or "
-            f"supersede it). To try a spelling first, "
-            f"`mathema check {key} --claim \"...\"` adjudicates it and "
-            f"writes nothing."]
+            f"declared claim is kept until a human decides it:\n"
+            + _indented(options([
+                "fix the code",
+                f"to record it as a discovery, run: mathema accept {key} <claim> "
+                f"--as discovery",
+                "supersede it",
+                f"to try a spelling first, writing nothing, run: mathema check "
+                f"{key} --claim \"...\""]))]
 
 
 def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
