@@ -262,8 +262,12 @@ def test_pole_detected_empirically():
     def reciprocal_gap(x: float) -> float:
         return 1 / (1 - x)
 
-    r = mathema.check(reciprocal_gap)
-    st = next(p for p in r.probes if p.name == "is_numerically_stable")
+    # the finiteness claim stated as written (the suggested
+    # is_numerically_stable reads accuracy, not finiteness)
+    from mathema.conjecture import check_conjectures, claim
+    (st,) = check_conjectures(reciprocal_gap, [claim(
+        "g(f, x) == 1", name="finite", route="best",
+        funcs={"g": "mathema.f.finite_no_error"})])
     assert st.verdict == "falsified"
     assert st.route == "probe:semi_analytical"
     assert "0 vs 1" in st.counterexample
@@ -295,7 +299,7 @@ def test_domain_boundary_edge_pole_provably_unsafe_via_derive():
         return 1 / x
 
     r = mathema.check(edge_pole, domain={"x": (0.0, 2.0)})  # pole at the edge
-    st = next(p for p in r.probes if p.name == "is_numerically_stable")
+    st = next(p for p in r.probes if p.name == "is_pole_safe[x]")
     assert st.verdict == "falsified"
     assert st.route == "examine"
 

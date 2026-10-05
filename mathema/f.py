@@ -86,3 +86,60 @@ def finite_no_error(fn, *args):
     if any(_is_nonfinite(v) for v in vals):
         return 0
     return 1
+
+
+def exact_value(fn, *args):
+    """The exact value of `fn`'s mathematics at `args`, each float read
+    as the exact binary number it is, as a sympy number evaluated to 40
+    digits; None when the body does not lift to a closed form or the
+    value is not a finite real."""
+    import sympy
+
+    from .analysis import analyze_source
+    from .symbolic import lift
+    try:
+        facts = analyze_source(fn)
+        lifted = lift(fn, facts)
+    except Exception:
+        return None
+    if lifted is None or isinstance(lifted.expr, tuple) \
+            or len(args) != len(facts.params):
+        return None
+    subs = {}
+    for name, value in zip(facts.params, args):
+        sym = lifted.params.get(name)
+        if sym is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        subs[sym] = sympy.Rational(value) if isinstance(value, float) \
+            else sympy.Integer(value)
+    try:
+        exact = sympy.N(lifted.expr.subs(subs), 40)
+    except Exception:
+        return None
+    if not (exact.is_real and exact.is_finite):
+        return None
+    return exact
+
+
+def accurate(fn, *args, tolerance=None):
+    """1 if the float result of `fn(*args)` agrees with the exact value
+    of its mathematics (`exact_value`) within `tolerance` (by default
+    1e-9 plus 1e-7 times the exact value's magnitude), 0 otherwise.
+
+    Raises:
+        ValueError: no comparison is possible at this point: the call
+            raises or returns a non-finite value, or there is no exact
+            value to compare with.
+    """
+    out = fn(*args)
+    if _is_nonfinite(out) or isinstance(out, bool) \
+            or not isinstance(out, (int, float)):
+        raise ValueError("no finite float result to compare")
+    exact = exact_value(fn, *args)
+    if exact is None:
+        raise ValueError("no exact value to compare with")
+    allowed = (1e-9 + 1e-7 * abs(float(exact))) if tolerance is None \
+        else tolerance
+    return 1 if abs(out - exact) <= allowed else 0

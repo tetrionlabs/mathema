@@ -48,11 +48,13 @@ def test_pole_safe_disproof_carries_the_executed_raise():
     assert p.meta.get("mathema.corroboration") == "reproduced"
 
 
-def test_numerically_stable_disproof_carries_the_executed_raise():
-    (p,) = check_conjectures(reciprocal_shift, [_stable_claim("derive")])
+def test_the_finiteness_statement_is_falsified_as_written():
+    # `g = finite_no_error` states finiteness, judged as written: the
+    # pole's raise makes g 0 at x = 5 (is_numerically_stable's own
+    # statement reads accuracy, with `mathema.f.accurate`)
+    (p,) = check_conjectures(reciprocal_shift, [_stable_claim("best")])
     assert p.verdict == "falsified"
-    assert "raised ZeroDivisionError" in p.counterexample
-    assert p.meta.get("mathema.corroboration") == "reproduced"
+    assert "x = 5" in p.counterexample
 
 
 def test_pole_safe_disproof_the_code_does_not_reproduce_is_not_falsified():
@@ -64,12 +66,10 @@ def test_pole_safe_disproof_the_code_does_not_reproduce_is_not_falsified():
     assert "UNCORROBORATED" in p.note
 
 
-def test_numerically_stable_disproof_the_code_does_not_reproduce_is_not_falsified():
+def test_the_finiteness_statement_holds_where_float_steps_over_the_pole():
     (p,) = check_conjectures(reciprocal_irrational_pole,
-                             [_stable_claim("derive")])
+                             [_stable_claim("best")])
     assert p.verdict != "falsified", (p.verdict, p.counterexample)
-    assert p.meta.get("mathema.corroboration") == "uncorroborated"
-    assert "UNCORROBORATED" in p.note
 
 
 def test_a_raising_missing_guard_is_proven_from_the_executed_raise():
@@ -97,8 +97,7 @@ def test_missing_safe_guard_that_does_not_raise_on_missing_is_not_falsified():
 def test_a_pole_floating_point_steps_over_is_labelled_exact_arithmetic_only():
     cj = claim("for x in [0, 10], is_pole_safe(x)", name="is_pole_safe[x]",
                route="derive")
-    for p in check_conjectures(reciprocal_irrational_pole,
-                               [cj, _stable_claim("derive")]):
+    for p in check_conjectures(reciprocal_irrational_pole, [cj]):
         assert p.meta.get("mathema.corroboration") == "uncorroborated"
         assert p.meta.get("mathema.corroboration_reason") == \
             "exact arithmetic only", (p.name, p.meta)

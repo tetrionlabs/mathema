@@ -494,7 +494,7 @@ _DERIVATIVE_FAMILY_FORMS = {
     "concave": (2, "<="),
 }
 
-_FINITE_NO_ERROR = "mathema.f.finite_no_error"
+_ACCURATE = "mathema.f.accurate"
 
 _COMPARISON_RELATIONS = frozenset({"==", "~=", "!=", "<=", ">=", "<", ">"})
 
@@ -540,8 +540,7 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
         matches the family of the same name. The derivative-sign
         families match `d(f(<params>), p) >= 0` and its siblings, with
         `p` the bracketed parameter. `is_numerically_stable` matches
-        `g(f, <params>) == 1` with `g` bound to `mathema.f.finite_no_
-        error`. `is_deterministic`, `is_reproducible` and
+        `g(f, <params>) == 1` with `g` bound to `mathema.f.accurate`. `is_deterministic`, `is_reproducible` and
         `is_state_safe` match `f(<params>) == f(<params>)`. `is_defined` states a region under its name (the
         restriction form in docs/conditional-claims.md) and so accepts
         any comparison. A family that dispatches on the function's
@@ -571,11 +570,11 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
                 and _squash(cj.rhs) == _squash(call))
     if base == "is_numerically_stable":
         bound = (cj.funcs or {}).get("g")
-        from .f import finite_no_error
+        from .f import accurate
         return (cj.relation == "==" and _squash(cj.rhs) == "1"
                 and _squash(cj.lhs) == _squash(
                     f"g(f, {', '.join(facts.params)})")
-                and (bound == _FINITE_NO_ERROR or bound is finite_no_error))
+                and (bound == _ACCURATE or bound is accurate))
     return not isinstance(family, (_NamedClaimFamily, MatrixPropertyFamily,
                                    OutputPredicateFamily))
 

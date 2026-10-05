@@ -54,7 +54,7 @@ def reciprocal(x: float) -> float:
 def test_a_failure_inside_the_guarded_domain_still_falsifies():
     # zero is inside the guarded domain and the body divides by it: the
     # guard admits the draw, so the row reports the function's own raise
-    row = _by_name(check(reciprocal))["is_numerically_stable"]
+    row = _by_name(check(reciprocal))["is_pole_safe[x]"]
     assert row.verdict == "falsified"
     assert str(row.counterexample) == "x = 0 raised ZeroDivisionError"
 

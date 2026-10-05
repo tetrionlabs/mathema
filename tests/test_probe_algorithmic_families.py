@@ -90,17 +90,22 @@ def test_second_difference_probe_falsifies_concave_for_a_genuinely_convex_functi
     assert result[0] == "falsified"
 
 
-def test_is_numerically_stable_derive_disproven_when_domain_contains_a_pole():
+def test_a_pole_inside_the_domain_is_the_pole_family_disproof():
+    # a pole is is_pole_safe's question; is_numerically_stable is
+    # accuracy only, and its structural half declines
+    from mathema.claim_families import _is_pole_safe_derive
     facts = analyze_source(npv_two_period)
-    result = _is_numerically_stable_derive(npv_two_period, facts, "", "", "==",
-                                        domain={"r": (-2.0, 0.0)})
+    result = _is_pole_safe_derive(npv_two_period, facts, "r", "",
+                                  "is_pole_safe", domain={"r": (-2.0, 0.0)})
     assert result is not None
     assert result.status == "disproven"
+    assert _is_numerically_stable_derive(npv_two_period, facts, "", "", "==",
+                                         domain={"r": (-2.0, 0.0)}) is None
 
 
 def test_is_numerically_stable_derive_undecided_when_domain_excludes_the_pole():
-    # every pole excluded still leaves overflow and NaN open, so the
-    # probe decides
+    # accuracy is settled by executing the computation, so the probe
+    # decides
     facts = analyze_source(npv_two_period)
     result = _is_numerically_stable_derive(npv_two_period, facts, "", "", "==",
                                         domain={"r": (0.0, 5.0)})

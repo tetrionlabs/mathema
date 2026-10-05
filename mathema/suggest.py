@@ -781,26 +781,18 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         out.append(_made(f"{call} == {call}", name="is_reproducible",
                          source="mathema", route="best"))
 
-    # no symbolic form for the probe fallback (whether a call raises or
-    # returns non-finite isn't a relation sympy adjudicates),
-    # expressed inside the same claim grammar via a bound extra
-    # function (mathema.f.finite_no_error, referenced by dotted path so
-    # this claim survives declare()/entry_claims()'s round trip),
-    # boolean-as-int, rather than a new predicate. `f` is a plain
-    # allowed name here, not a call, passed to the bound function so
-    # it can invoke fn itself under a try/except a symbolic comparison
-    # could never express. route="best": the registered
-    # is_numerically_stable family (above) gets a real derive attempt
-    # first (proving pole-avoidance when a domain is declared, via
-    # domain_hazards()), falling back to this funcs-bound probe check
-    # when no domain is declared or the family can't decide.
+    # numerical stability is accuracy: whether the float result agrees
+    # with the exact value of the mathematics, stated through the bound
+    # helper mathema.f.accurate (by dotted path, so the claim survives
+    # the declared store's round trip); the is_numerically_stable family
+    # executes it point by point.
     # numeric stability reads a finite number out of the call, which a
     # function over strings that returns no number does not have
     all_text = bool(facts.params) and all(
         facts.param_kinds.get(p) == "string" for p in facts.params)
     if not (all_text and facts.returns_kind != "scalar"):
         out.append(_made(f"g(f, {', '.join(facts.params)}) == 1", name="is_numerically_stable",
-                         source="mathema", route="best", funcs={"g": "mathema.f.finite_no_error"}))
+                         source="mathema", route="best", funcs={"g": "mathema.f.accurate"}))
 
     # the definedness region as its own named claim: adjudicated by
     # region equivalence against the current body (the is_defined

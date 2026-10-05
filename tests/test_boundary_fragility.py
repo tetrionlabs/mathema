@@ -66,9 +66,11 @@ def test_a_raise_at_a_closed_endpoint_falsifies_on_the_probe_route(fn, law):
     assert "mathema.boundary_fragility" not in p.meta
 
 
-def test_is_numerically_stable_still_falsifies_the_same_fragility():
+def test_a_suggested_value_claim_still_falsifies_the_same_fragility():
+    # the raise is not an accuracy failure (is_numerically_stable reads
+    # accuracy only); the suggested idempotence claim meets it
     rec = mathema.check(knife_edge)
-    ns = next(p for p in rec.probes if p.name == "is_numerically_stable")
+    ns = next(p for p in rec.probes if p.name == "idempotent")
     assert ns.verdict == "falsified"
     assert "clamp" in ns.counterexample
     assert "floating-point boundary" in ns.counterexample
@@ -104,4 +106,5 @@ def test_empirical_fallback_handles_domain_typed_integer_bounds(monkeypatch):
         choose, [claim("for n in [10,11] ⊂ Z, k in [5,6] ⊂ Z, f(n,k) >= 1",
                        route="derive")])
     assert p.verdict == "holds"
-    assert " : int" in p.meta.get("mathema.sampling", "")
+    # the sampling line states the integers drawn
+    assert "n~U{10..11}" in p.meta.get("mathema.sampling", "")
