@@ -75,3 +75,23 @@ def test_a_nan_from_values_agrees_with_nothing_not_even_a_nan():
 def test_a_missing_input_is_still_not_compared():
     p = _eq(first, largest, "x in {nan, 1}")
     assert p.verdict == "holds", (p.verdict, p.note)
+
+
+def nan_a(x: float) -> float:
+    return float("nan")
+
+
+def nan_b(x: float) -> float:
+    import math
+    return math.nan
+
+
+def test_a_nan_agrees_with_nothing_whatever_its_spelling_or_object():
+    # an all-nan function has no value at any point, so no rung proves it
+    # equivalent to anything, itself included: the same body and another
+    # spelling of nan get the same verdict, with an executed witness
+    same = _eq(nan_a, nan_a, "x in [0, 1]")
+    other = _eq(nan_a, nan_b, "x in [0, 1]")
+    assert same.verdict == other.verdict == "falsified", (
+        same.verdict, same.note, other.verdict)
+    assert "nan vs nan" in same.counterexample, same.counterexample

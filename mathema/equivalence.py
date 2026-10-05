@@ -277,11 +277,34 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
         return family_probe
 
     state = _LadderState()
-    for _, rung in RUNGS:
+    for name, rung in RUNGS:
         probe = rung(case, state)
         if probe is not None:
+            if name in _BY_SHAPE and probe.verdict == "proven":
+                broken = _no_value_witness(case)
+                if broken is not None:
+                    return broken
             return probe
     return _fallthrough(case, state)
+
+
+#: the rungs that prove from the shape of the two bodies alone, which
+#: say nothing about a point where both sides have no value
+_BY_SHAPE = frozenset({"form", "closed-forms"})
+
+
+def _no_value_witness(case: _Case) -> "Probe | None":
+    """Intent:
+        The executed rung's falsification when it finds a point where a
+        side has no value (a NaN from present inputs agrees with
+        nothing, another NaN included), else None. Two bodies of the
+        same shape behave alike, but a NaN they share is no agreement.
+    """
+    probe = _rung_sampled(case, _LadderState())
+    if probe is not None and probe.verdict == "falsified" \
+            and "nan" in (probe.counterexample or ""):
+        return probe
+    return None
 
 
 def _family_verdict(case: _Case) -> Probe | None:
