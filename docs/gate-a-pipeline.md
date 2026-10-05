@@ -57,9 +57,9 @@ mathema init: scaffolded git files:
 mathema init: scaffolded the CI gate:
   .github/workflows/mathema-verify.yml
 # mathema verify is the CI gate over the committed .mathema/ store: it
-# re-adjudicates whatever changed and gates the result. verify is
-# STRICT by default, which fails a falsified claim, an open unknown
-# one, AND a claim that could not be checked at all (an unreachable
+# checks again whatever changed and gates the result. verify is
+# strict by default, which fails a falsified claim, an open unknown
+# one, and also a claim that could not be checked at all (an unreachable
 # surface, an unsupported shape). Most stores have some of the last
 # kind at first, so expect the first run to be red and to tell you
 # exactly which claims it means. Add --lenient to report those
@@ -127,7 +127,7 @@ note fees.discounted: never_raises_price initially falsified. A declared claim
       fees.discounted --claim "..."
 FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no
     baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- log_monotone
-    unknown: derive route unliftable
+    unknown: derive could not decide it
        compendium:math declares 'log_monotone' for math.log; mathema verify
            recorded it unknown against the installed library:
        (i) to take it on its word, run: mathema accept math.log log_monotone
@@ -137,7 +137,7 @@ FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no
 FAIL fees.discounted: no baseline record; 1 proven, 0 holds, 1 falsified  <- 1
     falsified claim(s)
 ok   fees.late_fee: no baseline record; 1 proven, 2 holds, 0 falsified
-0 fresh (form unchanged, skipped), 3 adjudicated, 2 problem(s)
+0 unchanged since the last run (not run again), 3 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 exit code 1
 ```
@@ -186,15 +186,15 @@ mathema verify --root .; echo "exit code $?"
 ```text
 accepting math.log :: log_monotone (verdict unknown) as trusted, by Grace Hopper
   - trust log_monotone at its claimed level (holds), on the word of
-      compendium:math; `mathema verify` re-adjudicating this key replaces the
-      testimony with a local verdict
+      compendium:math; when `mathema verify` checks this key again, a local
+      verdict replaces the testimony
 written: trust log_monotone at its claimed level (holds), on the word of
-    compendium:math; `mathema verify` re-adjudicating this key replaces the
-    testimony with a local verdict
+    compendium:math; when `mathema verify` checks this key again, a local
+    verdict replaces the testimony
 ok   math.log: fresh; library claims from mathema/compendium/math.claims.yaml
 FAIL fees.discounted: fresh; 1 falsified claim(s)
 ok   fees.late_fee: fresh
-3 fresh (form unchanged, skipped), 0 adjudicated, 1 problem(s)
+3 unchanged since the last run (not run again), 0 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 exit code 1
 ```
@@ -233,7 +233,7 @@ mathema verify --root .; echo "exit code $?"
 ok   math.log: fresh; library claims from mathema/compendium/math.claims.yaml
 ok   fees.discounted: form changed; 2 proven (1 claim, 1 built-in), 3 holds, 0 falsified
 ok   fees.late_fee: fresh
-2 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+2 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 exit code 0
 ```

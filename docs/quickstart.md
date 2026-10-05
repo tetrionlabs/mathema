@@ -42,7 +42,7 @@ mathema check pricing.py:discounted --claim "for rate in [0, 1], f(price, rate) 
 
 <!-- example: falsify output -->
 ```text
-FAIL pricing.discounted: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+FAIL pricing.discounted: source, no side effects; claims 1/1 checked (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 Falsified, on the first try. That is not a bad start, it is the point.
@@ -126,7 +126,7 @@ mathema check pricing.py
 
 <!-- example: docstring output -->
 ```text
-ok   pricing.discounted: source, no side effects; claims 4/4 adjudicated (1 proven, 3 holds, 0 falsified)
+ok   pricing.discounted: source, no side effects; claims 4/4 checked (1 proven, 3 holds, 0 falsified)
 ```
 
 One claim, four checks. The first is the proof over the real numbers.

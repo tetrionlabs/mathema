@@ -191,7 +191,7 @@ mathema check mid.py:midpoint --claim "for a in [0, 100], b in [0, 100], min(a, 
 
 <!-- example: midpoint output -->
 ```text
-ok   mid.midpoint: source, no side effects; claims 4/4 adjudicated (1 proven, 3 holds, 0 falsified)
+ok   mid.midpoint: source, no side effects; claims 4/4 checked (1 proven, 3 holds, 0 falsified)
 ```
 
 One claim, four lines under it in the full record. The mathematics line is
@@ -229,8 +229,8 @@ mathema.intent
  ._summary    | 76:80p   || {4 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION, _GOOGLE_HEADER  | -       | -                                  || no-report || 0/2     || 44%
  .parse_doc   | 148:162p || {4 | 0 | -} || no      | 4  | 2 branches, 1 loop             | loop:not-a-fold     || yes   | -             || KEYWORDS                  | -       | DocIntent, _sections, _summary, +1 || no-report || 2/3     || 40%
 
-0/4 claimed, 0/4 derivable, 0/4 lift unconditionally, 4/4 fully typed, 2/12 docstring quality criteria met, no coverage.json/.coverage report found, 4/4 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 46%.
-`derives` is what the derive route can do here, given the domain the signature, docstring and claims declare. The reason/code cells describe the UNCONDITIONAL lift, the body with nothing supplied, so a branch:needs-domain row reads blocked there and derives all the same, once a claim declares the domain that prunes the branch. Neither is a ceiling: a probe claim can still be written and adjudicated for every function here.
+0/4 claimed, 0/4 derivable, 0/4 derive reads with nothing supplied, 4/4 fully typed, 2/12 docstring quality criteria met, no coverage.json/.coverage report found, 4/4 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 46%.
+`derives` is what the derive route can do here, given the domain the signature, docstring and claims declare. The reason/code cells describe what derive reads with nothing supplied, so a branch:needs-domain row reads blocked there and derives all the same, once a claim declares the domain that prunes the branch. Neither is a ceiling: a probe claim can still be written and checked for every function here.
 ```
 
 `sed -n 149,163p mathema/intent.py` prints `parse_doc` and nothing else, which
@@ -400,7 +400,7 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 
 <!-- example: parity output -->
 ```text
-ok   options.put_call_parity_gap: source, no side effects; claims 7/7 adjudicated (1 proven, 6 holds, 0 falsified)
+ok   options.put_call_parity_gap: source, no side effects; claims 7/7 checked (1 proven, 6 holds, 0 falsified)
 ```
 
 `proven`, over every point of a five-dimensional region of prices, rates,

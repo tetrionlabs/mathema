@@ -119,7 +119,7 @@ def test_a_disproof_with_no_reproducing_point_falls_to_execution_and_is_flagged(
     probe = _only(never_zero_denominator, "for x in [2, 5], is_defined(f)")
     assert probe.verdict == "holds"
     assert probe.meta.get("mathema.corroboration") == "uncorroborated"
-    assert "UNCORROBORATED" in probe.note
+    assert "derive found a disproof" in probe.note
 
 
 def test_the_correct_claims_still_prove():

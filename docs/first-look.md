@@ -53,7 +53,7 @@ mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
   proven    is_deterministic: f(x, alpha) = f(x, alpha)
   proven    is_state_safe: f(x, alpha) = f(x, alpha)
   unknown   is_numerically_stable: let g = mathema.f.accurate, g(f, x, alpha) = 1
-           derive route unliftable; probe: unknown (accuracy against the exact value is read for scalar parameters only)
+           derive could not decide it; the probe could not decide it either (accuracy against the exact value is read for scalar parameters only)
   holds     is_representation_safe[alpha]: is_representation_safe(alpha) (20 draws)
   bounded_lower  min(x) <= f(x, alpha)   falsified at x = [222791.29884554766, -852156.6094995309, -647122.5636467072, -772598.9379420548, 854595.3224724911, 999998], alpha = 4.542301584683122
     falsified  computation  min(x) <= f(x, alpha)   counterexample x = [222791.29884554766, -852156.6094995309, -647122.5636467072, -772598.9379420548, 854595.3224724911, 999998], alpha = 4.542301584683122: -852156.6094995309 vs -656298366.2095869

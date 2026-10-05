@@ -160,7 +160,7 @@ FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in),
        (ii) write: missing(f, xs, null) raises(TypeError)
        to list them, run: mathema claims balances.running_total
        never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
-0 fresh (form unchanged, skipped), 1 adjudicated, 2 problem(s)
+0 unchanged since the last run (not run again), 1 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -275,8 +275,8 @@ ledger.running_total:
 ```
 $ mathema verify --root .
 FAIL balances.running_total: cannot resolve to a live function (declared in .mathema/verified/balances.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total
-FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
-0 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
+FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was checked or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
+0 unchanged since the last run (not run again), 0 checked, 2 problem(s)
 grammars detected: (none); verified by this run: mathema
 ```
 
@@ -293,7 +293,7 @@ reconciling ledger.running_total from balances.running_total: a record rename, b
   - remove .mathema/verified/balances.running_total.yaml
   - re-stamp the integrity and re-anchor it to HEAD
 written: reconciled: balances.running_total renamed to ledger.running_total (by Charles Babbage)
-next: `mathema verify ledger.running_total` re-adjudicates it at its new location
+next, to check it at its new location, run: mathema verify ledger.running_total
 ```
 
 The record moves whole: every claim row with its acceptance and

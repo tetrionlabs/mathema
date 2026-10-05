@@ -25,7 +25,8 @@ def test_equivalent_implementations_prove_symbolically():
                                                funcs={"g": tri_incr},
                                                route="derive")])
     assert p.verdict == "proven"
-    assert "symbolic difference" in p.sketch or "canonical form" in p.sketch
+    assert ("read symbolically, is zero" in p.sketch
+            or "canonical form" in p.sketch)
 
 
 def test_loop_and_closed_form_agree():

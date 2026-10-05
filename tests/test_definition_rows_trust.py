@@ -96,6 +96,9 @@ def test_a_project_row_feeds_derive_only_after_verify_records_it(project):
     assert p.verdict == "holds", (p.verdict, p.note)
     assert "pandas.Series.sem has no definition row usable here" in p.note
     assert "feeds sampling only" in p.note, p.note
+    # the step that makes the row usable is a line of its own, command last
+    assert ("\nto take definition on its word, run: mathema accept "
+            "pandas.Series.sem definition --as trusted") in p.note, p.note
     _verify(project, rows)
     p = _check(project, sem_ratio)
     # verified by execution and not accepted: evidence, so the proof

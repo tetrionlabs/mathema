@@ -727,7 +727,7 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
     proven     mathematics  f(scores) = f(scores)
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   unknown   is_numerically_stable: let g = mathema.f.accurate, g(f, scores) = 1
-           derive route unliftable; probe: unknown (accuracy against the exact value is read for scalar parameters only)
+           derive could not decide it; the probe could not decide it either (accuracy against the exact value is read for scalar parameters only)
   proven    is_empty_safe[scores]: is_empty_safe(scores)
   holds     is_dimension_safe[f]: is_dimension_safe(f) (224 draws)
   preserves_length  len(f(scores)) = len(scores)   holds

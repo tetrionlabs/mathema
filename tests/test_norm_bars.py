@@ -539,7 +539,8 @@ def test_a_false_norm_identity_is_not_proven_and_is_falsified(fn, law):
     assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
     assert p.counterexample, p.note
     # the derive route was attempted and did not prove it
-    assert "derive could not decide it" in (p.note or ""), p.note
+    assert ("derive could not decide it" in (p.note or "")
+            or "could not show the relation" in (p.note or "")), p.note
 
 
 def test_an_order_outside_the_lowering_is_named_and_left_to_the_probe():

@@ -74,8 +74,8 @@ def test_all_fresh_immediately_after_seeding(tmp_path):
 
     r = _run(tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "3 fresh" in r.stdout
-    assert "0 adjudicated" in r.stdout
+    assert "3 unchanged since the last run" in r.stdout
+    assert "0 checked" in r.stdout
 
 
 def test_declared_claim_file_is_adjudicated_and_derive_route_dispatches(tmp_path):
@@ -186,7 +186,7 @@ def test_foreign_grammar_claim_does_not_mask_a_genuine_failure(tmp_path):
 
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout
-    assert "1 skipped" in r.stdout
+    assert "1 unknown" in r.stdout
     assert "1 not this grammar (mathema-data)" in r.stdout
 
 
@@ -209,8 +209,8 @@ def test_declared_claims_never_mask_verified_identity(tmp_path):
     first = _run(tmp_path)
     assert first.returncode == 0, first.stdout
     second = _run(tmp_path)
-    assert "3 fresh" in second.stdout, second.stdout   # funcs.add now fresh too
-    assert "0 adjudicated" in second.stdout, second.stdout
+    assert "3 unchanged since the last run" in second.stdout, second.stdout   # funcs.add now fresh too
+    assert "0 checked" in second.stdout, second.stdout
 
 
 def test_form_change_triggers_reverification_then_refreshes_baseline(tmp_path):
@@ -219,16 +219,16 @@ def test_form_change_triggers_reverification_then_refreshes_baseline(tmp_path):
     _seed_run(tmp_path, funcs_path)
 
     r1 = _run(tmp_path)
-    assert "3 fresh" in r1.stdout
+    assert "3 unchanged since the last run" in r1.stdout
 
     _write_funcs(funcs_path, add_body="    result = a + b\n    return result")
     r2 = _run(tmp_path)
     assert "funcs.add" in r2.stdout and "form changed" in r2.stdout
-    assert "2 fresh" in r2.stdout        # clamp01, gated_sqrt untouched
+    assert "2 unchanged since the last run" in r2.stdout        # clamp01, gated_sqrt untouched
 
     r3 = _run(tmp_path)                  # baseline should have refreshed
-    assert "3 fresh" in r3.stdout, r3.stdout
-    assert "0 adjudicated" in r3.stdout, r3.stdout
+    assert "3 unchanged since the last run" in r3.stdout, r3.stdout
+    assert "0 checked" in r3.stdout, r3.stdout
 
 
 def test_all_flag_forces_reverification_when_fresh(tmp_path):
@@ -237,8 +237,8 @@ def test_all_flag_forces_reverification_when_fresh(tmp_path):
     _seed_run(tmp_path, funcs_path)
 
     r = _run(tmp_path, "--all")
-    assert "0 fresh" in r.stdout
-    assert "3 adjudicated" in r.stdout
+    assert "0 unchanged since the last run" in r.stdout
+    assert "3 checked" in r.stdout
     assert "forced (--all)" in r.stdout
 
 
@@ -310,10 +310,10 @@ def test_decorator_declared_claim_is_picked_up_by_verify(tmp_path):
 
     r1 = _run(tmp_path)
     assert r1.returncode == 0, r1.stdout
-    assert "1 fresh" in r1.stdout and "0 adjudicated" in r1.stdout
+    assert "1 unchanged since the last run" in r1.stdout and "0 checked" in r1.stdout
 
     r2 = _run(tmp_path)
-    assert "1 fresh" in r2.stdout and "0 adjudicated" in r2.stdout
+    assert "1 unchanged since the last run" in r2.stdout and "0 checked" in r2.stdout
 
 
 def _seed_run_single(root, funcs_path, name):
@@ -439,11 +439,11 @@ def test_toggling_a_file_grammar_makes_every_entry_in_it_stale(tmp_path):
     r = _run(tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     r = _run(tmp_path)
-    assert "2 adjudicated" not in r.stdout, r.stdout
+    assert "2 checked" not in r.stdout, r.stdout
     for text in ("grammar: other\n" + body, body):
         path.write_text(text)
         r = _run(tmp_path)
-        assert "2 adjudicated" in r.stdout, (text, r.stdout)
+        assert "2 checked" in r.stdout, (text, r.stdout)
         assert r.stdout.count("claims changed") >= 2, r.stdout
 
 
@@ -502,15 +502,15 @@ def test_a_wrapper_reverifies_when_the_library_function_it_calls_changes(
         "    - name: above\n"
         '      statement: "for x in [0, 1], f(x) >= x"\n')
     r = _run(tmp_path)
-    assert "2 adjudicated" in r.stdout, r.stdout + r.stderr
+    assert "2 checked" in r.stdout, r.stdout + r.stderr
     stored = (tmp_path / ".mathema" / "verified"
               / "wrap.through_module.yaml").read_text()
     assert "lib.g" in stored and "form:" in stored, stored
     r = _run(tmp_path)
-    assert "2 fresh" in r.stdout, r.stdout
+    assert "2 unchanged since the last run" in r.stdout, r.stdout
     _write_lib(tmp_path, 2)
     r = _run(tmp_path)
-    assert "0 fresh" in r.stdout, r.stdout
+    assert "0 unchanged since the last run" in r.stdout, r.stdout
     assert r.stdout.count("dependency changed") >= 2, r.stdout
 
 
@@ -552,7 +552,7 @@ def test_a_claims_file_wholly_in_another_grammar_is_warned_about_once(
     for r in (_run(tmp_path), _check(tmp_path)):
         text = r.stdout + r.stderr
         warned = [ln for ln in text.splitlines()
-                  if "does not adjudicate" in ln]
+                  if "which mathema does not check" in ln]
         assert len(warned) == 1, text
         assert "funcs.claims.yaml" in warned[0], warned
         assert "'python-expression'" in warned[0], warned
@@ -586,5 +586,5 @@ def test_a_verified_claim_moved_to_another_grammar_warns_without_blocking(
     assert r.returncode == 0, r.stdout + r.stderr
     warning = ("warning: claim commutative of funcs.add was verified under "
                "mathema; its grammar is now 'other', so mathema no longer "
-               "adjudicates it")
+               "checks it")
     assert (r.stdout + r.stderr).count(warning) == 1, r.stdout + r.stderr

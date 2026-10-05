@@ -117,7 +117,7 @@ def test_no_admitted_point_is_skipped_not_holds():
     # the claim is unknown, as the plain probe's claims are
     p = _one(recip, "for x in [-1, 1], assuming sin(x) > 1, is_finite(f(x))")
     assert p.verdict == "unknown", (p.verdict, p.note)
-    assert ("probe: skipped (no sampled point satisfied the assuming "
+    assert ("the probe could not decide it either (no sampled point satisfied the assuming "
             "clause)") in p.note
     assert SEEN == []
 

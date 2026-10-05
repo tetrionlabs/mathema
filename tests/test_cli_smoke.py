@@ -152,12 +152,12 @@ def test_check_strict_fails_on_unverifiable_claims(tmp_path):
     law = "for name in L[nosuch.grammar], len(f(name)) == len(name)"
     lenient = _run("check", "lab.py:label", "--claim", law, cwd=tmp_path)
     assert lenient.returncode == 0, lenient.stdout
-    assert "1 skipped" in lenient.stdout
+    assert "1 unknown" in lenient.stdout
 
     strict = _run("check", "lab.py:label", "--claim", law, "--strict",
                   cwd=tmp_path)
     assert strict.returncode == 1, strict.stdout
-    assert "1 skipped claim(s)" in strict.stdout
+    assert " unknown: " in strict.stdout, strict.stdout
 
 
 def test_a_battery_call_mathema_could_not_build_does_not_gate(tmp_path):
@@ -170,7 +170,7 @@ def test_a_battery_call_mathema_could_not_build_does_not_gate(tmp_path):
     )
     strict = _run("check", "guarded.py:always_raises", "--strict", cwd=tmp_path)
     assert strict.returncode == 0, strict.stdout
-    assert "skipped" not in strict.stdout
+    assert "unknown" not in strict.stdout, strict.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +338,7 @@ def test_verify_root_argument_points_elsewhere(tmp_path):
     elsewhere.mkdir()
     r = _run("verify", "--root", str(project), cwd=elsewhere)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "2 fresh" in r.stdout
+    assert "2 unchanged since the last run" in r.stdout
 
 
 def test_verify_all_forces_reverification(tmp_path):
@@ -348,8 +348,8 @@ def test_verify_all_forces_reverification(tmp_path):
 
     r = _run("verify", "--root", str(tmp_path), "--all", cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "0 fresh" in r.stdout
-    assert "2 adjudicated" in r.stdout
+    assert "0 unchanged since the last run" in r.stdout
+    assert "2 checked" in r.stdout
     assert "forced (--all)" in r.stdout
 
 

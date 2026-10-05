@@ -526,7 +526,7 @@ print(mathema.check(delivery_note, claims=[mathema.claim(
 ```text
 mathema.Record(delivery_note) · source, no side effects · form 723add5de9a8
   holds     has_text: for order.note in {"leave at the door", "ring twice", None} \ {null}, len(delivery_note(order)) >= 1 (87 draws)
-           derive could not decide it (function body is not derivable, likely reason: unsupported-construct: unsupported-call (line 3), an expression form the derive vocabulary doesn't cover yet); the probe decided it; at order.note, a key left out, f raised KeyError
+           derive could not decide it (function body is not derivable, likely reason: unsupported-construct: unsupported-call (line 3), an expression form the derive vocabulary doesn't cover yet), so the probe decided it by running the code; at order.note, a key left out, f raised KeyError
   falsified absent[order.note]: f raised KeyError at order.note, a key left out, and no claim says it may
            (i) if the raise is intended, state: absent(f, order.note) raises(KeyError)
            (ii) if not, handle it in f

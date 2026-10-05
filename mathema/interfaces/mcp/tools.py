@@ -122,7 +122,7 @@ def adjudicate_target(target: str, claims: list | None = None,
     if not rows and include == "declared":
         out["hint"] = ("no declared claims for this function; call again "
                        "with include='suggested' to see candidates, or "
-                       "pass claims=[...] to adjudicate your own")
+                       "pass claims=[...] to check your own")
     return out
 
 

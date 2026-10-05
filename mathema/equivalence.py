@@ -319,7 +319,7 @@ def _rung_form(case: _Case, state: _LadderState) -> Probe | None:
     if case.facts.form and case.facts.form == case.gfacts.form:
         return _stamp(Probe(
             case.cj.name, case.statement, "proven", route="derive",
-            sketch=f"f and {case.rhs_name} lift to the identical "
+            sketch=f"f and {case.rhs_name} reduce to the same "
                    f"canonical form (form hash {case.facts.form})",
             note=case.note, meta=dict(case.annotations)), "form")
     return None
@@ -340,8 +340,8 @@ def _rung_symbolic(case: _Case, state: _LadderState) -> Probe | None:
     if proof is not None and proof.status == "proven":
         return _stamp(Probe(
             case.cj.name, case.statement, "proven", route="derive",
-            sketch=f"the symbolic difference of the two lifted bodies "
-                   f"vanishes: {proof.sketch}",
+            sketch=f"the difference of the two functions, read "
+                   f"symbolically, is zero: {proof.sketch}",
             condition=proof.quantifier, note=case.note,
             meta=dict(case.annotations)), "symbolic")
     if proof is not None and proof.status == "disproven" \
@@ -727,10 +727,9 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
         return _stamp(Probe(
             cj.name, case.statement, "unknown", route="derive",
             sketch=state.proof.sketch,
-            note=f"{case.note}; uncorroborated disproof: the symbolic "
-                 f"difference was reported nonzero but {checked} "
-                 f"executed shared points all agree, a probable "
-                 f"engine bug worth reporting",
+            note=f"{case.note}; derive found the two functions "
+                 f"different, but {checked} points run on both agree, "
+                 f"which is probably a mathema bug worth reporting",
             meta={**meta, "mathema.corroboration": "uncorroborated"}),
             "symbolic")
     if checked >= EQUIV_MIN_AGREEMENTS:
@@ -856,6 +855,6 @@ def _closed_forms_identical(fn, facts, gfn, gfacts, cj_domain) -> str | None:
         return None
     if residual == 0:
         return ("the two closed forms are identical under the declared "
-                "domain: both sides lift to expressions whose difference "
+                "domain: both sides read as expressions whose difference "
                 "simplifies to zero")
     return None

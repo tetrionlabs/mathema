@@ -95,13 +95,13 @@ print(textwrap.fill(record.probes[0].sketch, 78))
 ```text
 link 1: min(returns) <= f(returns): taking pandas.Series.mean as mean(a)
 (axiom, bundled with mathema, pandas 2.2 to 3.x); through the
-pandas.Series.mean definition row, lowered to sums over returns at a symbolic
+pandas.Series.mean definition row, read as sums over returns at a symbolic
 length: the relation holds for every length of at least one (min(returns) is
 at most mean(returns)); link 2: f(returns) <= max(returns): taking
 pandas.Series.mean as mean(a) (axiom, bundled with mathema, pandas 2.2 to
-3.x); through the pandas.Series.mean definition row, lowered to sums over
-returns at a symbolic length: the relation holds for every length of at least
-one (max(returns) is at least mean(returns))
+3.x); through the pandas.Series.mean definition row, read as sums over returns
+at a symbolic length: the relation holds for every length of at least one
+(max(returns) is at least mean(returns))
 ```
 
 ## A claim that is wrong, and the witness
@@ -213,7 +213,7 @@ for row in proof.meta["mathema.definitions"]:
 taking pandas.Series.mean as mean(a) (axiom, bundled with mathema, pandas 2.2
 to 3.x); taking pandas.Series.std as std(a, ddof=1) (axiom, bundled with
 mathema, pandas 2.2 to 3.x); through the pandas.Series.mean definition and
-pandas.Series.std definition rows, lowered to sums over returns at a symbolic
+pandas.Series.std definition rows, read as sums over returns at a symbolic
 length: the relation holds for every length
 pandas.Series.mean mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std mathema/compendium/pandas/series.claims.yaml

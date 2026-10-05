@@ -464,7 +464,7 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
             if lift_expr == "not-attempted":
                 lift_expr = _try_derive_lift(fn, facts)
             if lift_expr is None:
-                reason = purity_reason(fn) or "this function doesn't lift to a closed form"
+                reason = purity_reason(fn) or "derive cannot read this function as a closed form, so its claims are decided by running the code"
                 ladder[t] = {"text": reason, "available": False}
             elif t == "lifted":
                 ladder[t] = {"text": _tier_text.render_lifted_plain(lift_expr),

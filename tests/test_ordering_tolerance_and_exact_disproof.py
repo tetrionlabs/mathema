@@ -35,7 +35,7 @@ def test_an_exact_derive_disproof_inside_the_allowance_is_falsified():
         assert p.verdict == "falsified", (route, p.verdict, p.note)
         assert p.counterexample
         assert p.meta.get("mathema.corroboration") == "reproduced"
-        assert "engine bug" not in (p.note or "")
+        assert "mathema bug" not in (p.note or "")
         assert "exactly" in (p.note or "")
 
 
@@ -93,7 +93,7 @@ def test_rounding_the_ordering_violation_away_is_exact_arithmetic_only():
             assert p.meta.get("mathema.corroboration") == "uncorroborated"
             assert p.meta.get("mathema.corroboration_reason") == \
                 "exact arithmetic only", (law, route, p.meta)
-            assert "engine bug" not in (p.note or ""), (law, route, p.note)
+            assert "mathema bug" not in (p.note or ""), (law, route, p.note)
             assert "floating point does not reproduce" in (p.note or "")
 
 
@@ -119,5 +119,5 @@ def test_a_violation_inside_a_declared_tolerance_is_not_an_engine_bug():
     p = _v(just_above, "for x in [0, 1], f(x) <= x", "best",
            tolerance=1e-9)
     assert p.verdict == "holds", (p.verdict, p.note)
-    assert "engine bug" not in (p.note or "")
+    assert "mathema bug" not in (p.note or "")
     assert p.meta.get("mathema.corroboration") is None

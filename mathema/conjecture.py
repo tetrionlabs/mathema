@@ -790,14 +790,15 @@ def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
                           "field reading")
         plain, length_only = field_reads(facts.tree, p)
         if not (plain or length_only):
-            return None, (f"the body reads no field of {p}, so the lift "
-                          "declines and the probe adjudicates")
+            return None, (f"derive cannot read the function, which reads "
+                          f"no field of {p}, so the claim is decided by "
+                          "running the code")
         for f in plain:
             bound = _path_bound(p, f, schema[p], cj_domain)
             if not _is_numeric_bound(bound):
-                return None, (f"the body reads {p}.{f}, a field with no "
-                              "numeric reading, so the lift declines and "
-                              "the probe adjudicates")
+                return None, (f"derive cannot read the function's field "
+                              f"{p}.{f}, which is not a number, so the "
+                              "claim is decided by running the code")
             out[f"{p}.{f}"] = bound
         for f in length_only:
             bound = _path_bound(p, f, schema[p], cj_domain)
@@ -2556,10 +2557,10 @@ def _definedness_guards(fn, facts, working: bool = False,
             if pw is not None:
                 guards += pw.raise_guards
             elif raises:
-                gaps.append("the explicit raises do not lift")
+                gaps.append(_RAISES_UNREAD)
         except Exception:
             if raises:
-                gaps.append("the explicit raises do not lift")
+                gaps.append(_RAISES_UNREAD)
     if raises and not (facts.branch_count and not facts.loops
                        and not facts.recursion):
         gaps.append("the explicit raises do not lift")
@@ -2567,7 +2568,9 @@ def _definedness_guards(fn, facts, working: bool = False,
     if enforced and (enforced.get("intervals") or enforced.get("checks")):
         region = _range_violation_region(fn, facts, enforced)
         if region is None:
-            gaps.append("the result range enforce_range checks does not lift")
+            gaps.append("derive cannot read the result range enforce_range "
+                        "checks, so it decides nothing about it; the probe "
+                        "runs the code instead")
         else:
             guards.append((region, "RangeError"))
     return guards, gaps
@@ -4518,6 +4521,11 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
         if witness:
             out = [_unrepeatable(p, witness) if p.name == "is_deterministic"
                    and p.verdict != "falsified" else p for p in out]
+        for p in out:
+            # a next step is the note's last line, its command last
+            steps = (p.meta or {}).get("mathema.next_steps")
+            if steps and not (p.note or "").endswith(steps[-1]):
+                p.note = "\n".join([p.note or "", *steps]).lstrip("\n")
         return out
 
 
@@ -5480,7 +5488,7 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                    if k.startswith("mathema.corroboration")
                    or k == "mathema.restore_failed"}
         uncorroborated = [lbl for p, lbl in zip(probes, labels)
-                          if "UNCORROBORATED" in (p.note or "")]
+                          if "derive found a disproof" in (p.note or "")]
         note = with_caveats(f"every {unit} of the {what} holds", probes)
         # a part that passed only within the tolerance says so, with its gap
         gaps = [f"{lbl}: {clause}" for p, lbl in zip(probes, labels)
@@ -5489,9 +5497,10 @@ def _combine_conjunction(probes: list, name: str, statement: str,
         if gaps:
             note = "; ".join([note, *gaps])
         if uncorroborated:
-            note += (f"; derive reported an UNCORROBORATED disproof at "
-                     f"{', '.join(uncorroborated)} (probable engine bug, "
-                     f"worth reporting)")
+            note += (f"; derive found a disproof at "
+                     f"{', '.join(uncorroborated)} that no run of the code "
+                     f"reproduced, which is probably a mathema bug worth "
+                     f"reporting")
         return Probe(name, statement, "holds", n=n,
                      route=_conjunction_route(
                          [p.route for p in probes if p.verdict == "holds"],
@@ -5726,13 +5735,33 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
     return combined
 
 
+#: why derive leaves a function's raise statements to the probe
+_RAISES_UNREAD = ("derive cannot read the function's raise statements, so "
+                  "it decides nothing about them; the probe runs the code "
+                  "instead")
+
+
+def _last_clause(note: str) -> str:
+    """The last `; `-separated clause of a note, a `; ` inside
+    parentheses not counting as a separator."""
+    depth, cut = 0, 0
+    for i, ch in enumerate(note):
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth = max(depth - 1, 0)
+        elif ch == ";" and depth == 0 and note[i + 1:i + 2] == " ":
+            cut = i + 2
+    return note[cut:]
+
+
 def _derive_attempt_label(fallback: "Probe") -> str:
     """A short 'derive: <status> (<why>)' label for the attempt log,
     read off a stashed derive-undecided Probe; its
     mathema.derive_status meta (unliftable/undecided) and its own
     sketch/last-note reason."""
     status = (fallback.meta or {}).get("mathema.derive_status", "undecided")
-    reason = fallback.sketch or (fallback.note or "").rsplit("; ", 1)[-1]
+    reason = fallback.sketch or _last_clause(fallback.note or "")
     reason = (reason or "").strip()
     # keep the trail readable: one clause, not the whole prior note
     if reason and reason.startswith("conjectured by"):
@@ -5752,6 +5781,16 @@ def _probe_attempt_label(probed: "Probe") -> str:
     if reason.startswith("conjectured by"):
         reason = "inconclusive"
     return f"probe: {probed.verdict}" + (f" ({reason})" if reason else "")
+
+
+def _probe_said(probed: "Probe") -> str:
+    """Why running the code did not settle a claim either, in words:
+    `the probe could not decide it either (no point of the claim could
+    be drawn)`."""
+    reason = (probed.sketch or (probed.note or "").rsplit("; ", 1)[-1] or "").strip()
+    if not reason or reason.startswith("conjectured by"):
+        return "the probe could not decide it either"
+    return f"the probe could not decide it either ({reason})"
 
 
 def _merge_under(meta: dict, extra: dict) -> dict:
@@ -6094,20 +6133,35 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
     if winner is probed and probed.verdict in ("proven", "holds", "falsified"):
         why = _derive_attempt_label(fallback).split("(", 1)
         reason = why[1].rsplit(")", 1)[0] if len(why) > 1 else ""
+        # a next step rides on its own line inside the reason
+        reason, *then = reason.split("\n")
         branch = re.search(r"line (\d+) \('([^']*)'\)", reason or "")
         needs = re.search(r"needs a domain specific enough for ([\w, ]+)", reason or "")
         told = (f"derive could not decide the branch at line {branch.group(1)} "
                 f"({branch.group(2)})"
                 + (f": it needs a domain specific enough for {needs.group(1).strip()}"
                    if needs else "")
-                + "; the probe decided it" if branch else
-                f"derive could not decide it ({reason}); the probe decided it"
-                if reason else "derive could not decide it; the probe decided it")
+                + ", so the probe decided it by running the code" if branch else
+                "derive could not show whether f raises here (it returns a "
+                "value in this domain), so the probe decided it by running "
+                "the code" if "rather than raising" in reason else
+                reason if reason.startswith("derive ") and (
+                    "the probe" in reason or "running the code" in reason) else
+                f"{reason}, so the probe decided it by running the code"
+                if reason.startswith("derive ") else
+                f"derive could not decide it ({reason}), so the probe decided "
+                f"it by running the code"
+                if reason else "derive could not decide it, so the probe "
+                               "decided it by running the code")
         winner.note = f"{winner.note}; {told}".lstrip("; ")
+        if then:
+            # the next step, condition first and command last, goes on
+            # a line of its own after the whole note (see _check_built)
+            winner.meta = {**(winner.meta or {}), "mathema.next_steps": then}
     elif winner is fallback:
         # derive's own report stands; the note says why the probe could
         # not settle it either
-        winner.note = f"{winner.note}; {_probe_attempt_label(probed)}".lstrip("; ")
+        winner.note = f"{winner.note}; {_probe_said(probed)}".lstrip("; ")
     winner.meta = {**(winner.meta or {}), "mathema.routes_attempted": trail}
     carried = {k: v for k, v in (fallback.meta or {}).items()
                if k.startswith("mathema.derive") or k == "mathema.timeout"
@@ -6125,16 +6179,18 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
         from .corroboration import (EXACT_ARITHMETIC_ONLY,
                                     EXACT_ARITHMETIC_ONLY_NOTE)
         if (fallback.meta or {}).get("mathema.corroboration_unexecutable"):
-            winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
-                           f"disproof (the claim form has no point "
-                           f"evaluation, so derive had no executed witness)")
+            winner.note = (f"{winner.note}; derive found a disproof it could "
+                           f"not check by running the code, since this claim "
+                           f"has no single point to evaluate")
         elif ((fallback.meta or {}).get("mathema.corroboration_reason")
               == EXACT_ARITHMETIC_ONLY):
-            winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
-                           f"disproof ({EXACT_ARITHMETIC_ONLY_NOTE})")
+            winner.note = (f"{winner.note}; derive found a disproof that "
+                           f"no run of the code reproduced "
+                           f"({EXACT_ARITHMETIC_ONLY_NOTE})")
         else:
-            winner.note = (f"{winner.note}; derive reported an UNCORROBORATED "
-                           f"disproof (probable engine bug, worth reporting)")
+            winner.note = (f"{winner.note}; derive found a disproof that "
+                           f"no run of the code reproduced, which is probably "
+                           f"a mathema bug worth reporting")
     return winner
 
 
@@ -6385,7 +6441,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
         # strict-mode failure count.
         return Probe(cj.name, statement, "skipped", route=None,
                      note=note + f"; grammar {cj.grammar!r} is not "
-                          f"{GRAMMAR!r}, not adjudicated by this route",
+                          f"{GRAMMAR!r}, so mathema does not check it",
                      meta={"mathema.foreign_grammar": cj.grammar})
     param_set = set(facts.params)
     bare_reserved = (_find_bare_reserved_name(cj.lhs, param_set)
@@ -8072,7 +8128,7 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
         # float sweep could re-execute as the same question
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion":
-                           "none (a claim family adjudicates this claim)"}
+                           "none (a built-in claim decides this claim)"}
         return
     excluded = (_outside_definedness(fn, facts, ctx.cj)
                 if ctx.assume_defined else None)
@@ -8374,7 +8430,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         ctx.derive_undecided = Probe(
             cj.name, statement, "unknown", route="derive",
             sketch=family_proof.sketch,
-            note=f"{note}; derive route undecided",
+            note=f"{note}; derive could not decide it",
             meta={"mathema.derive_status": "undecided",
                   **_provenance_meta(family_proof)})
         return None
@@ -8471,11 +8527,10 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                 return Probe(cj.name, statement, "proven",
                              sketch=mproof.sketch, note=note, route="derive",
                              meta=_provenance_meta(mproof))
-        why = ("matrix identity not closed symbolically" if matrix_claim
-               else f"{', '.join(array_uses)} "
-                    f"{'is a vector or matrix' if len(array_uses) == 1 else 'are vectors or matrices'}"
-                    f", which the scalar derive route does not read, and "
-                    f"the matrix algebra did not close the claim")
+        why = ("derive could not decide the matrix identity" if matrix_claim
+               else f"derive could not decide the claim over the "
+                    f"{'vector or matrix' if len(array_uses) == 1 else 'vectors or matrices'} "
+                    f"{', '.join(array_uses)}")
         if definitions_hint is not None:
             why = definitions_hint
         unknown = Probe(
@@ -8509,9 +8564,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             # predicate families all have probe routes).
             ctx.derive_undecided = Probe(
                 cj.name, statement, "unknown", route="derive",
-                note=f"{note}; the registered family for this claim's own "
-                     f"name couldn't decide it, and there is no ordinary "
-                     f"derive route for this predicate",
+                note=f"{note}; the built-in claim {cj.relation} could not "
+                     f"decide it, and derive has no other way to read it",
                 meta={"mathema.derive_status": "unsupported"})
             return None
         if cj.route == "derive":
@@ -8520,8 +8574,10 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             # stays the plain "skipped" every other structural-mismatch
             # skip in this function uses.
             return Probe(cj.name, statement, "skipped", route=cj.route,
-                         note=f"{note}; derive route does not yet lift "
-                              f"multi-function raises claims")
+                         note=f"{note}; derive cannot yet read a raises "
+                              f"claim over several functions, so on the derive "
+                              f"route it stays unknown; to run the code "
+                              f"instead, state it with route: best")
         # route == "best" and derive-ineligible: fall through to the
         # probe stage, same as an ordinary probe claim.
         return None
@@ -8552,9 +8608,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         from .symbolic._proof_support import ProofResult
         proof = ProofResult(
             "unliftable",
-            sketch=f"`{cj.relation}` is decided by execution: the symbolic "
-                   "lift has no reading of membership in a language or a "
-                   "set, so the probe route adjudicates it")
+            sketch=f"derive cannot read membership in a language or a "
+                   f"set, so `{cj.relation}` is decided by running the "
+                   "code")
     elif language_params and row_domain is not None:
         # every language-bound parameter is a SCHEMA language and the
         # body reads only numeric fields of it (or a text field through
@@ -8586,12 +8642,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         proof = _language_strategy_proof(cj, fn, bound_funcs, cj_domain,
                                          extensive) or ProofResult(
             "unliftable",
-            sketch=(row_reason if row_reason.startswith("the body reads") else
-                    ", ".join(language_params) + " quantified over a "
-                    "language domain: the symbolic lift has no reading "
-                    "of a string or structured value, so only a finite "
-                    "language, swept point by point, is decided on this "
-                    "route"))
+            sketch=(row_reason if row_reason.startswith("derive cannot read the function") else
+                    "derive cannot read " + ", ".join(language_params)
+                    + ", a string or structured value from a language "
+                    "domain (it decides only a finite language, member by "
+                    "member)"))
     elif cj.relation == "raises":
         # only ever reachable via domain-conditioned branch
         # pruning, a raises claim with no domain specific
@@ -8681,7 +8736,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # values: state that explicitly (their exact values also ride
         # the record's dependency section, where the freshness sweep
         # watches them)
-        note = (note + "; module constants read at adjudication: "
+        note = (note + "; module constants read when it was checked: "
                 + ", ".join(f"{k} = {v!r}"
                             for k, v in sorted(inlined.items())))
     if proof.status == "proven":
@@ -8829,7 +8884,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     ctx.derive_undecided = Probe(
         cj.name, statement, "unknown", route="derive",
         sketch=proof.sketch,
-        note=note + f"; derive route {proof.status}",
+        note=note + "; derive could not decide it",
         meta=skip_meta)
     ctx.derive_intermediates = getattr(proof, "intermediates", None)
     return None
@@ -8994,10 +9049,10 @@ def _lifted_numeric_fallback(ctx, cj, statement, note, cj_domain):
         return None
     if verdict is None:
         return None
-    contract = (f"numeric evidence on the LIFTED intermediate ({checked} "
-                f"samples of the resolved symbolic form, mathema's "
-                f"reconstruction, not the code; the symbolic comparison "
-                f"itself stayed undecided)")
+    contract = (f"numeric evidence on derive's own reading of the function "
+                f"({checked} samples of that symbolic form, mathema's "
+                f"reconstruction, not a run of the code; derive itself "
+                f"could not decide it)")
     for cf in (lhs_cf, rhs_cf):
         if cf.validity:
             contract = f"{contract}; {cf.validity}"
@@ -9416,9 +9471,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # the executed reading above is the last one, and it could
         # not sample a point of this claim
         return Probe(cj.name, statement, "unknown", route=None,
-                     note=f"{note}; {region_row_kind(cj.name)} adjudicates "
-                          f"by execution, and no point of this claim could "
-                          f"be sampled")
+                     note=f"{note}; {region_row_kind(cj.name)} is decided by "
+                          f"running the code, and the probe could not draw "
+                          f"a single point of this claim")
     if cj.relation in routes.examine_predicates():
         # only reachable when the registered family declined, the
         # generic sampling loop below has no meaning for a
@@ -9426,9 +9481,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # dispatching predicate text into the compiled-expression
         # machinery.
         return Probe(cj.name, statement, "unknown", route=None,
-                     note=f"{note}; the registered family for this claim's "
-                          "own name couldn't decide it, and the generic "
-                          "sampling loop has no meaning for this predicate")
+                     note=f"{note}; the built-in claim {cj.relation} could not "
+                          "decide it, and the probe has no other way to "
+                          "check it")
     # a string parameter with no stated domain has no honest sampling
     # story, as in the automatic probes: numbers drawn for it would
     # falsify the claim on inputs the function was never meant to take
