@@ -350,7 +350,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return None
         both_finite = all(abs(v) != float("inf") for v in (lv, rv))
         if rel in ("==", "~="):
-            return lv == rv or (both_finite and abs(lv - rv) <= tol)
+            try:
+                return lv == rv or (both_finite and abs(lv - rv) <= tol)
+            except OverflowError:
+                from fractions import Fraction
+                return lv == rv or (both_finite and abs(
+                    Fraction(lv) - Fraction(rv)) <= Fraction(tol))
         if rel == "!=":
             # with no declared tolerance an inequality fails only at an
             # actual equality
@@ -361,10 +366,19 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # strict relations compare natively: equality within
             # tolerance must not count as strictly greater/less (the
             # probe loop applies the same rule)
-            return (lv <= rv + tol if rel == "<=" else
-                    lv >= rv - tol if rel == ">=" else
-                    lv < rv if rel == "<" else
-                    lv > rv if rel == ">" else None)
+            try:
+                return (lv <= rv + tol if rel == "<=" else
+                        lv >= rv - tol if rel == ">=" else
+                        lv < rv if rel == "<" else
+                        lv > rv if rel == ">" else None)
+            except OverflowError:
+                # an integer beyond float range: compare exactly
+                from fractions import Fraction
+                lv, rv, tol = Fraction(lv), Fraction(rv), Fraction(tol)
+                return (lv <= rv + tol if rel == "<=" else
+                        lv >= rv - tol if rel == ">=" else
+                        lv < rv if rel == "<" else
+                        lv > rv if rel == ">" else None)
         # an infinity on one side: native comparison is exact
         return (lv <= rv if rel == "<=" else lv >= rv if rel == ">=" else
                 lv < rv if rel == "<" else lv > rv if rel == ">" else None)
@@ -627,9 +641,15 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         overflowed = any(abs(v) == float("inf") for v in (lv, rv))
         if overflowed and not calls_nonfinite[0]:
             return None
-        scaled = slack + DEFAULT_RELATIVE_TOLERANCE * max(
-            abs(lv) if not overflowed else 0.0,
-            abs(rv) if not overflowed else 0.0)
+        magnitude = max(abs(lv) if not overflowed else 0.0,
+                        abs(rv) if not overflowed else 0.0)
+        try:
+            scaled = slack + DEFAULT_RELATIVE_TOLERANCE * magnitude
+        except OverflowError:
+            # an integer beyond float range: the tolerance is exact too
+            from fractions import Fraction
+            scaled = Fraction(slack) \
+                + Fraction(DEFAULT_RELATIVE_TOLERANCE) * magnitude
         exact = None if overflowed else _exact_decision(point, scaled)
         if exact is True:
             return None
