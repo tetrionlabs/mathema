@@ -159,15 +159,16 @@ print(mathema.check(discount_factor))
 <!-- example: pole output match=subset -->
 ```text
 mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
-  FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
+  falsified monotonic_increasing[x]: d(f(x), x) >= 0
            counterexample x = 1
-  FALSIFY even: f(-x) = f(x)
+  falsified even: f(-x) = f(x)
            counterexample x = -1
-  proven  is_deterministic: f(x) = f(x)
-  proven  is_defined: 1 - x != 0
-  FALSIFY is_pole_safe[x]: is_pole_safe(x)
+  proven    is_deterministic: f(x) = f(x)
+           missing for x (float) means nan
+  proven    is_defined: 1 - x != 0
+  falsified is_pole_safe[x]: is_pole_safe(x)
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
-  FALSIFY is_representation_safe[x]: is_representation_safe(x)
+  falsified is_representation_safe[x]: is_representation_safe(x)
            counterexample x = 1 (the int spelling) is admitted by the declared domain but the call raised ZeroDivisionError
            [implementation:representation]
 ```
