@@ -242,7 +242,7 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
                 return []
             choices.append(filled)
             continue
-        if k not in ("scalar", "float", "int"):
+        if k not in ("scalar", "int"):
             return []
         pieces = (bound.pieces if isinstance(bound, Domain) else (bound,))
         ends: list = []
@@ -345,7 +345,7 @@ def _guard_points(fn, facts, kinds: dict, domain: dict,
     for p, k in kinds.items():
         if p in literal_args:
             continue
-        if k not in ("scalar", "float", "int"):
+        if k not in ("scalar", "int"):
             return []
         values = _representative_values(k, domain.get(p))
         if not values:
@@ -2625,6 +2625,98 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
     return out
 
 
+def _always_raises(stmts) -> bool:
+    """Whether a block of statements raises on every path through it: a
+    `raise`, or an `if` whose branches both always raise, reached before
+    anything else ends the block."""
+    for stmt in stmts:
+        if isinstance(stmt, ast.Raise):
+            return True
+        if isinstance(stmt, ast.If) and stmt.orelse \
+                and _always_raises(stmt.body) and _always_raises(stmt.orelse):
+            return True
+        if isinstance(stmt, (ast.Return, ast.Break, ast.Continue)):
+            return False
+    return False
+
+
+def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
+    """Intent:
+        Whether a family claim's working domain is empty: f's own guards
+        refuse every input its annotations and binding admit. Read from
+        the body (no `return` anywhere and every path ends in a `raise`,
+        or a guard cut or `enforce_domain` that leaves no point of a
+        parameter's domain) and corroborated by calls at points of the
+        domain, each of which must be refused by f's own guard.
+    """
+    import inspect
+
+    import sympy
+
+    from .domain import bound_to_sympy_set, without_sentinels
+    if cj.relation not in routes.examine_predicates() or facts is None \
+            or facts.tree is None or not facts.params:
+        return False
+    # the numbers each parameter admits, its holes and absence aside
+    domain = {p: without_sentinels(b) if b is not None else None
+              for p, b in domain.items()}
+    func = next((n for n in ast.walk(facts.tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))), None)
+    if func is None:
+        return False
+    returns = any(isinstance(n, ast.Return) for n in ast.walk(func))
+    empty = not returns and _always_raises(func.body)
+    if not empty:
+        enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+        cuts = guard_cut_texts(fn, facts)
+        for p in facts.params:
+            bound = domain.get(p)
+            try:
+                here = bound_to_sympy_set(bound) if bound is not None \
+                    else sympy.S.Reals
+                if p in enforced:
+                    here = here & bound_to_sympy_set(enforced[p])
+            except Exception:
+                continue
+            sym = sympy.Symbol(p, real=True)
+            for text in cuts:
+                try:
+                    cond = sympy.sympify(text, locals={p: sym})
+                    if getattr(cond, "free_symbols", None) == {sym}:
+                        here = here - cond.as_set()
+                except Exception:
+                    continue
+            if here is sympy.S.EmptySet:
+                empty = True
+                break
+    if not empty:
+        return False
+    # corroborated: f's own guard refuses a call at each point tried
+    from .claim_families import _interval_ends
+    points = []
+    for value_at in (lambda lo, hi: lo, lambda lo, hi: (lo + hi) / 2,
+                     lambda lo, hi: hi):
+        point = {}
+        for p in facts.params:
+            if facts.param_kinds.get(p) not in ("scalar", "int"):
+                return False
+            ends = _interval_ends(domain.get(p)) or (-1.0, 1.0)
+            v = value_at(*ends)
+            point[p] = int(v) if facts.param_kinds.get(p) == "int" else float(v)
+        points.append(point)
+    body = inspect.unwrap(fn)
+    for point in points:
+        try:
+            _call_by_name(fn, point)
+        except Exception as exc:
+            if not deliberate_raise(exc, body if exc.__class__.__name__
+                                    not in ("DomainError",) else fn):
+                return False
+            continue
+        return False
+    return True
+
+
 def _set_text(found) -> str:
     """A real set as interval text: `[0, 4]`, `(0, 4]`, a union joined
     with `∪`."""
@@ -4564,6 +4656,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                         f"{families.current_family_name(accepted)}")
                 if said not in (probe.note or ""):
                     probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
+        if probe.verdict != "falsified" and _working_domain_empty(
+                fn, facts, cj, {**domain, **(cj.domain or {})}):
+            # every input f admits is refused by its own guards: there is
+            # nothing to judge, and no verdict over nothing
+            probe.verdict = "unknown"
+            probe.route = None
+            probe.sketch = None
+            probe.note = ("no valid domain: f's own guards refuse every "
+                          "input its annotations and binding admit")
         working = _working_domain_record(fn, facts, cj,
                                          {**domain, **(cj.domain or {})})
         if working:
