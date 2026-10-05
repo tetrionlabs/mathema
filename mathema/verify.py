@@ -1043,6 +1043,32 @@ def _unsettled_library_hints(key: str, claims: list) -> list:
     return out
 
 
+def _import_failure(key: str, root: str) -> "str | None":
+    """Intent:
+        Why the module a dotted key lives in does not import, as
+        `importing <module> raises <Error>: <message>`, trying the
+        longest module prefix of the key first; None when a prefix
+        imports or none could be tried.
+    """
+    import importlib
+    import sys
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    parts = key.split(".")
+    for end in range(len(parts) - 1, 0, -1):
+        module = ".".join(parts[:end])
+        try:
+            importlib.import_module(module)
+            return None
+        except ModuleNotFoundError as e:
+            if e.name and module.startswith(e.name):
+                continue
+            return f"importing {module} raises ModuleNotFoundError: {e}"
+        except Exception as e:
+            return f"importing {module} raises {type(e).__name__}: {e}"
+    return None
+
+
 def _unparseable_claim_name(entry: dict) -> "str | None":
     """The name of the first claim of a declared entry that does not
     parse as a claim, or None when each one does (or has no name)."""
@@ -1419,6 +1445,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             out.problems.append(msg)
             line = (f"FAIL {key}: cannot resolve to a live function "
                     f"(declared in {source})")
+            failure = _import_failure(key, root)
+            if failure:
+                line += f"; {failure}"
             row = {"key": key, "why": "unresolvable", "passed": False,
                    "problems": ["cannot resolve to a live function"],
                    "counts": {}, "claims": []}
