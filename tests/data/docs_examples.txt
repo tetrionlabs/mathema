@@ -126,10 +126,12 @@
 [ ] docs/symbology.md:135
 [-] docs/three-layers.md:36
 [x] docs/tutorial.md:loop                        file run file run output file run output run output run output run output run output
+[x] docs/verdicts.md:reading                     file run output
+[-] docs/verdicts.md:69
 [x] README.md:parity                             file run output
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output
 [-] README.md:193
 [-] README.md:294
 
-# 103 examples checked, 4 output fences not yet marked, 10 commands checked by hand
+# 104 examples checked, 4 output fences not yet marked, 10 commands checked by hand
