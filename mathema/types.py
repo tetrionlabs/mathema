@@ -375,8 +375,11 @@ def _element_policy(args) -> "tuple[str, tuple] | None":
 
 def _numpy_dtype_scalar(hint) -> "str | None":
     """The scalar type a subscripted `numpy.ndarray`/`NDArray` states for
-    its entries (`NDArray[np.int64]`), or None."""
+    its entries (`NDArray[np.int64]`), or None. A shape argument
+    (`ndarray[tuple[int, ...], dtype[...]]`) states no entry type."""
     for arg in typing.get_args(hint):
+        if arg is tuple or typing.get_origin(arg) is tuple:
+            continue
         for inner in (arg, *typing.get_args(arg)):
             scalar = _scalar_slot_type(inner)
             if scalar is not None:

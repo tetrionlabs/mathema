@@ -70,7 +70,49 @@ def callable_signature(fn) -> inspect.Signature:
     except ValueError:
         if _is_ufunc(fn):
             return ufunc_signature(fn)
-        raise
+        return documented_signature(fn)
+
+
+def documented_signature(fn) -> inspect.Signature:
+    """Intent:
+        The signature a compiled callable's docstring opens with, by
+        numpy's convention: a first line `dot(a, b, out=None)` naming
+        the callable itself. Each default is read as a Python literal.
+
+    Raises:
+        ValueError: the docstring opens with no call of that name, or
+            the call does not read as a parameter list.
+    """
+    import ast
+    name = getattr(fn, "__name__", "") or ""
+    doc = getattr(fn, "__doc__", None) or ""
+    first = next((line.strip() for line in doc.splitlines() if line.strip()), "")
+    if not name or not first.startswith(f"{name}(") or not first.endswith(")"):
+        raise ValueError(f"no signature found for {name or fn!r}")
+    try:
+        tree = ast.parse(f"def _f({first[len(name) + 1:-1]}): pass")
+        args = tree.body[0].args  # type: ignore[attr-defined]
+        positional = args.posonlyargs + args.args
+        defaults = [None] * (len(positional) - len(args.defaults)) \
+            + list(args.defaults)
+        params = []
+        for i, arg in enumerate(positional):
+            kind = _P.POSITIONAL_ONLY if i < len(args.posonlyargs) \
+                else _P.POSITIONAL_OR_KEYWORD
+            default = defaults[i]
+            params.append(_P(arg.arg, kind) if default is None else
+                          _P(arg.arg, kind, default=ast.literal_eval(default)))
+        if args.vararg is not None:
+            params.append(_P(args.vararg.arg, _P.VAR_POSITIONAL))
+        for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+            params.append(_P(arg.arg, _P.KEYWORD_ONLY) if default is None
+                          else _P(arg.arg, _P.KEYWORD_ONLY,
+                                  default=ast.literal_eval(default)))
+        if args.kwarg is not None:
+            params.append(_P(args.kwarg.arg, _P.VAR_KEYWORD))
+        return inspect.Signature(params)
+    except (SyntaxError, ValueError, TypeError) as exc:
+        raise ValueError(f"no signature found for {name}") from exc
 
 
 def module_scope(fn) -> dict:

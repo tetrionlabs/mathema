@@ -2029,7 +2029,18 @@ def _type_cases(cls, depth: int = 0, element: bool = False) -> list:
         hints = typing.get_type_hints(cls)
     except Exception:
         return []
-    optional_keys = getattr(cls, "__optional_keys__", ()) if typing.is_typeddict(cls) else ()
+    optional_keys = set(getattr(cls, "__optional_keys__", ())
+                        if typing.is_typeddict(cls) else ())
+    for name, ann in list(hints.items()):
+        # a key's own Required/NotRequired marking, which typing reads
+        # into the class itself only from Python 3.11
+        word = str(typing.get_origin(ann)).rsplit(".", 1)[-1]
+        if word in ("NotRequired", "Required") and typing.get_args(ann):
+            hints[name] = typing.get_args(ann)[0]
+            if word == "NotRequired":
+                optional_keys.add(name)
+            else:
+                optional_keys.discard(name)
     out: list = []
     for name, ann in hints.items():
         if name in optional_keys:
