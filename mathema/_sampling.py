@@ -29,7 +29,7 @@ def representation_reach() -> float:
     assert PY_FLOAT64.max_magnitude is not None
     return PY_FLOAT64.max_magnitude
 
-# The string edge-case corpus the is_arbitrary_input_safe fuzzer draws
+# The string edge-case corpus the is_language_defined fuzzer draws
 # from: the inputs real code forgets, empty and whitespace, control
 # characters, combining and zero-width marks, non-ascii and astral
 # scripts, a very long string, and injection-/format-/path-shaped

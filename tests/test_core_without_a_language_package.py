@@ -3,7 +3,7 @@
 """Core works with no language package installed. With the language,
 adaptor and family registries emptied (so this holds in a venv that has
 the package too): finite sets of strings adjudicate under the plain
-`mathema` grammar, `is_arbitrary_input_safe` runs on core's own string
+`mathema` grammar, `is_language_defined` runs on core's own string
 corpus, the suggestions for a `str` parameter name none of the
 package's families, nothing names the package unless the claim writes
 `L[...]`, a written `L[unicode]` is skipped with the unresolved-language
@@ -70,15 +70,15 @@ def test_finite_sets_of_strings_adjudicate(fn, law, verdict, witness):
 
 
 def test_arbitrary_input_safety_runs_on_core_s_own_corpus():
-    crash = _one(first, "is_arbitrary_input_safe(s)")
+    crash = _one(first, "is_language_defined(s)")
     assert crash.verdict == "falsified", crash.note
     assert crash.counterexample.startswith("s = '' raised IndexError")
-    assert _one(shout, "is_arbitrary_input_safe(s)").verdict == "holds"
+    assert _one(shout, "is_language_defined(s)").verdict == "holds"
 
 
 def test_the_suggestions_name_no_package_family():
     names = [c.name for c in suggest_claims(shout)]
-    assert "is_arbitrary_input_safe[s]" in names
+    assert "is_language_defined[s]" in names
     assert not [n for n in names if n.split("[")[0] in PACKAGE_FAMILIES]
     for c in suggest_claims(shout):
         assert not any(name in f"{c.raw} {c.meta}" for name in PACKAGE_NAMES)
@@ -87,7 +87,7 @@ def test_the_suggestions_name_no_package_family():
 @pytest.mark.parametrize("fn, law", [
     (shout, 'for s in {"a", " b ", ""}, f(f(s)) == f(s)'),
     (rank, 'for c in {"red", "mauve"}, f(c) >= 1'),
-    (first, "is_arbitrary_input_safe(s)"),
+    (first, "is_language_defined(s)"),
 ])
 def test_nothing_names_the_package_unless_the_claim_writes_a_language(fn, law):
     p = _one(fn, law)

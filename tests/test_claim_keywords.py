@@ -29,11 +29,11 @@ def test_defined_expands_to_the_gated_hazard_members():
     names = {p.name for p in r.probes}
     # gated in: the missing guard exists, log is a restricted builtin
     assert "is_missing_safe[x]" in names
-    assert "is_builtin_safe[x]" in names
+    assert "is_number_set_safe[x]" in names
     # gated out: no pole, no overflow-prone call, nothing suggested
     # that isn't structurally relevant
     assert not any(n.startswith("is_pole_safe") for n in names)
-    assert not any(n.startswith("is_extremity_safe") for n in names)
+    assert not any(n.startswith("is_overflow_safe") for n in names)
     # and no mathematical suggestions ride along with a keyword
     assert not any(n.startswith("monotonic") for n in names)
 

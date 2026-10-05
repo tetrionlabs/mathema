@@ -564,7 +564,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         also scalar; commutativity and associativity when fn takes
         exactly two real scalar parameters and returns one;
         determinism (and seeded reproducibility where randomness is detected); numerical stability; is_pole_safe[param]/
-        is_builtin_safe[param] when fn's own body actually calls
+        is_number_set_safe[param] when fn's own body actually calls
         something whose real domain a declared bound could be checked
         against; and, for a function whose first parameter is a
         sequence and the rest are scalar, a lower and upper bound
@@ -827,7 +827,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
 
     # The computation-safety predicates, gated per registered
     # family: each SafetyFamily names the parameters it is
-    # structurally relevant for (is_builtin_safe only where the body
+    # structurally relevant for (is_number_set_safe only where the body
     # passes the parameter to a restricted-domain builtin,
     # is_pole_safe only where the fast-path lift finds a pole,
     # is_missing_safe only where an explicit raising missing-guard

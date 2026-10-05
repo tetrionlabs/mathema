@@ -325,7 +325,7 @@ derive route has no reading of a string, so it declines with the
 reason rather than proving real-only facts about a symbol standing in
 for one; a finite language (an enumeration a package registers) is
 the exception, swept point by point and proven or falsified with the
-member. `is_arbitrary_input_safe(text)` keeps fuzzing a string
+member. `is_language_defined(text)` keeps fuzzing a string
 parameter for accidental crashes as before.
 
 Without the package installed, a claim over `L[unicode]` is not wrong,
@@ -443,7 +443,7 @@ a parameter whose signature names none, for code that cannot be
 annotated (`runtime_types: {returns: pandas.Series}`); see [runtime
 types](runtime-types.md).
 
-### `is_pole_safe(param)` / `is_builtin_safe(param)`
+### `is_pole_safe(param)` / `is_number_set_safe(param)`
 
 Two family-derive-only predicates (`route="derive"` always, neither
 has a probe-route meaning), suggested automatically wherever they
@@ -451,7 +451,8 @@ apply: `is_pole_safe(param)` asks whether param's declared domain
 provably excludes every pole mathema can find in the function's own
 body (including gamma/loggamma's own pole at every non-positive integer
 of their argument, not just an ordinary denominator's finite root set);
-`is_builtin_safe(param)` asks whether param's declared domain is safe
+`is_number_set_safe(param)` (read from the old spelling
+`is_builtin_safe` too) asks whether param's declared domain is safe
 for every restricted-domain math function it's actually passed to
 (`factorial`/`sqrt`/`log`/`asin`/`acos`/`gamma`/`lgamma`, sympy's own
 symbolic generalization is often wider than the real function's own

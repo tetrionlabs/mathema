@@ -57,8 +57,10 @@ from .analysis import Facts, SourceUnavailable, _parse_notes, analyze_source
 # alias below (`mathema.claims.check(...)`, load-bearing in README/tests), so
 # the claims()-decorator is exposed as `claims_decorator` at this level,
 # still directly importable as `from mathema.authoring import claims`.
-from .authoring import (DomainError, MissingValueError, claims as claims_decorator,
+from .authoring import (DomainError, MissingValueError, RangeError,
+                        claims as claims_decorator,
                         declared_from_function, enforce_dimensions, enforce_domain,
+                        enforce_range,
                         enforce_structure,
                         materialize_declared, parse_docstring_claims,
                         reject_missing, resolve_declared, retrieve)
@@ -111,7 +113,7 @@ __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "__version__", "claims_decorator", "declared_from_function",
            "resolve_declared", "materialize_declared",
            "parse_docstring_claims", "enforce_domain", "MissingValueError", "enforce_dimensions", "enforce_structure", "reject_missing",
-           "DomainError", "docstring_report", "DocstringReport", "lift_symbolic",
+           "DomainError", "RangeError", "enforce_range", "docstring_report", "DocstringReport", "lift_symbolic",
            "critical_points", "suggest_claims", "Conjecture",
            "issue", "ReasonCode", "Category", "ClaimReasonCode",
            "get_unicode_output", "set_unicode_output",
