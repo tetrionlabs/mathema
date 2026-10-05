@@ -115,6 +115,7 @@
 [x] docs/runtime-types.md:rt-proofs              run verdicts verdicts verdicts run output  (requires)
 [x] docs/runtime-types.md:rt-drawdown            run verdicts run output verdicts  (requires)
 [-] docs/runtime-types.md:105
+[x] docs/security.md:let-warning                 file session session
 [h] docs/start.md:40
 [h] docs/start.md:71
 [h] docs/start.md:99
@@ -128,6 +129,6 @@
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output
 [-] README.md:192
-[-] README.md:290
+[-] README.md:293
 
-# 101 examples checked, 4 output fences not yet marked, 10 commands checked by hand
+# 102 examples checked, 4 output fences not yet marked, 10 commands checked by hand

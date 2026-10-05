@@ -109,7 +109,7 @@ procedure delivered at the moment it chooses what to do.
 | `diagnose_falsification(target, claim)` | the code-wrong / claim-wrong fork, and why the judgement is handed back |
 
 Everything served is generated from what core already owns, so it
-cannot drift from the code it describes. The wall covers it: no
+cannot drift from the code it describes. The rule for tools covers it too: no
 resource or prompt takes a `verdict`/`accepted`/`stance`/`gates`/
 `pin`/`verified_by` parameter, none is named to suggest accepting,
 unlocking or PIN entry, and the material says plainly that acceptance,

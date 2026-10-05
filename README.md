@@ -200,9 +200,12 @@ the function is locked                  (mathema lock)
 ```
 
 No tool exposed over MCP accepts a verdict from its caller, and claim
-expressions are validated against a strict AST whitelist before they run, so
-a claim from an untrusted source can do no more than evaluate mathematics over
-the function (the function itself runs as it would in its own tests; see
+expressions are validated against a strict AST whitelist before they run. A
+claim can call the function under test, mathema's helpers and the functions it
+binds with `let`; a binding that reaches the system (`os`, `subprocess` and
+the like) is refused, and a binding into third-party code runs as it would if
+you imported it yourself, with a warning in the output (the function itself
+runs as it would in its own tests; see
 [Security and execution](https://mathema.tetrionlabs.com/security/)). `mathema accept` prints the
 exact write before making it, and lets a person accept evidence as sufficient,
 own a residual risk explicitly, or correct a claim the falsification showed

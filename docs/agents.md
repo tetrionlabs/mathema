@@ -71,6 +71,18 @@ None of this is a wall against an agent determined to subvert it, and it is
 not meant to be one: it is a tripwire. The normal loop cannot cross it, and
 every way around it leaves a trace in the record or the diff.
 
+## Claims an agent writes
+
+A claim can bind a function with `let` (`let g = json.dumps`). That is
+the same as importing the library and calling the function in your own
+code: the function runs. mathema refuses a binding that reaches the
+system (`os`, `sys`, `subprocess`, `builtins`, `shutil`, `socket`,
+`importlib` and others), and a binding into third-party code whose
+effects mathema cannot establish runs with a warning on the claim's
+line and in the record. Review a `let` in an agent's claim as you would
+an import in its code. [Security and execution](security.md) has the
+details.
+
 ## Giving an agent the tools
 
 Two pieces, both optional:
