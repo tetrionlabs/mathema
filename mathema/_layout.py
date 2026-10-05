@@ -24,6 +24,9 @@ import re
 _COMPUTATION = "is_numerically_stable"
 _EMPTY = "is_empty_safe"
 
+#: how strong each verdict a line can carry is, weakest first
+_STRENGTH = {"skipped": 0, "unknown": 1, "holds": 2, "proven": 3}
+
 _ADMISSIONS = re.compile(r"(?:\|(?:absent|missing|None|null|nan|NA|NaT|unset))+")
 _WRITTEN = re.compile(r" \| \{(?:missing|absent|None|null|nan|NA|NaT|unset|∅)"
                       r"(?:, (?:missing|absent|None|null|nan|NA|NaT|unset|∅))*\}")
@@ -180,7 +183,10 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             head = "falsified" + (f" at {falsified[0]}" if falsified[0] else "")
             head = head.split(": ", 1)[0] if ": " in head else head
         else:
-            head = _verdict(main)
+            # the weakest line: proven only when every line is proven
+            head = min((ln.split()[0] for ln in lines if ln.split()
+                        and ln.split()[0] in _STRENGTH),
+                       key=_STRENGTH.__getitem__, default=_verdict(main))
         out[id(main)] = [f"  {main.name}  {main.statement}   {head}", *lines]
     out["used"] = used
     return out

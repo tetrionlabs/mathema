@@ -73,3 +73,16 @@ def test_the_mathematics_line_keeps_its_own_verdict_under_an_empty_input_witness
     lines = _lines(rec)
     start = next(i for i, line in enumerate(lines) if line.startswith("  lead  "))
     assert lines[start + 1].split()[:2] == ["unknown", "mathematics"], lines[start + 1]
+
+
+def line_of(x: float) -> float:
+    return 2.0 * x + 1.0
+
+
+def test_the_headline_is_the_weakest_line_when_none_is_falsified():
+    # the mathematics is proven, the computation and the policy hold
+    rec = mathema.check(line_of, claims=[mathema.claim(
+        "for x in R, f(x) == 2*x + 1", name="line")])
+    lines = _lines(rec)
+    head = next(line for line in lines if line.startswith("  line  "))
+    assert head.endswith("   holds"), head
