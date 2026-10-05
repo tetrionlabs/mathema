@@ -898,6 +898,17 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     edges = {n: (list(_language_edges(n)) if n in language_names else
                  _complex_corners(n) if n in complex_names else
                  [_endpoint(n, "lo"), _endpoint(n, "hi")]) for n in names}
+    for n in names:
+        # -0.0 is a float input wherever 0 is in the domain, and code
+        # can tell it from 0.0 (atan2, copysign, 1 / x)
+        if n in language_names or n in complex_names:
+            continue
+        lo, hi = edges[n][0], edges[n][-1]
+        integral = getattr(cj_domain.get(n), "base_type", None) in ("Z", "N")
+        if (isinstance(lo, float) and isinstance(hi, float) and not integral
+                and lo <= 0.0 <= hi and domain_contains(-0.0, cj_domain.get(n))
+                if cj_domain.get(n) is not None else False):
+            edges[n] = [*edges[n], -0.0]
     if len(names) <= 6:
         # every corner of the box: 2^k points for k real coordinates
         # (four per complex coordinate)

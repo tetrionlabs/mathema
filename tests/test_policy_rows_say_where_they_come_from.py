@@ -66,11 +66,11 @@ def test_a_default_row_names_itself_and_its_confirmation():
     rec = mathema.check(lin, claims=[mathema.claim("for x in R, f(x) == 2*x + 1",
                                                    name="c")])
     lines = _lines(rec)
-    assert any(line.startswith("           the float64 computation of c ran at 43 "
+    assert any(line.startswith("           the float64 computation of c ran at 44 "
                                "points: nan, every corner and 40 interior points;")
                and line.endswith("; at x = nan f gave nan back") for line in lines)
     assert ("  holds   missing[x]: missing(f, x) propagates   [default for a float, "
-            "which may be nan; confirmed on the 43 draws of c[float]. Keep it by "
+            "which may be nan; confirmed on the 44 draws of c[float]. Keep it by "
             "writing it (mathema claims test_policy_rows_say_where_they_come_from.lin "
             "--write), or change the word to raises or drops if f should do "
             "otherwise]") in lines
@@ -80,11 +80,11 @@ def test_an_unaccounted_raise_is_a_named_sentence_row():
     rec = mathema.check(root_opt, claims=[mathema.claim("for x in [0, 4], f(x) >= 0",
                                                         name="c")])
     lines = _lines(rec)
-    assert ("           the float64 computation of c ran at 44 points: None, nan, "
+    assert ("           the float64 computation of c ran at 45 points: None, nan, "
             "every corner and 40 interior points; at x = None f raised TypeError; "
             "at x = nan f gave nan back") in lines
     assert ("  proven  missing[x]: missing(f, x) propagates   [from math.sqrt's own "
-            "policy row, which f calls; confirmed on the 44 draws of c[float]]") in lines
+            "policy row, which f calls; confirmed on the 45 draws of c[float]]") in lines
     at = lines.index("  FALSIFY absent[x]: f raised TypeError at x = None, and no claim "
                      "says it may")
     assert lines[at + 1] == (
