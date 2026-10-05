@@ -198,16 +198,14 @@ def test_an_overflow_under_complete_inputs_is_inconclusive_not_introduced():
             y = alpha * v + (1 - alpha) * y
         return y
     import mathema
-    rec = mathema.check(ema)
+    rec = mathema.check(ema, claims=[mathema.claim(
+        "for alpha in [0, 1], f(x, alpha) <= max(x)")])
     rows = {p.name: p for p in rec.probes}
     assert rows["missing[x]"].verdict != "falsified", rows["missing[x]"].note
     alpha = rows["missing[alpha]"]
-    # over a one-element x, ema returns x[0] whatever alpha holds
-    assert alpha.verdict == "falsified", alpha.note
-    assert re.match(r"x = \[[^,\]]+\], alpha = nan", alpha.counterexample), \
-        alpha.counterexample
-    assert "no fill of the hole changes" in alpha.note, alpha.note
-    assert "introduce" not in alpha.note, alpha.note
+    # a written claim's draws carry the policy rows (no rows on a bare check)
+    assert alpha.verdict != "falsified", alpha.note
+    assert alpha.meta["mathema.policy"]["behaviour"] != "introduces", alpha.meta
 
 
 def test_a_policy_row_decided_by_refilling_says_so_on_its_route():

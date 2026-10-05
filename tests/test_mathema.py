@@ -236,10 +236,12 @@ def test_trials_budget_is_configurable():
     def double(x: float) -> float:
         return 2 * x
 
-    r = mathema.check(double, trials=10)
+    r = mathema.check(double, trials=10,
+                      claims=[mathema.claim("for x in [0, 1], f(x) <= 2")])
     # a falsification stops at its first witness, so its n counts the
     # trials run up to it, never more than the budget; a policy row's n
-    # counts the calls at missing inputs among those trials
+    # counts the calls at missing inputs among those trials, and a
+    # written claim is what carries policy rows
     policy = [p for p in r.probes if (p.meta or {}).get("mathema.policy")]
     assert all(p.n == 10 for p in r.probes
                if p.n and p.verdict != "falsified" and p not in policy)
