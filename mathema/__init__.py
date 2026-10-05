@@ -503,6 +503,45 @@ def _domains_from_claims(claims) -> dict:
     return out
 
 
+def _offer_splits(fn, facts, claims: list, probes: list,
+                  written: list) -> None:
+    """Record on each falsified value claim falsified only below some
+    length the split that turns it into two held rows
+    (`_split.split_offer`), as `mathema.split`, with the claim's text
+    as its author wrote it (`written`, the call-site strings), else as
+    the record renders it."""
+    from ._split import split_offer
+    from .conjecture import claim as _parse
+    from .spec import canonical_claim_text
+    texts = {}
+    for c in written:
+        try:
+            texts[_parse(c).name] = c
+        except Exception:
+            continue
+    by_name = {}
+    for c in claims:
+        try:
+            cj = _parse(c) if isinstance(c, str) else c
+            text = texts.get(cj.name) or canonical_claim_text(cj)
+        except Exception:
+            continue
+        by_name[cj.name] = (cj, text)
+    for p in probes:
+        meta = p.meta or {}
+        cj, text = by_name.get(p.name, (None, None))
+        if cj is None or meta.get("mathema.companion_of") \
+                or meta.get("mathema.policy") or p.verdict != "falsified":
+            continue
+        try:
+            offer = split_offer(fn, facts, cj, p, text)
+        except Exception:
+            offer = None
+        if offer is not None:
+            p.meta = {**meta, "mathema.split": offer,
+                      "mathema.split_statement": text}
+
+
 def _matrix_names_of(fn) -> frozenset:
     """The parameters `fn`'s signature declares as matrices, over which
     bars in a claim (`|A|`) read as the determinant."""
@@ -729,6 +768,9 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                                                 known_premises=known_premises,
                                                 float_companions=True,
                                                 pseudo_infinity=pseudo_infinity)
+        if all_claims:
+            _offer_splits(fn, facts, all_claims, probes,
+                          [c for c in (claims or ()) if isinstance(c, str)])
         # what f does with a value that is not there, for every parameter
         # that admits one and no stated policy row covers; a bare check
         # (no claim written, only suggestions) carries none
