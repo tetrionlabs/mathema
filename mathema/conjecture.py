@@ -7690,8 +7690,15 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             cj, fn, facts, cj_domain, assumption,
             ctx.premise_structures, extensive)
         if dproof is not None and dproof.status == "proven":
-            proven = Probe(cj.name, statement, "proven",
-                           sketch=dproof.sketch, note=note,
+            # trusted definition rows are axioms; a row only verified
+            # by execution is evidence and caps the proof at holds
+            from .definitions import rows_sketch
+            capped, sketch = rows_sketch(
+                (dproof.meta or {}).get("mathema.definitions") or [],
+                dproof.sketch)
+            proven = Probe(cj.name, statement,
+                           "holds" if capped else "proven",
+                           sketch=sketch, note=note,
                            condition=dproof.quantifier, route="derive",
                            meta=_provenance_meta(dproof))
             listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain,

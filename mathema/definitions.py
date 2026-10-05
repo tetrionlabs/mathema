@@ -27,9 +27,19 @@ verifies each against the installed library); a row from a project's
 claims file or a third party is used only once `mathema verify` has
 recorded it `holds` or `proven` locally, or it was accepted with
 `mathema accept <key> <row> --as trusted`, and feeds sampling only
-until then. A row verify recorded `falsified` is never used. A proof
-through definition rows stays `proven`, and its record lists each row
-used (`meta["mathema.definitions"]`) with its source and local status.
+until then. A row verify recorded `falsified` is never used.
+
+A `definition` row trusted by mathema (bundled, read with the installed
+library inside its `versions:` range) or by the user (accepted `--as
+trusted`) is an axiom: a proof through it stays `proven`, and its
+sketch names it ("taking numpy.std as std(a, ddof=1) (axiom, bundled
+with mathema, numpy 2.0 to 2.x)"). Any other row the proof uses (one
+only verified by execution, or a bundled row read outside its range)
+is evidence: the proof is `holds`, and its sketch says how to lift it
+("accept the row as trusted: mathema accept KEY ROW --as trusted").
+The record lists each row used (`meta["mathema.definitions"]`) with
+its source, local status, `standing` ("axiom" or "evidence"),
+`trusted_by` ("mathema" or "user"), `versions` and `installed`.
 """
 from __future__ import annotations
 
@@ -154,11 +164,19 @@ class Row:
     pins: dict
     premises: list
     ranks: dict = field(default_factory=dict)
+    standing: str = "evidence"
+    trusted_by: "str | None" = None
+    versions: str = "*"
+    installed: str = "*"
 
     def use(self) -> dict:
         return {"key": self.key, "row": self.name,
                 "statement": self.statement, "source": self.source,
-                "status": self.status, "library": self.library}
+                "status": self.status, "library": self.library,
+                "standing": self.standing, "trusted_by": self.trusted_by,
+                "versions": self.versions, "installed": self.installed,
+                "params": list(self.params),
+                "rhs": ast.unparse(self.rhs)}
 
 
 @dataclass
@@ -203,10 +221,12 @@ def _local_row(root: "str | None", key: str, name: str) -> "dict | None":
                  if isinstance(c, dict) and c.get("name") == name), None)
 
 
-def _local_status(local: "dict | None", statement: str) -> "str | None":
+def _local_status(local: "dict | None", statement: str,
+                  versions: "str | None" = None) -> "str | None":
     """The local verdict of a recorded row stating `statement`
-    (`trusted` for an accepted testimony), or None when nothing was
-    recorded for this statement."""
+    (`trusted` for an accepted testimony still tied to the row as
+    written, `statement` and its `versions` range), or None when
+    nothing was recorded for this statement."""
     if local is None:
         return None
     if _canonical(str(local.get("statement") or "")) != _canonical(statement):
@@ -215,7 +235,9 @@ def _local_status(local: "dict | None", statement: str) -> "str | None":
     accepted = local.get("accepted") or {}
     if accepted.get("as") == "trusted" and not accepted.get("stale") \
             and verdict in ("holds", "proven"):
-        return "trusted"
+        from .acceptance import trust_mismatch
+        if trust_mismatch(accepted, statement, versions) is None:
+            return "trusted"
     return verdict or None
 
 
@@ -225,7 +247,8 @@ def _installed_root() -> "str | None":
 
 
 def row_standing(root: "str | None", key: str, row: dict,
-                 bundled: bool) -> "tuple[str | None, str]":
+                 bundled: bool,
+                 versions: "str | None" = None) -> "tuple[str | None, str]":
     """Intent:
         `(status, reason)` for one definition row: `status` is the
         local status a usable row carries (`bundled`, `holds`,
@@ -235,11 +258,16 @@ def row_standing(root: "str | None", key: str, row: dict,
     from .compendium import OUTSIDE_VERSIONS
     meta = row.get("meta") or {}
     if meta.get(OUTSIDE_VERSIONS):
+        if bundled:
+            # a bundled row read outside its range is evidence, not an
+            # axiom: usable, and a proof through it is capped
+            return "outside", ""
         return None, (f"its versions ({meta[OUTSIDE_VERSIONS]}) exclude "
                       f"the installed library")
     statement = str(row.get("statement") or "")
     local = _local_status(_local_row(root, key, str(row.get("name"))),
-                          statement)
+                          statement,
+                          str(row.get("versions") or versions or "*"))
     if local == "falsified":
         return None, "mathema verify recorded it falsified"
     if bundled:
@@ -334,6 +362,87 @@ def _parse_row(key: str, row: dict) -> "tuple | None":
     return params, rhs, pins, premises, ranks
 
 
+def _standing(row: dict, status: str, bundled: bool) -> tuple:
+    """Intent:
+        `(standing, trusted_by)` of a usable definition row: an
+        `"axiom"` trusted by `"user"` when accepted `--as trusted`, by
+        `"mathema"` when bundled and read inside its versions range;
+        otherwise `"evidence"` (verified by execution, or a bundled row
+        read outside its range), trusted by no one. Only a row named
+        `definition` can be an axiom.
+    """
+    if not is_definition_name(row.get("name")):
+        return "evidence", None
+    if status == "trusted":
+        return "axiom", "user"
+    if bundled and status != "outside":
+        return "axiom", "mathema"
+    return "evidence", None
+
+
+def _versions_words(library: str, spec: str) -> str:
+    """A version range in words: `numpy 1.24 to 2.x` for `>=1.24,<3`,
+    `numpy 2 and later` for `>=2`, `numpy, any version` for `*`."""
+    name = library.split(" ", 1)[0]
+    spec = (spec or "*").strip()
+    if spec == "*":
+        return f"{name}, any version"
+    low = high = None
+    for part in (p.strip() for p in spec.split(",")):
+        if part.startswith(">="):
+            low = part[2:]
+        elif part.startswith("<"):
+            high = part[1:]
+    if high is not None and high.isdigit():
+        high = f"{int(high) - 1}.x"
+    elif high is not None:
+        high = f"below {high}"
+    if low and high:
+        return f"{name} {low} to {high}"
+    if low:
+        return f"{name} {low} and later"
+    return f"{name} {high}"
+
+
+def rows_sketch(used: list, sketch: "str | None") -> "tuple[bool, str | None]":
+    """Intent:
+        `(capped, sketch)` for a derive proof through the definition
+        rows `used` (their `Row.use()` entries): `capped` when any row
+        is evidence rather than an axiom, and the proof's sketch with a
+        line naming each row: an axiom as `taking numpy.std as std(a,
+        ddof=1) (axiom, bundled with mathema, numpy 2.0 to 2.x)`,
+        evidence with how to lift it (`accept the row as trusted:
+        mathema accept KEY ROW --as trusted`).
+    """
+    if not used:
+        return False, sketch
+    lines = []
+    capped = False
+    for u in used:
+        call = f"{u['key']} as {u.get('rhs')}"
+        if u.get("standing") == "axiom":
+            whose = ("accepted as trusted" if u.get("trusted_by") == "user"
+                     else "bundled with mathema, "
+                          + _versions_words(u.get("library", ""),
+                                            u.get("versions", "*")))
+            lines.append(f"taking {call} (axiom, {whose})")
+            continue
+        capped = True
+        lines.append(f"taking {call} (evidence, {u['key']} {u['row']} row "
+                     f"{_evidence_words(u)}); accept the row as trusted: "
+                     f"mathema accept {u['key']} {u['row']} --as trusted")
+    head = "; ".join(lines)
+    return capped, (f"{head}; {sketch}" if sketch else head)
+
+
+def _evidence_words(use: dict) -> str:
+    status = use.get("status")
+    if status == "outside":
+        return (f"outside its versions {use.get('versions')} for "
+                f"{use.get('library')}")
+    return f"verified: {status}"
+
+
 class RowBook:
     """Intent:
         The definition rows of the project at `root` (the project
@@ -376,7 +485,8 @@ class RowBook:
                     or not is_definition_name(row.get("name")):
                 continue
             status, reason = row_standing(self.root, key, row,
-                                          info["bundled"])
+                                          info["bundled"],
+                                          info.get("versions"))
             if status is None:
                 why = why or f"{row.get('name')}: {reason}"
                 continue
@@ -387,12 +497,16 @@ class RowBook:
                 continue
             params, rhs, pins, premises, ranks = parsed
             version = _installed_version(info["compendium"]) or "*"
+            standing, trusted_by = _standing(row, status, info["bundled"])
             out.append(Row(
                 key=key, name=str(row["name"]),
                 statement=str(row.get("statement")), source=info["source"],
                 status=status, library=f"{info['compendium']} {version}",
                 params=params, rhs=rhs, pins=pins, premises=premises,
-                ranks=ranks))
+                ranks=ranks, standing=standing, trusted_by=trusted_by,
+                versions=str(row.get("versions") or info.get("versions")
+                             or "*"),
+                installed=version))
         self._rows[key] = out
         if why and not out:
             self._withheld[key] = why
