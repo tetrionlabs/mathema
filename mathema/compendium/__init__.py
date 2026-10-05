@@ -17,9 +17,10 @@ range its claims apply to with two file-level fields:
 
 mathema bundles such files for `math` and `numpy` beside this module;
 a project states its own wherever its ordinary claims files live
-(`claims/numpy.claims.yaml`), and a project file shadows a bundled one
-per function key. A file applies only when the library is importable
-and its installed version is inside `versions` (`"*"`, `">=X"` or
+(`claims/numpy.claims.yaml`), and a project file's row replaces its
+bundled namesake, the other bundled rows staying. A file applies only
+when the library is importable and its installed version is inside
+`versions` (`"*"`, `">=X"` or
 `">=X,<Y"`; the standard library counts as `"*"`); otherwise it
 contributes nothing, rather than stale facts.
 
@@ -440,9 +441,9 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         "bundled"}`, where `entry` is the claims-file entry with its rows
         stamped as compendium testimony, `compendium` the library,
         `versions` the range the file declares, `source` the file it
-        came from, `bundled` whether that file ships with mathema, and
-        `shadowed` the rows of earlier files this entry replaces without
-        restating, `[{"source", "rows"}]`.
+        came from (the last file stating the key), `bundled` whether
+        every file stating it ships with mathema, and `replaced` the
+        bundled rows a project file replaces, `[{"source", "rows"}]`.
         `root=None` reads the bundled files only.
 
     Notes:
@@ -451,8 +452,10 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         files declaring `compendium:` count, and only when the library
         is importable at a version inside the file's range. A project
         file naming the project's own package (`names_own_package`)
-        does not count. A later file shadows an earlier one per key,
-        whole entry.
+        does not count. Files stating one key merge by row name
+        (`merge_rows`): a later file's row replaces its earlier
+        namesake, every other row stays. Each row names its file
+        (`stamp_row_sources`).
 
     Raises:
         spec.ClaimsFileError: a claims file that does not read.
@@ -480,33 +483,90 @@ def load_library_claims(root: "str | None" = ".") -> dict:
             continue
         stamp_library_rows(data, tag)
         mark_row_versions(data, library, aliases)
+        stamp_row_sources(data, where, versions)
         for key, entry in data.items():
             if isinstance(entry, dict) and not (entry.get("defines")
                                                 and not entry.get("claims")):
                 # a key that only defines its runtime's missing values
                 # (`defines:`) has no function claims to register
                 prior = out.get(key)
-                shadowed = list((prior or {}).get("shadowed") or [])
+                replaced = list((prior or {}).get("replaced") or [])
                 if prior is not None:
-                    restated = {r.get("name") for r in entry.get("claims")
-                                or [] if isinstance(r, dict)}
-                    dropped = [r.get("name") for r in
-                               prior["entry"].get("claims") or []
-                               if isinstance(r, dict) and r.get("name")
-                               and r.get("name") not in restated]
-                    if dropped:
-                        shadowed.append({"source": prior["source"],
-                                         "rows": dropped})
+                    entry, gone = merge_rows(prior["entry"], entry)
+                    for row in gone:
+                        if row_is_bundled(row):
+                            replaced.append({
+                                "source": row["meta"][ROW_SOURCE],
+                                "rows": [row.get("name")]})
                 out[key] = {"entry": entry, "compendium": library,
                             "versions": versions, "source": where,
-                            "bundled": path in shipped,
-                            "shadowed": shadowed}
+                            "bundled": path in shipped and (
+                                prior is None or prior.get("bundled")),
+                            "replaced": replaced}
     return out
+
+
+#: the meta keys naming the claims file a library row comes from and
+#: that file's version range
+ROW_SOURCE = "mathema.compendium_source"
+ROW_VERSIONS = "mathema.compendium_versions"
+
+
+def stamp_row_sources(data: dict, where: str, versions: str) -> None:
+    """Intent:
+        Mark every row of a compendium file with the file it comes from
+        (`ROW_SOURCE`, `mathema/compendium/...` for a bundled file) and
+        the file's version range (`ROW_VERSIONS`), unless the row already
+        names them.
+    """
+    for entry in data.values():
+        for row in (entry.get("claims") or []
+                    if isinstance(entry, dict) else []):
+            if isinstance(row, dict):
+                meta = dict(row.get("meta") or {})
+                meta.setdefault(ROW_SOURCE, where)
+                meta.setdefault(ROW_VERSIONS, str(versions))
+                row["meta"] = meta
+
+
+def row_is_bundled(row: dict) -> bool:
+    """Whether a library row comes from a claims file mathema bundles
+    (its `ROW_SOURCE`)."""
+    source = str((row.get("meta") or {}).get(ROW_SOURCE) or "")
+    return source.startswith(os.path.join("mathema", "compendium") + os.sep)
+
+
+def merge_rows(earlier: dict, later: dict) -> "tuple[dict, list]":
+    """Intent:
+        Two entries for one library key merged by row name: each row of
+        `later` replaces its namesake in `earlier` in place, the others
+        join at the end, and every other row of `earlier` stays. The
+        entry's other fields are `earlier`'s updated by `later`'s.
+        Returns the merged entry and the replaced rows of `earlier`.
+    """
+    by_name = {r.get("name"): r for r in later.get("claims") or []
+               if isinstance(r, dict)}
+    rows: list = []
+    replaced: list = []
+    for row in earlier.get("claims") or []:
+        name = row.get("name") if isinstance(row, dict) else None
+        if name in by_name:
+            rows.append(by_name.pop(name))
+            replaced.append(row)
+        else:
+            rows.append(row)
+    rows += [r for r in later.get("claims") or []
+             if isinstance(r, dict) and r.get("name") in by_name]
+    rows += [r for r in later.get("claims") or [] if not isinstance(r, dict)
+             or not r.get("name")]
+    merged = {**earlier, **{k: v for k, v in later.items() if k != "claims"}}
+    merged["claims"] = rows
+    return merged, replaced
 
 
 def compendium_functions(root: str = ".") -> dict:
     """Function key -> its applicable library claims entry, project
-    files shadowing bundled ones."""
+    rows replacing their bundled namesakes."""
     return {key: info["entry"]
             for key, info in load_library_claims(root).items()}
 

@@ -884,8 +884,9 @@ def claims_file_entries(path: str, root: str,
         `{"entry", "source"}`, `is_library` whether the file declares
         `compendium:`, and `lines` the one-line notes the sweep prints.
         A compendium file's key takes the entry that applies to it
-        (`load_library_claims`, where a project file shadows a bundled
-        one), else the file's own, stamped as compendium testimony.
+        (`load_library_claims`, where a project file's rows merge with
+        the bundled ones by name), else the file's own, stamped as
+        compendium testimony.
 
     Notes:
         A compendium file whose library is not importable, or is
@@ -1320,12 +1321,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         if info is not None and not info.get("bundled"):
             library.setdefault(lkey, info["source"])
     for lkey in sorted(library):
-        for gone in (library_claims.get(lkey) or {}).get("shadowed") or []:
+        info = library_claims.get(lkey) or {}
+        by_file: dict = {}
+        for gone in info.get("replaced") or []:
+            by_file.setdefault(gone["source"], []).extend(gone["rows"])
+        for where, rows in by_file.items():
             out.lines.append(
-                f"note {lkey}: {library_claims[lkey]['source']} shadows "
-                f"the rows {', '.join(gone['rows'])} of {gone['source']}, "
-                f"which are not used here; restate them in "
-                f"{library_claims[lkey]['source']} to keep them")
+                f"note {lkey}: the project replaces the bundled "
+                f"row{'s' if len(rows) != 1 else ''} {', '.join(rows)} of "
+                f"{where}; the other bundled rows still apply")
     for lkey in library:
         if lkey not in declared:
             info = library_claims[lkey]

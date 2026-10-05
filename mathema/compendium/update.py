@@ -435,7 +435,8 @@ def _plan_update(root: str) -> dict:
     import yaml
 
     from . import (_installed_version, _version_in_range, install,
-                   load_library_claims, resolved_calls, row_pins)
+                   load_library_claims, merge_rows, resolved_calls,
+                   row_pins)
     from ..families import claim_base_name
     from ..spec import load_verified
 
@@ -471,8 +472,11 @@ def _plan_update(root: str) -> dict:
         rows = (library_claims[site.key]["entry"].get("claims") or [])
         path, data = target(site.key.split(".")[0])
         entry = data.get(site.key)
-        current = list((entry or {}).get("claims") or []) if entry else \
-            [dict(r) for r in rows]
+        # the rows that apply: the library's (bundled and project merged
+        # by name) with this run's own additions to the project entry
+        own = list((entry or {}).get("claims") or [])
+        current = merge_rows({"claims": [dict(r) for r in rows]},
+                             {"claims": own})[0]["claims"]
         unpinned = [r for r in current if not row_pins(r) and r.get("name")]
         if not unpinned:
             if not any(row_pins(r) == site.pins for r in current):
@@ -530,13 +534,10 @@ def _plan_update(root: str) -> dict:
                          f"library{f', {why}' if why else ''}{recorded}")
         if not kept:
             continue
-        if entry is None:
-            # the project's entry shadows the bundled one: carry its rows
-            current = [{k: v for k, v in r.items() if k in (
-                "name", "statement", "route", "note", "versions")}
-                for r in current]
+        # the project entry merges with the bundled one by row name, so
+        # only the project's own rows and the new pinned ones are written
         data[site.key] = {**(entry or {}),
-                          "claims": current + [row for row, _v in kept]}
+                          "claims": own + [row for row, _v in kept]}
         rel = os.path.relpath(path, root)
         for row, verdict in kept:
             lines.append(f"{site.key}: add {row['name']} ({row['statement']})"

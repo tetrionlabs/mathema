@@ -484,6 +484,7 @@ class RowBook:
         self._library = _library_claims(self.root, load_library_claims)
         self._rows: dict = {}
         self._withheld: dict = {}
+        self._unusable: dict = {}
 
     def states(self, key: str) -> bool:
         info = self._library.get(key)
@@ -496,6 +497,13 @@ class RowBook:
             self._read(key)
         return self._rows[key]
 
+    def unusable(self, key: str) -> list:
+        """Each definition row of `key` that may not feed a proof, as
+        `<row>: <reason>`, whether or not another row may."""
+        if key not in self._rows:
+            self._read(key)
+        return list(self._unusable.get(key) or [])
+
     def withheld(self, key: str) -> "str | None":
         if key not in self._rows:
             self._read(key)
@@ -505,16 +513,25 @@ class RowBook:
         from .compendium import _installed_version
         out: list = []
         why = None
+        from .compendium import ROW_SOURCE, ROW_VERSIONS, row_is_bundled
         info = self._library.get(key)
         for row in (info or {}).get("entry", {}).get("claims") or []:
             if not isinstance(row, dict) \
                     or not is_definition_name(row.get("name")):
                 continue
-            status, reason = row_standing(self.root, key, row,
-                                          info["bundled"],
-                                          info.get("versions"))
+            # each row stands on the file it comes from: a project row
+            # replacing a bundled one is the project's testimony
+            meta = row.get("meta") or {}
+            bundled = (row_is_bundled(row) if meta.get(ROW_SOURCE)
+                       else info["bundled"])
+            file_versions = meta.get(ROW_VERSIONS) or info.get("versions")
+            source = meta.get(ROW_SOURCE) or info["source"]
+            status, reason = row_standing(self.root, key, row, bundled,
+                                          file_versions)
             if status is None:
                 why = why or f"{row.get('name')}: {reason}"
+                self._unusable.setdefault(key, []).append(
+                    f"{row.get('name')}: {reason}")
                 continue
             parsed = _parse_row(key, row)
             if parsed is None:
@@ -523,7 +540,7 @@ class RowBook:
                 continue
             params, rhs, pins, premises, ranks = parsed
             version = _installed_version(info["compendium"]) or "*"
-            standing, trusted_by = _standing(row, status, info["bundled"])
+            standing, trusted_by = _standing(row, status, bundled)
             from .compendium import below_floor
             if standing == "axiom" and trusted_by == "mathema" \
                     and below_floor(info["compendium"], version):
@@ -531,12 +548,11 @@ class RowBook:
                 standing, trusted_by = "evidence", None
             out.append(Row(
                 key=key, name=str(row["name"]),
-                statement=str(row.get("statement")), source=info["source"],
+                statement=str(row.get("statement")), source=source,
                 status=status, library=f"{info['compendium']} {version}",
                 params=params, rhs=rhs, pins=pins, premises=premises,
                 ranks=ranks, standing=standing, trusted_by=trusted_by,
-                versions=str(row.get("versions") or info.get("versions")
-                             or "*"),
+                versions=str(row.get("versions") or file_versions or "*"),
                 installed=version))
         self._rows[key] = out
         if why and not out:
@@ -718,9 +734,12 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
         found = _match_row(key, rows, positional, keywords)
         if found is None:
             if rows:
+                unusable = book.unusable(key)
                 raise Decline(f"{key}: no definition row states this call "
                               f"({', '.join(r.name for r in rows)} "
-                              f"take other arguments)")
+                              f"take other arguments"
+                              + (f"; not usable here: {'; '.join(unusable)}"
+                                 if unusable else "") + ")")
             raise no_row(key)
         row, rhs, premises = found
         inlined.uses.append(row)
