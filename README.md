@@ -381,7 +381,8 @@ pip install "mathema[all]"    # numpy, z3, MCP server, coverage
 
 The extras can also be taken one at a time: `mcp` exposes mathema's tools to
 an agent, `smt` adds z3 as a fallback decision procedure, `numpy` enables
-array-shaped claims, `coverage` reads a native `.coverage` report,
+array-shaped claims, `pandas` and `polars` sample a parameter annotated with
+their Series or DataFrame types, `coverage` reads a native `.coverage` report,
 `symbology` adds conventional notation and `language` brings the named
 languages a claim quantifies text and structured values over.
 

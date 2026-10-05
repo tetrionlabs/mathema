@@ -89,14 +89,21 @@ Security reports are handled per [SECURITY.md](https://github.com/tetrionlabs/ma
 
 | | Supported |
 |---|---|
-| Python | 3.10, 3.11, 3.12, 3.13 (tested on each in CI) |
+| Python | 3.10, 3.11, 3.12, 3.13, 3.14 (3.10 and 3.14 on every push, all five weekly and before each release) |
 | sympy | >= 1.12, < 2 |
 | PyYAML | >= 6 |
 | Operating system | Linux, macOS, Windows (pure Python; CI runs Linux) |
 
 The core install depends only on sympy and PyYAML. Everything else
-(numpy, z3, the MCP server, coverage) is an optional extra, so a
-capability you do not use is not a dependency you carry.
+(numpy, pandas, polars, z3, the MCP server, coverage) is an optional
+extra, so a capability you do not use is not a dependency you carry.
+
+The claims mathema ships about library functions each name the library
+versions they were checked against: numpy `>=1.24,<3` (some rows
+`>=2.4,<3`), pandas `>=2,<4`, polars `>=1,<2`. On a version outside a
+file's range that file adjudicates nothing, and `mathema compendium
+status` lists it as out of range, see
+[`mathema compendium`](modes/compendium.md).
 
 Python versions are supported while they receive upstream security
 support. A Python release reaching end of life is a minor-version
