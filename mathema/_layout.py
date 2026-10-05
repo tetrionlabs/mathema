@@ -7,7 +7,9 @@ claim's name, its statement and its overall verdict: falsified, with the
 witness, when any line is falsified, otherwise the verdict of its
 mathematics. One line follows per aspect of what is known about it:
 
-- `mathematics`: the claim over the numbers of its domain;
+- `mathematics`: the claim over the numbers of its domain, as derive
+  decided it; a verdict reached by running the code is a computation
+  line instead;
 - `computation`: the claim run in the number representation (`[float]`);
 - `policy`: what f does at each value that is not a number, as the call
   `f(nan)`, `f(None)` or `f([])`.
@@ -23,6 +25,9 @@ import re
 #: what a `[float]` companion's family is called
 _COMPUTATION = "is_numerically_stable"
 _EMPTY = "is_empty_safe"
+
+#: how strong each verdict a line can carry is, weakest first
+_STRENGTH = {"skipped": 0, "unknown": 1, "holds": 2, "proven": 3}
 
 _ADMISSIONS = re.compile(r"(?:\|(?:absent|missing|None|null|nan|NA|NaT|unset))+")
 _WRITTEN = re.compile(r" \| \{(?:missing|absent|None|null|nan|NA|NaT|unset|∅)"
@@ -44,6 +49,18 @@ def over_the_reals(statement: str) -> str:
     return text
 
 
+def _ran(route) -> bool:
+    """Whether a verdict was reached by running the code (a probe route)
+    rather than decided by derive."""
+    return str(route or "").startswith("probe")
+
+
+def _shown(statement: str, aspect: str) -> str:
+    """The claim as the line of `aspect` restates it."""
+    return over_the_reals(statement) if aspect == "mathematics" \
+        else over_numbers(statement)
+
+
 def _verdict(p) -> str:
     return (p.verdict or "").split(":", 1)[0]
 
@@ -52,6 +69,17 @@ def _admits(main, param: str, kind: str) -> bool:
     admitted = (((main.meta or {}).get("mathema.missing") or {})
                 .get("admitted") or {}).get(param) or {}
     return bool(admitted.get(kind))
+
+
+def _hole_word(main, param: str) -> str:
+    """The hole a member-less missing row is about: the parameter's one
+    admitted member (`nan` for a float), else the class, `missing`."""
+    admitted = (((main.meta or {}).get("mathema.missing") or {})
+                .get("admitted") or {}).get(param) or {}
+    members = admitted.get("missing")
+    if isinstance(members, (list, tuple)) and len(members) == 1:
+        return str(members[0])
+    return "missing"
 
 
 def _call(params: list, kinds: dict, param: str, word: str) -> str:
@@ -85,12 +113,38 @@ def _policy_detail(p) -> str:
             return f"no {pol.get('kind')} policy stated; assumed {behaviour}"
         return f"no {pol.get('kind')} policy stated; {_did(p.counterexample)}"
     source = (pol.get("reason") or "").split("; ", 1)[0]
+    if _verdict(p) == "falsified" and p.counterexample:
+        # what f did, beside the word it broke
+        said = f"{_did(p.counterexample)}, where the word is {behaviour}"
+        return f"{said} ({source})" if source else said
     return f"{behaviour}, {source}" if source else behaviour
 
 
+#: the policy a row's next step says to state, as the record words it
+_STATED = re.compile(r'--corrected "([^"]+)"|(?:write|state|,) `([^`]+)`')
+
+
 def _fixes(p, key: str, word: str) -> str:
-    return (f"possible fixes: (i) mathema claims {key} --adopt '{p.name}'  "
-            f"(ii) exclude {word}  (iii) handle {word} at entry")
+    """The possible fixes under a falsified absence or missing line: the
+    command that records what f does as a stated policy, when the row
+    names one policy to state, then excluding the value, then handling
+    it at entry."""
+    pol = (p.meta or {}).get("mathema.policy") or {}
+    # a row with no single policy needs one claim per case, not one command
+    mixed = (pol.get("sentence") or "").startswith("f has no single policy")
+    stated_all = {a or b for a, b in _STATED.findall(pol.get("next") or "")}
+    # a row whose next step states one claim per member or case has no
+    # single command that settles it
+    found = None if mixed or len(stated_all) != 1 else stated_all.pop()
+    fixes = []
+    if found:
+        stated = found
+        fixes.append(f"mathema accept {key} {p.name} --as discovery "
+                     f"--corrected \"{stated}\"")
+    fixes += [f"exclude {word}", f"handle {word} at entry"]
+    numerals = ("i", "ii", "iii")
+    return "possible fixes: " + "  ".join(
+        f"({n}) {fix}" for n, fix in zip(numerals, fixes))
 
 
 def _row(verdict: str, aspect: str, what: str, detail: str = "") -> str:
@@ -140,11 +194,13 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 detail = count_words(found["n"], meta.get("mathema.drawn"))
             elif verdict in ("unknown", "skipped") and found.get("note"):
                 detail = found["note"]
-            lines.append(_row(verdict, "mathematics", over_the_reals(main.statement),
-                              detail))
+            # a verdict reached by running the code is the computation's
+            aspect = "computation" if _ran(found.get("route")) else "mathematics"
+            lines.append(_row(verdict, aspect, _shown(main.statement, aspect), detail))
         else:
-            lines.append(_row(_verdict(main), "mathematics",
-                              over_the_reals(main.statement), _detail(main, count_words)))
+            aspect = "computation" if _ran(main.route) else "mathematics"
+            lines.append(_row(_verdict(main), aspect, _shown(main.statement, aspect),
+                              _detail(main, count_words)))
             if _verdict(main) == "falsified":
                 falsified.append(main.counterexample)
         lines += _extras(main)
@@ -169,9 +225,13 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
         for r in rows:
             pol = r.meta["mathema.policy"]
             param, kind = pol.get("parameter") or "", pol.get("kind") or ""
-            word = "None" if kind == "absent" else (pol.get("member") or "nan")
-            lines.append(_row(_verdict(r), "policy", _call(params, kinds, param, word),
-                              _policy_detail(r)))
+            word = "None" if kind == "absent" else (
+                pol.get("member") or _hole_word(main, param))
+            what = _call(params, kinds, param, word)
+            if pol.get("premise"):
+                # a row about one case of the parameter names its case
+                what += f" assuming {pol['premise']}"
+            lines.append(_row(_verdict(r), "policy", what, _policy_detail(r)))
             if _verdict(r) == "falsified":
                 falsified.append(r.counterexample)
                 lines.append(" " * 28 + _fixes(r, key, word))
@@ -180,7 +240,10 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             head = "falsified" + (f" at {falsified[0]}" if falsified[0] else "")
             head = head.split(": ", 1)[0] if ": " in head else head
         else:
-            head = _verdict(main)
+            # the weakest line: proven only when every line is proven
+            head = min((ln.split()[0] for ln in lines if ln.split()
+                        and ln.split()[0] in _STRENGTH),
+                       key=_STRENGTH.__getitem__, default=_verdict(main))
         out[id(main)] = [f"  {main.name}  {main.statement}   {head}", *lines]
     out["used"] = used
     return out
