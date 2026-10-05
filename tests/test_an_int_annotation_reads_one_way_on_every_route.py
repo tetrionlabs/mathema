@@ -60,3 +60,16 @@ def test_a_stated_int_type_narrows_a_float_parameter():
     p = _one(scaled, "for x in [0, 3] : int, f(x) == 0")
     assert p.verdict in ("proven", "holds"), (p.verdict, p.counterexample)
     assert "the claim narrows the type" in (p.note or "")
+
+
+def test_the_number_set_proof_declines_an_int_parameter_over_the_reals():
+    from mathema.analysis import analyze_source
+    from mathema.claim_families import _working_number_set_proof
+    from mathema.domain import _as_domain
+    real = _as_domain((0, 10))
+    facts = analyze_source(factorial_of)
+    assert _working_number_set_proof(factorial_of, facts, "n", ["n"],
+                                     {"n": real}) is None
+    p = _one(factorial_of, "for n in [0, 10] ⊂ R, is_number_set_safe(n)",
+             route="derive")
+    assert p.verdict != "proven", (p.verdict, p.sketch)
