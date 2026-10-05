@@ -1007,6 +1007,23 @@ def _unsettled_library_hints(key: str, claims: list) -> list:
     return out
 
 
+def _unparseable_claim_name(entry: dict) -> "str | None":
+    """The name of the first claim of a declared entry that does not
+    parse as a claim, or None when each one does (or has no name)."""
+    from .conjecture import claim
+    for row in entry.get("claims") or []:
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        text = row.get("statement") or row.get("law")
+        if not text:
+            continue
+        try:
+            claim(str(text), name=row["name"])
+        except Exception:
+            return str(row["name"])
+    return None
+
+
 def _no_applicable_file_note(key: str, entry: dict, root: str) -> str:
     """Intent:
         The line for a recorded library key no applicable claims file
@@ -1443,7 +1460,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             else:
                 where = ((declared_info or {}).get("source")
                          or "its docstring or claims file")
-                msg = (f"{key}: a claim declared in {where} does not "
+                bad = _unparseable_claim_name(
+                    (declared_info or {}).get("entry") or {})
+                which = f"the claim {bad!r}" if bad else "a claim"
+                msg = (f"{key}: {which} declared in {where} does not "
                        f"parse ({e}); correct it there and re-run verify")
                 out.authoring_errors.append(msg)
             out.problems.append(msg)
