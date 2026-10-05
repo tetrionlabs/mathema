@@ -22,6 +22,8 @@ def volatility(returns: np.ndarray) -> float:
 
 def value_at_risk(returns: np.ndarray) -> float:
     """The loss not exceeded on 95 percent of days, as a positive number."""
+    if len(returns) == 0:
+        raise ValueError("value at risk needs at least one return")
     return float(-np.percentile(returns, 5))
 
 
@@ -96,9 +98,9 @@ mathema verify --root .
 ok   numpy.percentile: library claims from mathema/compendium/numpy/statistics.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
 ok   numpy.sqrt: library claims from mathema/compendium/numpy/scalars.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
 ok   numpy.std: library claims from mathema/compendium/numpy/reductions.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
-ok   risk.spread: no baseline record; 1 proven, 2 holds, 0 falsified
-ok   risk.value_at_risk: no baseline record; 1 proven, 2 holds, 0 falsified
-ok   risk.volatility: no baseline record; 1 proven, 2 holds, 0 falsified
+ok   risk.moves: no baseline record; 1 proven, 3 holds, 0 falsified
+ok   risk.value_at_risk: no baseline record; 1 proven, 3 holds, 0 falsified
+ok   risk.volatility: no baseline record; 1 proven, 3 holds, 0 falsified
 0 fresh (form unchanged, skipped), 6 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```

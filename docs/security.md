@@ -13,15 +13,43 @@ the boundary in CI.
 
 | Input | How mathema treats it |
 |---|---|
-| **The claim text** | Parsed, then validated against a strict AST whitelist before anything is evaluated. A claim can call only the function under test, functions bound to it explicitly, and a fixed set of mathematical helpers. It has no access to builtins, dunder attributes, attribute chains deeper than one field, lambdas or comprehensions, and it cannot import anything. Claim text from an untrusted source, a reviewer or a model, cannot make mathema do more than evaluate mathematics over the function. |
+| **The claim text** | Parsed, then validated against a strict AST whitelist before anything is evaluated. A claim can call the function under test, a fixed set of mathematical helpers, and any function it names in a `let` binding (`let g = json.dumps`). It has no access to builtins, dunder attributes, attribute chains deeper than one field, lambdas or comprehensions. A `let` binding imports the module it names and calls the function, so a claim that binds third-party code runs that code. Bindings that reach the system are refused before anything runs: modules such as `os`, `sys`, `subprocess`, `builtins`, `shutil`, `socket`, `importlib`, `pathlib`, `pickle` and `sympy` (whose functions evaluate strings as Python), and paths inside allowed libraries that run text as code or read and write files, such as `numpy.load`. |
 | **The function under test** | Imported with Python's ordinary import machinery, which runs the module's top-level code, and then called in-process on the inputs mathema chooses. Whatever the function does when called, it does here: mathema adds no sandbox around it. |
 | **Record and claims files** | YAML read with the safe loader only, so a spec or record file cannot construct arbitrary objects. |
-| **Functions bound to a claim** | Treated exactly like the function under test: imported and called, including a foreign implementation reached through a shim. |
+| **Functions bound to a claim** | Treated exactly like the function under test: imported and called, including a foreign implementation reached through a shim. A binding into mathema itself, into your own project, or into a function a trusted compendium describes runs without comment. A binding into other third-party code runs and carries a warning in the output and in the record (the `warnings` field of the claim row). |
 
-The practical rule follows from the second row. Checking a claim about a
-function is the same trust decision as running that function's tests:
-if you would not run the code, do not check it, and if you would, mathema
-adds no new way for it to reach anything.
+The practical rule follows from the second and fourth rows. Checking a
+claim about a function is the same trust decision as running that
+function's tests: if you would not run the code, do not check it. A `let`
+binding to a library function is the same as importing that library in
+your own code and calling the function, and mathema says so when it cannot
+establish what the function does:
+
+<!-- example: let-warning file=notes.py -->
+```python
+def note_length(text: str) -> int:
+    return len(text)
+```
+
+<!-- example: let-warning session -->
+```console
+$ mathema check notes.py:note_length --claim 'let g = html.escape, for text in {"a < b", "fish & chips"}, f(g(text)) >= f(text)'
+ok   notes.note_length: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+     warning: let g = html.escape calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would
+```
+
+A binding that reaches the system is refused, and the command exits with
+code 2 without checking anything:
+
+<!-- example: let-warning session -->
+```console
+$ mathema check notes.py:note_length --claim 'let g = os.system, f(g(text)) >= 0'
+mathema: `let g = os.system`: `os.system` reaches the system through the module 'os', which a claim may not name
+```
+
+So claim text from an untrusted source, a reviewer or a model, deserves
+the review you would give a line of code that imports and calls the
+functions it names.
 
 ## What mathema itself touches
 

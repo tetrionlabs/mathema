@@ -313,21 +313,29 @@ for row in proof.meta["mathema.definitions"]:
 <!-- example: rt-proofs output -->
 ```text
 mathema.Record(sharpe) · source, no side effects · form ef276c12c167
-  proven  f_s_returns_c_approx_f_returns: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)
-           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every length from 2; missing for returns (pandas.Series) means nan, null or NA
-  holds   f_s_returns_c_approx_f_returns[float, pandas.Series]: assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns) (229 entries across 43 draws, sizes (2, 1) to (8, 1))
-           the float64 computation of f_s_returns_c_approx_f_returns ran at 43 points: nan, null, NA, every corner and 37 interior points; at returns = [nan, -0.009, 0.000606] f returned -9.81, so it drops the nan slot; at returns = [NA, -0.009, 0.000606] f returned -9.81, so it drops the NA slot
-  FALSIFY missing[returns]: missing(f, returns) propagates   [mathema's default word for a pandas.Series slot that may be nan, null or NA, not a claim of yours; f drops instead: a nan slot in, -9.81 out]
-           if -9.81 is the answer f should give when a slot is nan, write `missing(f, returns) drops`; if not, make f raise or give a hole back; or accept it as a discovery: mathema accept sharpe missing[returns] --as discovery --corrected "missing(f, returns) drops"
-through the pandas.Series.mean definition and pandas.Series.std definition rows, lowered to a sum over returns at a symbolic length; holds for every length
+  f_s_returns_c_approx_f_returns  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)   falsified at returns = [nan, -0.009, 0.000606]
+    proven     mathematics  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1])^n ⊂ ℝ, f(s(returns, c)) ~= f(returns)
+    holds      computation  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1])^n : float, f(s(returns, c)) ~= f(returns)   201 entries across 34 draws, sizes (2, 1) to (8, 1)
+    holds      policy       f([])
+    falsified  policy       f([..., nan, ...])   no missing policy stated; returns -9.81
+                            possible fixes: (i) mathema claims sharpe --adopt 'missing[returns]'  (ii) exclude nan  (iii) handle nan at entry
+through the pandas.Series.mean definition and pandas.Series.std definition rows, lowered to sums over returns at a symbolic length: the relation holds for every length
 pandas.Series.mean definition bundled mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std definition bundled mathema/compendium/pandas/series.claims.yaml
 ```
 
-A proof through definition rows is `proven` like any other, and its
-`[float, pandas.Series]` companion runs the real code in float64. A call
-no row covers is named in the derive note (`pandas.Series.ewm has no
-definition row`), and such a claim is adjudicated by sampling.
+A proof through definition rows is `proven` like any other: that is the
+`mathematics` line. The `computation` line runs the real code in float64
+and holds. The headline is still falsified, by a `policy` line: the claim
+admits a missing day (`[-0.1, 0.1]^n` lets a float entry be `nan` or
+`NA`), nothing in it says what `sharpe` should do with one, so mathema
+assumed the missing value would reach the result, and it does not.
+pandas' `mean` and `std` skip it, so `sharpe` drops the missing day and
+returns a number. Stating that behaviour (`missing(f, returns) drops`)
+or excluding missing values from the claim
+(`[-0.1, 0.1]^n \ {missing}`) settles it. A call no row covers is named
+in the derive note (`pandas.Series.ewm has no definition row`), and such
+a claim is adjudicated by sampling.
 
 ### Running extrema, least and greatest elements, and columns
 
@@ -382,11 +390,11 @@ print(textwrap.fill(proof.sketch, 78))
 ```text
 proven derive
 ∀ prices over [1.0, 100.0] with nothing missing, prices of every length of at least one
-through the definition rows pandas.Series.cummax definition, pandas.Series.min
-definition, lowered to sums over prices at a symbolic length: the relation
-holds for every length of at least one (every element of prices /
-cummax(prices) - 1.0 is <= 0 (0 < prices[i] / cummax(prices)[i] <= 1), so
-min(prices / cummax(prices) - 1.0) is too)
+through the pandas.Series.cummax definition and pandas.Series.min definition
+rows, lowered to sums over prices at a symbolic length: the relation holds for
+every length of at least one (every element of prices / cummax(prices) - 1.0
+is <= 0 (0 < prices[i] / cummax(prices)[i] <= 1), so min(prices /
+cummax(prices) - 1.0) is too)
 ```
 
 A DataFrame's columns are vectors on the derive route too, read by

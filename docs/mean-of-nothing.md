@@ -25,7 +25,7 @@ The series it will meet, slot by slot:
 []                     no slots at all: empty, not missing
 ```
 
-## The value claim holds
+## The claim, and what pandas promised
 
 A mean of returns in `[-1, 1]` lies in `[-1, 1]`:
 
@@ -38,50 +38,32 @@ value = mathema.claim("for xs in [-1, 1]^n, -1 <= f(xs) <= 1", name="bounded")
 print(mathema.check(mean_return, claims=[value]))
 ```
 
-<!-- example: mean output match=subset -->
+<!-- example: mean output -->
 ```text
 mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
-  holds   bounded: for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1 (617 entries across 118 draws, sizes (1, 1) to (8, 1))
-           every link of the chained comparison holds; f drops a missing slot when values remain (xs = [nan, 0.317, -0.0865, 0.455, 1]) and gives a hole back when every slot is missing (xs = [nan], [null]); at an all-NA series it raises TypeError instead
+  bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = [NA]
+    holds      mathematics  for xs in ([-1.0, 1.0])^n ⊂ ℝ, -1 <= f(xs) <= 1   429 entries across 92 draws, sizes (1, 1) to (8, 1)
+    proven     policy       f([..., nan, ...])   drops, from pandas.Series.mean's own policy row, which f calls
+    falsified  policy       f([..., nan, ...])   propagates, from pandas.Series.mean's own policy row, which f calls
+                            possible fixes: (i) mathema claims returns.mean_return --adopt 'missing[xs, count == 0]'  (ii) exclude nan  (iii) handle nan at entry
 ```
 
-It holds on every value `mean_return` returns. The note says what
-happened at the missing inputs the draws carried: a pandas Series slot
-can be `nan`, `null` (a `None` element) or `NA`, and mathema put each
-one in. pandas skips missing slots in a mean, so a partly missing series
-still has a mean. When every slot is missing there is no value to
-average and pandas gives a hole back, `nan`, which is no value to
-judge, so the value claim is not asked there. And at an all-`NA` series
-the function raises: `xs.mean()` is `pd.NA`, and `float(pd.NA)` raises
-`TypeError`.
+Read it from the top. The headline is the claim as mathema resolved it:
+a float slot may be missing, so `[-1, 1]^n` became
+`([-1.0, 1.0] | {missing})^n`. The `mathematics` line holds on every
+series of values: a mean of numbers in `[-1, 1]` stays there.
 
-## The policy rows say what pandas promised
-
-The same record carries the policy rows, what `mean_return` does with a
-value that is not there:
-
-<!-- example: mean run -->
-```python
-record = mathema.check(mean_return, claims=[value])
-print(record)
-```
-
-<!-- example: mean output match=subset -->
-```text
-mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
-  proven  missing[xs, count >= 1]: assuming count(xs) >= 1, missing(f, xs) drops   [from pandas.Series.mean's own policy row, which f calls; confirmed on the 118 draws of bounded]
-  FALSIFY missing[xs, count == 0]: assuming count(xs) == 0, missing(f, xs) propagates   [from pandas.Series.mean's own policy row, which f calls; f raises TypeError instead at xs = [NA]]
-           state `assuming count(xs) == 0, missing(f, xs, nan) propagates`, `assuming count(xs) == 0, missing(f, xs, null) propagates` and `assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)` if that is intended, or change f
-```
-
-`mean_return` makes one library call, and pandas' own policy rows
-(bundled with mathema) say what `Series.mean` does: it drops holes while
-values remain, and gives a hole back when none do. `count(xs)` is the
-number of value slots, so the premises split the calls exactly where
-pandas does. The first row is proven. The second is falsified: at `xs = [NA]`
-the function raises where pandas' row says a hole comes back. The
-record names the three claims that would state what the code does, one
-per member.
+The two `policy` lines say what `mean_return` does with a slot that is
+not there. A pandas Series slot can be `nan`, `null` (a `None` element)
+or `NA`, and mathema put each one in. `mean_return` makes one library
+call, and pandas' own policy rows (bundled with mathema) say what
+`Series.mean` does: it drops holes while values remain, and gives a hole
+back when none do. The first line is that first row, proven. The second
+is the second row, and it is falsified, which is why the headline is:
+at `xs = [NA]`, a series whose only slot is pandas' `NA`, `xs.mean()` is
+`pd.NA` and `float(pd.NA)` raises `TypeError`, where pandas' row says a
+hole comes back. Both lines print the call as `f([..., nan, ...])`; the
+witness on the headline names the series that broke the second.
 
 ## The gate: is it missing-safe?
 
@@ -93,16 +75,25 @@ code follows:
 print(mathema.check(mean_return, claims=[value, mathema.claim("is_missing_safe(f)")]))
 ```
 
-<!-- example: mean output match=subset -->
+<!-- example: mean output -->
 ```text
 mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
-  FALSIFY is_missing_safe[f]: is_missing_safe(f)
+  bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = [NA]
+    holds      mathematics  for xs in ([-1.0, 1.0])^n ⊂ ℝ, -1 <= f(xs) <= 1   429 entries across 92 draws, sizes (1, 1) to (8, 1)
+    proven     policy       f([..., nan, ...])   drops, from pandas.Series.mean's own policy row, which f calls
+    falsified  policy       f([..., nan, ...])   propagates, from pandas.Series.mean's own policy row, which f calls
+                            possible fixes: (i) mathema claims returns.mean_return --adopt 'missing[xs, count == 0]'  (ii) exclude nan  (iii) handle nan at entry
+  falsified is_missing_safe[f]: is_missing_safe(f)
            xs (pandas.Series): nan and null follow pandas.Series.mean's own policy row (drops when values remain, propagates when every slot is missing); NA does not: f raises TypeError when every slot is NA
            counterexample xs = [NA]: f raised TypeError
+           state `assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)` if the raise is intended, or change f
 ```
 
-`nan` and `null` follow pandas' rows. `NA` does not, and no claim says
-it may raise, so the gate is falsified with the call that shows it.
+The value claim's block repeats above it, since the gate is checked
+beside it. `nan` and `null` follow pandas' rows. `NA` does not, and no
+claim says it may raise, so the gate is falsified with the call that
+shows it, and with the claim that would state the raise if it is what
+you meant.
 
 ## And with no slots at all?
 
@@ -115,10 +106,15 @@ parameter's own runtime type, an empty float Series:
 print(mathema.check(mean_return, claims=[value, mathema.claim("is_empty_safe(xs)")]))
 ```
 
-<!-- example: mean output match=subset -->
+<!-- example: mean output -->
 ```text
 mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
-  FALSIFY is_empty_safe[xs]: is_empty_safe(xs)
+  bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = [NA]
+    holds      mathematics  for xs in ([-1.0, 1.0])^n ⊂ ℝ, -1 <= f(xs) <= 1   429 entries across 92 draws, sizes (1, 1) to (8, 1)
+    proven     policy       f([..., nan, ...])   drops, from pandas.Series.mean's own policy row, which f calls
+    falsified  policy       f([..., nan, ...])   propagates, from pandas.Series.mean's own policy row, which f calls
+                            possible fixes: (i) mathema claims returns.mean_return --adopt 'missing[xs, count == 0]'  (ii) exclude nan  (iii) handle nan at entry
+  falsified is_empty_safe[xs]: is_empty_safe(xs)
            counterexample xs = [] (an empty float Series): f returned nan for the empty input; raise, or return a value
 ```
 
@@ -159,24 +155,24 @@ print(mathema.check(returns_fixed.mean_return, claims=[
 ]))
 ```
 
-<!-- example: mean output match=subset -->
+<!-- example: mean output -->
 ```text
 mathema.Record(mean_return) · source, no side effects · form 9671b357ded6
-  holds   bounded: for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1 (768 entries across 149 draws, sizes (1, 1) to (8, 1))
-           every link of the chained comparison holds; f drops a missing slot when values remain (xs = [nan, 0.317, -0.0865, 0.455, 1]); when every slot is missing (nan, null, NA) it raises ValueError instead
-  proven  is_empty_safe[xs]: is_empty_safe(xs)
-  holds   no_values: assuming count(xs) == 0, missing(f, xs) raises(ValueError)   [stated; confirmed on the 149 draws of bounded]
-  proven  is_missing_safe[f]: is_missing_safe(f)
+  bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   holds
+    holds      mathematics  for xs in ([-1.0, 1.0])^n ⊂ ℝ, -1 <= f(xs) <= 1   551 entries across 123 draws, sizes (1, 1) to (8, 1)
+    proven     policy       f([..., nan, ...])   drops, from pandas.Series.mean's own policy row, which f calls
+  proven    is_empty_safe[xs]: is_empty_safe(xs)
+  holds     no_values: assuming count(xs) == 0, missing(f, xs) raises(ValueError)   [stated; confirmed on the 123 draws of bounded]
+  proven    is_missing_safe[f]: is_missing_safe(f)
            xs (pandas.Series): nan, null and NA drop when values remain, from pandas.Series.mean's own policy row; raises ValueError when every slot is missing, stated
-  proven  missing[xs, count >= 1]: assuming count(xs) >= 1, missing(f, xs) drops   [from pandas.Series.mean's own policy row, which f calls; confirmed on the 149 draws of bounded]
 ```
 
 Every member now has a policy the code follows, from pandas' row where
 values remain and from the stated one where none do, so the gate is
 proven; the empty series meets the guard, a deliberate rejection, so
-`is_empty_safe` is proven too. The value claim still holds on every
-value, and the note now says the function raises `ValueError` wherever
-every slot is missing.
+`is_empty_safe` is proven too. The value claim holds, and its headline
+with it: the one policy line left under it is pandas' row for a series
+with values in it, and the stated `no_values` covers the rest.
 
 See [missing values](missing-values.md) for the two kinds, the five
 behaviours and the policy rows in general.

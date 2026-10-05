@@ -11,6 +11,25 @@ changes.
 Below are four reading orders through this site, one per job. Each names
 what you get from each page and ends with the first command to run.
 
+A few words recur on every path:
+
+- A **verdict** is what a claim came to: `proven` (true for every input
+  in the range, by algebra), `holds` (survived every input mathema ran,
+  evidence rather than proof), `falsified` (an input broke it, and that
+  input, the **witness**, is kept), or `unknown` (nothing was settled,
+  with the reason).
+- A **route** is how the verdict was reached: `derive` reads the body
+  as mathematics, `probe` runs the real function, `examine` reads the
+  source for what it touches. To **adjudicate** a claim is to run it
+  through a route to a verdict.
+- A **record** is the stored result, bound to the code it was checked
+  against. Printed, each claim shows a headline and the lines it rests
+  on: `mathematics`, `computation` and `policy`, explained in
+  [Reading a record](verdicts.md#reading-a-record).
+- A **compendium** is a claims file about a library's functions rather
+  than your own; mathema ships ones for Python's `math` module, numpy,
+  pandas and polars.
+
 ## Checking a numerical library function
 
 For a quant or data scientist whose function calls numpy, pandas or

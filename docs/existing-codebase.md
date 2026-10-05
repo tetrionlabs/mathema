@@ -126,7 +126,7 @@ mathema claims billing.fees.discounted --suggest --root .
 
 <!-- example: codebase output match=subset -->
 ```text
-billing.fees.discounted: 17 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+billing.fees.discounted: 18 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
  individual claims:
   - commutative: f(price, rate) == f(rate, price)  [route best]
   - associative: f(f(price, rate), c) == f(price, f(rate, c))  [route best]
@@ -198,7 +198,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: codebase output -->
 ```text
-falsified rate=-2.72559 -> -32.66347642639832, rate=4.92258 -> 34.39055087522713 at price = -8.76733 (not decreasing)
+falsified rate = -2.7255878198803085 -> -32.66347642639832, rate = 4.922577492583454 -> 34.39055087522713 at price = -8.767334983247743 (not decreasing)
 ```
 
 The derivative of `price * (1 - rate)` in `rate` is `-price`, which is
@@ -261,9 +261,9 @@ mathema audit billing --root . --filter unclaimed --cols key,claims
 
 <!-- example: codebase output -->
 ```text
-ok   billing.fees.discounted: no baseline record; 2 proven, 0 holds, 0 falsified
+ok   billing.fees.discounted: no baseline record; 2 proven (1 claim, 1 built-in), 0 holds, 0 falsified
 ok   billing.fees.late_fee: no baseline record; 1 proven, 0 holds, 0 falsified
-ok   billing.fees.settle: no baseline record; 2 proven, 1 holds, 0 falsified
+ok   billing.fees.settle: no baseline record; 2 proven (1 claim, 1 built-in), 2 holds, 0 falsified
 0 fresh (form unchanged, skipped), 3 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 {"prefix":"billing.fees.","cols":["key","claims"],"rows":[["late_fee",0]]}
@@ -272,9 +272,9 @@ grammars detected: mathema; verified by this run: mathema
 Both claims proved on the derive route, and every record also carries
 `dependencies_current`, the claim `verify` adds that what the function
 depends on has not moved; that is the second `proven` on the two claimed
-functions and the only one on `late_fee`. The `1 holds` on `settle` is
-the proof's `[float]` companion, the same claim run through the real code
-in floating point. `--filter unclaimed` is the list of what is left, as
+functions and the only one on `late_fee`. The `2 holds` on `settle` are
+the proof's computation line, the same claim run through the real code
+in floating point, and its policy line for a `nan` input. `--filter unclaimed` is the list of what is left, as
 data, cut to two columns with `--cols`: one function. The records under
 `.mathema/verified/` are the evidence, and they are meant to be committed
 with the code.

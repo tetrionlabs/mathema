@@ -81,6 +81,17 @@ value (`0`, `±1`, `±1e-9`, `±1e6`, ...) is actually exercised once.
 `--trials-downscale 0` or a negative value is a clean CLI error, not a
 silent 0-trial `holds`.
 
+The budget above is the probe route's. The `computation` line under a
+proven claim runs on points of its own: every corner of the domain and
+points sampled inside it, with the count in its note
+(`ran at 43 points: every corner and 40 interior points`).
+`--trials-downscale` leaves it as it is. A finite domain small enough
+to run in about a second, an integer range or a small set, is swept
+point by point. A claim can carry its own budget, the `trials:` field
+of a claims-file entry or `mathema.claim(..., trials=N)`; it sets the
+count for that claim, and a finite domain whose points fit within it is
+swept in full.
+
 ## Exit code
 
 1 if any row had a problem; 0 otherwise, suitable for a pre-commit
@@ -103,6 +114,12 @@ Worked pipeline configs for GitHub Actions and GitLab are in
 
 ## Worked example: softmax, start to finish
 
+`softmax` takes a list of float scores and refuses an empty list with
+its own `ValueError` before `max()` can fail on it. mathema checks the
+empty input on its own line under each claim: a deliberate error at
+`[]` passes, while a crash the body merely stumbles into (`max()` of an
+empty list) falsifies the claim.
+
 <!-- example: softmax file=functions.py -->
 ```python
 # functions.py
@@ -110,12 +127,14 @@ import math
 from typing import Annotated
 from mathema.types import Shape
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Turn a vector of real-valued scores into a probability distribution.
 
     Claims:
         sums_to_one: sum(f(scores)) == 1
     """
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
     total = sum(exps)
@@ -125,7 +144,7 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 <!-- example: softmax session -->
 ```
 $ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"
-FAIL functions.softmax: source, no side effects; claims 5/5 adjudicated (0 proven, 4 holds, 1 falsified)  <- 1 policy row to settle: missing[scores, null], f raises TypeError at a null slot of scores where mathema's default says propagates; write `missing(f, scores, null) raises(TypeError)` or change f (mathema claims functions.softmax)
+ok   functions.softmax: source, no side effects; claims 6/6 adjudicated (0 proven, 6 holds, 0 falsified)
 ```
 
 Break it on purpose (drop the normalization, `return exps` instead of
@@ -138,12 +157,14 @@ import math
 from typing import Annotated
 from mathema.types import Shape
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Turn a vector of real-valued scores into a probability distribution.
 
     Claims:
         sums_to_one: sum(f(scores)) == 1
     """
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
     total = sum(exps)
@@ -157,7 +178,7 @@ counterexample is kept as knowledge, *and* the run fails):
 <!-- example: softmax session -->
 ```
 $ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"; echo $?
-FAIL functions.softmax: source, no side effects; claims 3/3 adjudicated (0 proven, 1 holds, 2 falsified)  <- 2 falsified claim(s)
+FAIL functions.softmax: source, no side effects; claims 5/5 adjudicated (0 proven, 3 holds, 2 falsified)  <- 2 falsified claim(s)
 1
 ```
 

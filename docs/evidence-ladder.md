@@ -53,7 +53,9 @@ nothing more. It does not say the computation in float64 gets the same
 answer. That is a separate claim, and mathema makes it for you: every
 claim the derive route proves spawns a companion named `<name>[float]`,
 in the numerical stability family, adjudicated on the probe route
-against the real code.
+against the real code. A printed record shows it as the `computation`
+line under the claim, beside the `mathematics` line that carries the
+proof; the record file keeps it as its own row, `<name>[float]`.
 The companion runs the relation at every corner of the declared domain
 and at sampled interior points. A raise, a `NaN`, or an `inf` or a loss
 of precision where the relation fails on the executed values falsifies
@@ -88,7 +90,7 @@ derive           one        proven
 derive           one[float] holds
 derive           missing[x] holds
 derive           one        proven
-derive           one[float] falsified x = -1.79769e+308
+derive           one[float] falsified x = -1.7976931348623157e+308
 derive           missing[x] holds
 derive:math_only one        proven
 ```

@@ -299,6 +299,12 @@ let u = html.unescape, for s in L[unicode], u(f(s)) == s
 let dump = json.dumps, for s in L[json], f(dump(f(s))) == f(s)
 ```
 
+A `let` binding imports the function it names and calls it, the same
+as importing it in your own code. For third-party code whose effects
+mathema cannot establish, the claim's line carries a warning saying so,
+and a binding that reaches the system (`os`, `subprocess` and the
+like) is refused; see [Security and execution](security.md).
+
 A parser of decimal digits is a homomorphism from concatenation to
 arithmetic, which is what `f(s + "0") == 10 * f(s)` says. Where a
 function raises inside the language it was declared over, the claim
@@ -392,13 +398,14 @@ behind sampling hints, `is_pole_safe[...]`, and the case-split fallback
 to also consider a fold/dot/sum-lifted function, not just a directly
 liftable one. This can make a partially-liftable function's own
 sampling genuinely hybrid, part real symbolic resolution, part
-empirical, not just the same analysis run slower. Off by default
-everywhere; results are cached by the function's form, so the cost,
-when paid, is paid at most once per distinct function shape per
-process.
+empirical, not just the same analysis run slower. Off by default;
+results are cached by the function's form, so the cost, when paid, is
+paid at most once per distinct function shape per process.
 
-On the derive route, extensive is a strategy ladder, not just a wider
-budget: exact real-root isolation (Sturm), adaptive interval
+On the derive side the extra effort is a strategy ladder, not just a
+wider budget. A claim on the default route (`best`) already climbs it
+when the first attempt leaves the claim undecided; `extensive=True`
+gives it to a claim pinned to `route="derive"` as well: exact real-root isolation (Sturm), adaptive interval
 refinement over the domain box, change-of-variable substitutions
 (t = sqrt(x)/erf(x)/tanh(x), atan compactification for unbounded
 claims), residue contour evaluation for trigonometric integrals, and
@@ -690,12 +697,17 @@ import mathema
 from mathema.types import Shape
 
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Normalised exponentials of a list of scores.
 
     Claims:
         sums_to_one: sum(f(scores)) == 1
+
+    Raises:
+        ValueError: scores is empty.
     """
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     top = max(scores)
     exps = [math.exp(s - top) for s in scores]
     total = sum(exps)
@@ -705,25 +717,38 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 <!-- example: write-spec repl -->
 ```
 >>> mathema.write_spec(softmax, root='.')
-mathema.Record(softmax) · source, no side effects · form 7982b776d687
-  holds   result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
-  holds   is_deterministic: f(scores) = f(scores) (835 entries across 155 draws, sizes (1, 1) to (8, 1))
-           derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
-  holds   is_state_safe: f(scores) = f(scores) (48 draws)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (949 entries across 192 draws, sizes (1, 1) to (8, 1))
-  holds   preserves_length: len(f(scores)) = len(scores) (809 entries across 154 draws, sizes (1, 1) to (8, 1))
-           at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
-  FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
-           counterexample scores = [0, 0]: [0.5, 0.5] vs [0.0, 0.0]
-  holds   preserves_type: type(f(scores)) = type(scores) (805 entries across 152 draws, sizes (1, 1) to (8, 1))
-           at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
-  FALSIFY is_sorted_output: is_sorted_output(f(scores))
-           counterexample scores = [4.86304, 8.4521, -9.06059, -3.61645]: output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
-  holds   sums_to_one: sum(f(scores)) = 1 (741 entries across 151 draws, sizes (1, 1) to (8, 1))
-           derive could not decide it (function body is not derivable, likely reason: loop: multiple-loops (line 1), the loop doesn't match a recognized fold/sum/dot shape); the probe decided it; at scores = [null] f raised TypeError; at scores = [nan] f gave nan back
-  FALSIFY missing[scores, null]: missing(f, scores, null) propagates   [mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError]
-           if the raise is intended, write `missing(f, scores, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept softmax missing[scores, null] --as discovery --corrected "missing(f, scores, null) raises(TypeError)"
-  holds   missing[scores, nan]: missing(f, scores, nan) propagates   [default for a list slot that may be nan; confirmed on the draws of is_deterministic, preserves_length, preserves_type and sums_to_one. Keep it by writing it (mathema claims softmax --write), or change the word to raises or drops if f should do otherwise]
+mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
+  holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
+  is_deterministic  f(scores) = f(scores)   proven
+    proven     mathematics  f(scores) = f(scores)
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  is_state_safe  f(scores) = f(scores)   proven
+    proven     mathematics  f(scores) = f(scores)
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  holds     is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (1033 entries across 224 draws, sizes (1, 1) to (8, 1))
+  proven    is_empty_safe[scores]: is_empty_safe(scores)
+  preserves_length  len(f(scores)) = len(scores)   holds
+    holds      mathematics  len(f(scores)) = len(scores)   876 entries across 187 draws, sizes (1, 1) to (8, 1)
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  is_permutation_of_input  sorted(f(scores)) = sorted(scores)   falsified at scores = [0]
+    falsified  mathematics  sorted(f(scores)) = sorted(scores)   counterexample scores = [0]: [1.0] vs [0.0]
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  preserves_type  type(f(scores)) = type(scores)   holds
+    holds      mathematics  type(f(scores)) = type(scores)   801 entries across 178 draws, sizes (1, 1) to (8, 1)
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  is_sorted_output  is_sorted_output(f(scores))   falsified at scores = [2.537592853314665, 7.217216867849682, 1.7984436307928746, 1.9400981035638782, -6.520226559095592]
+    falsified  mathematics  is_sorted_output(f(scores))   counterexample scores = [2.537592853314665, 7.217216867849682, 1.7984436307928746, 1.9400981035638782, -6.520226559095592]: output [0.009111004242349006, 0.9815244800729237, 0.004350686800624942, 0.005012767664508467, 1.0612195938077462e-06] fails is_sorted_output
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  raises[scores]  raises(f(scores), ValueError)   falsified at scores = [0]
+    falsified  mathematics  raises(f(scores), ValueError)   counterexample scores = [0]: returned array([1.]) instead of raising
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  sums_to_one  sum(f(scores)) = 1   holds
+    holds      mathematics  sum(f(scores)) = 1   830 entries across 187 draws, sizes (1, 1) to (8, 1)
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 ```
 
 `result_dimensions` came from the `Annotated[list, Shape("n")]` hints,
@@ -731,7 +756,12 @@ mathema.Record(softmax) · source, no side effects · form 7982b776d687
 mathema's built-in battery: every function gets the determinism, state
 and stability probes, and a list-in, list-out function also gets the
 sequence laws. Two of those rightly falsify, because softmax neither
-permutes nor sorts its input.
+permutes nor sorts its input. A third, `raises[scores]`, is a
+suggestion read off the guard: it asks whether `softmax` always raises
+`ValueError`, and the witness `[0]` shows it does not. The guard raises
+only for an empty list, which `is_empty_safe[scores]` reports, proven.
+The `policy` lines under each claim say what `softmax` does with an
+empty list and with a `nan` score.
 
 ## Shape markers and their shorthand
 

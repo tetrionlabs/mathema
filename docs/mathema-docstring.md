@@ -13,7 +13,7 @@ from typing import Annotated
 from mathema.types import Probability
 
 
-def ema(x: list, alpha: Annotated[float, Probability]) -> float:
+def ema(x: list[float], alpha: Annotated[float, Probability]) -> float:
     """Exponentially weighted moving average.
 
     Intent:
@@ -21,7 +21,12 @@ def ema(x: list, alpha: Annotated[float, Probability]) -> float:
 
     Claims:
         bounded: for x in [0, 1]^n, alpha in [0, 1], f(x, alpha) <= 1
+
+    Raises:
+        ValueError: x is empty.
     """
+    if not x:
+        raise ValueError("ema of an empty series")
     y = x[0]
     for v in x[1:]:
         y = alpha * v + (1 - alpha) * y
@@ -29,8 +34,8 @@ def ema(x: list, alpha: Annotated[float, Probability]) -> float:
 ```
 
 `mathema.check(ema, claims=[])` checks exactly the claims the docstring
-declares, and `x in [0, 1]^n` samples lists of any length whose entries
-lie in the unit interval:
+declares, and `x in [0, 1]^n` samples lists of one or more entries,
+each in the unit interval:
 
 <!-- example: ema run -->
 ```python
@@ -42,13 +47,19 @@ print(mathema.check(ema, claims=[]))
 
 <!-- example: ema output -->
 ```text
-mathema.Record(ema) · source, no side effects · form 0a80d14e175f
-  holds   bounded: for x in ([0.0, 1.0] | {missing})^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1 (626 entries across 127 draws, sizes (1, 1) to (8, 1))
-           derive could not decide it (sympy could not settle the sign of -Piecewise((x[0] - 1, Eq(L, 1)), (alpha*x[L - 1] + alpha*Sum((1 - alpha)^(L - k - 1)*x[k], (k, 1, L - 2)) + (1 - alpha)^(L - 1)*x[0] - 1, True))); the probe decided it; at x = [null, null], alpha = 0.747 f raised TypeError; at x = [null], alpha = 0.988 it converts the null slot to an absent result; at x = [nan] f gave nan back
-  FALSIFY missing[x]: f has no single policy for a missing x
-           f gives a hole back at x = [nan], alpha = 1; at x = [null, null], alpha = 0.747 it raises TypeError instead; at x = [null], alpha = 0.988 it converts the null slot to an absent result
-           to state each case, write `assuming len(x) == 1, missing(f, x, null) converts`, `assuming len(x) >= 2, missing(f, x, null) raises(TypeError)` and `missing(f, x, nan) propagates`; or make f treat a missing x one way
+mathema.Record(ema) · source, no side effects · form b96b0b96677f
+  bounded  for x in ([0.0, 1.0] | {missing})^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1   holds
+    holds      mathematics  for x in ([0.0, 1.0])^n ⊂ ℝ, alpha in [0.0, 1.0] ⊂ ℝ, f(x, alpha) <= 1   737 entries across 160 draws, sizes (1, 1) to (8, 1)
+    holds      policy       f(x=[])
+    holds      policy       f(x=[..., nan, ...])   no missing policy stated; assumed propagates
 ```
+
+The claim's line carries the verdict, and the lines under it say what
+it rests on: the claim over the real numbers (the mathematics), what
+`ema` does with an empty list (it raises the `ValueError` its docstring
+declares), and what it does with a `nan` entry (nothing in the claim
+says, so mathema assumes the `nan` reaches the result, and checks that
+it does).
 
 This is additive, a docstring with none of these sections behaves
 exactly as before, and every existing authoring surface (a claims file,
@@ -236,19 +247,20 @@ it; this is the metric meant to catch that.
 >>> from mathema.docstring import docstring_sync, docstring_sync_checklist
 >>> sync = docstring_sync(ema)
 >>> sync.score, sync.applicable
-(8, 10)
+(9, 11)
 >>> print("\n".join(docstring_sync_checklist(sync)))
 ✓ Intent: present
 ✓ intent concise (8 words)
 ✓ Claims: block in sync (names known, no surface conflicts)
 ✓ Claims: present (1 parsed)
-· claims {11 | 1 | -} floor | actual | expected (not scored)
+· claims {13 | 1 | -} floor | actual | expected (not scored)
 ✓ domain declared (1/1)
 ✗ domain enforced
+✓ raises covered (1/1)
 ✗ symbol coverage (2/3)
 ✓ params typed (2/2)
 ✓ return typed
-docsync 89% (how much of what the function does is surfaced as context)
+docsync 90% (how much of what the function does is surfaced as context)
 ! 'v' used but not documented
 ```
 
@@ -291,15 +303,15 @@ mathema audit ema --docs
 ```text
 quality:
 key     || has_docstring | has_summary | params | returns | raises | quality_ratio | claims   | concepts/tags
-ema.ema || yes           | yes         | 2/2    | no      | -      | 4/5           | 1 parsed | -
+ema.ema || yes           | yes         | 2/2    | no      | 1/1    | 5/6           | 1 parsed | -
 
-4/5 docstring quality criteria met (1 function).
+5/6 docstring quality criteria met (1 function).
 
 docsync:
 key     || intent | notes | claims   | {min_expected|actual|est_applicable} || domain_declared | enforced || raises_declared || params_typed | return_typed || callees_doc_quality | callees_docsync || sync_score
-ema.ema || yes    | -     | 1 parsed | {11 | 1 | -}                         || 1/1             | no       || -               || 2/2          | yes          || -                   | -               || 89%
+ema.ema || yes    | -     | 1 parsed | {13 | 1 | -}                         || 1/1             | no       || 1/1             || 2/2          | yes          || -                   | -               || 90%
 
-mean docsync 89% (how much of what each function does is surfaced as context) (1 function).
+mean docsync 90% (how much of what each function does is surfaced as context) (1 function).
 ```
 
 `domain_declared`/`enforced` sit together in one group, and
@@ -368,8 +380,12 @@ Exponentially weighted moving average.
 Intent:
     Blends each new value with the running mean.
 
+Raises:
+    ValueError: x is empty.
+
 Claims:
     bounded: for x in ([0.0, 1.0] | {missing})^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1
+    missing[x]: missing(f, x) propagates
 ```
 
 `render_docstring()` returns text only; it never writes to the `.py`

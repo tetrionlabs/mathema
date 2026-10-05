@@ -262,26 +262,29 @@ print(mathema.check(clamp_discount, claims=[mathema.claim(
     "for rate in R, 0 <= clamp_discount(rate) <= 1", name="in_unit")]))
 ```
 
-<!-- example: core output match=subset -->
+<!-- example: core output -->
 ```text
 mathema.Record(clamp_discount) · source, no side effects · form bc9fa73b5bd1
-  proven  in_unit: for rate in R|missing, 0 <= clamp_discount(rate) <= 1
-           where x=rate: ∀ x ∈ ℝ; missing for rate (float) means nan
-  holds   in_unit[float]: for rate in R|missing, 0 <= clamp_discount(rate) <= 1 (44 draws)
-           the float64 computation of in_unit ran link by link, and every link holds; at rate = nan f returned 1.0, so it drops the hole
-  FALSIFY missing[rate]: missing(f, rate) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, 1.0 out]
-           if 1.0 is the answer f should give for a missing rate, write `missing(f, rate) drops`; if not, make f raise or give nan back; or accept it as a discovery: mathema accept pricing.clamp_discount missing[rate] --as discovery --corrected "missing(f, rate) drops"
+  in_unit  for rate in R|missing, 0 <= clamp_discount(rate) <= 1   falsified at rate = nan
+    proven     mathematics  for rate in R, 0 <= clamp_discount(rate) <= 1
+    holds      computation  for rate in R, 0 <= clamp_discount(rate) <= 1   43 draws
+    falsified  policy       f(nan)   no missing policy stated; returns 1.0
+                            possible fixes: (i) mathema claims pricing.clamp_discount --adopt 'missing[rate]'  (ii) exclude nan  (iii) handle nan at entry
 ```
 
-Read it from the top. The value claim is proven, and its `[float]`
-companion, which runs the real code, holds: `1.0` is between 0 and 1.
-The last row is a **policy row**: what `clamp_discount` does with a
-missing `rate`. mathema's default for a float is that a hole comes back
-as a hole, and the code does something else: at `rate = nan` it returned
-`1.0`. That is mathema's default word contradicted, not your claim, and
-the line under it gives the choice. If a full discount is what a missing
-rate should mean, write `missing(f, rate) drops`. If not, give the hole
-back (`if rate != rate: return rate`), and the default row holds.
+Read it from the top. The headline is the claim as mathema resolved
+it, `rate in R|missing` (a float may be `nan`), and its verdict. Under
+it, the `mathematics` line is the claim over the real numbers, proven;
+the `computation` line runs the real code in float64, and holds. The
+last line is a **policy line**: what `clamp_discount` does with a
+missing `rate`. No policy was stated, so mathema assumed the default for
+a float, that a hole comes back as a hole, and the code does something
+else: at `rate = nan` it returned `1.0`. That falsifies the headline,
+and the line under it lists the ways forward. If a full discount is what
+a missing rate should mean, state it: `missing(f, rate) drops`. If not,
+take `nan` out of the claim (`for rate in R \ {missing}`), or handle it
+at entry, giving the hole back (`if rate != rate: return rate`) or
+raising.
 
 ### Two bugs in one line
 
@@ -293,28 +296,28 @@ print(mathema.check(risk_label, claims=[mathema.claim(
     'for score in [0, 1], risk_label(score) in {"high", "low"}', name="labels")]))
 ```
 
-<!-- example: core output match=subset -->
+<!-- example: core output -->
 ```text
 mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
-  holds   labels: for score in [0.0, 1.0] : float|absent|missing, risk_label(score) in {"high", "low"} (34 draws)
-           derive could not decide it (`in` is decided by execution: the symbolic lift has no reading of membership in a language or a set, so the probe route adjudicates it); the probe decided it; at score = None f raised TypeError; at score = nan f returned "low", so it drops the hole
-  FALSIFY missing[score]: missing(f, score) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, "low" out]
-           if "low" is the answer f should give for a missing score, write `missing(f, score) drops`; if not, make f raise or give nan back; or accept it as a discovery: mathema accept pricing.risk_label missing[score] --as discovery --corrected "missing(f, score) drops"
-  FALSIFY absent[score]: f raised TypeError at score = None, and no claim says it may
-           score is Optional[float], so f promised to take None. If the raise is intended, state `absent(f, score) raises(TypeError)`; otherwise handle None in f, or annotate score as float; or accept the raise as a discovery (mathema accept pricing.risk_label absent[score] --as discovery) and state `absent(f, score) raises(TypeError)`
+  labels  for score in [0.0, 1.0] : float|absent|missing, risk_label(score) in {"high", "low"}   falsified at score = nan
+    holds      mathematics  for score in [0.0, 1.0] ⊂ ℝ, risk_label(score) in {"high", "low"}   34 draws
+    falsified  policy       f(nan)   no missing policy stated; returns "low"
+                            possible fixes: (i) mathema claims pricing.risk_label --adopt 'missing[score]'  (ii) exclude nan  (iii) handle nan at entry
+    falsified  policy       f(None)   no absent policy stated; raises TypeError
+                            possible fixes: (i) mathema claims pricing.risk_label --adopt 'absent[score]'  (ii) exclude None  (iii) handle None at entry
 ```
 
-The value claim holds: every label is `"high"` or `"low"`. The two
-policy rows carry what it does not say. A missing score becomes `"low"`,
-the same silent drop as above. And `Optional[float]` promises to take
-`None`, which the function cannot: `None > 0.5` raises. No claim says it
-may, so the row prints as a sentence, with the claim to state if the
-raise is what you meant.
+The mathematics holds: every label is `"high"` or `"low"`. The two
+policy lines carry what it does not say, and both falsify the headline.
+A missing score becomes `"low"`, the same silent drop as above. And
+`Optional[float]` promises to take `None`, which the function cannot:
+`None > 0.5` raises. No claim says it may; if the raise is what you
+meant, state `absent(f, score) raises(TypeError)`.
 
 ### The code already says it
 
 A float that propagates through a library call, a guard, and `None` used
-as a flag each settle their own row:
+as a flag each settle their own policy line:
 
 <!-- example: core run -->
 ```python
@@ -329,19 +332,29 @@ print(mathema.check(in_base_currency, claims=[mathema.claim(
     "in_base_currency(amount, fx_rate) == amount * fx_rate", name="scales")]))
 ```
 
-<!-- example: core output match=subset -->
+<!-- example: core output -->
 ```text
 mathema.Record(volatility) · source, no side effects · form fafd8ee932cd
-  proven  missing[variance]: missing(f, variance) propagates   [from math.sqrt's own policy row, which f calls; confirmed on the 44 draws of nonneg[float]]
+  nonneg  for variance in [0.0, 1.0] : float|missing, volatility(variance) >= 0   proven
+    proven     mathematics  for variance in [0.0, 1.0] ⊂ ℝ, volatility(variance) >= 0
+    holds      computation  for variance in [0.0, 1.0] : float, volatility(variance) >= 0   43 draws
+    proven     policy       f(nan)   propagates, from math.sqrt's own policy row, which f calls
 mathema.Record(log_return) · source, no side effects · form cdfe6bbcc84d
-  proven  missing[ratio]: missing(f, ratio) raises(ValueError)   [from the guard on line 3; confirmed on the 43 draws of bounded[float]]
+  bounded  for ratio in [0.5, 2.0] : float|missing, log_return(ratio) <= 1   proven
+    proven     mathematics  for ratio in [0.5, 2.0] ⊂ ℝ, log_return(ratio) <= 1
+    holds      computation  for ratio in [0.5, 2.0] : float, log_return(ratio) <= 1   42 draws
+    proven     policy       f(nan)   raises(ValueError), from the guard on line 3
 mathema.Record(in_base_currency) · source, no side effects · form c0f6dfdbe44d
-  proven  absent[fx_rate]: absent(f, fx_rate) drops   [from the guard on line 3; confirmed on the 161 draws of scales]
+  scales  for amount in [0.0, 100.0] : float|missing, fx_rate in [0.5, 2.0] : float|absent|missing, in_base_currency(amount, fx_rate) = amount*fx_rate   holds
+    holds      mathematics  for amount in [0.0, 100.0] ⊂ ℝ, fx_rate in [0.5, 2.0] ⊂ ℝ, in_base_currency(amount, fx_rate) = amount*fx_rate   161 draws
+    holds      policy       f(amount=nan)   no missing policy stated; assumed propagates
+    holds      policy       f(fx_rate=nan)   no missing policy stated; assumed propagates
+    proven     policy       f(fx_rate=None)   drops, from the guard on line 3
 ```
 
 `volatility` makes one call, to `math.sqrt`, and `math.sqrt` has its
-own policy row in the bundled compendium: the hole comes back. The row
-comes from it, proven. `log_return` raises on a missing ratio behind a
+own policy row in the bundled compendium: the hole comes back. The
+policy line comes from it, proven. `log_return` raises on a missing ratio behind a
 guard, so the row comes from the guard. `in_base_currency` replaces an
 absent `fx_rate` with `1.0`, a drop, read from the same kind of guard.
 
@@ -355,13 +368,13 @@ print(mathema.check(fee_rate, claims=[mathema.claim(
     "for tier in [0, 3] subset Z, fee_rate(tier) < 1", name="below_one")]))
 ```
 
-<!-- example: core output match=subset -->
+<!-- example: core output -->
 ```text
 mathema.Record(fee_rate) · source, no side effects · form c1cba0e35dda
-  proven  below_one: for tier in [0, 3] : int, fee_rate(tier) < 1
+  proven    below_one: for tier in [0, 3] : int, fee_rate(tier) < 1
            ∀ tier in the declared finite domain (4 points)
            f returns None at tier = 0, which its return type Optional[float] allows; that point has no value to compare, so it is recorded, not judged
-  proven  absent[f]: absent(f) introduces   [from the return type Optional[float]: f returned None at tier = 0 from present inputs; confirmed on the draws of below_one]
+  proven    absent[f]: absent(f) introduces   [from the return type Optional[float]: f returned None at tier = 0 from present inputs; confirmed on the draws of below_one]
 ```
 
 `-> Optional[float]` declares that the result may be absent, so the
@@ -405,18 +418,19 @@ print(mathema.check(average_return, claims=[mathema.claim(
     "for returns in [0, 1]^n, 0 <= average_return(returns) <= 1", name="unit")]))
 ```
 
-<!-- example: containers output match=subset -->
+<!-- example: containers output -->
 ```text
 mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
-  holds   nonneg[float]: for positions in ([0.0, 1.0] | {missing})^n : float, total_exposure(positions) >= 0 (253 entries across 55 draws, sizes (1, 1) to (8, 1))
-           the float64 computation of nonneg ran at 55 points: null, nan, every corner and 40 interior points; at positions = [null] f raised TypeError; at positions = [nan] f gave nan back
-  FALSIFY missing[positions, null]: missing(f, positions, null) propagates   [mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError]
-           if the raise is intended, write `missing(f, positions, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept portfolio.total_exposure missing[positions, null] --as discovery --corrected "missing(f, positions, null) raises(TypeError)"
-  holds   missing[positions, nan]: missing(f, positions, nan) propagates   [default for a list slot that may be nan; confirmed on the 55 draws of nonneg[float]. Keep it by writing it (mathema claims portfolio.total_exposure --write), or change the word to raises or drops if f should do otherwise]
+  nonneg  for positions in ([0.0, 1.0] | {missing})^n : float, total_exposure(positions) >= 0   falsified at positions = [null]
+    proven     mathematics  for positions in ([0.0, 1.0])^n ⊂ ℝ, total_exposure(positions) >= 0
+    holds      computation  for positions in ([0.0, 1.0])^n : float, total_exposure(positions) >= 0   184 entries across 43 draws, sizes (1, 1) to (8, 1)
+    falsified  policy       f([..., null, ...])   no missing policy stated; raises TypeError
+                            possible fixes: (i) mathema claims portfolio.total_exposure --adopt 'missing[positions, null]'  (ii) exclude null  (iii) handle null at entry
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 mathema.Record(average_return) · source, no side effects · form ce47d44bdab7
-  holds   unit: for returns in ([0.0, 1.0] | {missing})^n : float, 0 <= average_return(returns) <= 1 (474 entries across 100 draws, sizes (1, 1) to (8, 1))
-           every link of the chained comparison holds; at returns = [nan] f gave nan back
-  proven  missing[returns]: missing(f, returns) propagates   [from numpy.mean's own policy row, which f calls; confirmed on the 100 draws of unit]
+  unit  for returns in ([0.0, 1.0] | {missing})^n : float, 0 <= average_return(returns) <= 1   holds
+    holds      mathematics  for returns in ([0.0, 1.0])^n ⊂ ℝ, 0 <= average_return(returns) <= 1   457 entries across 100 draws, sizes (1, 1) to (8, 1)
+    proven     policy       f([..., nan, ...])   propagates, from numpy.mean's own policy row, which f calls
 ```
 
 `sum` treats the two members of a list slot differently: it raises on a
@@ -492,10 +506,15 @@ print(mathema.check(delivery_note, claims=[mathema.claim(
     'len(delivery_note(order)) >= 1', name="has_text")]))
 ```
 
-<!-- example: slip output match=subset -->
+<!-- example: slip output -->
 ```text
-  holds   has_text: for order.note in {"leave at the door", "ring twice", None} \ {null}, len(delivery_note(order)) >= 1 (87 draws)
-  FALSIFY absent[order.note]: f raised KeyError at order.note, a key left out, and no claim says it may
+mathema.Record(delivery_note) · source, no side effects · form 723add5de9a8
+  skipped   callable: f(order) can be called
+           f could not be called with a value mathema built from the signature (order: dict): KeyError: 'note'
+  holds     has_text: for order.note in {"leave at the door", "ring twice", None} \ {null}, len(delivery_note(order)) >= 1 (87 draws)
+           derive could not decide it (function body is not derivable, likely reason: unsupported-construct: unsupported-call (line 3), an expression form the derive vocabulary doesn't cover yet); the probe decided it; at order.note, a key left out, f raised KeyError
+  falsified absent[order.note]: f raised KeyError at order.note, a key left out, and no claim says it may
+           if the raise is intended, state `absent(f, order.note) raises(KeyError)`; otherwise handle it in f, or exclude it where order.note is bound, `\ {unset}`; or accept the raise as a discovery (mathema accept slips.delivery_note absent[order.note] --as discovery) and state `absent(f, order.note) raises(KeyError)`
 ```
 
 A field's no-value is a missing input as a parameter's is: the value
@@ -583,7 +602,7 @@ $ mathema claims shop.clamp_discount
 shop.clamp_discount: no declared claims (mathema claims --suggest lists candidates)
 shop.clamp_discount: 1 policy row about rate
   contradicted by the code (change the word, the code, or accept it as a discovery; --write writes these with the contradiction in the note):
-    FALSIFY missing[rate]: missing(f, rate) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, 1.0 out]
+    falsified missing[rate]: missing(f, rate) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, 1.0 out]
              if 1.0 is the answer f should give for a missing rate, write `missing(f, rate) drops`; if not, make f raise or give nan back; or accept it as a discovery: mathema accept shop.clamp_discount missing[rate] --as discovery --corrected "missing(f, rate) drops"
 ```
 
@@ -658,12 +677,18 @@ print(mathema.check(risk_label, claims=[mathema.claim(
     mathema.claim("is_missing_safe(f)"), mathema.claim("is_absent_safe(f)")]))
 ```
 
-<!-- example: core output match=subset -->
+<!-- example: core output -->
 ```text
 mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
-  holds   is_missing_safe[f]: is_missing_safe(f)
+  risk_label_score_in_high_low  for score in [0.0, 1.0] : float|absent|missing, risk_label(score) in {"high", "low"}   falsified at score = nan
+    holds      mathematics  for score in [0.0, 1.0] ⊂ ℝ, risk_label(score) in {"high", "low"}   34 draws
+    falsified  policy       f(nan)   no missing policy stated; returns "low"
+                            possible fixes: (i) mathema claims pricing.risk_label --adopt 'missing[score]'  (ii) exclude nan  (iii) handle nan at entry
+    falsified  policy       f(None)   no absent policy stated; raises TypeError
+                            possible fixes: (i) mathema claims pricing.risk_label --adopt 'absent[score]'  (ii) exclude None  (iii) handle None at entry
+  holds     is_missing_safe[f]: is_missing_safe(f)
            score (float): nan drops, confirmed by calling f at score = nan; no claim states it yet
-  FALSIFY is_absent_safe[f]: is_absent_safe(f)
+  falsified is_absent_safe[f]: is_absent_safe(f)
            score (float): None raises TypeError, and no claim says it may
            counterexample score = None: f raised TypeError
            score is Optional[float], so f promised to take None. If the raise is intended, state `absent(f, score) raises(TypeError)`; otherwise handle None in f, or annotate score as float; or accept the raise as a discovery (mathema accept pricing.risk_label absent[score] --as discovery) and state `absent(f, score) raises(TypeError)`

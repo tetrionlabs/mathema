@@ -155,7 +155,7 @@ not proven, nothing to rest this claim on`, and `verify` fails on it
 <!-- example: balance session -->
 ```
 $ mathema verify --root .
-FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 3 holds, 1 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total); never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
+FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 5 holds, 1 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total); never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
 0 fresh (form unchanged, skipped), 1 adjudicated, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -185,7 +185,7 @@ resurrects.
 Re-authoring a claim that is already in the verified layer (the
 same name with a different statement, region, tolerance or route on
 any authoring surface) is a conflict verify flags, and the verified version keeps
-adjudicating until a human adopts the change:
+adjudicating until a person accepts the change as a supersession:
 
 ```
 mathema accept mypkg.mod.fn claim_name --as superseded

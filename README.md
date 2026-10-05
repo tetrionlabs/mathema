@@ -159,15 +159,16 @@ print(mathema.check(discount_factor))
 <!-- example: pole output match=subset -->
 ```text
 mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
-  FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
+  falsified monotonic_increasing[x]: d(f(x), x) >= 0
            counterexample x = 1
-  FALSIFY even: f(-x) = f(x)
+  falsified even: f(-x) = f(x)
            counterexample x = -1
-  proven  is_deterministic: f(x) = f(x)
-  proven  is_defined: 1 - x != 0
-  FALSIFY is_pole_safe[x]: is_pole_safe(x)
+  proven    is_deterministic: f(x) = f(x)
+           missing for x (float) means nan
+  proven    is_defined: 1 - x != 0
+  falsified is_pole_safe[x]: is_pole_safe(x)
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
-  FALSIFY is_representation_safe[x]: is_representation_safe(x)
+  falsified is_representation_safe[x]: is_representation_safe(x)
            counterexample x = 1 (the int spelling) is admitted by the declared domain but the call raised ZeroDivisionError
            [implementation:representation]
 ```
@@ -200,9 +201,12 @@ the function is locked                  (mathema lock)
 ```
 
 No tool exposed over MCP accepts a verdict from its caller, and claim
-expressions are validated against a strict AST whitelist before they run, so
-a claim from an untrusted source can do no more than evaluate mathematics over
-the function (the function itself runs as it would in its own tests; see
+expressions are validated against a strict AST whitelist before they run. A
+claim can call the function under test, mathema's helpers and the functions it
+binds with `let`; a binding that reaches the system (`os`, `subprocess` and
+the like) is refused, and a binding into third-party code runs as it would if
+you imported it yourself, with a warning in the output (the function itself
+runs as it would in its own tests; see
 [Security and execution](https://mathema.tetrionlabs.com/security/)). `mathema accept` prints the
 exact write before making it, and lets a person accept evidence as sufficient,
 own a residual risk explicitly, or correct a claim the falsification showed
@@ -378,7 +382,8 @@ pip install "mathema[all]"    # numpy, z3, MCP server, coverage
 
 The extras can also be taken one at a time: `mcp` exposes mathema's tools to
 an agent, `smt` adds z3 as a fallback decision procedure, `numpy` enables
-array-shaped claims, `coverage` reads a native `.coverage` report,
+array-shaped claims, `pandas` and `polars` sample a parameter annotated with
+their Series or DataFrame types, `coverage` reads a native `.coverage` report,
 `symbology` adds conventional notation and `language` brings the named
 languages a claim quantifies text and structured values over.
 
