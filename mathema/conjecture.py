@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from ._signatures import module_scope
 import ast
+import contextvars
 import cmath as _cmath
 import inspect
 import math
@@ -117,8 +118,8 @@ def _literal_call_args(text: str, sig_params: list) -> dict:
     literal at a real parameter's position: the call passes that value
     verbatim, so the parameter is FIXED to it, not synthesized. Unlike
     `_inferred_literal_domain` (numeric only, for branch pruning), this
-    keeps every literal kind (a string `"nope"`, a `True`, a number) and
-    its actual value, so both the sample and the counterexample witness
+    keeps every literal kind (a string `"nope"`, a `True`, a number, a
+    list such as the empty `[]`) and its actual value, so both the sample and the counterexample witness
     show what the call really passed rather than a synthesized
     placeholder in a literal's slot."""
     try:
@@ -133,6 +134,13 @@ def _literal_call_args(text: str, sig_params: list) -> dict:
         for p, arg in zip(sig_params, node.args):
             if isinstance(arg, ast.Constant):
                 fixed[p] = arg.value
+            elif isinstance(arg, (ast.List, ast.Tuple)):
+                # a literal container (`f([])`, `f([1.0, 2.0])`) passes
+                # that container verbatim
+                try:
+                    fixed[p] = ast.literal_eval(arg)
+                except (ValueError, SyntaxError):
+                    continue
     return fixed
 
 
@@ -1716,13 +1724,19 @@ def _membership_member(value, bound, sizes: "dict | None" = None) -> bool:
         right-hand side: a domain that states nothing about missing
         values admits none (`f(x) in [0, 1]` is false at a NaN), and one
         that lists a sentinel admits what it lists, resolved against the
-        value tested (`nan in {missing}` on a float). A space (`R^(m,n)`)
+        value tested (`nan in {missing}` on a float, and a `None` that
+        f returns where its containers are realised in a runtime whose
+        holes include null). A space (`R^(m,n)`)
         judges a container by its shape, a named axis at the size
         `sizes` binds to the name, then every entry the same way.
     """
     from . import _shapes
-    from .domain import MissingDefaults, complete
+    from .domain import MissingDefaults, complete, domain_contains
     nothing = MissingDefaults(False, (), "value", annotated=False)
+    if value is None and _NULL_IS_A_HOLE.get() \
+            and not getattr(bound, "dims", ()):
+        # the null hole of the runtime f's containers are realised in
+        return domain_contains(value, complete(bound, nothing), slot=True)
     return _shapes.in_space(value, complete(bound, nothing), sizes)
 
 
@@ -5245,7 +5259,8 @@ def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set 
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                     and node.func.id == "f":
                 for i, arg in enumerate(node.args):
-                    if isinstance(arg, ast.Constant) and i < len(names):
+                    if isinstance(arg, (ast.Constant, ast.List, ast.Tuple)) \
+                            and i < len(names):
                         shown.add(names[i])
                 for kw in node.keywords:
                     if kw.arg and isinstance(kw.value, ast.Constant):
@@ -8460,6 +8475,46 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
 
 def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                  sampling) -> "Probe":
+    """Intent:
+        `_probe_stage_in_slots` under the hole members of f's slot
+        types: a value f returns is read against a `{missing}` bound as
+        a hole of the runtime its containers are realised in (see
+        `_null_is_a_hole`).
+    """
+    token = _NULL_IS_A_HOLE.set(_null_is_a_hole(facts))
+    try:
+        return _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
+    finally:
+        _NULL_IS_A_HOLE.reset(token)
+
+
+#: whether a `None` that f returns is the null hole of the runtime its
+#: containers are realised in, while one claim is probed
+_NULL_IS_A_HOLE: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "mathema_null_is_a_hole", default=False)
+
+
+def _null_is_a_hole(facts) -> bool:
+    """Intent:
+        Whether some container parameter of f is realised in a runtime
+        whose holes include `null` (a pandas or a polars Series): a
+        reduction over it answers no value with that runtime's null,
+        which Python returns as `None`.
+    """
+    from .runtime_types import adapter, realised_parameters
+    try:
+        found = realised_parameters(facts)
+    except Exception:
+        return False
+    for detection in found.values():
+        runtime = adapter(detection.adapter)
+        if "null" in (getattr(runtime, "MISSING_MEMBERS", ()) or ()):
+            return True
+    return False
+
+
+def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
+                          sampling) -> "Probe":
     """Intent:
         The probe stage: relation/exception-type gates, a registered
         family's `probe:algorithmic` technique, then the generic

@@ -13,8 +13,8 @@ polars.Series.median:
     - name: definition
       statement: "for a in R^n, f(a) ~= median(a)"
       note: "The mean of the two middle elements for an even length."
-    - name: empty_is_null
-      statement: "f([]) in {null}"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
       note: "The empty input has no value: null, returned as None."
 
 polars.Series.quantile:
