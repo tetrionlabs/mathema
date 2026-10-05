@@ -126,7 +126,7 @@ mathema claims billing.fees.discounted --suggest --root .
 
 <!-- example: codebase output match=subset -->
 ```text
-billing.fees.discounted: 17 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+billing.fees.discounted: 18 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
  individual claims:
   - commutative: f(price, rate) == f(rate, price)  [route best]
   - associative: f(f(price, rate), c) == f(price, f(rate, c))  [route best]
@@ -272,9 +272,9 @@ grammars detected: mathema; verified by this run: mathema
 Both claims proved on the derive route, and every record also carries
 `dependencies_current`, the claim `verify` adds that what the function
 depends on has not moved; that is the second `proven` on the two claimed
-functions and the only one on `late_fee`. The `1 holds` on `settle` is
-the proof's `[float]` companion, the same claim run through the real code
-in floating point. `--filter unclaimed` is the list of what is left, as
+functions and the only one on `late_fee`. The `2 holds` on `settle` are
+the proof's computation line, the same claim run through the real code
+in floating point, and its policy line for a `nan` input. `--filter unclaimed` is the list of what is left, as
 data, cut to two columns with `--cols`: one function. The records under
 `.mathema/verified/` are the evidence, and they are meant to be committed
 with the code.
