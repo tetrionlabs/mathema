@@ -491,12 +491,15 @@ def test_each_word_treats_a_hole_as_the_table_says(w, v):
         return
     if w.holes == "count":
         assert evaluate("count(x)", x=v) == len(_slots(v))
+        assert evaluate("count(x)", x=[None, None]) == 0
         return
     if w.holes == "dot":
         other = [2, -1, 0.5, 3, 1][:len(v)]
         both = [(a, b) for a, b in zip(v, other) if a is not None]
         expected = sum(Fraction(a) * Fraction(b) for a, b in both)
         assert evaluate("dot(x, y)", x=v, y=other) == float(expected)
+        apart = [None if e is not None else 1.5 for e in v]
+        assert _no_value(evaluate("dot(x, y)", x=v, y=apart))
         return
     if w.holes == "elementwise":
         got = evaluate(f"{name}(x)", x=v)
@@ -511,11 +514,13 @@ def test_each_word_treats_a_hole_as_the_table_says(w, v):
             else:
                 assert g == evaluate(f"{name}(x)", x=_slots(v[:i + 1]))[-1]
         return
-    src = {"quantile": "quantile(x, 0.25)", "norm": "norm(x)"}.get(
-        name, f"{name}(x)")
-    assert evaluate(src, x=holed) == evaluate(src, x=_slots(v))
-    if w.holes == "slots":
-        assert _no_value(evaluate(src, x=[None, None]))
+    spellings = {"quantile": ["quantile(x, 0.25)"],
+                 "norm": ["norm(x)", "norm(x, 1)", "norm(x, 2)",
+                          "norm(x, inf)", "norm(x, ord=1)"]}.get(
+        name, [f"{name}(x)"])
+    for src in spellings:
+        assert evaluate(src, x=holed) == evaluate(src, x=_slots(v)), src
+        assert _no_value(evaluate(src, x=[None, None])), src
 
 
 # --- the docs -----------------------------------------------------------
