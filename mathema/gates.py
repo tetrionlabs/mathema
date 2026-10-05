@@ -103,8 +103,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     import math
     from .domain import (_as_int_if_whole, bound_to_sympy_set,
                          domain_contains, operational_domain)
-    from .probing import (ComplexResult, _bound_is_complex, _fmt_value,
-                          _is_matrix_value, _synth, complex_is_a_raise,
+    from .probing import (DEFAULT_RELATIVE_TOLERANCE, ComplexResult,
+                          _bound_is_complex, _fmt_value, _is_matrix_value,
+                          _synth, complex_is_a_raise,
                           ExecutedMissing, LastCall, classified,
                           holds_inf, holds_nan, inputs_missing,
                           is_complex_value, missing_class,
@@ -562,7 +563,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if holds_nan(lv) or holds_nan(rv) or holds_inf(lv) \
                     or holds_inf(rv) or cj.relation not in ("==", "~=", "!="):
                 return None
-            scaled = slack + 1e-7 * max(abs(lv), abs(rv), 1.0)
+            scaled = slack + DEFAULT_RELATIVE_TOLERANCE * max(abs(lv), abs(rv))
             if _relation_holds(lv, rv, scaled):
                 return None
             return (f"the relation fails on the executed values "
@@ -581,7 +582,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                     [lv, rv], dtype=complex))))
             except Exception:
                 return None
-            scaled = slack + 1e-7 * max(size, 1.0)
+            scaled = slack + DEFAULT_RELATIVE_TOLERANCE * size
             held = _array_relation(lv, rv, scaled, point)
             if held is None or held:
                 return None
@@ -598,8 +599,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         overflowed = any(abs(v) == float("inf") for v in (lv, rv))
         if overflowed and not calls_nonfinite[0]:
             return None
-        scaled = slack + 1e-7 * max(abs(lv) if not overflowed else 0.0,
-                                    abs(rv) if not overflowed else 0.0, 1.0)
+        scaled = slack + DEFAULT_RELATIVE_TOLERANCE * max(
+            abs(lv) if not overflowed else 0.0,
+            abs(rv) if not overflowed else 0.0)
         if _relation_holds(lv, rv, scaled):
             return None
         if not overflowed and _exact_holds(point, scaled):
