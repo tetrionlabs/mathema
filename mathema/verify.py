@@ -1960,6 +1960,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                     "\n", "\n       ")
         out.problems.extend(f"{key}: {p}" for p in report.problems)
         out.lines.append(line)
+        # a definition row's corner finding: the library's computation
+        # gave no value at a magnitude corner, and the row stands
+        out.lines.extend(
+            f"     note {name}: {meta['mathema.computation_finding']}"
+            for name, _verdict, meta, _n in map(_claim_fields, claims_for_gate)
+            if meta.get("mathema.computation_finding"))
         out.lines.extend(
             f"     warning: claim {name} of {key} was verified under "
             f"mathema; its grammar is now {grammar!r}, so mathema no "

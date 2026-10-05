@@ -9,6 +9,8 @@ is 28, and 40 such pairs hide among 34,190 points."""
 import math
 from fractions import Fraction
 
+import pytest
+
 import mathema
 
 _LAW = ("for periods in [1, 260] subset Z, active in [0, 260] subset Z, "
@@ -38,6 +40,7 @@ def _point(text):
     return int(pairs["active"]), int(pairs["periods"])
 
 
+@pytest.mark.needs_full_proof_budget
 def test_the_float_line_falls_at_a_discontinuity_while_the_mathematics_is_proven():
     failing = _failing()
     assert (7, 25) in failing and len(failing) == 40
@@ -62,6 +65,7 @@ def test_a_small_finite_domain_runs_every_point():
     assert float_row.route == "probe"
 
 
+@pytest.mark.needs_full_proof_budget
 def test_an_exact_computation_stays_proven():
     rows = _rows(exposure_exact)
     main = [p for n, p in rows.items() if n.startswith("f_active")
@@ -69,6 +73,7 @@ def test_an_exact_computation_stays_proven():
     assert [p.verdict for p in main] == ["proven"], [(p.name, p.verdict) for p in main]
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_sweep_over_budget_runs_every_discontinuity_and_says_what_it_covered(monkeypatch):
     from mathema import gates
     monkeypatch.setattr(gates, "_SWEEP_SECONDS", 0.0)

@@ -2707,6 +2707,52 @@ def _every_link_holds(rels: list, domain: dict) -> bool:
     return True
 
 
+def _certified_undefined_point(computed_rels: list, facts,
+                               domain) -> "tuple[str, str] | None":
+    """Intent:
+        `(witness text, certificate)` when some condition f needs in
+        order to return provably fails somewhere in the domain, by
+        certified interval arithmetic (`symbolic._prove._certified_guard`)
+        around a solution of its boundary; None otherwise. Only a
+        condition over one parameter is tried.
+    """
+    import sympy as _sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .symbolic._prove import _certified_guard
+    fails = {"!=": _sympy.Eq, ">": _sympy.Le, ">=": _sympy.Lt,
+             "<": _sympy.Ge, "<=": _sympy.Gt}
+    for rel, gap in computed_rels:
+        build = fails.get(rel)
+        free = list(gap.free_symbols)
+        if build is None or len(free) != 1:
+            continue
+        sym = free[0]
+        name = str(sym)
+        bound = (domain or {}).get(name)
+        try:
+            lo, hi = float(bound[0]), float(bound[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
+        try:
+            roots = _with_timeout(
+                lambda: _sympy.solveset(_sympy.Eq(gap, 0), sym,
+                                        _sympy.Interval(lo, hi)),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            continue
+        except Exception:
+            continue
+        if not isinstance(roots, _sympy.FiniteSet):
+            continue
+        for root in roots:
+            text = _certified_guard(build(gap, 0), {sym: root}, {name: sym},
+                                    domain)
+            if text is not None:
+                return f"{name} = {root}", text
+    return None
+
+
 def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
                         premises, working: bool = False):
     """Intent:
@@ -2872,11 +2918,20 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
                 sketch=f"is_defined: f returns wherever "
                        f"{' and '.join(computed)}, which holds over the "
                        f"whole domain, so f is defined on it{cut_text}")
-        return disproof(
-            "is_defined: f is not defined everywhere, it returns "
-            "only on " + " and ".join(computed)
-            + "; state that region to claim the restriction",
-            computed_gaps, lambda point: True)
+        sketch = ("is_defined: f is not defined everywhere, it returns "
+                  "only on " + " and ".join(computed)
+                  + "; state that region to claim the restriction")
+        result = disproof(sketch, computed_gaps, lambda point: True)
+        if result.status == "undecided":
+            certified = _certified_undefined_point(computed_rels, facts,
+                                                   domain)
+            if certified is not None:
+                where, text = certified
+                return ProofResult(
+                    "disproven", sketch=f"{sketch}; {text}",
+                    counterexample=where,
+                    meta={"mathema.witness_certified": text})
+        return result
 
     stated_l, stated_r = to_expr(lhs_src), to_expr(rhs_src or "0")
     if stated_l is None or stated_r is None:

@@ -79,7 +79,16 @@ def _verdict(fn, law):
 def test_each_word_holds_where_true_and_falsifies_its_sibling(fn, true,
                                                               false):
     p = _verdict(fn, true)
-    assert p.verdict == "holds", (true, p.verdict, p.note, p.counterexample)
+    if fn in (sample_std, population_var):
+        # true over the reals; the code's float spread overflows to inf
+        # at a cancelling pair [1e300, -1e300, ...], a carrier failure
+        # that falsifies the computation (rulings of 2026-10-01 and
+        # 2026-10-05)
+        assert p.verdict == "falsified", (true, p.verdict, p.note)
+        assert "1e+300, -1e+300" in p.counterexample and "returned inf" in \
+            p.counterexample, p.counterexample
+    else:
+        assert p.verdict == "holds", (true, p.verdict, p.note, p.counterexample)
     p = _verdict(fn, false)
     assert p.verdict == "falsified", (false, p.verdict, p.note)
 

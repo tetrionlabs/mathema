@@ -5592,10 +5592,10 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
 def _inside_as_written(cj, env) -> bool:
     """Intent:
         Whether every coordinate of the executed point lies in the
-        claim's domain read as written (a float draw at the end of
-        `[-1e308, 1e308]` is the float nearest 1e308, which can lie past
-        the number written). A bound that is not a union of intervals or
-        a finite set of numbers is not checked.
+        claim's domain read as written: a draw at an interval end
+        written as a decimal is the float nearest that decimal, which
+        can lie past it. A bound that is not a union of intervals or a
+        finite set of numbers is not checked.
     """
     from fractions import Fraction
 
@@ -5624,6 +5624,41 @@ def _inside_as_written(cj, env) -> bool:
                         else Fraction(m) for m in members}:
                     return False
     return True
+
+
+#: magnitudes past which a draw is a corner of the number representation
+_CORNER_LARGE, _CORNER_SMALL = 1e150, 1e-150
+
+
+def _magnitude_corner(args) -> bool:
+    """Intent:
+        Whether an executed point is a magnitude corner: every number in
+        it finite, and some number at least 1e150 or nonzero and at most
+        1e-150 in magnitude, where float arithmetic overflows or
+        underflows although the exact value is finite.
+    """
+    import math
+    values: list = []
+
+    def collect(v):
+        if isinstance(v, bool):
+            return
+        if isinstance(v, (int, float)):
+            values.append(float(v))
+        elif isinstance(v, (list, tuple)):
+            for u in v:
+                collect(u)
+        elif hasattr(v, "ravel"):
+            for u in v.ravel().tolist():
+                collect(u)
+        elif hasattr(v, "tolist"):
+            collect(v.tolist())
+    for a in args:
+        collect(a)
+    if not values or not all(math.isfinite(v) for v in values):
+        return False
+    return any(abs(v) >= _CORNER_LARGE or 0 < abs(v) <= _CORNER_SMALL
+               for v in values)
 
 
 def _exactly_holds_at(cj, code_l, code_r, env, fn, bound_funcs) -> bool:
@@ -9400,6 +9435,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the first point where the float computation gave no value while
     # the claim holds there in exact arithmetic
     computation_cx = None
+    # a library definition row: a failure only at a magnitude corner is a
+    # finding about the library's computation, and the row stands
+    from .compendium import library_key_of
+    corner_row = (cj.name or "").split("@", 1)[0] == "definition" \
+        and library_key_of(fn) is not None
+    corner_finding = None
 
     def _tagged(callee, label, inject=None):
         # a raise from the function under test (or a bound function) is
@@ -9870,6 +9911,17 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # admits: classified, the companions judge f there
                 executed_record.classified += 1
                 continue
+            if not call_raised[0] and not at_missing(args) and (
+                    call_nan[0] == "f" or call_inf[0] is not None):
+                # the code gave no value at a finite input, whatever the
+                # claim's own float side does there
+                checked += 1
+                cx = (f"{_point_text(args)}: "
+                      + (f"{call_inf[0]} returned "
+                         f"{'-inf' if call_inf[1] < 0 else 'inf'}"
+                         if call_inf[0] is not None else "f returned nan")
+                      + ", and no value for a finite input")
+                break
             if not call_raised[0]:
                 if isinstance(e, (IndexError, ZeroDivisionError)):
                     # the claim's own expression has no value at this
@@ -10098,6 +10150,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             or (call_inf[0] is not None and not (
                 same_infinity(lv, rv)
                 and cj.relation in ("==", "~=", "<=", ">="))))
+        if float_gave_out and corner_row and _magnitude_corner(args):
+            # a definition row's library gave no value at a magnitude
+            # corner: a finding about its computation, not a wrong model
+            checked += 1
+            if corner_finding is None:
+                corner_finding = _point_text(args)
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+            continue
         if float_gave_out and ctx.companion_mode == "spawn" \
                 and _exactly_holds_at(cj, code_l, code_r, env, fn_call,
                                       bound_funcs):
@@ -10332,6 +10392,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                        "read exactly")
             break
     rng = main_rng
+    if corner_finding is not None:
+        finding = (f"{library_key_of(fn)} gives no value at {corner_finding}, "
+                   f"a magnitude corner where the exact value is finite: a "
+                   f"finding about its computation; the row stands")
+        note = f"{note}; {finding}".lstrip("; ")
+        missing_meta = {**(missing_meta or {}),
+                        "mathema.computation_finding": finding}  # type: ignore[dict-item]
     if computation_cx is not None:
         from .gates import companion_name, companion_representation
         descriptor, _rep, rep_word = companion_representation(cj_domain, facts)

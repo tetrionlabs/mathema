@@ -410,14 +410,14 @@
   "ascii": "for x in (R | {missing})^n|absent, f(x) ~= ||x||_inf"
  },
  "norm_bars_integer_order": {
-  "input": "for x in R^n, f(x, 3) ~= ||x||_3",
-  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(x, 3) ≈ ‖x‖₃",
-  "ascii": "for x in (R | {missing})^n|absent, f(x, 3) ~= ||x||_3"
+  "input": "for x in [-1e6, 1e6]^n, f(x, 3) ~= ||x||_3",
+  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(x, 3) ≈ ‖x‖₃",
+  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(x, 3) ~= ||x||_3"
  },
  "norm_bars_chain": {
-  "input": "for x in R^n, ||x||_inf <= f(x) <= ||x||_1",
-  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x‖∞ ≤ f(x) ≤ ‖x‖₁",
-  "ascii": "for x in (R | {missing})^n|absent, ||x||_inf <= f(x) <= ||x||_1"
+  "input": "for x in [-1e6, 1e6]^n, ||x||_inf <= f(x) <= ||x||_1",
+  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, ‖x‖∞ ≤ f(x) ≤ ‖x‖₁",
+  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, ||x||_inf <= f(x) <= ||x||_1"
  },
  "norm_bars_homogeneous": {
   "input": "for x in R^n, let c be [-2, 2], f(c * x) ~= |c| * ||x||",
@@ -450,9 +450,9 @@
   "ascii": "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, f(y, x) = ||x - y||"
  },
  "norm_bars_triangle": {
-  "input": "for x in R^n, y in R^n, f(x, y) <= ||x|| + ||y||",
-  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, y ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(x, y) ≤ ‖x‖ + ‖y‖",
-  "ascii": "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, f(x, y) <= ||x|| + ||y||"
+  "input": "for x in [-1e6, 1e6]^n, y in [-1e6, 1e6]^n, f(x, y) <= ||x|| + ||y||",
+  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, y ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(x, y) ≤ ‖x‖ + ‖y‖",
+  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, y in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(x, y) <= ||x|| + ||y||"
  },
  "norm_bars_stopping_criterion": {
   "input": "for x_new in R^n, x_old in R^n, tol in [0.01, 1], f(x_new, x_old, tol) == (||x_new - x_old|| <= tol)",
@@ -460,9 +460,9 @@
   "ascii": "for x_new in (R | {missing})^n|absent, x_old in (R | {missing})^n|absent, tol in [0.01, 1.0] : float|absent|missing, f(x_new, x_old, tol) = (||x_new - x_old|| <= tol)"
  },
  "norm_bars_nearest_distance": {
-  "input": "for points in R^(m,n), q in R^n, f(points, q) <= ||points[0, :] - q||",
-  "unicode": "∀ points ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {absent}, q ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(points, q) ≤ ‖points[0, :] - q‖",
-  "ascii": "for points in (R | {missing})^(m,n)|absent, q in (R | {missing})^n|absent, f(points, q) <= ||points[0, :] - q||"
+  "input": "for points in [-1e6, 1e6]^(m,n), q in [-1e6, 1e6]^n, f(points, q) <= ||points[0, :] - q||",
+  "unicode": "∀ points ∈ ([-1000000.0, 1000000.0] ∪ {∅})ᵐˣⁿ ⊂ ℝ ∪ {absent}, q ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(points, q) ≤ ‖points[0, :] - q‖",
+  "ascii": "for points in ([-1000000.0, 1000000.0] | {missing})^(m,n) : float|absent, q in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(points, q) <= ||points[0, :] - q||"
  },
  "norm_bars_nearest_distance_trap": {
   "input": "for points in R^(m,n), q in R^n, f(points, q) >= ||points[0, :] - q||",

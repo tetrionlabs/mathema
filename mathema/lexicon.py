@@ -252,10 +252,10 @@ LEXICON: dict[str, str] = {
     "norm_bars_one": "for x in R^n, f(x) ~= ||x||_1",
     "norm_bars_inf": "for x in R^n, f(x) ~= ||x||_inf",
     # the whole-number order: a p-norm implementation against `||x||_3`
-    "norm_bars_integer_order": "for x in R^n, f(x, 3) ~= ||x||_3",
+    "norm_bars_integer_order": "for x in [-1e6, 1e6]^n, f(x, 3) ~= ||x||_3",
     # the chain of orders; it teaches the orders, since a function at
     # either endpoint satisfies it too
-    "norm_bars_chain": "for x in R^n, ||x||_inf <= f(x) <= ||x||_1",
+    "norm_bars_chain": "for x in [-1e6, 1e6]^n, ||x||_inf <= f(x) <= ||x||_1",
     # a norm scales with the magnitude of the factor, never its sign
     "norm_bars_homogeneous":
         "for x in R^n, let c be [-2, 2], f(c * x) ~= |c| * ||x||",
@@ -270,14 +270,14 @@ LEXICON: dict[str, str] = {
     "norm_bars_distance": "for x in R^n, y in R^n, f(x, y) ~= ||x - y||",
     "norm_bars_distance_symmetric":
         "for x in R^n, y in R^n, f(y, x) == ||x - y||",
-    "norm_bars_triangle": "for x in R^n, y in R^n, f(x, y) <= ||x|| + ||y||",
+    "norm_bars_triangle": "for x in [-1e6, 1e6]^n, y in [-1e6, 1e6]^n, f(x, y) <= ||x|| + ||y||",
     # a stopping criterion: the step is within the tolerance
     "norm_bars_stopping_criterion":
         ("for x_new in R^n, x_old in R^n, tol in [0.01, 1], "
          "f(x_new, x_old, tol) == (||x_new - x_old|| <= tol)"),
     # the nearest row of a matrix is no farther than its first row
     "norm_bars_nearest_distance":
-        "for points in R^(m,n), q in R^n, f(points, q) <= ||points[0, :] - q||",
+        "for points in [-1e6, 1e6]^(m,n), q in [-1e6, 1e6]^n, f(points, q) <= ||points[0, :] - q||",
     "norm_bars_nearest_distance_trap":
         "for points in R^(m,n), q in R^n, f(points, q) >= ||points[0, :] - q||",
     # a tracking error over two pandas Series, and a root mean square

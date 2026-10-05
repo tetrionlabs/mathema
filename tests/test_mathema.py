@@ -195,7 +195,12 @@ def test_total_seq_probes_hold():
     # values falls below min(x), real, not the same failure twice.
     r = mathema.check(total)
     verdicts = {p.name: p.verdict for p in r.probes}
-    assert verdicts["permutation_invariant"] == "holds"
+    # a plain float sum is order-sensitive at a cancelling pair
+    # ([1e300, -1e300, ...]): a carrier failure, which falsifies the
+    # computation line (rulings of 2026-10-01 and 2026-10-05)
+    perm = next(p for p in r.probes if p.name == "permutation_invariant")
+    assert perm.verdict == "falsified", perm.note
+    assert "1e+300, -1e+300" in perm.counterexample, perm.counterexample
     # proven, not holds: the elementwise transform composes through
     # the fold's closed form on the derive route now
     assert verdicts["scale_equivariant"] == "proven"

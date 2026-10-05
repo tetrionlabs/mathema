@@ -51,3 +51,13 @@ def test_true_claims_stay_unfalsified():
     assert _row(square, "for x in [1, 2], f(x) != 5").verdict == "proven"
     assert _row(ident, "for x in [0, 0.3], f(x) <= 0.3").verdict == "proven"
     assert _row(tangent, "for x in [0, 1], f(x) < 1e17").verdict != "falsified"
+
+
+def test_is_defined_falls_at_a_pole_no_float_reaches():
+    p = _row(tangent, "for x in [0, 2], is_defined(f)")
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "certified by interval arithmetic" in (p.note or "") + (p.sketch or "")
+
+
+def test_is_defined_still_holds_away_from_the_pole():
+    assert _row(tangent, "for x in [0, 1], is_defined(f)").verdict in ("proven", "holds")

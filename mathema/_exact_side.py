@@ -231,7 +231,11 @@ def exact_literals(code, written: bool = True):
             return twin
     consts = []
     for c in code.co_consts:
-        if isinstance(c, float) and not isinstance(c, bool) and math.isfinite(c):
+        if isinstance(c, float) and c == 0.0 and math.copysign(1.0, c) < 0 \
+                and not written:
+            # the computation reads -0.0 as the signed zero it is
+            consts.append(c)
+        elif isinstance(c, float) and not isinstance(c, bool) and math.isfinite(c):
             consts.append(Fraction(repr(c)) if written else Fraction(c))
         elif type(c) is int:
             consts.append(ExactInt(c))
