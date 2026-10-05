@@ -546,7 +546,7 @@ def test_implementation_coverage_tool_reports_sources_and_staleness(tmp_path):
             """Clamp.
 
             Claims:
-                lower: f(x) >= 0
+                lower: for x in [-1, 1], f(x) >= 0
             """
             if x < 0.0:
                 return 0.0
