@@ -677,14 +677,18 @@ def _initially_falsified_hint(key: str, probes: list,
         return lines + [
             f"note {key}: {names} falsified on first adjudication: the "
             f"installed library does not do what the row states:\n"
-            + _indented(options(accepts + [f"correct the row in {library_source}"]))]
+            + _indented(options(accepts + [
+                f"correct the row in {library_source}, then run: mathema "
+                f"accept {key} {p.name} --as superseded"
+                for p in sorted(fresh, key=lambda p: str(p.name))]))]
     return lines + [f"note {key}: {names} falsified on first adjudication. A "
             f"declared claim is kept until a human decides it:\n"
             + _indented(options([
                 "fix the code",
                 f"to record it as a discovery, run: mathema accept {key} <claim> "
                 f"--as discovery",
-                "supersede it",
+                f"to replace it with a corrected claim, edit it, then run: "
+                f"mathema accept {key} <claim> --as superseded",
                 f"to try a spelling first (it writes nothing), run: mathema "
                 f"check {key} --claim \"...\""]))]
 

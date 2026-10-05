@@ -70,7 +70,8 @@ note numpy.ptp: at_most_the_largest falsified on first adjudication: the
     installed library does not do what the row states:
   (i) to record the falsification as a discovery, run: mathema accept numpy.ptp
       at_most_the_largest --as discovery
-  (ii) correct the row in claims/numpy.claims.yaml
+  (ii) correct the row in claims/numpy.claims.yaml, then run: mathema accept
+      numpy.ptp at_most_the_largest --as superseded
 FAIL numpy.ptp: library claims from claims/numpy.claims.yaml; no baseline
     record; 1 proven, 1 holds, 1 falsified  <- 1 falsified claim(s)
 0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)

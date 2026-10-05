@@ -351,7 +351,8 @@ def test_a_first_falsification_note_puts_each_command_last_on_its_line():
     assert lines[1:] == [
         "  (i) to record the falsification as a discovery, run: mathema accept "
         "numpy.ptp at_most_the_largest --as discovery",
-        "  (ii) correct the row in claims/numpy.claims.yaml"], lines
+        "  (ii) correct the row in claims/numpy.claims.yaml, then run: "
+        "mathema accept numpy.ptp at_most_the_largest --as superseded"], lines
 
 
 def test_a_compendium_hint_puts_each_command_last_on_its_line():

@@ -29,3 +29,11 @@ def test_a_project_function_keeps_its_note():
     (line,) = _initially_falsified_hint("pkg.f", [_row("below_x", "declared")],
                                    {})
     assert "fix the code" in line
+
+
+def test_the_project_note_says_how_to_replace_the_claim():
+    (line,) = _initially_falsified_hint("pkg.f", [_row("below_x", "declared")],
+                                   {})
+    assert ("to replace it with a corrected claim, edit it, then run: "
+            "mathema accept pkg.f <claim> --as superseded") in line
+    assert "supersede it\n" not in line + "\n"
