@@ -105,7 +105,15 @@ def test_a_silent_drop_is_said_once_as_a_fact():
     rows = check_conjectures(clamp01, [claim("for x in R, 0 <= f(x) <= 1", name="c")],
                              float_companions=True)
     companion = next(p for p in rows if p.name.startswith("c["))
-    assert companion.note.endswith("; at x = nan f returned 1.0, so it drops the hole")
+    # the computation line runs the numbers; the drop is the policy line's
+    assert "nan" not in companion.note, companion.note
+    assert _executed(companion) == {"x": {"nan": "nan in, 1.0 out (drops)"}}
+    import mathema
+    rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
+                                                       name="c")])
+    said = [ln for ln in repr(rec).splitlines() if "f(nan)" in ln]
+    assert said == ["    falsified  policy       f(nan)   no missing policy stated; "
+                    "returns 1.0"], said
 
 
 def test_a_propagated_hole_is_stated_on_the_proven_row():

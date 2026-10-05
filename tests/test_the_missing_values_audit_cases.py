@@ -3,6 +3,7 @@
 """Cases where a policy row, a gate or a value claim once claimed more
 than the calls showed: each pins the verdict the calls support."""
 import itertools
+import math
 from typing import Optional
 
 import pytest
@@ -461,3 +462,24 @@ def none_declared(x: float) -> Optional[float]:
 def test_a_declared_none_leaves_is_defined_standing():
     (row,) = check_conjectures(none_declared, [claim("is_defined(f)")])
     assert row.verdict == "proven", (row.verdict, row.note)
+
+
+# --- the computation line covers the numbers; the holes have lines of their own
+
+def root_or_none(x: Optional[float]) -> float:
+    return math.sqrt(x)
+
+
+def test_the_float_line_runs_numbers_and_the_policy_lines_run_the_holes():
+    import mathema
+    rec = mathema.check(root_or_none, claims=[mathema.claim(
+        "for x in [0, 4], f(x) >= 0", name="nonneg")])
+    rows = {p.name: p for p in rec.probes}
+    assert rows["nonneg"].verdict == "proven"
+    companion = rows["nonneg[float]"]
+    assert "nan" not in companion.note and "None" not in companion.note, companion.note
+    assert companion.note.startswith(f"the float64 computation of nonneg ran at "
+                                     f"{companion.n} points: every corner"), companion.note
+    assert rows["missing[x]"].verdict == "proven", rows["missing[x]"].note
+    assert rows["absent[x]"].verdict == "falsified"
+    assert rows["absent[x]"].counterexample == "x = None: f raised TypeError"

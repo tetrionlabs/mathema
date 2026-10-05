@@ -4018,7 +4018,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     merged["origin"] = origin
                 probe.meta = {**(probe.meta or {}), "mathema.missing": merged}
                 told = _missing_told(merged, written, resolution or {}, fn)
-                if told and told not in (probe.note or "") \
+                # the computation line runs the numbers; what f did at a
+                # hole is the policy lines' to say
+                computation = probe.name.startswith(f"{cj.name}[")
+                if told and not computation and told not in (probe.note or "") \
                         and not (probe.meta or {}).get("mathema.missing_unknown"):
                     probe.note = f"{probe.note or ''}; {told}".lstrip("; ")
         if canonical:
