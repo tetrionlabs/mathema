@@ -76,9 +76,19 @@ def test_update_finds_a_sample_std_call_covered_by_the_bundled_row(tmp_path):
             in first.stdout + first.stderr)
     assert "falsified against the installed library" in first.stdout + first.stderr
     # the bundled definition@ddof=1 covers the call: no copy of
-    # definition is pinned, and nothing else holds, so no file is written
+    # definition is pinned. The bundled empty policy (f([]) in {missing},
+    # 2026-10-05 empty-inputs ruling) has no ddof=1 row, so its pinned
+    # copy is the one row written, and it holds
     assert "definition@ddof=1" not in first.stdout + first.stderr
-    assert not (tmp_path / "claims" / "numpy.claims.yaml").exists()
+    import yaml
+    written = yaml.safe_load((tmp_path / "claims" / "numpy.claims.yaml").read_text())
+    from mathema.compendium import load_library_claims
+    bundled = {c["name"] for c in
+               load_library_claims()["numpy.std"]["entry"]["claims"]}
+    assert [c["name"] for c in written["numpy.std"]["claims"]
+            if c["name"] not in bundled] == ["empty_is_missing@ddof=1"], written
+    assert ("add empty_is_missing@ddof=1 (f([], ddof=1) in {missing})"
+            in first.stdout), first.stdout
     assert (tmp_path / ".mathema" / "verified" / "numpy.std.yaml").exists()
     again = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path))
     assert again.returncode == 0, again.stderr

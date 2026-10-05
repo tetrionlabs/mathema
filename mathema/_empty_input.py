@@ -244,8 +244,9 @@ def _fixes(fn_name: str, call_text: str, target: str, raised,
         word = "None" if result is None else "nan"
         first = (f"if {word} for no data is intended, state: "
                  f"{called} in {{missing}}")
-    return (f"possible fixes: (i) {first}  (ii) guard the empty input "
-            f"at entry")
+    from ._missing_words import options
+    return "possible fixes:\n" + "\n".join(
+        f"  {line}" for line in options([first, "guard the empty input at entry"]).splitlines())
 
 
 def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption,
