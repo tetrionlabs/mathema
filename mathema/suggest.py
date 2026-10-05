@@ -773,8 +773,9 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     # the mutation member rides the same ceremonial law (the family's
     # own halves adjudicate; the law text never compiles): does calling
     # the function mutate an argument, a global, or module state?
-    out.append(_made(f"{call} == {call}", name="is_state_safe",
-                     source="mathema", route="best"))
+    if not _default_side_effects(fn):
+        out.append(_made(f"{call} == {call}", name="is_state_safe",
+                         source="mathema", route="best"))
     if any("randomness" in e for e in facts.effects):
         # the weaker stateless member is only worth asking where
         # randomness structurally exists: reproducible up to the seed
@@ -1403,3 +1404,17 @@ def gate_suggestions(fn) -> list:
             out.append(claim(f"{gate}(f)", name=f"{gate}[f]", source="mathema",
                              route="examine"))
     return out
+
+
+def _default_side_effects(fn) -> bool:
+    """Whether examining fn finds a write a call with every defaulted
+    parameter at its default can make (is_state_safe is offered only
+    for a function without one)."""
+    from ._examine import examine, reachable_at_defaults, writes_at_defaults
+    try:
+        found = examine(fn)
+    except Exception:
+        return False
+    return bool(writes_at_defaults(fn, found)) or any(
+        reachable_at_defaults(fn, found, site)
+        for site in found.unknown_writes)
