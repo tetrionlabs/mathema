@@ -276,10 +276,10 @@ def _with_no_value_note(result, fn, target: str, cj, no_value: dict):
 def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
                              trials: int, *, kind: str):
     """Finite-difference second-derivative sign: per trial, a base
-    point x0 and a small step h (scaled to the declared domain's own
-    width, or a fixed small default when unbounded), checking the
-    discrete second difference f(x0-h) - 2*f(x0) + f(x0+h) against
-    zero; "affine" wants ~=0, "convex" wants >= -tolerance, "concave"
+    point x0 and a small step h (scaled to |x0|, and to the declared
+    domain's width when that is narrower), checking the curvature the
+    discrete second difference f(x0-h) - 2*f(x0) + f(x0+h) gives
+    against zero within a tolerance relative to f's own size there; "affine" wants ~=0, "convex" wants >= -tolerance, "concave"
     wants <= tolerance. A real approximation, not exact: finite-
     difference noise means a genuinely borderline function can go
     either way near the tolerance band, the same honesty every other
@@ -295,8 +295,18 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     def trial(args):
         x0 = _synth("float", rng, bounds)
-        span = (hi - lo) if lo is not None and hi is not None else max(1.0, abs(x0)) * 2
-        h = max(span * 1e-3, 1e-6)
+        if not math.isfinite(x0):
+            return None
+        # a step on the scale of the point itself (and of the domain when
+        # it is narrower), kept inside the domain
+        h = abs(x0) * 1e-3 or 1e-6
+        if lo is not None and hi is not None:
+            h = min(h, (hi / 2 - lo / 2) * 2e-3) if hi > lo else h
+            room = min(x0 - lo, hi - x0)
+            if room <= 0:
+                return None
+            h = min(h, room)
+        h = max(h, abs(x0) * 1e-12, 1e-300)
         if lo is not None and hi is not None and (x0 - h < lo or x0 + h > hi):
             return None
         try:
@@ -325,14 +335,22 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         # tolerance scaled only to the function's own value magnitude
         # is the wrong reference scale entirely; it was off by orders
         # of magnitude for a real quadratic before this fix, silently
-        # calling every shape "affine". A fixed absolute tolerance on
-        # the recovered curvature is still an approximation, not exact;
-        # a function whose real curvature is tiny relative to its
-        # own value scale (or exactly at the tolerance boundary) can
-        # still be misjudged, the same honest limit every probe
+        # calling every shape "affine". A finite difference is still an
+        # approximation, not exact: a curvature at the tolerance
+        # boundary can be misjudged, the same honest limit every probe
         # technique in this module already carries.
-        curvature = second_diff / (h * h)
-        tol = 1e-4
+        # divided by h twice, so a step near the float limit never
+        # overflows h * h
+        curvature = (second_diff / h) / h
+        # the tolerance is relative: the bend f's own size gives at this
+        # point (|f| over the squared distance from the origin, or the
+        # step for a point at it), and never below the rounding noise
+        # of the three values the difference is taken over
+        size = max(abs(v) for v in values)
+        reach = max(abs(x0), h)
+        natural = (size / reach) / reach
+        noise = 16 * (((8 * 2.220446049250313e-16 * size) / h) / h)
+        tol = max(1e-4 * natural, noise)
         ok = (abs(curvature) <= tol if kind == "affine" else
              curvature >= -tol if kind == "convex" else
              curvature <= tol)
