@@ -431,23 +431,177 @@ def os_path_within(path: str, root: str) -> bool:
         return False
 
 
+def _read_pyproject(path: str) -> dict:
+    """Intent:
+        A pyproject.toml as a dict: through `tomllib` (Python 3.11 on),
+        else `tomli` when installed, else `_toml_subset`, which reads the
+        tables, strings, arrays and inline tables the declared packages
+        are written in. {} when the file does not exist; a file that
+        cannot be read gives {} with a warning naming it, never silently.
+    """
+    import warnings
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return {}
+    try:
+        try:
+            import tomllib as toml
+        except ImportError:
+            try:
+                import tomli as toml  # type: ignore[no-redef]
+            except ImportError:
+                toml = None
+        if toml is not None:
+            return toml.loads(raw.decode("utf-8"))
+        return _toml_subset(raw.decode("utf-8"))
+    except Exception as e:
+        warnings.warn(f"mathema: {path} could not be read ({e}); the "
+                      f"packages it declares are not known, so code in "
+                      f"them reads as third-party", UserWarning,
+                      stacklevel=3)
+        return {}
+
+
+def _toml_subset(text: str) -> dict:
+    """Intent:
+        The tables of a TOML document whose values are strings, numbers,
+        booleans, arrays and inline tables (arrays may span lines), as
+        nested dicts: enough of TOML for a pyproject.toml's package
+        declarations.
+
+    Raises:
+        ValueError: a line or value outside that subset.
+    """
+    data: dict = {}
+    table = data
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = _strip_comment(lines[i]).strip()
+        i += 1
+        if not line:
+            continue
+        if line.startswith("[["):
+            raise ValueError(f"an array of tables is outside the subset: "
+                             f"{line!r}")
+        if line.startswith("["):
+            if not line.endswith("]"):
+                raise ValueError(f"a table header is not closed: {line!r}")
+            table = data
+            for part in _dotted(line[1:-1]):
+                table = table.setdefault(part, {})
+            continue
+        key, eq, rest = line.partition("=")
+        if not eq:
+            raise ValueError(f"a line is not `key = value`: {line!r}")
+        value = rest.strip()
+        while _depth(value) > 0 and i < len(lines):
+            value += " " + _strip_comment(lines[i]).strip()
+            i += 1
+        parsed, end = _toml_value(value, 0)
+        if value[end:].strip():
+            raise ValueError(f"a value has trailing text: {value!r}")
+        target = table
+        parts = _dotted(key.strip())
+        for part in parts[:-1]:
+            target = target.setdefault(part, {})
+        target[parts[-1]] = parsed
+    return data
+
+
+def _dotted(key: str) -> list:
+    return [p.strip().strip('"').strip("'") for p in key.split(".")]
+
+
+def _strip_comment(line: str) -> str:
+    quote = None
+    for k, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#":
+            return line[:k]
+    return line
+
+
+def _depth(value: str) -> int:
+    depth, quote = 0, None
+    for ch in value:
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+    return depth
+
+
+def _toml_value(text: str, k: int):
+    """One TOML value of the subset starting at `text[k]`, and the
+    index after it."""
+    while k < len(text) and text[k] == " ":
+        k += 1
+    if k >= len(text):
+        raise ValueError("a value is missing")
+    ch = text[k]
+    if ch in "\"'":
+        end = text.find(ch, k + 1)
+        if end < 0:
+            raise ValueError(f"a string is not closed: {text!r}")
+        return text[k + 1:end], end + 1
+    if ch in "[{":
+        close = "]" if ch == "[" else "}"
+        items: list = []
+        table: dict = {}
+        k += 1
+        while True:
+            while k < len(text) and text[k] in " ,":
+                k += 1
+            if k >= len(text):
+                raise ValueError(f"{ch} is not closed: {text!r}")
+            if text[k] == close:
+                return (items if ch == "[" else table), k + 1
+            if ch == "[":
+                item, k = _toml_value(text, k)
+                items.append(item)
+            else:
+                eq = text.find("=", k)
+                if eq < 0:
+                    raise ValueError(f"an inline table entry has no `=`: "
+                                     f"{text!r}")
+                key = text[k:eq].strip().strip('"').strip("'")
+                table[key], k = _toml_value(text, eq + 1)
+    end = k
+    while end < len(text) and text[end] not in ",]}":
+        end += 1
+    word = text[k:end].strip()
+    if word in ("true", "false"):
+        return word == "true", end
+    try:
+        return (float(word) if any(c in word for c in ".eE") and not
+                word.startswith("0x") else int(word, 0)), end
+    except ValueError:
+        raise ValueError(f"a value is outside the subset: {word!r}") \
+            from None
+
+
 def declared_packages(root: str = ".") -> frozenset:
     """Intent:
         The top-level packages a project's pyproject.toml declares as
         its own: the project name (with `-` read as `_`), setuptools'
         `packages`, poetry's `packages` includes and hatch's wheel
-        `packages`. Empty when there is no readable pyproject.toml.
+        `packages`. Empty when there is no pyproject.toml; a file that
+        cannot be read is said in a warning (`_read_pyproject`).
     """
     import os
-    try:
-        import tomllib
-    except ImportError:
-        return frozenset()
-    try:
-        with open(os.path.join(root, "pyproject.toml"), "rb") as fh:
-            data = tomllib.load(fh)
-    except (OSError, ValueError):
-        return frozenset()
+    data = _read_pyproject(os.path.join(root, "pyproject.toml"))
     out: set = set()
     name = (data.get("project") or {}).get("name")
     if isinstance(name, str):
