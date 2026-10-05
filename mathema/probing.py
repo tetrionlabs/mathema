@@ -1488,7 +1488,9 @@ def _sample_domain(rng: random.Random, dom: Domain,
             weights.append(1.0)
         elif isinstance(p, tuple):
             lo, hi = _moderate_bounds(*_reach_ends(p))
-            weights.append(max(hi - lo, 1e-9))
+            # half widths, so the widest pieces near the float limit
+            # still have a finite weight
+            weights.append(max(hi / 2 - lo / 2, 1e-9))
         else:
             weights.append(1.0)
     for _ in range(20):
@@ -1497,9 +1499,10 @@ def _sample_domain(rng: random.Random, dom: Domain,
             value = _draw_member(rng, list(piece))
         elif _rectangle(piece):
             c1, c2 = complex(piece[0]), complex(piece[1])
+            from ._sampling import _uniform
             value = complex(
-                rng.uniform(min(c1.real, c2.real), max(c1.real, c2.real)),
-                rng.uniform(min(c1.imag, c2.imag), max(c1.imag, c2.imag)))
+                _uniform(rng, min(c1.real, c2.real), max(c1.real, c2.real)),
+                _uniform(rng, min(c1.imag, c2.imag), max(c1.imag, c2.imag)))
         elif isinstance(piece, tuple):
             value = _synth_scalar(rng, piece, specials=specials)
             if dom.base_type in ("Z", "N"):
