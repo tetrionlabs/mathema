@@ -1950,8 +1950,10 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
     admitted spellings must all return math-equal results (an
     admitted spelling raising, or two admitted spellings diverging
     past tolerance, falsifies with the pair as witness), and a
-    policy-excluded spelling must raise (a clean return means the
-    type exclusion is asserted, not enforced). What runs here is what
+    policy-excluded spelling (2.0 for `n: int`, or True) may raise, or
+    return a value that agrees with the admitted spelling's and keeps
+    the return type f declares (a float where f declares `-> int`
+    falsifies). What runs here is what
     mypy cannot ask: whether f(2), f(2.0), and f(True) AGREE."""
     from .grammar import domain_contains
     from .hazards import _spelling_values
@@ -1965,6 +1967,14 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if not values:
         return None
     tol = cj.tolerance if cj.tolerance is not None else 1e-9
+    # the return type f declares, read from its annotation
+    import inspect
+    import typing
+    try:
+        declared = typing.get_type_hints(inspect.unwrap(fn)).get("return")
+    except Exception:
+        declared = inspect.signature(fn).return_annotation
+    declared_int = declared is int or declared == "int"
 
     def admitted(value) -> bool:
         try:
@@ -2020,21 +2030,18 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
                             f"returned {reference[2]!r} but the {label} "
                             f"spelling returned {out!r}")
             elif what == "returned":
-                if label == "bool":
-                    # bool is Python's own subtype of int: no domain
-                    # vocabulary excludes it by name, so a returning
-                    # bool spelling is judged on AGREEMENT only (a
-                    # raise would also have been acceptable rejection)
-                    if reference is not None and not agrees(out, reference[2]):
-                        return (f"f at {target} = {v} diverges across "
-                                f"machine spellings: the {reference[0]} "
-                                f"spelling returned {reference[2]!r} but "
-                                f"the bool spelling returned {out!r}")
-                    continue
-                return (f"{target} = {spelled!r} (the {label} spelling) is "
-                        f"excluded by the declared domain's representation "
-                        f"policy but returned {out!r}, the type exclusion "
-                        f"is asserted, not enforced")
+                # a spelling the domain excludes may be refused (a raise)
+                # or answered; an answer must agree with the in-domain
+                # spelling's value and keep the return type f declares
+                if reference is not None and not agrees(out, reference[2]):
+                    return (f"f at {target} = {v} diverges across "
+                            f"machine spellings: the {reference[0]} "
+                            f"spelling returned {reference[2]!r} but "
+                            f"the {label} spelling returned {out!r}")
+                if declared_int and (isinstance(out, bool)
+                                     or not isinstance(out, int)):
+                    return (f"{target} = {spelled!r} returned {out!r} "
+                            f"({type(out).__name__}) where f declares -> int")
         return True
 
     rounds = max(len(values), min(trials, len(values) * 4))

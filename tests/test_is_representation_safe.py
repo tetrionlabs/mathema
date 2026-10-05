@@ -80,16 +80,36 @@ def test_complete_integer_discipline_proves_structurally():
     assert "exactly one machine spelling" in probe.sketch
 
 
-def test_annotation_inferred_policy_rejects_the_unenforced_float():
-    # the int annotation infers a Z-typed domain; the float spelling
-    # of an admitted integer is policy-excluded, but sum(range(3.0))
-    # raising is exactly the enforcement Z demands, while a body
-    # that silently ACCEPTS the float spelling falsifies
+def test_an_excluded_spelling_must_keep_the_declared_return_type():
+    # the int annotation leaves 2.0 outside the domain; the float
+    # spelling is judged on agreement with f(2) and on the return type f
+    # declares: 4.0 agrees in value but is no int
     def loose_double(n: int) -> int:
         return n * 2
     probe = _one(loose_double, "is_representation_safe(n)")
     assert probe.verdict == "falsified"
-    assert "asserted, not enforced" in probe.counterexample
+    assert "returned" in probe.counterexample
+    assert "(float) where f declares -> int" in probe.counterexample, \
+        probe.counterexample
+
+
+def test_an_excluded_spelling_that_agrees_holds_without_a_declared_int():
+    def untyped_double(n: int):
+        return n * 2
+
+    def float_double(n: int) -> float:
+        return n * 2
+    for fn in (untyped_double, float_double):
+        probe = _one(fn, "is_representation_safe(n)")
+        assert probe.verdict == "holds", (fn.__name__, probe.counterexample)
+
+
+def test_an_excluded_spelling_that_disagrees_falsifies():
+    def typed_half(n: int) -> float:
+        return n / 2 if isinstance(n, int) else -1.0
+    probe = _one(typed_half, "is_representation_safe(n)")
+    assert probe.verdict == "falsified"
+    assert "diverges across machine spellings" in probe.counterexample
 
 
 def test_suggested_only_where_types_are_structural():
