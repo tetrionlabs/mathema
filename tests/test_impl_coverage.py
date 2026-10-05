@@ -37,7 +37,7 @@ def test_derivable_function_is_derive_covered(tmp_path):
             """Clamp to the unit interval.
 
             Claims:
-                in_unit: 0 <= f(x) <= 1
+                in_unit: for x in [-1, 2], 0 <= f(x) <= 1
             """
             if x < 0.0:
                 return 0.0
