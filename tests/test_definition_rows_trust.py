@@ -7,7 +7,10 @@ A definition row bundled with mathema feeds the derive route at once
 from a project's own claims file, or from a third party, feeds the
 derive route only once `mathema verify` has recorded it `holds` or
 `proven` here, or it was accepted `--as trusted`; until then it only
-guides sampling, and a claim resting on it stays `holds`. A row verify
+guides sampling, and a claim resting on it stays `holds`. A row only
+verified by execution is evidence, so a proof through it is `holds`;
+a bundled or accepted row is an axiom, and the proof stays `proven`. A
+row verify
 recorded `falsified` is never used, bundled or not. A record whose
 proof could read through different rows now (a row verified,
 falsified or added since) is stale, and verify re-adjudicates it.
@@ -95,9 +98,13 @@ def test_a_project_row_feeds_derive_only_after_verify_records_it(project):
     assert "feeds sampling only" in p.note, p.note
     _verify(project, rows)
     p = _check(project, sem_ratio)
-    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+    # verified by execution and not accepted: evidence, so the proof
+    # through it holds
+    assert (p.verdict, p.route) == ("holds", "derive"), (p.verdict, p.note)
     used = {u["key"]: u for u in p.meta["mathema.definitions"]}
     assert used["pandas.Series.sem"]["status"] == "holds"
+    assert used["pandas.Series.sem"]["standing"] == "evidence"
+    assert used["pandas.Series.mean"]["standing"] == "axiom"
     assert used["pandas.Series.sem"]["source"] == "claims/pandas.claims.yaml"
     assert used["pandas.Series.mean"]["status"] == "bundled"
 
@@ -185,12 +192,15 @@ def test_a_record_is_stale_when_its_definition_rows_change(project,
     sys.modules.pop("qpkg", None)
     sys.modules.pop("qpkg.quant", None)
 
-    def verdict():
+    def row():
         record = yaml.safe_load((project / ".mathema" / "verified"
                                  / "qpkg.quant.doubled_sharpe.yaml").read_text())
         return {c["name"]: c for c in
                 record["qpkg.quant.doubled_sharpe"]["claims"]}[
-            "leverage_invariant"]["verdict"]
+            "leverage_invariant"]
+
+    def verdict():
+        return row()["verdict"]
     _verify(project)
     assert verdict() == "holds"
     (project / "claims" / "pandas.claims.yaml").write_text(_MULTIPLY_ROW)
@@ -198,7 +208,8 @@ def test_a_record_is_stale_when_its_definition_rows_change(project,
     assert not result.problems, result.lines
     assert "ok   qpkg.quant.doubled_sharpe: definition rows changed" in \
         "\n".join(result.lines), result.lines
-    assert verdict() == "proven"
+    # derived through the newly verified row, which is evidence
+    assert (verdict(), row()["route"]) == ("holds", "derive"), row()
     result = _verify(project)
     assert "ok   qpkg.quant.doubled_sharpe: fresh" in "\n".join(result.lines), \
         result.lines
