@@ -249,3 +249,13 @@ def test_a_claim_may_widen_a_float_with_absence_and_the_none_is_executed():
 
 def plain_raising(x: float) -> float:
     return x + 1.0
+
+
+def test_an_array_annotation_reads_its_dtype_not_its_shape():
+    # numpy before 2.3 spells NDArray[np.float64] as
+    # ndarray[tuple[int, ...], dtype[float64]]: the int there is the
+    # shape's, and the entries are floats with their NaN hole
+    def spelled_out(x: np.ndarray[tuple[int, ...], np.dtype[np.float64]]):
+        return 0.0
+    policy = missing_policy_from_signature(spelled_out)["x"]
+    assert (policy.absent, policy.members) == (False, ("nan",))

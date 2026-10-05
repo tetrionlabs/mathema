@@ -2202,9 +2202,8 @@ def _missing_probe(fn, facts, cj, domain: dict, rng: random.Random,
         import inspect
         ann = inspect.signature(fn).parameters[target].annotation
         if ann is not inspect.Parameter.empty:
-            annotation = ann if isinstance(ann, str) else (
-                getattr(ann, "__name__", None) if isinstance(ann, type)
-                else repr(ann).replace("typing.", ""))
+            from ._annotation_text import annotation_text
+            annotation = annotation_text(ann)
     except (TypeError, ValueError, KeyError):
         annotation = None
     state = {"idx": 0}

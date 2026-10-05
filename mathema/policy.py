@@ -760,7 +760,8 @@ def none_default_misspecified(fn, params: "list | None" = None) -> "str | None":
         else:
             if ann in (typing.Any, object) or _admits_none(ann):
                 continue
-            text = getattr(ann, "__name__", None) or repr(ann).replace("typing.", "")
+            from ._annotation_text import annotation_text
+            text = annotation_text(ann)
         return (f"{p} is annotated {text} but defaults to None; annotate it "
                 f"Optional[{text}] or change the default")
     return None
@@ -2028,7 +2029,18 @@ def _type_cases(cls, depth: int = 0, element: bool = False) -> list:
         hints = typing.get_type_hints(cls)
     except Exception:
         return []
-    optional_keys = getattr(cls, "__optional_keys__", ()) if typing.is_typeddict(cls) else ()
+    optional_keys = set(getattr(cls, "__optional_keys__", ())
+                        if typing.is_typeddict(cls) else ())
+    for name, ann in list(hints.items()):
+        # a key's own Required/NotRequired marking, which typing reads
+        # into the class itself only from Python 3.11
+        word = str(typing.get_origin(ann)).rsplit(".", 1)[-1]
+        if word in ("NotRequired", "Required") and typing.get_args(ann):
+            hints[name] = typing.get_args(ann)[0]
+            if word == "NotRequired":
+                optional_keys.add(name)
+            else:
+                optional_keys.discard(name)
     out: list = []
     for name, ann in hints.items():
         if name in optional_keys:
@@ -2703,8 +2715,9 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                     ann = inspect.signature(fn).return_annotation
                 except (TypeError, ValueError):
                     ann = inspect.Signature.empty
-                shown = ("no annotation" if ann is inspect.Signature.empty else
-                         ann if isinstance(ann, str) else getattr(ann, "__name__", repr(ann)))
+                from ._annotation_text import annotation_text
+                shown = ("no annotation" if ann is inspect.Signature.empty
+                         else annotation_text(ann))
                 sentence = (f"f returned None at {where} from present inputs, and its "
                             f"return type {shown} does not declare it")
                 parts.append(sentence)

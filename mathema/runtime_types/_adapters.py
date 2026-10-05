@@ -215,7 +215,8 @@ def _type_name(annotation) -> str:
         module = annotation.__module__
         return (annotation.__qualname__ if module == "builtins"
                 else f"{module}.{annotation.__qualname__}")
-    return repr(annotation).replace("typing.", "")
+    from .._annotation_text import annotation_text
+    return annotation_text(annotation)
 
 
 class NumpyAdapter:

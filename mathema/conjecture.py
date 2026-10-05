@@ -7341,10 +7341,8 @@ def _annotation_words(fn, param: str) -> "str | None":
         return None
     if ann is inspect.Parameter.empty:
         return None
-    if isinstance(ann, str):
-        return ann
-    text = getattr(ann, "__name__", None) if isinstance(ann, type) else None
-    return text or repr(ann).replace("typing.", "")
+    from ._annotation_text import annotation_text
+    return annotation_text(ann)
 
 
 def _missing_origin(param: str, kind: str, written: dict, resolution: dict) -> str:

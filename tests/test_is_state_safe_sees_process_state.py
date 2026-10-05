@@ -223,3 +223,15 @@ def test_the_check_line_does_not_say_no_side_effects_beside_a_state_write(
           "--root", str(tmp_path)])
     out = capsys.readouterr().out
     assert "remember_rate: source, side effects;" in out, out
+
+
+def test_the_warnings_module_reads_the_same_on_every_python():
+    # Python 3.14 defines warnings.simplefilter in `_py_warnings`; the
+    # purity entry is the same one under its public module name
+    from mathema._examine import _qualified
+
+    def simplefilter():
+        pass
+    simplefilter.__module__ = "_py_warnings"
+    simplefilter.__qualname__ = "simplefilter"
+    assert _qualified(simplefilter) == "warnings.simplefilter"
