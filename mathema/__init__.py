@@ -776,9 +776,6 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                                                 known_premises=known_premises,
                                                 float_companions=True,
                                                 pseudo_infinity=pseudo_infinity)
-        if all_claims:
-            _offer_splits(fn, facts, all_claims, probes,
-                          [c for c in (claims or ()) if isinstance(c, str)])
         # what f does with a value that is not there, for every parameter
         # that admits one and no stated policy row covers; a bare check
         # (no claim written, only suggestions) carries none
@@ -790,6 +787,11 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         if written:
             probes = probes + _policy.default_rows(
                 fn, facts, parent_domain or {}, covered, _policy.row_name)
+    if all_claims:
+        # the split offer's own runs are not the record's claims: they
+        # stay out of the calls the policy rows read
+        _offer_splits(fn, facts, all_claims, probes,
+                      [c for c in (claims or ()) if isinstance(c, str)])
     if not all_claims:
         # a bad function-level or project value refuses even with
         # nothing to adjudicate

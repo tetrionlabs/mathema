@@ -3213,7 +3213,10 @@ def _validate(src: str, param_names: set[str],
                 # _MATH_ATTRS rather than being sampled randomly
                 if node.id not in callable_names and node.id not in MATH_CONSTANTS:
                     aux.add(node.id)
-    return compile(tree, "<conjecture>", "eval"), aux
+    code = compile(tree, "<conjecture>", "eval")
+    from ._exact_side import register_source
+    register_source(code, src, tree)
+    return code, aux
 
 
 
@@ -3765,6 +3768,15 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
                   None)
     if broken is None or probe.verdict == "falsified":
         return probe, lines
+    return _falsified_by_empty_input(probe, broken), lines
+
+
+def _falsified_by_empty_input(probe: "Probe", broken: "Probe") -> "Probe":
+    """Intent:
+        `probe` falsified by its falsified empty-input line `broken`, with
+        the claim's own finding over non-empty inputs kept in
+        `meta["mathema.mathematics"]`.
+    """
     from dataclasses import replace as _replace
     note = (f"{probe.note + '; ' if probe.note else ''}{broken.name} is "
             f"falsified: {broken.note}")
@@ -3779,7 +3791,22 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
             "mathema.witness_executed": True}
     return _replace(probe, verdict="falsified", route="probe",
                     counterexample=broken.counterexample, note=note,
-                    meta=meta), lines
+                    meta=meta)
+
+
+def _own_finding(probe: "Probe") -> "Probe":
+    """`probe` as it was before its empty-input line falsified it: its
+    own finding over non-empty inputs, from `meta["mathema.mathematics"]`."""
+    from dataclasses import replace as _replace
+    found = (probe.meta or {}).get("mathema.mathematics")
+    if not (probe.meta or {}).get("mathema.empty_input") or not found:
+        return probe
+    meta = {k: v for k, v in (probe.meta or {}).items()
+            if k not in ("mathema.empty_input", "mathema.mathematics",
+                         "mathema.witness_executed")}
+    return _replace(probe, verdict=found["verdict"], route=found.get("route"),
+                    note=found.get("note"), n=found.get("n", probe.n),
+                    counterexample=None, meta=meta)
 
 
 def _emit_companion(out: list, companion: "Probe", parent: str) -> None:
@@ -4886,6 +4913,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                                     float_companions,
                                                     conjectures)
             out.append(stamp(probed, _cap=verdict_cap))
+            if ctx.companion is not None:
+                _emit_companion(out, _stamped(ctx.companion, cj_record,
+                                              written=cj.domain or {}),
+                                probed.name)
             if float_companions:
                 out.extend(_stamped(line, cj, canonical=False) for line in lines)
         except LanguageDrawFailed as e:
@@ -5162,7 +5193,9 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
                                extensive=extensive,
                                float_companions=float_companions)
     link_names = {c.name for c in link_cjs}
-    links = [p for p in probes if p.name in link_names]
+    # each link's own finding over non-empty inputs; the empty input is
+    # the chain's own line, below
+    links = [_own_finding(p) for p in probes if p.name in link_names]
     # a link that does not read as a claim (an undeclared name, say)
     # makes the whole chain unreadable, whatever the other links decide
     refused = next((p for p in links
@@ -5187,7 +5220,10 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         else combined.meta
     companions = [p for p in probes if p.name not in link_names
                   and (p.meta or {}).get("mathema.family") != "is_empty_safe"]
+    empty_broken = next((p for p in empty.values() if p.verdict == "falsified"), None)
     if combined.verdict != "proven" or len(companions) != len(links):
+        if empty_broken is not None and combined.verdict != "falsified":
+            combined = _falsified_by_empty_input(combined, empty_broken)
         return combined, None
     from .gates import companion_representation
     descriptor, _representation, representation_word = \
@@ -5205,6 +5241,8 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         companion.stratum = broken.stratum
     combined.meta = {**(combined.meta or {}),
                      "mathema.float_companion": companion.name}
+    if empty_broken is not None:
+        combined = _falsified_by_empty_input(combined, empty_broken)
     return combined, companion
 
 
@@ -5411,6 +5449,58 @@ def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set 
     return tuple(kinds), shown
 
 
+def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
+    """Intent:
+        The claim at the point `env` in exact arithmetic: f and the
+        claim's bound functions run on the point's exact values
+        (`_exact_side.exact_sides` with `exact_calls`) under the fast
+        wall-clock cap, the sides compared exactly (within the claim's
+        own declared tolerance, when it states one). True or False, or
+        None when the evaluation cannot be carried out exactly.
+    """
+    from ._exact_side import exact_sides
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    try:
+        exact = _with_timeout(
+            lambda: exact_sides(code_l, code_r, env,
+                                {"f": fn, **(bound_funcs or {})},
+                                exact_calls=True),
+            FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    if exact is None:
+        return None
+    return relation_holds_elementwise(
+        exact[0], exact[1], cj.relation,
+        cj.tolerance if cj.tolerance is not None else 0.0,
+        exact_inequality=cj.tolerance is None, rel_tol=0.0)
+
+
+def _exactly_holds_at(cj, code_l, code_r, env, fn, bound_funcs) -> bool:
+    """Whether `_exact_verdict` finds the claim true at the point."""
+    return _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) is True
+
+
+def _exactly_decided(cj, code_l, code_r, env, callees, slack, ok,
+                     rel_tol=None):
+    """Intent:
+        The relation at the point `env` holds, re-decided with the claim's
+        sides evaluated exactly (`_exact_side.exact_sides`): the function's
+        results read as the exact values it returned, the claim's own
+        literals and arithmetic exact. `ok` (the float verdict) comes back
+        unchanged when the sides cannot be computed exactly.
+    """
+    from ._exact_side import exact_sides
+    exact = exact_sides(code_l, code_r, env, callees)
+    if exact is None:
+        return ok
+    held = relation_holds_elementwise(
+        exact[0], exact[1], cj.relation, slack,
+        exact_inequality=cj.tolerance is None,
+        rel_tol=_declared_rel_tol(cj) if rel_tol is None else rel_tol)
+    return ok if held is None else held
+
+
 def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "str | None":
     """Intent:
         The counterexample text the claim fails with at `args` (a raise,
@@ -5455,6 +5545,11 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
                                     exact_inequality=cj.tolerance is None,
                                     rel_tol=_declared_rel_tol(cj))
     if ok is False:
+        callees = {k: v for k, v in trial_env.items()
+                   if callable(v) and (k == "f" or k in (cj.funcs or {}))}
+        if _exactly_decided(cj, code_l, code_r, trial_env, callees,
+                            slack, ok) is True:
+            return None
         return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
     return None
 
@@ -9053,6 +9148,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     absorbed, absorbed_at = 0.0, None
     # the largest disagreement a draw's own round-off accounted for
     roundoff_absorbed, roundoff_at = 0.0, None
+    # the largest equality gap the relative tolerance absorbed at a draw
+    # that holds in exact arithmetic, and the draws that passed only
+    # within a tolerance and could not be evaluated exactly
+    relative_absorbed, relative_at = 0.0, None
+    inconclusive = 0
+    # the draws where the claim's own side has no value, exact or float
+    undecided, undecided_at = 0, None
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
     # axis that two parameters share, or that spans a matrix, at its
@@ -9102,6 +9204,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the LABEL and sign of the first callee to return an infinity for
     # finite arguments
     call_inf: list = [None, 0]
+    # the first point where the float computation gave no value while
+    # the claim holds there in exact arithmetic
+    computation_cx = None
 
     def _tagged(callee, label, inject=None):
         # a raise from the function under test (or a bound function) is
@@ -9593,8 +9698,40 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           f"({e}); narrow the claim's domain to where "
                           f"every side of it is real")
                     break
-                # the law's own plumbing failed, not the function,
-                # a broken sample, never a counterexample
+                # the claim's own side has no float value here: read
+                # exactly when it can be (`_exact_side`), else the draw
+                # is undecided and the claim cannot hold
+                call_raised[0] = call_nan[0] = call_inf[0] = None
+                decided = _exactly_decided(
+                    cj, code_l, code_r, env, {"f": fn_call, **bound_funcs},
+                    cj.tolerance if cj.tolerance is not None
+                    else DEFAULT_TOLERANCE, None)
+                if decided is True and _exactly_decided(
+                        cj, code_l, code_r, env,
+                        {"f": fn_call, **bound_funcs}, 0.0, None,
+                        rel_tol=0.0) is not True:
+                    # it passes only within the tolerance: the
+                    # mathematics at the point decides
+                    decided = _exact_verdict(cj, code_l, code_r, env,
+                                             fn_call, bound_funcs)
+                    if decided is None:
+                        call_raised[0] = call_nan[0] = call_inf[0] = None
+                        call_hole[0] = None
+                        inconclusive += 1
+                        continue
+                call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+                if decided is None:
+                    if undecided_at is None:
+                        undecided_at = (f"{_point_text(args)}: the claim's own "
+                                        f"side raised {type(e).__name__} "
+                                        f"({e})")
+                    undecided += 1
+                    continue
+                checked += 1
+                if decided is False:
+                    cx = (f"{_point_text(args)}: the claim is false here, "
+                          f"its own side read exactly")
+                    break
                 continue
             if ctx.assume_defined and call_raised[0] == "f":
                 # `assuming is_defined(f)`: a sample where F raises is
@@ -9762,6 +9899,32 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # the missing and absence companions judge what f does there
             executed_record.classified += 1
             continue
+        float_gave_out = not missing_in and (
+            call_hole[0] is not None or holds_nan(lv) or holds_nan(rv)
+            or (call_nan[0] == "f" and not f_nan_unread(env, lv, rv))
+            or (call_inf[0] is not None and not (
+                same_infinity(lv, rv)
+                and cj.relation in ("==", "~=", "<=", ">="))))
+        if float_gave_out and ctx.companion_mode == "spawn" \
+                and _exactly_holds_at(cj, code_l, code_r, env, fn_call,
+                                      bound_funcs):
+            # the float computation gave no value (an overflow to inf or
+            # nan) where the claim holds in exact arithmetic: a failure
+            # of the computation, carried by the `[float]` line
+            checked += 1
+            if computation_cx is None:
+                computation_cx = (
+                    f"{_point_text(args)}: "
+                    + (f"{call_hole[0][0]} returned {call_hole[0][1]}"
+                       if call_hole[0] is not None
+                       else f"{call_nan[0]} returned nan" if call_nan[0] is not None
+                       else f"{call_inf[0]} returned "
+                            f"{'-inf' if call_inf[1] < 0 else 'inf'}"
+                       if call_inf[0] is not None else
+                       f"{_linalg_eval.shown(lv)!r} vs "
+                       f"{_linalg_eval.shown(rv)!r}"))
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+            continue
         if not missing_in and call_hole[0] is not None:
             # a hole of any member computed from inputs that are not
             # missing is no value, as a NaN is
@@ -9830,6 +9993,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE,
                 exact_inequality=cj.tolerance is None,
                 rel_tol=_declared_rel_tol(cj))
+            if ok is False:
+                ok = _exactly_decided(
+                    cj, code_l, code_r, env, {"f": fn_call, **bound_funcs},
+                    cj.tolerance if cj.tolerance is not None
+                    else DEFAULT_TOLERANCE, ok)
+                call_raised[0] = call_nan[0] = call_inf[0] = None
             if ok is None:
                 continue
             checked += 1
@@ -9863,11 +10032,21 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             lv, rv, cj.relation, slack,
             exact_inequality=cj.tolerance is None,
             rel_tol=_declared_rel_tol(cj))
+        if ok is False:
+            ok = _exactly_decided(cj, code_l, code_r, env,
+                                  {"f": fn_call, **bound_funcs}, slack, ok)
+            call_raised[0] = call_nan[0] = call_inf[0] = None
+        within = (ok is True and cj.tolerance is None
+                  and cj.relation in ("==", "~=")
+                  and relation_holds_elementwise(
+                      lv, rv, cj.relation, slack, exact_inequality=True,
+                      rel_tol=0.0) is not True)
+        roundoff_gap = None
         if ok is False and as_arrays \
                 and cj.relation in ("==", "~=", "<=", ">="):
             # the draw disagrees by no more than the round-off its own
             # magnitudes produce (inputs moved by a few units in the
-            # last place move the sides by as much): no counterexample
+            # last place move the sides by as much)
             allowance = _linalg_eval.roundoff_allowance(
                 lambda jenv: (eval(code_l, {"__builtins__": {}}, jenv),
                               eval(code_r, {"__builtins__": {}}, jenv)),
@@ -9879,10 +10058,31 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     lv, rv, cj.relation, slack + allowance,
                     exact_inequality=cj.tolerance is None,
                     rel_tol=_declared_rel_tol(cj)):
-                ok = True
-                gap = _linalg_eval.largest_gap(lv, rv)
-                if gap > roundoff_absorbed:
-                    roundoff_absorbed, roundoff_at = gap, _point_text(args)
+                ok = within = True
+                roundoff_gap = _linalg_eval.largest_gap(lv, rv)
+        exactly_false = False
+        if within:
+            # a draw that passes only within a tolerance is decided in
+            # exact arithmetic: false there falsifies, true there holds
+            # with the gap printed, and a draw that cannot be evaluated
+            # exactly is inconclusive and not counted
+            exact_ok = _exact_verdict(cj, code_l, code_r, env, fn_call,
+                                      bound_funcs)
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+            if exact_ok is None:
+                checked -= 1
+                inconclusive += 1
+                continue
+            if exact_ok is False:
+                ok, exactly_false = False, True
+            elif roundoff_gap is not None:
+                if roundoff_gap > roundoff_absorbed:
+                    roundoff_absorbed, roundoff_at = roundoff_gap, _point_text(args)
+            else:
+                gap = (_linalg_eval.largest_gap(lv, rv) if as_arrays
+                       else abs(lv - rv))
+                if gap > relative_absorbed:
+                    relative_absorbed, relative_at = gap, _point_text(args)
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex value), or two
@@ -9912,8 +10112,19 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
+            if exactly_false:
+                cx += (", within the float tolerance but false here in "
+                       "exact arithmetic")
             break
     rng = main_rng
+    if computation_cx is not None:
+        from .gates import companion_name, companion_representation
+        descriptor, _rep, rep_word = companion_representation(cj_domain, facts)
+        ctx.companion = Probe(
+            companion_name(cj.name, descriptor), statement, "falsified",
+            route="probe", counterexample=computation_cx,
+            note=f"the {rep_word} computation of {cj.name} gave no value "
+                 f"where the claim holds in exact arithmetic")
     if checked > tallied:
         tally.add(dict(zip(kinds, args)))
     f_call.record(executed_record, dict(zip(kinds, args)))
@@ -9944,6 +10155,22 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           "mathema.confidence": _probe_density(risk, checked),
                           "mathema.counterexample_args": _yaml_safe_args(args),
                           **shrunk_meta, **missing_meta})
+    if undecided:
+        return Probe(cj.name, statement, "unknown", route="probe", n=checked,
+                     note=(f"{note}; the claim's own side could not be "
+                           f"evaluated at {undecided} draw"
+                           f"{'s' if undecided != 1 else ''}, first at "
+                           f"{undecided_at}").lstrip("; "),
+                     meta=dict(missing_meta))
+    inconclusive_words = (
+        f"{inconclusive} draw{'s' if inconclusive != 1 else ''} passed only "
+        f"within the tolerance and could not be evaluated in exact "
+        f"arithmetic, so {'they are' if inconclusive != 1 else 'it is'} "
+        f"not counted")
+    if checked == 0 and inconclusive:
+        return Probe(cj.name, statement, "unknown", route="probe",
+                     note=f"{note}; {inconclusive_words}".lstrip("; "),
+                     meta=dict(missing_meta))
     if checked == 0 and executed_record.classified and executed_record.first:
         # every point executed was a missing input the code raised at or
         # answered with a missing value: nothing left to compare
@@ -9965,6 +10192,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         note = (f"{note}; differs by {roundoff_absorbed:.3g} at "
                 f"{roundoff_at}, within the round-off of that draw's "
                 f"magnitudes").lstrip("; ")
+    if relative_absorbed > 0:
+        note = (f"{note}; differs by {relative_absorbed:.3g} at "
+                f"{relative_at}, within the tolerance ({DEFAULT_TOLERANCE:g} "
+                f"plus {_declared_rel_tol(cj):g} times the larger side), and "
+                f"holds there in exact arithmetic").lstrip("; ")
+    if inconclusive:
+        note = f"{note}; {inconclusive_words}".lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
                            sampled_kinds, cj_domain, checked, critical_hints,
