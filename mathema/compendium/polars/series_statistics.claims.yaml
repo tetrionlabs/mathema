@@ -11,10 +11,10 @@ versions: ">=1,<2"
 polars.Series.median:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= median(a)"
+      statement: "for a in R^n, f(a) ~= median(a)"
       note: "The mean of the two middle elements for an even length."
 
 polars.Series.quantile:
   claims:
     - name: within_range
-      statement: "for a in R^n \\ {∅}, quantile in [0, 1], min(a) <= f(a, quantile) <= max(a)"
+      statement: "for a in R^n, quantile in [0, 1], min(a) <= f(a, quantile) <= max(a)"

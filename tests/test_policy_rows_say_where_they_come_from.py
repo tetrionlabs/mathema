@@ -311,3 +311,19 @@ def test_a_bare_raises_beside_a_named_one_is_no_clash():
                                    "absent(f, x) raises"]) is None
     assert contradicting_policies(["absent(f, x) raises(TypeError)",
                                    "absent(f, x) raises(ValueError)"]) is not None
+
+
+def _policy_rows(rec) -> list:
+    return [p.name for p in rec.probes
+            if p.name.startswith(("missing[", "absent["))]
+
+
+def test_a_bare_check_carries_no_policy_rows():
+    # with no claim written, nothing asks what f does with a missing value
+    assert _policy_rows(mathema.check(clamp01)) == []
+    assert _policy_rows(mathema.check(root_opt)) == []
+
+
+def test_a_written_claim_carries_the_policy_rows_of_what_it_admits():
+    rec = mathema.check(clamp01, claims=[mathema.claim("for x in [0, 1], f(x) >= 0")])
+    assert _policy_rows(rec) == ["missing[x]"]

@@ -713,13 +713,16 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                                                 float_companions=True,
                                                 pseudo_infinity=pseudo_infinity)
         # what f does with a value that is not there, for every parameter
-        # that admits one and no stated policy row covers
+        # that admits one and no stated policy row covers; a bare check
+        # (no claim written, only suggestions) carries none
+        written = not suggested or bool(entry_claims(authored))
         covered = {(pol["kind"], pol.get("parameter"), pol.get("member"),
                     pol.get("premise") or "") for pol in
                    ((p.meta or {}).get("mathema.policy") for p in probes)
                    if pol and pol.get("source") == "stated"}
-        probes = probes + _policy.default_rows(
-            fn, facts, parent_domain or {}, covered, _policy.row_name)
+        if written:
+            probes = probes + _policy.default_rows(
+                fn, facts, parent_domain or {}, covered, _policy.row_name)
     if not all_claims:
         # a bad function-level or project value refuses even with
         # nothing to adjudicate

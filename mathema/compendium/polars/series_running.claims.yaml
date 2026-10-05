@@ -9,11 +9,11 @@ versions: ">=1,<2"
 polars.Series.cum_max:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == cummax(a)"
+      statement: "for a in R^n, f(a) == cummax(a)"
       note: "Element i is the greatest of elements 0 to i."
 
 polars.Series.cum_min:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == cummin(a)"
+      statement: "for a in R^n, f(a) == cummin(a)"
       note: "Element i is the least of elements 0 to i."

@@ -266,3 +266,12 @@ def test_a_polars_nan_is_observed_as_missing():
 def test_a_pandas_na_is_observed_as_missing():
     seen = rt.observe(pd.Series([1.0, pd.NA, None], dtype="Float64"))
     assert seen.missing == frozenset({1, 2}), seen
+
+
+def test_a_polars_series_with_no_value_is_still_a_float_column():
+    from mathema.runtime_types import adapter
+    from mathema.runtime_types._abstract import AbstractVec
+    series = adapter("polars.Series").realise(
+        AbstractVec((math.nan,), frozenset({0})), {})
+    assert series.dtype == pl.Float64, series.dtype
+    assert series.abs().to_list() == [None]
