@@ -147,7 +147,7 @@ infinity past it). A `raises` row whose type is a machine failure
 proof: `exp(x) >= 0` on a numpy caller is proven over the reals
 whatever the threshold, and the overflow shows on the computation side
 (the `[float]` companion, the probe route). They feed the hazard
-points, `is_compendium_safe`'s diagnosis, the reach of the key's own
+points, `is_library_safe`'s diagnosis, the reach of the key's own
 `is_defined` row and the companion's sketch.
 
 `numpy.exp` carries one row of each kind:
@@ -167,7 +167,7 @@ Consumption paths:
 - Definedness and overflow-safe regions become sampling hazards: their
   boundary values join the probe candidates for every caller, whether
   it spells the call `numpy.sqrt(x)` or `np.sqrt(x)`.
-- `is_compendium_safe(numpy)` asserts a function never silently emits
+- `is_library_safe(numpy)` asserts a function never silently emits
   a non-finite value (nan/inf) through an unguarded call into a covered
   library function; the probe samples the hazard boundaries and the
   empty-sequence case, and falsifies on a nan/inf output. When the
@@ -229,7 +229,8 @@ strongest evidence seen: holds`.
 
 A **definition row** is a row named `definition` that states what a
 library function computes, in the grammar's own words, over inputs
-with nothing missing:
+with nothing missing (a named space such as `R^n` states that on its
+own):
 
 ```yaml
 compendium: pandas
@@ -238,9 +239,9 @@ versions: ">=2,<4"
 pandas.Series.std:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
     - name: definition@ddof=0
-      statement: "let ddof be 0, for a in R^n \\ {∅}, f(a) ~= std(a, ddof=0)"
+      statement: "let ddof be 0, for a in R^n, f(a) ~= std(a, ddof=0)"
 ```
 
 A method's key names its class (`pandas.Series.std`,
@@ -322,9 +323,85 @@ record also stamps the rows its body could read through
 moved out of its library's `versions` since makes the record stale, and
 `mathema verify` adjudicates it again.
 
+### Definitions
+
+Which values a runtime holds as missing is stated once, under the
+runtime's own key, as a **definition**: a row of `defines:`, never of
+`claims:`, written `<word> := {<members>}` with the word `missing` (the
+hole class) or `absent` (absence, also spelled `None`). A definition is taken at face value,
+never adjudicated: its record reads `verdict: trusted`, `route: axiom`,
+and `mathema verify` lists a project's own definitions under
+`definitions (trusted)`, outside the verdict counts. A set with plain
+members, e.g. `missing := {null, nan}`, replaces what the key had; a set
+that includes the word itself, e.g. `missing := {missing, NaT}`, adds
+to it. A spelling the runtime type cannot realise fails when the file
+loads. mathema ships the polars and pandas ones:
+
+```yaml
+compendium: polars
+versions: ">=1,<2"
+
+polars.Series:
+  defines:
+    - "missing := {null, nan}"            # this runtime's members
+  claims: []
+```
+
+```yaml
+compendium: pandas
+versions: ">=2,<4"
+
+pandas.Series:
+  defines:
+    - "missing := {missing, NaT}"         # the built-in nan, null, NA, and NaT
+```
+
+The layers apply in order: the runtime type's own built-ins, the
+bundled compendium, a project's compendium files, a project's claims
+files. A claim over a Series then resolves `missing` to those members
+and its record says so (for a real-valued claim,
+`meta["mathema.missing"]["admitted"]` lists `nan`, `null` and `NA`;
+`NaT` joins only for a datetime Series). A runtime that is not Python states its spellings the same way,
+read by that runtime's adapter:
+
+```yaml
+compendium: rust-std
+runtime: rust
+f64:
+  defines: ["missing := {nan}"]
+Option:
+  defines: ["absent := {Option::None}"]
+std::iter::Iterator.sum:
+  claims:
+    - {name: "missing[a]", statement: "missing(f, a) propagates"}
+```
+
+```yaml
+compendium: jdk
+runtime: jvm
+java.lang.Double:
+  defines: ["missing := {NaN}"]
+java.lang.Object:
+  defines: ["absent := {null}"]
+java.util.stream.DoubleStream.average:
+  claims:
+    - {name: "absent[a]", statement: "absent(f, a) raises(NullPointerException)"}
+    - {name: "missing[a]", statement: "missing(f, a) propagates"}
+```
+
+A library's policy rows, what each function does with a value that is
+not there, are ordinary rows in the same file; a user function whose
+body makes one call inherits them, as `numpy.mean`'s
+`missing(f, a) propagates` becomes the row of a function returning
+`float(np.mean(xs))` ([missing values](missing-values.md)).
+
+A TypeScript compendium writes `absent := {undefined, null}` on its object
+key; `null` in `missing := {null}` on an array key is a different set,
+since the position decides which kind it is.
+
 ### Guarding a numpy hazard, and superseding the finding
 
-`is_compendium_safe(numpy)` catches a silent nan/inf leaking through a
+`is_library_safe(numpy)` catches a silent nan/inf leaking through a
 covered numpy call. On an unguarded body it FALSIFIES, with the input
 that produced the non-finite value:
 
@@ -332,14 +409,14 @@ that produced the non-finite value:
 def to_angle(x):
     return numpy.arcsin(x)          # nan for abs(x) > 1
 
-is_compendium_safe(numpy)   ->   falsified   (-8.76733): output np.float64(nan) is a silent non-finite value from an unguarded numpy call
+is_library_safe(numpy)   ->   falsified   (-8.76733): output np.float64(nan) is a silent non-finite value from an unguarded numpy call
 ```
 
 Two fixes make it hold, and each supersedes the falsification once
 re-verified:
 
 - a **bound** that excludes the nan region as a claim domain,
-  `for x in [-1, 1], is_compendium_safe(numpy)`, so the sampler never
+  `for x in [-1, 1], is_library_safe(numpy)`, so the sampler never
   leaves the safe region;
 - a **guard** that rejects it in the body, `if abs(x) > 1: raise
   ValueError`, so the covered call is never reached out of range.

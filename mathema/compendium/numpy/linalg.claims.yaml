@@ -10,74 +10,91 @@ versions: ">=1.24,<3"
 numpy.linalg.norm:
   claims:
     - name: definition
-      statement: "for x in R^n \\ {∅}, f(x) ~= sqrt(sum(x ** 2))"
+      statement: "for x in R^n, f(x) ~= sqrt(sum(x ** 2))"
       note: "The Euclidean norm of a vector, the default `ord=None`."
     - name: euclidean
-      statement: "for x in R^n \\ {∅}, f(x) ~= norm(x)"
+      statement: "for x in [-1e150, 1e150]^n, f(x) ~= norm(x)"
     - name: frobenius
-      statement: "for x in R^(m,n) \\ {∅}, f(x) ~= norm(x)"
+      statement: "for x in R^(m,n), f(x) ~= norm(x)"
       note: "A matrix with the default `ord=None` has its Frobenius norm."
     - name: definition@ord=1
-      statement: "let ord be 1, for x in R^n \\ {∅}, f(x) ~= sum(abs(x))"
+      statement: "for x in R^n, f(x, ord=1) ~= sum(abs(x))"
     - name: definition@ord=2
-      statement: "let ord be 2, for x in R^n \\ {∅}, f(x) ~= sqrt(sum(x ** 2))"
+      statement: "for x in R^n, f(x, ord=2) ~= sqrt(sum(x ** 2))"
+    - name: definition@ord=inf
+      statement: "for x in R^n, f(x, ord=inf) == max(abs(x))"
+      note: "The largest magnitude among the elements."
+
+numpy.linalg.qr:
+  claims:
+    - name: factors
+      statement: "for a in R^(n,n), f(a)[0] @ f(a)[1] ~= a"
+      note: "The reduced factorisation (mode='reduced'): Q times R is the matrix."
+
+numpy.linalg.svd:
+  claims:
+    - name: factors
+      statement: "for a in R^(n,n), f(a)[0] @ diag(f(a)[1]) @ f(a)[2] ~= a"
+      note: "U, the singular values S and Vh: U times diag(S) times Vh is the matrix."
 
 numpy.linalg.solve:
   claims:
     - name: definition
-      statement: "for a in R^(n,n) \\ {∅}, b in R^n \\ {∅}, assuming det(a) != 0, f(a, b) ~= solve(a, b)"
+      statement: "for a in R^(n,n), b in R^n, assuming det(a) != 0, f(a, b) ~= solve(a, b)"
       note: "A singular matrix raises LinAlgError."
     - name: solves
-      statement: "for a in R^(n,n) \\ {∅}, b in R^n \\ {∅}, assuming det(a) != 0, a @ f(a, b) ~= b"
+      statement: "for a in R^(n,n), b in R^n, assuming det(a) != 0, a @ f(a, b) ~= b"
 
 numpy.linalg.pinv:
   claims:
     - name: definition
-      statement: "for a in R^(m,n) \\ {∅}, f(a) ~= pinv(a)"
-      note: "The Moore-Penrose pseudo-inverse, through the singular value decomposition."
+      statement: "for a in R^(m,n), assuming cond(a) < 1e15, f(a) ~= pinv(a)"
+      note: "The Moore-Penrose pseudo-inverse, through the singular value decomposition. A singular value at most 1e-15 times the largest (the default rcond) is read as zero, so the pseudo-inverse is stated where every singular value is above that cutoff."
     - name: inverse_when_nonsingular
-      statement: "for a in R^(n,n) \\ {∅}, assuming det(a) != 0, f(a) ~= inv(a)"
+      statement: "for a in R^(n,n), assuming cond(a) < 1e15, f(a) ~= inv(a)"
+      note: "A nonsingular matrix with a singular value at most 1e-15 times the largest is not inverted: that value is read as zero."
     - name: penrose
-      statement: "for a in R^(m,n) \\ {∅}, a @ f(a) @ a ~= a"
+      statement: "for a in R^(m,n), a @ f(a) @ a ~= a"
 
 numpy.linalg.eigvalsh:
   claims:
     - name: symmetric_eigenvalues
-      statement: "for a in R^(n,n) \\ {∅}, assuming a is symmetric, f(a) ~= eigvalsh(a)"
+      statement: "for a in R^(n,n), assuming a is symmetric, f(a) ~= eigvalsh(a)"
       note: "Reads only the lower triangle (UPLO='L'), so it is stated for a symmetric matrix; the eigenvalues are real and ascending."
     - name: sum_is_trace
-      statement: "for a in R^(n,n) \\ {∅}, assuming a is symmetric, sum(f(a)) ~= trace(a)"
+      statement: "for a in R^(n,n), assuming a is symmetric, sum(f(a)) ~= trace(a)"
 
 numpy.linalg.matrix_rank:
   claims:
-    - name: definition
-      statement: "for A in R^(m,n) \\ {∅}, f(A) == rank(A)"
+    - name: at_most_rank
+      statement: "for A in R^(m,n), f(A) <= rank(A)"
+      note: "Counts the singular values above the tolerance S.max() * max(M, N) * eps, so it is below the rank where a nonzero singular value falls under it (diag(1, 1e-18) has rank 2 and matrix_rank 1). It has no definition row: it is not rank(A)."
 
 numpy.linalg.cond:
   claims:
     - name: definition
-      statement: "for x in R^(n,n) \\ {∅}, assuming det(x) != 0, f(x) ~= cond(x)"
+      statement: "for x in R^(n,n), assuming det(x) != 0, f(x) ~= cond(x)"
       note: "The 2-norm condition number; a singular matrix gives a very large value or inf."
     - name: at_least_one
-      statement: "for x in R^(n,n) \\ {∅}, assuming det(x) != 0, f(x) >= 1"
+      statement: "for x in R^(n,n), assuming det(x) != 0, f(x) >= 1"
 
 numpy.outer:
   claims:
     - name: definition
-      statement: "for a in R^m \\ {∅}, b in R^n \\ {∅}, f(a, b) ~= outer(a, b)"
+      statement: "for a in R^m, b in R^n, f(a, b) ~= outer(a, b)"
 
 numpy.kron:
   claims:
     - name: definition
-      statement: "for a in R^(m,n) \\ {∅}, b in R^(p,q) \\ {∅}, f(a, b) ~= kron(a, b)"
+      statement: "for a in R^(m,n), b in R^(p,q), f(a, b) ~= kron(a, b)"
 
 numpy.diag:
   claims:
     - name: definition
-      statement: "for v in R^n \\ {∅}, f(v) == diag(v)"
+      statement: "for v in R^n, f(v) == diag(v)"
       note: "A vector becomes the diagonal matrix with it on the diagonal."
     - name: of_a_matrix
-      statement: "for v in R^(n,n) \\ {∅}, f(v) == diag(v)"
+      statement: "for v in R^(n,n), f(v) == diag(v)"
       note: "A matrix gives its diagonal as a vector."
 
 numpy.identity:

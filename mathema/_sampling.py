@@ -29,7 +29,7 @@ def representation_reach() -> float:
     assert PY_FLOAT64.max_magnitude is not None
     return PY_FLOAT64.max_magnitude
 
-# The string edge-case corpus the is_arbitrary_input_safe fuzzer draws
+# The string edge-case corpus the is_language_defined fuzzer draws
 # from: the inputs real code forgets, empty and whitespace, control
 # characters, combining and zero-width marks, non-ascii and astral
 # scripts, a very long string, and injection-/format-/path-shaped
@@ -88,6 +88,28 @@ def _reach_ends(bounds) -> tuple[float, float, bool, bool]:
             reach if math.isinf(hi) else hi, un_lo, un_hi)
 
 
+def _half_span(lo: float, hi: float) -> float:
+    """Half the width of [lo, hi], finite for any finite ends (the full
+    width between two ends of opposite sign near the largest double
+    overflows)."""
+    return hi / 2 - lo / 2
+
+
+def _between(lo: float, hi: float, u: float) -> float:
+    """The point a fraction `u` of the way from `lo` to `hi`, computed
+    so it stays finite and inside [lo, hi] for any finite ends."""
+    if u <= 0:
+        return lo
+    if u >= 1:
+        return hi
+    return min(max(lo * (1 - u) + hi * u, lo), hi)
+
+
+def _uniform(rng: random.Random, lo: float, hi: float) -> float:
+    """`rng.uniform(lo, hi)` without overflow near the float limit."""
+    return _between(lo, hi, rng.random())
+
+
 def _moderate_bounds(lo: float, hi: float, un_lo: bool,
                      un_hi: bool) -> tuple[float, float]:
     """The range an interval's ordinary draws come from: an unbounded
@@ -113,12 +135,23 @@ def _far_draw(rng: random.Random, lo: float, hi: float, un_lo: bool,
     if rng.random() < 0.25:
         return end
     base = 0.0 if (un_lo and un_hi) else (lo if side == "hi" else hi)
-    span = abs(end - base)
-    if span <= 1.0:
-        return rng.uniform(min(base, end), max(base, end))
-    magnitude = 10.0 ** rng.uniform(0.0, math.log10(span))
+    half = abs(_half_span(base, end))
+    if half <= 0.5:
+        return _uniform(rng, min(base, end), max(base, end))
+    magnitude = 10.0 ** rng.uniform(0.0, math.log10(half) + math.log10(2.0))
     value = base + magnitude if side == "hi" else base - magnitude
+    if not math.isfinite(value):
+        value = end
     return min(max(value, lo), hi)
+
+
+class _Wait:
+    """A lap entry that dispenses nothing: the draw it stands in for is an
+    ordinary one."""
+
+
+#: the one `_Wait` a lap pads its front with
+WAIT = _Wait()
 
 
 class _SpecialCycle:
@@ -165,6 +198,10 @@ class _SpecialCycle:
             self._rng.shuffle(self._pool)
         self._dispensed += 1
         return self._pool.pop()
+
+    def first_values(self) -> list:
+        """The values dispensed first, in order."""
+        return [v for v in self._first if v is not WAIT]
 
     def guaranteed_remaining(self) -> bool:
         return self._dispensed < len(self._values)
@@ -232,20 +269,21 @@ def _synth_scalar(rng: random.Random, bounds=None,
             return _far_draw(rng, lo, hi, un_lo, un_hi)
         if rng.random() < 0.3:
             flo, fhi = _moderate_bounds(lo, hi, un_lo, un_hi)
-            span = fhi - flo
             # a relative step inside each end, at least one float (and
             # never past the other end), so a subnormal-width range
             # never rounds the step back onto the endpoint
-            in_lo = min(max(flo + span * 1e-6, math.nextafter(flo, math.inf)), fhi)
-            in_hi = max(min(fhi - span * 1e-6, math.nextafter(fhi, -math.inf)), flo)
+            in_lo = min(max(_between(flo, fhi, 1e-6),
+                            math.nextafter(flo, math.inf)), fhi)
+            in_hi = max(min(_between(flo, fhi, 1 - 1e-6),
+                            math.nextafter(fhi, -math.inf)), flo)
             candidates = [flo if closed_lo else in_lo,
                          fhi if closed_hi else in_hi,
-                         (flo + fhi) / 2,
+                         flo / 2 + fhi / 2,
                          in_lo, in_hi]
             if extra:
                 candidates += [v for v in extra if flo < v < fhi]
             return rng.choice(candidates)
-        return rng.uniform(*_moderate_bounds(lo, hi, un_lo, un_hi))
+        return _uniform(rng, *_moderate_bounds(lo, hi, un_lo, un_hi))
     # extra_cycle's own guaranteed lap is already handled above,
     # unconditionally, before bounds is even consulted.
     if specials is not None and specials.guaranteed_remaining():

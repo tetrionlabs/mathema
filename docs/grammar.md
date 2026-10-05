@@ -187,7 +187,7 @@ mathema check gaps.py --claim "for x in [0, 1], abs(f(x) - x) <= ε"
 
 <!-- example: eps output -->
 ```text
-ok   gaps.nearly_identity: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   gaps.nearly_identity: source, no side effects; claims 3/3 adjudicated (1 proven, 2 holds, 0 falsified)
 FAIL gaps.small_gap: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
@@ -228,8 +228,8 @@ for route in ["probe", "derive"]:
 <!-- example: just-below output -->
 ```text
 probe   holds
-        fails by 1e-10 at (0), within the default tolerance (1e-09)
-derive  falsified x=0.0616333
+        fails by 1e-10 at x = 0, within the default tolerance (1e-09)
+derive  falsified x = 0.06163325083761284
         reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
 ```
 
@@ -264,6 +264,11 @@ order is never a superscript, so <code>&#124;&#124;x&#124;&#124;^2</code>
 is the square of the norm. A claim written with the bars and one
 written with `norm(...)` are one claim: the claims file keeps the
 spelling you wrote, and the record's statement is the call form.
+
+What each of the grammar's words computes (`sum`, `mean`, `std`,
+`dot`, `norm`, `det`, `cumsum`, `quantile` and the rest), where it has
+a value, its keywords and what it does with a missing slot is listed on
+[the grammar's words](grammar-words.md).
 
 ## Domains: where the claim applies
 
@@ -353,16 +358,17 @@ that failed, and the fix is usually one of the ones below.
 
 | Spelling | What you learn | Usual fix |
 |---|---|---|
-| `is_builtin_safe(x)` | every restricted builtin the code calls (`sqrt`, `log`, `asin`, `factorial`, ...) gets an argument it accepts: no `math.sqrt` of a negative, no `math.log` of zero | narrow the domain to the builtin's range, or guard the call |
+| `is_number_set_safe(x)` | every restricted builtin the code calls (`sqrt`, `log`, `asin`, `factorial`, ...) gets an argument it accepts: no `math.sqrt` of a negative, no `math.log` of zero | narrow the domain to the builtin's range, or guard the call |
 | `is_pole_safe(x)` | the code never meets a pole, a point where the formula divides by zero or otherwise blows up (`1 / (x - 1)` at `x = 1`), anywhere in the domain | exclude the point from the domain, or guard it with an explicit raise |
-| `is_compendium_safe(numpy)` | every library call a [compendium](claims-transfer.md#in-the-compendium) covers returns a value on the domain | keep the call's argument inside the region the compendium states |
-| `is_overflow_safe(x)` | no result overflows to infinity and nothing raises `OverflowError` from a finite input; the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range | narrow the domain below the overflow point, or rescale (work in logarithms) |
-| `is_extremity_safe(x)` | the function still returns at the extremes of its domain, the largest and smallest magnitudes it admits, out to float64's maximum along an unbounded direction | bound the domain, or declare how far the code has to reach with <code>let &#124;inf&#124; be ...</code> |
-| `is_missing_safe(f)` | a missing value (`None`, `NaN`) meets a deliberate policy, raised or passed through, rather than an accidental crash or a wrong number | check for a missing value at entry and handle it on purpose |
+| `is_library_safe(numpy)` | every library call a [compendium](claims-transfer.md#in-the-compendium) covers returns a value on the domain | keep the call's argument inside the region the compendium states |
+| `is_overflow_safe(x)` | no result overflows to infinity and nothing raises `OverflowError` from a finite input, out to float64's maximum along an unbounded direction (bound it with <code>let &#124;inf&#124; be ...</code>); the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range | narrow the domain below the overflow point, or rescale (work in logarithms) |
+| `is_missing_safe(f)` | every hole a parameter admits (`nan`, `null`, `NA`) has a policy the code follows: it raises, drops it or gives a hole back, on purpose ([missing values](missing-values.md)) | state the policy, or guard the hole at entry |
+| `is_absent_safe(f)` | every parameter, field or key that may be None has a policy the code follows, and a None result is declared by the return type ([missing values](missing-values.md)) | state the policy, or annotate the parameter |
 | `is_empty_safe(xs)` | an empty sequence gets an answer or a deliberate error, not an `IndexError` or a division by a zero length | handle the empty case first |
 | `is_representation_safe(x)` | one number written differently (`1`, `1.0`, `True`) gets one answer | normalize the input type at entry |
-| `is_arbitrary_input_safe(s)` | no string input makes the function crash by accident | validate the input and raise the exception you mean |
+| `is_language_defined(s)` | no string input makes the function crash by accident: every member of the input's language reaches a branch that returns or raises on purpose | validate the input and raise the exception you mean |
 | `is_recursion_safe(f)` | the recursion never runs out of stack (`RecursionError`) over the domain; suggested when the body calls itself | rewrite the recursion as a loop, or narrow the domain |
+| `is_dimension_safe(f)` | every operand and the result have shapes that fit (no `matmul` of mismatched matrices, no result breaking its `Vec`/`Mat` marker) | fix the shapes, or guard them with `@enforce_dimensions` |
 | `is_concurrency_safe(f)` | reserved for a later release: the function runs correctly under concurrent calls | |
 
 **Is the answer right in float64?** The function returns, and the
@@ -370,7 +376,7 @@ number it returns is the one the mathematics says.
 
 | Spelling | What you learn | Usual fix |
 |---|---|---|
-| `is_numerically_stable` | the value is finite and the call raises no floating-point error across the domain | narrow the domain, or reorder the arithmetic that loses the value |
+| `is_numerically_stable` | the float64 result agrees with the exact value of the mathematics, within the claim tolerance (1e-9 plus 1e-7 times the magnitude by default), at every point tried in the working domain; stated with `mathema.f.accurate`, and the witness shows the exact and the float value | reorder or rescale the arithmetic that loses the value |
 | `<name>[float]` | the companion every proof spawns: the proven relation run in float64 at the domain's corners and inside it, falsified with a witness where the computation loses what the mathematics proves (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)) | narrow the domain, fix the code, or state the claim with `route="derive:math_only"` |
 | `is_precision_safe(f)` | reserved for a later release: the answer stays right in a narrower number representation (float32, say) | |
 | `is_representation_consistent(f)` | reserved for a later release: the same answer across the computations the bracketed descriptor names | |
@@ -380,9 +386,9 @@ nothing behind.
 
 | Spelling | What you learn | Usual fix |
 |---|---|---|
-| `is_deterministic` | the same inputs give the same output on every call | remove the hidden input (a clock, a global counter, an unseeded random draw) |
-| `is_reproducible` | the same inputs give the same output once the random seed is fixed; a parameter named `seed`, `rng`, `random_state` or `key`, or one annotated as a numpy `Generator` or `RandomState` or a `random.Random`, is the seed, held fixed while nothing else varies | draw from a generator the caller can seed |
-| `is_state_safe` | the call changes nothing outside itself: no argument mutated, no global written | copy before modifying, and return the result instead of storing it |
+| `is_deterministic` | the result depends on the arguments alone. mathema reads the source (and the source of every project function it reaches) and never runs it: a read of the environment, the clock, a file, a module-level value the call changes, or a draw from a shared random generator falsifies, with that read as the witness. A threaded reduction (numpy `dot`, `matmul`, `@`, `linalg`) whose rounding can depend on how its work is split, or anything mathema cannot read, leaves it `unknown` with the reason | remove the hidden input (a clock, a global counter, an unseeded random draw) |
+| `is_reproducible` | for a function that takes a seed or a generator (a parameter named `seed`, `rng`, `random_state` or `key`, or one annotated as a numpy `Generator` or `RandomState` or a `random.Random`), every draw comes through that parameter and nothing else the arguments do not carry is read, so the same seed gives the same answer. It is read from the source, as `is_deterministic` is | draw from a generator the caller can seed |
+| `is_state_safe` | the call changes nothing outside itself: no argument mutated, no global written, and no process state changed (the environment, the working directory, `sys.path`, the global random generators, logging's configuration). mathema reads the source, following aliases (`ys = xs`, `e = os.environ`) and the project functions it calls, and never runs it: a write falsifies with its site as the witness, even one in a branch the domain never reaches (the witness then says so too), and anything it cannot read (`getattr`, `exec`, a library function it has no entry for) leaves it `unknown` with the reason. Emitting a log record through the standard library's own logging, and drawing from a generator passed in, are not changes | copy before modifying, and return the result instead of storing it |
 | `is_order_invariant(f)` | reserved for a later release: the same answer whatever order a reduction runs in | |
 
 A reserved family is a known claim that is `skipped` in this release,
@@ -391,26 +397,44 @@ JIT compiler, a distributed runtime) is never part of a family name: it
 is named in the bracketed computation descriptor after a claim name
 (`[float]` today), which says which computation was attempted.
 
-Two roll-ups summarise the questions; the children stay individual
-claims. `is_computation_safe(f)` answers the first two: every child
-that applies to the function (a child applies when the battery would
-suggest it for the function) together with `is_numerically_stable`,
-which always applies. `is_repeatable(f)` answers the third, and the
-seed decides how: a function that takes a seed or a generator is held
-to `is_reproducible` (same seed, same answer), any other to
+The families form a tree, and a roll-up summarises its children; the
+children stay individual claims. `is_defined(f)` (a value or a
+deliberate error) has two children, `is_language_defined` and
+`is_numerically_defined`; the second rolls up `is_pole_safe`,
+`is_number_set_safe` and `is_dimension_safe`.
+`is_computation_safe(f)` rolls up `is_overflow_safe`,
+`is_representation_safe` and `is_recursion_safe`, and `is_input_safe(f)`
+rolls up `is_missing_safe`, `is_absent_safe` and `is_empty_safe`.
+`is_finite_over_floats(f)` is a view rather than a node: poles and
+overflow together. Each roll-up runs every child that applies to the
+function and is declared by the author, never suggested; its note
+names each child's verdict. A falsified child falsifies the roll-up with
+that child's name and witness; the roll-up is `proven` when every child
+is, and otherwise takes its weakest child's verdict.
+`is_repeatable(f)` answers the repeatability question, and the seed
+decides how: a function that takes a seed or a generator is held to
+`is_reproducible` (same seed, same answer), any other to
 `is_deterministic` (same input, same answer), and `is_state_safe`
-always joins. Each roll-up is declared by the author, never suggested;
-it is `holds` at best, never `proven`, its note names each child's
-verdict, and a falsified child falsifies it with that child's name and
-witness.
-`is_finite_valued` is a documented roll-up, not a registered family:
-`is_defined` and `is_overflow_safe` over the domain together say the
-function returns a finite value everywhere on it.
+always joins; it is `proven` when every child is, since its children are
+read from the source and never sampled.
 
-`is_defined` is not in these tables. Whether a function is defined at a
-point (a square root of a negative, a logarithm of zero) is a question
-about the mathematics, the same in every language, and the derive
-route reasons about it directly; see
+A function's own guards cut its working domain: a conditional raise,
+`@enforce_domain` (an assert at the top of the body feeds it) and an
+entry check of `@enforce_dimensions` reject a call on purpose, so
+`is_defined(f)` and the families judge only the calls the guards let
+through, and the record names each guard by its condition. A bare
+`assert` is not a guard: a failed assert counts against `is_defined`, and
+so does a `RangeError` from `@enforce_range` (a result outside its
+declared range).
+
+The old family names `is_builtin_safe`, `is_extremity_safe`,
+`is_arbitrary_input_safe` and `is_compendium_safe` are still read, as
+`is_number_set_safe`, `is_overflow_safe`, `is_language_defined` and
+`is_library_safe`, and the record says the spelling was accepted.
+
+Whether a function is defined at a point (a square root of a negative,
+a logarithm of zero) is a question about the mathematics, the same in
+every language, and the derive route reasons about it directly; see
 [conditional claims](conditional-claims.md).
 
 ## Partiality: claims about raising
@@ -449,7 +473,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: half-power output -->
 ```text
-falsified (-1): f returned the complex value 6.12323e-17+1j, which a real claim reads as a raise; narrow the claim's domain to where every call is real, or annotate the function complex
+falsified x = -1: f returned the complex value 6.12323e-17+1j, which a real claim reads as a raise; narrow the claim's domain to where every call is real, or annotate the function complex
 ```
 
 The derive route falsifies it too, with an executed witness. A function
@@ -547,6 +571,8 @@ for law in ["∫(f(x), x, -oo, oo) == 1",
             "f(x) >= 0",
             "let |inf| be 1e100, f(x) >= 0"]:
     for p in mathema.check(gauss, claims=[law]).probes:
+        if "mathema.policy" in (p.meta or {}):
+            continue    # what f does with a missing x, a row of its own
         label = "  [float]" if p.name.endswith("[float]") else law
         print(f"{label:31} {p.verdict:9} {p.counterexample or p.condition or ''}")
 ```
@@ -555,7 +581,7 @@ for law in ["∫(f(x), x, -oo, oo) == 1",
 ```text
 ∫(f(x), x, -oo, oo) == 1        proven
 f(x) >= 0                       proven    ∀ x ∈ ℝ
-  [float]                       falsified x=-1.79769e+308
+  [float]                       falsified x = -1.7976931348623157e+308
 let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ ℝ
   [float]                       holds
 ```
@@ -630,12 +656,12 @@ MATHEMA_PSEUDO_INFINITY=1e100 python levels.py 1e50
 
 <!-- example: levels output -->
 ```text
-f(x) >= 0                   [float] holds     {'value': 1e+100, 'source': 'environment'}
-  unbounded directions (x) run to let |inf| be 1e+100
+f(x) >= 0                   [float] holds     None
+  (every direction bounded)
 for x in [-3, 3], f(x) >= 0 [float] holds     None
   (every direction bounded)
-f(x) >= 0                   [float] holds     {'value': 1e+50, 'source': 'function'}
-  unbounded directions (x) run to let |inf| be 1e+50
+f(x) >= 0                   [float] holds     None
+  (every direction bounded)
 for x in [-3, 3], f(x) >= 0 [float] holds     None
   (every direction bounded)
 ```

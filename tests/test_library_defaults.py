@@ -51,7 +51,8 @@ def test_a_pinned_axis_is_passed_and_shown_pinned():
     assert pinned.verdict == "holds", pinned.note
     assert pinned.meta["mathema.defaults"]["numpy.mean"]["axis"] == \
         "0 (pinned)"
-    assert "let axis be" in pinned.statement
+    # the pin is written in the call (Pins ruling, 2026-10-01)
+    assert "f(a, axis=0)" in pinned.statement and "let axis" not in pinned.statement
     assert _declared(np.mean, law).verdict != "holds"
 
 
@@ -60,8 +61,11 @@ def test_a_literal_pin_survives_the_canonical_text():
     assert p.verdict == "holds", p.note
     assert p.meta["mathema.defaults"]["numpy.mean"]["keepdims"] == \
         "True (pinned)"
-    again = mathema.claim(p.statement)
-    assert again.param_pins == {"keepdims": True}
+    # the pin is written in the call, and reads back as the same pin
+    assert "f(a, keepdims=True)" in p.statement, p.statement
+    again = _declared(np.mean, p.statement)
+    assert again.statement == p.statement
+    assert again.meta["mathema.defaults"]["numpy.mean"]["keepdims"] == "True (pinned)"
 
 
 def test_a_pin_naming_no_parameter_is_misspecified():
@@ -88,9 +92,9 @@ def test_a_project_function_still_samples_its_defaulted_parameters(
     assert not _keeps_default(f, alpha)
     rec = mathema.check(f, claims=["for x in [0, 1], f(x) >= 0"])
     # the battery samples alpha, and the raise it hits says so
-    (callable_probe,) = [p for p in rec.probes if p.name == "callable"]
-    assert callable_probe.verdict == "skipped", callable_probe.note
-    assert "ValueError" in callable_probe.note
+    (not_run,) = rec.meta["mathema.not_run"]
+    assert not_run["check"] == "callable", not_run
+    assert "ValueError" in not_run["reason"]
     (claim_probe,) = [p for p in rec.probes if p.name == "f_x_ge_0"]
     assert "mathema.defaults" not in (claim_probe.meta or {})
 
@@ -246,3 +250,86 @@ def test_freshness_compares_the_defaults_per_function():
                         "meta": {"mathema.defaults":
                                  p.meta["mathema.defaults"]["numpy.mean"]}}]}
     assert _defaults_moved(np.mean, entry, flat)
+
+
+def _sampled(p) -> set:
+    # the parameter names the sampling line states a draw for
+    import re
+    return set(re.findall(r"(?:^|, )([A-Za-z_]\w*)~", p.meta["mathema.sampling"]))
+
+
+def test_the_sampling_line_lists_only_the_sampled_array():
+    p = _declared(np.mean, "for a in [-100, 100]^n, f(a) <= max(a)")
+    assert p.verdict == "holds", p.note
+    assert _sampled(p) == {"a"}
+    assert "held at their defaults: axis=None" in p.note
+
+
+def test_a_pinned_parameter_is_not_listed_as_sampled():
+    p = _declared(np.mean, "let axis be 0, for a in R^(n,n), "
+                           "dim(f(a)) == dim(a)")
+    assert _sampled(p) == {"a"}
+    assert "axis=0 (pinned)" in p.note
+
+
+def test_a_project_function_lists_its_sampled_defaulted_parameter(
+        tmp_path, monkeypatch):
+    (tmp_path / "dflt_sampled.py").write_text(textwrap.dedent('''
+        def scaled(x: float, k: float = 2.0) -> float:
+            """x times k."""
+            return x * k
+    '''))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    import importlib
+    scaled = importlib.import_module("dflt_sampled").scaled
+    rows = mathema.check(scaled, claims=[mathema.claim(
+        "for x in [0, 1], for k in [1, 2], f(x, k) >= 0",
+        route="probe")]).probes
+    (p,) = [p for p in rows if "mathema.sampling" in (p.meta or {})]
+    assert _sampled(p) == {"x", "k"}
+
+
+def test_a_library_key_with_a_policy_row_stays_fresh(tmp_path, monkeypatch):
+    import mathema.compendium as comp
+    from mathema.verify import verify_project
+    real = comp._installed_version
+    monkeypatch.setattr(comp, "_installed_version",
+                        lambda lib, aliases=(): "1.0" if lib == "extlib" else real(lib, aliases))
+    site = tmp_path / "site"
+    (site / "extlib").mkdir(parents=True)
+    (site / "extlib" / "__init__.py").write_text(textwrap.dedent('''
+        def scaled(x: float, k: float = 2.0) -> float:
+            """x times k."""
+            return x * k
+    '''))
+    monkeypatch.syspath_prepend(str(site))
+    proj = tmp_path / "proj"
+    (proj / "claims").mkdir(parents=True)
+    (proj / "claims" / "extlib.claims.yaml").write_text(textwrap.dedent("""
+        compendium: extlib
+        versions: ">=1.0"
+        extlib.scaled:
+          claims:
+            - name: nonneg
+              statement: 'for x in [0, 4], f(x) >= 0'
+            - name: holes_through
+              statement: 'missing(f, x) propagates'
+    """))
+    (proj / "claims" / "use.claims.yaml").write_text(textwrap.dedent("""
+        extlib.scaled:
+          claims: []
+    """))
+
+    def sweep():
+        sys.modules.pop("extlib", None)
+        comp.uninstall()
+        return verify_project(str(proj))
+
+    sweep()
+    import yaml
+    rec = proj / ".mathema" / "verified" / "extlib.scaled.yaml"
+    (row,) = [c for c in yaml.safe_load(rec.read_text())["extlib.scaled"]
+              ["claims"] if c["name"] == "holes_through"]
+    assert row["meta"]["mathema.defaults"] == {"extlib.scaled": {"k": "2.0"}}
+    again = sweep()
+    assert any("extlib.scaled: fresh" in line for line in again.lines), again.lines

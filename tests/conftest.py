@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Suite-wide pytest wiring: the `--extensive` flag that opts into the
-extensive-ladder proof corpus, the `needs_full_proof_budget` marker
-for tests whose assertion depends on a proof actually finishing, and
+extensive-ladder proof corpus, the `--third-party-compendiums` flag
+that opts into adjudicating the bundled compendium rows against the
+installed libraries, the `needs_full_proof_budget` marker for tests whose assertion depends on a proof actually finishing, and
 isolation from capability providers installed in the environment.
 
 The extensive-ladder tests each run full adjudication twice (fast
@@ -11,7 +12,14 @@ path and ladder), so they are skipped by default and run on command:
     python -m pytest --extensive tests/test_extensive_proofs.py
 
 They parallelize cleanly under pytest-xdist (`-n auto`) when it is
-installed, since every case is a self-contained adjudication."""
+installed, since every case is a self-contained adjudication.
+
+A test marked `third_party_compendiums` checks a library (or
+mathema's reading of it) rather than mathema, so it is skipped by
+default too:
+
+    python -m pytest -n 4 -q -m third_party_compendiums \
+        --third-party-compendiums"""
 import pytest
 
 
@@ -64,6 +72,25 @@ def _no_project_pseudo_infinity(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_throwaway_modules_left_behind(tmp_path_factory):
+    """A test that imports a package it wrote under its temporary
+    directory (`spkg.mod`, say) leaves no module behind: every module
+    imported during the test from a file under pytest's temporary base
+    directory is removed afterwards, so a later test in the same process
+    that writes a package of the same name imports its own."""
+    import os
+    import sys
+    base = os.path.realpath(str(tmp_path_factory.getbasetemp())) + os.sep
+    before = set(sys.modules)
+    yield
+    for name in set(sys.modules) - before:
+        module = sys.modules.get(name)
+        path = getattr(module, "__file__", None)
+        if path and os.path.realpath(path).startswith(base):
+            sys.modules.pop(name, None)
+
+
+@pytest.fixture(autouse=True)
 def _library_claims_isolated():
     """Installing library claims (`compendium.install`, which `verify`,
     `write_spec` and `mathema check` do) registers process-wide
@@ -79,7 +106,11 @@ def _library_claims_isolated():
     computation = {k: list(v) for k, v in compendium._COMPUTATION.items()}
     generators = dict(hazards._GENERATORS)
     installed = dict(compendium._INSTALLED)
+    from mathema.runtime_types import _missing
+    definitions = dict(_missing._DEFINITIONS)
     yield
+    _missing._DEFINITIONS.clear()
+    _missing._DEFINITIONS.update(definitions)
     _partiality._PARTIALITY_LEMMAS.clear()
     _partiality._PARTIALITY_LEMMAS.update(lemmas)
     compendium._COMPUTATION.clear()
@@ -93,6 +124,10 @@ def _library_claims_isolated():
 def pytest_addoption(parser):
     parser.addoption("--extensive", action="store_true", default=False,
                      help="run the extensive-ladder proof corpus (slower, opt-in)")
+    parser.addoption("--third-party-compendiums", action="store_true",
+                     default=False,
+                     help="adjudicate the bundled compendium rows against the "
+                          "installed libraries (opt-in)")
 
 
 def pytest_configure(config):
@@ -109,15 +144,27 @@ def pytest_configure(config):
         "markers",
         "slow_docs_example: a documentation example that takes more than "
         "a few seconds to run, see tests/test_docs_outputs.py")
+    config.addinivalue_line(
+        "markers",
+        "third_party_compendiums: adjudicates bundled compendium rows "
+        "against the installed library; skipped unless "
+        "--third-party-compendiums is given")
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("--extensive"):
-        return
-    skip = pytest.mark.skip(reason="extensive-ladder corpus: run with --extensive")
-    for item in items:
-        if "extensive_proofs" in item.keywords:
-            item.add_marker(skip)
+    opt_in = {"extensive_proofs": ("--extensive", "extensive-ladder corpus: "
+                                   "run with --extensive"),
+              "third_party_compendiums": (
+                  "--third-party-compendiums", "adjudicates library rows "
+                  "against the installed library: run with "
+                  "--third-party-compendiums")}
+    for marker, (option, reason) in opt_in.items():
+        if config.getoption(option):
+            continue
+        skip = pytest.mark.skip(reason=reason)
+        for item in items:
+            if marker in item.keywords:
+                item.add_marker(skip)
 
 # --- the proof budget, and why a test may need it raised ---------------
 #
@@ -151,6 +198,11 @@ def pytest_collection_modifyitems(config, items):
 
 _GENEROUS_FAST = 60
 _GENEROUS_EXTENSIVE = 120
+# the time a finite domain's whole sweep may take, by a timed estimate
+# of one call (`gates._SWEEP_SECONDS` for the computation line,
+# `_brute_force._SWEEP_SECONDS` for a derive brute-force proof): under
+# load the estimate grows and the sweep falls back to part of the domain
+_GENEROUS_SWEEP = 600
 
 
 @pytest.fixture(autouse=True)
@@ -168,6 +220,7 @@ def full_proof_budget(request, monkeypatch):
                             if name.startswith("mathema.") and m is not None]
     for mod in targets:
         for attr, value in (("FAST_TIMEOUT_SECONDS", _GENEROUS_FAST),
-                            ("EXTENSIVE_TIMEOUT_SECONDS", _GENEROUS_EXTENSIVE)):
+                            ("EXTENSIVE_TIMEOUT_SECONDS", _GENEROUS_EXTENSIVE),
+                            ("_SWEEP_SECONDS", _GENEROUS_SWEEP)):
             if hasattr(mod, attr):
                 monkeypatch.setattr(mod, attr, value, raising=False)

@@ -4,9 +4,19 @@ Implementation coverage: the share of each function's own statements that
 some evidence has exercised. Three sources count, and their union is the
 score: a test run that executed the line, read from a coverage report that
 already exists; a mathema probe that executed it while checking the
-function; and a derive-route proof of a claim on the function, one you
-declared or one of the standard claims `coverage` checks about it, which
-counts the whole body it modelled.
+function; and a proof of a claim included for the function, which counts
+the lines the proof modelled (the whole body, unless the proof was over
+part of the domain and names its branches). A proof is one on the derive
+route or one from the function's structure (the examine route).
+
+A claim is included when it is declared on the function (a docstring or
+decorator claim), when it sits in a claims file, or when it is a
+suggestion you adopted into a claims file or accepted with `mathema
+accept --as evidence`. Wherever it lives, a claim counts only once it
+has a verified record (`mathema verify`, or `write_spec` for a claim in a
+docstring): the coverage run's own proof never counts until then, so
+coverage never certifies itself. The standard claims `coverage` checks
+while tracing, and suggestions nobody adopted, never count as proofs.
 
 ```bash
 mathema coverage [targets] [--root .]
@@ -63,6 +73,19 @@ def running_total(xs: list, y0: float) -> float:
     return total
 ```
 
+A proof counts only once the claim has a verified record, so record the
+two docstring claims first (`mathema verify` then keeps the records
+current):
+
+<!-- example: cov run -->
+```python
+import mathema
+from ledger import running_total, settle
+
+for fn in (running_total, settle):
+    mathema.write_spec(fn)
+```
+
 <!-- example: cov run -->
 ```bash
 mathema coverage ledger --root .
@@ -77,8 +100,8 @@ implementation coverage: 88%
 ```
 
 `running_total` is covered twice over: the probe ran every line while
-checking `shifts_with_start`, and the claim proved on the derive route,
-which counts the whole body. `settle` is at 75%: nothing that ran the
+checking `shifts_with_start`, and the claim, recorded and proved on the
+derive route, counts the whole body. `settle` is at 75%: nothing that ran the
 function passed `"gross"`, so line 9 was never reached, and the remedy
 names the line. The project figure is weighted by statements, not
 averaged over functions.
@@ -184,7 +207,7 @@ mathema coverage ledger --root .
 
 <!-- example: cov output -->
 ```text
-100%  ledger.fee  [probe+derive]
+100%  ledger.fee  [probe]
 100%  ledger.running_total  [probe+derive]
  75%  ledger.settle  [probe]  -> re-run tests: reclaims +25% (stale coverage report)
 

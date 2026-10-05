@@ -62,7 +62,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: falsify output -->
 ```text
-falsified price=-8.76733e+09, rate=0.363721
+falsified price = -8767334983.247742, rate = 0.3637206090059846
 ```
 
 The claim is wrong, not the code. A negative price multiplied by
@@ -87,19 +87,21 @@ print(p.condition)
 <!-- example: falsify output -->
 ```text
 proven
-where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}
+where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ, y ∈ [0.0, 1.0] ⊂ ℝ
 ```
 
 `proven`, not `holds`. mathema did not run `discounted` on a thousand
 random prices and shrug, it lifted the body to a symbolic expression
 and decided the inequality algebraically, so the result covers every
 price in that range rather than the ones a sampler happened to pick.
-The region it proved over is printed back explicitly, including the
-`∪ {∅}` that says a missing value is part of the declared input space.
+The region it proved over is printed back explicitly, and it is over
+the reals: the NaN a `price: float` admits is not a real number, so the
+proof leaves it to the float computation, whose record lists what f did
+at nan.
 
 That difference is the whole idea: `holds` is evidence, `proven` is
 proof, and mathema always tells you which one you have. The full
-ladder is in [verdicts and evidence](cdd.md).
+ladder is in [the evidence ladder](evidence-ladder.md), and every verdict word in [Verdicts and exit codes](verdicts.md).
 
 ## Move it into the code
 
@@ -124,13 +126,16 @@ mathema check pricing.py
 
 <!-- example: docstring output -->
 ```text
-ok   pricing.discounted: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   pricing.discounted: source, no side effects; claims 4/4 adjudicated (1 proven, 3 holds, 0 falsified)
 ```
 
-The second claim is the proof's `[float]` companion: every claim the derive
-route proves also runs through the real code in floating point, since a
-proof is about the mathematics and whether the computation keeps up in
-float64 is a separate question. See [the evidence ladder](evidence-ladder.md).
+One claim, four checks. The first is the proof over the real numbers.
+The second runs the same claim through the real code in floating point,
+since a proof is about the mathematics and whether the computation keeps
+up in float64 is a separate question. The last two say what `discounted`
+does when `price` or `rate` is `nan`, a value a float may carry: nothing
+in the claim says, so mathema assumes the `nan` propagates to the result,
+and checks that it does. See [the evidence ladder](evidence-ladder.md).
 
 The docstring is one of four places a claim can live, alongside a
 decorator, a claims file, and an annotation. See [authoring
@@ -149,8 +154,9 @@ print(open(".mathema/verified/pricing.discounted.yaml").read())
 
 That writes `.mathema/verified/pricing.discounted.yaml`, which is the
 durable artifact: the claim, its verdict, the region it was proved
-over, the proof sketch, the float companion's row, and the identity hash
-it binds to (an excerpt):
+over, the proof sketch, the floating-point run's row (`[float]`), the two
+`nan` rows (`missing[price]`, `missing[rate]`), and the identity hash it
+binds to (an excerpt):
 
 <!-- example: docstring output match=subset -->
 ```yaml
@@ -159,21 +165,29 @@ pricing.discounted:
   identity:
     form: "d2ab6eef1b84"
   claims:
+    - name: "missing[price]"
+      statement: "missing(f, price) propagates"
+      verdict: "holds"
+      n: 1
+      note: "default for a float, which may be nan; confirmed on the 49 draws of never_raises_price[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims pricing.discounted --write"
+      route: "probe:counterfactual"
+    - name: "missing[rate]"
+      statement: "missing(f, rate) propagates"
+      verdict: "holds"
+      n: 1
+      note: "default for a float, which may be nan; confirmed on the 49 draws of never_raises_price[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims pricing.discounted --write"
+      route: "probe:counterfactual"
     - name: "never_raises_price"
-      statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
+      statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "proven"
       sketch: "interval evaluation over the declared domain: price*rate ∈ AccumBounds(0, 1000000), never negative"
-      condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
+      condition: "where x=price, y=rate: ∀ x ∈ [0.0, 1000000.0] ⊂ ℝ, y ∈ [0.0, 1.0] ⊂ ℝ"
       route: "derive"
-      authored:
-        surface: "docstring"
-        ref: "pricing.discounted:docstring:L1"
-        route: "best"
     - name: "never_raises_price[float]"
-      statement: "for price in [0.0, 1000000.0]:float|missing, rate in [0.0, 1.0]:float|missing, f(price, rate) <= price"
+      statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "holds"
-      n: 44
-      note: "the computation of never_raises_price in float64, executed at 44 points (every domain corner, then sampled interior points)"
+      n: 49
+      note: "the float64 computation of never_raises_price ran at 49 points: every corner and 40 interior points"
       route: "probe"
 ```
 
@@ -195,7 +209,7 @@ risk (`--lenient` lets the last two through, named in the report), so
 it drops into a pipeline exactly where
 a test runner would. Exit code
 2 means mathema could not run at all, which is worth keeping distinct
-from a real finding. See [exit codes](cdd.md#exit-codes).
+from a real finding. See [exit codes](verdicts.md#exit-codes).
 
 You do not have to write the workflow yourself:
 `mathema init --ci` scaffolds the GitHub Actions verify gate (or

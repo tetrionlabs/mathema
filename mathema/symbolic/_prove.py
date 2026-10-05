@@ -15,9 +15,12 @@ fallback applies).
 from __future__ import annotations
 
 import ast
+import contextlib
+import contextvars
 from dataclasses import dataclass, field, replace
 
 import sympy
+from fractions import Fraction
 
 from .._math_vocab import (_BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _PV_FUNC,
                            _SYMPY_FUNCS, _call_name)
@@ -35,7 +38,7 @@ from ..domain import InvalidDomain, render_domain_bound, split_bound_at
 from ._dot import try_prove_dot
 from ._fold import lift_fold, try_prove_fold
 from ._proof_support import (
-    ProofResult, _domain_assumptions, _free_names, _prove_relation,
+    ProofResult, _domain_assumptions, _free_names, _humanize, _prove_relation,
     _prove_relation_case_split, _quantifier_clause,
 )
 from ._sum import try_prove_sum
@@ -421,7 +424,16 @@ def _law_to_sympy(node: ast.AST, lifted: Lifted, param_names: set, aux: dict):
             # needs to know a _SymbolicArray was ever involved.
             idx = _literal_int_index(node.slice)
             if idx is not None:
-                return value.expr.subs(value.index, sympy.Integer(idx))
+                # numpy's reading of a literal index: a negative one
+                # counts from the end, and one outside the array has no
+                # element (the call raises IndexError), so the element
+                # is NaN wherever the position falls outside
+                position = sympy.Integer(idx) if idx >= 0 \
+                    else value.length + idx
+                inside = sympy.And(position >= 0, position < value.length)
+                return sympy.Piecewise(
+                    (value.expr.subs(value.index, position), inside),
+                    (sympy.nan, True))
             if isinstance(node.slice, ast.Name):
                 idx_sym = aux.setdefault(node.slice.id, sympy.Symbol(node.slice.id, real=True))
                 return value.expr.subs(value.index, idx_sym)
@@ -1549,8 +1561,11 @@ def _defined_assumptions(sub_conds: list) -> "tuple[list, list, list]":
 
 def _returns_no_value(out) -> bool:
     """Whether a call's result is a nan or an infinity (a scalar, or an
-    array with any non-finite element)."""
+    array with any non-finite element), or a complex number off the
+    real line, which has no value over the reals."""
     import math
+    if isinstance(out, complex) and out.imag != 0:
+        return True
     try:
         return not math.isfinite(complex(out).real) \
             or not math.isfinite(complex(out).imag)
@@ -1564,18 +1579,79 @@ def _returns_no_value(out) -> bool:
         return False
 
 
-def _witness_corroborated(callable_target, arg_exprs: list,
-                          witness: dict, exc: "str | None" = None) -> bool:
+def _certified_guard(cond, witness: dict, ext_params: dict,
+                     domain: dict) -> "str | None":
     """Intent:
-        True only when the real call, executed at the candidate
-        witness point, actually raises, the executed-witness bar a
-        guard disproof must clear; for a `NO_VALUE` guard, a call that
-        returns a nan or an infinity corroborates too. Evaluates each
-        substituted argument expression at the witness numerically;
-        any evaluation failure, or a call that returns a (finite)
-        value, refuses corroboration.
+        A certificate, in words, that the raise guard `cond` holds
+        somewhere in the declared domain near derive's witness, checked
+        by interval balls (`_exact_witness`) and not by the solver that
+        found the witness; None when it cannot be certified. One free
+        coordinate only: `G < 0` (or `<=`) by a ball strictly below zero
+        at a rational point near the witness; `G == 0` (or `<=`) by
+        certified opposite signs at the ends of a small rational
+        interval inside the domain over which G is continuous (a finite
+        enclosure of G over the whole interval, built from continuous
+        operations only), so G has a root inside it.
     """
-    from ._partiality import NO_VALUE
+    from .._exact_witness import (Undecided, ball, certified_sign, in_bound,
+                                  rational_near)
+    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    if not isinstance(cond, (sympy.Eq, sympy.Lt, sympy.Le, sympy.Gt,
+                             sympy.Ge)):
+        return None
+    g = cond.lhs - cond.rhs
+    if isinstance(cond, (sympy.Gt, sympy.Ge)):
+        g = -g
+    free = list(g.free_symbols)
+    if len(free) != 1:
+        return None
+    sym = free[0]
+    name = next((n for n, s in ext_params.items() if s == sym), None)
+    if name is None or sym not in witness:
+        return None
+    bound = (domain or {}).get(name)
+
+    def inside(q) -> bool:
+        return bound is None or in_bound(q, bound)
+
+    def check():
+        r = rational_near(witness[sym])
+        if isinstance(cond, (sympy.Lt, sympy.Le, sympy.Gt, sympy.Ge)):
+            if inside(r) and certified_sign(g, {sym: r}) < 0:
+                return (f"certified by interval arithmetic: "
+                        f"{sympy.sstr(g)} < 0 at {name} = {r}")
+            if isinstance(cond, (sympy.Lt, sympy.Gt)):
+                return None
+        for digits in (30, 15):
+            width = Fraction(1, 10 ** digits)
+            a, b = r - width, r + width
+            if not (inside(a) and inside(b) and inside(r)):
+                continue
+            sa, sb = certified_sign(g, {sym: a}), certified_sign(g, {sym: b})
+            if sa * sb < 0:
+                ball(g, {sym: (a, b)}, 200)
+                return (f"certified by interval arithmetic: "
+                        f"{sympy.sstr(g)} changes sign over {name} in "
+                        f"{sympy.Float(sympy.Rational(r.numerator, r.denominator), digits + 5)}"
+                        f" ± 1e-{digits} and is continuous there, so it is "
+                        f"zero inside")
+        return None
+    try:
+        return _with_timeout(check, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except (Undecided, ArithmeticError, TypeError, ValueError):
+        return None
+
+
+def _call_at_witness(callable_target, arg_exprs: list,
+                     witness: dict) -> "tuple | None":
+    """Intent:
+        The real call executed at the candidate witness point:
+        `("raised", exception)` or `("returned", value)`, or None when
+        an argument has no real numeric value there. Each substituted
+        argument expression is evaluated numerically.
+    """
     try:
         annotations = [prm.annotation for prm in
                        callable_signature(callable_target).parameters.values()]
@@ -1593,9 +1669,9 @@ def _witness_corroborated(callable_target, arg_exprs: list,
         except TimeoutError:
             raise
         except Exception:
-            return False
+            return None
         if abs(v.imag) > 1e-12:
-            return False
+            return None
         # a float-annotated parameter always gets a float; otherwise an
         # integral value is passed as int, since a float where the code
         # expects an int (a range() bound) would raise a TypeError that
@@ -1609,12 +1685,54 @@ def _witness_corroborated(callable_target, arg_exprs: list,
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            out = callable_target(*vals)
+            return ("returned", callable_target(*vals))
     except TimeoutError:
         raise
-    except Exception:
+    except Exception as e:
+        return ("raised", e)
+
+
+def _witness_corroborated(callable_target, arg_exprs: list,
+                          witness: dict, exc: "str | None" = None) -> bool:
+    """Intent:
+        True only when the real call, executed at the candidate
+        witness point, actually raises, the executed-witness bar a
+        guard disproof must clear; for a `NO_VALUE` guard, a call that
+        returns a nan, an infinity or a complex value corroborates too.
+        Any evaluation failure, or a call that returns a (finite) value,
+        refuses corroboration.
+    """
+    from ._partiality import NO_VALUE
+    outcome = _call_at_witness(callable_target, arg_exprs, witness)
+    if outcome is None:
+        return False
+    if outcome[0] == "raised":
         return True
-    return exc == NO_VALUE and _returns_no_value(out)
+    return exc == NO_VALUE and _returns_no_value(outcome[1])
+
+
+def _returned_words(callable_target, arg_exprs: list, witness: dict) -> str:
+    """What the real call did at the witness, for a counterexample: the
+    complex value, nan or infinity it returned, or the exception it
+    raised; empty when it returned an ordinary value."""
+    outcome = _call_at_witness(callable_target, arg_exprs, witness)
+    if outcome is None:
+        return ""
+    kind, value = outcome
+    if kind == "raised":
+        return f"raised {type(value).__name__}"
+    if isinstance(value, complex) or getattr(value, "dtype", None) is not None \
+            and getattr(value.dtype, "kind", "") == "c":
+        return f"returned the complex value {value!r}"
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if f != f:
+        return "returned nan"
+    if f in (float("inf"), float("-inf")):
+        return f"returned {f!r}"
+    return ""
 
 
 def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
@@ -1719,11 +1837,17 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             # witness the execution refutes is an engine artifact
             # (the false-falsified family), never a counterexample.
             target = (callables or {}).get(target_name)
+            certified = None
             if target is None or not _witness_corroborated(
                     target, arg_exprs, witness, exc):
-                uncorroborated = True
-                undecided = True
-                continue
+                # every float call returns there; the guard is checked at
+                # the exact witness by certified interval balls instead
+                certified = _certified_guard(cond, witness, ext_params,
+                                             domain)
+                if certified is None:
+                    uncorroborated = True
+                    undecided = True
+                    continue
             # a coordinate the claim's evaluation point fixes is named
             # at that value, the one the executed call used
             at_witness = {**witness, **fixed}
@@ -1733,18 +1857,24 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             from ._partiality import NO_VALUE
             fails = ("has no value" if exc == NO_VALUE
                      else f"raises {exc or 'an exception'}")
+            shown = (_returned_words(target, arg_exprs, witness)
+                     if exc == NO_VALUE and target is not None else "")
             return ProofResult(
                 "disproven",
                 sketch=f"{call_text} {fails} inside the declared "
-                       f"domain (guard {_cond_text(cond)} holds at {where}), "
-                       "so the claim has no value there, narrow the claim's "
-                       "domain to where every call returns, or state the "
-                       "raising region as its own raises(...) claim",
-                counterexample=where,
+                       f"domain (guard {_cond_text(cond)} holds at {where}"
+                       + (f"; {certified}" if certified else "")
+                       + "), so the claim has no value there, narrow the "
+                       "claim's domain to where every call returns, or "
+                       "state the raising region as its own raises(...) "
+                       "claim",
+                counterexample=(f"{where}: {call_text} {shown}" if shown
+                                else where),
                 witness=_witness_numbers(
                     {name: at_witness[sym] for name, sym in ext_params.items()
                      if sym in at_witness}),
-                meta={"mathema.witness_executed": True})
+                meta=({"mathema.witness_certified": certified}
+                      if certified else {"mathema.witness_executed": True}))
         undecided = True
     if undecided:
         meta = ({"mathema.engine": "guard-witness-uncorroborated"}
@@ -1756,6 +1886,308 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
                    "could be established, narrow the domain to where every "
                    "call returns, or state the raising region as its own "
                    "raises(...) claim", meta=meta)
+    return None
+
+
+def _nonpositive_integer_region(u):
+    """Where `u` is 0, -1, -2, ...: the poles of the gamma function."""
+    return sympy.And(sympy.Le(u, 0), sympy.Eq(u, sympy.floor(u)))
+
+
+#: the claim grammar's functions with no real value somewhere: name ->
+#: builder of the region over the lifted argument(s), and whether the
+#: region is a statement over real arguments only
+_CLAIM_FUNCTION_REGIONS: dict = {
+    "sqrt": (lambda u: sympy.Lt(u, 0), True),
+    "log": (lambda u, *b: sympy.Or(sympy.Le(u, 0),
+                                   *[sympy.Le(v, 0) for v in b],
+                                   *[sympy.Eq(v, 1) for v in b]), True),
+    "ln": (lambda u: sympy.Le(u, 0), True),
+    "log2": (lambda u: sympy.Le(u, 0), True),
+    "log10": (lambda u: sympy.Le(u, 0), True),
+    "asin": (lambda u: sympy.Gt(sympy.Abs(u), 1), True),
+    "acos": (lambda u: sympy.Gt(sympy.Abs(u), 1), True),
+    "atanh": (lambda u: sympy.Ge(sympy.Abs(u), 1), True),
+    "acosh": (lambda u: sympy.Lt(u, 1), True),
+    "tan": (lambda u: sympy.Eq(sympy.cos(u), 0), False),
+    "sec": (lambda u: sympy.Eq(sympy.cos(u), 0), False),
+    "cot": (lambda u: sympy.Eq(sympy.sin(u), 0), False),
+    "csc": (lambda u: sympy.Eq(sympy.sin(u), 0), False),
+    "gamma": (_nonpositive_integer_region, False),
+    "lgamma": (_nonpositive_integer_region, False),
+    "loggamma": (_nonpositive_integer_region, False),
+    "factorial": (lambda u: _nonpositive_integer_region(u + 1), False),
+}
+
+
+#: the lifted functions with no real value somewhere, by sympy class
+#: name: the region of their argument where they have none
+_REAL_ONLY_REGIONS: dict = {
+    "log": lambda u: sympy.Le(u, 0),
+    "asin": lambda u: sympy.Gt(sympy.Abs(u), 1),
+    "acos": lambda u: sympy.Gt(sympy.Abs(u), 1),
+    "acosh": lambda u: sympy.Lt(u, 1),
+    "atanh": lambda u: sympy.Ge(sympy.Abs(u), 1),
+}
+
+
+def _real_only_guards(expr, domain: dict) -> list:
+    """Intent:
+        The no-value guards `[(region, NO_VALUE)]` of a lifted body over
+        the reals, read from the lifted expression itself: a power with
+        a non-integer exponent has none where its base is negative, and
+        a logarithm, arcsine, arccosine, inverse hyperbolic cosine or
+        tangent none outside their real domains. The lift reads every
+        such call as the function over the reals whether or not a
+        compendium row states its definedness, so the mathematics never
+        takes a complex value for one. Empty when a parameter ranges
+        over C.
+    """
+    from ..probing import _bound_is_complex
+    from ._partiality import NO_VALUE
+    if any(_bound_is_complex(b) for b in domain.values()):
+        return []
+    exprs = expr if isinstance(expr, tuple) else (expr,)
+    out: list = []
+
+    def add(region) -> None:
+        if region not in (sympy.true, sympy.false) \
+                and region not in [r for r, _ in out]:
+            out.append((region, NO_VALUE))
+
+    def walk(node, context) -> None:
+        # `context` is the branch condition under which `node` is
+        # evaluated: a Piecewise evaluates a piece only where its own
+        # condition holds and no earlier one does
+        if isinstance(node, sympy.Piecewise):
+            earlier = sympy.false
+            for piece, cond in node.args:
+                here = sympy.And(context, cond, sympy.Not(earlier))
+                if here is not sympy.false:
+                    walk(piece, here)
+                    if not isinstance(cond, sympy.logic.boolalg.BooleanAtom):
+                        walk(cond, sympy.And(context, sympy.Not(earlier)))
+                earlier = sympy.Or(earlier, cond)
+            return
+        region = None
+        if isinstance(node, sympy.Pow):
+            k = node.exp
+            if k.is_number and k.is_real and k.is_integer is False \
+                    and node.base.free_symbols:
+                region = sympy.Lt(node.base, 0)
+        elif isinstance(node, sympy.Function):
+            build = _REAL_ONLY_REGIONS.get(type(node).__name__.lower())
+            if build is not None and len(node.args) == 1 \
+                    and node.args[0].free_symbols:
+                region = build(node.args[0])
+        if region is not None:
+            add(region if context is sympy.true
+                else sympy.And(context, region))
+        for arg in node.args:
+            if isinstance(arg, sympy.Basic):
+                walk(arg, context)
+
+    for e in exprs:
+        if isinstance(e, sympy.Basic):
+            walk(e, sympy.true)
+    return out
+
+
+def _integer_valued_over(expr, integer_names: set) -> bool:
+    """Whether `expr` is an integer at every point, reading the names
+    whose domain admits only integers as integers."""
+    swap = {s: sympy.Dummy(str(s), integer=True) for s in expr.free_symbols
+            if str(s) in integer_names}
+    if len(swap) != len(expr.free_symbols):
+        return False
+    return bool(expr.subs(swap).is_integer)
+
+
+def _claim_side_regions(src: str, build, complex_names: set,
+                        integer_names: "set | None" = None) -> list:
+    """Intent:
+        The regions where the claim's own expression `src` has no real
+        value, read from its syntax before sympy evaluates anything (a
+        built `x/x` is already 1): `[(region, text)]`, one per division,
+        power and partial grammar function, each operand lifted on its
+        own. An operand that does not lift contributes nothing.
+
+    Notes:
+        A division contributes its divisor's zero set; a power a zero
+        base with a negative exponent, and a negative base with an
+        exponent not known to be an integer; a function its row of
+        `_CLAIM_FUNCTION_REGIONS`. A region stated over real arguments
+        is left out when the operand reads a name bound to C. A name in
+        `integer_names` reads as an integer. An operand under a limit,
+        integral, sum or product that reads its bound variable
+        contributes nothing.
+    """
+    integer_names = integer_names or set()
+    try:
+        tree = ast.parse(src or "0", mode="eval")
+    except SyntaxError:
+        return []
+
+    def lifted(node):
+        try:
+            value = build(ast.unparse(node))
+        except TimeoutError:
+            raise
+        except Exception:
+            return None
+        if isinstance(value, tuple) or not isinstance(value, sympy.Basic):
+            return None
+        return value
+
+    def complex_operand(node) -> bool:
+        return any(isinstance(n, ast.Name) and n.id in complex_names
+                   for n in ast.walk(node))
+
+    # an operand reading a variable a limit, integral, sum or product
+    # binds is never evaluated over the claim's domain
+    bound_reads: set = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id in ("lim", "integrate", "Sum", "Prod",
+                                     "cauchy_pv") \
+                and len(node.args) >= 2 and isinstance(node.args[1], ast.Name):
+            bound = node.args[1].id
+            for sub in ast.walk(node):
+                if any(isinstance(n, ast.Name) and n.id == bound
+                       for n in ast.walk(sub)):
+                    bound_reads.add(id(sub))
+
+    out: list = []
+    for node in ast.walk(tree):
+        if id(node) in bound_reads:
+            continue
+        if isinstance(node, ast.BinOp) \
+                and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+            divisor = lifted(node.right)
+            if divisor is not None and divisor.free_symbols:
+                out.append((sympy.Eq(divisor, 0), ast.unparse(node)))
+            elif divisor is not None and divisor.is_zero:
+                out.append((sympy.true, ast.unparse(node)))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            base, exponent = lifted(node.left), lifted(node.right)
+            if base is None or exponent is None:
+                continue
+            if exponent.is_number and exponent.is_real \
+                    and exponent >= 0 and float(exponent).is_integer():
+                continue
+            out.append((sympy.And(sympy.Eq(base, 0), sympy.Lt(exponent, 0)),
+                        ast.unparse(node)))
+            integral = exponent.is_integer or (
+                exponent.is_number and exponent.is_real
+                and float(exponent).is_integer()) or (
+                bool(exponent.free_symbols)
+                and _integer_valued_over(exponent, integer_names))
+            if not integral and not complex_operand(node.left):
+                out.append((sympy.Lt(base, 0), ast.unparse(node)))
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id in _CLAIM_FUNCTION_REGIONS \
+                and not node.keywords:
+            builder, real_only = _CLAIM_FUNCTION_REGIONS[node.func.id]
+            if real_only and complex_operand(node):
+                continue
+            args = [lifted(a) for a in node.args]
+            if not args or any(a is None for a in args):
+                continue
+            try:
+                region = builder(*args)
+            except TypeError:
+                continue
+            out.append((region, ast.unparse(node)))
+    return [(region, text) for region, text in out
+            if region is not sympy.false]
+
+
+def _claim_side_verdict(lhs_src: str, rhs_src: str, build, domain: dict,
+                        params: dict, assumed_gaps: list,
+                        assumed_nonzero: list,
+                        int_params: "set | None" = None) -> "ProofResult | None":
+    """Intent:
+        Whether the claim's own sides have a real value at every point
+        of the domain: None when each region where one has none is
+        provably empty there (or outside the premises), a disproof
+        naming a point inside an explicitly bound domain where one
+        holds (the corroboration gate executes it), else undecided.
+        `int_params` names the parameters called with an int.
+    """
+    from ._proof_support import (_nonneg_certificate, _positive_certificate,
+                                 _relational_truth_over_domain)
+    from ..probing import _bound_is_complex
+    from ..domain import bound_assumptions
+    complex_names = {n for n, b in domain.items() if _bound_is_complex(b)}
+    integer_names = set()
+    for n, b in domain.items():
+        try:
+            if (bound_assumptions(b) or {}).get("integer"):
+                integer_names.add(n)
+        except Exception:
+            continue
+    integer_names |= {str(s) for s in params.values()
+                      if getattr(s, "is_integer", False)}
+    integer_names |= set(int_params or ())
+    regions = (_claim_side_regions(lhs_src, build, complex_names,
+                                   integer_names)
+               + _claim_side_regions(rhs_src, build, complex_names,
+                                     integer_names))
+    if not regions:
+        return None
+    names = {str(sym): sym for sym in params.values()}
+    assumptions = _AssumptionContext(gaps=list(assumed_gaps),
+                                     nonzero=list(assumed_nonzero))
+    for region, text in regions:
+        ext = {**names, **{str(s): s for s in region.free_symbols
+                           if str(s) not in names}}
+        if _relational_truth_over_domain(region, domain, ext) is False:
+            continue
+        if assumptions.excludes_guard(region, domain, ext):
+            continue
+        gap = (sympy.expand(region.lhs - region.rhs)
+               if isinstance(region, (sympy.Lt, sympy.Le, sympy.Eq))
+               else sympy.nan)
+        try:
+            if isinstance(region, sympy.Lt) \
+                    and _nonneg_certificate(gap, domain, ext) is not None:
+                continue
+            if isinstance(region, (sympy.Eq, sympy.Le)) and (
+                    _positive_certificate(gap, domain, ext) is not None
+                    or (isinstance(region, sympy.Eq)
+                        and _positive_certificate(-gap, domain, ext)
+                        is not None)):
+                continue
+        except TimeoutError:
+            raise
+        except Exception:
+            pass
+        candidates = _witness_candidates(ext, domain)
+        witness = None
+        if candidates is not None:
+            points, base = candidates
+            witness = _find_guard_witness(region, points, base, ext, domain,
+                                          assumptions)
+        explicit = all(str(s) in domain for s in region.free_symbols)
+        if witness is not None and explicit:
+            where = ", ".join(f"{name} = {_witness_value_text(witness[sym])}"
+                              for name, sym in ext.items() if sym in witness)
+            return ProofResult(
+                "disproven",
+                sketch=f"the claim's own side has no real value at {where}: "
+                       f"{text} has none where {_cond_text(region)}, which "
+                       f"the declared domain does not exclude; narrow the "
+                       f"claim's domain to where every side of it is real",
+                counterexample=where,
+                witness=_witness_numbers(
+                    {name: witness[sym] for name, sym in ext.items()
+                     if sym in witness}))
+        return ProofResult(
+            "undecided",
+            sketch=f"the claim's own side may have no real value inside the "
+                   f"declared domain: {text} has none where "
+                   f"{_cond_text(region)}, which neither a witness nor an "
+                   f"exclusion settles")
     return None
 
 
@@ -2311,6 +2743,12 @@ def _roots_outside_domain(locus, domain: dict) -> bool:
     if not isinstance(roots, sympy.FiniteSet):
         return False
 
+    if not plane:
+        # each real root against the bound's exact endpoints: a root a
+        # double cannot tell from an endpoint is still inside or outside
+        from ..domain import exact_membership
+        return all(exact_membership(r, bound) is False for r in roots)
+
     def number(r):
         # a root on the real line as the real number it is, else complex
         value = complex(r)
@@ -2329,19 +2767,37 @@ def _loop_proof_raise_gate(fn, facts, domain, proof: ProofResult) -> ProofResult
         the raise-region walk found (a non-integer `range()` argument,
         a division) provably misses the declared domain; otherwise the
         proof becomes undecided, since the closed form is silent about
-        the points where the code raises.
+        the points where the code raises. When every parameter is a
+        scalar, an operation whose region the walk could not state (a
+        division by a loop-built value) keeps it undecided too.
     """
     from ._fold import _cond_truth_over
     from ._partiality import partiality_walk
+    missed: list = []
     try:
-        guards, _unread = partiality_walk(fn, facts, domain or {})
+        guards, _unread = partiality_walk(fn, facts, domain or {},
+                                          missed_out=missed)
     except TimeoutError:
         raise
     except Exception:
-        return proof
+        guards, missed = [], ["the raise-region pass failed"]
+    if missed and not any(kind in SEQUENCE_KINDS
+                          for kind in (facts.param_kinds or {}).values()):
+        return ProofResult(
+            "undecided",
+            sketch=f"{proof.sketch}; not kept as a proof: the raise-region "
+                   f"pass cannot state where the code raises at "
+                   f"{missed[0]}, so a raise inside the domain is not "
+                   f"ruled out",
+            meta=dict(proof.meta))
     from ._partiality import NO_VALUE
     for cond, exc in guards:
-        if _cond_truth_over(cond, domain or {}) is True:
+        # a loop body's guard reads its range index, a nonnegative
+        # integer at every trip
+        indices = {str(sym): (0, float("inf")) for sym in cond.free_symbols
+                   if isinstance(sym, sympy.Dummy) and sym.is_integer
+                   and sym.is_nonnegative}
+        if _cond_truth_over(cond, {**(domain or {}), **indices}) is True:
             continue
         fails = ("have no value" if exc == NO_VALUE else f"raise {exc}")
         return ProofResult(
@@ -2355,12 +2811,152 @@ def _loop_proof_raise_gate(fn, facts, domain, proof: ProofResult) -> ProofResult
     return proof
 
 
+_CLAIM_SIDE_SKIP_CALLS = frozenset({"d", "diff", "integrate", "Integral",
+                                    "Sum", "sum", "Prod", "Product", "lim",
+                                    "limit"})
+
+
+def _claim_side_requirements(src: str) -> list:
+    """Intent:
+        The conditions under which the claim's own expression (never a
+        lifted function body) has a real value: `(kind, node)` pairs
+        for every divisor (`nonzero`), root or log argument (`nonneg`,
+        `positive`), and `(pow, base, exponent)` for every power, read
+        from the claim text. Calls that bind their own variable
+        (derivatives, integrals, sums, limits) are not entered.
+    """
+    try:
+        tree = ast.parse(src, mode="eval")
+    except SyntaxError:
+        return []
+    out: list = []
+
+    def walk(node):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id in _CLAIM_SIDE_SKIP_CALLS:
+            return
+        if isinstance(node, ast.BinOp):
+            if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+                out.append(("nonzero", node.right))
+            elif isinstance(node.op, ast.Pow):
+                out.append(("pow", node.left, node.right))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and len(node.args) == 1:
+            if node.func.id == "sqrt":
+                out.append(("nonneg", node.args[0]))
+            elif node.func.id in ("log", "log10", "log2", "ln"):
+                out.append(("positive", node.args[0]))
+        for child in ast.iter_child_nodes(node):
+            walk(child)
+
+    walk(tree)
+    return out
+
+
+def _claim_side_value_gate(sources, build, aux, domain, bound_context,
+                           params, extensive,
+                           integer_names: "set | None" = None) -> "ProofResult | None":
+    """Intent:
+        Whether the claim's own expression has a real value at every
+        point of the domain. None when every requirement is proven (or
+        none applies); a disproven ProofResult with an in-domain
+        witness where one provably fails; an undecided one, whose
+        sketch names the requirement, when one is not settled.
+
+    Notes:
+        A requirement over a name the domain does not bound (a bound
+        variable, an aux) is not checked here. A name in
+        `integer_names` (an int parameter, a domain of integers) reads
+        as an integer in an exponent.
+    """
+    integer_names = integer_names or set()
+    unsettled = None
+    names = set(params)
+    for src in sources:
+        if not src:
+            continue
+        for req in _claim_side_requirements(src):
+            try:
+                if req[0] == "pow":
+                    base = build(ast.unparse(req[1]), aux)
+                    exponent = build(ast.unparse(req[2]), aux)
+                    if not getattr(exponent, "is_integer", False) \
+                            and hasattr(exponent, "free_symbols") \
+                            and exponent.free_symbols \
+                            and _integer_valued_over(exponent, integer_names):
+                        # the same exponent over integer symbols, so its
+                        # sign questions read it as an integer
+                        swap = {sym: sympy.Dummy(str(sym), integer=True,
+                                                 **({"nonnegative": True}
+                                                    if sym.is_nonnegative
+                                                    else {}))
+                                for sym in exponent.free_symbols}
+                        exponent = exponent.subs(swap)
+                    if getattr(exponent, "is_integer", False) and \
+                            exponent.is_nonnegative:
+                        continue
+                    if getattr(exponent, "is_integer", False) and \
+                            exponent.is_negative:
+                        checks = [(base, "!=", "nonzero")]
+                    elif exponent.is_number and exponent.is_positive:
+                        checks = [(base, ">=", "nonneg")]
+                    else:
+                        checks = [(base, ">", "positive")]
+                else:
+                    operand = build(ast.unparse(req[1]), aux)
+                    rel = {"nonzero": "!=", "nonneg": ">=",
+                           "positive": ">"}[req[0]]
+                    checks = [(operand, rel, req[0])]
+            except TimeoutError:
+                raise
+            except Exception:
+                continue
+            for expr, rel, kind in checks:
+                if isinstance(expr, tuple) or not hasattr(expr, "free_symbols"):
+                    continue
+                if not {str(s) for s in expr.free_symbols} <= names:
+                    continue
+                if expr.is_number:
+                    if (rel == "!=" and expr.is_zero is False) or \
+                            (rel == ">=" and expr.is_nonnegative) or \
+                            (rel == ">" and expr.is_positive):
+                        continue
+                try:
+                    verdict = _prove_relation(expr, sympy.S.Zero, rel, domain,
+                                              bound_context, params,
+                                              extensive=extensive)
+                except TimeoutError:
+                    raise
+                except Exception:
+                    verdict = None
+                what = {"nonzero": f"{_humanize(expr)} is never zero",
+                        "nonneg": f"{_humanize(expr)} is never negative",
+                        "positive": f"{_humanize(expr)} is always positive"}[kind]
+                if verdict is not None and verdict.status == "proven":
+                    continue
+                if verdict is not None and verdict.status == "disproven" \
+                        and verdict.witness:
+                    return ProofResult(
+                        "disproven",
+                        sketch=(f"the claim's own side has no real value "
+                                f"inside the declared domain: it needs "
+                                f"{what}, which fails there"),
+                        witness=verdict.witness,
+                        meta={"mathema.claim_side_no_value": True})
+                unsettled = unsettled or ProofResult(
+                    "undecided",
+                    sketch=(f"the claim's own side needs {what} over the "
+                            f"declared domain, which is not settled"))
+    return unsettled
+
+
 def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
              domain: dict | None = None, tolerance: float | None = None,
              max_callee_depth: int = 3, extensive: bool = False,
              _split_depth: int = 0, funcs: dict | None = None,
              assumption: "list | None" = None,
-             assume_defined: bool = False) -> ProofResult:
+             assume_defined: bool = False,
+             exclude_own_guards: bool = False) -> ProofResult:
     """See `_try_prove`. A proof is kept only when every raise region
     of the functions it reads was read too: a statement the raise-region
     pass stops at could hide a raise in the domain, and a value claim is
@@ -2368,7 +2964,8 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     notes: dict = {}
     result = _try_prove(fn, facts, lhs_src, rhs_src, relation, domain,
                         tolerance, max_callee_depth, extensive, _split_depth,
-                        funcs, assumption, assume_defined, _walk_notes=notes)
+                        funcs, assumption, assume_defined, _walk_notes=notes,
+                        exclude_own_guards=exclude_own_guards)
     if (result.status == "disproven" and tolerance is not None
             and result.meta.get("mathema.exact_disproof")):
         # a declared tolerance is part of the claim: a difference below
@@ -2377,6 +2974,12 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             "undecided",
             sketch=(f"{result.sketch}; within the declared tolerance "
                     f"({tolerance:g}), so not a disproof of this claim"))
+    if result.status == "proven" and notes.get("claim_side"):
+        return ProofResult(
+            "undecided",
+            sketch=(f"{result.sketch}; not kept as a proof: "
+                    f"{notes['claim_side']}"),
+            meta=dict(result.meta))
     if result.status == "proven" and notes.get("unread") and not assume_defined:
         return ProofResult(
             "undecided",
@@ -2450,54 +3053,127 @@ def _complex_value_region(fn, facts, lhs_src: str, rhs_src: str,
     return None
 
 
-def _first_axis_length(seq, axis):
-    """`dim(seq, 0)` of a plain list, its length."""
+def _first_axis_length(seq, axis=0):
+    """`dim(seq)` and `dim(seq, 0)` of a plain list, its length."""
     if axis != 0:
         raise ValueError("only the first axis of a list has a length")
     return len(seq)
 
 
-def _premises_admit_empty(name: str, assumption) -> bool:
-    """Whether the `assuming` conjuncts put the empty list in `name`'s
-    domain: at least one of them reads `len(name)` (canonically
-    `dim(name, 0)`), and every one that reads it holds at length
-    zero."""
+#: whether a proof is judged at every sequence length the claim admits
+#: (the empty list, two lengths that differ, a length too short for a
+#: literal index); off while a family claim whose statement asks about
+#: agreement or accuracy rather than a value is adjudicated
+_JUDGE_LENGTHS: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "mathema_judge_lengths", default=True)
+
+
+@contextlib.contextmanager
+def lengths_unjudged():
+    """Within the block, proofs are not judged at the sequence lengths
+    their claim admits (see `_JUDGE_LENGTHS`)."""
+    token = _JUDGE_LENGTHS.set(False)
+    try:
+        yield
+    finally:
+        _JUDGE_LENGTHS.reset(token)
+
+
+def lengths_judged() -> bool:
+    return _JUDGE_LENGTHS.get()
+
+
+def length_admitted(name: str, k: int, domain, assumption,
+                    shapes: "dict | None" = None) -> "bool | None":
+    """Intent:
+        Whether the claim admits the sequence `name` at length `k`: True
+        when its binding and every premise that reads `name` hold for a
+        list of that length, False when the binding or a premise
+        excludes it, None when a premise reads more than this one
+        sequence and so cannot be read at `k` alone.
+
+    Notes:
+        A value claim is over non-empty sequences: an unbound sequence
+        and one over a dimension name (`x in R^n`, `Shape("n")`) admit
+        every length from one, and the empty list only where a premise
+        reads the sequence's length and holds at zero (`assuming
+        len(x) == 0`); what f does with an empty list the claim does not
+        name is the empty-input line's question (`empty_input_line`). A
+        fixed length (`R^3`) admits only itself, and a dimension name
+        the claim binds to whole numbers (`n in [2, 5] subset Z`) admits
+        those. A premise with no value at the list (`max(x) > 0` at the
+        empty list) excludes it.
+    """
     import re
-    pattern = re.compile(rf"\b(?:len\(\s*{re.escape(name)}\s*\)"
-                         rf"|dim\(\s*{re.escape(name)}\s*,\s*0\s*\))")
+
+    from .._shapes import dims_of, fixed_size
+    from ..domain import domain_contains
+    domain = domain or {}
+    dims = dims_of(domain.get(name)) or dims_of((shapes or {}).get(name))
+    if dims:
+        size = fixed_size(dims[0])
+        if size is not None and size != k:
+            return False
+        token = domain.get(dims[0]) if size is None else None
+        if token is not None:
+            try:
+                if not domain_contains(float(k), token):
+                    return False
+            except Exception:
+                return None
+    pattern = re.compile(rf"\b{re.escape(name)}\b")
+    reading = [(lhs, rel, rhs) for lhs, rel, rhs in assumption or ()
+               if pattern.search(f"{lhs} {rhs}")]
+    if k == 0 and not reading:
+        return False
+    return _premises_hold(reading, {name: [0.0] * k})
+
+
+def _premises_hold(assumption, point: dict) -> "bool | None":
+    """Whether every `assuming` conjunct holds at `point`: False when one
+    fails or has no value there (an index past the end, the maximum of
+    an empty list, a statistic that is nan), None when one cannot be
+    evaluated here."""
     ops = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
            "<=": lambda a, b: a <= b, ">=": lambda a, b: a >= b,
            "<": lambda a, b: a < b, ">": lambda a, b: a > b}
-    mentioned = False
+    from .._exact_premises import premise_functions
+    from .._linalg_eval import FUNCTIONS
+    # the claim's own premise vocabulary (`std(xs, ddof=1) > 0`), with a
+    # list's length read by len and dim
+    env = {**premise_functions(FUNCTIONS), "len": len,
+           "dim": _first_axis_length, **point}
+    answer: "bool | None" = True
     for lhs, rel, rhs in assumption or ():
-        text = f"{lhs} {rhs}"
-        if not pattern.search(text):
+        if rel not in ops:
+            answer = None
             continue
-        mentioned = True
         try:
-            env = {"len": len, "dim": _first_axis_length, name: []}
             lv = eval(compile(str(lhs), "<premise>", "eval"),
                       {"__builtins__": {}}, env)
             rv = eval(compile(str(rhs), "<premise>", "eval"),
                       {"__builtins__": {}}, env)
             holds = ops[rel](lv, rv)
-        except Exception:
-            # it reads more than this one length: whether it holds at
-            # length zero depends on values this check does not choose
+        except (IndexError, ValueError, ZeroDivisionError):
             return False
+        except Exception:
+            answer = None
+            continue
         if not holds:
             return False
-    return mentioned
+    return answer
 
 
 def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                           assumption) -> "ProofResult | None":
     """Intent:
-        A disproof with an executed witness when the claim's premises
-        admit the empty list for a sequence parameter, the claim calls
-        f at its own parameters, and f raises when called with the
-        empty list there; an undecided result when f raises but the
-        claim calls it at other arguments; None otherwise.
+        A disproof with an executed witness when the claim admits the
+        empty list for a sequence parameter (see `length_admitted`: an
+        unbound list does), the claim calls f at its own parameters,
+        and f raises when called with the empty list there; an
+        undecided result when f raises but the claim calls it at other
+        arguments, or its premises may admit the empty list; None
+        otherwise.
 
     Notes:
         A fold's closed form has a value at length zero (the initial
@@ -2508,12 +3184,132 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
     import random
 
     from ..probing import _synth
+    from ._seq_common import _length_ties, signature_shapes
+    if not lengths_judged():
+        return None
+    shapes = signature_shapes(fn)
     seqs = [p for p in facts.params
             if facts.param_kinds.get(p) in SEQUENCE_KINDS]
-    targets = [p for p in seqs if _premises_admit_empty(p, assumption)]
+    bound_admits = {p: length_admitted(p, 0, domain, assumption, shapes)
+                    for p in seqs}
+    ties = _length_ties(seqs, domain, assumption, shapes)
+    targets = [p for p in seqs if bound_admits[p] is not False
+               and length_admitted(p, 0, domain, assumption,
+                                   shapes) is not False]
     if not targets:
         return None
-    identity = True
+    identity, calls_f = True, False
+    for src in (lhs_src, rhs_src):
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            return None
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+                    and n.func.id == "f":
+                calls_f = True
+                if [getattr(a, "id", None) for a in n.args] \
+                        != list(facts.params):
+                    identity = False
+    if not calls_f:
+        # a claim that never calls f has a value wherever f raises
+        return None
+    rng = random.Random(0)
+    admitted: dict = {}
+    for target in targets:
+        # every sequence the claim ties to the target's length is empty
+        # with it, and the point must satisfy the claim's premises
+        group = {p for p in seqs if ties[p] == ties[target]}
+        if any(bound_admits[p] is False for p in group):
+            continue
+        args = None
+        for _attempt in range(8):
+            drawn: list = []
+            for p in facts.params:
+                if p in group:
+                    drawn.append([])
+                    continue
+                kind = facts.param_kinds.get(p, "float")
+                try:
+                    drawn.append(_synth(kind, rng, (domain or {}).get(p)))
+                except Exception:
+                    return None
+            held = _premises_hold(assumption, dict(zip(facts.params, drawn)))
+            if held is False:
+                continue
+            args = drawn
+            admitted[target] = (None if held is None or any(
+                bound_admits[p] is None for p in group) else True)
+            break
+        if args is None:
+            continue
+        try:
+            fn(*args)
+        except Exception as e:
+            exc = type(e).__name__
+        else:
+            continue
+        where = ", ".join(f"{p} = {a!r}" for p, a in zip(facts.params, args))
+        if admitted[target] is None:
+            return ProofResult(
+                "undecided",
+                sketch=f"f raises {exc} on the empty list ({where}), which "
+                       f"the claim may admit for {target}; state it: "
+                       f"assuming len({target}) >= 1")
+        if not identity:
+            from .._empty_input import claim_calls
+            called = next((c for c in claim_calls(
+                fn, (lhs_src, rhs_src), dict(zip(facts.params, args)))
+                if c[2]), None)
+            if called is not None:
+                call_text, call_args, call_exc, _result = called
+                at = ", ".join(f"{p} = {v!r}" for p, v in call_args.items())
+                return ProofResult(
+                    "disproven",
+                    sketch=f"the claim calls {call_text}, and f raises "
+                           f"{type(call_exc).__name__} at {at}, an empty list the claim "
+                           f"admits, so the claim has no value there; "
+                           f"narrow it with assuming len({target}) >= 1",
+                    counterexample=at,
+                    witness=dict(call_args),
+                    meta={"mathema.witness_executed": True})
+            return ProofResult(
+                "undecided",
+                sketch=f"f raises {exc} on the empty list the claim admits "
+                       f"for {target} ({where}), and the claim calls f at "
+                       f"other arguments; state it: assuming len({target}) "
+                       f">= 1")
+        return ProofResult(
+            "disproven",
+            sketch=f"f raises {exc} at {where}, an empty list the claim "
+                   f"admits, so the claim has no value there; narrow it "
+                   f"with assuming len({target}) >= 1, or state the raising "
+                   f"case as its own raises(...) claim",
+            counterexample=where,
+            witness=dict(zip(facts.params, args)),
+            meta={"mathema.witness_executed": True})
+    return None
+
+
+def _mismatch_raise(fn, lhs_src: str, rhs_src: str, pair: tuple, domain,
+                    assumption, shapes) -> "ProofResult | None":
+    """Intent:
+        A disproof with an executed witness when the claim admits the
+        two sequences of `pair` at different lengths, calls f at its
+        own parameters, and f raises there: each is drawn at a length
+        its binding admits (two and one element, then the reverse),
+        every other argument from its declared domain, at a point the
+        claim's premises hold. None otherwise.
+    """
+    import random
+
+    from ..analysis import analyze_source
+    from ..probing import _synth
+    from ._seq_common import _length_ties
+    try:
+        facts = analyze_source(fn)
+    except Exception:
+        return None
     for src in (lhs_src, rhs_src):
         try:
             tree = ast.parse(src or "0", mode="eval")
@@ -2523,41 +3319,48 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
                     and n.func.id == "f" and [getattr(a, "id", None)
                                               for a in n.args] != list(facts.params):
-                identity = False
-    rng = random.Random(0)
-    for target in targets:
-        args: list = []
-        for p in facts.params:
-            if p == target:
-                args.append([])
-                continue
-            kind = facts.param_kinds.get(p, "float")
-            try:
-                args.append(_synth(kind, rng, (domain or {}).get(p)))
-            except Exception:
                 return None
-        try:
-            fn(*args)
-        except Exception as e:
-            exc = type(e).__name__
-        else:
+    seqs = [p for p in facts.params
+            if facts.param_kinds.get(p) in SEQUENCE_KINDS]
+    ties = _length_ties(seqs, domain, assumption, shapes)
+    a, b = pair
+    rng = random.Random(0)
+    for la, lb in ((2, 1), (1, 2)):
+        if length_admitted(a, la, domain, None, shapes) is False \
+                or length_admitted(b, lb, domain, None, shapes) is False:
             continue
-        where = ", ".join(f"{p} = {a!r}" for p, a in zip(facts.params, args))
-        if not identity:
-            return ProofResult(
-                "undecided",
-                sketch=f"f raises {exc} on the empty list the premises admit "
-                       f"for {target} ({where}), and the claim calls f at "
-                       f"other arguments")
-        return ProofResult(
-            "disproven",
-            sketch=f"f raises {exc} at {where}, an empty list the premises "
-                   f"admit, so the claim has no value there; narrow the "
-                   f"premise to len({target}) >= 1, or state the raising "
-                   f"case as its own raises(...) claim",
-            counterexample=where,
-            witness=dict(zip(facts.params, args)),
-            meta={"mathema.witness_executed": True})
+        for _attempt in range(8):
+            args: list = []
+            for p in facts.params:
+                if ties.get(p) is not None and ties.get(p) == ties.get(a):
+                    args.append([float(k + 1) for k in range(la)])
+                elif ties.get(p) is not None and ties.get(p) == ties.get(b):
+                    args.append([float(k + 1) for k in range(lb)])
+                else:
+                    try:
+                        args.append(_synth(facts.param_kinds.get(p, "float"),
+                                           rng, (domain or {}).get(p)))
+                    except Exception:
+                        return None
+            if _premises_hold(assumption, dict(zip(facts.params, args))) \
+                    is not True:
+                continue
+            try:
+                fn(*args)
+            except Exception as e:
+                where = ", ".join(f"{p} = {v!r}"
+                                  for p, v in zip(facts.params, args))
+                return ProofResult(
+                    "disproven",
+                    sketch=f"f raises {type(e).__name__} at {where}, where "
+                           f"the claim admits {a} and {b} of different "
+                           f"lengths, so the claim has no value there; bind "
+                           f"both over one length (for {a} in R^n, {b} in "
+                           f"R^n) or state it: assuming len({a}) == len({b})",
+                    counterexample=where,
+                    witness=dict(zip(facts.params, args)),
+                    meta={"mathema.witness_executed": True})
+            break
     return None
 
 
@@ -2656,7 +3459,8 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                _split_depth: int = 0, funcs: dict | None = None,
                assumption: "list | None" = None,
                assume_defined: bool = False,
-               _walk_notes: dict | None = None) -> ProofResult:
+               _walk_notes: dict | None = None,
+               exclude_own_guards: bool = False) -> ProofResult:
     """Attempt a symbolic proof of `lhs <relation> rhs` over the function's
     lifted body, honoring a declared domain as sympy assumptions.
 
@@ -3043,7 +3847,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             except Exception:
                 summary = None
             sketch = "function body is not derivable"
-            if summary:
+            if facts.tree is None:
+                sketch = ("function body could not be read: a builtin "
+                          "or compiled function has no Python source")
+            elif summary:
                 sketch = f"{sketch}, {summary}"
             else:
                 sketch = (f"{sketch} in v1: contains a loop, branch, recursion, "
@@ -3055,6 +3862,8 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     # standard library's partiality is a raise like any other, and the
     # same pedantic raise-region verdict below adjudicates both
     from ._partiality import partiality_walk
+    # the first `own_count` guards are f's own explicit raise branches
+    own_count = len(piecewise_guards)
     try:
         implicit, unread = partiality_walk(fn, facts, domain or {})
     except TimeoutError:
@@ -3065,6 +3874,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         _walk_notes.setdefault("unread", f"{fn.__name__} {unread}")
     if implicit:
         piecewise_guards = list(piecewise_guards) + implicit
+    if lifted is not None:
+        real_only = _real_only_guards(lifted.expr, domain or {})
+        if real_only:
+            piecewise_guards = list(piecewise_guards) + real_only
 
     # Domain assumptions (e.g. sigma declared nonnegative) must be baked
     # into the symbols *before* the law is parsed, not substituted into
@@ -3106,8 +3919,9 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                else _subs_one_maybe_array(expr, subs))
 
     def _nonidentity_call_args(src: str) -> bool:
-        # does the law call f itself with anything other than a bare
-        # parameter name? `f(-partial, sigma)` substitutes a
+        # does the law call f itself with anything other than each
+        # parameter in its own position? `f(-partial, sigma)` or
+        # `f(y, x)` substitutes a
         # transformed argument into f's PRE-BAKED body, whose sign
         # resolution belonged to the original argument, the false-
         # disproof hazard. Two argument shapes cannot trigger it: a
@@ -3127,9 +3941,13 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                     and node.func.id == "f":
                 for i, a in enumerate(node.args):
-                    if isinstance(a, ast.Name) and a.id in lifted.params:
-                        continue
                     if i >= len(param_order):
+                        return True
+                    if isinstance(a, ast.Name) and a.id in lifted.params:
+                        if a.id == param_order[i]:
+                            continue
+                        # another parameter in this position: its own
+                        # domain, not this position's, holds here
                         return True
                     try:
                         value = ast.literal_eval(a)
@@ -3150,29 +3968,19 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                         return True
         return False
 
-    def _sign_sensitive(expr) -> bool:
-        parts = expr if isinstance(expr, tuple) else (expr,)
-        for e in parts:
-            base = e.expr if isinstance(e, _SymbolicArray) else e
-            if hasattr(base, "has") and base.has(sympy.Abs, sympy.sign,
-                                                 sympy.Max, sympy.Min):
-                return True
-        return False
-
     keep_plain = lifted.branch_complete or (
-        _sign_sensitive(lifted.expr)
-        and (_nonidentity_call_args(lhs_src)
-             or (bool(rhs_src) and _nonidentity_call_args(rhs_src))))
+        _nonidentity_call_args(lhs_src)
+        or (bool(rhs_src) and _nonidentity_call_args(rhs_src)))
     if keep_plain and subs:
         # a piecewise lift keeps its plain symbols: baking a sign
         # assumption in would collapse the branches the declared domain
         # doesn't select, which is only sound for bare-parameter calls.
-        # The same applies to a sign-SENSITIVE body (Abs/sign/Min/Max)
-        # when the law substitutes a transformed argument: sympy
-        # collapses Abs(positive_sym) to the symbol at bake time, so a
-        # later f(-partial, ...) substitution lands in a body whose
-        # sign resolution belonged to the ORIGINAL argument (the
-        # Abs-under-negated-argument false falsification). The domain
+        # The same applies whenever the law passes f anything but each
+        # parameter in its own position: sympy simplifies the body
+        # under the baked assumptions (Abs(positive_sym) becomes the
+        # symbol, sqrt(x**2) becomes x), so a later f(-partial, ...) or
+        # f(y, x) substitution lands in a body whose simplification
+        # belonged to the ORIGINAL argument's domain. The domain
         # still acts, through bound_context and pins, both remapped
         # back onto the original symbols here.
         inverse = {new_sym: old_sym for old_sym, new_sym in subs.items()}
@@ -3294,6 +4102,24 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             return e.subs(pins, simultaneous=True)
         lhs, rhs = _pin(lhs), _pin(rhs)
 
+    if relation in ("==", "~=", "!=", "<", "<=", ">", ">="):
+        from ..domain import bound_assumptions as _assumptions_of
+        integer_names = {p for p, k in (facts.param_kinds or {}).items()
+                         if k == "int"}
+        for name, bound in domain.items():
+            try:
+                if (_assumptions_of(bound) or {}).get("integer"):
+                    integer_names.add(name)
+            except Exception:
+                continue
+        side_gate = _claim_side_value_gate(
+            [lhs_src, rhs_src], build, aux, domain, bound_context,
+            lifted.params, extensive, integer_names)
+        if side_gate is not None and side_gate.status == "disproven":
+            return side_gate
+        if side_gate is not None and _walk_notes is not None:
+            _walk_notes.setdefault("claim_side", side_gate.sketch)
+
     if isinstance(lhs, _SymbolicArray) or isinstance(rhs, _SymbolicArray):
         return ProofResult("unliftable", sketch="an array-valued expression must "
                            "be indexed, e.g. f(...)[i], before it can be compared")
@@ -3330,13 +4156,16 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         return replace(result, quantifier=_quantifier_clause(
             names, list(lifted.params), domain))
 
-    if piecewise_guards and assume_defined:
+    own_guards = piecewise_guards[:own_count]
+    if (piecewise_guards and assume_defined) \
+            or (own_guards and exclude_own_guards):
         # `assuming defined(f)` quantifies over exactly the region
         # where every call returns: the raise regions are excluded by
         # the quantifier itself, and their negations feed the decision
         # machinery as algebraic assumptions
         triples = _call_guard_conditions(lhs_src, rhs_src, lifted,
-                                         piecewise_guards,
+                                         piecewise_guards if assume_defined
+                                         else own_guards,
                                          bound_funcs=aux_funcs_lifted)
         if triples:
             d_gaps, d_nonzero, d_preds = _defined_assumptions(
@@ -3346,7 +4175,11 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             for pred in d_preds:
                 bound_context = pred if bound_context is None \
                     else sympy.And(bound_context, pred)
-    verdict_guards = [] if assume_defined else piecewise_guards
+    # `exclude_own_guards`: a claim binding no domain is read over the
+    # working domain, where f's own raise branches refuse their inputs
+    verdict_guards = ([] if assume_defined else
+                      piecewise_guards[own_count:] if exclude_own_guards
+                      else piecewise_guards)
     if verdict_guards or aux_funcs_guards:
         from .._timeout import (EXTENSIVE_TIMEOUT_SECONDS,
                                 FAST_TIMEOUT_SECONDS, _with_timeout)
@@ -3377,6 +4210,26 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                                         sketch=f"{raise_verdict.sketch}; "
                                                f"{piecewise_hint}")
             return _mechanized(raise_verdict)
+    if not lhs_tuple:
+        from .._timeout import (EXTENSIVE_TIMEOUT_SECONDS as _EXT,
+                                FAST_TIMEOUT_SECONDS as _FAST,
+                                _with_timeout as _capped)
+        try:
+            side_verdict = _capped(
+                lambda: _claim_side_verdict(
+                    lhs_src, rhs_src, lambda src: build(src, aux), domain,
+                    lifted.params, assumed_gaps, assumed_nonzero,
+                    {p for p, k in (facts.param_kinds or {}).items()
+                     if k == "int"}),
+                _EXT if extensive else _FAST)
+        except TimeoutError:
+            side_verdict = ProofResult(
+                "undecided",
+                sketch="whether the claim's own sides have a real value "
+                       "over the domain exceeded its wall clock",
+                meta={"mathema.timeout": "fast"})
+        if side_verdict is not None:
+            return _mechanized(side_verdict)
     try:
         if lhs_tuple:
             # a claim against a tuple-valued f(...) (a function returning

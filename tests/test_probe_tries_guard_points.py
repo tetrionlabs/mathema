@@ -31,7 +31,7 @@ LAW = "for x in [-1, 2], y in [1, 3], f(x, y) == 1/y"
 def test_a_guard_solution_inside_the_domain_falsifies():
     (p,) = check_conjectures(ratio, [claim(LAW, route="probe")])
     assert p.verdict == "falsified", p
-    assert p.counterexample.startswith("(0, "), p.counterexample
+    assert p.counterexample.startswith("x = 0, "), p.counterexample
 
 
 @pytest.mark.needs_full_proof_budget
@@ -41,7 +41,7 @@ def test_the_derive_disproof_is_corroborated_at_the_guard():
     # derive's case split names x*y = 0; the real code, executed there,
     # returns 0.0 where the claim says 1/y
     assert p.meta.get("mathema.corroboration") == "reproduced", p.meta
-    assert p.counterexample.startswith("x=0, "), p.counterexample
+    assert p.counterexample.startswith("x = 0, "), p.counterexample
     assert ratio(0.0, 2.0) == 0.0
 
 

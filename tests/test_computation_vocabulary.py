@@ -5,7 +5,7 @@
 A derive `proven` is the mathematics; what runs the real code in
 float64 is the computation of the claim, and the record says so in
 those words: the `[float]` companion's note and sketch, the detail of a
-failing point, the chained companion, the extremity probe and the
+failing point, the chained companion, the overflow probe and the
 acceptance plan for a companion. "implementation" stays only in the
 public vocabulary (`blame: implementation`, the `implementation:*`
 causes). The bracket after a companion's name is a computation
@@ -53,8 +53,7 @@ def test_a_holding_companion_names_the_computation_in_float64():
     probes = _check(doubled, "for x in [0, 1], f(x) >= 0")
     comp = probes["law[float]"]
     assert comp.verdict == "holds"
-    assert comp.note.startswith("the computation of law in float64, "
-                                "executed at ")
+    assert comp.note.startswith("the float64 computation of law ran at ")
     assert "implementation" not in comp.note
 
 
@@ -64,7 +63,7 @@ def test_a_falsified_companion_says_the_mathematics_is_proven():
     comp = probes["law[float]"]
     assert comp.verdict == "falsified"
     assert comp.sketch.startswith("law is mathematically proven, but its "
-                                  "computation fails at x=")
+                                  "computation fails at x = ")
     assert "fix the code" in comp.sketch
     assert "implementation" not in _text(comp)
     # the public stratum vocabulary is unchanged
@@ -89,17 +88,16 @@ def test_a_nan_from_the_computation_is_named_as_such():
 def test_the_chained_companion_names_the_computation():
     probes = _check(plus_one_minus, "for x in [0, 1e300], 0.5 <= f(x) <= 1")
     comp = probes["law[float]"]
-    assert comp.note.startswith("the computation of law in float64, "
-                                "executed link by link; ")
+    assert comp.note.startswith("the float64 computation of law ran link by link")
 
 
-def test_the_extremity_probe_names_the_computation():
-    (probe,) = check_conjectures(exp_of, [claim("is_extremity_safe(x)",
+def test_the_overflow_probe_names_the_computation():
+    (probe,) = check_conjectures(exp_of, [claim("is_overflow_safe(x)",
                                                 route="best")],
                                  domain={"x": (0.0, 1000.0)},
                                  facts=analyze_source(exp_of))
     assert probe.verdict == "falsified"
-    assert "the computation leaves float range there" in _text(probe)
+    assert "OverflowError" in _text(probe)
     assert "the implementation" not in _text(probe)
 
 

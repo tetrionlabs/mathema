@@ -90,6 +90,7 @@ plugins:
         Writing claims:
           - authoring.md: The authoring surfaces and their precedence
           - grammar.md: The claim grammar, domains and tolerance
+          - grammar-words.md: What each of the grammar's words computes
           - multi-function-claims.md: Binding functions and the equivalence ladder
           - lemmas.md: Claims that rest on other claims
         Commands:
@@ -119,6 +120,7 @@ nav:
       - The CDD loop, end to end: tutorial.md
       - Claims about a pandas function: pandas-function.md
       - Case studies: case-studies.md
+      - "Case study: the mean of nothing": mean-of-nothing.md
       - How-to guides:
           - Gate a pipeline with mathema verify: gate-a-pipeline.md
           - See what mathema knows about a library you call: library-claims.md
@@ -136,11 +138,13 @@ nav:
   - Writing claims:
       - Authoring claims: authoring.md
       - The claim grammar: grammar.md
+      - "The grammar's words": grammar-words.md
       - The mathema docstring: mathema-docstring.md
       - Conditional claims: conditional-claims.md
       - Lemmas: lemmas.md
       - Matrix structure and linear algebra: matrix-structure.md
       - "Runtime types: numpy, pandas, polars": runtime-types.md
+      - Missing values: missing-values.md
       - Language domains: language.md
       - Multi-function claims: multi-function-claims.md
   - Command reference:

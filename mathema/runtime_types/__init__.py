@@ -42,6 +42,9 @@ from ._abstract import (AbstractMat, AbstractTable, AbstractVec, NotMine,
                         abstract_of, plain)
 from ._adapters import (BUILTIN_ADAPTERS, KINDS, Detection, ListAdapter,
                         RuntimeTypeAdapter)
+from ._missing import (Definition, absence_defined, definitions, members,
+                       resolve_absence, resolve_missing, set_definitions,
+                       spellings)
 
 #: the parameter kinds (`analysis.Facts.param_kinds`) sampled as a
 #: sequence: a plain sequence, and a vector or matrix whose runtime type
@@ -256,6 +259,23 @@ def detect_annotation(annotation, scope: "dict | None" = None) -> list:
     return out
 
 
+def _owning_class(fn):
+    """The class an unbound method is defined on (`pandas.Series` for
+    `pandas.Series.corr`), read from its qualified name in its own
+    module, or None for a plain function."""
+    import sys as _sys
+    qual = getattr(fn, "__qualname__", "") or ""
+    if "." not in qual or "<locals>" in qual:
+        return None
+    module = _sys.modules.get(getattr(fn, "__module__", "") or "")
+    obj = module
+    for part in qual.split(".")[:-1]:
+        obj = getattr(obj, part, None)
+        if obj is None:
+            return None
+    return obj if isinstance(obj, type) else None
+
+
 def detect_parameters(fn, declared: "dict | None" = None) -> dict:
     """Intent:
         Each parameter's runtime type detections, from the signature
@@ -275,10 +295,15 @@ def detect_parameters(fn, declared: "dict | None" = None) -> dict:
     except Exception:
         hints = {}
     out: dict = {}
-    for p, param in sig.parameters.items():
+    owner = _owning_class(fn)
+    for index, (p, param) in enumerate(sig.parameters.items()):
         found: list = []
         live = hints.get(p)
         raw = param.annotation
+        if (index == 0 and p == "self" and owner is not None and live is None
+                and raw is inspect.Parameter.empty):
+            # an unbound method's self is an instance of its own class
+            live = owner
         if live is None and isinstance(raw, str):
             try:
                 live = eval(raw, dict(scope))   # noqa: S307
@@ -598,8 +623,9 @@ def strong_hints(facts) -> list:
 
 
 __all__ = [
-    "AbstractMat", "AbstractTable", "AbstractVec", "Detection", "ListAdapter",
-    "NotMine",
+    "AbstractMat", "AbstractTable", "AbstractVec", "Definition", "Detection",
+    "ListAdapter", "NotMine", "absence_defined", "definitions", "members",
+    "resolve_absence", "resolve_missing", "set_definitions", "spellings",
     "RUNTIME_TYPES_GROUP", "RuntimeType", "SEQUENCE_KINDS", "RuntimeTypeAdapter",
     "abstract_of", "adapter", "adapters", "calling", "descriptor_names",
     "detect_annotation", "detect_parameters", "identity_entries",

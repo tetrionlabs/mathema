@@ -66,13 +66,14 @@ mathema verify claims/numpy.claims.yaml --root .
 
 <!-- example: ptp output wrap=80 -->
 ```text
-note numpy.ptp: at_most_the_largest falsified on first adjudication. A declared
-    claim is kept until a human decides it (fix the code, `mathema accept
-    numpy.ptp <claim> --as discovery`, or supersede it). To try a spelling
-    first, `mathema check numpy.ptp --claim "..."` adjudicates it and writes
-    nothing.
+note numpy.ptp: at_most_the_largest falsified on first adjudication: the
+    installed library does not do what the row states:
+  (i) to record the falsification as a discovery, run: mathema accept numpy.ptp
+      at_most_the_largest --as discovery
+  (ii) correct the row in claims/numpy.claims.yaml, then run: mathema accept
+      numpy.ptp at_most_the_largest --as superseded
 FAIL numpy.ptp: library claims from claims/numpy.claims.yaml; no baseline
-    record; 1 proven, 0 holds, 1 falsified  <- 1 falsified claim(s)
+    record; 1 proven, 1 holds, 1 falsified  <- 1 falsified claim(s)
 0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -86,14 +87,15 @@ grep -m1 counterexample .mathema/verified/numpy.ptp.yaml
 
 <!-- example: ptp output -->
 ```text
-      counterexample: "a=[-27.2559, -89.997, 6.05701, -11.7273], axis=None, out=None, keepdims=<no value>: 96.05404267895265 vs 6.057006177453999"
+      counterexample: "a = [-73.82223293132003, -73.82223293132003, -73.82223293132003, -73.82223293132003, -73.82223293132003], axis = None, out = None, keepdims = <no value>: 0.0 vs -73.82223293132003"
 ```
 
-Four values, all but one negative: the range is 96.05 and the largest
-value is 6.06. The test's own first array would have said the same,
-since its range of 15 is above its largest value of 10; the claim found
-it without anyone choosing the array. The other parameters were passed at
-numpy's defaults, as the witness says.
+One value, and a negative one: the range of `[-54.43]` is 0, and the
+largest value is -54.43. Whenever every value is negative the range sits
+above the largest value. The test's own first array says the same in
+another way, since its range of 15 is above its largest value of 10; the
+claim found a case without anyone choosing the array. The other
+parameters were passed at numpy's defaults, as the witness says.
 
 ## Record the discovery
 
@@ -117,14 +119,14 @@ accepting numpy.ptp :: at_most_the_largest (verdict falsified) as discovery, by
       at_most_the_largest_corrected), keeping its counterexample as the witness
   - declare the stated corrected claim 'at_most_the_largest_corrected': 'for a
       in [-100, 100]^n, f(a) == max(a) - min(a)', adjudicated now: holds over
-      160 trials
+      130 trials
   - rewrite claims/numpy.claims.yaml: replace declared claim
       'at_most_the_largest' with 'at_most_the_largest_corrected'
 written: move at_most_the_largest to the record's discoveries section
     (superseded_by: at_most_the_largest_corrected), keeping its counterexample
     as the witness; declare the stated corrected claim
     'at_most_the_largest_corrected': 'for a in [-100, 100]^n, f(a) == max(a) -
-    min(a)', adjudicated now: holds over 160 trials; rewrite
+    min(a)', adjudicated now: holds over 130 trials; rewrite
     claims/numpy.claims.yaml: replace declared claim 'at_most_the_largest' with
     'at_most_the_largest_corrected'
 declared layer: claims/numpy.claims.yaml now declares
@@ -137,10 +139,10 @@ declared layer: claims/numpy.claims.yaml now declares
 
 `holds over 160 trials`, on the probe route: the corrected claim is the
 test's sentence, run at 160 vectors mathema chose. The record's sampling
-line says how: `a~[-100.0, 100.0]^n, ..., seed=20260718, n=160`, vectors
-of two to eight entries drawn inside the range; the line also names
-`axis`, `out` and `keepdims`, which the note says were held at numpy's
-defaults. It is evidence, not proof. The corrected claim carries `route:
+line says how: `a~[-100.0, 100.0]^n, seed=20260718, n=160`, vectors of
+two to eight entries drawn inside the range. `axis`, `out` and `keepdims`
+are not on it, since nothing drew them: the note says they were held at
+numpy's defaults. It is evidence, not proof. The corrected claim carries `route:
 probe`, which `accept` wrote, so the derive route was not tried for it;
 the first attempt's record shows what it met: `derive: underivable (a is
 a vector or matrix, which the scalar derive route does not read, and the
@@ -174,7 +176,7 @@ mathema verify claims/numpy.claims.yaml --root .
 
 <!-- example: ptp output -->
 ```text
-ok   numpy.ptp: library claims from claims/numpy.claims.yaml; claims changed; 1 proven, 3 holds, 0 falsified
+ok   numpy.ptp: library claims from claims/numpy.claims.yaml; claims changed; 1 proven, 4 holds, 0 falsified
 0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```

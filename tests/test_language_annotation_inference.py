@@ -60,7 +60,7 @@ def test_a_str_annotation_infers_the_adaptor_s_language(tmp_path, str_adaptor):
     ''')
     (p,) = check_conjectures(mod.same, [claim("f(s) == s")])
     assert p.verdict == "holds", (p.verdict, p.note)
-    assert "inferred s in L[letters]|missing from its own str annotation (adaptor text)" in p.note
+    assert "inferred s in L[letters] from its own str annotation (adaptor text)" in p.note
 
 
 def test_a_stated_binding_wins(tmp_path, str_adaptor):

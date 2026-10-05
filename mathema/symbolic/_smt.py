@@ -51,38 +51,75 @@ class _Translator:
         numbers become exact rationals, and a radical becomes an
         auxiliary variable with its defining polynomial constraint.
         `constraints` collects those side constraints; the caller adds
-        them to the solver alongside the query.
+        them to the solver alongside the query. A side constraint is
+        global to the query, so it must hold at every point of the box:
+        an even root's defining constraint applies only where its base
+        is nonnegative.
+
+        `undefined` collects, for every root, the condition under
+        which it is evaluated with a negative base: the Piecewise branch
+        conditions leading to it (`_path`) and `base < 0`. There the
+        expression has no real value, so the caller counts any such
+        point as a model of the negation.
     """
 
     def __init__(self, z3mod, params: dict):
         self.z3 = z3mod
         self.vars: dict = {}
         self.constraints: list = []
+        self.undefined: list = []
+        # (path, divisor): z3 reads x / 0 as some value, so each
+        # division is recorded with the branch condition it is
+        # evaluated under, for the caller to ask about its zeros
+        self.divisors: list = []
+        self._path: list = []
         self._aux: dict = {}
         for name, sym in params.items():
             self.vars[sym] = (z3mod.Int(name) if sym.is_integer
                               else z3mod.Real(name))
 
     def _rational(self, value) -> "object":
-        q = Fraction(value.p, value.q) if isinstance(value, sympy.Rational) \
-            else Fraction(float(value))
+        # a double-precision Float reads as its shortest round-tripping
+        # decimal, the number its digits name; a wider Float as the
+        # exact number it holds
+        if isinstance(value, sympy.Rational):
+            q = Fraction(value.p, value.q)
+        elif isinstance(value, sympy.Float) and value._prec > 53:
+            exact = sympy.Rational(value)
+            q = Fraction(int(exact.p), int(exact.q))
+        else:
+            q = Fraction(repr(float(value)))
         return self.z3.RealVal(f"{q.numerator}/{q.denominator}")
 
     def _radical(self, base_expr, q: int):
         key = (sympy.srepr(base_expr), q)
+        # a rational power of a negative base is not real (sympy's
+        # principal root, odd q included)
+        self.undefined.append(self.z3.And(
+            *self._path, self.expr(base_expr) < 0))
         cached = self._aux.get(key)
         if cached is not None:
             return cached
         base = self.expr(base_expr)
         y = self.z3.Real(f"_rad{len(self._aux)}")
-        self.constraints.append(y ** q == base)
         if q % 2 == 0:
             # an even root exists only for a nonnegative base, and is
-            # the nonnegative branch by convention
-            self.constraints.append(y >= 0)
-            self.constraints.append(base >= 0)
+            # the nonnegative branch by convention; where the base is
+            # negative the auxiliary variable is left free, so the
+            # constraint holds on every branch of the query, including
+            # those that never evaluate this radical
+            self.constraints.append(self.z3.Implies(
+                base >= 0, self.z3.And(y >= 0, y ** q == base)))
+        else:
+            self.constraints.append(y ** q == base)
         self._aux[key] = y
         return y
+
+    def _divide(self, numerator, divisor):
+        path = (self.z3.And(*self._path) if self._path
+                else self.z3.BoolVal(True))
+        self.divisors.append((path, divisor))
+        return numerator / divisor
 
     def expr(self, e):
         z3 = self.z3
@@ -113,11 +150,12 @@ class _Translator:
                 b = self.expr(base)
                 if n >= 0:
                     return b ** n
-                return self.z3.RealVal(1) / (b ** (-n))
+                return self._divide(self.z3.RealVal(1), b ** (-n))
             if isinstance(exp, sympy.Rational):
                 y = self._radical(base, int(exp.q))
                 p = int(exp.p)
-                return y ** p if p >= 0 else self.z3.RealVal(1) / (y ** (-p))
+                return y ** p if p >= 0 else self._divide(self.z3.RealVal(1),
+                                                          y ** (-p))
             raise _Untranslatable(f"non-rational exponent in {e}")
         if isinstance(e, sympy.Abs):
             t = self.expr(e.args[0])
@@ -136,9 +174,22 @@ class _Translator:
             last_expr, last_cond = pairs[-1]
             if last_cond is not sympy.true:
                 raise _Untranslatable(f"piecewise without a catch-all: {e}")
-            out = self.expr(last_expr)
-            for value, cond in reversed(pairs[:-1]):
-                out = z3.If(self.condition(cond), self.expr(value), out)
+            # each condition is evaluated once every earlier one is
+            # false, and each value only under its own condition
+            conds, values = [], []
+            outer = len(self._path)
+            try:
+                for value, cond in pairs[:-1]:
+                    c = self.condition(cond)
+                    self._path.append(c)
+                    values.append(self.expr(value))
+                    self._path[-1] = z3.Not(c)
+                    conds.append(c)
+                out = self.expr(last_expr)
+            finally:
+                del self._path[outer:]
+            for c, v in zip(reversed(conds), reversed(values)):
+                out = z3.If(c, v, out)
             return out
         raise _Untranslatable(f"{type(e).__name__} has no exact translation")
 
@@ -169,6 +220,23 @@ class _Translator:
                 return lhs >= rhs
             if op == ">":
                 return lhs > rhs
+        from sympy.assumptions import AppliedPredicate
+        if isinstance(c, AppliedPredicate):
+            name, args = c.function.name, [self.expr(a) for a in c.arguments]
+            zero = z3.RealVal(0)
+            unary = {"positive": lambda t: t > zero,
+                     "negative": lambda t: t < zero,
+                     "nonnegative": lambda t: t >= zero,
+                     "nonpositive": lambda t: t <= zero,
+                     "zero": lambda t: t == zero,
+                     "nonzero": lambda t: t != zero}
+            binary = {"ge": lambda a, b: a >= b, "gt": lambda a, b: a > b,
+                      "le": lambda a, b: a <= b, "lt": lambda a, b: a < b,
+                      "eq": lambda a, b: a == b, "ne": lambda a, b: a != b}
+            if len(args) == 1 and name in unary:
+                return unary[name](args[0])
+            if len(args) == 2 and name in binary:
+                return binary[name](*args)
         raise _Untranslatable(f"condition {c} has no exact translation")
 
 
@@ -202,7 +270,7 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
     import z3
 
     from ._extensive import _bound_interval
-    from ._proof_support import ProofResult
+    from ._proof_support import ProofResult, _exact_endpoint
 
     named = {p: s for p, s in params.items() if s in diff.free_symbols}
     if not named or len(named) > 6:
@@ -228,10 +296,10 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
             lo, hi, closed_lo, closed_hi, plain = hull
             var = translator.vars[sym]
             if getattr(lo, "is_finite", False):
-                lo_t = translator.expr(sympy.nsimplify(lo, rational=True))
+                lo_t = translator.expr(_exact_endpoint(lo))
                 box.append(var >= lo_t if closed_lo else var > lo_t)
             if getattr(hi, "is_finite", False):
-                hi_t = translator.expr(sympy.nsimplify(hi, rational=True))
+                hi_t = translator.expr(_exact_endpoint(hi))
                 box.append(var <= hi_t if closed_hi else var < hi_t)
             if not plain:
                 # the hull is a superset of the real bound (an
@@ -240,7 +308,17 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
                 proofs_only = True
         if bound_context is not None:
             try:
-                box.append(translator.condition(bound_context))
+                # a premise is false where it has no real value: its
+                # roots' bases are nonnegative inside the region it
+                # admits, a constraint on the region, never a
+                # counterexample
+                before = len(translator.undefined)
+                try:
+                    box.append(translator.condition(bound_context))
+                    box.extend(z3.Not(u)
+                               for u in translator.undefined[before:])
+                finally:
+                    del translator.undefined[before:]
             except _Untranslatable:
                 # dropping an assumed constraint widens the region:
                 # proofs stay sound, witnesses may lie off the surface
@@ -262,7 +340,14 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
     solver.set("rlimit", 10_000_000)
     for c in box + translator.constraints:
         solver.add(c)
-    solver.add(query)
+    # a point where a division on the evaluated branch meets a zero
+    # divisor, or where a root on the evaluated branch has no real value,
+    # is one where the claim has no value: it answers the query as a
+    # counterexample does
+    zero_divisor = [z3.And(path, divisor == 0)
+                    for path, divisor in translator.divisors]
+    no_value = list(translator.undefined) + zero_divisor
+    solver.add(z3.Or(query, *no_value) if no_value else query)
     outcome = solver.check()
 
     if outcome == z3.unsat:
@@ -291,6 +376,13 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
             return None   # an irrational algebraic model value: decline
     try:
         value = diff.subs(point)
+        if (value.is_extended_real is not True
+                or value.has(sympy.zoo, sympy.nan)
+                or value.is_finite is False):
+            # the model sits where the claim has no real value (a zero
+            # divisor or a root of a negative): a later rung or the
+            # executed witness decides
+            return None
         holds_at_point = {"<": value < 0, "<=": value <= 0,
                           ">": value > 0, ">=": value >= 0,
                           "==": sympy.Eq(value, 0),

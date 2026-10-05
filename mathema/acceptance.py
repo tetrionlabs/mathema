@@ -243,18 +243,27 @@ def unaccepted_retirements(entry: dict) -> list:
     return out
 
 
-def _same_law_as(statement: str):
+def _same_law_as(statement: str, key: "str | None" = None, root: str = "."):
     """Intent:
         A canonical-law comparator over claim spellings: two texts
         match when they parse to the same fingerprint form, so the
         record's canonical rendering and an author's hand spelling of
-        the same law compare equal. An unparseable side never matches.
+        the same law compare equal. With the function's `key`, each
+        side's bindings are completed from its annotations first, as
+        its record states them. An unparseable side never matches.
     """
-    from .spec import _declared_conjecture, fingerprint_text
+    from .sync import _identity
+    fn = None
+    if key is not None:
+        from .conjecture import _resolve_func_ref
+        try:
+            fn = _resolve_func_ref(key, root=root)
+        except Exception:
+            fn = None
 
     def canon(text: str):
         try:
-            return fingerprint_text(_declared_conjecture({"statement": text}))
+            return _identity(text, None, fn)
         except Exception:
             return None
 
@@ -279,7 +288,7 @@ def _declared_claim_files(root: str, key: str, claim_name: str,
     import yaml
 
     from .spec import _SKIP_DIRS, _is_claim_file
-    same = _same_law_as(statement)
+    same = _same_law_as(statement, key, root)
     hits = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
@@ -588,10 +597,12 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                   "skipped); anything else is either already evidence "
                   "or needs the ordinary flow")
         claimed = meta.get("mathema.compendium_claimed", "holds")
+        written, versions = written_row(root, key, claim_name)
         plan["accepted"] = {"as": "trusted",
                             "at": datetime.date.today().isoformat(),
                             "level": claimed,
-                            "source": meta.get("mathema.compendium", "")}
+                            "source": meta.get("mathema.compendium", ""),
+                            "statement": written, "versions": versions}
         if by:
             plan["accepted"]["by"] = by
         if note:
@@ -1000,6 +1011,77 @@ def _carry_trust(c: dict, accepted: dict, history: list) -> None:
     c["acceptance_history"] = history
 
 
+def written_row(root: "str | None", key: str, name) -> tuple:
+    """Intent:
+        `(statement, versions)` of the library row `key` / `name` as the
+        claims file writes it: its `statement:` string unchanged, and its
+        own `versions:` range or else the file's; `(None, None)` when no
+        claims file under `root` (or bundled with mathema) states it.
+    """
+    from .compendium import load_library_claims
+    try:
+        info = load_library_claims(root).get(key)
+    except Exception:
+        return None, None
+    if not info:
+        return None, None
+    row = next((r for r in info["entry"].get("claims") or []
+                if isinstance(r, dict) and r.get("name") == name), None)
+    if row is None:
+        return None, None
+    return (row.get("statement") or row.get("law"),
+            str(row.get("versions") or info.get("versions") or "*"))
+
+
+def _range_ends(spec: str) -> tuple:
+    """The `(lowest, highest)` version tuples a range admits, None for
+    an open end: `>=2.2,<3` is `((2, 2), (3,))`."""
+    from .compendium import _version_tuple
+    low = high = None
+    for part in (p.strip() for p in str(spec or "*").split(",")):
+        if part.startswith(">="):
+            low = _version_tuple(part[2:])
+        elif part.startswith("<"):
+            high = _version_tuple(part[1:])
+    return low, high
+
+
+def _widened(old: str, new: str) -> bool:
+    """Whether the range `new` admits a version the range `old` does
+    not: a lower floor, a higher ceiling, or an end left open."""
+    old_low, old_high = _range_ends(old)
+    new_low, new_high = _range_ends(new)
+    if old_low is not None and (new_low is None or new_low < old_low):
+        return True
+    if old_high is not None and (new_high is None or new_high > old_high):
+        return True
+    return False
+
+
+def trust_mismatch(accepted: dict, statement, versions) -> "str | None":
+    """Intent:
+        Why a trusted acceptance no longer speaks for the row as the
+        claims file now writes it, or None when it still does: the
+        acceptance stored no statement (it predates storing one), the
+        row is no longer stated, its statement string changed, or its
+        versions range admits versions the accepted range did not. A
+        narrower range, and edits elsewhere in the file, keep it.
+    """
+    stored = accepted.get("statement")
+    if stored is None:
+        return ("the acceptance predates storing the row's statement, so "
+                "it cannot show the row is unchanged")
+    if statement is None:
+        return "the row is no longer stated in a claims file"
+    if statement != stored:
+        return "the row's statement changed since it was accepted"
+    old = accepted.get("versions")
+    if old is not None and versions is not None and _widened(old, versions):
+        return (f"the row's versions range widened from {old} to "
+                f"{versions} since it was accepted")
+    return None
+
+
 def carry_acceptance(spec: dict, key: str, path: str) -> None:
     """Intent:
         At record-write time, carry each claim's acceptance state
@@ -1054,7 +1136,7 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
         matchers = []
         for d in discovery_rows:
             stmt = d.get("statement") or d.get("law") or ""
-            matchers.append((d["name"], _same_law_as(stmt) if stmt else None))
+            matchers.append((d["name"], _same_law_as(stmt, key) if stmt else None))
 
         def _retired(c) -> bool:
             name = c.get("name")
@@ -1074,6 +1156,21 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
         accepted = dict(prior["accepted"])
         history = list(prior.get("acceptance_history") or [])
         if accepted.get("as") == "trusted" and not accepted.get("stale"):
+            root = os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(path))))
+            written, versions = written_row(root, key, c.get("name"))
+            reason = trust_mismatch(accepted, written, versions)
+            if reason is not None:
+                accepted["stale"] = True
+                history.append({
+                    "at": datetime.date.today().isoformat(),
+                    "event": "stale",
+                    "reason": f"{reason}; accept the row as trusted: "
+                              f"mathema accept {key} {c.get('name')} "
+                              f"--as trusted"})
+                c["accepted"] = accepted
+                c["acceptance_history"] = history
+                continue
             _carry_trust(c, accepted, history)
             continue
         if accepted.get("form") != fresh_form and not accepted.get("stale"):

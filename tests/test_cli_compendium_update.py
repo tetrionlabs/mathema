@@ -3,8 +3,9 @@
 """`mathema compendium update`: brings the project's compendium files in
 line with how its functions call libraries. A call that passes a
 non-default literal argument no row covers gains rows pinning it (`let
-axis be 1, ...`), copied from the key's existing rows, unverified until
-`mathema verify` runs; a non-literal argument is reported, not pinned.
+axis be 0, ...`), copied from the key's existing rows, each written only
+when it holds against the installed library; a non-literal argument is
+reported, not pinned.
 A row whose own `versions:` range excludes the installed version, and
 which `verify` recorded as holding here, has its range widened to
 include it; a row nobody uses keeps its range. Every change is printed,
@@ -48,18 +49,18 @@ def _project(root, body):
     """)
 
 
-_AXIS_ONE = '''
+_AXIS_ZERO = '''
     import numpy as np
 
 
     def rows_mean(a):
-        """The mean along the second axis."""
-        return np.mean(a, axis=1)
+        """The mean along the first axis."""
+        return np.mean(a, axis=0)
 '''
 
 
 def test_a_non_default_literal_argument_gains_a_pinned_row(tmp_path):
-    _project(tmp_path, _AXIS_ONE)
+    _project(tmp_path, _AXIS_ZERO)
     r = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path))
     assert r.returncode == 0, r.stderr
     path = tmp_path / "claims" / "numpy.claims.yaml"
@@ -67,13 +68,20 @@ def test_a_non_default_literal_argument_gains_a_pinned_row(tmp_path):
     assert data["compendium"] == "numpy"
     assert data["versions"] == f">={_minor()}"
     rows = {c["name"]: c for c in data["numpy.mean"]["claims"]}
-    # the key's existing row is kept, and a pinned copy joins it
-    assert rows["is_defined"]["statement"] == "dim(a) >= 1"
-    pinned = rows["is_defined@axis=1"]
-    assert pinned["statement"] == "let axis be 1, dim(a) >= 1"
+    # the project entry merges with the bundled one by row name, so the
+    # bundled rows are not copied: only the pinned row is written, and
+    # the loader reads it beside the bundled is_defined it copies
+    assert "is_defined" not in rows, rows
+    from mathema.compendium import load_library_claims
+    merged = {c["name"]: c for c in load_library_claims(str(tmp_path))[
+        "numpy.mean"]["entry"]["claims"]}
+    assert merged["is_defined"]["statement"] == "dim(a) >= 1"
+    assert "is_defined@axis=0" in merged
+    pinned = rows["is_defined@axis=0"]
+    assert pinned["statement"] == "let axis be 0, dim(a) >= 1"
     assert "upd.rows_mean" in pinned["note"]
-    assert "numpy.mean" in r.stdout and "axis=1" in r.stdout, r.stdout
-    assert "unverified" in r.stdout, r.stdout
+    assert "numpy.mean" in r.stdout and "axis=0" in r.stdout, r.stdout
+    assert "against the installed library" in r.stdout, r.stdout
     # a second run finds the call covered and changes nothing
     again = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path))
     assert again.returncode == 0, again.stderr
@@ -97,11 +105,11 @@ def test_a_non_literal_argument_is_reported_not_pinned(tmp_path):
 
 
 def test_dry_run_writes_nothing(tmp_path):
-    _project(tmp_path, _AXIS_ONE)
+    _project(tmp_path, _AXIS_ZERO)
     r = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path),
              "--dry-run")
     assert r.returncode == 0, r.stderr
-    assert "is_defined@axis=1" in r.stdout, r.stdout
+    assert "is_defined@axis=0" in r.stdout, r.stdout
     assert not (tmp_path / "claims" / "numpy.claims.yaml").exists()
 
 
@@ -209,7 +217,7 @@ _COMMENTED = """\
 
 
 def test_rewriting_a_file_with_comments_warns_and_points_at_note(tmp_path):
-    _project(tmp_path, _AXIS_ONE)
+    _project(tmp_path, _AXIS_ZERO)
     _write(tmp_path / "claims" / "numpy.claims.yaml", _COMMENTED)
     r = _cli(tmp_path, "compendium", "update", "--root", str(tmp_path))
     assert r.returncode == 0, r.stderr
@@ -223,7 +231,7 @@ def test_rewriting_a_file_with_comments_warns_and_points_at_note(tmp_path):
 
 
 def test_dry_run_says_the_comments_would_be_lost(tmp_path):
-    _project(tmp_path, _AXIS_ONE)
+    _project(tmp_path, _AXIS_ZERO)
     path = tmp_path / "claims" / "numpy.claims.yaml"
     _write(path, _COMMENTED)
     before = path.read_text()
@@ -237,7 +245,7 @@ def test_dry_run_says_the_comments_would_be_lost(tmp_path):
 
 
 def test_a_header_comment_alone_raises_no_warning(tmp_path):
-    _project(tmp_path, _AXIS_ONE)
+    _project(tmp_path, _AXIS_ZERO)
     _write(tmp_path / "claims" / "numpy.claims.yaml", """\
         # numpy rows for this project
         compendium: numpy
@@ -273,7 +281,7 @@ def test_a_pinned_row_name_passes_validation():
 
 
 def test_a_header_after_a_leading_blank_line_survives(tmp_path):
-    _project(tmp_path, _AXIS_ONE)
+    _project(tmp_path, _AXIS_ZERO)
     path = tmp_path / "claims" / "numpy.claims.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent("""

@@ -35,4 +35,4 @@ def test_a_fixed_parameter_does_not_cost_the_proof():
 def test_a_parameter_the_claim_reads_is_still_swept():
     (p,) = check_conjectures(tagged, [claim('for s in {"a", "b"}, tagged(s, upper) == s')])
     assert p.verdict == "falsified"
-    assert "upper=True" in (p.counterexample or ""), p.counterexample
+    assert "upper = True" in (p.counterexample or ""), p.counterexample

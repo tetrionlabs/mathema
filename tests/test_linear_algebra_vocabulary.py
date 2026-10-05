@@ -91,12 +91,25 @@ _WORDS = [
 ]
 
 
+#: true identities the probe route meets at a magnitude corner; none
+#: since a claim's `@` is the exact product (the form identity's two
+#: sides near 1e600 compare exactly)
+_AT_A_CORNER: dict = {}
+
+
 @pytest.mark.parametrize("route", ["probe", "best"])
 @pytest.mark.parametrize("fn, true, false", _WORDS)
 def test_each_word_has_a_true_identity_and_a_false_sibling(fn, true, false,
                                                            route):
     p = _one(fn, true, route)
-    assert _holds(p), (true, p.verdict, p.note, p.counterexample)
+    expected = _AT_A_CORNER.get((true, route))
+    if expected == "falsified":
+        # true over the reals, broken by the float computation at a
+        # magnitude corner (rulings of 2026-10-01 and 2026-10-05)
+        assert p.verdict == "falsified", (true, p.verdict, p.note)
+        assert "e+300" in p.counterexample or "e+16" in p.counterexample, p.counterexample
+    else:
+        assert _holds(p), (true, p.verdict, p.note, p.counterexample)
     p = _one(fn, false, route)
     assert p.verdict == "falsified", (false, p.verdict, p.note)
 

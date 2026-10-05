@@ -27,9 +27,22 @@ verifies each against the installed library); a row from a project's
 claims file or a third party is used only once `mathema verify` has
 recorded it `holds` or `proven` locally, or it was accepted with
 `mathema accept <key> <row> --as trusted`, and feeds sampling only
-until then. A row verify recorded `falsified` is never used. A proof
-through definition rows stays `proven`, and its record lists each row
-used (`meta["mathema.definitions"]`) with its source and local status.
+until then. A row verify recorded `falsified` is never used.
+
+A `definition` row trusted by mathema (bundled, read with the installed
+library inside its `versions:` range and at or above mathema's
+supported floor, `compendium.SUPPORTED_FLOORS`) or by the user
+(accepted `--as trusted`) is an axiom: a proof through it stays `proven`, and its
+sketch names it ("taking numpy.std as std(a, ddof=1) (axiom, bundled
+with mathema, numpy 2.0 to 2.x)"). Any other row the proof uses (one
+only verified by execution, or a bundled row read outside its range)
+is evidence (so is a bundled row read below the supported floor, down
+to its file's range): the proof is `holds`, and its sketch says how to
+lift it
+("accept the row as trusted: mathema accept KEY ROW --as trusted").
+The record lists each row used (`meta["mathema.definitions"]`) with
+its source, local status, `standing` ("axiom" or "evidence"),
+`trusted_by` ("mathema" or "user"), `versions` and `installed`.
 """
 from __future__ import annotations
 
@@ -154,11 +167,19 @@ class Row:
     pins: dict
     premises: list
     ranks: dict = field(default_factory=dict)
+    standing: str = "evidence"
+    trusted_by: "str | None" = None
+    versions: str = "*"
+    installed: str = "*"
 
     def use(self) -> dict:
         return {"key": self.key, "row": self.name,
                 "statement": self.statement, "source": self.source,
-                "status": self.status, "library": self.library}
+                "status": self.status, "library": self.library,
+                "standing": self.standing, "trusted_by": self.trusted_by,
+                "versions": self.versions, "installed": self.installed,
+                "params": list(self.params),
+                "rhs": ast.unparse(self.rhs)}
 
 
 @dataclass
@@ -203,10 +224,12 @@ def _local_row(root: "str | None", key: str, name: str) -> "dict | None":
                  if isinstance(c, dict) and c.get("name") == name), None)
 
 
-def _local_status(local: "dict | None", statement: str) -> "str | None":
+def _local_status(local: "dict | None", statement: str,
+                  versions: "str | None" = None) -> "str | None":
     """The local verdict of a recorded row stating `statement`
-    (`trusted` for an accepted testimony), or None when nothing was
-    recorded for this statement."""
+    (`trusted` for an accepted testimony still tied to the row as
+    written, `statement` and its `versions` range), or None when
+    nothing was recorded for this statement."""
     if local is None:
         return None
     if _canonical(str(local.get("statement") or "")) != _canonical(statement):
@@ -215,7 +238,9 @@ def _local_status(local: "dict | None", statement: str) -> "str | None":
     accepted = local.get("accepted") or {}
     if accepted.get("as") == "trusted" and not accepted.get("stale") \
             and verdict in ("holds", "proven"):
-        return "trusted"
+        from .acceptance import trust_mismatch
+        if trust_mismatch(accepted, statement, versions) is None:
+            return "trusted"
     return verdict or None
 
 
@@ -225,7 +250,8 @@ def _installed_root() -> "str | None":
 
 
 def row_standing(root: "str | None", key: str, row: dict,
-                 bundled: bool) -> "tuple[str | None, str]":
+                 bundled: bool,
+                 versions: "str | None" = None) -> "tuple[str | None, str]":
     """Intent:
         `(status, reason)` for one definition row: `status` is the
         local status a usable row carries (`bundled`, `holds`,
@@ -235,11 +261,16 @@ def row_standing(root: "str | None", key: str, row: dict,
     from .compendium import OUTSIDE_VERSIONS
     meta = row.get("meta") or {}
     if meta.get(OUTSIDE_VERSIONS):
+        if bundled:
+            # a bundled row read outside its range is evidence, not an
+            # axiom: usable, and a proof through it is capped
+            return "outside", ""
         return None, (f"its versions ({meta[OUTSIDE_VERSIONS]}) exclude "
                       f"the installed library")
     statement = str(row.get("statement") or "")
     local = _local_status(_local_row(root, key, str(row.get("name"))),
-                          statement)
+                          statement,
+                          str(row.get("versions") or versions or "*"))
     if local == "falsified":
         return None, "mathema verify recorded it falsified"
     if bundled:
@@ -292,10 +323,27 @@ def _parse_row(key: str, row: dict) -> "tuple | None":
     except SyntaxError:
         return None
 
+    called: dict = {}
+
     def f_params(node):
+        # `f(a, b)`, its pins written in the call as constants
+        # (`f(a, axis=1)`)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-                and node.func.id == "f" and not node.keywords \
+                and node.func.id == "f" \
                 and all(isinstance(a, ast.Name) for a in node.args):
+            values = {}
+            for k in node.keywords:
+                try:
+                    values[k.arg] = ast.literal_eval(k.value)
+                except ValueError:
+                    if isinstance(k.value, ast.Name) and k.value.id == "inf":
+                        values[k.arg] = float("inf")
+                    else:
+                        return None
+            if None in values:
+                return None
+            called.clear()
+            called.update(values)
             return [a.id for a in node.args]
         return None
     params = f_params(lhs)
@@ -303,7 +351,7 @@ def _parse_row(key: str, row: dict) -> "tuple | None":
         params, rhs = f_params(rhs), lhs
     if params is None:
         return None
-    pins = dict(cj.param_pins or {})
+    pins = {**dict(cj.param_pins or {}), **called}
     for name in cj.free_vars or ():
         point = _single_point((cj.domain or {}).get(name))
         if point is not None:
@@ -315,6 +363,110 @@ def _parse_row(key: str, row: dict) -> "tuple | None":
     ranks = {p: len(getattr((cj.domain or {}).get(p), "dims", ()) or ())
              for p in params}
     return params, rhs, pins, premises, ranks
+
+
+def _standing(row: dict, status: str, bundled: bool) -> tuple:
+    """Intent:
+        `(standing, trusted_by)` of a usable definition row: an
+        `"axiom"` trusted by `"user"` when accepted `--as trusted`, by
+        `"mathema"` when bundled and read inside its versions range;
+        otherwise `"evidence"` (verified by execution, or a bundled row
+        read outside its range), trusted by no one. Only a row named
+        `definition` can be an axiom.
+    """
+    if not is_definition_name(row.get("name")):
+        return "evidence", None
+    if status == "trusted":
+        return "axiom", "user"
+    if bundled and status != "outside":
+        return "axiom", "mathema"
+    return "evidence", None
+
+
+def _versions_words(library: str, spec: str) -> str:
+    """A version range in words: `numpy 1.24 to 2.x` for `>=1.24,<3`,
+    `numpy 2 and later` for `>=2`, `numpy, any version` for `*`."""
+    name = library.split(" ", 1)[0]
+    spec = (spec or "*").strip()
+    if spec == "*":
+        return f"{name}, any version"
+    low = high = None
+    for part in (p.strip() for p in spec.split(",")):
+        if part.startswith(">="):
+            low = part[2:]
+        elif part.startswith("<"):
+            high = part[1:]
+    if high is not None and high.isdigit():
+        high = f"{int(high) - 1}.x"
+    elif high is not None:
+        high = f"below {high}"
+    if low and high:
+        return f"{name} {low} to {high}"
+    if low:
+        return f"{name} {low} and later"
+    return f"{name} {high}"
+
+
+def rows_sketch(used: list, sketch: "str | None") -> "tuple[bool, str | None]":
+    """Intent:
+        `(capped, sketch)` for a derive proof through the definition
+        rows `used` (their `Row.use()` entries): `capped` when any row
+        is evidence rather than an axiom, and the proof's sketch with a
+        line naming each row: an axiom as `taking numpy.std as std(a,
+        ddof=1) (axiom, bundled with mathema, numpy 2.0 to 2.x)`,
+        evidence with how to lift it (`accept the row as trusted:
+        mathema accept KEY ROW --as trusted`).
+    """
+    if not used:
+        return False, sketch
+    lines = []
+    capped = False
+    for u in used:
+        call = f"{u['key']} as {u.get('rhs')}"
+        if u.get("standing") == "axiom":
+            whose = ("accepted as trusted" if u.get("trusted_by") == "user"
+                     else "bundled with mathema, "
+                          + _versions_words(u.get("library", ""),
+                                            _from_floor(u.get("library", ""),
+                                                        u.get("versions",
+                                                              "*"))))
+            lines.append(f"taking {call} (axiom, {whose})")
+            continue
+        capped = True
+        lines.append(f"taking {call} (evidence, {u['key']} {u['row']} row "
+                     f"{_evidence_words(u)}); accept the row as trusted: "
+                     f"mathema accept {u['key']} {u['row']} --as trusted")
+    head = "; ".join(lines)
+    return capped, (f"{head}; {sketch}" if sketch else head)
+
+
+def _from_floor(library: str, spec: str) -> str:
+    """A versions range with its start raised to the library's
+    supported floor, the range a bundled row is an axiom over."""
+    from .compendium import SUPPORTED_FLOORS, _version_tuple
+    floor = SUPPORTED_FLOORS.get(library.split(" ", 1)[0])
+    if floor is None:
+        return spec
+    parts = [p.strip() for p in str(spec or "*").split(",") if p.strip()]
+    lows = [p for p in parts if p.startswith(">=")]
+    rest = [p for p in parts if not p.startswith(">=") and p != "*"]
+    low = lows[0][2:] if lows else None
+    if low is None or _version_tuple(low) < _version_tuple(floor):
+        low = floor
+    return ",".join([f">={low}", *rest])
+
+
+def _evidence_words(use: dict) -> str:
+    status = use.get("status")
+    if status == "below_floor":
+        from .compendium import SUPPORTED_FLOORS
+        name, _, installed = str(use.get("library", "")).partition(" ")
+        return (f"{name} {installed} is below the supported floor "
+                f"{SUPPORTED_FLOORS.get(name)}")
+    if status == "outside":
+        return (f"outside its versions {use.get('versions')} for "
+                f"{use.get('library')}")
+    return f"verified: {status}"
 
 
 class RowBook:
@@ -332,6 +484,7 @@ class RowBook:
         self._library = _library_claims(self.root, load_library_claims)
         self._rows: dict = {}
         self._withheld: dict = {}
+        self._unusable: dict = {}
 
     def states(self, key: str) -> bool:
         info = self._library.get(key)
@@ -344,6 +497,13 @@ class RowBook:
             self._read(key)
         return self._rows[key]
 
+    def unusable(self, key: str) -> list:
+        """Each definition row of `key` that may not feed a proof, as
+        `<row>: <reason>`, whether or not another row may."""
+        if key not in self._rows:
+            self._read(key)
+        return list(self._unusable.get(key) or [])
+
     def withheld(self, key: str) -> "str | None":
         if key not in self._rows:
             self._read(key)
@@ -353,15 +513,25 @@ class RowBook:
         from .compendium import _installed_version
         out: list = []
         why = None
+        from .compendium import ROW_SOURCE, ROW_VERSIONS, row_is_bundled
         info = self._library.get(key)
         for row in (info or {}).get("entry", {}).get("claims") or []:
             if not isinstance(row, dict) \
                     or not is_definition_name(row.get("name")):
                 continue
-            status, reason = row_standing(self.root, key, row,
-                                          info["bundled"])
+            # each row stands on the file it comes from: a project row
+            # replacing a bundled one is the project's testimony
+            meta = row.get("meta") or {}
+            bundled = (row_is_bundled(row) if meta.get(ROW_SOURCE)
+                       else info["bundled"])
+            file_versions = meta.get(ROW_VERSIONS) or info.get("versions")
+            source = meta.get(ROW_SOURCE) or info["source"]
+            status, reason = row_standing(self.root, key, row, bundled,
+                                          file_versions)
             if status is None:
                 why = why or f"{row.get('name')}: {reason}"
+                self._unusable.setdefault(key, []).append(
+                    f"{row.get('name')}: {reason}")
                 continue
             parsed = _parse_row(key, row)
             if parsed is None:
@@ -370,12 +540,20 @@ class RowBook:
                 continue
             params, rhs, pins, premises, ranks = parsed
             version = _installed_version(info["compendium"]) or "*"
+            standing, trusted_by = _standing(row, status, bundled)
+            from .compendium import below_floor
+            if standing == "axiom" and trusted_by == "mathema" \
+                    and below_floor(info["compendium"], version):
+                status = "below_floor"
+                standing, trusted_by = "evidence", None
             out.append(Row(
                 key=key, name=str(row["name"]),
-                statement=str(row.get("statement")), source=info["source"],
+                statement=str(row.get("statement")), source=source,
                 status=status, library=f"{info['compendium']} {version}",
                 params=params, rhs=rhs, pins=pins, premises=premises,
-                ranks=ranks))
+                ranks=ranks, standing=standing, trusted_by=trusted_by,
+                versions=str(row.get("versions") or file_versions or "*"),
+                installed=version))
         self._rows[key] = out
         if why and not out:
             self._withheld[key] = why
@@ -556,9 +734,12 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
         found = _match_row(key, rows, positional, keywords)
         if found is None:
             if rows:
+                unusable = book.unusable(key)
                 raise Decline(f"{key}: no definition row states this call "
                               f"({', '.join(r.name for r in rows)} "
-                              f"take other arguments)")
+                              f"take other arguments"
+                              + (f"; not usable here: {'; '.join(unusable)}"
+                                 if unusable else "") + ")")
             raise no_row(key)
         row, rhs, premises = found
         inlined.uses.append(row)
@@ -849,7 +1030,11 @@ def _uses_meta(uses: list) -> list:
 
 
 def _rows_text(uses: list) -> str:
-    return ", ".join(dict.fromkeys(f"{r.key} {r.name}" for r in uses))
+    """`the polars.Series.sum definition row`, or several joined."""
+    names = list(dict.fromkeys(f"{r.key} {r.name}" for r in uses))
+    if len(names) == 1:
+        return f"the {names[0]} row"
+    return "the " + ", ".join(names[:-1]) + f" and {names[-1]} rows"
 
 
 def prove_through_definitions(cj, fn, facts, cj_domain: dict, assumption,
@@ -931,7 +1116,7 @@ def _matrix_route(cj, facts, cj_domain, shapes, assumption, structures, fn,
     structs = dict(structures_from_signature(fn))
     for p, props in (structures or {}).items():
         structs[p] = tuple(sorted(set(structs.get(p, ())) | set(props)))
-    through = (f"through the definition rows {_rows_text(inlined.uses)} the "
+    through = (f"through {_rows_text(inlined.uses)} the "
                f"claim reads {lhs_text} {cj.relation} {rhs_text}")
     mproof = try_prove_matrix(lhs_text, rhs_text, cj.relation, facts,
                               cj_domain, shapes, structs,
@@ -1330,7 +1515,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
 
     shortest: dict = {}
     cap = EXTENSIVE_TIMEOUT_SECONDS if extensive else FAST_TIMEOUT_SECONDS
-    through = f"through the definition rows {_rows_text(inlined.uses)}"
+    through = f"through {_rows_text(inlined.uses)}"
     try:
         outcome = _with_timeout(decide, cap)
         if empty_only[0] and outcome.get("proven"):
@@ -1416,7 +1601,8 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
     """
     import random
 
-    from .conjecture import _resolve_func_ref
+    from .conjecture import _resolve_bound_ref
+    from .corroboration import INCONCLUSIVE, Undecided
     from .gates import _fmt_point, _point_evaluator
     from .symbolic._proof_support import ProofResult
     wheres: list = []
@@ -1438,7 +1624,7 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
     remedy = " and ".join(dict.fromkeys(remedies))
     bound_funcs = {}
     for name, ref in (cj.funcs or {}).items():
-        bound_funcs[name] = ref if callable(ref) else _resolve_func_ref(ref)
+        bound_funcs[name] = ref if callable(ref) else _resolve_bound_ref(ref)
     deps = None
     if all(v is not None for v in bound_funcs.values()):
         try:
@@ -1469,6 +1655,9 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
                         continue
                     if held is False:
                         detail = deps["probe_finite"](point)
+                        if detail is INCONCLUSIVE \
+                                or isinstance(detail, Undecided):
+                            detail = None
                         shown = _fmt_point(point, deps["names"])
                         return ProofResult(
                             "disproven", meta={**meta,

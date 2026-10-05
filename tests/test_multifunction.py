@@ -87,9 +87,26 @@ def test_derivative_claims_span_both_functions():
     # tangency claim needs (its full identity is only true at the
     # optimum, so this proves the ratio's own closed form instead)
     r = _verdict(cobb_douglas_utility,
+                 "for x in [0.5,100], y in [0.5,100], a in [0.1,0.9], "
+                 "d(f(x,y,a),x)/d(f(x,y,a),y) == a*y/((1-a)*x)",
+                 route="derive")
+    assert r.verdict == "proven"
+
+
+def test_the_ratio_over_every_real_x_is_falsified_where_x_is_negative():
+    # x ** a has no real value at a negative x and a fractional a, so
+    # the same claim with x unbounded fails there, at an executed point
+    r = _verdict(cobb_douglas_utility,
                  "for a in [0.1,0.9], d(f(x,y,a),x)/d(f(x,y,a),y) "
                  "== a*y/((1-a)*x)", route="derive")
-    assert r.verdict == "proven"
+    assert r.verdict == "falsified", (r.verdict, r.sketch)
+    import re
+    from fractions import Fraction
+    point = {name: float(Fraction(value)) for name, value in re.findall(
+        r"\b([xya])\s*=\s*(-?[0-9./]+)", r.counterexample or "")}
+    assert point.get("x", 0) < 0, r.counterexample
+    assert isinstance(cobb_douglas_utility(point["x"], point.get("y", 1.0),
+                                           point["a"]), complex)
 
 
 def test_let_alias_of_a_same_scope_function_resolves():
@@ -146,7 +163,7 @@ def test_counterexample_respects_let_declared_free_variable_domains():
     # outside the declared domain falsifies nothing
     r = _verdict(cobb_douglas_utility,
                  "let I be [10,1000], let px be [0.5,20], let py be [0.5,20], "
-                 "for a in [0.1,0.9], "
+                 "for x in [0.5,100], y in [0.5,100], a in [0.1,0.9], "
                  "d(f(x,y,a),x)/d(f(x,y,a),y) == d(budget_line(x,I,px,py),x)",
                  route="derive")
     # false away from the optimum, but a calculus form has no point

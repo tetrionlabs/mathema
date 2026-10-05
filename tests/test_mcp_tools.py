@@ -218,12 +218,12 @@ def test_suggest_claims_tool_declares_never_verifies(tmp_path):
         sys.path.remove(str(tmp_path))
         for m in [m for m in sys.modules if m.startswith("sgpkg")]:
             del sys.modules[m]
-    # the column set gained `declared` and `aspect` so the tool and
-    # `mathema claims --suggest --format json` agree exactly
+    # the tool and `mathema claims --suggest --format json` agree
+    # exactly, the section and its reason included
     assert out["cols"] == ["name", "statement", "route", "declared",
-                           "aspect"]
+                           "aspect", "section", "reason"]
     assert out["rows"], "a plain scalar function earns suggestions"
-    assert all(len(row) == 5 for row in out["rows"])
+    assert all(len(row) == 7 for row in out["rows"])
     # the aspect column groups the same-question suggestions: the shape
     # members (affine/convex/concave in x) all share one label, so a
     # caller reads them as one bending question, not three claims.
@@ -232,6 +232,9 @@ def test_suggest_claims_tool_declares_never_verifies(tmp_path):
     assert shape == {"shape[x]"}
     assert by_name.get("monotonic_increasing[x]") == "monotonicity[x]"
     assert by_name.get("is_deterministic") == ""     # its own aspect
+    sections = {row[0]: row[5] for row in out["rows"]}
+    assert sections["convex[x]"] == "question"
+    assert sections["is_deterministic"] == "individual"
     # no verdicts anywhere: this tool declares, never adjudicates
     assert "verdict" not in str(out)
 
@@ -310,7 +313,8 @@ def test_suggest_claims_tool_and_cli_agree_on_columns(tmp_path):
         for m in [m for m in sys.modules if m.startswith("agpkg")]:
             del sys.modules[m]
     assert cli["cols"] == mcp["cols"] == [
-        "name", "statement", "route", "declared", "aspect"]
+        "name", "statement", "route", "declared", "aspect", "section",
+        "reason"]
     assert cli["rows"] == mcp["rows"]
     # computed-empty, never null, per the documented null policy
     assert all(row[4] == "" or isinstance(row[4], str) for row in cli["rows"])
@@ -353,7 +357,11 @@ def test_adjudicate_target_include_selects_the_row_set(tmp_path):
     suggested = _with_path(root, lambda: run(include="suggested"))
     every = _with_path(root, lambda: run(include="all"))
 
-    assert {r["source"] for r in declared["claims"]} == {"docstring"}
+    # beside the declared claims, the policy rows mathema writes for the
+    # function's parameters, which gate as the declared claims do
+    assert {r["source"] for r in declared["claims"]} == {"docstring", "default"}
+    assert [r["claim"] for r in declared["claims"] if r["source"] == "default"] == \
+        ["missing[x]"]
     assert {r["source"] for r in suggested["claims"]} == {"suggested"}
     assert len(every["claims"]) == len(declared["claims"]) + len(suggested["claims"])
     # the default is strictly cheaper than what it replaced
@@ -379,7 +387,11 @@ def test_adjudicate_target_empty_claims_no_longer_collapses(tmp_path):
     battery = _with_path(root, lambda: tools.adjudicate_target(
         "ckpkg.mod:scale", claims=None, root=str(root), include="all"))
     assert len(explicit["claims"]) < len(battery["claims"])
-    assert not any(r["source"] == "suggested" for r in explicit["claims"])
+    # a policy row is the record's own statement of what f did at a
+    # missing input, written beside any claim that drew one
+    from mathema.policy import parse_policy
+    assert not any(r["source"] == "suggested" and parse_policy(r["statement"]) is None
+                   for r in explicit["claims"])
 
 
 def test_adjudicate_target_lints_before_adjudicating(tmp_path):
@@ -518,6 +530,7 @@ def test_the_wire_payload_is_compact_and_not_duplicated():
     assert result.structured_content is None
 
 
+@pytest.mark.needs_full_proof_budget
 def test_implementation_coverage_tool_reports_sources_and_staleness(tmp_path):
     import json
     import os
@@ -530,19 +543,29 @@ def test_implementation_coverage_tool_reports_sources_and_staleness(tmp_path):
     modp = tmp_path / "icp" / "mod.py"
     modp.write_text(textwrap.dedent('''
         def clamp01(x: float) -> float:
-            """Clamp."""
+            """Clamp.
+
+            Claims:
+                lower: for x in [-1, 1], f(x) >= 0
+            """
             if x < 0.0:
                 return 0.0
             return x
     '''))
     # a coverage report OLDER than the source: the test source is stale.
     (tmp_path / "coverage.json").write_text(json.dumps(
-        {"files": {os.path.abspath(str(modp)): {"executed_lines": [2, 3, 4, 5]}}}))
+        {"files": {os.path.abspath(str(modp)): {"executed_lines": [7, 8, 9, 10]}}}))
     time.sleep(0.01)
     os.utime(str(modp), None)
 
     sys.path.insert(0, str(tmp_path))
     try:
+        # the docstring claim counts once verify has recorded it
+        import importlib
+
+        import mathema
+        mathema.write_spec(importlib.import_module("icp.mod").clamp01,
+                           root=str(tmp_path))
         out = tools.implementation_coverage(["icp.mod"], root=str(tmp_path))
     finally:
         sys.path.remove(str(tmp_path))

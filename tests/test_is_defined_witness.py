@@ -42,7 +42,7 @@ def _only(fn, statement):
 
 
 def _witness_x(probe) -> float:
-    m = re.search(r"\bx=([-+0-9.e]+)", probe.counterexample or "")
+    m = re.search(r"\bx = ([-+0-9.e]+)", probe.counterexample or "")
     assert m, probe.counterexample
     return float(m.group(1))
 
@@ -62,10 +62,11 @@ def test_bare_is_defined_on_a_pole_names_a_point_that_raises():
     assert probe.meta.get("mathema.corroboration") == "reproduced"
 
 
-def test_bare_is_defined_on_a_raise_guard_names_a_point_that_raises():
+def test_bare_is_defined_on_a_raise_guard_is_proven_over_the_working_domain():
+    # the guard's raise is deliberate and cuts the working domain
+    # (decision A); inside it every call returns
     probe = _only(guarded_root, "is_defined(f)")
-    assert probe.verdict == "falsified"
-    assert _raises(guarded_root, _witness_x(probe))
+    assert probe.verdict == "proven", (probe.verdict, probe.sketch)
 
 
 def test_a_restriction_too_narrow_names_a_point_where_f_returns():
@@ -101,11 +102,21 @@ def test_a_premise_that_excludes_the_pole_is_never_falsified():
     assert probe.counterexample is None
 
 
-def test_a_disproof_with_no_reproducing_point_falls_to_execution_and_is_flagged():
-    # the structural disproof is not reproduced, so region equivalence
-    # is undecided and the probe half adjudicates by execution; the
-    # engine-bug flag stays on the record
+def never_zero_denominator(x):
+    return 1 / (x * x - 2 * x + 2)
+
+
+def test_a_domain_the_region_covers_is_proven():
     probe = _only(reciprocal_pole, "for x in [2, 5], is_defined(f)")
+    assert probe.verdict == "proven", (probe.verdict, probe.sketch)
+
+
+def test_a_disproof_with_no_reproducing_point_falls_to_execution_and_is_flagged():
+    # the region x*x - 2*x + 2 != 0 holds everywhere, but its interval
+    # hull over [2, 5] straddles zero, so the structural disproof is not
+    # reproduced, region equivalence is undecided and the probe half
+    # adjudicates by execution; the engine-bug flag stays on the record
+    probe = _only(never_zero_denominator, "for x in [2, 5], is_defined(f)")
     assert probe.verdict == "holds"
     assert probe.meta.get("mathema.corroboration") == "uncorroborated"
     assert "UNCORROBORATED" in probe.note

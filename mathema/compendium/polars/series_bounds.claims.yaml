@@ -1,0 +1,47 @@
+# Definition rows for the least and greatest elements, the absolute
+# value, the square root, the clipped values and the inner product of a
+# polars.Series, stated over Series with nothing missing; the receiver
+# of `returns.min()` is `a`. mathema's own test suite verifies each row
+# against the installed polars.
+compendium: polars
+versions: ">=1,<2"
+
+polars.Series.min:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == min(a)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: null, returned as None."
+
+polars.Series.max:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == max(a)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: null, returned as None."
+
+polars.Series.abs:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == abs(a)"
+      note: "Element by element, a Series of the same length."
+
+polars.Series.sqrt:
+  claims:
+    - name: definition
+      statement: "for a in R^n, assuming min(a) >= 0, f(a) ~= a ** 0.5"
+      note: "Element by element; a negative element gives NaN."
+
+polars.Series.dot:
+  claims:
+    - name: definition
+      statement: "for a in R^n, other in R^n, f(a, other) ~= dot(a, other)"
+      note: "The inner product with a Series of the same length."
+
+polars.Series.clip:
+  claims:
+    - name: definition
+      statement: "for a in R^n, lower_bound in [-1e6, 1e6], upper_bound in [-1e6, 1e6], assuming lower_bound <= upper_bound, f(a, lower_bound, upper_bound) ~= ((a + lower_bound + abs(a - lower_bound)) / 2 + upper_bound - abs((a + lower_bound + abs(a - lower_bound)) / 2 - upper_bound)) / 2"
+      note: "Element by element, the larger of each element and lower_bound, then the smaller of that and upper_bound. Stated for bounds in order: polars clips reversed bounds its own way."

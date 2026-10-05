@@ -79,10 +79,80 @@ def _affine_sign_by_corners(target, domain: dict, params: dict) -> bool | None:
             return None
     except sympy.PolynomialError:
         return None
+    from ..domain import exact_number
+    exact_target = _exact_floats(target)
     signs = set()
     for corner in itertools.product(*bounded.values()):
-        signs.add(float(target.subs(dict(zip(syms, corner)))) >= 0)
+        point = {sym: exact_number(v) for sym, v in zip(syms, corner)}
+        value = exact_target.subs(point)
+        if value is sympy.nan or not value.is_comparable:
+            return None
+        if value.is_infinite:
+            signs.add(bool(value > 0))
+            continue
+        sign = _verified_sign(value)
+        if sign is None:
+            return None
+        signs.add(sign >= 0)
     return signs.pop() if len(signs) == 1 else None
+
+
+def _linear_box_extreme(target, domain: dict):
+    """Intent:
+        For a `target` linear in symbols that each name an element of a
+        vector or a scalar the `domain` bounds by one finite interval
+        (`r[0]` in `[-0.1, 0.1]`), its least value over that box, taken
+        exactly at the corner where every term is smallest, as
+        `(least, corner text)`; None for any other target.
+
+    Notes:
+        A linear function over a box is least at a corner: each term
+        `c * x` is least at the end of `x`'s interval that `c`'s sign
+        picks. An open end is the infimum, so a least value >= 0 still
+        means the target is never negative.
+    """
+    from ..domain import Domain, exact_number
+    symbols = sorted(target.free_symbols, key=str)
+    if not symbols or len(symbols) > 4096:
+        return None
+    ends = {}
+    for sym in symbols:
+        bound = domain.get(str(sym))
+        if not isinstance(bound, Domain) or bound.dims \
+                or len(bound.pieces) != 1:
+            return None
+        piece = bound.pieces[0]
+        if not (isinstance(piece, tuple) and len(piece) == 2):
+            return None
+        lo, hi = piece
+        try:
+            if not (math.isfinite(lo) and math.isfinite(hi)):
+                return None
+        except TypeError:
+            return None
+        ends[sym] = (exact_number(lo), exact_number(hi))
+    try:
+        poly = sympy.Poly(_exact_floats(target), *symbols)
+    except (sympy.PolynomialError, sympy.GeneratorsNeeded):
+        return None
+    if poly.total_degree() > 1:
+        return None
+    least = poly.coeff_monomial(1)
+    corner = []
+    for i, sym in enumerate(symbols):
+        monomial = [0] * len(symbols)
+        monomial[i] = 1
+        c = poly.coeff_monomial(tuple(monomial))
+        if not c.is_comparable:
+            return None
+        lo, hi = ends[sym]
+        pick = lo if c >= 0 else hi
+        least += c * pick
+        corner.append(f"{sym} = {pick}")
+    if not least.is_comparable:
+        return None
+    shown = ", ".join(corner[:4]) + (", ..." if len(corner) > 4 else "")
+    return least, shown
 
 
 def _provably_signed(expr, domain: dict, params: dict, bound_context) -> bool | None:
@@ -192,15 +262,25 @@ def _resolve_clamps(expr, domain: dict, params: dict):
     it. Only ever collapses when one side's whole range provably never
     overlaps the other's, an overlapping or partially-declared pair
     is left alone, never guessed at."""
+    from ..domain import exact_number
     bounds = {}
     for p, sym in params.items():
         lo_hi = domain.get(p)
         if isinstance(lo_hi, tuple) and len(lo_hi) == 2:
-            bounds[sym] = (float(lo_hi[0]), float(lo_hi[1]))
+            bounds[sym] = (exact_number(lo_hi[0]), exact_number(lo_hi[1]))
+
+    def at_most(a, b) -> bool:
+        # a <= b decided exactly, an infinite end included
+        if a is -sympy.oo or b is sympy.oo:
+            return True
+        if a is sympy.oo or b is -sympy.oo:
+            return False
+        sign = _verified_sign(_exact_floats(sympy.sympify(b - a)))
+        return sign is not None and sign >= 0
 
     def bound_of(node):
         if node.is_number:
-            c = float(node)
+            c = _exact_floats(node)
             return c, c
         if node in bounds:
             return bounds[node]
@@ -220,7 +300,7 @@ def _resolve_clamps(expr, domain: dict, params: dict):
             return None
         if not (lo.is_finite and hi.is_finite):
             return None
-        return float(lo), float(hi)
+        return _exact_floats(lo), _exact_floats(hi)
 
     subs = {}
     for node in expr.atoms(sympy.Min, sympy.Max):
@@ -234,14 +314,14 @@ def _resolve_clamps(expr, domain: dict, params: dict):
         lo_a, hi_a = bound_a
         lo_b, hi_b = bound_b
         if isinstance(node, sympy.Min):
-            if hi_a <= lo_b:
+            if at_most(hi_a, lo_b):
                 subs[node] = a
-            elif hi_b <= lo_a:
+            elif at_most(hi_b, lo_a):
                 subs[node] = b
         else:
-            if hi_a <= lo_b:
+            if at_most(hi_a, lo_b):
                 subs[node] = b
-            elif hi_b <= lo_a:
+            elif at_most(hi_b, lo_a):
                 subs[node] = a
     return expr.subs(subs) if subs else expr
 
@@ -343,21 +423,23 @@ def _resolve_mod(expr, domain: dict, params: dict):
     `Mod` from the expression entirely for a domain this narrow, so the
     question `.equals()` ends up answering is a plain, honestly
     decidable one."""
+    from ..domain import exact_number
     subs = {}
     for p, sym in params.items():
         lo_hi = domain.get(p)
         if not isinstance(lo_hi, tuple):
             continue
-        lo, hi = lo_hi
-        if lo < 0:
+        lo, hi = exact_number(lo_hi[0]), exact_number(lo_hi[1])
+        if not (lo.is_comparable and hi.is_comparable) or bool(lo < 0):
             continue
         closed_hi = getattr(lo_hi, "closed_hi", True)
         for node in expr.atoms(sympy.Mod):
             base, modulus = node.args
             if base != sym or not modulus.is_number:
                 continue
-            m = float(modulus)
-            if hi < m or (hi == m and not closed_hi):
+            gap = _verified_sign(_exact_floats(modulus) - hi) \
+                if hi.is_finite else None
+            if gap == 1 or (gap == 0 and not closed_hi):
                 subs[node] = sym
     return expr.subs(subs) if subs else expr
 
@@ -420,7 +502,9 @@ def _quantifier_clause(names: set, order: list, domain: dict,
         bounds = domain.get(n)
         if bounds is None:
             return "ℝ"
-        return render_domain(bounds, ascii_mode=False)
+        # a proof is over the reals: the missing values a domain admits
+        # are the computation's, executed by its companion
+        return render_domain(bounds, ascii_mode=False, show_missing=False)
 
     groups: dict = {}
     for n in free:
@@ -652,6 +736,27 @@ def _has_equality_constraint(bound_context) -> bool:
     from sympy.assumptions import AppliedPredicate
     return any(atom.function.name == "zero"
                for atom in bound_context.atoms(AppliedPredicate))
+
+
+def _has_premise_region(bound_context) -> bool:
+    """Intent:
+        Whether the bound context carries a constraint beyond the
+        domain box: any predicate other than a bound on one symbol by
+        a number (`Q.ge(x, -1)`), such as an assumed `sqrt(x) > 1/2`.
+        A disproof that reasons over the box alone may then land off
+        the premise's region.
+    """
+    if bound_context is None:
+        return False
+    from sympy.assumptions import AppliedPredicate
+    for atom in bound_context.atoms(AppliedPredicate):
+        args = atom.arguments
+        symbols = [a for a in args if isinstance(a, sympy.Symbol)]
+        if len(symbols) > 1 or any(
+                not isinstance(a, sympy.Symbol) and not a.is_number
+                for a in args):
+            return True
+    return False
 
 
 def _piecewise_seed_points(diff, free: list, bounds: dict) -> list[dict]:
@@ -1298,20 +1403,35 @@ def _exact_endpoint(v):
 
     Notes:
         A declared bound arrives as a float (2.0, 0.1); the number the
-        claim names is its decimal reading. Rationalizing it keeps
-        endpoint arithmetic exact, so an attained bound collapses to a
-        true zero (log(2)/log(2) - 1 == 0) instead of float noise the
-        sign check can't call. Anything that is not a Float passes
-        through unchanged.
+        claim names is its decimal reading, the shortest decimal that
+        reads back as the same float (`repr`), every digit kept, so
+        `0.3472963553338606` stays sixteen digits long. A Float carrying
+        more than double precision is read from its own digits.
+        Rationalizing keeps endpoint arithmetic exact, so an attained
+        bound collapses to a true zero (log(2)/log(2) - 1 == 0) instead
+        of float noise the sign check can't call. Anything that is not a
+        finite Float passes through unchanged.
     """
-    if isinstance(v, sympy.Float):
+    if isinstance(v, sympy.Float) and v.is_finite:
         try:
-            return sympy.nsimplify(v, rational=True)
+            if v._prec <= 53:
+                return sympy.Rational(repr(float(v)))
+            return sympy.Rational(str(v))
         except TimeoutError:
             raise
         except Exception:
             return v
     return v
+
+
+def _exact_floats(expr):
+    """Intent:
+        `expr` with every finite Float replaced by its decimal reading
+        (`_exact_endpoint`), so a coefficient keeps every digit it was
+        written with.
+    """
+    floats = {f: _exact_endpoint(f) for f in expr.atoms(sympy.Float)}
+    return expr.xreplace(floats) if floats else expr
 
 
 def _has_sequence_structure(expr) -> bool:
@@ -1386,6 +1506,8 @@ def _interval_bounds(expr, domain: dict, params: dict):
         return None
 
     box = {}
+    # the symbols whose declared bound holds both its ends
+    closed: set = set()
     for p, sym in params.items():
         bound = domain.get(p)
         if bound == "C" or getattr(bound, "base_type", None) == "C":
@@ -1399,6 +1521,9 @@ def _interval_bounds(expr, domain: dict, params: dict):
             try:
                 sset = bound_to_sympy_set(bound)
                 lo, hi = _exact(sset.inf), _exact(sset.sup)
+                if sset.contains(sset.inf) is sympy.true \
+                        and sset.contains(sset.sup) is sympy.true:
+                    closed.add(sym)
             except TimeoutError:
                 raise
             except Exception:
@@ -1429,7 +1554,23 @@ def _interval_bounds(expr, domain: dict, params: dict):
     for s in expr.free_symbols:
         if s not in box:
             box[s] = sympy.AccumBounds(-sympy.oo, sympy.oo)
-    return _interval_hull(expr, box)
+    hull = _interval_hull(expr, box)
+    if isinstance(hull, sympy.AccumBounds) \
+            and not (hull.min.is_finite and hull.max.is_finite) \
+            and all(_finite_entry(box[s]) for s in expr.free_symbols) \
+            and all(s in closed for s in expr.free_symbols):
+        # an infinite end over a closed bounded box: no open end for it
+        # to be approached at, so the expression has a pole inside the
+        # box, where it has no value, and the hull bounds nothing
+        return None
+    return hull
+
+
+def _finite_entry(entry) -> bool:
+    """Whether one box entry (an `AccumBounds` or a number) is bounded."""
+    if isinstance(entry, sympy.AccumBounds):
+        return bool(entry.min.is_finite and entry.max.is_finite)
+    return bool(getattr(entry, "is_finite", False))
 
 
 def _min_max_hull(e):
@@ -1551,20 +1692,124 @@ def _interval_hull(expr, box: dict):
     return None
 
 
+def _hull_sign(arg, box: dict):
+    """Intent:
+        The sign `arg` keeps over the whole box: 1 when its interval
+        hull is strictly positive, -1 when strictly negative, None when
+        the hull reaches zero or cannot be computed.
+    """
+    try:
+        hull = _interval_hull(arg, box)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    if hull is None:
+        return None
+    if isinstance(hull, sympy.AccumBounds):
+        lo, hi = hull.min, hull.max
+    else:
+        lo = hi = hull
+    if not (getattr(lo, "is_finite", False) and getattr(hi, "is_finite", False)):
+        lo_sign = _verified_sign(lo) if getattr(lo, "is_finite", False) else None
+        hi_sign = _verified_sign(hi) if getattr(hi, "is_finite", False) else None
+        if lo_sign == 1 and hi is sympy.oo:
+            return 1
+        if hi_sign == -1 and lo is -sympy.oo:
+            return -1
+        return None
+    if _verified_sign(lo) == 1:
+        return 1
+    if _verified_sign(hi) == -1:
+        return -1
+    return None
+
+
+_SMOOTH_EVERYWHERE = (sympy.exp, sympy.sin, sympy.cos, sympy.atan,
+                      sympy.sinh, sympy.cosh, sympy.tanh, sympy.asinh,
+                      sympy.erf, sympy.erfc)
+
+
+def _smooth_on_box(expr, box: dict) -> bool:
+    """Intent:
+        Whether `expr` is defined, continuous and differentiable at
+        every point of the closed box, by checking each subterm against
+        the region where its function is smooth.
+
+    Notes:
+        A sufficient test, never a complete one: sums, products,
+        nonnegative integer powers and the functions in
+        `_SMOOTH_EVERYWHERE` are smooth everywhere; every other
+        function is accepted only when the interval hull of its
+        argument stays inside its smooth region over the box (a
+        negative power or an Abs needs a base that keeps one sign, a
+        fractional or symbolic power and log a positive base, tan and
+        sec a cos that keeps one sign, asin, acos and atanh an argument
+        strictly inside (-1, 1), atan2(y, x) a positive x or a y that
+        keeps one sign). Anything else (Piecewise, floor, sign, Mod, an
+        unknown function) makes the answer False.
+    """
+    for node in sympy.preorder_traversal(expr):
+        if node.is_Atom or isinstance(node, (sympy.Add, sympy.Mul)):
+            continue
+        if isinstance(node, _SMOOTH_EVERYWHERE):
+            continue
+        if isinstance(node, sympy.Pow):
+            base, exponent = node.args
+            if exponent.is_Integer and exponent >= 0:
+                continue
+            if exponent.is_Integer:
+                if _hull_sign(base, box) is None:
+                    return False
+                continue
+            if _hull_sign(base, box) != 1:
+                return False
+            continue
+        if isinstance(node, sympy.atan2):
+            y, x = node.args
+            if _hull_sign(x, box) == 1 or _hull_sign(y, box) is not None:
+                continue
+            return False
+        if len(node.args) != 1:
+            return False
+        arg = node.args[0]
+        if isinstance(node, sympy.log):
+            ok = _hull_sign(arg, box) == 1
+        elif isinstance(node, (sympy.Abs, sympy.acot)):
+            ok = _hull_sign(arg, box) is not None
+        elif isinstance(node, (sympy.tan, sympy.sec)):
+            ok = _hull_sign(sympy.cos(arg), box) is not None
+        elif isinstance(node, (sympy.cot, sympy.csc)):
+            ok = _hull_sign(sympy.sin(arg), box) is not None
+        elif isinstance(node, (sympy.asin, sympy.acos, sympy.atanh)):
+            ok = (_hull_sign(1 - arg, box) == 1
+                  and _hull_sign(1 + arg, box) == 1)
+        elif isinstance(node, sympy.acosh):
+            ok = _hull_sign(arg - 1, box) == 1
+        else:
+            ok = False
+        if not ok:
+            return False
+    return True
+
+
 def _constant_by_derivative(diff, domain: dict, params: dict):
     """Intent:
         Decide `diff == 0` for a differentiable expression over a
-        connected interval box by the classic argument: if every
-        partial derivative simplifies to zero, `diff` is constant
-        there, and one exact evaluation at an interior rational point
-        settles which constant.
+        connected interval box by the classic argument: if `diff` is
+        smooth on the closed box and every partial derivative
+        simplifies to zero, `diff` is constant there, and one exact
+        evaluation at a point of the box settles which constant.
 
     Notes:
         `True`/`False` only when everything discharges exactly (all
-        free symbols interval-bounded, all partials provably zero, the
-        point value exactly zero or exactly not); `None` otherwise;
-        in particular for a nonzero derivative, which says nothing
-        about equality at any single point.
+        free symbols interval-bounded, `diff` smooth on the whole box
+        by `_smooth_on_box`, all partials provably zero, the point
+        value exactly zero or exactly not); `None` otherwise; in
+        particular for a nonzero derivative, which says nothing about
+        equality at any single point, and for a difference with a pole,
+        branch cut or jump inside the box, across which a zero
+        derivative does not make it constant.
     """
     from ..domain import bound_to_sympy_set
 
@@ -1591,6 +1836,10 @@ def _constant_by_derivative(diff, domain: dict, params: dict):
         point[sym] = mid
         ranges[sym] = (lo, hi)
     if any(s not in point for s in diff.free_symbols):
+        return None
+    box = {sym: (sympy.AccumBounds(lo, hi) if lo != hi else lo)
+           for sym, (lo, hi) in ranges.items()}
+    if not _smooth_on_box(diff, box):
         return None
     for sym in point:
         try:
@@ -1646,7 +1895,9 @@ def _verified_sign(value):
         `is_negative` says True). Exact zero and rational values decide
         structurally; everything else must agree at two working
         precisions (30 and 50 digits) or the answer is None, an
-        undecided, never a confidently wrong verdict.
+        undecided, never a confidently wrong verdict. 0 only when sympy
+        proves the value zero: a value too small for a double is still
+        signed.
     """
     if value.is_zero:
         return 0
@@ -1655,15 +1906,43 @@ def _verified_sign(value):
     try:
         a, b = value.evalf(30), value.evalf(50)
         if a.is_comparable and b.is_comparable:
-            fa, fb = float(a), float(b)
-            if fa > 0 and fb > 0:
+            # the signs of the evaluated Floats themselves, never of a
+            # double conversion, which underflows a value below about
+            # 1e-308 to zero
+            if a.is_positive and b.is_positive:
                 return 1
-            if fa < 0 and fb < 0:
+            if a.is_negative and b.is_negative:
                 return -1
-            if fa == 0 and fb == 0:
-                return 0
     except (TypeError, ValueError, OverflowError):
         pass
+    return None
+
+
+def _integrality_truth(cond, domain: dict, params: dict):
+    """Intent:
+        Decide `Eq(u, floor(u))` (u is an integer) or its `Ne` over the
+        domain box when u's range there holds no integer: the equality
+        holds nowhere and the inequality everywhere. None otherwise.
+    """
+    if not isinstance(cond, (sympy.Eq, sympy.Ne)):
+        return None
+    lhs, rhs = cond.lhs, cond.rhs
+    if isinstance(lhs, sympy.floor):
+        lhs, rhs = rhs, lhs
+    if not (isinstance(rhs, sympy.floor) and rhs.args[0] == lhs):
+        return None
+    bounds = _interval_bounds(lhs, domain, params)
+    if bounds is None:
+        return None
+    lo = bounds.min if isinstance(bounds, sympy.AccumBounds) else bounds
+    hi = bounds.max if isinstance(bounds, sympy.AccumBounds) else bounds
+    try:
+        if not (lo.is_finite and hi.is_finite):
+            return None
+        if bool(sympy.ceiling(lo) > hi):
+            return isinstance(cond, sympy.Ne)
+    except TypeError:
+        return None
     return None
 
 
@@ -1700,6 +1979,9 @@ def _relational_truth_over_domain(cond, domain: dict, params: dict):
     if not isinstance(cond, sympy.core.relational.Relational):
         return None
     gap = cond.lhs - cond.rhs
+    integral = _integrality_truth(cond, domain, params)
+    if integral is not None:
+        return integral
     bounds = _interval_bounds(gap, domain, params)
     if bounds is None:
         return None
@@ -1873,9 +2155,11 @@ def _assumption_rewrites(bound_context) -> list:
         if pred == sympy.Q.zero:
             out.append((rest, -const))
         else:
-            t = sympy.Dummy("assumed",
-                            positive=(pred == sympy.Q.positive),
-                            nonnegative=True)
+            # a slack ranging over every nonnegative value (every
+            # positive one for a strict premise)
+            t = (sympy.Dummy("assumed", positive=True)
+                 if pred == sympy.Q.positive
+                 else sympy.Dummy("assumed", nonnegative=True))
             out.append((rest, t - const))
     return out
 
@@ -2152,13 +2436,23 @@ def _decide_equality(lhs, rhs, diff, relation, domain, bound_context, params,
         # these shapes.
         try:
             if sympy.simplify(diff.rewrite(sympy.asin)).is_zero:
-                equal = True
+                return ProofResult(
+                    "proven",
+                    sketch=f"{_humanize(lhs)} and {_humanize(rhs)} simplify "
+                           "identically once the inverse trigonometric "
+                           "functions are rewritten in terms of asin")
         except TimeoutError:
             raise
         except Exception:
             pass
-        if equal is None:
-            equal = _constant_by_derivative(diff, domain, params)
+        equal = _constant_by_derivative(diff, domain, params)
+        if equal is True:
+            return ProofResult(
+                "proven",
+                sketch=f"{_humanize(diff)} is smooth on the declared box, "
+                       "every partial derivative of it is zero there, and it "
+                       "is zero at one point of the box, so it is zero "
+                       "throughout")
     if equal is None:
         # an Abs the declared domain settles the sign of: resolve it
         # before asking .equals(), which cannot see the domain and
@@ -2215,7 +2509,7 @@ def _decide_equality(lhs, rhs, diff, relation, domain, bound_context, params,
                                                bound_context, tolerance)
         if counterexample is not None:
             detail = (", confirmed nonzero at "
-                     + ", ".join(f"{s}={v:.6g}" for s, v in counterexample.items())
+                     + ", ".join(f"{s} = {v:.6g}" for s, v in counterexample.items())
                      if counterexample else "")
             return ProofResult("disproven", sketch=f"{_humanize(lhs)} ≠ {_humanize(rhs)}: "
                                f"difference simplifies to {_humanize(diff)}{detail}",
@@ -2295,14 +2589,26 @@ def _sum_closed_zero(diff) -> "bool | None":
                 continue
             if branch_cond is sympy.true:
                 return False
+            # only an equality in one symbol whose real solution set is
+            # finite and complete (solveset, not solve, which may list
+            # only some solutions of sin(n) = 0)
+            if not isinstance(branch_cond, sympy.Eq) or \
+                    len(branch_cond.free_symbols) != 1:
+                return False
+            (sym,) = branch_cond.free_symbols
             try:
-                solutions = sympy.solve(branch_cond, dict=True)
+                solutions = _with_timeout(
+                    lambda: sympy.solveset(branch_cond.lhs - branch_cond.rhs,
+                                           sym, sympy.S.Reals),
+                    FAST_TIMEOUT_SECONDS)
+            except TimeoutError:
+                raise
             except Exception:
                 return False
-            if not solutions:
+            if not isinstance(solutions, sympy.FiniteSet) or not solutions:
                 return False
-            for sol in solutions:
-                if not zero(branch_expr.subs(sol), depth + 1):
+            for value in solutions:
+                if not zero(branch_expr.subs(sym, value), depth + 1):
                     return False
         return True
 
@@ -2434,6 +2740,21 @@ def _decide_ordering(lhs, rhs, diff, relation, domain, bound_context, params,
                            witness=witness or _representative_point(
                                target, domain, params, bound_context),
                            meta=meta)
+
+    linear = _linear_box_extreme(target, domain)
+    if linear is not None:
+        least, corner = linear
+        if least >= 0:
+            return ProofResult(
+                "proven",
+                sketch=f"{_humanize(target)} is linear in elements that each "
+                       f"lie in an interval, so it is least at the corner "
+                       f"{corner}, where it is {least}: never negative")
+        return ProofResult(
+            "undecided",
+            sketch=f"{_humanize(target)} is linear in elements that each lie "
+                   f"in an interval and is least at the corner {corner}, "
+                   f"where it is {least} < 0; the corner is left to execution")
 
     def _is_nonneg(expr):
         # .is_nonnegative only ever consults assumptions baked
@@ -2741,7 +3062,7 @@ def _attained_zero(target, domain: dict, params: dict,
         root leaves the claim undecided, never proven). The root is
         verified by exact substitution before being trusted.
     """
-    from ..domain import domain_contains
+    from ..domain import exact_membership
     syms = list(params.values())
     if not syms:
         return None
@@ -2764,11 +3085,7 @@ def _attained_zero(target, domain: dict, params: dict,
                 ok = False
                 break
             bound = domain.get(name_of[s])
-            try:
-                if bound is not None and not domain_contains(float(v), bound):
-                    ok = False
-                    break
-            except Exception:
+            if bound is not None and exact_membership(v, bound) is not True:
                 ok = False
                 break
             point[name_of[s]] = v
@@ -2798,23 +3115,17 @@ _RELATION_DECIDERS = {
 
 def _exact(v):
     """Intent:
-        Snap a float to an exact Integer or Rational when the round
-        trip is lossless. Falls back to the original value otherwise.
+        A float as the exact number it names (`domain.exact_number`):
+        the shortest decimal that reads back as it, as a Rational.
+        Anything else passes through.
 
     Notes:
         sympy.refine's Abs-sign handler only fires when every bound in
         an assumption set is exact. One Float anywhere in the
-        conjunction disables it. Upcasting everything to Float instead
-        of downcasting to exact does not help either, both confirmed
-        directly against sympy.
+        conjunction disables it.
     """
-    if not isinstance(v, float):
-        return v
-    exact = sympy.nsimplify(v, rational=False)
-    try:
-        return exact if abs(float(exact) - v) < 1e-9 else v
-    except TypeError:
-        return v
+    from ..domain import exact_number
+    return exact_number(v)
 
 
 def _split_domain_pieces(lo, hi, closed_lo: bool, closed_hi: bool, split_points):

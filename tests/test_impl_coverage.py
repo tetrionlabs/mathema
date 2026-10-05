@@ -6,6 +6,8 @@ coverage` pass merges the three, per function and repo-wide."""
 import os
 import textwrap
 
+import pytest
+
 from mathema.impl_coverage import (FunctionCoverage, function_coverage,
                                    project_coverage)
 
@@ -28,16 +30,23 @@ def test_percent_is_line_weighted():
     assert FunctionCoverage(key="g", statements=set()).percent == 100
 
 
+@pytest.mark.needs_full_proof_budget
 def test_derivable_function_is_derive_covered(tmp_path):
     mod = _load(tmp_path, '''
         def clamp01(x: float) -> float:
-            """Clamp to the unit interval."""
+            """Clamp to the unit interval.
+
+            Claims:
+                in_unit: for x in [-1, 2], 0 <= f(x) <= 1
+            """
             if x < 0.0:
                 return 0.0
             if x > 1.0:
                 return 1.0
             return x
     ''')
+    import mathema
+    mathema.write_spec(mod.clamp01, root=str(tmp_path))   # verify records it
     fc = function_coverage(mod.clamp01, root=str(tmp_path))
     assert fc.traced is True
     assert fc.statements                       # a non-empty denominator
@@ -89,7 +98,8 @@ def test_untraceable_source_degrades_without_probe(tmp_path, monkeypatch):
     # rather than crashing.
     import mathema.impl_coverage as ic
 
-    monkeypatch.setattr(ic, "_trace_check", lambda fn: (None, None, None))
+    monkeypatch.setattr(ic, "_trace_check",
+                        lambda fn, declared=None: (None, None, None))
     mod = _load(tmp_path, '''
         def add(a: float, b: float) -> float:
             """Sum."""
@@ -411,14 +421,188 @@ def test_derive_coverage_uses_per_branch_attribution(tmp_path):
     from mathema.impl_coverage import _derive_covered_lines
 
     # a proven derive probe carrying per-branch lines {2, 3, 5}
-    probe = types.SimpleNamespace(route="derive", verdict="proven",
-                                  meta={"mathema.derive_lines": [2, 3, 5]})
+    probe = types.SimpleNamespace(name="c", route="derive", verdict="proven",
+                                  meta={"mathema.derive_lines": [2, 3, 5],
+                                        "mathema.surface": "docstring"},
+                                  note="")
     record = types.SimpleNamespace(probes=[probe])
-    got = _derive_covered_lines(record, statements={2, 3, 4, 5})
+    got = _derive_covered_lines(record, statements={2, 3, 4, 5},
+                                recorded={"c"})
     assert got == {2, 3, 5}            # line 4 (pruned branch) not covered
 
     # a proven probe WITHOUT per-branch lines counts the whole body
-    plain = types.SimpleNamespace(route="derive", verdict="proven", meta={})
+    plain = types.SimpleNamespace(name="c", route="derive", verdict="proven",
+                                  meta={"mathema.surface": "docstring"},
+                                  note="")
     whole = _derive_covered_lines(types.SimpleNamespace(probes=[plain]),
-                                  statements={2, 3, 4, 5})
+                                  statements={2, 3, 4, 5}, recorded={"c"})
     assert whole == {2, 3, 4, 5}
+
+
+def test_a_proof_of_a_standard_claim_never_counts_toward_the_derive_source(
+        tmp_path):
+    # a constant function proves every suggested shape law (monotonic,
+    # affine, even, idempotent) on the derive route, but none of them is
+    # a claim anyone included for it
+    mod = _load(tmp_path, '''
+        def fee(x: float) -> float:
+            """A flat fee."""
+            return 2.0
+    ''', name="unclaimed")
+    fc = function_coverage(mod.fee, root=str(tmp_path), coverage_data={})
+    assert "derive" not in fc.by_source
+    assert "probe" in fc.by_source
+
+
+def test_a_docstring_claim_counts_once_verify_has_recorded_it(tmp_path):
+    import mathema
+    mod = _load(tmp_path, '''
+        def fee(x: float) -> float:
+            """A flat fee.
+
+            Claims:
+                flat: f(x) == 2
+            """
+            return 2.0
+    ''', name="docclaimed")
+    fc = function_coverage(mod.fee, root=str(tmp_path), coverage_data={})
+    assert "derive" not in fc.by_source
+    mathema.write_spec(mod.fee, root=str(tmp_path))
+    fc = function_coverage(mod.fee, root=str(tmp_path), coverage_data={})
+    assert "derive" in fc.by_source
+
+
+def test_a_decorator_claim_counts_once_verify_has_recorded_it(tmp_path):
+    import mathema
+    mod = _load(tmp_path, '''
+        from mathema import claims_decorator
+
+
+        @claims_decorator("f(x) == 2")
+        def fee(x: float) -> float:
+            """A flat fee."""
+            return 2.0
+    ''', name="decoclaimed")
+    fc = function_coverage(mod.fee, root=str(tmp_path), coverage_data={})
+    assert "derive" not in fc.by_source
+    mathema.write_spec(mod.fee, root=str(tmp_path))
+    fc = function_coverage(mod.fee, root=str(tmp_path), coverage_data={})
+    assert "derive" in fc.by_source
+
+
+def test_a_claims_file_claim_counts_once_verify_has_recorded_it(tmp_path):
+    import sys
+    pkg = tmp_path / "filedecl"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "mod.py").write_text(textwrap.dedent('''
+        def fee(x: float) -> float:
+            """A flat fee."""
+            return 2.0
+    '''))
+    (tmp_path / "c.claims.yaml").write_text(textwrap.dedent("""
+        filedecl.mod.fee:
+          claims:
+            - name: flat
+              statement: 'f(x) == 2'
+    """))
+    sys.path.insert(0, str(tmp_path))
+    try:
+        # coverage never certifies itself: the claim counts only once
+        # verify has recorded it
+        (fc,) = project_coverage(["filedecl.mod"], root=str(tmp_path)).functions
+        assert "derive" not in fc.by_source
+        from mathema.verify import verify_project
+        verify_project(str(tmp_path))
+        (fc,) = project_coverage(["filedecl.mod"], root=str(tmp_path)).functions
+        assert "derive" in fc.by_source
+    finally:
+        sys.path.remove(str(tmp_path))
+        for m in [m for m in sys.modules if m.startswith("filedecl")]:
+            del sys.modules[m]
+
+
+def test_derive_lines_come_only_from_claims_included_for_the_function():
+    import types
+
+    from mathema.impl_coverage import _derive_covered_lines
+
+    def proven(surface):
+        return types.SimpleNamespace(name="c", route="derive",
+                                     verdict="proven",
+                                     meta={"mathema.surface": surface},
+                                     note="")
+    statements = {2, 3}
+    # nothing counts before verify has recorded it, wherever it lives
+    for surface in ("mathema", "builtin", "compendium", "declared",
+                    "docstring", "decorator", "types"):
+        record = types.SimpleNamespace(probes=[proven(surface)])
+        assert _derive_covered_lines(record, statements) == set(), surface
+    # once recorded, an included claim counts; a suggestion, compendium
+    # row or battery row still does not
+    for surface in ("mathema", "builtin", "compendium"):
+        record = types.SimpleNamespace(probes=[proven(surface)])
+        assert _derive_covered_lines(record, statements,
+                                     recorded={"c"}) == set(), surface
+    for surface in ("docstring", "decorator", "types", "declared"):
+        record = types.SimpleNamespace(probes=[proven(surface)])
+        assert _derive_covered_lines(record, statements,
+                                     recorded={"c"}) == statements, surface
+
+
+def _proven_row(surface, route="derive", name="c"):
+    import types
+    return types.SimpleNamespace(name=name, route=route, verdict="proven",
+                                 meta={"mathema.surface": surface}, note="")
+
+
+def test_a_claims_file_claim_counts_only_when_recorded_by_verify():
+    import types
+
+    from mathema.impl_coverage import _derive_covered_lines
+    record = types.SimpleNamespace(probes=[_proven_row("declared")])
+    assert _derive_covered_lines(record, {2}) == set()
+    assert _derive_covered_lines(record, {2}, recorded={"c"}) == {2}
+
+
+def test_a_suggestion_accepted_as_evidence_counts_as_included():
+    import types
+
+    from mathema.impl_coverage import _derive_covered_lines
+    record = types.SimpleNamespace(probes=[_proven_row("mathema")])
+    assert _derive_covered_lines(record, {2}) == set()
+    assert _derive_covered_lines(record, {2}, recorded={"c"},
+                                 accepted={"c"}) == {2}
+
+
+def test_an_examine_proof_of_an_included_claim_counts_as_derive_does():
+    import types
+
+    from mathema.impl_coverage import _derive_covered_lines
+    record = types.SimpleNamespace(probes=[_proven_row("docstring", "examine")])
+    assert _derive_covered_lines(record, {2, 3}, recorded={"c"}) == {2, 3}
+
+
+def test_an_included_examine_claim_covers_the_body_end_to_end(tmp_path):
+    mod = _load(tmp_path, '''
+        def fee(x: float) -> float:
+            """A flat fee.
+
+            Claims:
+                is_state_safe: is_state_safe(f)
+            """
+            return 2.0
+    ''', name="examined")
+    import mathema
+    mathema.write_spec(mod.fee, root=str(tmp_path))
+    fc = function_coverage(mod.fee, root=str(tmp_path), coverage_data={})
+    assert "derive" in fc.by_source
+
+
+def test_a_falsified_included_claim_credits_nothing():
+    import types
+
+    from mathema.impl_coverage import _derive_covered_lines
+    row = types.SimpleNamespace(name="c", route="derive", verdict="falsified",
+                                meta={"mathema.surface": "docstring"}, note="")
+    assert _derive_covered_lines(types.SimpleNamespace(probes=[row]), {2}) == set()

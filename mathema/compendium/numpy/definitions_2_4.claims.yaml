@@ -1,5 +1,5 @@
 # Definition rows for numpy functions that mathema can adjudicate from
-# numpy 2.4 on: before it, `numpy.dot` states no signature and has no
+# numpy 2.4 on: before it, `numpy.dot` and `numpy.inner` state no signature and has no
 # source, so a row about it cannot be checked by execution there. What
 # the function computes is stated as in definitions.claims.yaml, over
 # inputs with nothing missing.
@@ -9,5 +9,14 @@ versions: ">=2.4,<3"
 numpy.dot:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, b in R^n \\ {∅}, f(a, b) ~= dot(a, b)"
+      statement: "for a in R^n, b in R^n, f(a, b) ~= dot(a, b)"
+      note: "Stated for two vectors of one length: their inner product."
+    - name: of_matrices
+      statement: "for a in R^(m,k), b in R^(k,n), f(a, b) ~= a @ b"
+      note: "Two matrices: the matrix product."
+
+numpy.inner:
+  claims:
+    - name: definition
+      statement: "for a in R^n, b in R^n, f(a, b) ~= dot(a, b)"
       note: "Stated for two vectors of one length: their inner product."

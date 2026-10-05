@@ -34,8 +34,7 @@ def test_false_on_surface_claim_falsifies_with_an_on_surface_witness():
     assert p.counterexample
     # the witness coordinates must actually satisfy x + y == 2 (the
     # printed coords are :.6g-rounded, so allow display precision)
-    nums = [float(t) for t in
-            p.counterexample.split(":")[0].strip("() ").split(",")]
+    nums = [float(t.split("=")[1]) for t in p.counterexample.split(":")[0].split(",")]
     assert abs(sum(nums) - 2.0) < 1e-4, p.counterexample
 
 

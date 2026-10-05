@@ -111,6 +111,8 @@ def _holds(p):
 @pytest.mark.parametrize("fn", _VECTOR_FUNCTIONS)
 @pytest.mark.parametrize("true, false", _VECTOR_CLAIMS)
 def test_one_claim_text_on_every_vector_runtime_type(fn, true, false):
+    # the claim's own side stays exact past the float limit (norm(...)**2
+    # is the exact sum of squares, 61bfd67), so a corner draw decides
     p = _one(fn, true)
     assert _holds(p), (fn.__name__, true, p.verdict, p.note,
                        p.counterexample)

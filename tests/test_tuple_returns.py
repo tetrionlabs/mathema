@@ -68,10 +68,13 @@ def test_comparing_a_tuple_valued_claim_against_a_scalar_is_unliftable():
     assert "tuple-valued" in results[0].note
 
 
-def test_out_of_range_tuple_index_is_unliftable_not_a_crash():
+def test_an_out_of_range_tuple_index_falsifies_the_claim_not_a_crash():
+    # the claim reads an element the tuple does not have, so it has no
+    # value at any point of its domain
     results = check_conjectures(
         to_cartesian, [claim("f(r, theta)[2] == r", route="derive")])
-    assert results[0].verdict == "unknown"
+    assert results[0].verdict == "falsified"
+    assert "IndexError" in (results[0].counterexample or "")
 
 
 def test_tuple_return_combines_with_domain_conditioned_branch_pruning():

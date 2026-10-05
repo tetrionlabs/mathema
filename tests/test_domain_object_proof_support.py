@@ -30,7 +30,7 @@ def test_bound_context_for_a_single_interval_piece_is_a_plain_and():
     x = sympy.Symbol("x", real=True)
     dom = _dom("for x in [0, 1] \\subset Z, True")
     ctx = bound_context(x, dom)
-    assert ctx == sympy.And(sympy.Q.ge(x, 0.0), sympy.Q.le(x, 1.0))
+    assert ctx == sympy.And(sympy.Q.ge(x, 0), sympy.Q.le(x, 1))
 
 
 def test_bound_context_for_a_union_is_an_or_of_each_piece():
@@ -52,11 +52,12 @@ def test_bound_context_carries_a_q_ne_fact_for_each_excluded_value():
     assert sympy.Q.ne(x, 0) in (ctx.args if isinstance(ctx, sympy.And) else [ctx])
 
 
-def test_bound_context_keeps_a_float_excluded_value_a_float():
+def test_bound_context_reads_a_float_excluded_value_as_written():
     x = sympy.Symbol("x", real=True)
     dom = _dom("for x in [-1, 1] \\ {0.5}, True")
     ctx = bound_context(x, dom)
-    assert sympy.Q.ne(x, 0.5) in (ctx.args if isinstance(ctx, sympy.And) else [ctx])
+    assert sympy.Q.ne(x, sympy.Rational(1, 2)) in (
+        ctx.args if isinstance(ctx, sympy.And) else [ctx])
 
 
 def test_bound_context_never_states_a_q_ne_fact_for_missing_itself():
@@ -91,21 +92,22 @@ def test_union_domain_gets_no_symbol_level_sign_assumption():
 
 def test_proof_sketch_domain_rendering_states_missing_policy_explicitly():
     lenient = _dom("for x in [0, 100], True")
-    # stating a type (⊂ Z) never excludes missing by default, only an
-    # explicit exclusion clause does, regardless of type.
-    typed_but_included = _dom("for x in [0, 100] \\subset Z, True")
+    # a stated type admits the missing values it lists and no other;
+    # what it excludes is never rendered
+    typed_but_included = _dom("for x in [0, 100] \\subset Z ∪ {∅}, True")
     strict = _dom("for x in [0, 100] \\subset Z \\ {missing}, True")
-    assert render_domain(strict, ascii_mode=False).endswith("\\ {∅}")
-    assert render_domain(typed_but_included, ascii_mode=False).endswith("∪ {∅}")
+    assert render_domain(strict, ascii_mode=False) == "[0, 100] ⊂ ℤ"
+    assert render_domain(typed_but_included, ascii_mode=False).endswith("⊂ ℤ ∪ {∅}")
+    assert render_domain(lenient, ascii_mode=False).endswith("⊂ ℝ ∪ {absent, ∅}")
     assert lenient != strict
 
 
-def test_quantifier_clause_states_missing_included_for_a_bare_named_type():
+def test_quantifier_clause_is_over_the_named_set():
     # a hand-built domain dict may pass "Z"/"N" directly (not through a
-    # Domain object); this bare-string shape must state the same
-    # missing-included-by-default policy the Domain-object path does.
-    assert _quantifier_clause({"x"}, ["x"], {"x": "Z"}, set()) == "∀ x ∈ ℤ ∪ {∅}"
-    assert _quantifier_clause({"x"}, ["x"], {"x": "N"}, set()) == "∀ x ∈ ℕ ∪ {∅}"
+    # Domain object); a proof's quantifier is over the numbers, the
+    # missing values any domain admits being the computation's
+    assert _quantifier_clause({"x"}, ["x"], {"x": "Z"}, set()) == "∀ x ∈ ℤ"
+    assert _quantifier_clause({"x"}, ["x"], {"x": "N"}, set()) == "∀ x ∈ ℕ"
 
 
 # --- end-to-end: the derive route accepts an excluded/union domain

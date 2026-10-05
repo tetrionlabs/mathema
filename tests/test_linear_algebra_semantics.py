@@ -104,10 +104,15 @@ def test_vector_operators_read_as_numpy(law, true):
 @pytest.mark.parametrize("law, true", [
     ("norm(c*x) == abs(c)*norm(x)", True),
     ("norm(c*x) == c*norm(x)", False),
-    ("norm(x + c) <= norm(x) + abs(c)*norm(x + 1 - x)", True),
+    ("norm(x + c) <= norm(x) + abs(c)*norm(x + 1 - x)", "corner"),
 ])
 def test_a_number_scales_and_shifts_every_element(law, true):
     p = _one(scaled, law)
+    if true == "corner":
+        # true over the reals; c at the float limit overflows the
+        # computation (rulings of 2026-10-01 and 2026-10-05)
+        assert _falls_at_a_magnitude_corner(p), (law, p.verdict, p.counterexample)
+        return
     assert _holds(p) is true, (law, p.verdict, p.note, p.counterexample)
 
 
@@ -178,3 +183,17 @@ def test_matrix_closeness_is_elementwise_with_the_scalar_tolerance():
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
     p = _one(one, "assuming det(A) != 0, A @ inv(A) ~= 2 * I(n)", "probe")
     assert p.verdict == "falsified", (p.verdict, p.note)
+
+
+def _falls_at_a_magnitude_corner(p):
+    """The float computation gives no value, or loses the value, at a
+    draw with an entry of magnitude 1e150 or more: a carrier failure,
+    which falsifies the computation line (rulings of 2026-10-01 and
+    2026-10-05: corners on, a carrier failure falsifies the computation
+    line)."""
+    import re
+    if p.verdict != "falsified" or not p.counterexample:
+        return False
+    numbers = [float(v) for v in re.findall(r"-?\d+(?:\.\d+)?e[+-]?\d+",
+                                            p.counterexample)]
+    return any(abs(v) >= 1e150 for v in numbers)

@@ -198,6 +198,11 @@ Everything a provider may import lives in
 | `families` | `SafetyFamily`, `OutputPredicateFamily`, `ProofResult`, `probe_trials`, `call_with_target`, `synth_other_params`, `format_point`, `pinned_float_env` |
 | `sampling` | `sample_bound`, `shrink` |
 
+`evidence_rank` ranks a route or an intent class, strongest lowest. A
+compendium definition row's route, `axiom`, ranks with trusted testimony,
+level with `probe`: a definition is trusted, not adjudicated, so it never
+ranks above a plain `holds`.
+
 Import from `mathema.interfaces.extension`, not from the module a name
 happens to live in today. The module is free to move; the name on this
 surface is not.
@@ -285,8 +290,8 @@ declared as a `let` binding. With it uninstalled, mathema renders its
 own names:
 
 ```text
-default        : ∀ mass ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, velocity ∈ [0.0, 5.0] ⊂ ℝ ∪ {∅}, f(mass, velocity) ≥ 0
-with provider  : let m = mass, let v = velocity, ∀ m ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, v ∈ [0.0, 5.0] ⊂ ℝ ∪ {∅}, f(m, v) ≥ 0
+default        : ∀ mass ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, velocity ∈ [0.0, 5.0] ⊂ ℝ ∪ {absent, ∅}, f(mass, velocity) ≥ 0
+with provider  : let m = mass, let v = velocity, ∀ m ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, v ∈ [0.0, 5.0] ⊂ ℝ ∪ {absent, ∅}, f(m, v) ≥ 0
 ```
 
 ## Reference

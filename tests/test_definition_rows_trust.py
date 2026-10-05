@@ -7,7 +7,10 @@ A definition row bundled with mathema feeds the derive route at once
 from a project's own claims file, or from a third party, feeds the
 derive route only once `mathema verify` has recorded it `holds` or
 `proven` here, or it was accepted `--as trusted`; until then it only
-guides sampling, and a claim resting on it stays `holds`. A row verify
+guides sampling, and a claim resting on it stays `holds`. A row only
+verified by execution is evidence, so a proof through it is `holds`;
+a bundled or accepted row is an axiom, and the proof stays `proven`. A
+row verify
 recorded `falsified` is never used, bundled or not. A record whose
 proof could read through different rows now (a row verified,
 falsified or added since) is stale, and verify re-adjudicates it.
@@ -48,6 +51,17 @@ def sharpe(returns: pd.Series):
     return returns.mean() / returns.std()
 
 
+_MULTIPLY_ROW = """\
+compendium: pandas
+versions: ">=2"
+
+pandas.Series.multiply:
+  claims:
+    - name: definition
+      statement: "for a in R^n \\\\ {∅}, other in [-1e6, 1e6], f(a, other) ~= a * other"
+"""
+
+
 @pytest.fixture()
 def project(tmp_path):
     (tmp_path / "claims").mkdir()
@@ -84,9 +98,13 @@ def test_a_project_row_feeds_derive_only_after_verify_records_it(project):
     assert "feeds sampling only" in p.note, p.note
     _verify(project, rows)
     p = _check(project, sem_ratio)
-    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+    # verified by execution and not accepted: evidence, so the proof
+    # through it holds
+    assert (p.verdict, p.route) == ("holds", "derive"), (p.verdict, p.note)
     used = {u["key"]: u for u in p.meta["mathema.definitions"]}
     assert used["pandas.Series.sem"]["status"] == "holds"
+    assert used["pandas.Series.sem"]["standing"] == "evidence"
+    assert used["pandas.Series.mean"]["standing"] == "axiom"
     assert used["pandas.Series.sem"]["source"] == "claims/pandas.claims.yaml"
     assert used["pandas.Series.mean"]["status"] == "bundled"
 
@@ -102,7 +120,7 @@ def test_a_wrong_definition_row_is_falsified_by_verify_and_never_used(
             - name: definition
               statement: "for a in R^n \\\\ {∅}, f(a) ~= std(a, ddof=0)"
         """))
-    # the project's row shadows the bundled one: unverified, it is not used
+    # the project's row replaces the bundled definition: unverified, it is not used
     p = _check(project, sharpe)
     assert p.verdict != "proven", (p.verdict, p.sketch)
     _verify(project, rows)
@@ -144,7 +162,9 @@ def test_a_trusted_acceptance_lets_a_project_row_feed_derive(project):
     (verified / "pandas.Series.sem.yaml").write_text(yaml.safe_dump({
         "pandas.Series.sem": {"claims": [
             {"name": "definition", "statement": statement,
-             "verdict": "holds", "accepted": {"as": "trusted"}}]}}))
+             "verdict": "holds", "accepted": {
+                 "as": "trusted", "statement": statement,
+                 "versions": ">=2"}}]}}))
     p = _check(project, sem_ratio)
     assert p.verdict == "proven", (p.verdict, p.note)
     used = {u["key"]: u for u in p.meta["mathema.definitions"]}
@@ -160,31 +180,41 @@ def test_a_record_is_stale_when_its_definition_rows_change(project,
         import pandas as pd
 
 
-        def sem_ratio(returns: pd.Series):
-            """Mean return over its standard error."""
-            return returns.mean() / returns.sem()
+        def doubled_sharpe(returns: pd.Series):
+            """Twice the mean return over its standard deviation."""
+            return (returns.mean() + returns.multiply(1.0).mean()) \
+                / returns.std()
         '''))
     (project / "claims" / "quant.claims.yaml").write_text(yaml.safe_dump({
-        "qpkg.quant.sem_ratio": {"claims": [
-            {"name": "leverage_invariant", "statement": _LEVERAGE}]}}))
+        "qpkg.quant.doubled_sharpe": {"claims": [
+            {"name": "leverage_invariant", "statement": _LEVERAGE},
+            # pandas skips a missing return in both the mean and the std
+            {"name": "missing[returns]", "statement": "missing(f, returns) drops"},
+            # no returns give no ratio: the empty input's stated policy
+            {"name": "no_ratio_for_no_data",
+             "statement": "f([]) in {missing}"}]}}))
     monkeypatch.syspath_prepend(str(project))
     sys.modules.pop("qpkg", None)
     sys.modules.pop("qpkg.quant", None)
 
-    def verdict():
+    def row():
         record = yaml.safe_load((project / ".mathema" / "verified"
-                                 / "qpkg.quant.sem_ratio.yaml").read_text())
+                                 / "qpkg.quant.doubled_sharpe.yaml").read_text())
         return {c["name"]: c for c in
-                record["qpkg.quant.sem_ratio"]["claims"]}[
-            "leverage_invariant"]["verdict"]
+                record["qpkg.quant.doubled_sharpe"]["claims"]}[
+            "leverage_invariant"]
+
+    def verdict():
+        return row()["verdict"]
     _verify(project)
     assert verdict() == "holds"
-    (project / "claims" / "pandas.claims.yaml").write_text(_SEM_ROW)
+    (project / "claims" / "pandas.claims.yaml").write_text(_MULTIPLY_ROW)
     result = _verify(project)
     assert not result.problems, result.lines
-    assert "ok   qpkg.quant.sem_ratio: definition rows changed" in \
+    assert "ok   qpkg.quant.doubled_sharpe: definition rows changed" in \
         "\n".join(result.lines), result.lines
-    assert verdict() == "proven"
+    # derived through the newly verified row, which is evidence
+    assert (verdict(), row()["route"]) == ("holds", "derive"), row()
     result = _verify(project)
-    assert "ok   qpkg.quant.sem_ratio: fresh" in "\n".join(result.lines), \
+    assert "ok   qpkg.quant.doubled_sharpe: fresh" in "\n".join(result.lines), \
         result.lines

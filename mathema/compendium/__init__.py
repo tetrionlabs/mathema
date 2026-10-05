@@ -17,9 +17,10 @@ range its claims apply to with two file-level fields:
 
 mathema bundles such files for `math` and `numpy` beside this module;
 a project states its own wherever its ordinary claims files live
-(`claims/numpy.claims.yaml`), and a project file shadows a bundled one
-per function key. A file applies only when the library is importable
-and its installed version is inside `versions` (`"*"`, `">=X"` or
+(`claims/numpy.claims.yaml`), and a project file's row replaces its
+bundled namesake, the other bundled rows staying. A file applies only
+when the library is importable and its installed version is inside
+`versions` (`"*"`, `">=X"` or
 `">=X,<Y"`; the standard library counts as `"*"`); otherwise it
 contributes nothing, rather than stale facts.
 
@@ -50,6 +51,21 @@ from .._signatures import callable_signature
 
 def _version_tuple(text: str) -> tuple:
     return tuple(int(p) for p in text.split(".")[:3] if p.isdigit())
+
+
+#: the lowest version of each library mathema supports: a bundled
+#: definition row is an axiom from here up, and evidence below it down
+#: to its own file's range
+SUPPORTED_FLOORS = {"numpy": "2.0", "pandas": "2.2", "polars": "1.0"}
+
+
+def below_floor(library: str, installed: "str | None") -> bool:
+    """Whether `installed` is below the supported floor of `library`
+    (`SUPPORTED_FLOORS`); False for a library with no floor."""
+    floor = SUPPORTED_FLOORS.get(library)
+    if floor is None or not installed or installed == "*":
+        return False
+    return _version_tuple(installed) < _version_tuple(floor)
 
 
 def _version_in_range(installed: str, spec: str) -> bool:
@@ -89,6 +105,27 @@ def valid_version_range(spec: str) -> bool:
     return all(re.fullmatch(rf"(?:>=|<)\s*{version}", p) for p in parts)
 
 
+def empty_version_range(spec: str) -> bool:
+    """Intent:
+        Whether a range `valid_version_range` reads admits no version:
+        an upper bound at or below its lower bound (`">=6,<5"`), or an
+        upper bound of 0 (`"<0"`).
+    """
+    lower: tuple = (0,)
+    upper = None
+    for part in (p.strip() for p in spec.split(",")):
+        if part.startswith(">="):
+            lower = _version_tuple(part[2:].strip())
+        elif part.startswith("<"):
+            upper = _version_tuple(part[1:].strip())
+    if upper is None:
+        return False
+
+    def padded(v: tuple) -> tuple:
+        return tuple(list(v) + [0] * (3 - len(v)))
+    return padded(upper) <= padded(lower)
+
+
 def _installed_version(package: str,
                        aliases: "tuple | list" = ()) -> "str | None":
     """Intent:
@@ -102,6 +139,20 @@ def _installed_version(package: str,
     stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
     if package in ("math",) or package in stdlib:   # stdlib: always present
         return "*"
+    asked = (package, tuple(aliases))
+    if asked not in _VERSIONS:
+        _VERSIONS[asked] = _distribution_version(package, aliases)
+    return _VERSIONS[asked]
+
+
+#: installed versions already looked up in this process, by the
+#: `(package, aliases)` asked about
+_VERSIONS: dict = {}
+
+
+def _distribution_version(package: str, aliases) -> "str | None":
+    """The installed version `_installed_version` reports for a library
+    outside the standard library, looked up afresh."""
     from importlib import metadata
     names = [package, *[a for a in aliases if a != package]]
     for name in names:
@@ -109,9 +160,8 @@ def _installed_version(package: str,
             return metadata.version(name)
         except Exception:
             continue
-    try:
-        provided = metadata.packages_distributions()
-    except Exception:
+    provided = _packages_distributions()
+    if provided is None:
         return None
     for name in names:
         for dist in provided.get(name) or []:
@@ -120,6 +170,23 @@ def _installed_version(package: str,
             except Exception:
                 continue
     return None
+
+
+#: `importlib.metadata.packages_distributions()`, read once per process
+#: (it walks every installed distribution's file list)
+_PROVIDED: dict = {}
+
+
+def _packages_distributions() -> "dict | None":
+    """The import-name to distributions map of the installed packages,
+    read once per process; None when it cannot be read."""
+    if "map" not in _PROVIDED:
+        from importlib import metadata
+        try:
+            _PROVIDED["map"] = metadata.packages_distributions()
+        except Exception:
+            _PROVIDED["map"] = None
+    return _PROVIDED["map"]
 
 
 def applicable_tag(library: str, versions: str = "*",
@@ -191,24 +258,58 @@ def mark_row_versions(data: dict, library: str,
                            OUTSIDE_VERSIONS: str(spec)}
 
 
+#: each library row's statement read by the claim grammar, by
+#: `(statement, name)`: the parsed claim, or the exception it raised
+_ROW_CLAIMS: dict = {}
+
+
+def _row_claim(row: dict):
+    """Intent:
+        A library row read by the claim grammar, once per process for
+        each statement and name; the claim is shared, so a caller only
+        reads it.
+
+    Raises:
+        Exception: whatever reading the statement raised.
+    """
+    from .. import conjecture
+    text = str(row.get("statement") or row.get("law") or "")
+    name = row.get("name") or None
+    key = (text, name)
+    if key not in _ROW_CLAIMS:
+        try:
+            _ROW_CLAIMS[key] = (conjecture.claim(text, name=name), None)
+        except Exception as e:
+            _ROW_CLAIMS[key] = (None, e)
+    found, error = _ROW_CLAIMS[key]
+    if error is not None:
+        raise error
+    return found
+
+
 def row_pins(row: dict) -> dict:
     """Intent:
         The library parameters a row pins, `{parameter: value}`: each
-        `let p be None/True/False` binding, and each `let p be <number>`
+        keyword every call to f passes as one literal (`f(a, axis=1)`),
+        each `let p be None/True/False` binding, and each `let p be <number>`
         whose name the statement never reads (`let axis be 1, dim(a) >=
-        1`). {} for a row that pins nothing or does not parse.
+        1`); a keyword argument of the same name (`std(a, ddof=1)`) is
+        not a read. {} for a row that pins nothing or does not parse.
     """
     import re
 
-    from ..conjecture import _single_point, claim
+    from ..conjecture import _single_point
     try:
-        cj = claim(str(row.get("statement") or row.get("law") or ""),
-                   name=row.get("name"))
+        cj = _row_claim(row)
     except Exception:
         return {}
-    pins = dict(getattr(cj, "param_pins", None) or {})
+    from ..conjecture import _pins_in_calls
+    # a pin written in the call (`f(a, axis=1)`) is a pin
+    pins = {**_pins_in_calls(cj), **dict(getattr(cj, "param_pins", None) or {})}
     text = " ".join(str(t) for t in (cj.lhs, cj.rhs, cj.assuming) if t)
-    named = set(re.findall(r"\b[A-Za-z_]\w*\b", text))
+    # a name followed by a single `=` is a keyword argument of a grammar
+    # word (`std(a, ddof=1)`), not a read of that name
+    named = set(re.findall(r"\b([A-Za-z_]\w*)\b(?!\s*=(?!=))", text))
     for name in sorted(cj.free_vars or ()):
         point = _single_point((cj.domain or {}).get(name))
         if point is not None and name not in named:
@@ -340,7 +441,9 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         "bundled"}`, where `entry` is the claims-file entry with its rows
         stamped as compendium testimony, `compendium` the library,
         `versions` the range the file declares, `source` the file it
-        came from, and `bundled` whether that file ships with mathema.
+        came from (the last file stating the key), `bundled` whether
+        every file stating it ships with mathema, and `replaced` the
+        bundled rows a project file replaces, `[{"source", "rows"}]`.
         `root=None` reads the bundled files only.
 
     Notes:
@@ -349,8 +452,10 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         files declaring `compendium:` count, and only when the library
         is importable at a version inside the file's range. A project
         file naming the project's own package (`names_own_package`)
-        does not count. A later file shadows an earlier one per key,
-        whole entry.
+        does not count. Files stating one key merge by row name
+        (`merge_rows`): a later file's row replaces its earlier
+        namesake, every other row stays. Each row names its file
+        (`stamp_row_sources`).
 
     Raises:
         spec.ClaimsFileError: a claims file that does not read.
@@ -378,17 +483,90 @@ def load_library_claims(root: "str | None" = ".") -> dict:
             continue
         stamp_library_rows(data, tag)
         mark_row_versions(data, library, aliases)
+        stamp_row_sources(data, where, versions)
         for key, entry in data.items():
-            if isinstance(entry, dict):
+            if isinstance(entry, dict) and not (entry.get("defines")
+                                                and not entry.get("claims")):
+                # a key that only defines its runtime's missing values
+                # (`defines:`) has no function claims to register
+                prior = out.get(key)
+                replaced = list((prior or {}).get("replaced") or [])
+                if prior is not None:
+                    entry, gone = merge_rows(prior["entry"], entry)
+                    for row in gone:
+                        if row_is_bundled(row):
+                            replaced.append({
+                                "source": row["meta"][ROW_SOURCE],
+                                "rows": [row.get("name")]})
                 out[key] = {"entry": entry, "compendium": library,
                             "versions": versions, "source": where,
-                            "bundled": path in shipped}
+                            "bundled": path in shipped and (
+                                prior is None or prior.get("bundled")),
+                            "replaced": replaced}
     return out
+
+
+#: the meta keys naming the claims file a library row comes from and
+#: that file's version range
+ROW_SOURCE = "mathema.compendium_source"
+ROW_VERSIONS = "mathema.compendium_versions"
+
+
+def stamp_row_sources(data: dict, where: str, versions: str) -> None:
+    """Intent:
+        Mark every row of a compendium file with the file it comes from
+        (`ROW_SOURCE`, `mathema/compendium/...` for a bundled file) and
+        the file's version range (`ROW_VERSIONS`), unless the row already
+        names them.
+    """
+    for entry in data.values():
+        for row in (entry.get("claims") or []
+                    if isinstance(entry, dict) else []):
+            if isinstance(row, dict):
+                meta = dict(row.get("meta") or {})
+                meta.setdefault(ROW_SOURCE, where)
+                meta.setdefault(ROW_VERSIONS, str(versions))
+                row["meta"] = meta
+
+
+def row_is_bundled(row: dict) -> bool:
+    """Whether a library row comes from a claims file mathema bundles
+    (its `ROW_SOURCE`)."""
+    source = str((row.get("meta") or {}).get(ROW_SOURCE) or "")
+    return source.startswith(os.path.join("mathema", "compendium") + os.sep)
+
+
+def merge_rows(earlier: dict, later: dict) -> "tuple[dict, list]":
+    """Intent:
+        Two entries for one library key merged by row name: each row of
+        `later` replaces its namesake in `earlier` in place, the others
+        join at the end, and every other row of `earlier` stays. The
+        entry's other fields are `earlier`'s updated by `later`'s.
+        Returns the merged entry and the replaced rows of `earlier`.
+    """
+    by_name = {r.get("name"): r for r in later.get("claims") or []
+               if isinstance(r, dict)}
+    rows: list = []
+    replaced: list = []
+    for row in earlier.get("claims") or []:
+        name = row.get("name") if isinstance(row, dict) else None
+        if name in by_name:
+            rows.append(by_name.pop(name))
+            replaced.append(row)
+        else:
+            rows.append(row)
+    rows += [r for r in later.get("claims") or []
+             if isinstance(r, dict) and r.get("name") in by_name]
+    rows += [r for r in later.get("claims") or [] if not isinstance(r, dict)
+             or not r.get("name")]
+    merged = {**earlier, **{k: v for k, v in later.items() if k != "claims"}}
+    merged["claims"] = rows
+    return merged, replaced
 
 
 def compendium_functions(root: str = ".") -> dict:
     """Function key -> its applicable library claims entry, project
-    files shadowing bundled ones."""
+    rows replacing their bundled namesakes."""
     return {key: info["entry"]
             for key, info in load_library_claims(root).items()}
 
@@ -519,11 +697,11 @@ def library_keys_called(fn, facts, root: str = ".",
 def libraries_called(fn, facts, root: str = ".") -> set:
     """The set of libraries whose COMPENDIUM-COVERED functions `fn`
     calls, resolving import aliases through fn's own globals so
-    `np.sqrt` counts as `numpy.sqrt`. This is what is_compendium_safe is
+    `np.sqrt` counts as `numpy.sqrt`. This is what is_library_safe is
     suggested and adjudicated for: a function that never touches a
     covered library function has nothing to check."""
     stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
-    # stdlib (math) is is_builtin_safe's domain; is_compendium_safe
+    # stdlib (math) is is_number_set_safe's domain; is_library_safe
     # covers THIRD-PARTY libraries (numpy, ...) only
     return {key.split(".")[0] for key in library_keys_called(fn, facts, root)
             if key.split(".")[0] not in stdlib}
@@ -651,13 +829,21 @@ def external_premises(root: str = ".", verified: "dict | None" = None,
 
 def _compendium_hint(tag: str, name: str, key: str,
                      verdict: "str | None" = None) -> str:
-    standing = (f"mathema verify recorded it {verdict} against the "
-                f"installed library" if verdict and verdict != "declared"
-                else "a compendium verdict is never trusted silently")
-    return (f"{tag} declares {name!r} for {key}; {standing}: accept it "
-            f"(mathema accept {key} {name} --as trusted) or let "
-            f"mathema verify adjudicate it against the installed "
-            f"library")
+    from .._missing_words import options
+    recorded = bool(verdict) and verdict != "declared"
+    if recorded:
+        # verify already tried: the way forward is a row it can decide
+        return (f"{tag} declares {name!r} for {key}; mathema verify "
+                f"recorded it {verdict} against the installed library:\n"
+                + options([f"to take it on its word, run: mathema accept {key} "
+                           f"{name} --as trusted",
+                           f"to decide it, restate the row, then run: mathema "
+                           f"check {key} --claim \"...\""]))
+    return (f"{tag} declares {name!r} for {key}; a compendium verdict is "
+            f"never trusted silently:\n"
+            + options([f"to accept it, run: mathema accept {key} {name} --as trusted",
+                       "let mathema verify adjudicate it against the installed "
+                       "library"]))
 
 
 def _region_texts(entry: dict, families) -> list:
@@ -668,15 +854,14 @@ def _region_texts(entry: dict, families) -> list:
         1"]`), parsed by the claim grammar. A bare row
         (`is_defined(f)`) states no region and contributes nothing.
     """
-    from ..conjecture import InvalidConjecture, claim, region_row_kind
+    from ..conjecture import InvalidConjecture, region_row_kind
     out: list = []
     for row in entry.get("claims") or []:
         kind = region_row_kind(row.get("name", ""))
         if kind is None or kind not in families or not row_is_fact(row):
             continue
         try:
-            cj = claim(str(row.get("statement") or row.get("law") or ""),
-                       name=row.get("name"))
+            cj = _row_claim(row)
         except (InvalidConjecture, ValueError):
             continue
         if cj.relation == kind:
@@ -704,7 +889,7 @@ _INSTALLED: dict = {"root": None, "rows": []}
 #: computation is safe in that respect and `exception` is None; for a
 #: `raises` row whose type is a machine failure, `family` is "raises",
 #: `region` is where the call raises and `exception` names the type.
-#: Read by the hazard generator, `is_compendium_safe`'s diagnosis, the
+#: Read by the hazard generator, `is_library_safe`'s diagnosis, the
 #: `is_defined` probe's reach on a library key and the float companion's
 #: sketch; never by the derive route.
 _COMPUTATION: dict = {}
@@ -828,13 +1013,12 @@ def _row_region(key: str, row: dict) -> "_RowRegion | None":
     import sympy
 
     from ..conjecture import (REGION_ROW_STRATA, _parse_assuming_relation,
-                              claim, region_row_kind)
+                              region_row_kind)
     from ..domain import bound_to_sympy_set
     from ..symbolic._partiality import NO_VALUE
     name = str(row.get("name") or "")
-    text = str(row.get("statement") or row.get("law") or "")
     try:
-        cj = claim(text, name=name or None)
+        cj = _row_claim(row)
     except Exception as e:
         raise _Unbuildable(f"the statement does not parse ({e})") from None
     kind = region_row_kind(name)
@@ -1000,8 +1184,12 @@ def register_library_claims(root: "str | None" = ".") -> list:
         return list(_INSTALLED.get("names", []))
     uninstall()
     library_claims = load_library_claims(root)
+    apply_definitions(root)
     rows: list = []
     names: list = []
+    unbuilt: list = []
+    defined: set = set()
+    from ..conjecture import region_row_kind
     for key, info in sorted(library_claims.items()):
         for row in info["entry"].get("claims") or []:
             if not row_is_fact(row):
@@ -1011,14 +1199,20 @@ def register_library_claims(root: "str | None" = ".") -> list:
             except _Unbuildable as e:
                 reason = str(e)
                 label = (key, str(row.get("name")), reason)
+                if reason != "shape" and not info.get("bundled"):
+                    unbuilt.append((key, str(row.get("name")),
+                                    info["source"], reason))
                 if (reason != "shape" and not info.get("bundled")
-                        and label not in _REPORTED):
+                        and label not in _REPORTED and not _QUIET["on"]):
                     _REPORTED.add(label)
                     warnings.warn(
                         f"mathema: compendium row {row.get('name')!r} of "
                         f"{key} ({info['source']}) registers no region: "
                         f"{reason}", stacklevel=2)
                 continue
+            if region_row_kind(str(row.get("name") or "")) == "is_defined" \
+                    and (built is not None or _states_totality(row)):
+                defined.add(key)
             if built is None:
                 continue
             if built.stratum == "computation":
@@ -1038,12 +1232,46 @@ def register_library_claims(root: "str | None" = ".") -> list:
             register_raises_when(key, build, built.label)
             rows.append((key, build))
             names.append((key, str(row.get("name"))))
-    _INSTALLED.update(root=marker, rows=rows, names=names,
-                      keys=frozenset(library_claims), objects=None)
+    _INSTALLED.update(root=marker, rows=rows, names=names, unbuilt=unbuilt,
+                      keys=frozenset(library_claims), objects=None,
+                      defined=frozenset(defined))
     from ..hazards import register_hazard_generator
     register_hazard_generator("compendium",
                               _boundary_generator(library_claims))
     return names
+
+
+def _states_totality(row: dict) -> bool:
+    """Whether a library row is the bare `is_defined(f)` with no domain:
+    the function has a value at every argument."""
+    try:
+        cj = _row_claim(row)
+    except Exception:
+        return False
+    return cj.relation == "is_defined" and not cj.domain
+
+
+def defined_keys() -> frozenset:
+    """The registered library claim keys whose files state an
+    `is_defined` row (bare or a region): where each is defined is a
+    stated fact."""
+    return _INSTALLED.get("defined") or frozenset()
+
+
+#: whether `register_library_claims` keeps its reports of project rows
+#: that register no region to itself (`unregistered_project_rows`)
+#: rather than warning: set while `mathema verify` installs, which
+#: prints them as note lines
+_QUIET: dict = {"on": False}
+
+
+def unregistered_project_rows() -> list:
+    """Intent:
+        The project compendium rows the installed library claims could
+        not register, `(key, row name, source, reason)` each, a row
+        reading an array's shape or a matrix left out.
+    """
+    return list(_INSTALLED.get("unbuilt") or [])
 
 
 def install(root: str = ".") -> None:
@@ -1057,16 +1285,86 @@ def install(root: str = ".") -> None:
     register_library_claims(root)
 
 
+#: the files that mark a project's root directory
+_ROOT_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", ".mathema", ".git")
+
+
+def uninstalled_project_note(fn) -> "str | None":
+    """Intent:
+        The record note for `check()` on a function whose source file
+        sits in a project (the nearest directory above it with a
+        `pyproject.toml`, `setup.py`, `setup.cfg`, `.mathema` or `.git`)
+        that states compendium files of its own (looked up once per
+        process for each project) which are not installed:
+        "project compendium files under <root> were not read; to use
+        them, call: mathema.compendium.install('<root>')". None when the
+        function has no source file, no project is found, the project
+        states no compendium file, or its files are installed.
+    """
+    import inspect
+    try:
+        path = inspect.getsourcefile(_engine_unwrapped(fn))
+    except (TypeError, OSError):
+        return None
+    if not path:
+        return None
+    parts = os.path.realpath(path).split(os.sep)
+    if "site-packages" in parts or "dist-packages" in parts:
+        return None
+    here = os.path.dirname(os.path.realpath(path))
+    root = None
+    while True:
+        if any(os.path.exists(os.path.join(here, m)) for m in _ROOT_MARKERS):
+            root = here
+            break
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+    if _INSTALLED.get("root") == os.path.abspath(root):
+        return None
+    if root not in _PROJECT_FILES:
+        _PROJECT_FILES[root] = _states_compendium_files(root)
+    if not _PROJECT_FILES[root]:
+        return None
+    return (f"project compendium files under {root} were not read; to use "
+            f"them, call: mathema.compendium.install({root!r})")
+
+
+#: per project root, whether it states compendium files of its own,
+#: looked up once per process
+_PROJECT_FILES: dict = {}
+
+
+def _states_compendium_files(root: str) -> bool:
+    """Whether any claims file under `root` declares `compendium:` for a
+    library other than the project's own package."""
+    from ..spec import claims_file_paths, read_claims_file
+    for claims_path in claims_file_paths(root, exclude=(_bundled_dir(),)):
+        try:
+            data = read_claims_file(claims_path,
+                                    os.path.relpath(claims_path, root)) or {}
+        except Exception:
+            continue
+        library = data.get("compendium")
+        if isinstance(library, str) and not names_own_package(library, root):
+            return True
+    return False
+
+
 def library_key_of(fn) -> "str | None":
     """Intent:
         The library claim key `fn` is (`numpy.mean` for `np.mean`),
         among the keys the registered library claims files state, or
         None for any other callable (a project's own function
-        included).
+        included). The wrappers mathema itself calls a function through
+        (a runtime type realiser, a premise guard) are the function
+        they wrap.
     """
     keys = _INSTALLED.get("keys") or frozenset()
     if not keys:
         return None
+    fn = _engine_unwrapped(fn)
     from ..conjecture import _resolve_func_ref
 
     def resolved() -> dict:
@@ -1100,6 +1398,108 @@ def library_key_of(fn) -> "str | None":
     return None
 
 
+def _engine_unwrapped(fn):
+    """`fn` without the wrappers mathema calls a function through: a
+    runtime type realiser (`runtime_types._Realising`) and a premise
+    guard (`_premises._Guarded`), at any depth. A wrapper anyone else
+    wrote is left in place."""
+    from .._premises import _Guarded
+    from ..runtime_types import _Realising
+    while isinstance(fn, (_Realising, _Guarded)):
+        fn = (fn.__dict__["_fn"] if isinstance(fn, _Realising)
+              else fn.__wrapped__)
+    return fn
+
+
+def _entry_definitions(key: str, entry: dict, source: str) -> list:
+    """Intent:
+        The definition rows a claims-file entry states under `defines:`,
+        each a `runtime_types.Definition`, in order. A row is the text
+        `<word> := {<members>}` or a record of one (`definition:`).
+    """
+    from ..grammar import parse_definition
+    from ..runtime_types import Definition
+    out = []
+    for row in entry.get("defines") or []:
+        text = row.get("definition") if isinstance(row, dict) else row
+        word, members, extends = parse_definition(str(text))
+        out.append(Definition(key, word, members, extends, str(text), source))
+    return out
+
+
+def load_definitions(root: "str | None" = ".") -> dict:
+    """Intent:
+        Every definition row the claims files state, by layer:
+        `{"bundled": [...], "compendium": [...], "claims": [...]}`, the
+        bundled compendium files first, then a project's compendium
+        files, then its ordinary claims files. `root=None` reads the
+        bundled files only. A bundled or project compendium file counts
+        only when its library applies, as its claims do.
+
+    Raises:
+        spec.ClaimsFileError: a claims file that does not read, a
+            definition row that does not parse, or a spelling its key's
+            runtime type cannot realise.
+    """
+    from ..spec import claims_file_paths, read_claims_file
+    bundled = _bundled_dir()
+    out: dict = {"bundled": [], "compendium": [], "claims": []}
+    paths = [(p, True) for p in claims_file_paths(bundled)]
+    if root is not None:
+        paths += [(p, False) for p in claims_file_paths(root, exclude=(bundled,))]
+    for path, shipped in paths:
+        where = _display_path(path, root or ".")
+        data = read_claims_file(path, where)
+        if not data:
+            continue
+        rows: list = []
+        for key, entry in data.items():
+            if isinstance(entry, dict) and entry.get("defines"):
+                origin = (f"compendium {data['compendium']}"
+                          + (", bundled" if shipped else f", {where}")
+                          if "compendium" in data else f"claims file {where}")
+                rows.extend(_entry_definitions(key, entry, origin))
+        if not rows:
+            continue
+        if "compendium" in data:
+            library, versions, aliases = pop_library_fields(dict(data))
+            if applicable_tag(library, versions, aliases) is None:
+                continue
+            out["bundled" if shipped else "compendium"].extend(rows)
+        else:
+            out["claims"].extend(rows)
+    return out
+
+
+def apply_definitions(root: "str | None" = ".") -> list:
+    """Register every definition row `load_definitions(root)` finds, layer
+    by layer, and return them in the order they apply."""
+    from ..runtime_types import set_definitions
+    layers = load_definitions(root)
+    for layer, rows in layers.items():
+        set_definitions(layer, rows)
+    return [row for layer in ("bundled", "compendium", "claims")
+            for row in layers[layer]]
+
+
+def definition_records(rows=None) -> list:
+    """Intent:
+        The record of each definition row in force: `{key, definition,
+        verdict, route, source, members}`, the verdict `trusted` and the
+        route `axiom` (a definition is taken at face value, never
+        adjudicated), `members` the spellings the row's word stands for
+        on its key once every layer up to it has applied.
+    """
+    from ..runtime_types import definitions, members
+    out = []
+    for row in rows if rows is not None else definitions():
+        out.append({"key": row.key, "definition": row.text,
+                    "verdict": "trusted", "route": "axiom",
+                    "source": row.source,
+                    "members": list(members(row.key, row.word))})
+    return out
+
+
 def ensure_bundled() -> None:
     """Intent:
         Register the bundled library claims when no library claims are
@@ -1121,11 +1521,41 @@ def uninstall(root: "str | None" = None) -> None:
         return
     for key, build in _INSTALLED["rows"]:
         unregister_lemmas(key, [build])
-    _INSTALLED.update(root=None, rows=[], names=[], keys=frozenset(),
-                      objects=None)
+    _INSTALLED.update(root=None, rows=[], names=[], unbuilt=[], keys=frozenset(),
+                      objects=None, defined=frozenset(), runtime=None)
     _COMPUTATION.clear()
+    from ..runtime_types import set_definitions
+    for layer in ("bundled", "compendium", "claims"):
+        set_definitions(layer, ())
     from ..hazards import _GENERATORS
     _GENERATORS.pop("compendium", None)
+
+
+def declared_runtime_types(key: str) -> dict:
+    """Intent:
+        The `runtime_types:` the installed project's claims files
+        declare for the function `key` (`{param: "pandas.Series"}`), {}
+        when no project is installed or the entry declares none. Read
+        once per installed project.
+    """
+    root = _INSTALLED.get("root")
+    if root is None or root == BUNDLED:
+        return {}
+    cached = _INSTALLED.get("runtime")
+    if cached is None or cached[0] != root:
+        from ..spec import load_declared
+        try:
+            declared = load_declared(root)
+        except Exception:
+            declared = {}
+        entries = {k: (v.get("entry") if isinstance(v, dict) else None)
+                   for k, v in declared.items()}
+        cached = (root, {k: dict(entry.get("runtime_types") or {})
+                         for k, entry in entries.items()
+                         if isinstance(entry, dict)
+                         and entry.get("runtime_types")})
+        _INSTALLED["runtime"] = cached
+    return dict(cached[1].get(key) or {})
 
 
 def computation_region(key: str, family: "str | None" = None) -> list:

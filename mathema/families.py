@@ -142,7 +142,7 @@ def families() -> dict[str, ClaimFamily]:
 GROUPS: dict[str, tuple[str, ...]] = {
     # all applicable hazard checks, enforced, inside the domain
     "defined_within_domain": ("is_missing_safe", "is_pole_safe",
-                              "is_builtin_safe", "is_extremity_safe",
+                              "is_number_set_safe", "is_overflow_safe",
                               "is_representation_safe", "is_empty_safe",
                               "is_defined"),
     # any point outside the declared domain causes a raise
@@ -159,11 +159,11 @@ GROUPS: dict[str, tuple[str, ...]] = {
     # name; repeatability is is_repeatable's, over the stateless
     # cluster)
     "computation_safe": ("is_overflow_safe", "is_numerically_stable",
-                         "is_representation_safe", "is_extremity_safe",
-                         "is_pole_safe", "is_builtin_safe",
+                         "is_representation_safe",
+                         "is_pole_safe", "is_number_set_safe",
                          "is_missing_safe", "is_empty_safe",
-                         "is_recursion_safe", "is_arbitrary_input_safe",
-                         "is_compendium_safe"),
+                         "is_recursion_safe", "is_language_defined",
+                         "is_library_safe"),
 }
 
 # terse spellings (and the spaced forms a claim-text reader would
@@ -297,6 +297,32 @@ CLAIM_ASPECTS: dict[str, tuple[str, ...]] = {
 _ASPECT_OF: dict[str, str] = {member: aspect
                               for aspect, members in CLAIM_ASPECTS.items()
                               for member in members}
+
+
+#: the family names decision A retired, each an accepted spelling of
+#: the family that replaces it
+RETIRED_FAMILY_NAMES: dict[str, str] = {
+    "is_builtin_safe": "is_number_set_safe",
+    "is_extremity_safe": "is_overflow_safe",
+    "is_arbitrary_input_safe": "is_language_defined",
+    "is_compendium_safe": "is_library_safe",
+}
+
+
+def current_family_name(name: str) -> str:
+    """The family a name stands for: a retired spelling's replacement,
+    any other name itself."""
+    return RETIRED_FAMILY_NAMES.get(name, name)
+
+
+def current_claim_name(claim_name: str) -> str:
+    """A claim name with a retired family spelling in its family part
+    replaced (`is_builtin_safe[x]` is `is_number_set_safe[x]`)."""
+    base = claim_base_name(claim_name)
+    current = current_family_name(base)
+    if current == base:
+        return claim_name
+    return current + str(claim_name)[len(base):]
 
 
 def claim_base_name(claim_name: str) -> str:

@@ -154,8 +154,11 @@ def _domain_safety_predicates() -> frozenset:
     # the LIVE examine vocabulary (static tables plus predicates owned
     # by registered claim families), read per parse rather than bound
     # at import so a family registered later is still recognized
+    from .families import RETIRED_FAMILY_NAMES
     from .routes import examine_predicates
-    return examine_predicates()
+    # a retired family spelling is still read, and resolves to its
+    # replacement when the claim is built
+    return examine_predicates() | frozenset(RETIRED_FAMILY_NAMES)
 
 
 # \alpha, \beta, ... as identifier spellings: unlike \pi/\infty (math
@@ -1162,6 +1165,10 @@ def extract_let_bindings(
                 f"no claim after the let run; if it is the claim, write it "
                 f"with `==`: `{name} == {unmask_strings(expr, literals)}`")
         if _LET_FUNC_VALUE.match(expr):
+            from ._claim_reach import path_refusal
+            refused = path_refusal(expr)
+            if refused is not None:
+                raise InvalidDomain(f"`let {name} = {expr}`: {refused}")
             funcs[name] = expr
             text = rest
         else:
@@ -1912,12 +1919,15 @@ _SPACED_PREDICATES = {
     "is defined": "is_defined",
     "is pole safe": "is_pole_safe",
     "is builtin safe": "is_builtin_safe",
+    "is number set safe": "is_number_set_safe",
     "is missing safe": "is_missing_safe",
     "is extremity safe": "is_extremity_safe",
     "is representation safe": "is_representation_safe",
     "is empty safe": "is_empty_safe",
     "is arbitrary input safe": "is_arbitrary_input_safe",
+    "is language defined": "is_language_defined",
     "is compendium safe": "is_compendium_safe",
+    "is library safe": "is_library_safe",
     "excluded outside domain": "excluded_outside_domain",
 }
 
@@ -2859,6 +2869,10 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         # `s + "0"` into `"0" + s`, a different claim, so the whole
         # operation is one verbatim atom, rendered as written
         return _verbatim_atom(node)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _quotient(_operand(node.left, node, funcs, matrix_names),
+                         _operand(node.right, node, funcs, matrix_names),
+                         node)
     if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
         return _BINOPS[type(node.op)](
             _operand(node.left, node, funcs, matrix_names),
@@ -2910,6 +2924,32 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         if name in _SYMPY_FUNCS:
             return _SYMPY_FUNCS[name](*args)
     return _verbatim_atom(node)
+
+
+def _quotient(left, right, node: ast.BinOp):
+    """`left / right` as sympy reads it, unless that reading cancels the
+    divisor: `f(x) / f(x)` evaluates to 1 and `x*y / y` to `x`, which
+    drops the point where the divisor is zero and the quotient has no
+    value. A quotient whose evaluated form no longer divides by `right`
+    is kept unevaluated, so the claim still says it divides there; one
+    over matrices, whose products keep their written order, is kept as
+    its own parenthesised spelling."""
+    quotient = left / right
+    if getattr(right, "is_number", False) or \
+            isinstance(right, sympy.MatrixExpr) or \
+            isinstance(quotient, sympy.MatrixExpr):
+        return quotient
+    divisors = [b for b, e in (f.as_base_exp() for f in
+                               sympy.Mul.make_args(right))
+                if not b.is_number and getattr(e, "is_positive", False)]
+    inverted = {p.base for p in quotient.atoms(sympy.Pow)
+                if getattr(p.exp, "is_negative", False)}
+    if all(b in inverted for b in divisors):
+        return quotient
+    if not (left.is_commutative and right.is_commutative):
+        return sympy.Symbol(f"({ast.unparse(node)})", commutative=False)
+    return sympy.Mul(left, sympy.Pow(right, -1, evaluate=False),
+                     evaluate=False)
 
 
 def _operand(child: ast.AST, parent: ast.BinOp, funcs: frozenset,
@@ -3056,7 +3096,7 @@ def _is_dotted_name(node) -> bool:
 
 
 def parse_domain_safety(law: str) -> tuple[str, str] | None:
-    """Recognize the `is_pole_safe(param)`/`is_builtin_safe(param)`/
+    """Recognize the `is_pole_safe(param)`/`is_number_set_safe(param)`/
     `is_missing_safe(param)` predicate forms: a family-adjudicated fact
     about param's own declared domain, whether it excludes every pole,
     fits a restricted-domain builtin it's passed to, or (for
@@ -3318,7 +3358,9 @@ class _CanonicalPrinter(StrPrinter):
         return f"lgamma({self._print(expr.args[0])})"
 
     def _print_Exp1(self, expr):
-        return "e"
+        # `e` reads back as the constant only when no bound name is `e`;
+        # `exp(1)` reads back as the constant always
+        return "exp(1)" if "e" in self._suppress_glyphs else "e"
 
     def _print_Pi(self, expr):
         # unicode only, "π" already round-trips back to "pi" on input
@@ -3596,6 +3638,11 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     product, commutative only as a stated identity) renders as
     written, never as `A*B = A*B`."""
     funcs = funcs | {"f"}
+    # a literal a double does not read exactly renders as the exact
+    # fraction it names, so the rendered claim reads back as the same
+    # number
+    from ._float_text import exact_literal_text
+    text = exact_literal_text(text)
     token = _ORDERED_MATRICES.set(frozenset(matrix_names))
     # a real parameter named for a constant (`pi`, `inf`) is a symbol
     # here, so `inf + 1` stays `inf + 1` rather than folding into the
@@ -3613,5 +3660,78 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
                 s = s.replace(symbol, backslash_name)
         return s
 
-    return outside_strings(
-        respell, to_canonical(expr, funcs, unicode, suppress_glyphs))
+    return _double_quoted(outside_strings(
+        respell, to_canonical(expr, funcs, unicode, suppress_glyphs)))
+
+
+_SINGLE_QUOTED = re.compile(r"(?<![\w)\]'])'((?:[^'\\\"]|\\.)*)'(?!')")
+
+
+def _double_quoted(text: str) -> str:
+    """`text` with each single-quoted string literal written in double
+    quotes, the one quote style a statement uses (a set member renders
+    `{"a"}`); a literal holding a double quote keeps its own."""
+    return _SINGLE_QUOTED.sub(lambda m: f'"{m.group(1)}"', text)
+
+
+class InvalidDefinition(ValueError):
+    """A `defines:` row that does not read as `<word> := {<members>}`."""
+
+
+#: the words a definition row may define: the hole class and absence
+#: (`absent`, with `None` its synonym, both read as the absence word)
+DEFINABLE_WORDS = ("missing", "absent", "None")
+_DEFINITION = re.compile(
+    r"^\s*(?P<word>[^\s:=]+)\s*:=\s*\{\s*(?P<members>.*?)\s*\}\s*$")
+_SPELLING = re.compile(r"^[A-Za-z_][\w]*(?:::[A-Za-z_][\w]*)*$")
+
+
+def parse_definition(text: str) -> tuple:
+    """Intent:
+        One definition row, `<word> := {<members>}`, as `(word,
+        members, extends)`: the word defined (`missing`, the hole class,
+        or `None` for the object's absence, written `absent` or `None`),
+        the spellings the set names
+        with the word itself left out, and whether the set extends what
+        the key already had (the word appears inside it, `missing :=
+        {missing, NaT}`) rather than replacing it. Read only from a
+        key's `defines:`; a claim or a binding never holds `:=`.
+
+    Raises:
+        InvalidDefinition: the text is not a definition of a word this
+            grammar defines, or a member is not a spelling (a name,
+            `Option::None` style paths allowed).
+    """
+    m = _DEFINITION.match(str(text))
+    if m is None:
+        raise InvalidDefinition(
+            f"{text!r} is not a definition; a definition row is "
+            f"`<word> := {{<members>}}`, `missing := {{null, nan}}`")
+    word = m.group("word")
+    if word == "∅":
+        word = "missing"
+    if word not in DEFINABLE_WORDS:
+        raise InvalidDefinition(
+            f"{text!r} defines {word!r}; a definition row defines "
+            f"`missing` (the hole class) or `absent` (the object's absence)")
+    synonyms = ("absent", "None") if word in ("absent", "None") else (word, "∅")
+    if word == "absent":
+        word = "None"
+    members: list = []
+    extends = False
+    for part in _split_commas(m.group("members")):
+        spelling = part.strip()
+        if not spelling:
+            continue
+        if spelling in synonyms:
+            extends = True
+            continue
+        if not _SPELLING.match(spelling):
+            raise InvalidDefinition(
+                f"{text!r}: {spelling!r} is not a spelling (a name such as "
+                f"`nan`, `NaT` or `Option::None`)")
+        if spelling not in members:
+            members.append(spelling)
+    if not members and not extends:
+        raise InvalidDefinition(f"{text!r} names no spelling")
+    return word, tuple(members), extends

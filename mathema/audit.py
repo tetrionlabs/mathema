@@ -203,6 +203,13 @@ def _describe_signature(fn) -> str:
     import inspect
     import warnings
 
+    from ._annotation_text import annotation_text
+
+    def shown(ann) -> str:
+        # a class by its qualified name, any other annotation in
+        # mathema's one spelling
+        return (inspect.formatannotation(ann) if isinstance(ann, type)
+                else annotation_text(ann))
     try:
         sig = callable_signature(fn)
     except (TypeError, ValueError):
@@ -225,7 +232,7 @@ def _describe_signature(fn) -> str:
     for name, p in sig.parameters.items():
         piece = name
         if p.annotation is not inspect.Parameter.empty:
-            piece += f": {inspect.formatannotation(p.annotation)}"
+            piece += f": {shown(p.annotation)}"
         elif kinds.get(name) in SEQUENCE_KINDS:
             piece += ": sequence (inferred)"
         if p.default is not inspect.Parameter.empty:
@@ -233,7 +240,7 @@ def _describe_signature(fn) -> str:
         parts.append(piece)
     ret = ""
     if sig.return_annotation is not inspect.Signature.empty:
-        ret = f" -> {inspect.formatannotation(sig.return_annotation)}"
+        ret = f" -> {shown(sig.return_annotation)}"
     return f"({', '.join(parts)}){ret}"
 
 
@@ -398,7 +405,7 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
         else {"sig_hash": None, "form_hash": None})
 
     domains = [{"param": name, "domain": bound, "source": "types"}
-              for name, bound in domain_from_signature(fn).items()]
+              for name, bound in domain_from_signature(fn, guards=False).items()]
     for name, values in (typing_info(fn).get("finite_domains") or {}).items():
         # a plain Python list here (typing_info()'s own return shape) is
         # not part of the Interval/"Z"/"N"/frozenset domain vocabulary

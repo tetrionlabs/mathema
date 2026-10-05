@@ -28,18 +28,18 @@ DERIVE_ONLY_FORMS = frozenset({"d", "lim", "integrate", "Sum", "Prod",
 
 # Domain-safety predicates: every one is on both routes, a
 # structural/symbolic derive half AND a targeted empirical half
-# (is_pole_safe trials the admitted pole locations, is_builtin_safe
+# (is_pole_safe trials the admitted pole locations, is_number_set_safe
 # the restricted builtins' domain edges, is_missing_safe a literal
 # NaN). raises likewise: "every call in the domain raises" is a
 # universal fact however it was reached. This set is the ONE
 # statement of which relations are safety predicates, grammar,
 # records, spec, acceptance, and the adjudication loop all read it
 # from here.
-SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_builtin_safe",
-                               "is_missing_safe", "is_extremity_safe",
+SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_number_set_safe",
+                               "is_missing_safe", "is_absent_safe",
                                "is_representation_safe", "is_empty_safe",
-                               "is_arbitrary_input_safe",
-                               "is_compendium_safe",
+                               "is_language_defined",
+                               "is_library_safe",
                                "excluded_outside_domain",
                                # function-wide computation checks.
                                # They were registered claim families and
@@ -53,6 +53,11 @@ SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_builtin_safe",
                                "is_reproducible", "is_defined",
                                # the repeatability roll-up
                                "is_repeatable",
+                               # the definedness tree's roll-ups and
+                               # views beyond the `is_*_safe` shape
+                               "is_numerically_defined",
+                               "is_language_defined",
+                               "is_finite_over_floats",
                                # reserved for a later release
                                "is_order_invariant",
                                "is_representation_consistent"})
@@ -242,3 +247,12 @@ def unsupported_forms(route: str, cj) -> list[str]:
         return []
     capable = ROUTE_CAPABILITIES.get(route, frozenset())
     return sorted(required_forms(cj) - capable)
+
+
+def is_proof_route(route: "str | None") -> bool:
+    """Intent:
+        Whether a row's route names a proof: `derive` and its subroutes,
+        or `examine` (a proof from the function's structure), which
+        share the strongest rung of the evidence ladder.
+    """
+    return (route or "").split(":", 1)[0] in ("derive", "examine")

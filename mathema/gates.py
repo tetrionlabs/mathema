@@ -62,7 +62,7 @@ def _integer_bound(bound) -> bool:
 
 def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                      cap=None, reach=None, sequences=False,
-                     exact=False):
+                     exact=False, holes=None):
     """Intent:
         Build the injected dependencies the corroboration engine needs
         for THIS claim: `evaluate(point)` decides the original claim's
@@ -70,7 +70,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         holds, False = a genuine counterexample, None = can't tell);
         `probe_finite(point)` returns a computation-failure detail
         (a raise, a NaN, an inf or a deviation past a magnitude-scaled
-        tolerance where the relation fails) or None; `admits(point)` is
+        tolerance where the relation fails), None where the code
+        agrees, or a `corroboration.Undecided` reason where the claim's
+        own side has no value, exact or float; `admits(point)` is
         in-domain-and-assumption membership; `sample(name, rng)` draws
         a value respecting the parameter's declared bound; `exact`
         drops the default allowance, so a claim with no declared
@@ -89,15 +91,23 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         +-`_EXTREME`. A sequence parameter is evaluable only with
         `sequences=True`: `sample` then draws a list (respecting a
         declared per-element bound) and `admits` requires a list whose
-        every element the bound admits. A coordinate whose domain is
-        integer-only reaches `fn` as an int, corners included.
+        every element the bound admits; a matrix coordinate (a claim
+        space of two axes) draws a list of rows, and a table coordinate
+        a dict of equal-length columns. `holes`, `{param: [value,
+        ...]}`, are the hole values a container's slots admit: a draw
+        carries them at `_floor.HOLE_RATE`, and `admits` accepts them. A
+        coordinate whose domain is integer-only reaches `fn` as an int,
+        corners included.
     """
     import math
     from .domain import (_as_int_if_whole, bound_to_sympy_set,
-                         domain_contains, is_missing, operational_domain)
-    from .probing import (ComplexResult, _bound_is_complex, _fmt_value,
-                          _is_matrix_value, _synth, complex_is_a_raise,
-                          holds_inf, holds_nan, is_complex_value,
+                         domain_contains, operational_domain)
+    from .probing import (DEFAULT_RELATIVE_TOLERANCE, ComplexResult,
+                          _bound_is_complex, _fmt_value, _is_matrix_value,
+                          _synth, complex_is_a_raise,
+                          ExecutedMissing, LastCall, classified,
+                          holds_inf, holds_nan, inputs_missing,
+                          is_complex_value, missing_class,
                           plain_value, relation_holds_elementwise,
                           same_infinity, values_agree, values_differ)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
@@ -108,10 +118,19 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # caller asked for list-valued points
     seq_names = {p for p, k in kinds.items() if k in SEQUENCE_KINDS}
     # a parameter whose binding states a space is a container whatever
-    # kind the body suggested
-    seq_names |= {p for p in kinds if _shapes.dims_of(cj_domain.get(p))}
+    # kind the body suggested; a table stays a table, its space bounding
+    # every column
+    seq_names |= {p for p, k in kinds.items()
+                  if k != "table" and _shapes.dims_of(cj_domain.get(p))}
     if seq_names and not sequences:
         return None
+    # a table coordinate is a container too when list-valued points were
+    # asked for: a dict of columns, each a sequence
+    table_names = ({p for p, k in kinds.items() if k == "table"}
+                   if sequences else set())
+    mat_names = {p for p in seq_names
+                 if len(getattr(cj_domain.get(p), "dims", ()) or ()) >= 2}
+    hole_values = {p: list(v) for p, v in (holes or {}).items() if v}
     if cj.relation not in ("==", "~=", "!=", "<=", ">=", "<", ">"):
         return None
     extra = frozenset(bound_funcs)
@@ -156,17 +175,35 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the first callee that returned a nan or an infinity for finite,
     # non-missing arguments, as the witness text ("f returned inf")
     calls_nonfinite: list = [None]
+    # the calls the function under test (or a bound function) made at
+    # the current point, for the executed missing inputs
+    f_calls = LastCall()
+    from .probing import parameter_defaults
+    f_calls.defaults = parameter_defaults(fn)
+    executed = ExecutedMissing()
+    from .probing import signature_defaults
+    executed.defaults = signature_defaults(fn)
+    from ._missing_words import DrawTally
+    tally = DrawTally()
+    from ._missing_words import declared_optional_return
+    declared_return = declared_optional_return(fn)
 
     def _tag(callee, label):
         # a complex result under a real claim counts as a raise too
         complex_raises = complex_is_a_raise(callee, cj_domain)
+        from .conjecture import _is_under_test
+        under_test = label == "f" or _is_under_test(callee, fn)
 
         def _wrapped(*a, **kw):
             try:
                 out = callee(*a, **kw)
             except Exception as exc:
                 calls_raised[0] = type(exc).__name__
+                if under_test:
+                    f_calls.calls.append(("raised", type(exc).__name__, a, kw))
                 raise
+            if under_test:
+                f_calls.calls.append(("returned", out, a, kw))
             if complex_raises and is_complex_value(out):
                 calls_raised[0] = "a complex result"
                 raise ComplexResult(label, out)
@@ -197,6 +234,29 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     def _reset():
         calls_raised[0] = None
         calls_nonfinite[0] = None
+        f_calls.reset()
+        executed.last_classified = False
+
+    from .conjecture import _lists_sentinel
+
+    def _admitted(point) -> bool:
+        # a hole or absence the claim does not list as its own point
+        return any(inputs_missing([v]) and not _lists_sentinel(cj_domain.get(p))
+                   for p, v in point.items())
+
+    def _classify(point, raised, sides=()):
+        # at a missing input, a raise or a missing output is classified
+        # into the executed missing inputs and not judged; so is every
+        # call at a hole or absence the claim only admits, which the
+        # policy lines judge. True when it was. A law that calls no
+        # function has its own sides as output
+        at_missing = _admitted(point) or classified(
+            point.values(), f_calls.outputs() or list(sides), raised)
+        f_calls.record(executed, point)
+        if at_missing:
+            executed.classified += 1
+            executed.last_classified = True
+        return at_missing
 
     from .runtime_types import calling
     from ._linalg_eval import FUNCTIONS as _VECTOR_FUNCS
@@ -208,12 +268,16 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # `2 * xs` scales and `xs + ys` adds elementwise, never a list
     # repeated or concatenated; the function still receives its own
     # runtime type and its result is read back as an array
-    as_arrays = bool(seq_names) and _numpy() is not None
+    as_arrays = bool(seq_names or table_names) and _numpy() is not None
     fn_call = calling(fn, facts)
     if as_arrays:
         fn_call = law_callable(fn_call)
         bound_funcs = {name: _bound_for_arrays(v)
                        for name, v in bound_funcs.items()}
+    from .conjecture import _fill_value, _refill_caller
+    executed.refill_at = _refill_caller(fn_call)
+    executed.fills = {p: fill for p in kinds
+                      if (fill := _fill_value(cj_domain.get(p))) is not None}
     base_env = {"f": _tag(fn_call, "f"), **_SAFE_FUNCS,
                 **_VECTOR_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
@@ -228,6 +292,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     else:
         cap_lo, cap_hi = -_EXTREME, _EXTREME
 
+    from . import _floor
+    from .conjecture import _table_columns
+    table_columns = {p: _table_columns(p, cj, facts) for p in table_names}
     int_names = {name for name in names
                  if _integer_bound(cj_domain.get(name))
                  or kinds.get(name) in ("int", "bool")}
@@ -243,8 +310,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # int, the value the probe route draws there; a float would make
         # `range(n)` raise where the claim is about integers
         return {n: (_as_int_if_whole(v) if n in int_names else
-                    as_array(v) if as_arrays and n in seq_names
-                    and isinstance(v, (list, tuple)) else v)
+                    as_array(v) if as_arrays and n in seq_names | table_names
+                    and isinstance(v, (list, tuple, dict)) else v)
                 for n, v in point.items()}
 
     def _values(point):
@@ -283,7 +350,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return None
         both_finite = all(abs(v) != float("inf") for v in (lv, rv))
         if rel in ("==", "~="):
-            return lv == rv or (both_finite and abs(lv - rv) <= tol)
+            try:
+                return lv == rv or (both_finite and abs(lv - rv) <= tol)
+            except OverflowError:
+                from fractions import Fraction
+                return lv == rv or (both_finite and abs(
+                    Fraction(lv) - Fraction(rv)) <= Fraction(tol))
         if rel == "!=":
             # with no declared tolerance an inequality fails only at an
             # actual equality
@@ -294,10 +366,19 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # strict relations compare natively: equality within
             # tolerance must not count as strictly greater/less (the
             # probe loop applies the same rule)
-            return (lv <= rv + tol if rel == "<=" else
-                    lv >= rv - tol if rel == ">=" else
-                    lv < rv if rel == "<" else
-                    lv > rv if rel == ">" else None)
+            try:
+                return (lv <= rv + tol if rel == "<=" else
+                        lv >= rv - tol if rel == ">=" else
+                        lv < rv if rel == "<" else
+                        lv > rv if rel == ">" else None)
+            except OverflowError:
+                # an integer beyond float range: compare exactly
+                from fractions import Fraction
+                lv, rv, tol = Fraction(lv), Fraction(rv), Fraction(tol)
+                return (lv <= rv + tol if rel == "<=" else
+                        lv >= rv - tol if rel == ">=" else
+                        lv < rv if rel == "<" else
+                        lv > rv if rel == ">" else None)
         # an infinity on one side: native comparison is exact
         return (lv <= rv if rel == "<=" else lv >= rv if rel == ">=" else
                 lv < rv if rel == "<" else lv > rv if rel == ">" else None)
@@ -317,12 +398,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
     def _array_relation(lv, rv, tol, point):
         # an array result compared element by element: a NaN the code
-        # computed from non-missing inputs is no value and fails; one
-        # that propagates a missing input is the missing-value axis's
-        # business
+        # computed from inputs that are not missing is no value and
+        # fails (a missing input was compared by kind before this)
         if holds_nan(lv) or holds_nan(rv):
-            if any(is_missing(v) or holds_nan(v) for v in point.values()):
-                return None
             return False
         return relation_holds_elementwise(
             lv, rv, cj.relation, tol,
@@ -332,20 +410,42 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         _reset()
         try:
             lv, rv = _values(point)
-        except Exception:
+        except Exception as e:
             # a raise FROM THE FUNCTION at an in-domain point is a
             # genuine failure of a value claim (the pedantic raise
-            # rule), so it reproduces a disproof; a plumbing raise
-            # stays inconclusive
-            return False if calls_raised[0] else None
+            # rule), so it reproduces a disproof, and so does a claim
+            # side with no value there (no real value, an index outside
+            # a sequence it reads, a division by zero), except at a
+            # missing input, where it is classified; any other plumbing
+            # raise stays inconclusive
+            if _classify(point, bool(calls_raised[0])):
+                return None
+            from .conjecture import claim_side_has_no_value
+            return False if (calls_raised[0] or claim_side_has_no_value(e)
+                             or isinstance(e, (IndexError, ZeroDivisionError))) \
+                else None
+        if _classify(point, False, (lv, rv)):
+            return None
         if calls_nonfinite[0] is not None:
             # a nan or an infinity the code returned for finite inputs
             # is no value: against a value every relation fails. Two
             # sides overflowing toward the same infinity are one
-            # extended-real point and agree, as equal sides; a NaN is
-            # the absence of a value and agrees with nothing
-            if _same_no_value(lv, rv):
+            # extended-real point and agree, as equal sides, unless a
+            # side read exactly is finite; a NaN is the absence of a
+            # value and agrees with nothing
+            if _same_no_value(lv, rv) and not _finite_exactly(point):
                 return cj.relation in ("==", "~=", "<=", ">=")
+            return False
+        if not inputs_missing(point.values()) \
+                and "absent" in (missing_class(lv), missing_class(rv)):
+            # a None from present inputs is no value, like a NaN, unless
+            # the return type declares it
+            if not declared_return and (lv is None or rv is None):
+                from .policy import record_introduced
+                record_introduced(dict(point))
+            if declared_return and (lv is None or rv is None):
+                executed.returned_absent(dict(point), declared_return)
+                return None
             return False
         if _complex_pair(lv, rv) and not (holds_nan(lv) or holds_nan(rv)):
             if (holds_inf(lv) or holds_inf(rv)) and not calls_nonfinite[0]:
@@ -368,15 +468,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # non-numeric result: an EQUALITY relation still compares
         # exactly (None vs a real number is a genuine mismatch, so an
         # opaque disproof reproduces), and ordering over non-orderable
-        # values proves nothing. A NaN that propagates a missing input
-        # is the missing-policy axis's business, inconclusive here; a
-        # NaN computed from non-missing inputs, a scalar or an element
-        # of an array or list, is no value and fails every relation,
-        # `!=` included: it agrees with nothing, another NaN included
-        # (P4)
+        # values proves nothing. A NaN computed from inputs that are not
+        # missing, a scalar or an element of an array or list, is no
+        # value and fails every relation, `!=` included: it agrees with
+        # nothing, another NaN included (the no-value rule; a missing
+        # input was compared by kind before this)
         if holds_nan(lv) or holds_nan(rv):
-            if any(is_missing(v) or holds_nan(v) for v in point.values()):
-                return None
             return False
         if cj.relation in ("==", "~="):
             try:
@@ -390,7 +487,43 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return None
         return None
 
+    # the executed missing inputs both evaluators record, read by
+    # the routes that build a record from this kit
+    evaluate.executed = executed  # type: ignore[attr-defined]
+    evaluate.drawn = tally  # type: ignore[attr-defined]
+
+    def _finite_exactly(point) -> bool:
+        # two float sides at the same infinity stand for a finite value
+        # when a side read exactly is finite: the code overflowed
+        from ._exact_side import some_side_is_finite
+        saved = (calls_raised[0], calls_nonfinite[0])
+        held = some_side_is_finite(code_l, code_r,
+                                   {**base_env, **_typed(point)},
+                                   {"f": fn_call, **(bound_funcs or {})})
+        calls_raised[0], calls_nonfinite[0] = saved
+        return held
+
+    def _exact_decision(point, tol) -> "bool | None":
+        # the claim's sides read exactly, the function's results as the
+        # exact values it returned (`_exact_side`): whether the relation
+        # holds within `tol` there, None when the sides cannot be
+        # computed exactly
+        from ._exact_side import exact_sides
+        env = {**base_env, **_typed(point)}
+        exact = exact_sides(code_l, code_r, env,
+                            {"f": fn_call, **(bound_funcs or {})})
+        _reset()
+        if exact is None:
+            return None
+        return relation_holds_elementwise(
+            exact[0], exact[1], cj.relation, tol,
+            exact_inequality=cj.tolerance is None, rel_tol=0.0)
+
+    def _exact_holds(point, tol) -> bool:
+        return _exact_decision(point, tol) is True
+
     def probe_finite(point):
+        tally.add(point)
         # a computation failure only: a raise from the code, a NaN
         # or an inf the code returned where the relation then fails, or
         # a deviation past a MAGNITUDE-SCALED tolerance (so a correct
@@ -401,12 +534,66 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         _reset()
         try:
             lv, rv = _values(point)
-        except Exception:
-            # only a raise from the function under test is a
-            # computation failure; the law's own plumbing failing
-            # says nothing about the code
+        except Exception as e:
+            # a raise from the function under test is a computation
+            # failure (a raise at a missing input is classified), and so
+            # is a claim side with no value (no real value, an index
+            # outside a sequence it reads, a division by zero); the
+            # law's own plumbing failing otherwise says nothing about
+            # the code, and is no agreement either
+            if _classify(point, bool(calls_raised[0])):
+                return None
+            from .conjecture import claim_side_has_no_value
             if calls_raised[0]:
                 return f"the computation raises {calls_raised[0]} here"
+            if calls_nonfinite[0]:
+                # the code gave no value at a finite input, whatever the
+                # claim's own float side does there
+                return (f"{calls_nonfinite[0]}, and an infinity or a nan "
+                        f"for a finite input is no value")
+            if isinstance(e, (IndexError, ZeroDivisionError)):
+                return (f"the claim's own expression raises "
+                        f"{type(e).__name__} here ({e})")
+            if claim_side_has_no_value(e):
+                return f"the claim's own side has no real value here ({e})"
+            # the claim's own side read exactly, the code's results as
+            # the values it returned; else the point is undecided
+            from ._exact_side import exact_sides
+            from .corroboration import Undecided
+            _reset()
+            exact = exact_sides(code_l, code_r,
+                                {**base_env, **_typed(point)},
+                                {"f": fn_call, **(bound_funcs or {})})
+            _reset()
+            held = None if exact is None else relation_holds_elementwise(
+                exact[0], exact[1], cj.relation, slack,
+                exact_inequality=cj.tolerance is None,
+                rel_tol=DEFAULT_RELATIVE_TOLERANCE
+                if cj.tolerance is None else 0.0)
+            if held is None:
+                return Undecided(f"the claim's own side raised "
+                                 f"{type(e).__name__} ({e})")
+            if held:
+                return None
+            return ("the relation fails on the executed values, the "
+                    "claim's own side read exactly")
+        if _classify(point, False, (lv, rv)):
+            return None
+        if not inputs_missing(point.values()) \
+                and "absent" in (missing_class(lv), missing_class(rv)):
+            if declared_return:
+                return None
+            return (f"the computation returns None here "
+                    f"({_fmt_value(lv)} {cj.relation} {_fmt_value(rv)})")
+        if inputs_missing(point.values()) and (holds_nan(lv) or holds_nan(rv)
+                                               or None in (lv, rv)):
+            # the code returned a value at a missing input and the law's
+            # side holds no value there
+            if relation_holds_elementwise(
+                    lv, rv, cj.relation, slack,
+                    exact_inequality=cj.tolerance is None, rel_tol=0.0) is False:
+                return (f"the relation fails at a missing input "
+                        f"({_fmt_value(lv)} {cj.relation} {_fmt_value(rv)})")
             return None
         if calls_nonfinite[0] is not None:
             # no value at a finite input: an overflow, a pole, a nan.
@@ -414,7 +601,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # point and agree, as equal sides; a NaN, or an infinity
             # against a value, is a failure
             if _same_no_value(lv, rv) and cj.relation in ("==", "~=",
-                                                          "<=", ">="):
+                                                          "<=", ">=") \
+                    and not _finite_exactly(point):
                 return None
             if calls_nonfinite[0].endswith("nan"):
                 return (f"the computation returns NaN here "
@@ -428,13 +616,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if holds_nan(lv) or holds_nan(rv) or holds_inf(lv) \
                     or holds_inf(rv) or cj.relation not in ("==", "~=", "!="):
                 return None
-            scaled = slack + 1e-7 * max(abs(lv), abs(rv), 1.0)
+            scaled = slack + DEFAULT_RELATIVE_TOLERANCE * max(abs(lv), abs(rv))
             if _relation_holds(lv, rv, scaled):
                 return None
             return (f"the relation fails on the executed values "
                     f"({_fmt_value(complex(lv))} {cj.relation} "
                     f"{_fmt_value(complex(rv))}), past the magnitude-scaled "
-                    f"tolerance: precision loss")
+                    f"tolerance")
         if _is_matrix_value(lv) or _is_matrix_value(rv):
             if holds_nan(lv) or holds_nan(rv) or holds_inf(lv) \
                     or holds_inf(rv):
@@ -447,13 +635,22 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                     [lv, rv], dtype=complex))))
             except Exception:
                 return None
-            scaled = slack + 1e-7 * max(size, 1.0)
+            scaled = slack + DEFAULT_RELATIVE_TOLERANCE * size
+            # the claim read exactly decides where it can be: a float
+            # claim side that rounds the way the code does would agree
+            # with it and hide the code's error
+            exact = _exact_decision(point, scaled)
+            if exact is True:
+                return None
+            if exact is False:
+                return ("the relation fails on the executed values, the "
+                        "claim's own side read exactly")
             held = _array_relation(lv, rv, scaled, point)
             if held is None or held:
                 return None
             return (f"the relation fails on the executed values ({lv!r} "
                     f"{cj.relation} {rv!r}), past the magnitude-scaled "
-                    f"tolerance: precision loss")
+                    f"tolerance")
         if any(isinstance(v, float) and v != v for v in (lv, rv)):
             return ("the computation returns NaN here"
                     if calls_nonfinite[0] else None)
@@ -462,8 +659,22 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         overflowed = any(abs(v) == float("inf") for v in (lv, rv))
         if overflowed and not calls_nonfinite[0]:
             return None
-        scaled = slack + 1e-7 * max(abs(lv) if not overflowed else 0.0,
-                                    abs(rv) if not overflowed else 0.0, 1.0)
+        magnitude = max(abs(lv) if not overflowed else 0.0,
+                        abs(rv) if not overflowed else 0.0)
+        try:
+            scaled = slack + DEFAULT_RELATIVE_TOLERANCE * magnitude
+        except OverflowError:
+            # an integer beyond float range: the tolerance is exact too
+            from fractions import Fraction
+            scaled = Fraction(slack) \
+                + Fraction(DEFAULT_RELATIVE_TOLERANCE) * magnitude
+        exact = None if overflowed else _exact_decision(point, scaled)
+        if exact is True:
+            return None
+        if exact is False:
+            return (f"the relation fails on the executed values ({lv!r} "
+                    f"{cj.relation} {rv!r} in float), the claim's own side "
+                    f"read exactly")
         if _relation_holds(lv, rv, scaled):
             return None
         if overflowed:
@@ -472,7 +683,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                     f"{cj.relation} {rv!r})")
         return (f"the relation fails on the executed values ({lv!r} "
                 f"{cj.relation} {rv!r}), past the magnitude-scaled "
-                f"tolerance: precision loss")
+                f"tolerance")
 
     def _ends(bound):
         # the bound's (lo, hi) as floats, +-inf for an unbounded end
@@ -545,11 +756,33 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # range (or the reach), so a declared range bounds the draws
         # too, not only the corners
         b = sample_domain.get(name)
+        if name in mat_names and name not in planned:
+            # a matrix: rows of element draws, square when its two axes
+            # share a name
+            n_rows, n_cols = _floor.sizes(cj_domain.get(name), rng, (2, 4), ndim=2)
+            rows = [[_synth("float", rng, b) for _ in range(n_cols)]
+                    for _ in range(n_rows)]
+            return _floor.gapped_rows(rows, hole_values.get(name, []), rng, 0)[0]
         if name in seq_names:
             # a sequence's declared bound is per element
             if name in planned:
-                return _planned_draw(name, rng, b)
-            return _synth("sequence", rng, b)
+                v = _planned_draw(name, rng, b)
+                if resolver.shapes[name].ndim == 1:
+                    return _floor.gapped(v, hole_values.get(name, []), rng, 0)[0]
+                return _floor.gapped_rows(v, hole_values.get(name, []), rng, 0)[0]
+            (length,) = _floor.sizes(cj_domain.get(name), rng)
+            return _floor.gapped(_synth("sequence", rng, b, length=length),
+                                 hole_values.get(name, []), rng, 0)[0]
+        if name in table_names:
+            # a table: one equal-length column per name the claim or the
+            # body reads
+            (length,) = _floor.sizes(cj_domain.get(name), rng)
+            from .conjecture import _column_bound
+            return {c: _floor.gapped(_synth("sequence", rng,
+                                            _column_bound(cj_domain.get(f"{name}.{c}"), b),
+                                            length=length),
+                                     hole_values.get(name, []), rng, 0)[0]
+                    for c in table_columns[name]}
         if name in complex_names:
             # both components, each inside the pseudo-infinity range
             # when one applies
@@ -582,11 +815,28 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # computed exactly; the law itself stays in float
     premise_words = premise_functions(_VECTOR_FUNCS)
 
+    def column_bound(name, column):
+        # the element domain a path binding (`for df.w in [0, 1]^n`)
+        # states for one column of a table, None when it states none
+        bound = cj_domain.get(f"{name}.{column}")
+        if bound is None:
+            return None
+        from .conjecture import _column_bound
+        return _column_bound(bound, None)
+
+    def _element_ok(n, e, bound):
+        # an element inside the declared per-element bound, or a hole
+        # the slot admits
+        if hole_values.get(n) and missing_class(e) is not None:
+            return True
+        return isinstance(e, (int, float)) and domain_contains(e, bound)
+
     def admits(point):
-        for n in seq_names:
+        for n in seq_names | table_names:
             # a sequence coordinate is a container of the shape its
-            # binding states, each element inside the declared
-            # per-element bound
+            # binding states (a matrix a list of rows, a table a dict of
+            # columns), each element inside the declared per-element
+            # bound or a hole the slot admits
             v = point.get(n)
             bound = cj_domain.get(n)
             dims = _shapes.dims_of(bound)
@@ -595,18 +845,30 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 if shape is None or not _shapes.fits(shape, dims):
                     return False
                 elements = list(_shapes.leaves(v))
+            elif n in table_names:
+                if not isinstance(v, dict):
+                    return False
+                # a column its own binding bounds holds its elements there
+                for c, col in v.items():
+                    col_bound = column_bound(n, c)
+                    if col_bound is not None and not all(
+                            _element_ok(n, e, col_bound) for e in col):
+                        return False
+                elements = [e for col in v.values() for e in col]
             elif isinstance(v, (list, tuple)):
                 elements = list(v)
             else:
                 return False
-            if bound is not None and not all(
-                    isinstance(e, (int, float)) and domain_contains(e, bound)
-                    for e in elements):
+            if bound is not None and not all(_element_ok(n, e, bound)
+                                             for e in elements):
                 return False
         for n in names:
             bound = cj_domain.get(n)
             v = point.get(n)
-            if bound is None or v is None or n in seq_names:
+            if bound is None or v is None or n in seq_names | table_names:
+                continue
+            if n in hole_values and missing_class(v) is not None:
+                # a missing value the parameter's completed domain admits
                 continue
             if n in language_names or isinstance(v, complex):
                 # a language coordinate is judged by its language and a
@@ -667,11 +929,33 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
     def _corner_value(name, value):
         # a sequence's corner is a short constant list at the
-        # per-element edge; a planned coordinate is nested to its axes
+        # per-element edge, a planned coordinate nested to its axes, a
+        # matrix's a small one, a table's short columns
         if name in planned:
             return resolver.synth(name, corner_sizes, lambda: value,
                                   _random.Random(0))
+        if name in mat_names:
+            dims = tuple(getattr(cj_domain.get(name), "dims", ()) or ())
+            n_cols = 2 if len(set(dims[:2])) == 1 else 3
+            return [[value] * n_cols for _ in range(2)]
+        if name in table_names:
+            return {c: [_column_end(name, c, value)] * 3 for c in table_columns[name]}
         return [value] * 3 if name in seq_names else value
+
+    def _column_end(name, column, value):
+        # a column its own binding bounds takes that binding's edge on the
+        # side the table's corner takes
+        bound = column_bound(name, column)
+        ends = _ends(bound) if bound is not None else None
+        if ends is None:
+            return value
+        which = 0 if value == edges[name][0] else 1
+        end = ends[which]
+        if end != end or math.isinf(end):
+            return value
+        if not domain_contains(end, bound):
+            end = math.nextafter(end, math.inf if which == 0 else -math.inf)
+        return end
 
     def _language_edges(name):
         # a language coordinate has no numeric ends: its corners are the
@@ -717,6 +1001,33 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     edges = {n: (list(_language_edges(n)) if n in language_names else
                  _complex_corners(n) if n in complex_names else
                  [_endpoint(n, "lo"), _endpoint(n, "hi")]) for n in names}
+    for n in names:
+        # -0.0 is a float input wherever 0 is in the domain, and code
+        # can tell it from 0.0 (atan2, copysign, 1 / x)
+        if n in language_names or n in complex_names:
+            continue
+        lo, hi = edges[n][0], edges[n][-1]
+        integral = getattr(cj_domain.get(n), "base_type", None) in ("Z", "N")
+        if (isinstance(lo, float) and isinstance(hi, float) and not integral
+                and lo <= 0.0 <= hi and domain_contains(-0.0, cj_domain.get(n))
+                if cj_domain.get(n) is not None else False):
+            edges[n] = [*edges[n], -0.0]
+        # a closed infinite end includes the point (ruling E2): the
+        # computation executes x = inf there, unless a declared
+        # operational infinity bounds the computation
+        bound = cj_domain.get(n)
+        if cap is None and bound is not None and not integral:
+            pieces = getattr(bound, "pieces", None) or (
+                (bound,) if isinstance(bound, tuple) else ())
+            for piece in pieces:
+                if not (isinstance(piece, tuple) and not isinstance(piece, frozenset)
+                        and len(piece) == 2):
+                    continue
+                for end, closed in ((piece[0], getattr(piece, "closed_lo", True)),
+                                    (piece[1], getattr(piece, "closed_hi", True))):
+                    if isinstance(end, float) and math.isinf(end) and closed \
+                            and end not in edges[n]:
+                        edges[n] = [*edges[n], end]
     if len(names) <= 6:
         # every corner of the box: 2^k points for k real coordinates
         # (four per complex coordinate)
@@ -730,21 +1041,36 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # this dict is the point-runtime kit; `interfaces.runtime` states
     # its contract (and the narrower obligation of a foreign runner
     # whose callable stands in for fn) so the seam is testable
+    def exact_at(point):
+        # the claim's sides at a point of exact numbers, the function and
+        # the bound functions run on those numbers themselves
+        from ._exact_side import exact_sides
+        _reset()
+        try:
+            return exact_sides(code_l, code_r, {**base_env, **point},
+                               {"f": fn_call, **(bound_funcs or {})},
+                               exact_calls=True)
+        finally:
+            _reset()
+
+    evaluate.exact_at = exact_at  # type: ignore[attr-defined]
     return dict(evaluate=evaluate, probe_finite=probe_finite, admits=admits,
                 sample=sample, corners=corners, names=names)
 
 
 def _fmt_point(point, names):
-    """A point rendered for a counterexample string, numeric coords
-    as :.6g, discrete/string coords (a string domain member) as-is."""
+    """A point rendered for a counterexample string, a float coordinate
+    at full precision (`probing._fmt_coordinate`), discrete/string
+    coords (a string domain member) as-is."""
     parts = []
     for n in names:
         if n not in point:
             continue
         v = point[n]
+        from .probing import _fmt_coordinate
         if isinstance(v, str):
             from .probing import spell_text
-            parts.append(f"{n}={spell_text(v)}")
+            parts.append(f"{n} = {spell_text(v)}")
             continue
         capped = _shapes.witness_text(v)
         if capped is not None:
@@ -753,8 +1079,8 @@ def _fmt_point(point, names):
             # arguments
             parts.append(f"{n} = {capped}")
             continue
-        parts.append(f"{n}={v:.6g}" if isinstance(v, (int, float))
-                     and not isinstance(v, bool) else f"{n}={v!r}")
+        parts.append(f"{n} = {_fmt_coordinate(v)}" if isinstance(v, float)
+                     else f"{n} = {v!r}")
     return ", ".join(parts)
 
 
@@ -871,6 +1197,51 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
     return None, False
 
 
+def _certified_point_witness(cj, deps, proof, cj_domain) -> "str | None":
+    """Intent:
+        The witness text when derive's witness, read as exact numbers
+        (`_exact_witness.exact_number`: a rational, or an algebraic
+        number with a verified isolating interval), lies in the claim's
+        domain and the code run on those numbers makes the claim false,
+        decided by the exact sign of the sides' difference; else None.
+        Independent of the solver that found the witness: only the
+        witness's value is taken from it.
+    """
+    from ._exact_witness import (Undecided, exact_number, in_bound,
+                                 relation_fails)
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    witness = proof.witness or {}
+    if cj.relation not in ("==", "!=", "<=", ">=", "<", ">") \
+            or cj.tolerance is not None:
+        return None
+    names = list(deps["names"])
+    if not names or any(n not in witness for n in names):
+        return None
+
+    def check():
+        point = {}
+        for n in names:
+            value = exact_number(witness[n], FAST_TIMEOUT_SECONDS)
+            bound = cj_domain.get(n)
+            if bound is not None and not in_bound(value, bound):
+                return None
+            point[n] = value
+        exact_at = getattr(deps["evaluate"], "exact_at", None)
+        if exact_at is None:
+            return None
+        sides = exact_at(point)
+        if sides is None or not relation_fails(sides[0], sides[1],
+                                               cj.relation):
+            return None
+        return ", ".join(f"{n} = {witness[n]}" for n in names)
+    try:
+        return _with_timeout(check, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except (Undecided, ArithmeticError, TypeError, ValueError):
+        return None
+
+
 def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
                         bound_funcs, assum=()):
     """Intent:
@@ -896,6 +1267,16 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         the same exact comparison; `~=` does not.
     """
     from . import corroboration as C
+    if proof.meta.get("mathema.witness_certified") and falsified.counterexample:
+        # the raise guard holds in the domain by certified interval
+        # arithmetic while every float call returns: the mathematics is
+        # false, the computation holds
+        falsified.meta = {**(falsified.meta or {}),
+                          "mathema.corroboration": "certified"}
+        falsified.note = (
+            f"{falsified.note}; {proof.meta['mathema.witness_certified']}, "
+            f"while every float call there returns a value").lstrip("; ")
+        return falsified
     if proof.meta.get("mathema.witness_executed") and falsified.counterexample:
         # no stratum: a raise at the witness is the contract or the
         # mathematics talking, which the probe route leaves unclassified
@@ -934,6 +1315,18 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
                           "mathema.corroboration": "reproduced"}
         pt = _fmt_point(result.point, deps["names"])
         falsified.counterexample = pt or falsified.counterexample
+        detail = deps["probe_finite"](result.point)
+        if pt and isinstance(detail, str) and \
+                detail.startswith("the claim's own"):
+            # the witness carries why the claim fails there: its own
+            # side has no value (no real value, or an expression of it
+            # raising, named first)
+            reason = (detail if "no real value" in detail else
+                      f"{detail}, so the claim's own side has no real "
+                      f"value here")
+            falsified.counterexample = (
+                f"{pt}: {reason}; narrow the claim's domain to where every "
+                f"side of it is real")
         if falsified.stratum is None:
             # a symbolic disproof plus a reproduced executed witness is
             # the evidence bar for indicting the mathematics itself
@@ -965,6 +1358,21 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             f"the executed code violates the relation there by less than "
             f"the default tolerance ({_DEFAULT_ORDERING_SLACK:g}) the probe "
             f"route allows, and compared exactly it fails").lstrip("; ")
+        return falsified
+    certified = (_certified_point_witness(cj, deps, proof, cj_domain)
+                 if not assum else None)
+    if certified is not None:
+        falsified.meta = {**(falsified.meta or {}),
+                          "mathema.corroboration": "reproduced"}
+        falsified.counterexample = certified
+        if falsified.stratum is None:
+            falsified.stratum = {"mathematics": "unsound",
+                                 "blame": "claim", "witness": certified}
+        falsified.note = (
+            f"{falsified.note}; reproduced exactly at derive's witness: the "
+            f"code, run on the witness's exact value, makes the claim false "
+            f"there, while every float draw passes (the computation holds "
+            f"within its tolerance)").lstrip("; ")
         return falsified
     falsified.verdict = "unknown"
     falsified.meta = {**(falsified.meta or {}),
@@ -1037,6 +1445,53 @@ def companion_descriptor(name: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in inside.split(",") if part.strip())
 
 
+def _listed_points(names, cj_domain) -> "list | None":
+    """Every point of a claim whose coordinates all range over finite
+    sets, each listed missing value realised as the value it stands for;
+    None when a coordinate is not a finite set."""
+    import itertools
+
+    from .domain import (_as_domain, _is_enumerated, _member_sort_key, is_sentinel,
+                         realise_sentinel)
+    values = []
+    for n in names:
+        bound = (cj_domain or {}).get(n)
+        if bound is None:
+            return None
+        dom = _as_domain(bound)
+        if not _is_enumerated(dom) or dom.dims:
+            return None
+        members = sorted({v for piece in dom.pieces for v in piece},
+                         key=_member_sort_key)
+        realised = []
+        for v in members:
+            realised += realise_sentinel(v) if is_sentinel(v) else [v]
+        values.append(realised)
+    return [dict(zip(names, combo)) for combo in itertools.product(*values)]
+
+
+def _listed_words(points, names) -> str:
+    """`both listed points, 0.25 and None`, `the only listed point,
+    0.25`, `the 3 listed points, 1, 2 and 3`."""
+    from ._missing_words import point_shown, value_shown
+    shown = [value_shown(pt[names[0]]) if len(names) == 1 else point_shown(pt)
+             for pt in points]
+    if len(shown) == 1:
+        return f"the only listed point, {shown[0]}"
+    listing = _and_words(", ".join(shown))
+    if len(shown) == 2:
+        return f"both listed points, {listing}"
+    return f"the {len(shown)} listed points, {listing}"
+
+
+def _and_words(words: str) -> str:
+    """`None, nan` as `None and nan`, a list of words said aloud."""
+    parts = [w.strip() for w in words.split(",") if w.strip()]
+    if len(parts) <= 1:
+        return words
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 def _reach_text(names, cj_domain, resolved, reach) -> str:
     """Intent:
         How far the float companion ran along the claim's unbounded
@@ -1077,8 +1532,158 @@ def _finite_arguments(args, kwargs) -> bool:
                    for v in (*args, *kwargs.values()))
 
 
+def _exact_claim_at(cj, fn, facts, point: dict, assum) -> "bool | None":
+    """Intent:
+        Whether the claim holds at one executed point in exact
+        arithmetic: the derive route run over the domain pinned to that
+        point, each coordinate the decimal reading of the float that
+        was executed (`repr`, as a declared bound is read). True or False when it decides, None when it
+        does not (a sequence or non-numeric coordinate, a bound
+        function, a claim with no relation, an undecided or timed-out
+        attempt).
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .symbolic import try_prove
+    if cj.funcs or cj.relation not in ("==", "!=", "<=", ">=", "<", ">") \
+            or cj.tolerance is not None:
+        return None
+    pinned: dict = {}
+    for name, value in point.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or value != value or value in (float("inf"), float("-inf")):
+            return None
+        # the decimal reading of the executed float, the same reading
+        # the derive route gives a declared bound, so a domain corner
+        # pins to the corner the proof quantified over
+        exact = sympy.Rational(repr(float(value))) \
+            if isinstance(value, float) else sympy.Integer(value)
+        pinned[name] = (exact, exact)
+    try:
+        result = _with_timeout(
+            lambda: try_prove(fn, facts, cj.lhs, cj.rhs or "0", cj.relation,
+                              domain=pinned,
+                              assumption=[tuple(a) for a in assum or ()]
+                              or None),
+            FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except Exception:
+        return None
+    if result.status == "proven":
+        return True
+    if result.status == "disproven":
+        return False
+    return None
+
+
+#: the wall-clock seconds a computation line may spend executing every
+#: point of a finite domain, judged from a timed estimate of one call and
+#: scaled with the trials the caller asked for
+_SWEEP_SECONDS = 1.0
+#: the trials a computation line makes over a finite domain too large or
+#: too slow to sweep: its discontinuities first, then a seeded sample
+_PARTIAL_POINTS = 2000
+
+
+class _FinitePlan:
+    """The points a computation line runs over a finite domain and the
+    coverage its note states."""
+
+    def __init__(self, points, sampled, coverage):
+        self.points, self.sampled, self.coverage = points, sampled, coverage
+
+    @property
+    def targeted(self) -> bool:
+        return bool(self.coverage.at_discontinuities)
+
+
+def _finite_plan(cj, fn, facts, deps, cj_domain, corners, admits,
+                 scale: float = 1.0):
+    """Intent:
+        The computation line's plan over a finite domain, or None when
+        some parameter's domain is not finite: every admitted point
+        when a timed estimate of one call fits `_SWEEP_SECONDS` (times
+        `scale`); otherwise the corners, every point at a
+        discontinuity (`_discontinuities`), then a seeded sample up to
+        `_PARTIAL_POINTS` (times `scale`).
+    """
+    import time
+
+    from . import _discontinuities as D
+    from ._brute_force import BRUTE_FORCE_POINT_BUDGET, _sweep_grid
+    names = list(deps["names"])
+    grid = _sweep_grid(names, cj_domain, BRUTE_FORCE_POINT_BUDGET)
+    if grid is None or not grid:
+        return None
+    points = [pt for pt in D.grid_points(names, grid) if admits(pt)]
+    if not points:
+        return None
+    trial = points[::max(1, len(points) // 5)][:5]
+    started = time.perf_counter()
+    for pt in trial:
+        try:
+            deps["probe_finite"](pt)
+        except Exception:
+            pass
+    per_call = (time.perf_counter() - started) / max(1, len(trial))
+    asked = getattr(cj, "trials", None)
+    if (asked is not None and len(points) <= asked) or \
+            per_call * len(points) <= _SWEEP_SECONDS * scale:
+        # the claim's own trials cover the domain, or the timed estimate
+        # fits the budget: every point
+        return _FinitePlan(points, 0, D.Coverage(total=len(points), full=True))
+    found = D.discontinuities(cj, fn, facts)
+    hits = D.on_grid(found, points)
+    chosen = list(corners) + hits
+    sampled = max(0, int(_PARTIAL_POINTS * scale) - len(chosen))
+    return _FinitePlan(chosen, sampled, D.Coverage(
+        total=len(points), at_discontinuities=len(hits),
+        discontinuity_words=D.words_of(found), edge_cases=len(corners),
+        random=sampled))
+
+
+def _interval_discontinuities(cj, fn, facts, deps, cj_domain, corners):
+    """Intent:
+        `(points, coverage)` for a domain that is not finite: the points
+        at a discontinuity of a single-parameter argument over that
+        parameter's interval (each with its float neighbours), the
+        other coordinates at the first corner; `([], None)` when there
+        are none.
+    """
+    from . import _discontinuities as D
+    from .domain import Interval
+    found = D.discontinuities(cj, fn, facts)
+    if not found or not corners:
+        return [], None
+    points: list = []
+    skipped = 0
+    for name in deps["names"]:
+        bound = cj_domain.get(name)
+        pieces = getattr(bound, "pieces", None) or (
+            (bound,) if isinstance(bound, tuple) else ())
+        for piece in pieces:
+            if not (isinstance(piece, (tuple, Interval))
+                    and not isinstance(piece, frozenset) and len(piece) == 2):
+                continue
+            try:
+                lo, hi = float(piece[0]), float(piece[1])
+            except (TypeError, ValueError):
+                continue
+            values, more = D.on_interval(found, name, lo, hi)
+            skipped += more
+            points += [{**corners[0], name: v} for v in values]
+    if not points:
+        return [], None
+    return points, D.Coverage(at_discontinuities=len(points),
+                              discontinuity_words=D.words_of(found),
+                              edge_cases=len(corners), skipped=skipped)
+
+
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
-                     assum=(), budget=None) -> "Probe | None":
+                     assum=(), budget=None, missing=None,
+                     holes=None, excluded=None) -> "Probe | None":
     """Intent:
         The computation claim a derive proof spawns. `parent` is proven in
         exact arithmetic, which is all a derive `proven` says; the
@@ -1102,7 +1707,18 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         `unknown`, naming the point that was executing. `budget`, when
         given, is the total number of points drawn, corners included
         (the caller's trials); otherwise every corner plus the
-        corroboration budget of interior points.
+        corroboration budget of interior points. `missing` lists the
+        missing values the claim's completed domain admits, `(param,
+        word, value)`: each is executed at the first domain corner,
+        after the corners and before the sampled points; a container's
+        floor is listed the same way (its word None for an item that
+        holds no hole). `holes`, `{param: [value, ...]}`, are the hole
+        values a container's slots admit, carried by its sampled draws.
+        A point where the code returns a missing value or raises at a
+        missing input is classified, never judged. `excluded`, when given,
+        is a predicate over points that the claim's premises leave out
+        beyond its relations (`assuming f is defined`): such a point is
+        never executed.
     """
     from . import corroboration as C
     from ._sampling import representation_reach
@@ -1112,24 +1728,77 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     cap = operational_range(cj)
     descriptor, representation, representation_word = \
         companion_representation(cj_domain, facts)
+    # the admitted missing values, a container's by slot and a scalar's
+    # as the parameter's own value, which the kit admits beside the
+    # domain's own points
+    holes = {p: list(v) for p, v in (holes or {}).items()}
+    for p, _w, v in (missing or ()):
+        if not isinstance(v, (list, tuple, dict)):
+            holes.setdefault(p, []).append(v)
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
                             cap=cap, reach=representation.max_magnitude,
-                            sequences=True)
+                            sequences=True, holes=holes)
     if deps is None:
         return None
+    if excluded is not None:
+        inside = deps["admits"]
+        deps["admits"] = lambda point: inside(point) and not excluded(point)
     name = companion_name(parent.name, descriptor)
+    # the companion's calls are filed under its own name
+    from .policy import _CLAIM as _policy_claim
+    _policy_claim.set(name)
     top = float(representation.max_magnitude or representation_reach())
     reach = cap if cap is not None else (-top, top)
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
+    corners = list(deps["corners"])
+    missing_corners = [{**corners[0], p: v} for p, _w, v in (missing or ())
+                       if corners and p in deps["names"]]
+    # the admitted missing inputs run first, so each is executed and
+    # recorded whatever a domain corner does
+    corners = missing_corners + corners
+    # the admitted missing inputs run beside the budget, which is the
+    # computation line's numbers
     interior = (C._CORROBORATION_BUDGET if budget is None
-                else max(0, int(budget) - len(deps["corners"])))
+                else max(0, int(budget) - (len(corners) - len(missing_corners))))
+    # a claim over finite sets only is its listed points, each run once
+    listed = _listed_points(deps["names"], cj_domain)
+    admits = deps["admits"]
+    if listed is not None:
+        corners, interior = listed, 0
+        listed_ids = {id(pt) for pt in listed}
+        admits = (lambda pt: id(pt) in listed_ids)  # noqa: E731
+    scale = 1.0 if budget is None else max(
+        1.0, float(budget) / (len(corners) + C._CORROBORATION_BUDGET))
+    finite = None if listed is not None else _finite_plan(
+        cj, fn, facts, deps, cj_domain, corners, admits, scale)
+    coverage = None
+    if finite is not None:
+        corners, interior = finite.points, finite.sampled
+        if finite.coverage.full:
+            # the admitted missing inputs still run first, for the
+            # policy lines
+            corners = missing_corners + corners
+        coverage = finite.coverage
+    elif listed is None:
+        targeted, coverage = _interval_discontinuities(
+            cj, fn, facts, deps, cj_domain, corners)
+        corners = corners + targeted
+        if coverage is not None:
+            coverage.random = interior
+    if coverage is not None and not coverage.full:
+        # the missing inputs are the policy lines' trials, not this line's
+        coverage.edge_cases = max(0, coverage.edge_cases - len(missing_corners))
+    corner_count = sum(1 for c in corners if admits(c))
+    # the admitted missing inputs run for the policy lines, not as points
+    # of the computation line
+    holes_run = sum(1 for c in missing_corners if admits(c)) if listed is None else 0
     progress = C.StabilitySweep()
     try:
         sweep = _with_timeout(
             lambda: C.sweep_stability(deps["probe_finite"], deps["names"],
                                       sample=deps["sample"],
-                                      corners=deps["corners"],
-                                      admits=deps["admits"],
+                                      corners=corners,
+                                      admits=admits,
                                       budget=interior, progress=progress),
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
@@ -1144,10 +1813,39 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                  + (f" executing {at}" if at else "")
                  + (f"; {reach_text}" if reach_text else ""),
             meta={"mathema.timeout": "fast"})
-    what = (f"the computation of {parent.name} in {representation_word}, "
-            f"executed at {sweep.checked} points (every domain corner, then sampled "
-            f"interior points)"
-            + (f"; {reach_text}" if reach_text else ""))
+    tried: dict = {}
+    for p, w, v in (missing or ()):
+        if w and missing_corners and p in deps["names"]:
+            # a scalar's value as executed, a container's member word
+            said = w if isinstance(v, (list, tuple, dict)) else repr(v)
+            if said not in tried.get(p, []):
+                tried.setdefault(p, []).append(said)
+    tried_meta = {"mathema.missing": {"tried": tried}} if tried else {}
+    from .probing import executed_missing, with_executed
+    tried_meta = with_executed(tried_meta, executed_missing(deps)) or {}
+    drawn = getattr(deps["evaluate"], "drawn", None)
+    if drawn is not None and drawn.meta():
+        tried_meta = {**tried_meta, "mathema.drawn": drawn.meta()}
+    numbers = max(0, sweep.checked - holes_run)
+    if listed is not None:
+        what = (f"the {representation_word} computation of {parent.name} ran at "
+                + _listed_words(listed, deps["names"])
+                + (f"; {reach_text}" if reach_text else ""))
+    elif coverage is not None:
+        what = (f"the {representation_word} computation of {parent.name} ran "
+                + coverage.words(numbers)
+                + (f"; {reach_text}" if reach_text else ""))
+    else:
+        inner = max(0, sweep.checked - corner_count)
+        listing = ["every corner",
+                   f"{inner} interior point{'s' if inner != 1 else ''}"]
+        what = (f"the {representation_word} computation of {parent.name} ran at "
+                f"{numbers} points: " + _and_words(", ".join(listing))
+                + (f"; {reach_text}" if reach_text else ""))
+    # the points a discontinuity analysis chose are the route's mechanism
+    float_route = ("probe:semi_analytical"
+                   if coverage is not None and coverage.at_discontinuities
+                   else "probe")
     if sweep.fragile_point is not None:
         pt = _fmt_point(sweep.fragile_point, deps["names"])
         remedy = ("narrow the domain, "
@@ -1160,21 +1858,60 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         # states one and the failing point lies outside it
         from .compendium import computation_diagnosis
         covered = computation_diagnosis(fn, facts, sweep.fragile_point)
+        exact = _exact_claim_at(cj, fn, facts, sweep.fragile_point, assum)
+        if exact is False:
+            # the claim is false at the executed point in exact
+            # arithmetic too: the proof, not the computation, failed
+            return Probe(
+                name, parent.statement, "falsified", route=float_route,
+                n=numbers, counterexample=f"{pt}: {sweep.detail}",
+                note=what,
+                sketch=f"the proof of {parent.name} failed: at {pt} the "
+                       f"claim is false in exact arithmetic as well as in "
+                       f"the computation ({sweep.detail})",
+                meta={"mathema.proof_contradicted": pt})
+        relation_failed = sweep.detail.startswith("the relation fails")
+        if exact is None and relation_failed:
+            # finite values that contradict the proof: either float lost
+            # the value or the proof is wrong, and nothing here says which
+            return Probe(
+                name, parent.statement, "falsified", route=float_route,
+                n=numbers, counterexample=pt, note=what,
+                sketch=f"{parent.name} is proven, but its computation "
+                       f"fails at {pt}: {sweep.detail}; whether the "
+                       f"mathematics holds at that point was not decided, "
+                       f"so this is the computation failing or the proof "
+                       f"failing; "
+                       + (f"{covered}; " if covered else "")
+                       + f"{remedy}")
         return Probe(
-            name, parent.statement, "falsified", route="probe",
-            n=sweep.checked, counterexample=pt, note=what,
+            name, parent.statement, "falsified", route=float_route,
+            n=numbers, counterexample=pt, note=what,
             sketch=f"{parent.name} is mathematically proven, but its "
-                   f"computation fails at {pt}: {sweep.detail}; "
+                   f"computation fails at {pt}: {sweep.detail}"
+                   + (": precision loss" if relation_failed else "")
+                   + ("; the claim holds there in exact arithmetic; "
+                      if exact else "; ")
                    + (f"{covered}; " if covered else "")
                    + f"{remedy}",
             # the proof that coexists with the executed break is the
             # evidence that the mathematics is sound and the code is not
             stratum={"mathematics": "sound", "blame": "implementation",
                      "cause": "implementation:numerical-instability",
-                     "representation": representation.tag, "witness": pt})
-    if sweep.checked == 0:
-        return Probe(name, parent.statement, "skipped", route="probe",
+                     "representation": representation.tag, "witness": pt},
+            meta=tried_meta or None)
+    if sweep.undecided:
+        at = _fmt_point(sweep.undecided_point, deps["names"])
+        return Probe(name, parent.statement, "unknown", route=float_route,
+                     n=numbers,
+                     note=f"{what}; the claim's own side could not be "
+                          f"evaluated at {sweep.undecided} point"
+                          f"{'s' if sweep.undecided != 1 else ''}, first at "
+                          f"{at}: {sweep.undecided_detail}",
+                     meta=tried_meta or None)
+    if numbers == 0:
+        return Probe(name, parent.statement, "skipped", route=float_route,
                      note=f"{what}; no in-domain point satisfied the "
                           f"claim's premises, so nothing was executed")
-    return Probe(name, parent.statement, "holds", route="probe",
-                 n=sweep.checked, note=what)
+    return Probe(name, parent.statement, "holds", route=float_route,
+                 n=numbers, note=what, meta=tried_meta or None)

@@ -86,9 +86,9 @@ def test_verify_of_a_recorded_key_that_no_longer_resolves(project, capsys):
 
 
 @pytest.mark.parametrize("scale", ["0", "-1", "nan"])
-def test_trials_scale_outside_its_range_is_refused(project, capsys, scale):
-    _bad(capsys, ["check", "exitfix.py", "--trials-scale", scale],
-         "--trials-scale")
+def test_trials_downscale_outside_its_range_is_refused(project, capsys, scale):
+    _bad(capsys, ["check", "exitfix.py", "--trials-downscale", scale],
+         "--trials-downscale")
 
 
 def test_describe_depth_below_zero_is_refused(project, capsys):

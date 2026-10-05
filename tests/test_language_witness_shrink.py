@@ -43,7 +43,7 @@ def ends_with_x(s):
 def test_a_containment_witness_shrinks_to_the_character_that_fails():
     (p,) = check_conjectures(escape, [claim('for s in L[any_text], "&" not in f(s)')])
     assert p.verdict == "falsified"
-    assert p.counterexample.split(":")[0] in ("s='&'", "s='<'", "s='>'", "s='\"'", "s=\"'\""), \
+    assert p.counterexample.split(":")[0] in ("s = '&'", "s = '<'", "s = '>'", "s = '\"'", "s = \"'\""), \
         p.counterexample
     assert p.meta["mathema.witness_shrunk"]["steps"] >= 0
 
@@ -51,7 +51,7 @@ def test_a_containment_witness_shrinks_to_the_character_that_fails():
 def test_a_length_witness_stays_the_member_at_the_bound():
     (p,) = check_conjectures(headline, [claim("for s in L[any_text, len <= 81], f(s) == s")])
     assert p.verdict == "falsified"
-    assert p.counterexample.startswith("s='" + "a" * 81 + "':")
+    assert p.counterexample.startswith("s = '" + "a" * 81 + "':")
 
 
 def test_a_shrunk_witness_stays_in_the_domain_and_still_fails():
@@ -59,5 +59,5 @@ def test_a_shrunk_witness_stays_in_the_domain_and_still_fails():
         'for s in L[any_text] \\ {""}, "xx" not in f(s)')])
     assert p.verdict == "falsified"
     witness = p.counterexample.split(":")[0]
-    assert witness == "s='x'", p.counterexample
+    assert witness == "s = 'x'", p.counterexample
     assert "shrunk" in p.note

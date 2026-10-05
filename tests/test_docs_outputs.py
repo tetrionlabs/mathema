@@ -6,7 +6,8 @@ A page that shows code next to its output makes two promises: the code
 runs, and it prints what the page says. This module holds the pages to
 the second one. It reads the markdown, runs each marked example in a
 fresh temporary directory, and compares what came out with what the
-page shows, allowing only timing figures and absolute paths to differ.
+page shows, allowing only timing figures, absolute paths and the date
+a run writes to differ.
 
 Marking an example
 ------------------
@@ -213,17 +214,20 @@ def inventory():
 # --- comparison ----------------------------------------------------------
 
 _DURATION = re.compile(r"\b\d+(?:\.\d+)?\s?(?:ms|s|sec|seconds)\b")
+_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 def normalise(text, workdir):
     """Intent:
         The text with what legitimately differs between runs replaced:
-        the working directory's absolute path and timing figures.
-        Trailing whitespace and surrounding blank lines are dropped.
+        the working directory's absolute path, timing figures and the
+        ISO date a run writes. Trailing whitespace and surrounding blank
+        lines are dropped.
     """
     for d in {workdir, os.path.realpath(workdir)}:
         text = text.replace(d, "<tmp>")
     text = _DURATION.sub("<time>", text)
+    text = _DATE.sub("<date>", text)
     lines = [ln.rstrip() for ln in text.splitlines()]
     return "\n".join(lines).strip("\n")
 
@@ -604,6 +608,12 @@ def test_only_timing_and_paths_are_allowed_to_differ():
     assert normalise("proven, n=12", "/t/w") != normalise("proven, n=13", "/t/w")
 
 
+def test_the_date_a_run_writes_is_allowed_to_differ():
+    assert normalise("contradicted on 2026-09-30: f drops", "/t/w") == \
+        normalise("contradicted on 2026-10-01: f drops", "/t/w")
+    assert normalise("form 2026abc", "/t/w") != normalise("form 2027abc", "/t/w")
+
+
 def test_an_excerpt_keeps_each_detail_under_its_own_entry():
     real = "rec\n  A\n     detail a\n  B\n     detail b\n  C"
     assert matches("rec\n  A\n     detail a\n  C", real, subset=True)
@@ -662,3 +672,39 @@ if __name__ == "__main__":
         print(f"wrote {_rel(_INVENTORY)}")
     else:
         sys.exit("usage: test_docs_outputs.py --write-inventory")
+
+
+def test_the_three_layers_triangle_is_the_billing_modules_real_state(tmp_path):
+    """docs/three-layers.md draws `mathema badges` over the billing module
+    that docs/existing-codebase.md builds; the figure is an illustration
+    block (the page has no files of its own), so this replays that page's
+    example and checks the figure against a real run."""
+    import re
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(here, "docs", "three-layers.md"),
+              encoding="utf-8") as fh:
+        page = fh.read()
+    shown = re.search(r"```text\n(\s+CLARITY .*?)```", page, re.S).group(1)
+    example = _BY_ID["docs/existing-codebase.md"]["codebase"]
+    workdir = str(tmp_path)
+    spec_path = os.path.join(workdir, ".example.json")
+    with open(spec_path, "w") as fh:
+        json.dump({"workdir": workdir, "parts": example["parts"],
+                   "before": []}, fh)
+    env = dict(os.environ)
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("MATHEMA_PSEUDO_INFINITY", None)
+    env["XDG_CONFIG_HOME"] = os.path.join(workdir, ".config")
+    env["MATHEMA_FAST_TIMEOUT"] = "60"
+    env["MATHEMA_EXTENSIVE_TIMEOUT"] = "120"
+    r = subprocess.run([sys.executable, os.path.abspath(__file__), "--drive",
+                        spec_path], cwd=workdir, env=env, capture_output=True,
+                       text=True, timeout=600)
+    assert r.returncode == 0, r.stderr
+    r = subprocess.run([sys.executable, "-c",
+                        "import sys; from mathema.cli import main; "
+                        "sys.exit(main(sys.argv[1:]))",
+                        "badges", "billing", "--root", workdir], cwd=workdir,
+                       env=env, capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.rstrip("\n") == shown.rstrip("\n"), r.stdout

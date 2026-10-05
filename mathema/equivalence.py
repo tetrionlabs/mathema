@@ -227,7 +227,7 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
         First slice: `f` on the left, one funcs=-bound name on the
         right, same arity (positional alignment).
     """
-    from .conjecture import _effective_facts, _resolve_func_ref
+    from .conjecture import _effective_facts, _resolve_bound_ref
     from .inventory import structural_complexity
 
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
@@ -240,7 +240,7 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
                           f"f =:= g with g bound via funcs= (got "
                           f"{cj.lhs!r} =:= {cj.rhs!r})")
     try:
-        bound = {name: (v if callable(v) else _resolve_func_ref(v))
+        bound = {name: (v if callable(v) else _resolve_bound_ref(v))
                  for name, v in cj.funcs.items()}
     except AttributeError:
         bound = {}
@@ -615,9 +615,9 @@ def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
 
 def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     from .conjecture import DEFAULT_TOLERANCE
-    from .domain import is_missing
     from .probing import (_fmt, _fmt_value, _synth, complex_is_a_raise,
-                          holds_nan, same_infinity)
+                          classified, missing_class,
+                          same_infinity)
 
     cj = case.cj
     kinds = {p: case.facts.param_kinds.get(p, "unknown")
@@ -643,6 +643,11 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
         fv, f_exc = _run_side(f_call, args, f_complex)
         gv, g_exc = _run_side(g_call, args, g_complex)
         state.executed += 1
+        if classified(args, [v for v in (fv, gv) if v is not _RAISED],
+                      fv is _RAISED or gv is _RAISED):
+            # a raise or a missing output at a missing input is
+            # classified, not judged
+            continue
         one_sided = _one_sided_raise(args, kinds, fv, f_exc, gv, g_exc,
                                      case.rhs_name)
         if one_sided is not None:
@@ -657,21 +662,27 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
                 break
             both_raised += 1
             continue
+        if "absent" in (missing_class(fv), missing_class(gv)):
+            # a None from present inputs, or a value against a None at a
+            # missing input, is no value on that side
+            checked += 1
+            if not (fv is None and gv is None):
+                cx = (_fmt(tuple(args), names=tuple(kinds))
+                      + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
+                break
+            continue
         if not (_numberlike(fv) and _numberlike(gv)):
             discarded["non_numeric"] += 1
             continue
         if not (_finite(fv) and _finite(gv)):
-            if any(is_missing(a) or holds_nan(a) for a in args):
-                # a missing input: its NaN is the missing-value
-                # policy's business, not compared here
-                discarded["not_compared"] += 1
-                continue
-            # no value from non-missing inputs (P4): two sides at the
-            # same infinity are one extended-real point and agree; a
-            # NaN agrees with nothing, and an infinity disagrees with a
-            # value and with the opposite infinity
+            # the two functions are the same where both have no value
+            # of one kind: two NaNs agree, whatever object carries them,
+            # and two sides at the same infinity are one extended-real
+            # point; a no-value side against a value, a NaN against an
+            # infinity, and opposite infinities disagree
             checked += 1
-            if same_infinity(fv, gv):
+            if same_infinity(fv, gv) or (missing_class(fv) == "hole"
+                                         and missing_class(gv) == "hole"):
                 continue
             cx = (_fmt(tuple(args), names=tuple(kinds))
                   + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")

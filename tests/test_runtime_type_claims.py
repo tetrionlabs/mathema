@@ -160,7 +160,8 @@ def test_a_claims_file_names_a_runtime_type_for_code_it_cannot_annotate():
     with pytest.raises(ClaimsFileError, match="runtime_types"):
         validate_claims_file({"m.f": {"runtime_types": {"xs": "pandas.Serie"}}},
                              "c.claims.yaml")
-    rec = mathema.check(untyped_mean, claims=[_BETWEEN],
+    # the mean of no data is no value, stated as the empty input's policy
+    rec = mathema.check(untyped_mean, claims=[_BETWEEN, "f([]) in {missing}"],
                         declared={"runtime_types": {"xs": "pandas.Series"}})
     row = next(p for p in rec.probes if p.statement.startswith("for xs"))
     assert row.verdict in ("holds", "proven"), (row.verdict, row.note)

@@ -92,21 +92,21 @@ def test_every_spelling_reaches_one_verdict_on_the_best_route(spelling):
 @pytest.mark.parametrize("spelling", SPELLINGS)
 def test_the_canonical_text_spells_infinity_inf(spelling):
     cj = claim(f"for x in [1, 2], f(x) < {spelling}")
-    assert canonical_claim_text(cj) == "for x in [1.0, 2.0]:float|missing, f(x) < inf"
-    assert render_claim_text(cj, unicode=True) == "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {∅}, f(x) < ∞"
+    assert canonical_claim_text(cj) == "for x in [1.0, 2.0] : float|absent|missing, f(x) < inf"
+    assert render_claim_text(cj, unicode=True) == "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(x) < ∞"
 
 
 def test_minus_infinity_spells_minus_inf():
     cj = claim("for x in [1, 2], f(x) > -oo")
-    assert canonical_claim_text(cj) == "for x in [1.0, 2.0]:float|missing, f(x) > -inf"
-    assert render_claim_text(cj, unicode=True) == "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {∅}, f(x) > -∞"
+    assert canonical_claim_text(cj) == "for x in [1.0, 2.0] : float|absent|missing, f(x) > -inf"
+    assert render_claim_text(cj, unicode=True) == "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(x) > -∞"
 
 
 @pytest.mark.parametrize("law, ascii_form", [
     ("lim(f(x), x, oo) == 0", "lim(f(x), x, inf) = 0"),
     ("lim(f(x), x -> -oo) == 0", "lim(f(x), x, -inf) = 0"),
     ("∫(d(f(x), x), x, -oo, oo) == 1", "integrate(d(f(x), x), x, -inf, inf) = 1"),
-    ("for x in [0, oo), f(x) < oo", "for x in [0.0, inf):float|missing, f(x) < inf"),
+    ("for x in [0, oo), f(x) < oo", "for x in [0.0, inf) : float|absent|missing, f(x) < inf"),
 ])
 def test_a_law_and_its_domain_spell_infinity_alike(law, ascii_form):
     cj = claim(law)
@@ -135,7 +135,7 @@ def test_a_parameter_named_inf_is_read_as_the_parameter_on_both_routes():
     q = _adjudicate(clip_between,
                     "for x in [-5, 5], inf in [-1, 0], sup in [0, 1], f(x, inf, sup) >= 100")
     assert q.verdict == "falsified", (q.verdict, q.note)
-    assert "inf=" in str(q.counterexample), q.counterexample
+    assert "inf = " in str(q.counterexample), q.counterexample
     # one note says how the name was read, and how to still write infinity
     assert (p.note or "").count("read as the parameter") == 1, p.note
     assert "write oo for infinity" in (p.note or ""), p.note
@@ -163,7 +163,7 @@ def test_arithmetic_on_a_parameter_named_inf_survives_the_render():
 
 def test_the_unicode_line_spells_infinity_one_way():
     cj = claim("for x in [0, oo), f(x) < oo")
-    assert render_claim_text(cj, unicode=True) == "∀ x ∈ [0.0, ∞) ⊂ ℝ ∪ {∅}, f(x) < ∞"
-    assert render_claim_text(cj, unicode=False) == "for x in [0.0, inf):float|missing, f(x) < inf"
+    assert render_claim_text(cj, unicode=True) == "∀ x ∈ [0.0, ∞) ⊂ ℝ ∪ {absent, ∅}, f(x) < ∞"
+    assert render_claim_text(cj, unicode=False) == "for x in [0.0, inf) : float|absent|missing, f(x) < inf"
     again = claim(render_claim_text(cj, unicode=True))
     assert canonical_claim_text(again) == canonical_claim_text(cj)

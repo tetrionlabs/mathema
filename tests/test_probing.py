@@ -168,7 +168,10 @@ def test_explicit_trials_disables_adaptivity_entirely():
     # batteries; the explicit count is a CAP every sampled row
     # respects, honored exactly by the generic trial loops and never
     # exceeded by a structured battery's own round count
-    sampled = [p for p in rec.probes if p.n]
+    # a policy row samples nothing: its n counts the calls at missing
+    # inputs it read from every other row
+    sampled = [p for p in rec.probes
+               if p.n and not (p.meta or {}).get("mathema.policy")]
     assert any(p.n == 50 for p in sampled), sampled
     assert all(p.n <= 50 for p in sampled)
 
@@ -201,13 +204,13 @@ def test_budget_stays_the_same_regardless_of_earlier_falsifications():
     r = mathema.check(ema, domain={"alpha": (0, 1)})
     probes = {p.name: p for p in r.probes}
     assert probes["permutation_invariant"].verdict == "falsified"
-    assert probes["is_numerically_stable"].verdict == "holds"
+    holding = "is_dimension_safe[f]"
+    assert probes[holding].verdict == "holds"
     assert (probes["permutation_invariant"].n
-            < probes["is_numerically_stable"].n)
+            < probes[holding].n)
     again = {p.name: p for p in mathema.check(
         ema, domain={"alpha": (0, 1)}).probes}
-    assert again["is_numerically_stable"].n == probes[
-        "is_numerically_stable"].n
+    assert again[holding].n == probes[holding].n
 
 
 def test_a_provably_affine_function_actually_runs_at_the_reduced_budget():
@@ -290,14 +293,18 @@ def test_bounded_counterexample_names_which_side_failed_and_by_what_margin():
     # "(args): lv vs rv" shape, not a bespoke "result=... > max(x)=..."
     # message the old hardcoded check built. Real, minor loss of
     # message detail; the args and both compared values are still there.
-    r = mathema.check(ema)
+    # alpha past 1 and finite: ema is no weighted average there, and
+    # unbounded the probe can reach an overflow witness first
+    r = mathema.check(ema, domain={"alpha": (1.5, 3)})
     bounded = next(p for p in r.probes if p.name == "bounded_lower")
     assert bounded.verdict == "falsified"
     assert ": " in bounded.counterexample and " vs " in bounded.counterexample
 
 
 def test_permutation_invariant_counterexample_shows_both_computed_values():
-    r = mathema.check(ema)
+    # alpha in its weighting range: unbounded, the probe can reach alpha
+    # = 1e308 first, where the loop overflows to nan
+    r = mathema.check(ema, domain={"alpha": (0, 1)})
     perm = next(p for p in r.probes if p.name == "permutation_invariant")
     assert perm.verdict == "falsified"
     assert ": " in perm.counterexample and " vs " in perm.counterexample

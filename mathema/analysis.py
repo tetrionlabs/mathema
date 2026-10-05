@@ -519,6 +519,49 @@ def _returns_kind(fdef: ast.FunctionDef) -> str:
     return "unknown"
 
 
+#: method names that return a new object holding a copy of the data
+_COPYING_METHODS = frozenset({"copy", "flatten", "tolist", "astype"})
+#: functions that return a new object holding a copy of the data
+_COPYING_CALLS = frozenset({"list", "sorted", "tuple", "dict", "set",
+                            "copy", "deepcopy"})
+
+
+def _is_copy(value) -> bool:
+    """Whether an expression makes a new object rather than handing
+    back one it was given: a call of a copying method or function."""
+    if not isinstance(value, ast.Call):
+        return False
+    func = value.func
+    if isinstance(func, ast.Attribute):
+        return func.attr in _COPYING_METHODS or (
+            func.attr == "deepcopy")
+    return isinstance(func, ast.Name) and func.id in _COPYING_CALLS
+
+
+def _rebound_to_copy(stmts: list, name: str, lineno: int,
+                     copied: bool = False) -> bool:
+    """Whether, on every path through `stmts` before line `lineno`, the
+    name was last rebound to a copy (`copied`: whether it already was
+    on entry), so a method called on it there cannot reach the caller's
+    object."""
+    for stmt in stmts:
+        if stmt.lineno >= lineno:
+            break
+        if isinstance(stmt, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == name
+                for t in stmt.targets):
+            copied = _is_copy(stmt.value)
+        elif isinstance(stmt, ast.If):
+            copied = (_rebound_to_copy(stmt.body, name, lineno, copied)
+                      and _rebound_to_copy(stmt.orelse, name, lineno,
+                                           copied))
+        elif any(isinstance(n, (ast.Name)) and n.id == name
+                 and isinstance(n.ctx, ast.Store) for n in ast.walk(stmt)):
+            # rebound somewhere this reading does not follow
+            copied = False
+    return copied
+
+
 def _effects(fdef: ast.FunctionDef, params: list[str]) -> list[str]:
     out: list[str] = []
 
@@ -543,7 +586,8 @@ def _effects(fdef: ast.FunctionDef, params: list[str]) -> list[str]:
                     note("uses randomness")
                 elif root in _CLOCK_MODULES:
                     note("reads the clock")
-                elif f.attr in _MUTATORS and root in params:
+                elif f.attr in _MUTATORS and root in params and not \
+                        _rebound_to_copy(fdef.body, root, node.lineno):
                     note(f"mutates argument '{root}'")
         elif isinstance(node, (ast.Assign, ast.AugAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -777,6 +821,24 @@ def _is_definitional(value) -> bool:
            or isinstance(value, types.ModuleType))
 
 
+def _installed_code(fn) -> bool:
+    """Whether `fn` is defined in the standard library or an installed
+    package (a file under the interpreter's library paths), not in the
+    project being checked."""
+    import inspect
+    import os
+    import sysconfig
+    try:
+        path = os.path.realpath(inspect.getsourcefile(inspect.unwrap(fn)) or "")
+    except (TypeError, OSError):
+        return False
+    if not path:
+        return False
+    roots = {os.path.realpath(p) for name in ("stdlib", "platstdlib", "purelib", "platlib")
+             if (p := sysconfig.get_paths().get(name))}
+    return any(path.startswith(root + os.sep) for root in roots)
+
+
 def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
         list[str], list[str], list[str], list[str]]:
     """Free names the function inherits from outside itself, split four
@@ -860,7 +922,7 @@ def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
                 target = global_funcs if _is_definitional(g[n]) else global_vars
                 if n not in target:
                     target.append(n)
-    if global_vars or unresolved:
+    if (global_vars or unresolved) and not _installed_code(fn):
         # global_funcs deliberately doesn't trigger this, referencing a
         # sibling function/class/module isn't "behavior depends on state
         # outside the function" the way a global variable's current
@@ -943,7 +1005,7 @@ _TIER_WORDS = {0: "no source",
                3: "source, side effects"}
 
 
-def tier_word(tier: int) -> str:
+def tier_word(tier: int, rows=(), effects: "dict | None" = None) -> str:
     """The word a record shows in place of its tier number.
 
     Intent:
@@ -954,9 +1016,25 @@ def tier_word(tier: int) -> str:
         the only evidence there is; `pure` and `impure` both mean the
         source was read, and say whether effects were found. An
         unrecognised value renders as the bare number rather than
-        guessing at a word for it.
+        guessing at a word for it. `rows` (Probes or claim-row dicts)
+        can overrule "no side effects": a falsified `is_state_safe` row
+        is an observed side effect, and so is a write examining the source
+        finds a default call makes (`effects`, the record's
+        `mathema.effects`).
     """
+    if tier == 2 and (any(_state_write_observed(r) for r in rows)
+                      or (effects or {}).get("writes")):
+        return _TIER_WORDS[3]
     return _TIER_WORDS.get(tier, f"tier {tier}")
+
+
+def _state_write_observed(row) -> bool:
+    name = ((row.get("name") or row.get("claim")) if isinstance(row, dict)
+            else getattr(row, "name", ""))
+    verdict = (row.get("verdict") if isinstance(row, dict)
+               else getattr(row, "verdict", "")) or ""
+    return (str(name or "").split("[", 1)[0] == "is_state_safe"
+            and verdict.split(":", 1)[0] == "falsified")
 
 
 def looks_like_wrapper(facts) -> bool:
@@ -1027,6 +1105,17 @@ def analyze_source(fn) -> Facts:
     from .runtime_types import detect_parameters, usage_hints
     param_kinds = _param_kinds(fdef, params)
     detected = detect_parameters(fn)
+    hints = usage_hints(fn, fdef, params, param_kinds, detected)
+    # a parameter the body uses as a numpy array, which a list does not
+    # support, is drawn as one: the hint becomes the runtime type
+    from .runtime_types import Detection
+    for p, hint in list(hints.items()):
+        if hint.get("strong") and hint.get("type") == "numpy.ndarray" \
+                and p not in detected:
+            kind = "mat" if hint.get("usage") == "matrix" else "vec"
+            detected[p] = (Detection("numpy.ndarray", kind,
+                                     "the body uses it as a numpy array"),)
+            hints.pop(p)
     apply_runtime_kinds(param_kinds, detected)
     return Facts(
         name=fdef.name,
@@ -1034,7 +1123,7 @@ def analyze_source(fn) -> Facts:
         params=params,
         param_kinds=param_kinds,
         runtime_types=detected,
-        runtime_hints=usage_hints(fn, fdef, params, param_kinds, detected),
+        runtime_hints=hints,
         finite_domains=finite_annotation_domains(fn),
         doc_concepts=doc_concepts,
         returns_kind=_returns_kind(fdef),

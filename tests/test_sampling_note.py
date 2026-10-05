@@ -26,12 +26,12 @@ def test_a_premise_fixed_length_is_reported_as_that_length():
     note = _note("for xs in R^n, assuming dim(xs) == 20, "
                  "f(xs) == f(xs)")
     assert "len=20" in note, note
-    assert "len∈[2,8]" not in note, note
+    assert "len∈[1,8]" not in note, note
 
 
 def test_the_free_draw_reports_the_lengths_it_used_and_its_shapes():
     note = _note("f(xs) == f(xs)")
-    assert "len∈[2,8]" in note, note
+    assert "len∈[1,8]" in note, note
     assert "shape∈{" in note, note
 
 

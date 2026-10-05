@@ -124,7 +124,8 @@ def test_the_true_claim_on_the_same_function_still_proves(tmp_path, monkeypatch)
     import mathema
     fn = _manhattan(tmp_path, monkeypatch)
     (p,) = mathema.claims.check_conjectures(
-        fn, [mathema.claim("f(x, y) >= 0", route="derive")])
+        fn, [mathema.claim("assuming len(x) == len(y), f(x, y) >= 0",
+                           route="derive")])
     assert p.verdict == "proven", p.sketch
 
 
@@ -167,7 +168,16 @@ def test_the_cauchy_schwarz_trio_resolves_the_way_the_algebra_does(
 
     for route in ("derive", "probe"):
         true_v, note = verdict("f(x, y) <= 0", route)
-        assert true_v in ("proven", "holds"), (route, true_v, note)
+        # true over the reals; the loop's float products overflow at a
+        # corner draw (y holding 1e300), a carrier failure that falsifies
+        # the computation, which is the probe route's line here (rulings
+        # of 2026-10-01 and 2026-10-05). A false proven never appears.
+        assert true_v == "falsified", (route, true_v, note)
+        (p,) = mathema.claims.check_conjectures(
+            fn, [mathema.claim("assuming len(x) == len(y), f(x, y) <= 0",
+                               route=route)])
+        assert "e+300" in p.counterexample and "returned nan" in p.counterexample, \
+            p.counterexample
         for false_law in ("f(x, y) <= -1", "f(x, y) >= 1"):
             v, note = verdict(false_law, route)
             assert v != "proven", (route, false_law, v, note)

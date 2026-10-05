@@ -132,7 +132,8 @@ def test_the_exact_filter_rejects_a_constant_that_float_arithmetic_admits():
                                 frozenset())
     words = premise_functions(FUNCTIONS)
     constant = np.array([-0.1, -0.1, -0.1])
-    assert FUNCTIONS["std"](constant, ddof=1) > 0   # the float residue
+    assert np.std(constant, ddof=1) > 0   # numpy's float residue
+    assert FUNCTIONS["std"](constant, ddof=1) == 0   # the exact claim word
     assert not admits(compiled, {**FUNCTIONS, **words, "xs": constant})
     assert admits(compiled, {**FUNCTIONS, **words,
                              "xs": np.array([-0.1, 0.0, 0.1])})

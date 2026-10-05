@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The is_missing_safe[param] claim family: a function's runtime
-behavior on a literal NaN input must honor the declared domain's
-missing-value policy, reject (raise) when the domain excludes missing
-(`\\ {∅}`), accept (never raise) when missing is included (the
-default). The structural half proves an excluded policy from an
-explicit raising guard; the empirical half calls the real function with
-NaN and reports under a probe route, never relabeled as derive."""
+"""The is_missing_safe[param] claim family (the function-wide
+`is_missing_safe(f)` is the gate the policy rows decide):
+the function is called with each missing value its parameter's type
+admits (a float's nan; None only for an unannotated or Optional
+parameter), and must reject it (raise) when the domain excludes it and
+return a value when it is admitted. A raising guard is a policy, so it
+proves the parameter safe. The structural half reads guards; the
+empirical half calls the real function and reports under a probe
+route, never relabeled as derive."""
 
 from mathema.claim_families import (_is_missing_safe_derive,
                                     _missing_guard_params, _missing_probe)
@@ -97,17 +99,22 @@ def test_partial_guard_settles_exhaustively_through_the_trials():
     (probe,) = check_conjectures(guarded_sqrt_like, [cj])
     assert probe.verdict == "proven"
     assert probe.route == "probe:algorithmic"
-    assert "exhaustive" in probe.sketch
+    assert probe.sketch == ("nan is rejected (f raises ValueError), as the claim's "
+                            "exclusion says, and x is a float, so it is never None; "
+                            "every case was called")
 
 
-def test_derive_disproves_a_guard_that_contradicts_the_default_policy():
-    # no exclusion declared -> missing included by default -> a raising
-    # guard contradicts the declared domain.
+def test_a_raising_guard_is_a_policy_and_proves_the_parameter_safe():
+    # missing admitted by default and a raising guard for it: the guard
+    # is the function's stated policy (R20)
     cj = claim("for x in [0, 10], is_missing_safe(x)",
                name="is_missing_safe[x]", route="best")
     (probe,) = check_conjectures(guarded_sqrt_like, [cj])
-    assert probe.verdict == "falsified"
+    assert probe.verdict == "proven"
     assert probe.route == "examine"
+    assert probe.sketch == ("nan is rejected by the guard on line 2 (raises "
+                            "ValueError); that counts as a policy, "
+                            "`missing(f, x) raises(ValueError)`")
 
 
 def test_probe_falsifies_an_asserted_but_unenforced_exclusion():
@@ -120,29 +127,46 @@ def test_probe_falsifies_an_asserted_but_unenforced_exclusion():
     (probe,) = check_conjectures(silent_passthrough, [cj])
     assert probe.verdict == "falsified"
     assert probe.route == "probe:algorithmic"
-    assert "asserted, not enforced" in probe.counterexample
+    assert probe.counterexample == ("f returned nan at x = nan, but the claim "
+                                    "excludes it; guard x in f so the exclusion "
+                                    "holds, or remove the exclusion")
 
 
-def test_nan_propagation_alone_no_longer_satisfies_the_default_policy():
-    # the default policy admits a missing value in EITHER spelling:
-    # (x + y) / 2 propagates NaN fine but raises TypeError on None,
-    # so the admitted None spelling falsifies with that witness
+def test_a_float_parameter_is_never_none_so_nan_propagation_holds():
+    # a float admits nan and never None: (x + y) / 2 gives nan back
     cj = claim("for x in [0, 10], y in [0, 10], is_missing_safe(x)",
                name="is_missing_safe[x]", route="best")
     (probe,) = check_conjectures(propagating_mean, [cj])
+    assert probe.verdict == "holds", (probe.verdict, probe.counterexample)
+
+
+def unannotated_mean(x, y):
+    return (x + y) / 2.0
+
+
+def test_an_unannotated_parameter_admits_none_and_a_raise_there_falsifies():
+    cj = claim("for x in [0, 10], y in [0, 10], is_missing_safe(x)",
+               name="is_missing_safe[x]", route="best")
+    (probe,) = check_conjectures(unannotated_mean, [cj])
     assert probe.verdict == "falsified"
-    assert probe.route == "probe:algorithmic"
-    assert "x=None raised TypeError" in probe.counterexample
+    assert probe.counterexample == (
+        "f raised TypeError at x = None, and the claim admits None for x (the "
+        "parameter is unannotated). Annotate x as float to exclude None, or state "
+        "`absent(f, x) raises(TypeError)`.")
 
 
-def test_function_wide_spelling_covers_every_numeric_parameter():
-    # is_missing_safe(f): the conjunction over all numeric parameters,
-    # falsified at the first parameter with a real witness (named)
+def test_function_wide_spelling_is_the_gate_over_every_parameter():
+    # is_missing_safe(f) is the gate the policy rows decide: every
+    # parameter's holes, each with a policy the code follows; a nan that
+    # propagates through two parameters is confirmed by execution alone
     cj = claim("is_missing_safe(f)", route="best")
-    (probe,) = check_conjectures(propagating_mean, [cj])
+    (probe,) = check_conjectures(unannotated_mean, [cj])
     assert probe.name == "is_missing_safe[f]"
-    assert probe.verdict == "falsified"
-    assert probe.counterexample.startswith("x: ")
+    assert probe.verdict == "holds"
+    assert probe.note == ("x (unannotated): nan propagates, confirmed by calling f at "
+                          "x = nan; no claim states it yet; y (unannotated): nan "
+                          "propagates, confirmed by calling f at y = nan; no claim "
+                          "states it yet")
 
 
 def test_function_wide_spelling_holds_when_every_parameter_does():
@@ -153,7 +177,9 @@ def test_function_wide_spelling_holds_when_every_parameter_does():
     (probe,) = check_conjectures(handled,
                                  [claim("f is missing safe", route="best")])
     assert probe.verdict == "holds"
-    assert "every parameter" in probe.note
+    assert probe.note == ("x (float): nan propagates, confirmed by calling f at x = nan; "
+                          "no claim states it yet; y (float): nan propagates, confirmed "
+                          "by calling f at y = nan; no claim states it yet")
 
 
 def test_both_spellings_handled_proves_exhaustively_for_one_param():
@@ -165,7 +191,7 @@ def test_both_spellings_handled_proves_exhaustively_for_one_param():
     (probe,) = check_conjectures(none_tolerant_mean, [cj])
     assert probe.verdict == "proven"
     assert probe.route == "probe:algorithmic"
-    assert "exhaustive" in probe.sketch
+    assert "every case was called" in probe.sketch
     assert probe.n > 0
 
 

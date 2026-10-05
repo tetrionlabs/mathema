@@ -115,8 +115,8 @@ A few consequences worth knowing:
 - **The computation-safety hierarchy credits existing sources.** Every
   safety family maps to one source of uncertainty in the *how safely it
   runs* dimension: `is_overflow_safe` credits the representation source
-  beside `is_extremity_safe` and `is_pole_safe`, `is_recursion_safe`
-  credits the accidental-crash source beside `is_arbitrary_input_safe`,
+  beside `is_pole_safe`, `is_recursion_safe` credits the accidental-crash
+  source beside `is_language_defined`,
   and `is_empty_safe` the missing-value source beside `is_missing_safe`.
   `is_computation_safe` and `is_repeatable` credit nothing themselves,
   since their children do. The reserved families (`is_precision_safe`,
@@ -154,11 +154,12 @@ a regression.
 
 `@1.2` changed how a call is charged. Under `@1.1` a call into a library
 some compendium file covered cost half a bit, cleared by a verified
-`is_compendium_safe` claim on the caller, and any other call outside the
+`is_library_safe` claim (then spelled `is_compendium_safe`) on the
+caller, and any other call outside the
 standard library cost two bits nothing could clear; your own helpers
 counted as the second kind. Under `@1.2` every call costs two bits,
 cleared only by the callee's own recorded definedness evidence, as
-described above, and `is_compendium_safe` no longer reduces anything (it
+described above, and `is_library_safe` no longer reduces anything (it
 is still a claim you can state and check). Scores move down for a
 function calling a covered library function whose rows are not verified
 in your store, including a standard-library function like `math.exp`,

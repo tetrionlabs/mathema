@@ -241,6 +241,21 @@ def resolve(target: str, root: str = ".", *,
                     else "module")
             return Target(kind, found, target if kind == "module" else None,
                           root, skipped)
+        walked = _prefix_walk(f"{mod_part}.{qual_part}", root)
+        if (walked is not None and callable(walked[2])
+                and not inspect.isclass(walked[2])
+                and not inspect.isfunction(walked[2])):
+            # a callable discovery never lists (a C builtin, a ufunc,
+            # a library's dispatcher object) found at the named
+            # attribute: the same function the dotted spelling names
+            return _walked_target(walked, target, root, skipped)
+        if not _inside_root(mod_part, root):
+            # a library installed outside the project: the name is read
+            # as an attribute only, never searched for by importing
+            # every submodule (some run a program when imported)
+            if walked is not None:
+                return _walked_target(walked, target, root, skipped)
+            raise TargetError(_no_such_attribute(mod_part, qual_part))
         if "." not in qual_part:
             # bare-suffix search: `pkg:name` matches `name` anywhere
             # under the package when that suffix is unique
@@ -270,6 +285,52 @@ def resolve(target: str, root: str = ".", *,
                 hint = "; did you mean: " + ", ".join(matches[:3]) + "?"
         raise TargetError(
             f"no function named {what!r} found under {mod_part!r}{hint}")
+
+
+def _inside_root(module_name: str, root: str) -> bool:
+    """Intent:
+        Whether the imported module `module_name` is a file under the
+        project `root`, rather than an installed library (anything in a
+        site-packages directory, a virtual environment inside the project
+        included).
+    """
+    import site
+    import sysconfig
+    mod = sys.modules.get(module_name)
+    path = getattr(mod, "__file__", None)
+    if not path:
+        return False
+    path = os.path.abspath(path)
+    installed = {sysconfig.get_paths().get(k) for k in ("purelib", "platlib")}
+    installed |= set(site.getsitepackages()) | {site.getusersitepackages()}
+    if any(d and path.startswith(os.path.abspath(d) + os.sep)
+           for d in installed):
+        return False   # a virtual environment inside the project counts as installed
+    return path.startswith(os.path.abspath(root) + os.sep)
+
+
+def _no_such_attribute(module_name: str, name: str) -> str:
+    """Intent:
+        The one-line message for `module:name` when the module has no
+        such attribute, with the nearest names it does have.
+    """
+    import difflib
+    mod = sys.modules.get(module_name)
+    # the module's own namespace, never `dir()`/`getattr`, which can
+    # import a library's lazily loaded submodules
+    names = [n for n, v in vars(mod).items() if not n.startswith("_")
+             and callable(v) and not inspect.isclass(v)] if mod is not None else []
+    close = difflib.get_close_matches(name, names, n=3, cutoff=0.6)
+    if close:
+        hint = f"did you mean {', '.join(f'{module_name}:{c}' for c in close)}?"
+    elif names:
+        hint = (f"name one with {module_name}:NAME, for example "
+                f"{module_name}:{names[0]}")
+    else:
+        return (f"{module_name} has no function {name!r} at its top level; "
+                f"name the module that defines it, for example "
+                f"{module_name}.module:{name}")
+    return f"{module_name} has no function {name!r}; {hint}"
 
 
 def _walked_target(walked, target: str, root: str, skipped: list) -> Target:

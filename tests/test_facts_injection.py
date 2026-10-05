@@ -44,7 +44,7 @@ def test_derive_route_degrades_honestly_with_no_tree():
     # evidence, never proof, with the derive gap stated in the record
     # (route supersession: a probe holds supersedes a derive unknown)
     assert p.verdict == "holds", (p.verdict, p.note)
-    assert "underivable" in (p.note or "")
+    assert "underivable" in p.meta["mathema.routes_attempted"]
     from mathema.reason_codes import ClaimReasonCode, claim_reason_code
     assert claim_reason_code(p) in (ClaimReasonCode.DERIVE_GAP_EMPIRICAL,
                                     None) and "derive" in (p.note or "")

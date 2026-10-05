@@ -45,17 +45,17 @@ def test_critical_hint_ignores_a_fold_shaped_function(tmp_path):
     assert _critical_hint(mod.ema, facts, {}) == {}
 
 
-def test_derive_falsifies_is_numerically_stable_at_an_interior_pole(tmp_path):
-    # a declared domain that provably contains a pole is now settled by
-    # the registered is_numerically_stable family's own derive route
-    # (domain_hazards()-based), a real proof, not a sample. See
+def test_derive_falsifies_is_pole_safe_at_an_interior_pole(tmp_path):
+    # a declared domain that provably contains a pole is settled by the
+    # is_pole_safe family's own derive route (is_numerically_stable is
+    # accuracy only), with an executed witness, not a sample. See
     # test_probe_semi_analytical_route_pinned_to_probe below for the
     # probe-route sampling mechanics this file is otherwise about.
     mod = _load(tmp_path, "interior_pole_fixture",
                "def f(x: float) -> float:\n"
                "    return 1 / (x - 0.37)\n")
     r = mathema.check(mod.f, domain={"x": (-1.0, 1.0)}, trials=32)
-    st = next(p for p in r.probes if p.name == "is_numerically_stable")
+    st = next(p for p in r.probes if p.name == "is_pole_safe[x]")
     assert st.verdict == "falsified"
     assert st.route == "examine"
 

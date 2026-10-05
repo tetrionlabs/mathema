@@ -50,15 +50,9 @@ def _definition_rows(relative: str) -> list:
 def _expected_battery_skips(relative: str) -> list:
     """The `callable`-battery rows `verify` is expected to report skipped
     for a bundled file on the installed library, as `<key>: 1 skipped
-    claim(s)`. Before numpy 2.4, `numpy.sum` is a Python wrapper whose
-    source writes to its `out` argument, which the purity analysis reads
-    as an effect, so its `purity` row is skipped there; the definition
-    row itself holds on every numpy the file covers."""
-    if relative != "numpy/definitions.claims.yaml":
-        return []
-    import numpy
-    if tuple(int(part) for part in numpy.__version__.split(".")[:2]) < (2, 4):
-        return ["numpy.sum: 1 skipped claim(s)"]
+    claim(s)`: none. `numpy.sum` before numpy 2.4 is a Python wrapper
+    whose source writes to its `out` argument; its battery is judged at
+    the default call (`out=None`), where nothing is written."""
     return []
 
 
@@ -69,6 +63,7 @@ def _record_rows(root, key: str) -> dict:
     return {c["name"]: c for c in entry["claims"]}
 
 
+@pytest.mark.third_party_compendiums
 @pytest.mark.parametrize("relative", _FILES)
 def test_every_bundled_definition_row_holds_against_the_installed_library(
         tmp_path, relative):
@@ -95,9 +90,9 @@ def test_every_bundled_definition_row_holds_against_the_installed_library(
 def test_the_numbers_of_bundled_definition_rows():
     counted = {relative: len(_definition_rows(relative))
                for relative in _FILES}
-    assert counted == {"numpy/reductions.claims.yaml": 5,
-                       "numpy/definitions.claims.yaml": 13,
-                       "numpy/definitions_2_4.claims.yaml": 1,
+    assert counted == {"numpy/reductions.claims.yaml": 8,
+                       "numpy/definitions.claims.yaml": 16,
+                       "numpy/definitions_2_4.claims.yaml": 2,
                        "pandas/series.claims.yaml": 10,
                        "polars/series.claims.yaml": 11}
 

@@ -98,13 +98,15 @@ def test_record_states_the_default_tolerance(tmp_path):
         assert entry.get("tolerance") == 1e-9, key
 
 
-def test_skip_reason_rides_note_not_statement(tmp_path):
+def test_the_effects_ride_the_record_meta_not_a_skipped_row(tmp_path):
+    # a check mathema does not run leaves no row; the effects examine
+    # finds are stated in the record's meta
     env = _project(tmp_path)
     _verify(tmp_path, env, "--lenient")
     _, entry = _records(tmp_path)["rpkg.mod.impure"]
-    purity = next(r for r in entry["claims"] if r["name"] == "purity")
-    assert not purity.get("statement")
-    assert "algebraic probing" in (purity.get("note") or "")
+    assert not any(r["name"] == "purity" for r in entry["claims"])
+    assert "rebinds the module-level _COUNT" in \
+        entry["meta"]["mathema.effects"]["line"]
 
 
 def test_reverify_all_is_crash_free_and_byte_stable(tmp_path):
@@ -222,7 +224,7 @@ def _mini(tmp_path, statement):
     return env
 
 
-def test_born_falsified_claim_teaches_the_cheap_experiment(tmp_path):
+def test_initially_falsified_claim_teaches_the_cheap_experiment(tmp_path):
     # a claim that falsifies on its FIRST adjudication is a failed
     # authoring experiment, and it is permanent until a human signs it
     # off (membership never silently shrinks, by design). Nothing

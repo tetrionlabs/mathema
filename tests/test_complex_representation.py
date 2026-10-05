@@ -48,14 +48,14 @@ def test_a_claim_over_c_spawns_a_complex_companion():
     comp = rows["sq[complex]"]
     assert companion_descriptor(comp.name) == ("complex",)
     assert comp.meta.get("mathema.companion_of") == "sq"
-    assert "the computation of sq in complex128" in comp.note, comp.note
+    assert "the complex128 computation of sq" in comp.note, comp.note
     assert comp.verdict == "holds", (comp.counterexample, comp.note)
 
 
 def test_a_claim_over_r_keeps_the_float_companion():
     rows = _rows(rsq, "for x in [-3, 3], f(x) >= 0")
     assert "sq[float]" in rows and "sq[complex]" not in rows
-    assert "in float64" in rows["sq[float]"].note
+    assert "the float64 computation of sq" in rows["sq[float]"].note
 
 
 def test_the_c_sampler_draws_both_components_far_as_well():

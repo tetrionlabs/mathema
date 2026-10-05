@@ -24,10 +24,10 @@ def not_heat_sol(t, x):
 
 
 def _point(text: str) -> dict:
-    """The `name=value` pairs of a rendered counterexample, a list
+    """The `name = value` pairs of a rendered counterexample, a list
     value kept whole."""
     return {m.group(1): ast.literal_eval(m.group(2))
-            for m in re.finditer(r"(\w+)=(\[[^\]]*\]|[^,]+)", text)}
+            for m in re.finditer(r"(\w+) = (\[[^\]]*\]|[^,]+)", text)}
 
 
 @pytest.mark.needs_full_proof_budget

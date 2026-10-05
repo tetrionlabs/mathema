@@ -62,7 +62,7 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 
 <!-- example: parity output -->
 ```text
-ok   options.put_call_parity_gap: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   options.put_call_parity_gap: source, no side effects; claims 7/7 adjudicated (1 proven, 6 holds, 0 falsified)
 ```
 
 Everything before the last comma is the domain and everything after it is the
@@ -75,8 +75,12 @@ that proof's `[float]` companion, a separate claim that runs the same identity
 through the real code in floating point at the region's corners and across its
 interior, because a proof is about the mathematics and whether its
 computation keeps up with it in float64 is a different question, answered here
-by `holds`. The [claim grammar](https://mathema.tetrionlabs.com/grammar/) has
-the full notation.
+by `holds`. The other five rows are policy claims, one per parameter,
+saying what the function does with a missing value (`missing(f, s)
+propagates`: a `nan` in gives a `nan` back), each checked on the calls
+already made; [missing values](https://mathema.tetrionlabs.com/missing-values/)
+explains them. The [claim grammar](https://mathema.tetrionlabs.com/grammar/)
+has the full notation.
 
 The domain is doing real work: drop it and the same claim comes back
 `falsified`, with a counterexample at a negative maturity where `math.sqrt(t)`
@@ -132,7 +136,7 @@ mathema check sigmoid.py \
 
 <!-- example: sigmoid output -->
 ```text
-ok   sigmoid.logistic: source, no side effects; claims 5/5 adjudicated (4 proven, 1 holds, 0 falsified)
+ok   sigmoid.logistic: source, no side effects; claims 6/6 adjudicated (4 proven, 2 holds, 0 falsified)
 ```
 
 ## When the code is wrong
@@ -155,15 +159,16 @@ print(mathema.check(discount_factor))
 <!-- example: pole output match=subset -->
 ```text
 mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
-  FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
+  falsified monotonic_increasing[x]: d(f(x), x) >= 0
            counterexample x = 1
-  FALSIFY even: f(-x) = f(x)
+  falsified even: f(-x) = f(x)
            counterexample x = -1
-  proven  is_deterministic: f(x) = f(x)
-  proven  is_defined: 1 - x != 0
-  FALSIFY is_pole_safe[x]: is_pole_safe(x)
+  proven    is_deterministic: f(x) = f(x)
+           missing for x (float) means nan
+  proven    is_defined: 1 - x != 0
+  falsified is_pole_safe[x]: is_pole_safe(x)
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
-  FALSIFY is_representation_safe[x]: is_representation_safe(x)
+  falsified is_representation_safe[x]: is_representation_safe(x)
            counterexample x = 1 (the int spelling) is admitted by the declared domain but the call raised ZeroDivisionError
            [implementation:representation]
 ```
@@ -196,9 +201,12 @@ the function is locked                  (mathema lock)
 ```
 
 No tool exposed over MCP accepts a verdict from its caller, and claim
-expressions are validated against a strict AST whitelist before they run, so
-a claim from an untrusted source can do no more than evaluate mathematics over
-the function (the function itself runs as it would in its own tests; see
+expressions are validated against a strict AST whitelist before they run. A
+claim can call the function under test, mathema's helpers and the functions it
+binds with `let`; a binding that reaches the system (`os`, `subprocess` and
+the like) is refused, and a binding into third-party code runs as it would if
+you imported it yourself, with a warning in the output (the function itself
+runs as it would in its own tests; see
 [Security and execution](https://mathema.tetrionlabs.com/security/)). `mathema accept` prints the
 exact write before making it, and lets a person accept evidence as sufficient,
 own a residual risk explicitly, or correct a claim the falsification showed
@@ -374,7 +382,8 @@ pip install "mathema[all]"    # numpy, z3, MCP server, coverage
 
 The extras can also be taken one at a time: `mcp` exposes mathema's tools to
 an agent, `smt` adds z3 as a fallback decision procedure, `numpy` enables
-array-shaped claims, `coverage` reads a native `.coverage` report,
+array-shaped claims, `pandas` and `polars` sample a parameter annotated with
+their Series or DataFrame types, `coverage` reads a native `.coverage` report,
 `symbology` adds conventional notation and `language` brings the named
 languages a claim quantifies text and structured values over.
 

@@ -709,7 +709,8 @@ def test_affine_local_branch_with_no_domain_lifts_piecewise_but_stays_honest():
     # and the actionable domain hint survives in the sketch
     results = check_conjectures(denom_local, [claim("f(x, y) >= 0", route="derive")])
     assert results[0].verdict == "falsified"
-    assert "routes attempted" in results[0].note and "derive: undecided" in results[0].note
+    trail = results[0].meta["mathema.routes_attempted"]
+    assert "routes attempted" in trail and "derive: undecided" in trail
     assert "needs a domain specific enough" in results[0].note
 
 
@@ -962,7 +963,8 @@ def test_lift_dot_closed_form_matches_real_execution():
 
 def test_dot_claim_reflexivity_proven():
     results = check_conjectures(
-        dot_ab, [claim("f(a, b) == f(a, b)", route="derive")])
+        dot_ab, [claim("for a in R^n, b in R^n, f(a, b) == f(a, b)",
+                       route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -997,7 +999,8 @@ def test_dot_claim_law_can_call_a_math_function():
     # own sign-decidability gap on an unassumed Abs is a separate,
     # pre-existing limitation this test isn't meant to close.
     results = check_conjectures(
-        dot_ab, [claim("abs(f(a, b)) >= 0.0", route="derive")])
+        dot_ab, [claim("assuming len(a) == len(b), abs(f(a, b)) >= 0.0",
+                       route="derive")])
     haystack = (results[0].sketch or "") + (results[0].note or "")
     assert "NameError" not in haystack
     assert "Abs(" in haystack
@@ -1162,7 +1165,8 @@ def test_lift_sum_two_pass_variance_closed_form_matches_real_execution():
 
 def test_sum_claim_index_dot_reflexivity_proven():
     results = check_conjectures(
-        index_dot, [claim("f(a, b) == f(a, b)", route="derive")])
+        index_dot, [claim("for a in R^n, b in R^n, f(a, b) == f(a, b)",
+                          route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1273,15 +1277,22 @@ def test_fold_claim_symbolic_alpha_is_falsified_never_falsely_proven():
 
 
 def test_fold_claim_wrong_argument_count_is_skipped_not_an_error():
+    # f(x) cannot bind to ema(x, alpha): the claim is misspecified
     results = check_conjectures(ema, [claim("f(x) == x[-1]", route="derive")])
-    assert results[0].verdict == "unknown"
+    assert results[0].verdict == "skipped:misspecified"
 
 
 def test_fold_claim_non_bare_first_argument_is_skipped():
-    # the fold lift declines the sliced argument; probing then
-    # evaluates the slice for real, and with alpha = 1.0 the average
-    # collapses to the last element, so the claim holds empirically
+    # the fold lift declines the sliced argument, and probing evaluates
+    # the slice for real: a single element leaves x[1:] empty, where
+    # ema raises, a witness at length 1
     results = check_conjectures(ema, [claim("f(x[1:], 1.0) == x[-1]", route="derive")])
+    assert results[0].verdict == "falsified"
+    assert results[0].counterexample.startswith("x = [")
+    # from two elements on, with alpha = 1.0 the average collapses to
+    # the last element, so the claim holds empirically
+    results = check_conjectures(ema, [claim(
+        "assuming len(x) >= 2, f(x[1:], 1.0) == x[-1]", route="derive")])
     assert results[0].verdict == "holds"
 
 
@@ -1419,7 +1430,7 @@ def test_proven_scalar_claim_quantifier_reflects_a_declared_domain():
     results = check_conjectures(
         clamp01, [claim("for x in [0, 1], f(x) == x", route="derive")])
     assert results[0].verdict == "proven"
-    assert results[0].condition == "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
+    assert results[0].condition == "∀ x ∈ [0.0, 1.0] ⊂ ℝ"
 
 
 def test_proven_fold_claim_quantifies_over_the_sequence():
@@ -1452,7 +1463,7 @@ def test_quantifier_groups_shared_domains_and_remaps_long_names():
         "some_var + some_other_var + other_var", route="derive")])
     assert results[0].verdict == "proven"
     assert results[0].condition == \
-        "where x=some_var, y=some_other_var, z=other_var: ∀ x, y ∈ ℝ, z ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
+        "where x=some_var, y=some_other_var, z=other_var: ∀ x, y ∈ ℝ, z ∈ [0.0, 1.0] ⊂ ℝ"
 
 
 def test_disproven_and_undecided_claims_have_no_quantifier():

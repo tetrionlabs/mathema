@@ -4,6 +4,138 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## 0.6.1
 
+- `is_library_safe(numpy)` is the view of definedness over a library's
+  calls only; `is_compendium_safe` is still read as an accepted
+  spelling, and the record says so.
+- An `int` annotation completes a binding that states no type to the
+  integers: `for n in [0, 10]` on `n: int` is `for n in [0, 10] : int`,
+  rendered so, and every route (derive, the probe, the exhaustive
+  sweep, the safety families) reads the integers. A type the claim
+  states wins in either direction, and the record says so: `[0, 10] ⊂ R`
+  widens an `int` parameter to the reals, `: int` narrows a `float` one.
+  The fingerprint of every claim over an `int`-annotated parameter with
+  an untyped binding moves once with this change.
+- A pin is written in the call. `let alpha be 2` naming a parameter of f
+  pins it for every call, and the claim is now written with the pin in
+  the call: `let alpha be 2, for x in R^n, f(x) == 2 * x[0]` reads `for
+  x in R^n, f(x, alpha=2) == 2 * x[0]`. The `let` form is still accepted
+  as input, and a statement that calls f nowhere (an `is_defined` region
+  row) keeps it. The bundled pinned rows are written in the call form
+  and keep their names (`definition@axis=1` states `f(a, axis=1) ~=
+  sum(a, axis=1)`). The fingerprint of every claim written with a pin
+  moves once with this change.
+- A policy claim states what a function does with a value that is not
+  there: `missing(f, x) propagates`, `absent(f, x) raises(TypeError)`,
+  `missing(f, xs, null) drops`, with an optional premise (`assuming
+  count(xs) >= 1, ...`). mathema writes one for every parameter that
+  admits a kind, from a library's row, from a guard in the code, from
+  what the code did, or as the default for the type (propagates for a
+  hole, raises for absence), and checks each; `mathema claims KEY` lists
+  them and `--write` puts every one in claims/policies.claims.yaml, a
+  contradicted one with the contradiction in its note, where changing a
+  policy is editing one word. The bundled math, numpy, pandas and polars
+  compendiums carry their policy rows.
+- `is_missing_safe(f)` is about holes only and `is_absent_safe(f)` about
+  absence (before, `is_missing_safe(f)` covered `None` too); `mathema
+  claims KEY --suggest` offers both. A gate is proven only when every
+  admitted member's policy is derived (a guard in the code, a library's
+  own row) or stated and confirmed; what the code was only seen to do
+  holds, and a row the code contradicts keeps the gate from proven.
+  `is_absent_safe(f)` also calls the function at inputs with nothing
+  missing, so an undeclared `None` return fails it.
+- `@enforce_domain()` reads the policy rows. A `raises` row refuses the
+  input before the function runs, with the exception the row names
+  (`absent(f, x) raises(TypeError)` gives a `TypeError`: "enforce_domain
+  is active and raised TypeError because x is None"), or mathema's
+  `DomainError` where it names none; a `drops` or `propagates` row is
+  checked on the result and raises `MissingValueError`, a kind of
+  `DomainError`.
+- Fingerprints move once in 0.6.1: the rendered domain now states what
+  it admits. A value can be not there in two ways: absent (`absent`;
+  Python spells it `None`), the object itself not there, and missing
+  (`missing`, `∅` in unicode), one slot holding no computable value,
+  with the members `nan`, `NA`, `null` and `NaT`. A domain renders only
+  what it admits: `[0.0, 1.0] : float|missing` in ASCII, `[0.0, 1.0] ⊂ ℝ
+  ∪ {∅}` in unicode, a space's slot holes in brackets before the power
+  (`([0.0, 1.0] | {missing})^n : float`). A type clause states exactly
+  what the domain admits (`[0, 100] ⊂ Z` now admits no missing value), a binding without
+  one is completed from the annotation (a `float` holds `nan`, an `int`
+  or `str` nothing, `Optional[...]` may be absent), the record's
+  `meta["mathema.missing"]` states the members the class resolved to,
+  and a finite set is exactly its members (`{0.25, absent}` is 0.25 and
+  absence). Every
+  earlier spelling still reads and comes back in the new form. `mathema
+  verify` re-records a claim whose record differs only by this change
+  and says so once for the run, not claim by claim.
+- A record writes a sentinel as its word, `{"sentinel": "missing"}`,
+  and reads the older `__mathema_missing__` as `missing`.
+- A function is called with the real value a listed word stands for
+  (`None`, `nan`, `pd.NA`), never with a placeholder of mathema's own;
+  each is tried at least once per claim, and the record lists what was
+  tried (`meta["mathema.missing"]`).
+- A runtime's missing values are stated as definition rows under a
+  key's `defines:` (`missing := {null, nan}`), taken at face value
+  (`verdict: trusted`, `route: axiom`); `mathema verify` lists a
+  project's own under `definitions (trusted)`. `:=` is refused in a claim and in a
+  binding. mathema ships `polars.Series` and `pandas.Series` definitions,
+  and the bundled definition rows state `R^n` without `\ {∅}`.
+- A `raises(...)` claim over a finite domain is proven by calling the
+  function at every point.
+- A value claim is judged wherever the function returns a value, a
+  missing input it replaces included, and never where it returns a
+  missing value: that point is recorded in the record's missing
+  behaviour, not compared. A raise at a missing input is recorded the
+  same way and, where no claim accounts for it, reported in the row's
+  note and on `mathema verify`'s line for the function. A value claim
+  with no point left to compare is `unknown`, and its note says what to
+  write instead. `meta["mathema.missing"]` records what the function did at
+  each missing input it was called with (`executed`) and the behaviour
+  per parameter and member (`behaviour`: `raises`, `drops`,
+  `propagates`, `converts` or `introduces`, or `mixed` with a witness
+  for each).
+- A claim over a vector, a matrix or a table meets the degenerate
+  containers first (the zero and a constant vector, a vector of length
+  1, all-missing vectors, a missing value at the first and at the last
+  position, the zero, constant and rank-deficient matrices, a missing
+  entry and an all-missing row, a missing value in every column and an
+  all-missing column); a random vector then has each slot missing with
+  probability 0.15, at least one and at most three slots per vector,
+  each admitted member in turn. A float companion runs these too.
+- `sum`, `mean`, `std`, `var`, `min`, `max`, `prod`, `median`,
+  `quantile`, `dot`, `cumsum`, `cumprod` and `count` in a claim read the
+  values of a vector, a missing value left out. Over no value `sum` is
+  0, `prod` 1, `count` 0, `dot` and `norm` 0, and `mean`, `std`, `var`,
+  `min`, `max`, `median` and `quantile` are missing; `len` counts every
+  position. The bundled `polars.Series.count` row counts `null` slots
+  as missing and `nan` slots as values.
+- A definition row may define `absent` (`absent := {Option::None}`); one
+  value may be both the absence and a hole member, and two hole members
+  that are one value are refused at load.
+- A record says in one sentence what the function did at each missing
+  input it was called with (`at x = nan f gave nan back`, `at x = None
+  f raised TypeError`); what to do about it is said once, on the policy
+  row. A declared `Optional` return's `None` is recorded, not judged; a
+  row's count reads `(43 draws)`, or for a container `(257 entries
+  across 57 draws, sizes (1, 1) to (8, 1))`.
+- A policy row mathema writes that the code contradicts, and a raise no
+  claim accounts for, are falsified and fail `verify` and `check` like
+  any falsified claim; the row's second line names the word to write,
+  and `mathema accept KEY missing[x] --as discovery --corrected "..."`
+  retires it with its witness.
+- Along a path, where the `None` sits decides the kind: a field or key
+  holding `None` is absent (member `null`), a key left out, an index
+  past the end or a step below an absent object is absent (member
+  `unset`), and an element of a list holding `None` is a hole (member
+  `null`). `\ {null}` and `\ {unset}` narrow a path binding; `null`
+  written for a parameter itself is its absence. A field's or key's
+  no-value is a missing input: a raise there is recorded and said
+  (`at d.note, a key left out, f raised KeyError`), the path has a
+  policy row (`absent(f, d.note, unset) drops`, `absent[d.note,
+  unset]`), and `is_absent_safe(f)` reaches into a record's optional
+  fields. A witness names what a path reached (`d.note unset`,
+  `o.lines[1] = null (hole)`).
+- Every witness names its arguments, `x = nan, alpha = 0.5`; a
+  parameter the claim never reads is left out.
 - `is_memory_safe` is not part of this release: it is named nowhere,
   and a claim naming it fails as an unknown predicate does, with one
   sentence saying the family is planned.

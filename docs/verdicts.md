@@ -33,6 +33,76 @@ own an `unknown` or `skipped` gap, with their name, the date and their
 note. It stays visible in every report, and strict `verify` still refuses
 it. See [`mathema accept`](modes/accept.md).
 
+## Reading a record
+
+`print(mathema.check(...))` shows each claim as a block: a headline, then
+the lines its verdict rests on. A pricing helper that clamps a rate into
+`[0, 1]`:
+
+<!-- example: reading file=pricing.py -->
+```python
+def clamp_discount(rate: float) -> float:
+    """A discount rate clamped into [0, 1]."""
+    return max(0.0, min(1.0, rate))
+```
+
+<!-- example: reading run -->
+```python
+import mathema
+from pricing import clamp_discount
+
+print(mathema.check(clamp_discount, claims=[mathema.claim(
+    "for rate in R, 0 <= f(rate) <= 1", name="in_unit")]))
+```
+
+<!-- example: reading output -->
+```text
+mathema.Record(clamp_discount) · source, no side effects · form bc9fa73b5bd1
+  in_unit  for rate in R|missing, 0 <= f(rate) <= 1   falsified at rate = nan
+    proven     mathematics  for rate in R, 0 <= f(rate) <= 1
+    holds      computation  for rate in R, 0 <= f(rate) <= 1   43 draws
+    falsified  policy       f(nan)   no missing policy stated; returns 1.0
+                            possible fixes:
+                              (i) if dropping nan is intended, run: mathema accept pricing.clamp_discount missing[rate] --as discovery --corrected "missing(f, rate) drops"
+                              (ii) exclude nan
+                              (iii) handle nan at entry
+```
+
+<!-- illustration -->
+```text
+in_unit  <claim as resolved>               falsified at rate = nan    headline: name, claim, verdict, witness
+  proven     mathematics  <claim over R>                              the claim over the real numbers
+  holds      computation  <claim : float>  43 draws                   the same claim run in float64
+  falsified  policy       f(nan)           returns 1.0                an input that is not an ordinary value
+                          possible fixes: (i) ... (ii) ... (iii) ...
+```
+
+- The **headline** shows the claim as mathema resolved it (here
+  `rate in R|missing`, since a float may be `nan`) and its verdict. It is
+  falsified when any line under it is, and carries that line's witness.
+- A **`mathematics`** line is the claim over the numbers, decided by the
+  derive route when it can be, and by sampling when it cannot.
+- A **`computation`** line runs a proven claim through the real code in
+  floating point, at the domain's corners and at sampled points inside
+  it. It can fail where the mathematics holds (an overflow, a NaN), and
+  then it carries the tag `[mathematics sound,
+  implementation:numerical-instability]`.
+- A **`policy`** line covers an input that is not an ordinary value: a
+  missing one (`nan`, a `None` element, pandas' `NA`), an absent one
+  (`None` for an `Optional` parameter), or an empty container. With no
+  policy stated, mathema assumes the default and says so (`no missing
+  policy stated; assumed propagates`); a call that breaks it is the
+  witness. Under a falsified policy line, `possible fixes` lists the
+  ways forward: state the policy, take the value out of the claim's
+  domain, or handle it at the function's entry. In this release
+  `mathema claims KEY --adopt` does not yet accept the policy name the
+  first fix prints; state the policy as a claim instead, here
+  `missing(f, rate) drops`. [Missing values](missing-values.md) covers
+  the policies and how to state one.
+
+A claim with nothing to say beyond its verdict, such as a family fact
+like `is_deterministic` or a claim over integers, prints on one line.
+
 ## What fails the gate
 
 `falsified`, `invalidated` and an unaccepted `unknown` fail `mathema

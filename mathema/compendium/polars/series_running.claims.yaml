@@ -1,0 +1,19 @@
+# Definition rows for the running extrema of a polars.Series, stated
+# over Series with nothing missing; the receiver of `prices.cum_max()`
+# is `a`. The running sum and product are stated in series.claims.yaml.
+# mathema's own test suite verifies each row against the installed
+# polars.
+compendium: polars
+versions: ">=1,<2"
+
+polars.Series.cum_max:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == cummax(a)"
+      note: "Element i is the greatest of elements 0 to i."
+
+polars.Series.cum_min:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == cummin(a)"
+      note: "Element i is the least of elements 0 to i."

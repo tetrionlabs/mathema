@@ -9,68 +9,83 @@ versions: ">=1.24,<3"
 numpy.prod:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= prod(a)"
+      statement: "for a in R^n, f(a) ~= prod(a)"
 
 numpy.cumsum:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= cumsum(a)"
+      statement: "for a in R^n, f(a) ~= cumsum(a)"
       note: "The running sums: element i is the sum of the first i + 1 elements."
+    - name: definition@axis=0
+      statement: "for a in R^(m,n), f(a, axis=0) ~= cumsum(a, axis=0)"
+      note: "The running sums down each column of a matrix."
 
 numpy.cumprod:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= cumprod(a)"
+      statement: "for a in R^n, f(a) ~= cumprod(a)"
       note: "The running products: element i is the product of the first i + 1 elements."
 
 numpy.trace:
   claims:
     - name: definition
-      statement: "for a in R^(n,n) \\ {∅}, f(a) ~= trace(a)"
+      statement: "for a in R^(n,n), f(a) ~= trace(a)"
 
 numpy.transpose:
   claims:
     - name: definition
-      statement: "for a in R^(m,n) \\ {∅}, f(a) == transpose(a)"
+      statement: "for a in R^(m,n), f(a) == transpose(a)"
 
 numpy.linalg.inv:
   claims:
     - name: definition
-      statement: "for a in R^(n,n) \\ {∅}, assuming det(a) != 0, f(a) ~= inv(a)"
+      statement: "for a in R^(n,n), assuming det(a) != 0, f(a) ~= inv(a)"
       note: "A singular matrix raises LinAlgError."
 
 numpy.linalg.det:
   claims:
     - name: definition
-      statement: "for a in R^(n,n) \\ {∅}, f(a) ~= det(a)"
+      statement: "for a in R^(n,n), f(a) ~= det(a)"
 
 numpy.ndarray.mean:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= mean(a)"
+      statement: "for a in R^n, f(a) ~= mean(a)"
       note: "The method `a.mean()`; its receiver is `a`."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.ndarray.std:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= std(a, ddof=0)"
+      statement: "for a in R^n, f(a) ~= std(a, ddof=0)"
       note: "The method `a.std()`: ddof defaults to 0."
     - name: definition@ddof=1
-      statement: "let ddof be 1, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= std(a, ddof=1)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.ndarray.sum:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= sum(a)"
+      statement: "for a in R^n, f(a) ~= sum(a)"
 
 numpy.ndarray.T:
   claims:
     - name: definition
-      statement: "for a in R^(m,n) \\ {∅}, f(a) == transpose(a)"
+      statement: "for a in R^(m,n), f(a) == transpose(a)"
       note: "The attribute `a.T`, the transpose."
 
 numpy.sum:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= sum(a)"
+      statement: "for a in R^n, f(a) ~= sum(a)"
       note: "Stated for a vector: the sum of its elements. Holds by execution on every numpy the file covers."
+    - name: definition@axis=0
+      statement: "for a in R^(m,n), f(a, axis=0) ~= sum(a, axis=0)"
+      note: "The sum of each column of a matrix."
+    - name: definition@axis=1
+      statement: "for a in R^(m,n), f(a, axis=1) ~= sum(a, axis=1)"
+      note: "The sum of each row of a matrix."

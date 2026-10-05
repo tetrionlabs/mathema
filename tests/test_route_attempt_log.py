@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """The cross-route attempt log: a best/derive claim that falls through
-records every route tried and why each did or didn't decide."""
+records every route tried and why each did or didn't decide, in
+`meta["mathema.routes_attempted"]`; the note leads with the deciding
+route's own sentence."""
 from mathema.conjecture import claim, check_conjectures
 
 
@@ -23,9 +25,11 @@ def test_best_over_unliftable_lists_derive_and_probe(monkeypatch):
     monkeypatch.setattr(smt, "available", lambda: False)
     (p,) = check_conjectures(branchy, [claim("f(x) >= 1", route="best")])
     assert p.verdict == "holds"
-    assert "routes attempted" in p.note
-    assert "derive: undecided" in p.note   # piecewise lifted, sign unsettled
-    assert "probe: holds" in p.note
+    trail = p.meta["mathema.routes_attempted"]
+    assert "routes attempted" in trail
+    assert "derive: undecided" in trail   # piecewise lifted, sign unsettled
+    assert "probe: holds" in trail
+    assert "the probe decided it" in p.note and "routes attempted" not in p.note
 
 
 def test_best_escalates_to_an_nlsat_proof_when_available():
@@ -43,3 +47,4 @@ def test_derive_proof_leaves_no_probe_line():
     (p,) = check_conjectures(sq, [claim("d(f(x), x) == 2*x", route="best")])
     assert p.verdict == "proven"
     assert "routes attempted" not in (p.note or "")
+    assert "mathema.routes_attempted" not in (p.meta or {})

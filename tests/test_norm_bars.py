@@ -9,8 +9,9 @@ same route. The order is never a superscript, so `||x||^2` is the
 square of the norm. A written `||x||` renders back as written, `||x||`
 in ascii and `‖x‖` in unicode with the order a subscript glyph, and a
 written `norm(x)` stays the call. The record's note names the norm a
-bare `||x||` resolves to: Euclidean for a vector, Frobenius for a
-matrix. Any other order is refused with the accepted orders named.
+bare `||x||` or `norm(x)` resolves to, in the spelling written:
+Euclidean for a vector, Frobenius for a matrix. Any other order is
+refused with the accepted orders named.
 """
 from __future__ import annotations
 
@@ -110,42 +111,42 @@ def test_bars_that_do_not_pair_are_still_refused(bad):
 
 @pytest.mark.parametrize("law, ascii_form, unicode_form", [
     ("for x in R^n, ||x|| >= 0",
-     "for x in R^n|missing, ||x|| >= 0",
-     "∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖ ≥ 0"),
+     "for x in (R | {missing})^n|absent, ||x|| >= 0",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x‖ ≥ 0"),
     ("for x in R^n, ||x||_1 >= ||x||_2",
-     "for x in R^n|missing, ||x||_1 >= ||x||_2",
-     "∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖₁ ≥ ‖x‖₂"),
+     "for x in (R | {missing})^n|absent, ||x||_1 >= ||x||_2",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x‖₁ ≥ ‖x‖₂"),
     ("for x in R^n, ||x||_inf <= ||x||_1",
-     "for x in R^n|missing, ||x||_inf <= ||x||_1",
-     "∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖∞ ≤ ‖x‖₁"),
+     "for x in (R | {missing})^n|absent, ||x||_inf <= ||x||_1",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x‖∞ ≤ ‖x‖₁"),
     ("for x in R^n, ||x||_oo <= ||x||_1",
-     "for x in R^n|missing, ||x||_inf <= ||x||_1",
-     "∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖∞ ≤ ‖x‖₁"),
+     "for x in (R | {missing})^n|absent, ||x||_inf <= ||x||_1",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x‖∞ ≤ ‖x‖₁"),
     ("for x in R^n, ||x||_∞ <= ||x||_1",
-     "for x in R^n|missing, ||x||_inf <= ||x||_1",
-     "∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖∞ ≤ ‖x‖₁"),
+     "for x in (R | {missing})^n|absent, ||x||_inf <= ||x||_1",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x‖∞ ≤ ‖x‖₁"),
     ("for x in R^n, ||x||_12 <= ||x||_1",
-     "for x in R^n|missing, ||x||_12 <= ||x||_1",
-     "∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖₁₂ ≤ ‖x‖₁"),
+     "for x in (R | {missing})^n|absent, ||x||_12 <= ||x||_1",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x‖₁₂ ≤ ‖x‖₁"),
     ("for x in R^n, ||x||^2 == dot(x, x)",
-     "for x in R^n|missing, ||x||^2 = dot(x, x)",
-     "∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖^2 = dot(x, x)"),
+     "for x in (R | {missing})^n|absent, ||x||^2 = dot(x, x)",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x‖^2 = dot(x, x)"),
     ("for x in R^n, y in R^n, ||x - y|| <= ||x|| + ||y||",
-     "for x in R^n|missing, y in R^n|missing, ||x - y|| <= ||x|| + ||y||",
-     "∀ x ∈ ℝⁿ ∪ {∅}, y ∈ ℝⁿ ∪ {∅}, ‖x - y‖ ≤ ‖x‖ + ‖y‖"),
+     "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, ||x - y|| <= ||x|| + ||y||",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, y ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x - y‖ ≤ ‖x‖ + ‖y‖"),
     ("for A in R^(n,n), ||A||_2 <= ||A||",
-     "for A in R^(n,n)|missing, ||A||_2 <= ||A||",
-     "∀ A ∈ ℝⁿˣⁿ ∪ {∅}, ‖A‖₂ ≤ ‖A‖"),
+     "for A in (R | {missing})^(n,n)|absent, ||A||_2 <= ||A||",
+     "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {absent}, ‖A‖₂ ≤ ‖A‖"),
     ("∀ x ∈ ℝⁿ, ‖x‖₂ ≤ ‖x‖₁",
-     "for x in R^n|missing, ||x||_2 <= ||x||_1",
-     "∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖₂ ≤ ‖x‖₁"),
+     "for x in (R | {missing})^n|absent, ||x||_2 <= ||x||_1",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x‖₂ ≤ ‖x‖₁"),
     # the words stay the words
     ("for x in R^n, norm(x) >= 0",
-     "for x in R^n|missing, norm(x) >= 0",
-     "∀ x ∈ ℝⁿ ∪ {∅}, norm(x) ≥ 0"),
+     "for x in (R | {missing})^n|absent, norm(x) >= 0",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, norm(x) ≥ 0"),
     ("for x in R^n, norm(x, 2) <= norm(x, 1)",
-     "for x in R^n|missing, norm(x, 2) <= norm(x, 1)",
-     "∀ x ∈ ℝⁿ ∪ {∅}, norm(x, 2) ≤ norm(x, 1)"),
+     "for x in (R | {missing})^n|absent, norm(x, 2) <= norm(x, 1)",
+     "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, norm(x, 2) ≤ norm(x, 1)"),
 ])
 def test_a_norm_renders_as_the_author_spelled_it(law, ascii_form, unicode_form):
     cj = claim(law)
@@ -161,13 +162,13 @@ def test_a_norm_renders_as_the_author_spelled_it(law, ascii_form, unicode_form):
 def test_the_canonical_text_writes_every_infinity_spelling_as_inf():
     texts = {canonical_claim_text(claim(f"for x in R^n, ||x||_{spelling} <= ||x||_1"))
              for spelling in ("inf", "oo", "∞")}
-    assert texts == {"for x in R^n|missing, norm(x, inf) <= norm(x, 1)"}
+    assert texts == {"for x in (R | {missing})^n|absent, norm(x, inf) <= norm(x, 1)"}
 
 
 def test_a_norm_of_a_bar_term_keeps_the_call_spelling():
     cj = claim("for x in R^n, ||abs(x)|| == ||x||")
     assert render_claim_text(cj, unicode=False) == \
-        "for x in R^n|missing, norm(|x|) = ||x||"
+        "for x in (R | {missing})^n|absent, norm(|x|) = ||x||"
 
 
 @pytest.mark.parametrize("law", [
@@ -195,7 +196,7 @@ def test_the_two_spellings_are_one_claim_with_one_fingerprint():
     words = claim("for x in R^n, norm(x, 2) <= 1")
     assert (bars.lhs, bars.rhs) == (words.lhs, words.rhs)
     assert canonical_claim_text(bars) == canonical_claim_text(words) \
-        == "for x in R^n|missing, norm(x, 2) <= 1"
+        == "for x in (R | {missing})^n|absent, norm(x, 2) <= 1"
     assert fingerprint_text(bars) == fingerprint_text(words)
     # the display keeps each author's spelling
     assert render_claim_text(bars, unicode=False).endswith("||x||_2 <= 1")
@@ -273,7 +274,7 @@ def test_every_infinite_order_in_the_call_form_lowers_to_inf(spelling):
     cj = claim(f"for x in R^n, norm(x, {spelling}) <= norm(x, 1)")
     assert cj.lhs == "norm(x, inf)"
     assert canonical_claim_text(cj) == \
-        "for x in R^n|missing, norm(x, inf) <= norm(x, 1)"
+        "for x in (R | {missing})^n|absent, norm(x, inf) <= norm(x, 1)"
 
 
 def test_a_nested_norm_order_is_lowered_too():
@@ -313,7 +314,8 @@ def largest_magnitude(x: np.ndarray) -> float:
     ("||x||_inf", "proven"),
     ("‖x‖∞", "proven"),
     ("norm(x, oo)", "proven"),
-    # the control: the wrong order is caught on the same path
+    # the control: the wrong order is caught on the same path, at a
+    # vector with entries
     ("||x||_1", "falsified"),
 ])
 def test_the_cli_reads_the_infinite_order_on_the_decorator_path(
@@ -321,21 +323,30 @@ def test_the_cli_reads_the_infinite_order_on_the_decorator_path(
     # at e9172e8 `mathema check` on this module printed a probe record
     # falsified with the witness `inf=-1.13166e+162`: the decorator path
     # never bound `inf`, which was sampled as a free variable
+    import json
+
     from mathema.cli import main
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     (tmp_path / "normdeco.py").write_text(_DECORATED.format(law=law))
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    main(["check", "normdeco.py"])
+    main(["check", "normdeco.py", "--format", "compact"])
     out = capsys.readouterr().out
-    # the summary counts the mathematics record and its [float]
-    # companion; nothing is falsified and no witness names `inf`
     assert "inf=" not in out, out
+    (record,) = json.loads(out)
+    rows = [r for r in record["claims"] if r["source"] == "decorator"]
+    headline = next(r for r in rows if r["claim"].startswith("f_x_approx")
+                    and "[" not in r["claim"])
     if expected == "proven":
-        assert "1 proven" in out and "0 falsified" in out, out
+        companion = next(r for r in rows if "[float" in r["claim"])
+        # np.max raises on the empty vector, which the claim's
+        # empty-input line reports: that is the claim's only witness,
+        # and every non-empty vector agrees with the infinite order
+        assert headline["counterexample"] == "x = []", headline
+        assert companion["verdict"] == "holds", companion
     else:
-        assert "0 proven" in out and "falsified)" in out \
-            and "0 falsified" not in out, out
+        assert headline["verdict"] == "falsified", headline
+        assert headline["counterexample"] != "x = []", headline
 
 
 # --- the evaluation path: numpy's norm, both ranks, the matrix orders ------
@@ -391,8 +402,8 @@ def test_the_matrix_orders_are_three_different_numbers():
 
 @pytest.mark.parametrize("text, written", [
     ("for x in R^n, ||x|| >= 0", True),
-    ("for x in R^n|missing, ||x||_2 <= ||x||_1", True),
-    ("∀ x ∈ ℝⁿ ∪ {∅}, ‖x‖₂ ≤ ‖x‖₁", True),
+    ("for x in (R | {missing})^n|absent, ||x||_2 <= ||x||_1", True),
+    ("∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖x‖₂ ≤ ‖x‖₁", True),
     ("assuming ||x|| > 0, for x in R^n, f(x) >= 0", True),
     ("for x in R^n, norm(x) >= 0", False),
     ("for x in [0, 1], |x| <= 1", False),
@@ -461,8 +472,8 @@ def _adjudicate(fn, law):
      "for x in R^n, f(x) ~= norm(x, inf)", "proven", "derive"),
     (largest_magnitude, "for x in R^n, f(x) ~= ||x||_oo",
      "for x in R^n, f(x) ~= norm(x, inf)", "proven", "derive"),
-    (squared_length, "for x in R^n, f(x) ~= ||x||^2",
-     "for x in R^n, f(x) ~= norm(x)**2", *_SQUARED),
+    (squared_length, "for x in [-1e6, 1e6]^n, f(x) ~= ||x||^2",
+     "for x in [-1e6, 1e6]^n, f(x) ~= norm(x)**2", *_SQUARED),
     (distance, "for x in R^n, y in R^n, f(x, y) ~= ||x - y||",
      "for x in R^n, y in R^n, f(x, y) ~= norm(x - y)", "proven", "derive"),
     # a sum over every entry of a matrix, a singular value decomposition
@@ -492,6 +503,26 @@ def test_the_sugar_reaches_the_verdict_of_the_words(fn, sugar, words, verdict, r
         assert "every length" in (a.sketch or ""), a.sketch
 
 
+
+def test_the_squared_length_overflows_at_the_magnitude_corner_on_every_numpy():
+    """Over all of `R^n`, `float(np.dot(x, x))` overflows to inf at a
+    vector of entries near the float maximum, where the exact squared
+    norm is finite: the record's headline is falsified there through
+    the computation line, whether or not the mathematics is proven (it
+    is from numpy 2.4, through `numpy.dot`'s definition row)."""
+    import mathema
+    law = "for x in R^n, f(x) ~= norm(x)**2"
+    record = mathema.check(squared_length, claims=[law])
+    headline = str(record).splitlines()[1]
+    assert "falsified at x = " in headline, headline
+    (computation,) = [p for p in record.probes
+                      if p.name.startswith("f_x_approx_norm_x_2")
+                      and p.verdict == "falsified"]
+    import re
+    entries = [float(v) for v in re.findall(r"-?\d[\d.e+-]*",
+                                           computation.counterexample)]
+    assert max(abs(v) for v in entries) >= 1e300, computation.counterexample
+
 # --- the derive route: what the lowering proves and what it refuses -------
 
 @pytest.mark.parametrize("fn, law", [
@@ -508,7 +539,7 @@ def test_a_false_norm_identity_is_not_proven_and_is_falsified(fn, law):
     assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
     assert p.counterexample, p.note
     # the derive route was attempted and did not prove it
-    assert "routes attempted, derive:" in (p.note or ""), p.note
+    assert "derive could not decide it" in (p.note or ""), p.note
 
 
 def test_an_order_outside_the_lowering_is_named_and_left_to_the_probe():
@@ -549,7 +580,7 @@ def test_the_root_mean_square_error_of_the_empty_vector_is_left_to_the_probe(law
 def test_the_empty_vector_falsifies_the_largest_magnitude_with_a_witness():
     p = _adjudicate(largest_magnitude, "for x in R^0, f(x) ~= ||x||_inf")
     assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
-    assert "x=[]" in str(p.counterexample), p.counterexample
+    assert "x = []" in str(p.counterexample), p.counterexample
 
 
 @pytest.mark.parametrize("fn, law", [
@@ -620,8 +651,16 @@ def test_a_written_order_needs_no_note():
     assert "norm of" not in (p.note or ""), p.note
 
 
-def test_the_call_spelling_gets_no_note():
+def test_the_call_spelling_gets_the_same_note_in_its_own_spelling():
     p = _adjudicate(euclidean_length, "for x in R^n, f(x) ~= norm(x)")
+    assert "norm(x) is the Euclidean norm of x" in (p.note or ""), p.note
+    assert "||x||" not in (p.note or ""), p.note
+    p = _adjudicate(frobenius, "for A in R^(m,n), f(A) ~= norm(A)")
+    assert "norm(A) is the Frobenius norm of A" in (p.note or ""), p.note
+
+
+def test_the_call_with_an_order_written_needs_no_note():
+    p = _adjudicate(manhattan_length, "for x in R^n, f(x) ~= norm(x, 1)")
     assert "norm of" not in (p.note or ""), p.note
 
 

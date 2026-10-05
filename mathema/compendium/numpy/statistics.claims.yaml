@@ -1,119 +1,172 @@
 # Definition rows and bounds for numpy's statistics: what each function
 # computes, stated in the grammar's own words over inputs with nothing
 # missing (numpy's nan-ignoring functions then compute the plain
-# statistic). A function with no grammar word of its own (median,
-# percentile, quantile) states the range its value lies in. mathema's
-# own test suite verifies each row against the installed numpy.
+# statistic). median, quantile and percentile also state the range
+# their value lies in; quantile and percentile interpolate linearly
+# (method='linear', the default), as the grammar's quantile does.
+# mathema's own test suite verifies each row against the installed
+# numpy.
 compendium: numpy
 versions: ">=1.24,<3"
 
 numpy.max:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == max(a)"
+      statement: "for a in R^n, f(a) == max(a)"
 
 numpy.min:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == min(a)"
+      statement: "for a in R^n, f(a) == min(a)"
 
 numpy.amax:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == max(a)"
+      statement: "for a in R^n, f(a) == max(a)"
 
 numpy.amin:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == min(a)"
+      statement: "for a in R^n, f(a) == min(a)"
 
 numpy.median:
   claims:
     - name: within_range
-      statement: "for a in R^n \\ {∅}, min(a) <= f(a) <= max(a)"
+      statement: "for a in R^n, min(a) <= f(a) <= max(a)"
+    - name: definition
+      statement: "for a in R^n, f(a) ~= median(a)"
+      note: "The middle element, or the mean of the two middle elements for an even length."
+    - name: definition@axis=0
+      statement: "for a in R^(m,n), f(a, axis=0) ~= median(a, axis=0)"
+      note: "The median of each column of a matrix."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.percentile:
   claims:
     - name: within_range
-      statement: "for a in R^n \\ {∅}, q in [0, 100], min(a) <= f(a, q) <= max(a)"
+      statement: "for a in R^n, q in [0, 100], min(a) <= f(a, q) <= max(a)"
+    - name: definition
+      statement: "for a in R^n, q in [0, 100], f(a, q) ~= quantile(a, q / 100)"
+      note: "The q-th percentile is the (q / 100)-quantile, interpolated linearly."
 
 numpy.quantile:
   claims:
     - name: within_range
-      statement: "for a in R^n \\ {∅}, q in [0, 1], min(a) <= f(a, q) <= max(a)"
+      statement: "for a in R^n, q in [0, 1], min(a) <= f(a, q) <= max(a)"
+    - name: definition
+      statement: "for a in R^n, q in [0, 1], f(a, q) ~= quantile(a, q)"
+      note: "Stated for one q; q outside [0, 1] raises ValueError."
 
 numpy.diff:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= a[1:] - a[:-1]"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= a[1:] - a[:-1]"
+    - name: definition@n=2
+      statement: "for a in R^n, assuming dim(a) >= 3, f(a, n=2) ~= a[2:] - 2 * a[1:-1] + a[:-2]"
+      note: "The second differences."
+
+numpy.ptp:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == max(a) - min(a)"
+      note: "Peak to peak: the greatest element less the least."
+
+numpy.cov:
+  claims:
+    - name: of_a_vector
+      statement: "for m in [-1e10, 1e10]^n, assuming dim(m) >= 2, f(m) ~= var(m, ddof=1)"
+      note: "One vector is one variable: its sample variance (ddof 1, numpy's default here, unlike var)."
 
 numpy.nansum:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= sum(a)"
+      statement: "for a in R^n, f(a) ~= sum(a)"
+    - name: missing_dropped
+      statement: "missing(f, a) drops"
+      note: "The holes are left out; an array with no value sums to 0."
 
 numpy.nanprod:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= prod(a)"
+      statement: "for a in R^n, f(a) ~= prod(a)"
 
 numpy.nanmean:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= mean(a)"
+      statement: "for a in R^n, f(a) ~= mean(a)"
+    - name: missing_dropped
+      statement: "assuming count(a) >= 1, missing(f, a) drops"
+      note: "The holes are left out while a value remains."
+    - name: all_missing_is_nan
+      statement: "assuming count(a) == 0, missing(f, a) propagates"
+      note: "An array with no value has mean nan."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.nanstd:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= std(a, ddof=0)"
+      statement: "for a in R^n, f(a) ~= std(a, ddof=0)"
     - name: definition@ddof=1
-      statement: "let ddof be 1, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= std(a, ddof=1)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.nanvar:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= var(a, ddof=0)"
+      statement: "for a in R^n, f(a) ~= var(a, ddof=0)"
     - name: definition@ddof=1
-      statement: "let ddof be 1, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= var(a, ddof=1)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.nanmax:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == max(a)"
+      statement: "for a in R^n, f(a) == max(a)"
 
 numpy.nanmin:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == min(a)"
+      statement: "for a in R^n, f(a) == min(a)"
 
 numpy.ndarray.min:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == min(a)"
+      statement: "for a in R^n, f(a) == min(a)"
 
 numpy.ndarray.max:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == max(a)"
+      statement: "for a in R^n, f(a) == max(a)"
 
 numpy.ndarray.prod:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= prod(a)"
+      statement: "for a in R^n, f(a) ~= prod(a)"
 
 numpy.ndarray.cumsum:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= cumsum(a)"
+      statement: "for a in R^n, f(a) ~= cumsum(a)"
 
 numpy.ndarray.cumprod:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= cumprod(a)"
+      statement: "for a in R^n, f(a) ~= cumprod(a)"
 
 numpy.ndarray.var:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) ~= var(a, ddof=0)"
+      statement: "for a in R^n, f(a) ~= var(a, ddof=0)"
     - name: definition@ddof=1
-      statement: "let ddof be 1, for a in R^n \\ {∅}, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= var(a, ddof=1)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."

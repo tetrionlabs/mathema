@@ -5,16 +5,16 @@
 # missing at its own position. mathema's own test suite verifies each
 # row against the installed pandas.
 compendium: pandas
-versions: ">=2,<4"
+versions: ">=2.2,<4"
 
 pandas.Series.cummax:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == cummax(a)"
+      statement: "for a in R^n, f(a) == cummax(a)"
       note: "Element i is the greatest of elements 0 to i, the same value numpy.maximum.accumulate gives."
 
 pandas.Series.cummin:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, f(a) == cummin(a)"
+      statement: "for a in R^n, f(a) == cummin(a)"
       note: "Element i is the least of elements 0 to i, the same value numpy.minimum.accumulate gives."

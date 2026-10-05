@@ -146,8 +146,10 @@ def test_an_unreadable_authored_claim_names_its_file_not_the_record(tmp_path):
         "      statement: \"f(x) >= 1 +\"\n")
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     r = _run(tmp_path)
-    (row,) = _rows_for(r.stdout, "funcs.settle")
+    (row,) = [r for r in _rows_for(r.stdout, "funcs.settle")
+              if "does not parse" in r]
     assert row.startswith("FAIL") and "claims/demo.claims.yaml" in row
+    assert "'broken'" in row, row
     assert "delete .mathema/verified" not in row
     assert "Traceback" not in r.stdout + r.stderr
 

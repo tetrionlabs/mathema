@@ -608,9 +608,14 @@ def dot_product(a: list, b: list) -> float:
     return total
 ```
 
+The claim binds both lists over one length, `for a in R^n, b in R^n`;
+left unbound, `a` and `b` may differ in length, and `b[i]` raises
+`IndexError` past the end of a shorter `b`, so the claim is falsified there:
+
 <!-- example: dot-loop verdicts fn=dot_product route=derive -->
 ```
-f(a, b) == f(a, b)   # proven, Sum(a[i]*b[i], (i, 0, L_a - 1))
+for a in R^n, b in R^n, f(a, b) == f(a, b)   # proven, Sum(a[i]*b[i], (i, 0, L_a - 1))
+f(a, b) == f(a, b)   # falsified
 ```
 
 A third loop-header form, `for i, item in enumerate(seq):`, binds both
@@ -962,11 +967,12 @@ conditions are each verified, never a "probably".
   of strictly positive factors, a one-variable quadratic with
   positive leading coefficient and negative discriminant. Its
   non-strict sibling covers `>=` the same way.
-- **The write-free certificate.** `is_state_safe(f)` is proven
-  structurally when the body contains no external-write site and
-  every name resolves; an unresolved or global read leaves room for
-  state the walk cannot see, so it falls to trials instead. The
-  sketch says which of the two happened.
+- **The write-free certificate.** `is_state_safe(f)` is proven on
+  the examine route when the body, and every project function it
+  reaches, contains no write outside the call and every name and
+  callee resolves; anything unresolved leaves it unknown with the
+  reason, never to trials. `is_deterministic` and `is_reproducible`
+  are certified the same way for hidden reads.
 - **Piecewise proof.** A claim over a finite value set is proven by
   splitting the domain into its stated values and proving each piece;
   the sketch lists the pieces.
