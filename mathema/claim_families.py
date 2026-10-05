@@ -2445,6 +2445,7 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
     # over real arguments a complex result is no value
     real_only = not any(_bound_is_complex(b) for b in (domain or {}).values())
     executed = 0
+    caught: dict = {}
 
     def search():
         nonlocal executed
@@ -2468,9 +2469,12 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
             executed += 1
             try:
                 out = fn(**call)
-            except Exception:
+            except Exception as exc:
                 returned = False
+                from .authoring import RangeError
+                caught["range"] = isinstance(exc, RangeError)
             else:
+                caught["range"] = False
                 returned = _has_value(out, None) and not (
                     real_only and isinstance(out, complex) and out.imag != 0)
             if returned != claimed:
@@ -2481,7 +2485,24 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         found = _capped(search, _FAST)
     except TimeoutError:
         found = None
+    if found is not None and caught.get("range"):
+        found = _RangeCaught(found)
     return found, executed
+
+
+class _RangeCaught(dict):
+    """A definedness witness whose call raised enforce_range's
+    RangeError: its counterexample says the range violation was
+    caught."""
+
+
+def _witness_text(point: dict, facts) -> str:
+    """A definedness witness as its counterexample text."""
+    from .gates import _fmt_point
+    text = _fmt_point(point, list(facts.params))
+    if isinstance(point, _RangeCaught):
+        text = f"{text}: f raised RangeError, range violation caught"
+    return text
 
 
 def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
@@ -2492,7 +2513,6 @@ def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
         otherwise `undecided` carrying the corroboration flags (and the
         unexecutable flag when no candidate could be called at all).
     """
-    from .gates import _fmt_point
     from .symbolic import ProofResult
 
     point, executed = _definedness_witness(fn, facts, gaps, says_defined,
@@ -2500,7 +2520,7 @@ def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
     if point is not None:
         return ProofResult(
             "disproven", sketch=sketch,
-            counterexample=_fmt_point(point, list(facts.params)),
+            counterexample=_witness_text(point, facts),
             meta={"mathema.corroboration": "reproduced",
                   "mathema.witness_executed": True})
     meta = {"mathema.corroboration": "uncorroborated"}
@@ -2601,10 +2621,9 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
                                                 says_defined, domain,
                                                 premises)
         if point is not None:
-            from .gates import _fmt_point
             return ProofResult(
                 "disproven", sketch=sketch,
-                counterexample=_fmt_point(point, list(facts.params)),
+                counterexample=_witness_text(point, facts),
                 meta={"mathema.corroboration": "reproduced",
                       "mathema.witness_executed": True})
         return ProofResult(
@@ -2746,13 +2765,12 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
                                             stated_says_defined, domain,
                                             premises)
     if point is not None:
-        from .gates import _fmt_point
         return ProofResult(
             "disproven",
             sketch=f"is_defined: the stated region disagrees with the "
                    f"current body at an executed point, fresh region: "
                    f"{region_text}",
-            counterexample=_fmt_point(point, list(facts.params)),
+            counterexample=_witness_text(point, facts),
             meta={"mathema.corroboration": "reproduced",
                   "mathema.witness_executed": True})
     return ProofResult("undecided", sketch=undecided_sketch)

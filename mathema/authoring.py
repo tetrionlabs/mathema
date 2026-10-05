@@ -340,6 +340,14 @@ class DomainError(ValueError):
     `except ValueError` handling keeps working unchanged."""
 
 
+class RangeError(ValueError):
+    """A function's result falls outside the range `enforce_range()`
+    guards: the range its return annotation, its own claims or an exit
+    assert on the returned value state. A ValueError, beside
+    `DomainError` (an argument outside the domain) and `DimensionError`
+    (a shape that does not fit)."""
+
+
 class MissingValueError(DomainError):
     """An output that does not carry the input's holes the way a
     function's policy claim says (`drops`, `propagates`), found at exit
@@ -626,6 +634,211 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
 
         wrapper.__mathema_enforced_domain__ = merged_domain
         _declare_exclusions(wrapper, fn, sorted(merged_domain), "enforce_domain")
+        return wrapper
+    return decorator
+
+
+_RANGE_OPS = {"<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
+              ">": lambda a, b: a > b, ">=": lambda a, b: a >= b}
+_FLIPPED = {"<": ">", "<=": ">=", ">": "<", ">=": "<="}
+
+
+def _constant(text: str) -> "float | None":
+    """A claim side as a number, or None when it is not a constant."""
+    import ast
+    try:
+        value = ast.literal_eval(text.strip())
+    except (ValueError, SyntaxError):
+        try:
+            value = ast.literal_eval(text.strip().replace("^", "**"))
+        except (ValueError, SyntaxError):
+            return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _range_from_claims(fn, key: "str | None", root: str) -> list:
+    """Intent:
+        The `(relation, bound)` checks the function's own declared claims
+        state on its result: every link `f(<its parameters>) <rel>
+        <number>` (or the number on the left), chained links included,
+        each read as the result compared with the number.
+    """
+    from .conjecture import claim as _parse
+    from .grammar import normalize
+    entries = declared_from_function(fn)
+    if key is not None:
+        from .spec import load_declared, merge_entries
+        file_entry = load_declared(root).get(key, {}).get("entry", {})
+        entries = merge_entries({"claims": entries}, file_entry)["claims"]
+    params = list(callable_signature(fn).parameters)
+    call = normalize(f"f({', '.join(params)})").replace(" ", "")
+    out: list = []
+    for c in entries:
+        text = c.get("statement") or c.get("law") or ""
+        try:
+            cj = _parse(text)
+        except Exception:
+            continue
+        if cj.assuming:
+            continue
+        for lhs, rel, rhs in (cj.links or [(cj.lhs, cj.relation, cj.rhs)]):
+            if rel not in _RANGE_OPS:
+                continue
+            left, right = (lhs or "").replace(" ", ""), (rhs or "").replace(" ", "")
+            if left == call and _constant(rhs or "") is not None:
+                out.append((rel, _constant(rhs)))
+            elif right == call and _constant(lhs or "") is not None:
+                out.append((_FLIPPED[rel], _constant(lhs)))
+    return out
+
+
+def _range_from_exit_asserts(fn) -> "tuple[list, set]":
+    """Intent:
+        `(checks, lines)`: the `(relation, bound)` checks the asserts
+        just before the body's final `return <name>` state on that name,
+        and the source lines those asserts sit on.
+    """
+    import ast
+    import inspect
+    import textwrap
+    try:
+        lines, start = inspect.getsourcelines(fn)
+        tree = ast.parse(textwrap.dedent("".join(lines)))
+    except (OSError, TypeError, SyntaxError):
+        return [], set()
+    func = next((n for n in tree.body
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
+                None)
+    if func is None or not func.body:
+        return [], set()
+    last = func.body[-1]
+    if not (isinstance(last, ast.Return) and isinstance(last.value, ast.Name)):
+        return [], set()
+    name = last.value.id
+    ops = {ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">="}
+    checks: list = []
+    where: set = set()
+    for stmt in reversed(func.body[:-1]):
+        if not isinstance(stmt, ast.Assert):
+            break
+        test = stmt.test
+        if not isinstance(test, ast.Compare):
+            continue
+        operands = [test.left, *test.comparators]
+        found: list = []
+        for left, op, right in zip(operands, test.ops, operands[1:]):
+            rel = ops.get(type(op))
+            if rel is None:
+                found = []
+                break
+            if isinstance(left, ast.Name) and left.id == name:
+                bound = _constant(ast.unparse(right))
+                if bound is not None:
+                    found.append((rel, bound))
+            elif isinstance(right, ast.Name) and right.id == name:
+                bound = _constant(ast.unparse(left))
+                if bound is not None:
+                    found.append((_FLIPPED[rel], bound))
+        if found:
+            checks.extend(found)
+            where.add(stmt.lineno + start - 1)
+    return checks, where
+
+
+def _result_interval(marker):
+    """The range a bound marker states for a value, as an `Interval`
+    with infinite ends where the marker states none (`Positive` is
+    `(0, oo)`), or None for a marker that states no range."""
+    import math
+
+    from .domain import Interval
+    from .types import (InRange, Negative, Nonnegative, Nonpositive,
+                        Positive, Probability, UnitBall, UnitInterval)
+    if isinstance(marker, InRange):
+        closed_lo, closed_hi = marker.closed
+        return Interval(float(marker.lo), float(marker.hi), closed_lo,
+                        closed_hi)
+    ranges = {Probability: Interval(0.0, 1.0),
+              UnitInterval: Interval(0.0, 1.0),
+              UnitBall: Interval(-1.0, 1.0),
+              Positive: Interval(0.0, math.inf, False, False),
+              Nonnegative: Interval(0.0, math.inf, True, False),
+              Negative: Interval(-math.inf, 0.0, False, False),
+              Nonpositive: Interval(-math.inf, 0.0, False, True)}
+    return ranges.get(type(marker))
+
+
+def enforce_range(key: "str | None" = None, root: str = "."):
+    """Decorator: wrap a function so a result outside its declared range
+    raises `RangeError` after the body runs, instead of handing the
+    caller a value the function says it never returns.
+
+        @enforce_range()
+        def odds(x: float) -> Annotated[float, Probability]:
+            return x / 2
+
+        odds(3.0)   # RangeError: odds(): the result 1.5 is outside [0, 1]
+
+    The range is read from what the function already states: a bound
+    marker on the return annotation (`Probability`, `Positive`,
+    `InRange(...)`), every `f(<its parameters>) <rel> <number>` its own
+    claims declare (decorator, docstring, and a claims.yaml file when
+    `key`/`root` are given), and the asserts just before a final
+    `return <name>` that compare that name with a number. An exit assert
+    the body raises is reported as the RangeError it states ("range
+    violation caught"), so the range holds whether or not Python strips
+    asserts. A result that is not a number is not judged."""
+    def decorator(fn):
+        import functools
+        import numbers
+
+        from .grammar import render_domain
+        from .types import _hints, _markers
+
+        intervals = [b for m in _markers(_hints(fn).get("return"))
+                     if (b := _result_interval(m)) is not None]
+        checks = _range_from_claims(fn, key, root)
+        assert_checks, assert_lines = _range_from_exit_asserts(fn)
+        checks = checks + assert_checks
+
+        def outside(value) -> "str | None":
+            if isinstance(value, bool) or not isinstance(value, numbers.Real):
+                return None
+            for bound in intervals:
+                lo, hi = bound[0], bound[1]
+                below = value < lo or (value == lo and not bound.closed_lo)
+                above = value > hi or (value == hi and not bound.closed_hi)
+                if below or above:
+                    return f"outside {render_domain(bound)}"
+            for rel, number in checks:
+                if not _RANGE_OPS[rel](value, number):
+                    return f"not {rel} {number:g}"
+            return None
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                out = fn(*args, **kwargs)
+            except AssertionError as exc:
+                tb = exc.__traceback__
+                while tb is not None and tb.tb_next is not None:
+                    tb = tb.tb_next
+                if tb is not None and tb.tb_lineno in assert_lines \
+                        and tb.tb_frame.f_code is getattr(fn, "__code__", None):
+                    raise RangeError(
+                        f"{fn.__name__}(): range violation caught by the "
+                        f"exit assert on its result") from exc
+                raise
+            problem = outside(out)
+            if problem is not None:
+                raise RangeError(f"{fn.__name__}(): the result {out!r} is "
+                                 f"{problem}, range violation caught")
+            return out
+
+        wrapper.__mathema_enforced_range__ = {
+            "intervals": intervals, "checks": checks}
         return wrapper
     return decorator
 

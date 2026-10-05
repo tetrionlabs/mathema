@@ -2493,7 +2493,45 @@ def _definedness_guards(fn, facts) -> "tuple[list, list]":
                 gaps.append("the explicit raises do not lift")
     elif raises:
         gaps.append("the explicit raises do not lift")
+    enforced = getattr(fn, "__mathema_enforced_range__", None)
+    if enforced and (enforced.get("intervals") or enforced.get("checks")):
+        region = _range_violation_region(fn, facts, enforced)
+        if region is None:
+            gaps.append("the result range enforce_range checks does not lift")
+        else:
+            guards.append((region, "RangeError"))
     return guards, gaps
+
+
+def _range_violation_region(fn, facts, enforced: dict):
+    """Intent:
+        Where `enforce_range` raises: the lifted result outside one of
+        the intervals or checks it enforces, as a sympy condition over
+        the parameters, or None when the body does not lift.
+    """
+    import sympy
+
+    from .symbolic import lift
+    try:
+        lifted = lift(fn, facts)
+    except Exception:
+        return None
+    if lifted is None or isinstance(lifted.expr, tuple):
+        return None
+    out = lifted.expr
+    parts = []
+    for bound in enforced.get("intervals") or ():
+        lo, hi = bound[0], bound[1]
+        if lo != -math.inf:
+            parts.append(out < lo if getattr(bound, "closed_lo", True)
+                         else out <= lo)
+        if hi != math.inf:
+            parts.append(out > hi if getattr(bound, "closed_hi", True)
+                         else out >= hi)
+    negated = {"<": ">=", "<=": ">", ">": "<=", ">=": "<"}
+    for rel, number in enforced.get("checks") or ():
+        parts.append(sympy.Rel(out, number, negated[rel]))
+    return sympy.Or(*parts) if parts else None
 
 
 def _negated_guard_texts(cond, negate, op_text) -> list[str]:
