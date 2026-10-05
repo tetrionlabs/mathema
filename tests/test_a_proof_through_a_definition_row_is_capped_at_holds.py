@@ -7,7 +7,7 @@ A `definition` row mathema bundles, read with the installed library
 inside the row's version range, or one the user accepted `--as
 trusted`, is taken at face value: a proof through it stays `proven`,
 and its sketch names it ("taking numpy.sum as sum(a) (axiom, bundled
-with mathema, numpy 1.24 to 2.x)"). A project row `mathema verify`
+with mathema, numpy 2.0 to 2.x)"). A project row `mathema verify`
 recorded as holding, and not accepted, is evidence: the proof is
 `holds`, and its sketch says how to lift it ("accept the row as
 trusted: mathema accept KEY ROW --as trusted"). So is a bundled row
@@ -79,7 +79,7 @@ def test_a_bundled_row_is_an_axiom_and_the_proof_stays_proven():
     assert row["standing"] == "axiom" and row["trusted_by"] == "mathema"
     assert row["versions"] and row["installed"]
     assert "taking numpy.sum as sum(a) (axiom, bundled with mathema, " \
-           "numpy 1.24 to 2.x)" in (p.sketch or ""), p.sketch
+           "numpy 2.0 to 2.x)" in (p.sketch or ""), p.sketch
 
 
 def _verify_rows(root):

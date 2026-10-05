@@ -52,6 +52,21 @@ def _version_tuple(text: str) -> tuple:
     return tuple(int(p) for p in text.split(".")[:3] if p.isdigit())
 
 
+#: the lowest version of each library mathema supports: a bundled
+#: definition row is an axiom from here up, and evidence below it down
+#: to its own file's range
+SUPPORTED_FLOORS = {"numpy": "2.0", "pandas": "2.2", "polars": "1.0"}
+
+
+def below_floor(library: str, installed: "str | None") -> bool:
+    """Whether `installed` is below the supported floor of `library`
+    (`SUPPORTED_FLOORS`); False for a library with no floor."""
+    floor = SUPPORTED_FLOORS.get(library)
+    if floor is None or not installed or installed == "*":
+        return False
+    return _version_tuple(installed) < _version_tuple(floor)
+
+
 def _version_in_range(installed: str, spec: str) -> bool:
     """The light range check: `"*"`, `">=X"`, or `">=X,<Y"`. Anything
     else is treated as not matching, loudly enough (the pack simply
