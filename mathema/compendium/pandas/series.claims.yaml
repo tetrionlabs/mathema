@@ -25,6 +25,9 @@ pandas.Series.mean:
     - name: all_missing_is_missing
       statement: "assuming count(a) == 0, missing(f, a) propagates"
       note: "A Series with no value has a missing mean."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 pandas.Series.std:
   claims:
@@ -33,6 +36,9 @@ pandas.Series.std:
       note: "The sample standard deviation: ddof defaults to 1, unlike numpy; one element gives nan."
     - name: definition@ddof=0
       statement: "let ddof be 0, for a in R^n, f(a) ~= std(a, ddof=0)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 pandas.Series.var:
   claims:
@@ -41,6 +47,9 @@ pandas.Series.var:
       note: "The sample variance: ddof defaults to 1, unlike numpy; one element gives nan."
     - name: definition@ddof=0
       statement: "let ddof be 0, for a in R^n, f(a) ~= var(a, ddof=0)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 pandas.Series.sum:
   claims:

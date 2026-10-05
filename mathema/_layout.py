@@ -157,10 +157,10 @@ def _split_lines(p, key: str) -> list:
         return []
     param, at = offer["param"], offer["at"]
     written = (p.meta or {}).get("mathema.split_statement") or p.statement
-    return [" " * 28 + f"every witness has len({param}) < {at}; it holds "
-                       f"for len({param}) >= {at}, where f is defined",
-            " " * 28 + "possible fixes: (i) "
-            + split_command(key, written, offer)]
+    return [" " * 28 + f"every witness has len({param}) < {at}; the claim "
+                       f"holds for len({param}) >= {at}, where f is defined",
+            " " * 28 + "possible fixes: (i) to split at the shared cause, "
+                       "run: " + split_command(key, written, offer)]
 
 
 def _row(verdict: str, aspect: str, what: str, detail: str = "") -> str:
@@ -228,6 +228,9 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 what = _call(params, {param: "sequence"} | kinds, param, "[]")
                 lines.append(_row(_verdict(c), "policy", what,
                                   c.note if _verdict(c) != "holds" else ""))
+                if _verdict(c) == "falsified" and \
+                        (c.meta or {}).get("mathema.empty_fixes"):
+                    lines.append(" " * 28 + c.meta["mathema.empty_fixes"])
             else:
                 shown = over_numbers(c.statement)
                 if (c.condition or "").startswith("let |inf| be ") and "|inf|" not in shown:

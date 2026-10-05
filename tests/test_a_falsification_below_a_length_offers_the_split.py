@@ -53,7 +53,8 @@ def test_a_sample_statistic_of_one_element_offers_the_split_at_two(tmp_path):
     assert p.verdict == "falsified"
     assert p.meta["mathema.split"] == {"param": "r", "at": 2}
     shown = repr(rec)
-    assert ('possible fixes: (i) mathema claims split_mod.sstd --split '
+    assert ('possible fixes: (i) to split at the shared cause, run: '
+            'mathema claims split_mod.sstd --split '
             '"for r in R^n, f(r) >= 0" --at "len(r) >= 2"') in shown, shown
 
 

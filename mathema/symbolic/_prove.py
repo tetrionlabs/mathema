@@ -3066,12 +3066,12 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                 fn, (lhs_src, rhs_src), dict(zip(facts.params, args)))
                 if c[2]), None)
             if called is not None:
-                call_text, call_args, call_exc = called
+                call_text, call_args, call_exc, _result = called
                 at = ", ".join(f"{p} = {v!r}" for p, v in call_args.items())
                 return ProofResult(
                     "disproven",
                     sketch=f"the claim calls {call_text}, and f raises "
-                           f"{call_exc} at {at}, an empty list the claim "
+                           f"{type(call_exc).__name__} at {at}, an empty list the claim "
                            f"admits, so the claim has no value there; "
                            f"narrow it with assuming len({target}) >= 1",
                     counterexample=at,
