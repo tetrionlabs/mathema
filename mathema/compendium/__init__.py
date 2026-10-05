@@ -242,6 +242,35 @@ def mark_row_versions(data: dict, library: str,
                            OUTSIDE_VERSIONS: str(spec)}
 
 
+#: each library row's statement read by the claim grammar, by
+#: `(statement, name)`: the parsed claim, or the exception it raised
+_ROW_CLAIMS: dict = {}
+
+
+def _row_claim(row: dict):
+    """Intent:
+        A library row read by the claim grammar, once per process for
+        each statement and name; the claim is shared, so a caller only
+        reads it.
+
+    Raises:
+        Exception: whatever reading the statement raised.
+    """
+    from .. import conjecture
+    text = str(row.get("statement") or row.get("law") or "")
+    name = row.get("name") or None
+    key = (text, name)
+    if key not in _ROW_CLAIMS:
+        try:
+            _ROW_CLAIMS[key] = (conjecture.claim(text, name=name), None)
+        except Exception as e:
+            _ROW_CLAIMS[key] = (None, e)
+    found, error = _ROW_CLAIMS[key]
+    if error is not None:
+        raise error
+    return found
+
+
 def row_pins(row: dict) -> dict:
     """Intent:
         The library parameters a row pins, `{parameter: value}`: each
@@ -253,10 +282,9 @@ def row_pins(row: dict) -> dict:
     """
     import re
 
-    from ..conjecture import _single_point, claim
+    from ..conjecture import _single_point
     try:
-        cj = claim(str(row.get("statement") or row.get("law") or ""),
-                   name=row.get("name"))
+        cj = _row_claim(row)
     except Exception:
         return {}
     from ..conjecture import _pins_in_calls
@@ -748,15 +776,14 @@ def _region_texts(entry: dict, families) -> list:
         1"]`), parsed by the claim grammar. A bare row
         (`is_defined(f)`) states no region and contributes nothing.
     """
-    from ..conjecture import InvalidConjecture, claim, region_row_kind
+    from ..conjecture import InvalidConjecture, region_row_kind
     out: list = []
     for row in entry.get("claims") or []:
         kind = region_row_kind(row.get("name", ""))
         if kind is None or kind not in families or not row_is_fact(row):
             continue
         try:
-            cj = claim(str(row.get("statement") or row.get("law") or ""),
-                       name=row.get("name"))
+            cj = _row_claim(row)
         except (InvalidConjecture, ValueError):
             continue
         if cj.relation == kind:
@@ -908,13 +935,12 @@ def _row_region(key: str, row: dict) -> "_RowRegion | None":
     import sympy
 
     from ..conjecture import (REGION_ROW_STRATA, _parse_assuming_relation,
-                              claim, region_row_kind)
+                              region_row_kind)
     from ..domain import bound_to_sympy_set
     from ..symbolic._partiality import NO_VALUE
     name = str(row.get("name") or "")
-    text = str(row.get("statement") or row.get("law") or "")
     try:
-        cj = claim(text, name=name or None)
+        cj = _row_claim(row)
     except Exception as e:
         raise _Unbuildable(f"the statement does not parse ({e})") from None
     kind = region_row_kind(name)
@@ -1140,10 +1166,8 @@ def register_library_claims(root: "str | None" = ".") -> list:
 def _states_totality(row: dict) -> bool:
     """Whether a library row is the bare `is_defined(f)` with no domain:
     the function has a value at every argument."""
-    from ..conjecture import claim
     try:
-        cj = claim(str(row.get("statement") or row.get("law") or ""),
-                   name=row.get("name") or None)
+        cj = _row_claim(row)
     except Exception:
         return False
     return cj.relation == "is_defined" and not cj.domain
