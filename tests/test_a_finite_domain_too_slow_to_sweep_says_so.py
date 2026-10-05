@@ -2,7 +2,7 @@
 # Copyright 2026 Tetrion Ltd
 """A finite domain too slow to sweep in the time budget is never left
 with a bare sampled verdict: the exhaustive route runs every point where
-a rounding step in the claim jumps, then a seeded sample, and the record
+a discontinuity of the claim, then a seeded sample, and the record
 says how much of the domain it executed."""
 import math
 
@@ -32,7 +32,7 @@ def _main(fn):
     return row
 
 
-def test_a_slow_function_is_falsified_at_a_rounding_jump(monkeypatch):
+def test_a_slow_function_is_falsified_at_a_discontinuity(monkeypatch):
     from mathema import _brute_force
     monkeypatch.setattr(_brute_force, "_SWEEP_SECONDS", 0.5)
     row = _main(slow_exposure)
@@ -48,4 +48,5 @@ def test_a_slow_function_that_holds_says_the_sweep_was_skipped(monkeypatch):
     monkeypatch.setattr(_brute_force, "_SWEEP_SECONDS", 0.5)
     row = _main(slow_exact)
     assert row.verdict in ("holds", "unknown"), (row.verdict, row.note)
-    assert "of 34190 points: every jump point of ceil(" in row.note, row.note
+    assert " at discontinuities of ceil(100*active/periods)" in row.note, row.note
+    assert "; the domain has 34,190 points)" in row.note, row.note

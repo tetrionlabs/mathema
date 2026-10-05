@@ -2,7 +2,7 @@
 # Copyright 2026 Tetrion Ltd
 """The computation line of a claim over a finite domain runs every
 point when the sweep fits its budget, and otherwise every point where a
-rounding step in the code or the claim jumps, then a seeded sample; its
+discontinuity of the code or the claim, then a seeded sample; its
 note says how much of the domain ran. `ceil(active / periods * 100)`
 in float64 gives 29 at active = 7, periods = 25, where the exact value
 is 28, and 40 such pairs hide among 34,190 points."""
@@ -38,7 +38,7 @@ def _point(text):
     return int(pairs["active"]), int(pairs["periods"])
 
 
-def test_the_float_line_falls_at_a_rounding_jump_while_the_mathematics_is_proven():
+def test_the_float_line_falls_at_a_discontinuity_while_the_mathematics_is_proven():
     failing = _failing()
     assert (7, 25) in failing and len(failing) == 40
     rows = _rows(exposure_formula)
@@ -57,7 +57,8 @@ def test_a_small_finite_domain_runs_every_point():
     rows = {p.name: p for p in mathema.check(exposure_formula, claims=[law]).probes}
     (float_row,) = [p for n, p in rows.items() if n.endswith("[float]")]
     assert float_row.verdict == "falsified", float_row.note
-    assert ": every point" in float_row.note, float_row.note
+    assert "every point of the domain in order up to the first failure; " \
+        "the domain has 495 points)" in float_row.note, float_row.note
     assert float_row.route == "probe"
 
 
@@ -68,13 +69,14 @@ def test_an_exact_computation_stays_proven():
     assert [p.verdict for p in main] == ["proven"], [(p.name, p.verdict) for p in main]
 
 
-def test_a_sweep_over_budget_runs_every_jump_and_says_what_it_covered(monkeypatch):
+def test_a_sweep_over_budget_runs_every_discontinuity_and_says_what_it_covered(monkeypatch):
     from mathema import gates
     monkeypatch.setattr(gates, "_SWEEP_SECONDS", 0.0)
     rows = _rows(exposure_formula)
     (float_row,) = [p for n, p in rows.items() if n.endswith("[float]")]
     assert float_row.verdict == "falsified", float_row.note
     assert _point(float_row.counterexample) in _failing()
-    assert "of 34190 points: every jump point of ceil(" in float_row.note, \
+    assert " at discontinuities of ceil(100*active/periods)" in float_row.note, \
         float_row.note
+    assert "; the domain has 34,190 points)" in float_row.note, float_row.note
     assert float_row.route == "probe:semi_analytical"

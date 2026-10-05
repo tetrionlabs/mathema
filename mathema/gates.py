@@ -1377,115 +1377,48 @@ def _exact_claim_at(cj, fn, facts, point: dict, assum) -> "bool | None":
 
 
 #: the wall-clock seconds a computation line may spend executing every
-#: point of a finite domain, judged from a timed estimate of one call
+#: point of a finite domain, judged from a timed estimate of one call and
+#: scaled with the trials the caller asked for
 _SWEEP_SECONDS = 1.0
-#: the points a computation line executes over a finite domain too large
-#: or too slow to sweep: its jump points first, then a seeded sample
+#: the trials a computation line makes over a finite domain too large or
+#: too slow to sweep: its discontinuities first, then a seeded sample
 _PARTIAL_POINTS = 2000
 
 
 class _FinitePlan:
-    """The points a computation line runs over a finite domain, and the
-    words its note uses for what they covered."""
+    """The points a computation line runs over a finite domain and the
+    coverage its note states."""
 
-    def __init__(self, points, sampled, total, full, jumps, jump_words,
-                 jump_count=0):
-        self.points, self.sampled, self.total = points, sampled, total
-        self.full, self.jumps, self.jump_words = full, jumps, jump_words
-        self.jump_count = jump_count
+    def __init__(self, points, sampled, coverage):
+        self.points, self.sampled, self.coverage = points, sampled, coverage
 
-    def words(self, checked: int) -> str:
-        """The coverage words of the note, the one place they are
-        spelled: `executed N of M points: every point` for a full sweep,
-        `executed N of M points: every jump point of <expr> (K), and S
-        sampled` otherwise."""
-        if self.full:
-            return f"executed {checked} of {self.total} points: every point"
-        parts = []
-        if self.jumps:
-            parts.append(f"every jump point of {self.jump_words} "
-                         f"({self.jump_count})")
-        parts.append(f"{self.sampled} sampled")
-        return f"executed {checked} of {self.total} points: " + ", and ".join(parts)
+    @property
+    def targeted(self) -> bool:
+        return bool(self.coverage.at_discontinuities)
 
 
-def _jump_arguments(cj, fn, facts) -> "tuple[list, str]":
-    """Intent:
-        The arguments of every rounding step (floor, ceil, int, round)
-        in the lifted body and in the claim's own text, as sympy
-        expressions over the parameters with the kind of jump each
-        makes (`int` at an integer, `half` at a half-integer), and the
-        words naming them.
-    """
-    import ast as _ast
-
-    import sympy
-    found: list = []
-    words: list = []
-    try:
-        from .symbolic import lift
-        lifted = lift(fn, facts)
-    except Exception:
-        lifted = None
-    if lifted is not None and not isinstance(lifted.expr, tuple):
-        for node in sympy.preorder_traversal(lifted.expr):
-            if isinstance(node, (sympy.floor, sympy.ceiling)):
-                found.append((node.args[0], "int"))
-                words.append(f"{'ceil' if isinstance(node, sympy.ceiling) else 'floor'}"
-                             f"({node.args[0]})")
-    for side in (cj.lhs, cj.rhs):
-        try:
-            tree = _ast.parse(side or "0", mode="eval")
-        except SyntaxError:
-            continue
-        for node in _ast.walk(tree):
-            if not (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name)
-                    and node.func.id in ("floor", "ceil", "int", "round")
-                    and node.args):
-                continue
-            text = _ast.unparse(node.args[0])
-            if "f(" in text:
-                continue
-            try:
-                expr = sympy.sympify(text, locals={
-                    n: sympy.Symbol(n, real=True) for n in facts.params})
-            except Exception:
-                continue
-            kind = "half" if node.func.id == "round" and len(node.args) == 1 else "int"
-            if node.func.id == "round" and len(node.args) > 1:
-                continue
-            found.append((expr, kind))
-            words.append(f"{'ceil' if node.func.id == 'ceil' else node.func.id}"
-                         f"({expr})")
-    return found, ", ".join(dict.fromkeys(words))
-
-
-def _finite_plan(cj, fn, facts, deps, cj_domain, corners, admits):
+def _finite_plan(cj, fn, facts, deps, cj_domain, corners, admits,
+                 scale: float = 1.0):
     """Intent:
         The computation line's plan over a finite domain, or None when
         some parameter's domain is not finite: every admitted point
-        when a timed estimate of one call fits `_SWEEP_SECONDS`;
-        otherwise the corners, every point where a rounding step's
-        argument hits its jump, then a seeded sample up to
-        `_PARTIAL_POINTS`.
+        when a timed estimate of one call fits `_SWEEP_SECONDS` (times
+        `scale`); otherwise the corners, every point at a
+        discontinuity (`_discontinuities`), then a seeded sample up to
+        `_PARTIAL_POINTS` (times `scale`).
     """
-    import itertools
     import time
 
+    from . import _discontinuities as D
     from ._brute_force import BRUTE_FORCE_POINT_BUDGET, _sweep_grid
     names = list(deps["names"])
     grid = _sweep_grid(names, cj_domain, BRUTE_FORCE_POINT_BUDGET)
     if grid is None or not grid:
         return None
-    points = [dict(zip(names, combo))
-              for combo in itertools.product(*(grid[n] for n in names))]
-    points = [pt for pt in points if admits(pt)]
+    points = [pt for pt in D.grid_points(names, grid) if admits(pt)]
     if not points:
         return None
-    # a timed estimate of one call, over a few points spread through the
-    # domain (the probe is run again during the sweep itself)
-    step = max(1, len(points) // 5)
-    trial = points[::step][:5]
+    trial = points[::max(1, len(points) // 5)][:5]
     started = time.perf_counter()
     for pt in trial:
         try:
@@ -1493,56 +1426,52 @@ def _finite_plan(cj, fn, facts, deps, cj_domain, corners, admits):
         except Exception:
             pass
     per_call = (time.perf_counter() - started) / max(1, len(trial))
-    if per_call * len(points) <= _SWEEP_SECONDS:
-        return _FinitePlan(points, 0, len(points), True, False, "")
-    chosen, jumps, jump_words, jump_count = _jump_points(cj, fn, facts,
-                                                         points, corners)
-    sampled = max(0, _PARTIAL_POINTS - len(chosen))
-    return _FinitePlan(chosen, sampled, len(points), False, bool(jumps),
-                       jump_words, jump_count)
+    if per_call * len(points) <= _SWEEP_SECONDS * scale:
+        return _FinitePlan(points, 0, D.Coverage(total=len(points), full=True))
+    found = D.discontinuities(cj, fn, facts)
+    hits = D.on_grid(found, points)
+    chosen = list(corners) + hits
+    sampled = max(0, int(_PARTIAL_POINTS * scale) - len(chosen))
+    return _FinitePlan(chosen, sampled, D.Coverage(
+        total=len(points), at_discontinuities=len(hits),
+        discontinuity_words=D.words_of(found), edge_cases=len(corners)))
 
 
-def _jump_points(cj, fn, facts, points, corners):
+def _interval_discontinuities(cj, fn, facts, deps, cj_domain, corners):
     """Intent:
-        `(points, jumps, words, count)`: `corners` followed by every
-        point of `points` where a rounding step's argument
-        (`_jump_arguments`) hits its jump, exactly, with the arguments,
-        their words and how many points were added.
+        `(points, coverage)` for a domain that is not finite: the points
+        at a discontinuity of a single-parameter argument over that
+        parameter's interval (each with its float neighbours), the
+        other coordinates at the first corner; `(\[], None)` when there
+        are none.
     """
-    from fractions import Fraction
-
-    import sympy
-    jumps, jump_words = _jump_arguments(cj, fn, facts)
-    chosen: list = list(corners)
-    jump_count = 0
-    if jumps:
-        # one plain symbol per name, whichever side the argument came from
-        jumps = [(e.xreplace({s: sympy.Symbol(str(s)) for s in e.free_symbols}), k)
-                 for e, k in jumps]
-        syms = sorted({s for e, _k in jumps for s in e.free_symbols}, key=str)
-        try:
-            evaluators = [(sympy.lambdify(syms, e, modules=[{"floor": lambda v: v,
-                                                             "ceiling": lambda v: v}]), k)
-                          for e, k in jumps]
-        except Exception:
-            evaluators = []
-        for pt in points:
-            args = [Fraction(pt[str(s)]) if str(s) in pt else None for s in syms]
-            if any(a is None for a in args):
+    from . import _discontinuities as D
+    from .domain import Interval
+    found = D.discontinuities(cj, fn, facts)
+    if not found or not corners:
+        return [], None
+    points: list = []
+    skipped = 0
+    for name in deps["names"]:
+        bound = cj_domain.get(name)
+        pieces = getattr(bound, "pieces", None) or (
+            (bound,) if isinstance(bound, tuple) else ())
+        for piece in pieces:
+            if not (isinstance(piece, (tuple, Interval))
+                    and not isinstance(piece, frozenset) and len(piece) == 2):
                 continue
-            for ev, kind in evaluators:
-                try:
-                    value = ev(*args)
-                    value = Fraction(value) if not isinstance(value, Fraction) else value
-                except Exception:
-                    continue
-                if (kind == "int" and value.denominator == 1) or \
-                        (kind == "half" and (value * 2).denominator == 1
-                         and value.denominator != 1):
-                    chosen.append(pt)
-                    jump_count += 1
-                    break
-    return chosen, jumps, jump_words, jump_count
+            try:
+                lo, hi = float(piece[0]), float(piece[1])
+            except (TypeError, ValueError):
+                continue
+            values, more = D.on_interval(found, name, lo, hi)
+            skipped += more
+            points += [{**corners[0], name: v} for v in values]
+    if not points:
+        return [], None
+    return points, D.Coverage(at_discontinuities=len(points),
+                              discontinuity_words=D.words_of(found),
+                              edge_cases=len(corners), skipped=skipped)
 
 
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
@@ -1629,10 +1558,18 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         corners, interior = listed, 0
         listed_ids = {id(pt) for pt in listed}
         admits = (lambda pt: id(pt) in listed_ids)  # noqa: E731
+    scale = 1.0 if budget is None else max(
+        1.0, float(budget) / (len(corners) + C._CORROBORATION_BUDGET))
     finite = None if listed is not None else _finite_plan(
-        cj, fn, facts, deps, cj_domain, corners, admits)
+        cj, fn, facts, deps, cj_domain, corners, admits, scale)
+    coverage = None
     if finite is not None:
         corners, interior = finite.points, finite.sampled
+        coverage = finite.coverage
+    elif listed is None:
+        targeted, coverage = _interval_discontinuities(
+            cj, fn, facts, deps, cj_domain, corners)
+        corners = corners + targeted
     corner_count = sum(1 for c in corners if admits(c))
     progress = C.StabilitySweep()
     try:
@@ -1672,9 +1609,10 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         what = (f"the {representation_word} computation of {parent.name} ran at "
                 + _listed_words(listed, deps["names"])
                 + (f"; {reach_text}" if reach_text else ""))
-    elif finite is not None:
-        what = (f"the {representation_word} computation of {parent.name} "
-                + finite.words(sweep.checked))
+    elif coverage is not None:
+        what = (f"the {representation_word} computation of {parent.name} ran "
+                + coverage.words(sweep.checked)
+                + (f"; {reach_text}" if reach_text else ""))
     else:
         firsts = [w for w in dict.fromkeys(w for _p, w, _v in (missing or ()) if w)] \
             if missing_corners else []
@@ -1684,9 +1622,10 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         what = (f"the {representation_word} computation of {parent.name} ran at "
                 f"{sweep.checked} points: " + _and_words(", ".join(listing))
                 + (f"; {reach_text}" if reach_text else ""))
-    # the points a jump analysis chose are the route's mechanism
+    # the points a discontinuity analysis chose are the route's mechanism
     float_route = ("probe:semi_analytical"
-                   if finite is not None and finite.jumps else "probe")
+                   if coverage is not None and coverage.at_discontinuities
+                   else "probe")
     if sweep.fragile_point is not None:
         pt = _fmt_point(sweep.fragile_point, deps["names"])
         remedy = ("narrow the domain, "
