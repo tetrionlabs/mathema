@@ -9532,7 +9532,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           "mathema.confidence": _probe_density(risk, checked),
                           "mathema.counterexample_args": _yaml_safe_args(args),
                           **shrunk_meta, **missing_meta})
-    if checked == 0 and executed_record.classified:
+    if checked == 0 and executed_record.classified and executed_record.first:
         # every point executed was a missing input the code raised at or
         # answered with a missing value: nothing left to compare
         from ._missing_words import unknown_reason
