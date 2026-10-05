@@ -4199,9 +4199,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # function under test is f, with nothing to `let`
             cj.under_test = cj.under_test | {n for n, v in cj.funcs.items()
                                              if v != n and _is_under_test(v, fn)}
+            lines = (chained.meta or {}).pop("mathema.chain_lines", None) or []
             out.append(_stamped(chained, cj))
             if companion is not None:
                 _emit_companion(out, _stamped(companion, cj), cj.name)
+            out.extend(lines)
             continue
         if (cj.relation in routes.safety_predicates() and cj.lhs == "f"
                 and "f" not in facts.params
@@ -4835,7 +4837,20 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
                      meta={"mathema.invalid_conjecture": True}), None
     combined = _combine_conjunction(links, cj.name, _chain_statement(cj),
                                     labels)
-    companions = [p for p in probes if p.name not in link_names]
+    # the links' own empty-input lines are the chain's, one per sequence,
+    # the first falsified one where any is
+    empty: dict = {}
+    for p in probes:
+        if (p.meta or {}).get("mathema.family") == "is_empty_safe":
+            if p.name not in empty or (p.verdict == "falsified"
+                                       and empty[p.name].verdict != "falsified"):
+                empty[p.name] = _replace(p, meta={**(p.meta or {}),
+                                                  "mathema.companion_of": cj.name})
+    combined.meta = {**(combined.meta or {}),
+                     "mathema.chain_lines": list(empty.values())} if empty \
+        else combined.meta
+    companions = [p for p in probes if p.name not in link_names
+                  and (p.meta or {}).get("mathema.family") != "is_empty_safe"]
     if combined.verdict != "proven" or len(companions) != len(links):
         return combined, None
     from .gates import companion_representation
