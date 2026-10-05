@@ -2145,6 +2145,14 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         if bound_shape == "interval":
             lo, hi = bounds
             return f"U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]{crit_suffix(p)}"
+        if (isinstance(bounds, Domain) and bounds.base_type in ("Z", "N")
+                and len(bounds.pieces) == 1
+                and isinstance(bounds.pieces[0], tuple)
+                and not numeric_excluded(bounds)):
+            # an interval of integers: the integers actually drawn, as
+            # for an int parameter's plain interval
+            first, last = _integer_range(bounds.pieces[0], bounds.base_type)
+            return f"U{{{first}..{last}}}"
         if bound_shape != "none":
             # "domain" (grammar.Domain: union/exclusion/an explicit
             # type refinement) or "other": the canonical set-notation

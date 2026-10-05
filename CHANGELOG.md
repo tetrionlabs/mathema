@@ -4,6 +4,14 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## 0.6.1
 
+- An `int` annotation completes a binding that states no type to the
+  integers: `for n in [0, 10]` on `n: int` is `for n in [0, 10] : int`,
+  rendered so, and every route (derive, the probe, the exhaustive
+  sweep, the safety families) reads the integers. A type the claim
+  states wins in either direction, and the record says so: `[0, 10] ⊂ R`
+  widens an `int` parameter to the reals, `: int` narrows a `float` one.
+  The fingerprint of every claim over an `int`-annotated parameter with
+  an untyped binding moves once with this change.
 - A pin is written in the call. `let alpha be 2` naming a parameter of f
   pins it for every call, and the claim is now written with the pin in
   the call: `let alpha be 2, for x in R^n, f(x) == 2 * x[0]` reads `for

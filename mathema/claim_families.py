@@ -2695,7 +2695,7 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     # guards cut it, and only a failure inside it counts (decision A)
     bare = relation == "is_defined"
     structured = _definedness_region_structured(fn, facts, region_gaps,
-                                                working=bare)
+                                                working=bare, domain=domain)
     cuts = guard_cut_texts(fn, facts) if bare else []
     cut_text = (f" (its own guard raises where {' or '.join(cuts)}, which "
                 f"cuts the working domain)" if cuts else "")
