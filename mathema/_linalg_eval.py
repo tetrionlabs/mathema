@@ -1095,12 +1095,21 @@ def _inv(A):
 
 
 def _trace(A):
-    """The sum of a matrix's diagonal entries, exact and rounded once."""
+    """Intent:
+        The sum of a square matrix's diagonal entries, exact and
+        rounded once.
+
+    Raises:
+        numpy.linalg.LinAlgError: the matrix is not square.
+    """
     a = _matrix(A)
-    rows = _exact_rows(a) if a.ndim == 2 else None
+    if a.ndim != 2 or a.shape[0] != a.shape[1]:
+        raise _np().linalg.LinAlgError(
+            f"trace needs a square matrix, got shape {a.shape}")
+    rows = _exact_rows(a)
     if rows is None:
         return float(_np().trace(a))
-    return _exact_sum([rows[i][i] for i in range(min(len(rows), len(rows[0])))])
+    return _exact_sum([rows[i][i] for i in range(len(rows))])
 
 
 def _transpose(A):

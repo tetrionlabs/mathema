@@ -383,6 +383,17 @@ def test_an_inverse_of_a_singular_matrix_has_no_value_on_either_route(src, A):
     assert isinstance(evaluate(src, **used), Exception)
 
 
+@pytest.mark.parametrize("A", [[[1, 2, 3], [4, 5, 6]], [[1, 2], [3, 4], [5, 6]],
+                               [[7, -1]]], ids=str)
+@pytest.mark.parametrize("word", ["trace", "det"])
+def test_a_square_word_has_no_value_on_a_non_square_matrix(word, A):
+    """`trace` and `det` are defined for a square matrix only: the lift
+    refuses a non-square one, and the evaluator raises there."""
+    with pytest.raises(ValueError):
+        matrix_value(f"{word}(A)", A=A)
+    assert isinstance(evaluate(f"{word}(A)", A=A), Exception)
+
+
 @pytest.mark.parametrize("word", ["sum", "prod"])
 def test_the_eigenvalue_lemmas_agree_with_the_evaluator(word):
     """The lift reads `sum(eigvals(A))` as `trace(A)` and
