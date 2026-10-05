@@ -246,7 +246,7 @@ def claim_word(kind: str, param: str, member: "str | None", behaviour: str,
     null) raises(TypeError)`."""
     target = param + (f", {member}" if member else "")
     verb = f"raises({raised})" if behaviour == "raises" and raised else behaviour
-    return f"`{kind}(f, {target}) {verb}`"
+    return f"{kind}(f, {target}) {verb}"
 
 
 def unknown_reason(first: dict, relation: str, listed: set) -> str:
@@ -271,11 +271,56 @@ def unknown_reason(first: dict, relation: str, listed: set) -> str:
         stated = claim_word(kind, p, None, "raises", raised)
         word = "None" if kind == ABSENT else value_shown(value)
         where = (f"remove {word} from the set" if p in listed
-                 else f"write \\ {{{kind}}} in the domain")
-        return f"{text} State {stated} if that is intended, or {where}."
+                 else f"to exclude it, write in the domain: \\ {{{kind}}}")
+        return f"{text}\n" + options([f"if that is intended, state: {stated}", where])
     stated = claim_word(kind, p, None, behaviour or "propagates")
-    return (f"{text} To state what f does there, write "
-            f"`for {p} in {{{value_shown(value)}}}, f({p}) in {{{kind}}}` or {stated}.")
+    return f"{text}\n" + numbered(
+        "To state what f does there, write one of these claims",
+        [f"for {p} in {{{value_shown(value)}}}, f({p}) in {{{kind}}}", stated])
+
+
+#: the numerals a remedy's options are listed under
+_ROMAN = ("i", "ii", "iii", "iv", "v", "vi", "vii", "viii")
+
+
+def options(items: list) -> str:
+    """Intent:
+        A remedy with its options: one option as it is, several each on
+        its own line, numbered `(i)`, `(ii)`, ... A claim or command is
+        the last thing on its line, after a colon.
+    """
+    items = [x for x in items if x]
+    if len(items) <= 1:
+        return items[0] if items else ""
+    return "\n".join(f"({_ROMAN[k]}) {x}" for k, x in enumerate(items))
+
+
+def numbered(lead: str, claims: list) -> str:
+    """`<lead>:` followed by each claim on its own line, `(1)`, `(2)`, ...,
+    indented under it."""
+    return lead + ":\n" + "\n".join(f"    ({i}) {c}" for i, c in enumerate(claims, start=1))
+
+
+def remedy_statements(text: str) -> list:
+    """Intent:
+        The claims a remedy says to state or write, in order: each line
+        `..., state: <claim>` or `..., write: <claim>`, and each numbered
+        claim line `(1) <claim>` under a `write these claims:` or
+        `write one of these claims:` line. A claim is the last thing on
+        its line, so it runs to the end of the line.
+    """
+    import re
+    out: list = []
+    for line in (text or "").splitlines():
+        s = line.strip()
+        listed = re.match(r"\(\d+\) (.+)$", s)
+        if listed:
+            out.append(listed.group(1).strip())
+            continue
+        single = re.search(r"(?:^|, |\. |\) )(?:[Ss]tate|[Ww]rite)(?: yourself)?: (.+)$", s)
+        if single:
+            out.append(single.group(1).strip())
+    return out
 
 
 def declared_optional_return(fn) -> "str | None":

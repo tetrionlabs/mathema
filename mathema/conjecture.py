@@ -4116,16 +4116,23 @@ def _gate_premise_refusal(cj) -> "str | None":
             continue
         param = next((p for p in (cj.domain or {}) if p.isidentifier()), "x")
         if gate.group(1) == "is_missing_safe":
+            from ._missing_words import options
             return (f"assuming {part.strip()} is not a premise: a value claim is never "
                     f"judged where f returns a missing value, so the premise would "
-                    f"change nothing. State what f does with a missing {param} as its "
-                    f"own claim (`missing(f, {param}) propagates`, `drops` or `raises`), "
-                    f"or write `\\ {{missing}}` in the domain so f is not called with one.")
+                    f"change nothing.\n" + options([
+                        f"to keep f from being called with a missing {param}, write "
+                        f"in the domain: \\ {{missing}}",
+                        f"to state what f does with one as its own claim (propagates, "
+                        f"drops or raises), write, for example: missing(f, {param}) "
+                        f"propagates"]))
+        from ._missing_words import options
         return (f"assuming {part.strip()} is not a premise: a value claim is never "
-                f"judged where f returns None, so the premise would change nothing. "
-                f"State what f does when {param} is None as its own claim "
-                f"(`absent(f, {param}) raises(TypeError)`), or write `\\ {{absent}}` in "
-                f"the domain so f is not called with None.")
+                f"judged where f returns None, so the premise would change nothing."
+                "\n" + options([
+                    "to keep f from being called with None, write in the domain: "
+                    "\\ {absent}",
+                    f"to state what f does when {param} is None as its own claim, "
+                    f"write, for example: absent(f, {param}) raises(TypeError)"]))
     return None
 
 

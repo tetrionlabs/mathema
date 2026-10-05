@@ -721,9 +721,18 @@ def _cases(calls: list, param: str, kind: str, member: "str | None" = None,
     return out
 
 
-def _written(policies: list) -> str:
-    """`a`, `a` and `b` for claims to write."""
-    return _and([f"`{policy_text(p)}`" for p in policies])
+from ._missing_words import options  # noqa: E402
+
+
+def _state_clause(policies: list, condition: str) -> str:
+    """`<condition>, state: <claim>` for one claim, `<condition>, write
+    these claims: (1) <a> (2) <b>` for several: the condition first, the
+    claims last, after a colon."""
+    from ._missing_words import numbered
+    texts = [policy_text(p) for p in policies]
+    if len(texts) == 1:
+        return f"{condition}, state: {texts[0]}"
+    return numbered(f"{condition}, write these claims", texts)
 
 
 # --- a stated policy claim ------------------------------------------------
@@ -840,14 +849,15 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
         if cases is not None and len(cases) > 1 and all(c.premise for c in cases) \
                 and len({c.member for c in cases}) == 1:
             reason = (f"stated; f {_split_words(cases, p)}")
-            nxt = f"state the two cases: {_written(cases)}; or change f"
+            nxt = options([_state_clause(cases, "to state the two cases"),
+                           "if not, change f"])
         else:
             reason = f"stated; f {did} instead: {_entry(wrong, p, stated.kind)}"
-            nxt = (f"state {_stated_word(stated, did, wrong, calls)} if that is "
-                   f"intended, or change f")
+            nxt = options([f"if that is intended, state: "
+                           f"{_stated_word(stated, did, wrong, calls)}", "if not, change f"])
         meta["mathema.policy"].update({"reason": reason, "next": nxt})
         return Probe(cj.name, statement, "falsified", n=len(calls), route="probe:counterfactual",
-                     counterexample=_witness(wrong, p), note=f"{reason}; {nxt}",
+                     counterexample=_witness(wrong, p), note=f"{reason}\n{nxt}",
                      meta=meta)
     guard = None
     for p in params:
@@ -969,7 +979,7 @@ def _stated_word(policy: Policy, behaviour: str, call: Call,
             member = mine[0]
     word = replace(policy, member=member, behaviour=behaviour,
                    exception=call.raised if behaviour == "raises" else None)
-    return f"`{policy_text(word)}`"
+    return policy_text(word)
 
 
 def _is_path(name: "str | None") -> bool:
@@ -1407,7 +1417,8 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
         cases = _cases(calls, p, kind, member, list(sig.members) or None)
         what = f"a missing {p}" if kind == "missing" else f"{p} = None"
         if cases:
-            nxt = f"to state each case, write {_written(cases)}; or make f treat {what} one way"
+            nxt = options([f"to make f treat {what} one way, change f",
+                           _state_clause(cases, "to state each case")])
         elif kind == "missing" and container:
             nxt = (f"no premise on count({p}) or len({p}) tells these cases apart; make "
                    f"f treat {what} one way")
@@ -1431,16 +1442,16 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
             words = _default_words(p, kind, member, sig, container)
             if kind == "absent" and sig.slot_type == "unannotated":
                 bracket = (f"{words}, and f raises on it; {evidence}. Annotate {p} as "
-                           f"float to exclude None, or write this row with mathema "
+                           f"float to exclude None; to write this row, run: mathema "
                            f"claims {key} --write")
             elif sig.slot_type == "unannotated":
-                bracket = (f"{words}; {evidence}. Annotate {p} as float to say so, or "
-                           f"write this row with mathema claims {key} --write")
+                bracket = (f"{words}; {evidence}. Annotate {p} as float to say so; to "
+                           f"write this row, run: mathema claims {key} --write")
             else:
                 other = "raises or drops" if kind == "missing" else "drops or propagates"
-                bracket = (f"{words}; {evidence}. Keep it by writing it (mathema claims "
-                           f"{key} --write), or change the word to {other} if f should "
-                           f"do otherwise")
+                bracket = (f"{words}; {evidence}. Change the word to {other} if f "
+                           f"should do otherwise; to keep it, run: mathema claims "
+                           f"{key} --write")
             return row("holds", behaviour, None, "default", bracket)
         words = _default_words(p, kind, member, sig, container, short=True)
         bracket = f"{words}; f {behaviour} instead: {_entry(call, p, kind)}"
@@ -1457,25 +1468,27 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
         slot_member = member or (_members_in(call.point.get(p), kind) or ["nan"])[0]
         if behaviour == "drops":
             if kind == "absent":
-                nxt = (f"if {out} is the answer f should give for {p} = None, write "
-                       f"`{accepted}`; if not, make f raise")
+                said = [f"if {out} is the answer f should give for {p} = None, state: "
+                        f"{accepted}", "if not, make f raise"]
             elif container:
-                nxt = (f"if {out} is the answer f should give when a slot is "
-                       f"{slot_member}, write `{accepted}`; if not, make f raise or "
-                       f"give a hole back")
+                said = [f"if {out} is the answer f should give when a slot is "
+                        f"{slot_member}, state: {accepted}",
+                        "if not, make f raise or give a hole back"]
             else:
-                nxt = (f"if {out} is the answer f should give for a missing {p}, write "
-                       f"`{accepted}`; if not, make f raise or give nan back")
+                said = [f"if {out} is the answer f should give for a missing {p}, "
+                        f"state: {accepted}", "if not, make f raise or give nan back"]
         elif behaviour == "raises":
             fix = (f"make f skip or fill the {slot_member} slot" if container
                    else "make f give nan back")
-            nxt = f"if the raise is intended, write `{accepted}`; if not, {fix}"
+            said = [f"if the raise is intended, state: {accepted}", f"if not, {fix}"]
         elif behaviour == "propagates" and kind == "absent":
-            nxt = f"if giving None back is intended, write `{accepted}`; if not, make f raise"
+            said = [f"if giving None back is intended, state: {accepted}",
+                    "if not, make f raise"]
         else:
-            nxt = f"if that is intended, write `{accepted}`; if not, change f"
-        nxt += (f"; or accept it as a discovery: mathema accept {key} "
-                f"{name_of(expected_policy)} --as discovery --corrected \"{accepted}\"")
+            said = [f"if that is intended, state: {accepted}", "if not, change f"]
+        nxt = options(said + [f"to accept it as a discovery, run: mathema accept {key} "
+                              f"{name_of(expected_policy)} --as discovery --corrected "
+                              f"\"{accepted}\""])
         return row("falsified", expected, None, "default", bracket, nxt=nxt,
                    cx=_witness(call), shown=expected_policy)
     held = _members_at(call, p, kind)
@@ -1489,24 +1502,30 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
             place = path_place(p, (_members_at(call, p, kind) or ["null"])[0],
                                call.point, kind)
             sentence = (f"f raised {exception} at {place}, and no claim says it may")
-            nxt = (f"if the raise is intended, state `{accepted}`; otherwise handle "
-                   f"it in f, or exclude it where {p} is bound, `\\ {{{word}}}`")
+            said = [f"if the raise is intended, state: {accepted}",
+                    "if not, handle it in f",
+                    f"to exclude it where {p} is bound, write: \\ {{{word}}}"]
+            lead = ""
         elif origin == "optional":
             sentence = f"f raised {exception} at {at}, and no claim says it may"
-            nxt = (f"{why}. If the raise is intended, state `{accepted}`; otherwise "
-                   f"handle None in f, or annotate {p} as {_plain_type(fn, p)}")
+            said = [f"if the raise is intended, state: {accepted}",
+                    f"if not, handle None in f, or annotate {p} as {_plain_type(fn, p)}"]
+            lead = f"{why}.\n"
         elif origin == "listed":
             sentence = (f"f raised {exception} at {at}, a point the claim lists, and no "
                         f"claim says it may")
-            nxt = (f"if the raise is intended, state `{accepted}`; otherwise handle "
-                   f"{word} in f, or remove {word} from the set")
+            said = [f"if the raise is intended, state: {accepted}",
+                    f"if not, handle {word} in f, or remove {word} from the set"]
+            lead = ""
         else:
             sentence = (f"f raised {exception} at {at}, a value the claim admits, and "
                         f"no claim says it may")
-            nxt = (f"if the raise is intended, state `{accepted}`; otherwise handle "
-                   f"{word} in f, or remove |{kind} from the domain")
-        nxt += (f"; or accept the raise as a discovery (mathema accept {key} "
-                f"{name_of(policy)} --as discovery) and state `{accepted}`")
+            said = [f"if the raise is intended, state: {accepted}",
+                    f"if not, handle {word} in f, or remove |{kind} from the domain"]
+            lead = ""
+        nxt = lead + options(said + [
+            f"to accept the raise as a discovery, run: mathema accept {key} "
+            f"{name_of(policy)} --as discovery --corrected \"{accepted}\""])
         return row("falsified", None, None, "observed", sentence, sentence=sentence,
                    nxt=nxt, cx=_witness(call, p))
     return row("holds", behaviour, None, "observed",
@@ -1547,11 +1566,15 @@ def contradicting_policies(statements: list) -> "str | None":
         if other is not None and (other.behaviour != stated.behaviour or (
                 other.exception and stated.exception
                 and other.exception != stated.exception)):
-            return (f"`{policy_text(other)}` and `{policy_text(stated)}` state two "
-                    f"behaviours for one case. Keep one (the record shows which f "
-                    f"follows), or give each a premise on another parameter or on "
-                    f"count(...) that tells the cases apart, e.g. `assuming count(xs) "
-                    f">= 1, ...` beside `assuming count(xs) == 0, ...`")
+            from ._missing_words import numbered
+            return (numbered("two claims state two behaviours for one case",
+                             [policy_text(other), policy_text(stated)])
+                    + "\nKeep one (the record shows which f follows), or give each a "
+                    "premise on another parameter or on count(...) that tells the "
+                    "cases apart, "
+                    + numbered("for example, one claim for each",
+                               ["assuming count(xs) >= 1, ...",
+                                "assuming count(xs) == 0, ..."]))
         seen.setdefault(key, stated)
     return None
 
@@ -1724,14 +1747,14 @@ def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
                      for c in cases]
         if cases is not None and cases != [replace(policy, source="stated")] and \
                 len(cases) > 1:
-            nxt = f"state {_written(cases)} if that is intended, or change f"
+            nxt = options([_state_clause(cases, "if that is intended"), "if not, change f"])
         else:
-            nxt = (f"state {_stated_word(policy, did, wrong, calls)} if that is "
-                   f"intended, or change f")
+            nxt = options([f"if that is intended, state: "
+                           f"{_stated_word(policy, did, wrong, calls)}", "if not, change f"])
         meta_policy.update({"reason": reason, "next": nxt})
         rows.append(Probe(name_of(policy), statement, "falsified", n=len(calls),
                           route="probe:counterfactual", counterexample=_witness(wrong),
-                          note=f"{reason}; {nxt}", meta=meta))
+                          note=f"{reason}\n{nxt}", meta=meta))
     return rows
 
 
@@ -2446,7 +2469,8 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                 exception=c.raised if c.raised else None)]
             accepted = [replace(a, premise=a.premise or pol.premise) for a in accepted]
             verb = "the raise is" if c.raised else "that is"
-            nexts.append(f"state {_written(accepted)} if {verb} intended, or change f")
+            nexts.append(options([_state_clause(accepted, f"if {verb} intended"),
+                                  "if not, change f"]))
         if said:
             clauses.append(_by_member(said))
         cover = ""

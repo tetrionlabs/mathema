@@ -121,7 +121,7 @@ def _policy_detail(p) -> str:
 
 
 #: the policy a row's next step says to state, as the record words it
-_STATED = re.compile(r'--corrected "([^"]+)"|(?:write|state|,) `([^`]+)`')
+_CORRECTED = re.compile(r'--corrected "([^"]+)"')
 
 
 def _intended(stated: str, word: str) -> str:
@@ -144,7 +144,9 @@ def _fixes(p, key: str, word: str) -> str:
     pol = (p.meta or {}).get("mathema.policy") or {}
     # a row with no single policy needs one claim per case, not one command
     mixed = (pol.get("sentence") or "").startswith("f has no single policy")
-    stated_all = {a or b for a, b in _STATED.findall(pol.get("next") or "")}
+    from ._missing_words import remedy_statements
+    corrected = _CORRECTED.findall(pol.get("next") or "")
+    stated_all = set(corrected) or set(remedy_statements(pol.get("next") or ""))
     # a row whose next step states one claim per member or case has no
     # single command that settles it
     found = None if mixed or len(stated_all) != 1 else stated_all.pop()
@@ -154,9 +156,10 @@ def _fixes(p, key: str, word: str) -> str:
         fixes.append(f"if {_intended(found, word)} is intended, run: mathema accept "
                      f"{key} {p.name} --as discovery --corrected \"{found}\"")
     fixes += [f"exclude {word}", f"handle {word} at entry"]
-    numerals = ("i", "ii", "iii")
-    return "possible fixes: " + "  ".join(
-        f"({n}) {fix}" for n, fix in zip(numerals, fixes))
+    # each fix on its own line, the command last on its line
+    from ._missing_words import options
+    return "possible fixes:\n" + "\n".join(f"  {line}" for line in
+                                             options(fixes).splitlines())
 
 
 def _split_lines(p, key: str) -> list:
@@ -266,7 +269,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             lines.append(_row(_verdict(r), "policy", what, _policy_detail(r)))
             if _verdict(r) == "falsified":
                 falsified.append(r.counterexample)
-                lines.append(" " * 28 + _fixes(r, key, word))
+                lines += [" " * 28 + part for part in _fixes(r, key, word).splitlines()]
             used.add(id(r))
         if falsified:
             head = "falsified" + (f" at {falsified[0]}" if falsified[0] else "")
