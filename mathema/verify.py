@@ -621,7 +621,7 @@ def _indented(text: str) -> str:
     return "\n".join(f"  {line}" for line in text.splitlines())
 
 
-def _born_falsified_hint(key: str, probes: list,
+def _initially_falsified_hint(key: str, probes: list,
                          verified_entry: dict,
                          library_source: "str | None" = None) -> list:
     """Intent:
@@ -685,8 +685,8 @@ def _born_falsified_hint(key: str, probes: list,
                 f"to record it as a discovery, run: mathema accept {key} <claim> "
                 f"--as discovery",
                 "supersede it",
-                f"to try a spelling first, writing nothing, run: mathema check "
-                f"{key} --claim \"...\""]))]
+                f"to try a spelling first (it writes nothing), run: mathema "
+                f"check {key} --claim \"...\""]))]
 
 
 def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
@@ -1817,7 +1817,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         rec.probes, late_notes = _strip_retired_probes(
             key, rec.probes, verified_entry or {}, retired_noted)
         out.lines.extend(late_notes)
-        out.lines.extend(_born_falsified_hint(key, rec.probes,
+        out.lines.extend(_initially_falsified_hint(key, rec.probes,
                                               verified_entry or {},
                                               library.get(key)))
         _apply_declared_extras(rec, merged_entry)

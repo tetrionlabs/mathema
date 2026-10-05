@@ -122,7 +122,7 @@ note fees.discounted: never_raises_price falsified on first adjudication. A
   (ii) to record it as a discovery, run: mathema accept fees.discounted <claim>
       --as discovery
   (iii) supersede it
-  (iv) to try a spelling first, writing nothing, run: mathema check
+  (iv) to try a spelling first (it writes nothing), run: mathema check
       fees.discounted --claim "..."
 FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no
     baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- log_monotone
