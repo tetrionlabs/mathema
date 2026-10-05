@@ -477,6 +477,23 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     evaluate.executed = executed  # type: ignore[attr-defined]
     evaluate.drawn = tally  # type: ignore[attr-defined]
 
+    def _exact_holds(point, tol) -> bool:
+        # the claim's sides read exactly, the function's results as the
+        # exact values it returned (`_exact_side`): whether the relation
+        # holds within `tol` there, False when it does not or cannot be
+        # computed exactly
+        from ._exact_side import exact_sides
+        env = {**base_env, **_typed(point)}
+        exact = exact_sides(code_l, code_r, env,
+                            {"f": fn_call, **(bound_funcs or {})})
+        _reset()
+        if exact is None:
+            return False
+        held = relation_holds_elementwise(
+            exact[0], exact[1], cj.relation, tol,
+            exact_inequality=cj.tolerance is None, rel_tol=0.0)
+        return held is True
+
     def probe_finite(point):
         tally.add(point)
         # a computation failure only: a raise from the code, a NaN
@@ -568,6 +585,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             held = _array_relation(lv, rv, scaled, point)
             if held is None or held:
                 return None
+            if _exact_holds(point, scaled):
+                return None
             return (f"the relation fails on the executed values ({lv!r} "
                     f"{cj.relation} {rv!r}), past the magnitude-scaled "
                     f"tolerance")
@@ -582,6 +601,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         scaled = slack + 1e-7 * max(abs(lv) if not overflowed else 0.0,
                                     abs(rv) if not overflowed else 0.0, 1.0)
         if _relation_holds(lv, rv, scaled):
+            return None
+        if not overflowed and _exact_holds(point, scaled):
             return None
         if overflowed:
             return (f"the computation overflows to inf here, and the "

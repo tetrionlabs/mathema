@@ -5052,6 +5052,25 @@ def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set 
     return tuple(kinds), shown
 
 
+def _exactly_decided(cj, code_l, code_r, env, callees, slack, ok):
+    """Intent:
+        The relation at the point `env` holds, re-decided with the claim's
+        sides evaluated exactly (`_exact_side.exact_sides`): the function's
+        results read as the exact values it returned, the claim's own
+        literals and arithmetic exact. `ok` (the float verdict) comes back
+        unchanged when the sides cannot be computed exactly.
+    """
+    from ._exact_side import exact_sides
+    exact = exact_sides(code_l, code_r, env, callees)
+    if exact is None:
+        return ok
+    held = relation_holds_elementwise(
+        exact[0], exact[1], cj.relation, slack,
+        exact_inequality=cj.tolerance is None,
+        rel_tol=_declared_rel_tol(cj))
+    return ok if held is None else held
+
+
 def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "str | None":
     """Intent:
         The counterexample text the claim fails with at `args` (a raise,
@@ -5096,6 +5115,11 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
                                     exact_inequality=cj.tolerance is None,
                                     rel_tol=_declared_rel_tol(cj))
     if ok is False:
+        callees = {k: v for k, v in trial_env.items()
+                   if callable(v) and (k == "f" or k in (cj.funcs or {}))}
+        if _exactly_decided(cj, code_l, code_r, trial_env, callees,
+                            slack, ok) is True:
+            return None
         return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
     return None
 
@@ -9418,6 +9442,12 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE,
                 exact_inequality=cj.tolerance is None,
                 rel_tol=_declared_rel_tol(cj))
+            if ok is False:
+                ok = _exactly_decided(
+                    cj, code_l, code_r, env, {"f": fn_call, **bound_funcs},
+                    cj.tolerance if cj.tolerance is not None
+                    else DEFAULT_TOLERANCE, ok)
+                call_raised[0] = call_nan[0] = call_inf[0] = None
             if ok is None:
                 continue
             checked += 1
@@ -9451,6 +9481,10 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             lv, rv, cj.relation, slack,
             exact_inequality=cj.tolerance is None,
             rel_tol=_declared_rel_tol(cj))
+        if ok is False:
+            ok = _exactly_decided(cj, code_l, code_r, env,
+                                  {"f": fn_call, **bound_funcs}, slack, ok)
+            call_raised[0] = call_nan[0] = call_inf[0] = None
         if ok is False and as_arrays \
                 and cj.relation in ("==", "~=", "<=", ">="):
             # the draw disagrees by no more than the round-off its own
