@@ -88,7 +88,7 @@ nothing it writes outside the call. `n=192` elsewhere is not a flat constant
 either, it is a trial budget decided once per call from `ema`'s own
 structure and the domain it is checked over (128 by default, +32 for
 the loop, +32 for a domain as wide as `x`'s). See [mathema check](modes/check.md#the-trial-budget)
-for how that is decided, and `--trials-scale` for turning it down in a
+for how that is decided, and `--trials-downscale` for turning it down in a
 fast dev loop. Every verdict reports the exact `n` it used, plus a
 `meta["mathema.confidence"]` score capped below the derive route's own,
 since sampling is never proof.

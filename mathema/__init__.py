@@ -502,10 +502,11 @@ def _matrix_names_of(fn) -> frozenset:
 @_quiet_while_probing
 def check(fn, claims: list | None = None, domain: dict | None = None,
          trials: int | None = None,
-         trials_scale: float = 1.0, extensive: bool = False,
+         trials_downscale: "float | None" = None, extensive: bool = False,
          declared: dict | None = None,
          known_premises: dict | None = None,
-         pseudo_infinity=None, runtime_types: dict | None = None) -> Record:
+         pseudo_infinity=None, runtime_types: dict | None = None,
+         trials_scale: "float | None" = None) -> Record:
     """Verify a function's claims, each adjudicated against the real
     function.
 
@@ -603,6 +604,8 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     authoring.declared_from_function's own decorator-over-docstring rule
     for the same reasoning one layer in).
     """
+    from .probing import resolve_trials_downscale
+    trials_scale = resolve_trials_downscale(trials_downscale, trials_scale)
     from .compendium import ensure_bundled
     from .probing import _RISK, _SPECIALS
     from .spec import declare, entry_claims
@@ -707,7 +710,7 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     with _policy.batch():
         if all_claims:
             probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
-                                                trials=trials, trials_scale=trials_scale,
+                                                trials=trials, trials_downscale=trials_scale,
                                                 facts=facts, extensive=extensive,
                                                 known_premises=known_premises,
                                                 float_companions=True,

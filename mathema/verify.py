@@ -766,9 +766,10 @@ def _union_verified_membership(current_claims: list,
 
 def verify_project(root: str = ".", *, all: bool = False,
                    strict: bool = True,
-                   trials_scale: float = 1.0,
+                   trials_downscale: "float | None" = None,
                    only: "list | None" = None,
-                   files: "list | None" = None) -> VerifyResult:
+                   files: "list | None" = None,
+                   trials_scale: "float | None" = None) -> VerifyResult:
     """The test-runner sweep as a library call: for every key the
     declared/verified stores know, re-adjudicate if the function's form
     hash, claims fingerprint, or a dependency changed (`all=True`
@@ -786,6 +787,8 @@ def verify_project(root: str = ".", *, all: bool = False,
         callee in the same run still reads the callee's fresh record;
         the sweep's outcome does not depend on key order.
     """
+    from .probing import resolve_trials_downscale
+    trials_scale = resolve_trials_downscale(trials_downscale, trials_scale)
     import warnings
 
     from .analysis import StateDependenceWarning
@@ -1502,7 +1505,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         from .spec import attach_recorded_pins
         attach_recorded_pins(claims, verified_entry or None)
         rec = check(fn, claims=claims if claims else [],
-                    trials_scale=trials_scale,
+                    trials_downscale=trials_scale,
                     known_premises=stub_premises,
                     pseudo_infinity=merged_entry.get("pseudo_infinity"),
                     runtime_types=merged_entry.get("runtime_types"))

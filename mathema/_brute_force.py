@@ -514,7 +514,7 @@ def _sweep_plan(cj, fn, facts, names, grid, deps):
     sample = rng.sample(points, min(_PARTIAL_SAMPLE, len(points)))
     return _FinitePlan(hits + sample, len(sample), D.Coverage(
         total=len(points), at_discontinuities=len(hits),
-        discontinuity_words=D.words_of(found)))
+        discontinuity_words=D.words_of(found), random=len(sample)))
 
 
 def _examined_clean(fn) -> bool:

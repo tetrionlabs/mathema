@@ -559,7 +559,7 @@ def test_check_help_documents_all_flags():
     assert r.returncode == 0
     for flag in ("--claim", "--domain", "--strict", "--lenient",
                 "--format", "--output",
-                "--trials-scale"):
+                "--trials-downscale"):
         assert flag in r.stdout, flag
     for choice in ("text", "json", "junit", "github", "md"):
         assert choice in r.stdout, choice
@@ -568,12 +568,12 @@ def test_check_help_documents_all_flags():
 def test_verify_help_documents_all_flags():
     r = _run_module_help("verify", "--help")
     assert r.returncode == 0
-    for flag in ("--root", "--all", "--lenient", "--trials-scale"):
+    for flag in ("--root", "--all", "--lenient", "--trials-downscale"):
         assert flag in r.stdout, flag
 
 
 # ---------------------------------------------------------------------------
-# check: --trials-scale
+# check: --trials-downscale
 # ---------------------------------------------------------------------------
 
 def _write_unliftable(path):
@@ -587,7 +587,7 @@ def _write_unliftable(path):
         "    return vals[0] + vals[1]\n")
 
 
-def test_trials_scale_shrinks_the_reported_n(tmp_path):
+def test_trials_downscale_shrinks_the_reported_n(tmp_path):
     # suggestions no longer populate the report: declare a probe claim
     # so the runs have a sampled n to compare
     _write_unliftable(tmp_path / "funcs.py")
@@ -595,7 +595,7 @@ def test_trials_scale_shrinks_the_reported_n(tmp_path):
     default = _run("check", "funcs.py:add", "--format", "json", *probe_claim,
                    cwd=tmp_path)
     scaled = _run("check", "funcs.py:add", "--format", "json", *probe_claim,
-                  "--trials-scale", "0.25", cwd=tmp_path)
+                  "--trials-downscale", "0.25", cwd=tmp_path)
     assert default.returncode == 0 and scaled.returncode == 0
     # a policy row's n counts the calls at missing inputs, not draws
     default_ns = {c["n"] for f in json.loads(default.stdout)["functions"]
@@ -607,11 +607,11 @@ def test_trials_scale_shrinks_the_reported_n(tmp_path):
     assert max(scaled_ns) < min(default_ns)
 
 
-def test_trials_scale_never_drops_below_the_floor(tmp_path):
+def test_trials_downscale_never_drops_below_the_floor(tmp_path):
     _write_unliftable(tmp_path / "funcs.py")
     r = _run("check", "funcs.py:add", "--format", "json",
             "--claim", "for a in [-5,5], b in [-5,5], f(a, b) == f(b, a)",
-            "--trials-scale", "0.001", cwd=tmp_path)
+            "--trials-downscale", "0.001", cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     ns = {c["n"] for f in json.loads(r.stdout)["functions"]
          for c in f["claims"]
@@ -619,13 +619,13 @@ def test_trials_scale_never_drops_below_the_floor(tmp_path):
     assert min(ns) >= 16
 
 
-def test_trials_scale_above_one_is_harmless_not_an_error(tmp_path):
+def test_trials_downscale_above_one_is_harmless_not_an_error(tmp_path):
     # "harmless" means clamped, not amplified: the sampled budgets under
     # scale 4.0 match an unscaled run exactly
     import json as _json
     _write_funcs(tmp_path / "funcs.py")
     base = _run("check", "funcs.py", "--format", "json", cwd=tmp_path)
-    r = _run("check", "funcs.py", "--trials-scale", "4.0",
+    r = _run("check", "funcs.py", "--trials-downscale", "4.0",
              "--format", "json", cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
 
@@ -636,12 +636,12 @@ def test_trials_scale_above_one_is_harmless_not_an_error(tmp_path):
     assert _ns(r.stdout) == _ns(base.stdout)
 
 
-def test_trials_scale_zero_or_negative_is_a_clean_error(tmp_path):
+def test_trials_downscale_zero_or_negative_is_a_clean_error(tmp_path):
     _write_funcs(tmp_path / "funcs.py")
     for bad in ("0", "-0.5"):
-        r = _run("check", "funcs.py", "--trials-scale", bad, cwd=tmp_path)
+        r = _run("check", "funcs.py", "--trials-downscale", bad, cwd=tmp_path)
         assert r.returncode == 2, r.stdout + r.stderr
-        assert "--trials-scale" in (r.stdout + r.stderr)
+        assert "--trials-downscale" in (r.stdout + r.stderr)
 
 
 def test_verify_status_flag_is_documented():

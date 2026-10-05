@@ -51,6 +51,7 @@ class Coverage:
     at_discontinuities: int = 0
     discontinuity_words: str = ""
     edge_cases: int = 0
+    random: int = 0
     skipped: int = 0
 
     def words(self, trials: int) -> str:
@@ -64,15 +65,22 @@ class Coverage:
             return (f"({trials:,} trials, every point of the domain in order "
                     f"up to the first failure; the domain has {self.total:,} "
                     f"points)")
+        planned = self.at_discontinuities + self.edge_cases + self.random
+        if trials < planned:
+            # stopped at the first failure: the counts are what was planned
+            head = f"({trials:,} trials up to the first failure, of {planned:,} planned: "
+        else:
+            head = f"({trials:,} trials: "
         parts = []
         if self.at_discontinuities:
             parts.append(f"{self.at_discontinuities:,} at discontinuities of "
                          f"{self.discontinuity_words}")
         if self.edge_cases:
             parts.append(f"{self.edge_cases:,} edge cases")
-        random_count = max(0, trials - self.at_discontinuities - self.edge_cases)
+        random_count = (self.random if trials < planned else
+                        max(0, trials - self.at_discontinuities - self.edge_cases))
         parts.append(f"{random_count:,} random")
-        text = f"({trials:,} trials: " + ", ".join(parts)
+        text = head + ", ".join(parts)
         if self.skipped:
             text += (f"; {self.skipped:,} discontinuities past the cap of "
                      f"{SOLVE_CAP} not run")

@@ -1205,6 +1205,11 @@ class Conjecture:
     # calling scope rather than from an explicit `funcs=`/`let` binding.
     # Their text stays the bare call name, which resolves the same way
     # when the claim is rebuilt, so rendering adds no `let` for them.
+    trials: "int | None" = None
+    # the claim's own trial budget (`claim(..., trials=)`, a claims
+    # file's `trials:`), which may exceed the usual limit; None uses the
+    # caller's. A finite domain whose point count is within it is swept
+    # in full on the computation line.
 
 
 class InvalidConjecture(ValueError):
@@ -1229,7 +1234,8 @@ def claim(law: str, name: str | None = None, source: str = "user",
          funcs: dict | None = None, tolerance: float | None = None,
          pseudo_infinity: float | None = None,
          meta: dict | None = None,
-         matrix_names: frozenset = frozenset()) -> Conjecture:
+         matrix_names: frozenset = frozenset(),
+         trials: "int | None" = None) -> Conjecture:
     """The simple way to state a claim: one string, relation included.
 
         claim("f(-x) = -f(x)")
@@ -1277,7 +1283,15 @@ def claim(law: str, name: str | None = None, source: str = "user",
     declaring the *same* name via both `let ... be ...` and
     `for ... in ...` in one claim, though, raises `ConflictingDomainBinding`
     immediately; two different bounds for one name has no principled
-    default to pick silently."""
+    default to pick silently. `trials` is the claim's own trial
+    budget, a positive whole number, which may exceed the usual limit."""
+    if trials is not None:
+        if isinstance(trials, bool) or not isinstance(trials, int) or trials < 1:
+            raise InvalidConjecture(
+                f"trials must be a positive whole number, got {trials!r}")
+        made = claim(law, name, source, route, grammar, funcs, tolerance,
+                     pseudo_infinity, meta, matrix_names)
+        return _dc_replace(made, trials=trials)
     first = _claim(law, name, source, route, grammar, funcs, tolerance,
                    pseudo_infinity, meta, matrix_names)
     if "|" not in blank_strings(law):
@@ -3667,11 +3681,12 @@ def _receiver_params_bound(fn, facts, conjectures):
 @quiet_while_probing
 def check_conjectures(fn, conjectures: list[Conjecture],
                       domain: dict | None = None, trials: int | None = None,
-                      trials_scale: float = 1.0, facts=None,
+                      trials_downscale: "float | None" = None, facts=None,
                       extensive: bool = False,
                       known_premises: dict | None = None,
                       float_companions: bool = False,
-                      pseudo_infinity=None) -> list[Probe]:
+                      pseudo_infinity=None,
+                      trials_scale: "float | None" = None) -> list[Probe]:
     """Adjudicate proposed claims against the live function.
 
     Throughout, bars around one of the matrices `fn`'s signature
@@ -3744,6 +3759,8 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         InvalidDomain: a function-level or `MATHEMA_PSEUDO_INFINITY`
             value that `let |inf| be` would refuse.
     """
+    from .probing import resolve_trials_downscale
+    trials_scale = resolve_trials_downscale(trials_downscale, trials_scale)
     from .grammar import _BAR_MATRICES, bars_over_matrices, matrices_in_view
     from .types import matrix_param_names
     try:
@@ -4388,7 +4405,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             "math_only" if math_only else
             "spawn" if float_companions and cj.route in ("derive", "best")
             else None)
-        ctx.companion_budget = trials
+        ctx.companion_budget = cj.trials if cj.trials is not None else trials
         def stamp(probe, _cap=None):
             # `condition` is rendered text that gets read back,
             # docsync compares a verified row by feeding
@@ -4788,7 +4805,7 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         link_cjs.append(_replace(cj, lhs=lhs, relation=rel, rhs=rhs,
                                  links=[], name=f"{cj.name}[link{i}]"))
     probes = check_conjectures(fn, link_cjs, domain=domain, trials=trials,
-                               trials_scale=trials_scale, facts=facts,
+                               trials_downscale=trials_scale, facts=facts,
                                extensive=extensive,
                                float_companions=float_companions)
     link_names = {c.name for c in link_cjs}
@@ -4939,7 +4956,7 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
     sub_cjs = [_replace(cj, lhs=p, name=f"{cj.relation}[{p}]")
                for p in numeric]
     probes = check_conjectures(fn, sub_cjs, domain=domain, trials=trials,
-                               trials_scale=trials_scale, facts=facts,
+                               trials_downscale=trials_scale, facts=facts,
                                extensive=extensive)
     combined = _combine_conjunction(probes, cj.name, statement, numeric,
                                     what=f"function-wide {cj.relation}",
@@ -8458,6 +8475,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     rng, specials = setup.rng, setup.specials
     from .probing import claim_sampling_budget
     risk, budget = claim_sampling_budget(setup, facts, cj_domain)
+    if getattr(cj, "trials", None) is not None:
+        # the claim's own trials, which may exceed the usual limit
+        budget = cj.trials
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
     from .probing import _language_lap

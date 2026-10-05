@@ -2402,6 +2402,21 @@ def string_domain_hint(p: str) -> str:
             f"declare its values, e.g. {example}")
 
 
+def resolve_trials_downscale(downscale: "float | None",
+                             old: "float | None") -> float:
+    """Intent:
+        The factor that shrinks the trial budget, from `trials_downscale`
+        or its deprecated spelling `trials_scale` (which warns); 1.0
+        when neither is given.
+    """
+    if old is not None:
+        from ._deprecation import warn_deprecated
+        warn_deprecated("trials_scale", use="trials_downscale", remove_in="0.7")
+        if downscale is None:
+            downscale = old
+    return 1.0 if downscale is None else float(downscale)
+
+
 def probe(fn, facts, domain: dict | None = None,
           trials: int | None = None, trials_scale: float = 1.0,
           extensive: bool = False) -> list[Probe]:

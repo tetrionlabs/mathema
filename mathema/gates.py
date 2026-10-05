@@ -1426,7 +1426,11 @@ def _finite_plan(cj, fn, facts, deps, cj_domain, corners, admits,
         except Exception:
             pass
     per_call = (time.perf_counter() - started) / max(1, len(trial))
-    if per_call * len(points) <= _SWEEP_SECONDS * scale:
+    asked = getattr(cj, "trials", None)
+    if (asked is not None and len(points) <= asked) or \
+            per_call * len(points) <= _SWEEP_SECONDS * scale:
+        # the claim's own trials cover the domain, or the timed estimate
+        # fits the budget: every point
         return _FinitePlan(points, 0, D.Coverage(total=len(points), full=True))
     found = D.discontinuities(cj, fn, facts)
     hits = D.on_grid(found, points)
@@ -1434,7 +1438,8 @@ def _finite_plan(cj, fn, facts, deps, cj_domain, corners, admits,
     sampled = max(0, int(_PARTIAL_POINTS * scale) - len(chosen))
     return _FinitePlan(chosen, sampled, D.Coverage(
         total=len(points), at_discontinuities=len(hits),
-        discontinuity_words=D.words_of(found), edge_cases=len(corners)))
+        discontinuity_words=D.words_of(found), edge_cases=len(corners),
+        random=sampled))
 
 
 def _interval_discontinuities(cj, fn, facts, deps, cj_domain, corners):
@@ -1570,6 +1575,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         targeted, coverage = _interval_discontinuities(
             cj, fn, facts, deps, cj_domain, corners)
         corners = corners + targeted
+        if coverage is not None:
+            coverage.random = interior
     corner_count = sum(1 for c in corners if admits(c))
     progress = C.StabilitySweep()
     try:

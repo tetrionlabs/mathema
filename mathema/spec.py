@@ -548,6 +548,9 @@ def _declared_conjecture(c: dict, default_grammar: str = "mathema"):
                 tolerance=c.get("tolerance"),
                 pseudo_infinity=c.get("pseudo_infinity"),
                 meta=meta)
+    if c.get("trials") is not None:
+        from dataclasses import replace as _replace
+        cj = _replace(cj, trials=int(c["trials"]))
     for param, b in (c.get("domain") or {}).items():
         cj.domain.setdefault(param, domain_bound_from_json(b))
     # a call-site claim's in-hand callables (check() carries them under
@@ -1289,7 +1292,7 @@ class ClaimsFileError(ValueError):
 
 _CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
                  "grammar", "funcs", "pseudo_infinity", "meta", "authored",
-                 "source", "family", "note", "versions")
+                 "source", "family", "note", "versions", "trials")
 _ENTRY_FIELDS = ("claims", "defines", "intent", "grammar", "meta", "references",
                  "pseudo_infinity", "runtime_types")
 
@@ -1543,6 +1546,12 @@ def validate_claims_file(data, rel_path: str) -> None:
             problem = _pseudo_infinity_problem(c.get("pseudo_infinity"))
             if problem:
                 fail(key, f"{label}: `pseudo_infinity`: {problem}")
+            trials = c.get("trials")
+            if trials is not None and (isinstance(trials, bool)
+                                       or not isinstance(trials, int)
+                                       or trials < 1):
+                fail(key, f"{label}: `trials` must be a positive whole "
+                          f"number, not {trials!r}")
             if "versions" in c:
                 from .compendium import valid_version_range
                 row_range = c.get("versions")
@@ -2113,6 +2122,8 @@ def declare(cj) -> dict:
         out["domain"] = {p: domain_bound_to_json(b) for p, b in cj.domain.items()}
     if cj.tolerance is not None:
         out["tolerance"] = cj.tolerance
+    if getattr(cj, "trials", None) is not None:
+        out["trials"] = cj.trials
     if getattr(cj, "meta", None):
         out["meta"] = dict(cj.meta)
     if pseudo_infinity_bounds_something(cj):

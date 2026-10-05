@@ -107,7 +107,29 @@ def _validate_trials_scale(scale: float) -> None:
     # a factor above 1 is clamped to 1 downstream; NaN compares false
     # both ways, so it is refused here along with zero and below
     if not scale > 0:
-        _bad_argument(f"mathema: --trials-scale must be > 0, got {scale!r}")
+        _bad_argument(f"mathema: --trials-downscale must be > 0, got {scale!r}")
+
+
+class _DeprecatedTrialsScale(argparse.Action):
+    """`--trials-scale`, the old spelling of `--trials-downscale`: the
+    same value, with a deprecation note on stderr."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print("mathema: --trials-scale is deprecated and will be removed in "
+              "0.7; use --trials-downscale", file=sys.stderr)
+        setattr(namespace, self.dest, values)
+
+
+def _add_trials_downscale(sub) -> None:
+    sub.add_argument("--trials-downscale", dest="trials_scale", type=float,
+                     default=1.0, metavar="FACTOR",
+                     help="shrink the probe-route trial budget by this factor "
+                          "(FACTOR > 0, e.g. 0.25) for faster dev-loop "
+                          "iteration; a value above 1 is clamped to 1, so it "
+                          "never scales upward, and never below a floor that "
+                          "still guarantees real evidence")
+    sub.add_argument("--trials-scale", dest="trials_scale", type=float,
+                     action=_DeprecatedTrialsScale, help=argparse.SUPPRESS)
 
 
 def _check_rows(args) -> list[dict]:
@@ -145,7 +167,7 @@ def _check_rows(args) -> list[dict]:
     for name, fn in sorted(target.functions.items()):
         rec = check(fn, claims=list(args.claim) if args.claim else None,
                     domain=domain or None,
-                    trials_scale=args.trials_scale,
+                    trials_downscale=args.trials_scale,
                     declared=retrieve(fn, root, store=declared_store),
                     known_premises=premises)
         # the one gate (verify.gate): provenance population, so a
@@ -390,7 +412,7 @@ def cmd_verify(args) -> int:
             files.append(path)
     result = verify_project(args.root, all=args.all,
                             strict=args.strict,
-                            trials_scale=args.trials_scale,
+                            trials_downscale=args.trials_scale,
                             only=keys or None,
                             files=files or None)
     as_json = getattr(args, "format", "text") == "json"
@@ -2949,12 +2971,7 @@ def main(argv: list[str] | None = None) -> int:
                          "(repeatable)")
     pc.add_argument("--domain", action="append", metavar="name=lo:hi",
                     help="declared parameter range (repeatable)")
-    pc.add_argument("--trials-scale", type=float, default=1.0, metavar="FACTOR",
-                    help="shrink the probe-route trial budget by this factor "
-                         "(FACTOR > 0, e.g. 0.25) for faster dev-loop "
-                         "iteration; a value above 1 is clamped to 1, so it "
-                         "never scales upward, and never below a floor that "
-                         "still guarantees real evidence")
+    _add_trials_downscale(pc)
     pc.add_argument("--format", default="text",
                     choices=["text", "json", "junit", "github", "md",
                              "compact"],
@@ -2990,12 +3007,7 @@ def main(argv: list[str] | None = None) -> int:
                          "0); an optional TARGET (dotted name or file "
                          "path) is imported first so its tagged "
                          "functions register")
-    pv.add_argument("--trials-scale", type=float, default=1.0, metavar="FACTOR",
-                    help="shrink the probe-route trial budget by this factor "
-                         "(FACTOR > 0, e.g. 0.25) for faster dev-loop "
-                         "iteration; a value above 1 is clamped to 1, so it "
-                         "never scales upward, and never below a floor that "
-                         "still guarantees real evidence")
+    _add_trials_downscale(pv)
     pv.add_argument("--format", default="text", choices=["text", "json"],
                     help="report format: json emits the sweep as data "
                          "(per-key rows in the same claim vocabulary "

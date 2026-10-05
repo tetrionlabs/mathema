@@ -18,7 +18,7 @@ mathema check path/to/file.py:fn [--claim "..."]
 | `--claim LAW` | ad-hoc claim to adjudicate, e.g. `"f(-x) == -f(x)"` (repeatable) |
 | `--domain name=lo:hi` | declared parameter range (repeatable) |
 | `--strict` / `--lenient` | one strictness pair shared with `verify`; lenient is the default here (the authoring loop iterates while claims are still being written); strict additionally counts skipped (unverifiable) claims and accepted risk as failures, a reporting filter over already-computed verdicts, never an adjudication mode |
-| `--trials-scale FACTOR` | shrink the trial budget by `FACTOR` (FACTOR > 0) for a faster dev loop; a value above 1 is clamped to 1, so it never scales upward |
+| `--trials-downscale FACTOR` | shrink the trial budget by `FACTOR` (FACTOR > 0) for a faster dev loop; a value above 1 is clamped to 1, so it never scales upward |
 | `--format` | `text` (default), `json`, `compact`, `junit`, `github`, `md` |
 | `--output FILE` | write the report to a file instead of stdout |
 
@@ -69,7 +69,7 @@ verdict deserves more or less trust without re-deriving it. From the
 library, `mathema.check(fn, trials=N)` takes an exact count, with no
 adaptivity at all.
 
-`--trials-scale FACTOR` shrinks the whole budget by a flat factor
+`--trials-downscale FACTOR` shrinks the whole budget by a flat factor
 instead; `0.25` for a much faster dev loop, say, applied to
 *everything*, an explicit `trials=N` included, not just the adaptive
 default. It only ever shrinks (a value above 1 is accepted but has no
@@ -78,7 +78,7 @@ riskier function already gets more trials on its own), and it never
 drops the budget below a floor that still means something: at least
 16 trials, and at least enough to guarantee every special sampled
 value (`0`, `±1`, `±1e-9`, `±1e6`, ...) is actually exercised once.
-`--trials-scale 0` or a negative value is a clean CLI error, not a
+`--trials-downscale 0` or a negative value is a clean CLI error, not a
 silent 0-trial `holds`.
 
 ## Exit code
