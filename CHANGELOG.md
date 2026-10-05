@@ -4,6 +4,9 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## 0.6.1
 
+- `is_library_safe(numpy)` is the view of definedness over a library's
+  calls only; `is_compendium_safe` is still read as an accepted
+  spelling, and the record says so.
 - An `int` annotation completes a binding that states no type to the
   integers: `for n in [0, 10]` on `n: int` is `for n in [0, 10] : int`,
   rendered so, and every route (derive, the probe, the exhaustive

@@ -1927,6 +1927,7 @@ _SPACED_PREDICATES = {
     "is arbitrary input safe": "is_arbitrary_input_safe",
     "is language defined": "is_language_defined",
     "is compendium safe": "is_compendium_safe",
+    "is library safe": "is_library_safe",
     "excluded outside domain": "excluded_outside_domain",
 }
 

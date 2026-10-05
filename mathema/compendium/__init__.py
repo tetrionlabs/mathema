@@ -697,11 +697,11 @@ def library_keys_called(fn, facts, root: str = ".",
 def libraries_called(fn, facts, root: str = ".") -> set:
     """The set of libraries whose COMPENDIUM-COVERED functions `fn`
     calls, resolving import aliases through fn's own globals so
-    `np.sqrt` counts as `numpy.sqrt`. This is what is_compendium_safe is
+    `np.sqrt` counts as `numpy.sqrt`. This is what is_library_safe is
     suggested and adjudicated for: a function that never touches a
     covered library function has nothing to check."""
     stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
-    # stdlib (math) is is_number_set_safe's domain; is_compendium_safe
+    # stdlib (math) is is_number_set_safe's domain; is_library_safe
     # covers THIRD-PARTY libraries (numpy, ...) only
     return {key.split(".")[0] for key in library_keys_called(fn, facts, root)
             if key.split(".")[0] not in stdlib}
@@ -886,7 +886,7 @@ _INSTALLED: dict = {"root": None, "rows": []}
 #: computation is safe in that respect and `exception` is None; for a
 #: `raises` row whose type is a machine failure, `family` is "raises",
 #: `region` is where the call raises and `exception` names the type.
-#: Read by the hazard generator, `is_compendium_safe`'s diagnosis, the
+#: Read by the hazard generator, `is_library_safe`'s diagnosis, the
 #: `is_defined` probe's reach on a library key and the float companion's
 #: sketch; never by the derive route.
 _COMPUTATION: dict = {}

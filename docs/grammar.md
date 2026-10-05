@@ -360,7 +360,7 @@ that failed, and the fix is usually one of the ones below.
 |---|---|---|
 | `is_number_set_safe(x)` | every restricted builtin the code calls (`sqrt`, `log`, `asin`, `factorial`, ...) gets an argument it accepts: no `math.sqrt` of a negative, no `math.log` of zero | narrow the domain to the builtin's range, or guard the call |
 | `is_pole_safe(x)` | the code never meets a pole, a point where the formula divides by zero or otherwise blows up (`1 / (x - 1)` at `x = 1`), anywhere in the domain | exclude the point from the domain, or guard it with an explicit raise |
-| `is_compendium_safe(numpy)` | every library call a [compendium](claims-transfer.md#in-the-compendium) covers returns a value on the domain | keep the call's argument inside the region the compendium states |
+| `is_library_safe(numpy)` | every library call a [compendium](claims-transfer.md#in-the-compendium) covers returns a value on the domain | keep the call's argument inside the region the compendium states |
 | `is_overflow_safe(x)` | no result overflows to infinity and nothing raises `OverflowError` from a finite input, out to float64's maximum along an unbounded direction (bound it with <code>let &#124;inf&#124; be ...</code>); the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range | narrow the domain below the overflow point, or rescale (work in logarithms) |
 | `is_missing_safe(f)` | every hole a parameter admits (`nan`, `null`, `NA`) has a policy the code follows: it raises, drops it or gives a hole back, on purpose ([missing values](missing-values.md)) | state the policy, or guard the hole at entry |
 | `is_absent_safe(f)` | every parameter, field or key that may be None has a policy the code follows, and a None result is declared by the return type ([missing values](missing-values.md)) | state the policy, or annotate the parameter |
@@ -427,10 +427,10 @@ through, and the record names each guard by its condition. A bare
 so does a `RangeError` from `@enforce_range` (a result outside its
 declared range).
 
-The old family names `is_builtin_safe`, `is_extremity_safe` and
-`is_arbitrary_input_safe` are still read, as `is_number_set_safe`,
-`is_overflow_safe` and `is_language_defined`, and the record says the
-spelling was accepted.
+The old family names `is_builtin_safe`, `is_extremity_safe`,
+`is_arbitrary_input_safe` and `is_compendium_safe` are still read, as
+`is_number_set_safe`, `is_overflow_safe`, `is_language_defined` and
+`is_library_safe`, and the record says the spelling was accepted.
 
 Whether a function is defined at a point (a square root of a negative,
 a logarithm of zero) is a question about the mathematics, the same in

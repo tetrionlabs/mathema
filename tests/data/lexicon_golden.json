@@ -219,15 +219,15 @@
   "unicode": "s is language defined",
   "ascii": "is_language_defined(s)"
  },
- "is_compendium_safe": {
-  "input": "is_compendium_safe(numpy)",
-  "unicode": "numpy is compendium safe",
-  "ascii": "is_compendium_safe(numpy)"
+ "is_library_safe": {
+  "input": "is_library_safe(numpy)",
+  "unicode": "numpy is library safe",
+  "ascii": "is_library_safe(numpy)"
  },
- "is_compendium_safe_scoped": {
-  "input": "for x in [0, 1e6], is_compendium_safe(numpy)",
-  "unicode": "∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, numpy is compendium safe",
-  "ascii": "for x in [0.0, 1000000.0] : float|absent|missing, is_compendium_safe(numpy)"
+ "is_library_safe_scoped": {
+  "input": "for x in [0, 1e6], is_library_safe(numpy)",
+  "unicode": "∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, numpy is library safe",
+  "ascii": "for x in [0.0, 1000000.0] : float|absent|missing, is_library_safe(numpy)"
  },
  "is_language_defined_postfix": {
   "input": "s is language defined",

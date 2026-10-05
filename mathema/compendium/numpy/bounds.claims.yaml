@@ -1,6 +1,6 @@
 # Claims about numpy functions with a known, always finite output range.
 # They are bound claims a caller can rest a premise on, and being covered
-# means is_compendium_safe(numpy) sees that a caller uses numpy.
+# means is_library_safe(numpy) sees that a caller uses numpy.
 compendium: numpy
 versions: ">=1.24,<3"
 
