@@ -372,17 +372,28 @@ def _abs(x):
 def _norm(x, ord=None):
     """The Euclidean norm of a vector, the Frobenius norm of a matrix,
     or `numpy.linalg.norm`'s `ord` norm (`2` spectral, `1`, `inf`); the
-    absolute value of a number. The Euclidean and Frobenius norms read
-    the value slots, 0 over none."""
+    absolute value of a number. A vector's norm of every order reads
+    its value slots, as do a matrix's Frobenius, 1 and inf norms (a
+    hole contributing nothing); over only holes, and for any other
+    matrix norm of a matrix holding one, the norm is a hole."""
     if isinstance(x, (int, float, complex)) and not isinstance(x, bool):
         return builtins.abs(x)
     np = _np()
     a = as_array(x) if not is_array(x) else x
     if not is_array(a):
         raise TypeError(f"norm of {type(x).__name__}")
-    if a.dtype.kind in "fc" and np.isnan(a).any() and ord is None:
-        # over the value slots, a hole contributing nothing; 0 over none
-        a = np.where(np.isnan(a), 0.0, a)
+    if a.dtype.kind in "fc" and np.isnan(a).any():
+        if np.isnan(a).all():
+            return math.nan
+        if a.ndim == 1:
+            a = a[~np.isnan(a)]
+        elif ord is None or ord in (1, math.inf, "fro"):
+            a = np.where(np.isnan(a), 0.0, a)
+        else:
+            return math.nan
+    exact = _exact_norm(a, ord)
+    if exact is not None:
+        return exact
     # every norm is homogeneous, so it is computed on the array scaled
     # to its largest magnitude: squaring an entry near the float
     # maximum overflows where the norm itself does not
@@ -395,24 +406,44 @@ def _norm(x, ord=None):
                          else np.linalg.norm(unit, ord))
 
 
+def _exact_norm(a, ord):
+    """The Euclidean or Frobenius norm (`ord` None, or 2 on a vector),
+    the 1 norm or the inf norm of an array of finite real numbers,
+    exact and rounded once; None for any other order or array, which
+    numpy computes."""
+    rows = _exact_rows(a)
+    if rows is None or not rows or not rows[0]:
+        return None
+    vector = a.ndim == 1
+    flat = [v for row in rows for v in row]
+    if ord is None or (vector and ord == 2):
+        return _exact_sqrt(builtins.sum(v * v for v in flat))
+    if ord == 1:
+        if vector:
+            return _rounded(builtins.sum(builtins.abs(v) for v in flat))
+        return _rounded(builtins.max(builtins.sum(builtins.abs(v) for v in col)
+                                     for col in zip(*rows)))
+    if ord == math.inf:
+        if vector:
+            return _rounded(builtins.max(builtins.abs(v) for v in flat))
+        return _rounded(builtins.max(builtins.sum(builtins.abs(v) for v in row)
+                                     for row in rows))
+    return None
+
+
 def _holes(a) -> bool:
     """Whether an array holds a hole (a NaN position)."""
     np = _np()
     return bool(a.dtype.kind in "fc" and np.isnan(a).any())
 
 
-#: the reductions with an identity, which they give over no value slot
-_IDENTITY = {"sum": 0.0, "prod": 1.0}
-
-
 def _over_values(numpy_name: str, a, axis=None, **kwargs):
     """A reduction over the value slots of `a`: numpy's NaN-skipping
-    reduction. Over no value slot a reduction with an identity gives it
-    (`sum` 0, `prod` 1) and one without gives a hole."""
+    reduction, a hole over no value slot."""
     np = _np()
     out = getattr(np, "nan" + numpy_name)(a, axis=axis, **kwargs)
     empty = np.all(np.isnan(a), axis=axis)
-    out = np.where(empty, _IDENTITY.get(numpy_name, np.nan), out)
+    out = np.where(empty, np.nan, out)
     return out.item() if getattr(out, "ndim", 1) == 0 else out
 
 
@@ -482,27 +513,25 @@ def _is_hole(v) -> bool:
     return isinstance(v, float) and math.isnan(v)
 
 
-def _over_slots(values: list, of_list, identity=math.nan):
-    """`of_list` over the value slots of a list: its holes left out.
-    Over no value slot, `identity` (a reduction with one gives it; one
-    without gives a hole)."""
+def _over_slots(values: list, of_list):
+    """`of_list` over the value slots of a list: its holes left out. A
+    list holding only holes gives a hole."""
     if any(_is_hole(v) for v in values):
         values = [v for v in values if not _is_hole(v)]
         if not values:
-            return identity
+            return math.nan
     return of_list(values)
 
 
-def _along(args, axis, of_list, identity=math.nan):
+def _along(args, axis, of_list):
     """`of_list` applied to the value slots of the one vector the
     arguments give, or along `axis` of a matrix (one value per
     remaining index); see `_over_slots`."""
     a = _raw(args)
     if axis is None:
-        return _over_slots([_element(v) for v in a.ravel()], of_list,
-                           identity)
+        return _over_slots([_element(v) for v in a.ravel()], of_list)
     return _np().apply_along_axis(
-        lambda v: _over_slots([_element(x) for x in v], of_list, identity),
+        lambda v: _over_slots([_element(x) for x in v], of_list),
         axis, a)
 
 
@@ -704,7 +733,7 @@ def _sum(*args, axis=None):
     """The sum of a vector's elements, exact and rounded once; along
     `axis` for a matrix."""
     if len(args) == 1 and _is_array_arg(args[0]):
-        return _along(args, axis, _exact_sum, identity=0.0)
+        return _along(args, axis, _exact_sum)
     if axis is not None:
         raise TypeError("sum(..., axis=) needs an array")
     return builtins.sum(*args)
@@ -722,7 +751,7 @@ def _prod(*args, axis=None):
     """The exact product of a vector's elements, rounded once; along
     `axis` for a matrix."""
     if len(args) == 1 and _is_array_arg(args[0]):
-        return _along(args, axis, _product, identity=1.0)
+        return _along(args, axis, _product)
     return math.prod(args[0] if len(args) == 1 else args)
 
 
@@ -901,16 +930,186 @@ def _matrix(x):
     return a
 
 
+def _exact_rows(a):
+    """The entries of a matrix (or a vector, as one column) as exact
+    rationals, row by row, or None when an entry is not a finite real
+    number (a hole, an infinity, a complex number)."""
+    np = _np()
+    if not is_array(a) or a.ndim not in (1, 2) or a.dtype.kind not in "biuf":
+        return None
+    if a.dtype.kind == "f" and not np.isfinite(a).all():
+        return None
+    column = a.reshape(-1, 1) if a.ndim == 1 else a
+    return [[_exact(_element(v)) for v in row] for row in column]
+
+
+def _rounded_array(rows, vector: bool = False):
+    """Exact rational entries, each rounded once (see `_rounded`), as an
+    array: a float array, or an object array when an entry lies beyond
+    float range; `vector` reads a single column as a vector."""
+    np = _np()
+    entries = [[_rounded(v) for v in row] for row in rows]
+    finite = all(isinstance(v, float) for row in entries for v in row)
+    out = np.empty((len(entries), len(entries[0]) if entries else 0),
+                   dtype=float if finite else object)
+    for i, row in enumerate(entries):
+        out[i, :] = row
+    return out[:, 0] if vector else out
+
+
+def _singular():
+    return _np().linalg.LinAlgError("Singular matrix")
+
+
+def _integer_rows(rows):
+    """Rows of exact rationals as `(integer rows, d)`: every entry times
+    `d`, the least common denominator of them all."""
+    d = 1
+    for row in rows:
+        for v in row:
+            d = math.lcm(d, v.denominator)
+    return [[int(v * d) for v in row] for row in rows], d
+
+
+def _fraction_free(m, n: int, every_row: bool) -> int:
+    """Intent:
+        Fraction-free (Bareiss) elimination on the integer rows `m`, in
+        place, over their first `n` columns: below each pivot when
+        `every_row` is False, above and below it when True, every
+        division exact. Returns the sign of the row exchanges, 0 when
+        the first `n` columns are singular. After it the last pivot is
+        the determinant of those columns times that sign, and with
+        `every_row` each diagonal entry equals the last pivot.
+    """
+    sign, previous = 1, 1
+    for k in range(n):
+        pivot_row = next((r for r in range(k, n) if m[r][k] != 0), None)
+        if pivot_row is None:
+            return 0
+        if pivot_row != k:
+            m[k], m[pivot_row] = m[pivot_row], m[k]
+            sign = -sign
+        mk = m[k]
+        pivot = mk[k]
+        for i in (range(n) if every_row else range(k + 1, n)):
+            if i == k:
+                continue
+            mi = m[i]
+            factor = mi[k]
+            m[i] = [(pivot * a - factor * b) // previous
+                    for a, b in zip(mi, mk)]
+        previous = pivot
+    return sign
+
+
+def _exact_det(rows):
+    """The determinant of a square matrix of exact rationals."""
+    from fractions import Fraction
+    n = len(rows)
+    m, d = _integer_rows(rows)
+    sign = _fraction_free(m, n, every_row=False)
+    if sign == 0:
+        return Fraction(0)
+    return Fraction(sign * m[n - 1][n - 1], d ** n)
+
+
+def _exact_solve(rows, rhs):
+    """The rows `X` with `A @ X == rhs` for a square matrix `A` of exact
+    rationals (`rhs` its rows too), by fraction-free Gauss-Jordan
+    elimination; None when `A` is singular."""
+    from fractions import Fraction
+    n = len(rows)
+    m, _ = _integer_rows([list(a) + list(b) for a, b in zip(rows, rhs)])
+    if _fraction_free(m, n, every_row=True) == 0:
+        return None
+    return [[Fraction(v, m[i][i]) for v in m[i][n:]] for i in range(n)]
+
+
+def _exact_identity(n: int):
+    from fractions import Fraction
+    return [[Fraction(int(i == j)) for j in range(n)] for i in range(n)]
+
+
+def _exact_power(rows, k: int):
+    """A square matrix of exact rationals to the whole power `k >= 0`,
+    by repeated squaring over its integer rows."""
+    from fractions import Fraction
+    n = len(rows)
+    base, d = _integer_rows(rows)
+    out = [[int(i == j) for j in range(n)] for i in range(n)]
+    scale = d ** k
+    while k:
+        if k & 1:
+            out = [[builtins.sum(x * y for x, y in zip(row, col))
+                    for col in zip(*base)] for row in out]
+        k >>= 1
+        if k:
+            base = [[builtins.sum(x * y for x, y in zip(row, col))
+                     for col in zip(*base)] for row in base]
+    return [[Fraction(v, scale) for v in row] for row in out]
+
+
+def _square_rows(A):
+    """`A`'s exact rows when it is a square matrix of finite real
+    numbers, else None."""
+    a = _matrix(A)
+    rows = _exact_rows(a) if a.ndim == 2 else None
+    if rows is None or len(rows) != len(rows[0]):
+        return None
+    return rows
+
+
 def _det(A):
-    return float(_np().linalg.det(_matrix(A)))
+    """The determinant of a square matrix, exact and rounded once."""
+    rows = _square_rows(A)
+    if rows is None:
+        return float(_np().linalg.det(_matrix(A)))
+    return _rounded(_exact_det(rows))
+
+
+def _exact_inverse(rows):
+    """Intent:
+        The inverse of a square matrix of exact rationals.
+
+    Raises:
+        numpy.linalg.LinAlgError: the matrix is singular.
+    """
+    out = _exact_solve(rows, _exact_identity(len(rows)))
+    if out is None:
+        raise _singular()
+    return out
 
 
 def _inv(A):
-    return _np().linalg.inv(_matrix(A))
+    """Intent:
+        The inverse of a square matrix, each entry exact and rounded
+        once.
+
+    Raises:
+        numpy.linalg.LinAlgError: the matrix is singular.
+    """
+    rows = _square_rows(A)
+    if rows is None:
+        return _np().linalg.inv(_matrix(A))
+    return _rounded_array(_exact_inverse(rows))
 
 
 def _trace(A):
-    return float(_np().trace(_matrix(A)))
+    """Intent:
+        The sum of a square matrix's diagonal entries, exact and
+        rounded once.
+
+    Raises:
+        numpy.linalg.LinAlgError: the matrix is not square.
+    """
+    a = _matrix(A)
+    if a.ndim != 2 or a.shape[0] != a.shape[1]:
+        raise _np().linalg.LinAlgError(
+            f"trace needs a square matrix, got shape {a.shape}")
+    rows = _exact_rows(a)
+    if rows is None:
+        return float(_np().trace(a))
+    return _exact_sum([rows[i][i] for i in range(len(rows))])
 
 
 def _transpose(A):
@@ -926,11 +1125,24 @@ def _identity(n):
 
 
 def _matrix_power(A, k):
+    """Intent:
+        `A` multiplied by itself `k` times, the identity at `k = 0` and
+        the power of the inverse for a negative `k`, each entry exact
+        and rounded once.
+
+    Raises:
+        ValueError: `k` is not a whole number.
+        numpy.linalg.LinAlgError: `k` is negative and `A` singular.
+    """
     if isinstance(k, float) and k.is_integer():
         k = int(k)
     if not isinstance(k, int) or isinstance(k, bool):
         raise ValueError(f"matrix_power needs a whole exponent, got {k!r}")
-    return _np().linalg.matrix_power(_matrix(A), k)
+    rows = _square_rows(A)
+    if rows is None:
+        return _np().linalg.matrix_power(_matrix(A), k)
+    base = _exact_inverse(rows) if k < 0 else rows
+    return _rounded_array(_exact_power(base, builtins.abs(k)))
 
 
 def _exact_inner(xs: list, ys: list):
@@ -968,11 +1180,11 @@ def _dot(x, y):
     if a.ndim == 1 and b.ndim == 1:
         pairs = [(_element(u), _element(v)) for u, v in zip(a, b)]
         if any(_is_hole(u) or _is_hole(v) for u, v in pairs):
-            # over the value slots both vectors hold; 0 where none is
+            # over the value slots both vectors hold; a hole where none is
             both = [(u, v) for u, v in pairs
                     if not (_is_hole(u) or _is_hole(v))]
             return (_exact_inner([u for u, _ in both], [v for _, v in both])
-                    if both else 0.0)
+                    if both else math.nan)
     a2 = a.reshape(1, -1) if a.ndim == 1 else a
     b2 = b.reshape(-1, 1) if b.ndim == 1 else b
     entries = [[_exact_inner([_element(v) for v in a2[i]],
@@ -1025,7 +1237,21 @@ def _cond(A):
 
 
 def _solve(A, b):
-    return _np().linalg.solve(_matrix(A), _matrix(b))
+    """Intent:
+        The `x` with `A @ x == b` for a square `A` and a vector or
+        matrix `b`, each entry exact and rounded once.
+
+    Raises:
+        numpy.linalg.LinAlgError: `A` is singular.
+    """
+    rows = _square_rows(A)
+    rhs = _exact_rows(_matrix(b))
+    if rows is None or rhs is None or len(rhs) != len(rows):
+        return _np().linalg.solve(_matrix(A), _matrix(b))
+    out = _exact_solve(rows, rhs)
+    if out is None:
+        raise _singular()
+    return _rounded_array(out, vector=_matrix(b).ndim == 1)
 
 
 def _pinv(A):

@@ -5,13 +5,16 @@
 # pandas skips a missing element in each. mathema's own test suite
 # verifies each row against the installed pandas.
 compendium: pandas
-versions: ">=2,<4"
+versions: ">=2.2,<4"
 
 pandas.Series.median:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) ~= median(a)"
       note: "The mean of the two middle elements for an even length."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 pandas.Series.quantile:
   claims:
@@ -19,12 +22,18 @@ pandas.Series.quantile:
       statement: "for a in R^n, f(a) ~= quantile(a, 0.5)"
       note: "q defaults to 0.5, and interpolation to linear, the reading quantile(a, q) takes."
     - name: definition@q=0.25
-      statement: "let q be 0.25, for a in R^n, f(a) ~= quantile(a, 0.25)"
+      statement: "for a in R^n, f(a, q=0.25) ~= quantile(a, 0.25)"
     - name: definition@q=0.75
-      statement: "let q be 0.75, for a in R^n, f(a) ~= quantile(a, 0.75)"
+      statement: "for a in R^n, f(a, q=0.75) ~= quantile(a, 0.75)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 pandas.Series.sem:
   claims:
     - name: definition
       statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1) / sqrt(dim(a))"
       note: "The standard error of the mean: ddof defaults to 1; one element gives nan."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."

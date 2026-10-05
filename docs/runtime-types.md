@@ -319,7 +319,7 @@ mathema.Record(sharpe) · source, no side effects · form ef276c12c167
     holds      policy       f([])
     falsified  policy       f([..., nan, ...])   no missing policy stated; returns -9.81
                             possible fixes: (i) mathema claims sharpe --adopt 'missing[returns]'  (ii) exclude nan  (iii) handle nan at entry
-through the pandas.Series.mean definition and pandas.Series.std definition rows, lowered to sums over returns at a symbolic length: the relation holds for every length
+taking pandas.Series.mean as mean(a) (axiom, bundled with mathema, pandas 2 to 3.x); taking pandas.Series.std as std(a, ddof=1) (axiom, bundled with mathema, pandas 2 to 3.x); through the pandas.Series.mean definition and pandas.Series.std definition rows, lowered to sums over returns at a symbolic length: the relation holds for every length
 pandas.Series.mean definition bundled mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std definition bundled mathema/compendium/pandas/series.claims.yaml
 ```
@@ -390,11 +390,13 @@ print(textwrap.fill(proof.sketch, 78))
 ```text
 proven derive
 ∀ prices over [1.0, 100.0] with nothing missing, prices of every length of at least one
-through the pandas.Series.cummax definition and pandas.Series.min definition
-rows, lowered to sums over prices at a symbolic length: the relation holds for
-every length of at least one (every element of prices / cummax(prices) - 1.0
-is <= 0 (0 < prices[i] / cummax(prices)[i] <= 1), so min(prices /
-cummax(prices) - 1.0) is too)
+taking pandas.Series.cummax as cummax(a) (axiom, bundled with mathema, pandas
+2 to 3.x); taking pandas.Series.min as min(a) (axiom, bundled with mathema,
+pandas 2 to 3.x); through the pandas.Series.cummax definition and
+pandas.Series.min definition rows, lowered to sums over prices at a symbolic
+length: the relation holds for every length of at least one (every element of
+prices / cummax(prices) - 1.0 is <= 0 (0 < prices[i] / cummax(prices)[i] <=
+1), so min(prices / cummax(prices) - 1.0) is too)
 ```
 
 A DataFrame's columns are vectors on the derive route too, read by

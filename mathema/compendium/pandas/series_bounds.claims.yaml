@@ -5,17 +5,23 @@
 # mathema's own test suite verifies each row against the installed
 # pandas.
 compendium: pandas
-versions: ">=2,<4"
+versions: ">=2.2,<4"
 
 pandas.Series.min:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) == min(a)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 pandas.Series.max:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) == max(a)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 pandas.Series.abs:
   claims:

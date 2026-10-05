@@ -90,7 +90,7 @@ def test_a_malformed_library_field_is_refused_naming_the_field(data, field):
     assert str(info.value).startswith(f"lib.claims.yaml: {field}:")
 
 
-def test_a_project_file_shadows_the_bundled_one(tmp_path):
+def test_a_project_row_replaces_its_bundled_namesake(tmp_path):
     _write(tmp_path / "claims" / "numpy.claims.yaml", """
         compendium: numpy
         versions: "*"
@@ -101,8 +101,13 @@ def test_a_project_file_shadows_the_bundled_one(tmp_path):
     """)
     info = load_library_claims(str(tmp_path))["numpy.clip"]
     assert info["source"] == "claims/numpy.claims.yaml"
-    (row,) = info["entry"]["claims"]
-    assert "[-9, 9]" in row["statement"]
+    rows = {r["name"]: r for r in info["entry"]["claims"]}
+    # the project's clip_lower replaces the bundled one; the bundled
+    # rows it does not restate stay
+    assert "[-9, 9]" in rows["clip_lower"]["statement"]
+    assert {"clip_upper", "definition"} <= set(rows)
+    assert [r["name"] for r in info["entry"]["claims"]].count(
+        "clip_lower") == 1
     # every other bundled key is untouched
     assert load_library_claims(str(tmp_path))["numpy.sqrt"]["source"] \
         .startswith("mathema/compendium/")

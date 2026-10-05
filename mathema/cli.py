@@ -291,7 +291,7 @@ def _format_check(rows: list[dict], fmt: str) -> str:
                 f'claims {r["coverage"]} '
                 f'adjudicated ({summary_counts(r)})')
         if r["problems"]:
-            line += "  <- " + "; ".join(r["problems"])
+            line += "  <- " + "; ".join(r["problems"]).replace("\n", "\n       ")
         lines.append(line)
         lines.extend(f"     hint: {h}" for h in r.get("hints", ()))
         lines.extend(f"     warning: {w}" for w in r.get("warnings", ()))
@@ -1980,7 +1980,7 @@ def _policy_line(p) -> str:
         line = f"    {mark} {p.name}: {p.statement}   [{pol.get('reason')}]"
     for extra in (pol.get("said"), pol.get("next")):
         if extra and p.verdict not in ("holds", "proven"):
-            line += f"\n             {extra}"
+            line += "\n             " + str(extra).replace("\n", "\n             ")
     return line
 
 
@@ -2023,6 +2023,8 @@ def _write_policies(args, declared_rows: list, policies: list) -> int:
     contradiction; a raise or a case no claim accounts for has no word
     to write, and the write line says what to state instead."""
     import yaml
+
+    from ._missing_words import options, remedy_statements
     path = os.path.join(args.root or ".", "claims", "policies.claims.yaml")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     doc: dict = {}
@@ -2053,26 +2055,29 @@ def _write_policies(args, declared_rows: list, policies: list) -> int:
             + (f": {', '.join(written)}" if written else ""))
     for p in contradicted:
         corrected = _corrected_text(p)
-        line += (f". The code contradicts {p.name} ({_contradiction_words(p)}): change "
-                 f"the word in the file, change f, or accept it as a discovery "
-                 f"(mathema accept {args.key} {p.name} --as discovery"
-                 + (f" --corrected \"{corrected}\"" if corrected else "") + ")")
+        line += (f".\nThe code contradicts {p.name} ({_contradiction_words(p)}):\n"
+                 + options(["change the word in the file or change f",
+                            f"to accept it as a discovery, run: mathema accept "
+                            f"{args.key} {p.name} --as discovery"
+                            + (f" --corrected \"{corrected}\"" if corrected else "")]))
     for p in policies:
         if _policy_state(p) != "unaccounted":
             continue
         pol = p.meta["mathema.policy"]
         sentence = pol.get("sentence") or ""
-        stated = re.findall(r"`([^`]+)`", (pol.get("next") or "").split("; or ", 1)[0])
+        stated = remedy_statements(pol.get("next") or "")
         if sentence.startswith("f has no single policy"):
-            line += (f". Not written: {p.name}, {sentence}; mathema claims {args.key} "
-                     f"prints the {len(stated)} rows to state, or change f")
+            line += (f".\nNot written: {p.name}, {sentence}:\n"
+                     + options(["change f", f"to see the {len(stated)} rows to state, "
+                                f"run: mathema claims {args.key}"]))
         elif "does not declare it" in sentence:
-            line += (f". Not written: {p.name}, f returns None from present inputs and "
-                     f"its return type does not declare it; declare `-> Optional[...]`, "
-                     f"or make f return a value")
+            line += (f".\nNot written: {p.name}, f returns None from present inputs and "
+                     f"its return type does not declare it:\n"
+                     + options(["make f return a value", "declare: -> Optional[...]"]))
         else:
-            line += (f". Not written: {p.name}, {_unwritten_words(sentence)}"
-                     + (f"; state `{stated[0]}` yourself, or {_alternative(pol)}"
+            line += (f".\nNot written: {p.name}, {_unwritten_words(sentence)}"
+                     + (":\n" + options([_alternative(pol),
+                                         f"state yourself: {stated[0]}"])
                         if stated else ""))
     print(line)
     return 0
@@ -2105,8 +2110,8 @@ def _list_policies(key: str, policies: list) -> None:
         (p.meta["mathema.policy"].get("parameter") or "the result") for p in policies))
     n = len(policies)
     print(f"{key}: {n} policy row{'' if n == 1 else 's'} about {', '.join(params)}")
-    groups = (("confirmed", f"confirmed by the code (mathema claims {key} --write "
-                            f"writes these):"),
+    groups = (("confirmed", f"confirmed by the code (to write these, run: mathema "
+                            f"claims {key} --write):"),
               ("contradicted", "contradicted by the code (change the word, the code, "
                                "or accept it as a discovery; --write writes these "
                                "with the contradiction in the note):"),
@@ -2118,6 +2123,45 @@ def _list_policies(key: str, policies: list) -> None:
             print(f"  {title}")
             for p in rows:
                 print(_policy_line(p))
+
+
+def _write_split(args) -> int:
+    """Write a split into the declared claims file: the claim narrowed
+    by `--at` (`assuming len(r) >= k`) under the claim's own name, in
+    place of a declared row of that name, and the region row
+    `is_defined` stating the same lengths on f."""
+    import yaml
+
+    from .conjecture import InvalidConjecture, claim as _claim
+    from .spec import atomic_write_text
+    at = (args.at or "").strip()
+    if not re.fullmatch(r"len\(\s*[A-Za-z_]\w*\s*\)\s*>=\s*\d+", at):
+        print("mathema claims --split: --at must be a length premise, "
+              "`len(r) >= k`")
+        return 2
+    try:
+        name = _claim(args.split).name
+        narrowed = f"assuming {at}, {args.split}"
+        _claim(narrowed)
+    except InvalidConjecture as e:
+        print(f"mathema claims --split: {e}")
+        return 2
+    root = args.root or "."
+    path = os.path.join(root, "claims", "adopted.claims.yaml")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    doc: dict = {}
+    if os.path.exists(path):
+        with open(path) as fh:
+            doc = yaml.safe_load(fh) or {}
+    rows = doc.setdefault(args.key, {}).setdefault("claims", [])
+    rows[:] = [c for c in rows if c.get("name") not in (name, "is_defined")]
+    rows += [{"name": name, "statement": narrowed},
+             {"name": "is_defined", "statement": at}]
+    atomic_write_text(path, yaml.safe_dump(doc, sort_keys=False,
+                                           allow_unicode=True))
+    print(f"{args.key}: wrote {name} ({narrowed}) and is_defined ({at}) "
+          f"to {os.path.relpath(path, root)}")
+    return 0
 
 
 def cmd_claims(args) -> int:
@@ -2134,6 +2178,8 @@ def cmd_claims(args) -> int:
     from .spec import load_declared
     from .suggest import suggest_claims as _suggest
 
+    if getattr(args, "split", None):
+        return _write_split(args)
     _key, fn = resolve_function(args.key, args.root)
     declared = load_declared(args.root)
     entry = (declared.get(args.key) or {}).get("entry") or {}
@@ -2146,7 +2192,7 @@ def cmd_claims(args) -> int:
             return _write_policies(args, declared_rows, policies)
         if not declared_rows:
             print(f"{args.key}: no declared claims "
-                  "(mathema claims --suggest lists candidates)")
+                  f"(to list candidates, run: mathema claims {args.key} --suggest)")
         else:
             print(f"{args.key}: {len(declared_rows)} declared claim(s)")
             for c in declared_rows:
@@ -2880,12 +2926,20 @@ def cmd_compendium(args) -> int:
     from .spec import load_verified
 
     if not args.library:
-        raise TargetError("compendium export needs the library to export "
-                          "(mathema compendium export mylib)")
+        raise TargetError("compendium export needs the library to export, for "
+                          "example: mathema compendium export mylib")
     if not any(k.split(".")[0] == args.library for k in load_verified(root)):
         raise TargetError(f"no verified records for library "
                           f"{args.library!r} under {root}; nothing to export")
-    path = write_compendium(args.library, root=root, out=args.out)
+    notes: list = []
+    path = write_compendium(args.library, root=root, out=args.out,
+                            notes=notes)
+    for line in notes:
+        print(f"note {line}")
+    if path is None:
+        print(f"nothing written: no verified row of {args.library!r} is "
+              f"left to export")
+        return 1
     print(f"wrote the {args.library!r} compendium claims file to {path}")
     return 0
 
@@ -3279,6 +3333,14 @@ def main(argv: list[str] | None = None) -> int:
                      help="write the suggested policy claims (what each "
                           "parameter does at a value that is not there) into "
                           "claims/policies.claims.yaml")
+    pcl.add_argument("--split", default=None, metavar="CLAIM",
+                     help="write CLAIM narrowed to the lengths where it "
+                          "holds (with --at) and the region row is_defined "
+                          "for those lengths into the declared claims file "
+                          "(claims/adopted.claims.yaml)")
+    pcl.add_argument("--at", default=None, metavar="PREMISE",
+                     help="the length premise a --split narrows to, "
+                          "`len(r) >= k`")
     pcl.add_argument("--root", default=None, help="project root")
     pcl.add_argument("--format", default="text", choices=["text", "json"],
                      help="report format: json emits --suggest's rows "

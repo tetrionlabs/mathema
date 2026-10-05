@@ -55,13 +55,13 @@ docs = ["mkdocs>=1.6", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.25",
 # numpy is not a runtime dependency of mathema itself; installed, it
 # turns on the array fast paths (matrix structure checks, array-shaped
 # parameter synthesis) and is exercised unconditionally by the tests.
-numpy = ["numpy"]
+numpy = ["numpy>=2.0"]
 # pandas and polars are optional like numpy: installed, a parameter
 # annotated `pd.Series`, `pd.DataFrame`, `pl.Series` or `pl.DataFrame`
 # is sampled as one (its runtime type adapter); absent, that adapter is
 # inert.
-pandas = ["pandas"]
-polars = ["polars"]
+pandas = ["pandas>=2.2"]
+polars = ["polars>=1.0"]
 # Needed to run the test suite. pytest-xdist parallelises it, which
 # matters here because proof attempts are capped on the WALL clock:
 # oversubscribing the machine starves a proof of CPU and turns a

@@ -121,7 +121,19 @@ def _policy_detail(p) -> str:
 
 
 #: the policy a row's next step says to state, as the record words it
-_STATED = re.compile(r'--corrected "([^"]+)"|(?:write|state|,) `([^`]+)`')
+_CORRECTED = re.compile(r'--corrected "([^"]+)"')
+
+
+def _intended(stated: str, word: str) -> str:
+    """What f does, as the condition of the command that states it: `the
+    raise`, `dropping nan`, `giving nan back`, else `that`."""
+    if " raises" in stated:
+        return "the raise"
+    if stated.endswith(" drops"):
+        return f"dropping {word}"
+    if stated.endswith(" propagates"):
+        return f"giving {word} back"
+    return "that"
 
 
 def _fixes(p, key: str, word: str) -> str:
@@ -132,19 +144,38 @@ def _fixes(p, key: str, word: str) -> str:
     pol = (p.meta or {}).get("mathema.policy") or {}
     # a row with no single policy needs one claim per case, not one command
     mixed = (pol.get("sentence") or "").startswith("f has no single policy")
-    stated_all = {a or b for a, b in _STATED.findall(pol.get("next") or "")}
+    from ._missing_words import remedy_statements
+    corrected = _CORRECTED.findall(pol.get("next") or "")
+    stated_all = set(corrected) or set(remedy_statements(pol.get("next") or ""))
     # a row whose next step states one claim per member or case has no
     # single command that settles it
     found = None if mixed or len(stated_all) != 1 else stated_all.pop()
     fixes = []
     if found:
-        stated = found
-        fixes.append(f"mathema accept {key} {p.name} --as discovery "
-                     f"--corrected \"{stated}\"")
+        # the condition first, the command last, after a colon
+        fixes.append(f"if {_intended(found, word)} is intended, run: mathema accept "
+                     f"{key} {p.name} --as discovery --corrected \"{found}\"")
     fixes += [f"exclude {word}", f"handle {word} at entry"]
-    numerals = ("i", "ii", "iii")
-    return "possible fixes: " + "  ".join(
-        f"({n}) {fix}" for n, fix in zip(numerals, fixes))
+    # each fix on its own line, the command last on its line
+    from ._missing_words import options
+    return "possible fixes:\n" + "\n".join(f"  {line}" for line in
+                                             options(fixes).splitlines())
+
+
+def _split_lines(p, key: str) -> list:
+    """The split a claim falsified only below some length is offered as:
+    what the witnesses share, and the command that writes the claim
+    narrowed to the longer inputs and the region f has a value on."""
+    from ._split import split_command
+    offer = (p.meta or {}).get("mathema.split")
+    if not offer:
+        return []
+    param, at = offer["param"], offer["at"]
+    written = (p.meta or {}).get("mathema.split_statement") or p.statement
+    return [" " * 28 + f"every witness has len({param}) < {at}; the claim "
+                       f"holds for len({param}) >= {at}, where f is defined",
+            " " * 28 + "possible fixes: (i) to split at the shared cause, "
+                       "run: " + split_command(key, written, offer)]
 
 
 def _row(verdict: str, aspect: str, what: str, detail: str = "") -> str:
@@ -203,6 +234,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                               _detail(main, count_words)))
             if _verdict(main) == "falsified":
                 falsified.append(main.counterexample)
+                lines += _split_lines(main, key)
         lines += _extras(main)
         for c in under:
             fam = (c.meta or {}).get("mathema.family")
@@ -211,6 +243,10 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 what = _call(params, {param: "sequence"} | kinds, param, "[]")
                 lines.append(_row(_verdict(c), "policy", what,
                                   c.note if _verdict(c) != "holds" else ""))
+                if _verdict(c) == "falsified" and \
+                        (c.meta or {}).get("mathema.empty_fixes"):
+                    lines += [" " * 28 + part
+                              for part in c.meta["mathema.empty_fixes"].splitlines()]
             else:
                 shown = over_numbers(c.statement)
                 if (c.condition or "").startswith("let |inf| be ") and "|inf|" not in shown:
@@ -234,7 +270,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             lines.append(_row(_verdict(r), "policy", what, _policy_detail(r)))
             if _verdict(r) == "falsified":
                 falsified.append(r.counterexample)
-                lines.append(" " * 28 + _fixes(r, key, word))
+                lines += [" " * 28 + part for part in _fixes(r, key, word).splitlines()]
             used.add(id(r))
         if falsified:
             head = "falsified" + (f" at {falsified[0]}" if falsified[0] else "")

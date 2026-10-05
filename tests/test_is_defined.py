@@ -259,11 +259,13 @@ def test_bare_is_defined_claims_totality_not_a_restriction():
     (p,) = check_conjectures(_total, [claim("f is defined", route="derive")])
     assert p.verdict == "proven"
 
-    # a function that raises is NOT total: falsified, naming where
+    # a function whose own guard raises is defined over its working
+    # domain (decision A): the guard's raise is deliberate, and the
+    # sketch names the guard by its condition
     (p,) = check_conjectures(_guarded, [claim("is_defined(f)",
                                               route="derive")])
-    assert p.verdict == "falsified", (p.verdict, p.sketch)
-    assert "x >= 0" in p.sketch          # the region it is actually defined on
+    assert p.verdict == "proven", (p.verdict, p.sketch)
+    assert "x < 0" in p.sketch
 
 
 def test_stated_region_still_reads_as_a_restriction():

@@ -194,10 +194,15 @@
   "unicode": "not x is pole safe",
   "ascii": "not is_pole_safe(x)"
  },
- "is_extremity_safe": {
-  "input": "is_extremity_safe(x)",
-  "unicode": "x is extremity safe",
-  "ascii": "is_extremity_safe(x)"
+ "is_overflow_safe": {
+  "input": "is_overflow_safe(x)",
+  "unicode": "x is overflow safe",
+  "ascii": "is_overflow_safe(x)"
+ },
+ "retired_family_spelling": {
+  "input": "is_builtin_safe(x)",
+  "unicode": "x is number set safe",
+  "ascii": "is_number_set_safe(x)"
  },
  "is_representation_safe": {
   "input": "is_representation_safe(x)",
@@ -209,10 +214,10 @@
   "unicode": "xs is empty safe",
   "ascii": "is_empty_safe(xs)"
  },
- "is_arbitrary_input_safe": {
-  "input": "is_arbitrary_input_safe(s)",
-  "unicode": "s is arbitrary input safe",
-  "ascii": "is_arbitrary_input_safe(s)"
+ "is_language_defined": {
+  "input": "is_language_defined(s)",
+  "unicode": "s is language defined",
+  "ascii": "is_language_defined(s)"
  },
  "is_compendium_safe": {
   "input": "is_compendium_safe(numpy)",
@@ -224,10 +229,10 @@
   "unicode": "∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, numpy is compendium safe",
   "ascii": "for x in [0.0, 1000000.0] : float|absent|missing, is_compendium_safe(numpy)"
  },
- "is_arbitrary_input_safe_postfix": {
-  "input": "s is arbitrary input safe",
-  "unicode": "s is arbitrary input safe",
-  "ascii": "is_arbitrary_input_safe(s)"
+ "is_language_defined_postfix": {
+  "input": "s is language defined",
+  "unicode": "s is language defined",
+  "ascii": "is_language_defined(s)"
  },
  "safety_predicate_function_wide": {
   "input": "is_missing_safe(f)",

@@ -4,9 +4,10 @@
 lazy about the bundled library claims (only the library functions the
 project calls are adjudicated); naming a claims file adjudicates every
 entry in it, compendium or not, and records them like any sweep. A
-compendium file whose library is not importable, or installed outside
-the file's `versions` range, says so on one line and adjudicates
-nothing."""
+compendium file whose library is not importable says so on one line
+and adjudicates nothing; one installed outside the file's `versions`
+range says so on one line and is adjudicated against the installed
+version, its rows recorded but never used as facts there."""
 import os
 import subprocess
 import sys
@@ -123,10 +124,46 @@ def test_a_file_outside_its_versions_range_says_so_on_one_line(project):
     """)
     r = _verify(project, "claims/future.claims.yaml")
     assert r.returncode == 0, r.stdout + r.stderr
-    lines = [ln for ln in r.stdout.splitlines() if "future.claims.yaml" in ln]
+    lines = [ln for ln in r.stdout.splitlines()
+             if ln.startswith("note claims/future.claims.yaml")]
     assert len(lines) == 1, r.stdout
     assert "outside the file's range >=99" in lines[0]
-    assert "numpy.cos" not in _recorded(project)
+    assert "never used as facts" in lines[0]
+
+
+def test_a_named_file_outside_its_range_is_adjudicated_against_the_installed_version(project):
+    import yaml
+    _write(project / "claims" / "future.claims.yaml", """
+        compendium: numpy
+        versions: ">=99"
+        numpy.cos:
+          claims:
+            - name: cos_within_one
+              statement: "for x in [-1, 1], -1 <= f(x) <= 1"
+    """)
+    r = _verify(project, "claims/future.claims.yaml")
+    assert "numpy.cos" in _recorded(project), r.stdout + r.stderr
+    doc = yaml.safe_load((project / ".mathema" / "verified"
+                          / "numpy.cos.yaml").read_text())
+    row = {c["name"]: c for c in doc["numpy.cos"]["claims"]}["cos_within_one"]
+    assert row["verdict"] in ("proven", "holds"), row
+    assert row["meta"]["mathema.outside_versions"] == ">=99"
+
+
+def test_a_row_outside_its_range_is_never_a_fact_after_its_file_is_verified(project):
+    from mathema.compendium import load_library_claims
+    _write(project / "claims" / "future.claims.yaml", """
+        compendium: numpy
+        versions: ">=99"
+        numpy.cos:
+          claims:
+            - name: cos_within_one
+              statement: "for x in [-1, 1], -1 <= f(x) <= 1"
+    """)
+    _verify(project, "claims/future.claims.yaml")
+    claims = load_library_claims(str(project))
+    rows = (claims.get("numpy.cos") or {}).get("entry", {}).get("claims") or []
+    assert "cos_within_one" not in [r.get("name") for r in rows]
 
 
 def test_a_file_whose_library_is_not_importable_says_so(project):

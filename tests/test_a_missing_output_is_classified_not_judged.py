@@ -92,7 +92,9 @@ def test_a_value_claim_with_no_judged_point_is_unknown():
     assert p.verdict == "unknown", (p.verdict, p.note)
     assert p.note.startswith("the only listed point, x = nan, gives nan back, so "
                              "there is no value to compare with >= 0.")
-    assert "`missing(f, x) propagates`" in p.note
+    assert p.note.endswith("write one of these claims:\n"
+                           "    (1) for x in {nan}, f(x) in {missing}\n"
+                           "    (2) missing(f, x) propagates"), p.note
 
 
 def test_a_dropped_hole_is_judged_on_the_value_returned():

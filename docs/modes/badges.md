@@ -115,8 +115,8 @@ A few consequences worth knowing:
 - **The computation-safety hierarchy credits existing sources.** Every
   safety family maps to one source of uncertainty in the *how safely it
   runs* dimension: `is_overflow_safe` credits the representation source
-  beside `is_extremity_safe` and `is_pole_safe`, `is_recursion_safe`
-  credits the accidental-crash source beside `is_arbitrary_input_safe`,
+  beside `is_pole_safe`, `is_recursion_safe` credits the accidental-crash
+  source beside `is_language_defined`,
   and `is_empty_safe` the missing-value source beside `is_missing_safe`.
   `is_computation_safe` and `is_repeatable` credit nothing themselves,
   since their children do. The reserved families (`is_precision_safe`,

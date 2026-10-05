@@ -121,13 +121,13 @@ def _restricted_domain_targets(fn, facts) -> dict:
     """Every real parameter passed bare to a math function with a
     restricted real domain (factorial/sqrt/log/asin/acos/gamma/
     lgamma), mapped to the set of such names it's passed to, the
-    is_builtin_safe relevance detector."""
+    is_number_set_safe relevance detector."""
     return _bare_call_targets(facts, _RESTRICTED_DOMAIN_NAMES)
 
 
 # Real math functions that leave float range at moderate arguments
 # (exp overflows near 710, cosh/sinh near 711, gamma near 171.6,
-# factorial for any large integer), the is_extremity_safe relevance
+# factorial for any large integer), the is_overflow_safe relevance
 # set: a parameter fed bare into one of these is where the
 # computation's representable range ends well before the
 # mathematics does.
@@ -137,8 +137,8 @@ _OVERFLOW_PRONE_NAMES = frozenset(
 
 def _overflow_prone_params(fn, facts) -> set:
     """Every real parameter passed bare to an overflow-prone math
-    function; the set is_extremity_safe[param] is worth suggesting
-    for at all."""
+    function, part of the set is_overflow_safe[param] is suggested
+    for."""
     return set(_bare_call_targets(facts, _OVERFLOW_PRONE_NAMES))
 
 
@@ -152,7 +152,7 @@ def _overflow_targets(fn, facts) -> set:
         The is_overflow_safe suggestion gate: every real parameter the
         body raises to a power (`**`, `pow`, `power`), passes inside
         any expression to an overflow-prone function (`exp`, `cosh`,
-        ...), or feeds bare to one (the is_extremity_safe set).
+        ...), or feeds bare to one (`_overflow_prone_params`).
 
     Notes:
         A source-level scan over the whole argument expression, unlike
@@ -286,7 +286,7 @@ def _pole_bearing_params(fn, facts) -> set:
         Every real parameter fn's own fast-path lift finds at least one
         pole for; the set is_pole_safe[param] is worth suggesting for
         at all, the same "only when actually relevant" rule
-        _restricted_domain_targets already applies for is_builtin_safe.
+        _restricted_domain_targets already applies for is_number_set_safe.
 
     Notes:
         Reuses _points_for_probe's own fast, direct-lift-only search,
@@ -754,7 +754,7 @@ def _type_discipline_params(fn, facts) -> set:
 
 
 def _string_input_params(facts) -> set:
-    """The is_arbitrary_input_safe suggestion gate: every parameter the
+    """The is_language_defined suggestion gate: every parameter the
     body treats as a string (a bare `str`-annotated or string-inferred
     parameter). That is exactly the input the algebraic battery declines
     to sample, so it is where fuzzing for an accidental crash is worth

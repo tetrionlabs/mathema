@@ -119,7 +119,7 @@ _MATH_ATTRS = {"pi": sympy.pi, "e": sympy.E, "oo": sympy.oo, "inf": sympy.oo,
 import math as _math   # noqa: E402
 
 MATH_CONSTANTS = {"pi": _math.pi, "e": _math.e, "oo": _math.inf,
-                  "inf": _math.inf, "infinity": _math.inf}
+                  "inf": _math.inf, "infinity": _math.inf, "nan": _math.nan}
 # "infinity" is a second, independent spelling of "oo" (both map to the
 # identical sympy.oo object) rather than something "oo" gets normalized
 # to first, unlike tau below, "infinity" isn't a plausible ordinary
@@ -130,6 +130,8 @@ MATH_CONSTANTS = {"pi": _math.pi, "e": _math.e, "oo": _math.inf,
 # an ordinary free variable instead (never taking a limit), and could
 # return a confidently wrong `falsified` with a sampled counterexample
 # rather than even a `skipped`.
+# `nan` is the float nan: a claim writes it to state what a function
+# does with a missing element (`f(c(xs, [nan])) ~= f(xs)`).
 # `tau` is deliberately not here: unlike `pi`, it isn't universally a
 # fixed constant in the way this table's other entries are (a common
 # ordinary variable name too, a time-constant in engineering/physics

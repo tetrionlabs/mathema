@@ -59,12 +59,21 @@ ALL = (add, scale, bs_d1, mean, parse_tag, stateful_io)
 
 # add and scale are homogeneous of degree one, so the gated
 # scale_equivariant suggestion (proven by construction) joins their
-# floor
+# floor; mean takes a sequence, so whether its operands and result have
+# the right shapes (is_dimension_safe, a child of is_numerically_defined)
+# is one of its aspects
 @pytest.mark.parametrize("fn,expected", [
-    (add, 12), (scale, 9), (bs_d1, 26), (mean, 11),
+    (add, 12), (scale, 9), (bs_d1, 26), (mean, 12),
 ])
 def test_floor_for_liftable_shapes(fn, expected):
     assert claim_floor(fn)["floor"] == expected
+
+
+def test_a_sequence_parameter_brings_the_dimension_aspect():
+    aspects = [tuple(a) for a in claim_floor(mean)["aspects"]]
+    assert any(a[0] == "is_dimension_safe" for a in aspects), aspects
+    assert not any(a[0] == "is_dimension_safe"
+                   for a in (tuple(x) for x in claim_floor(add)["aspects"]))
 
 
 @pytest.mark.parametrize("fn,expected", [

@@ -6,7 +6,7 @@
 # reads a method called on it through the pandas.Series rows. mathema's
 # own test suite verifies each row against the installed pandas.
 compendium: pandas
-versions: ">=2,<4"
+versions: ">=2.2,<4"
 
 pandas.DataFrame.abs:
   claims:

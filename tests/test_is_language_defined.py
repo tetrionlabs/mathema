@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""is_arbitrary_input_safe[s]: fuzz a string parameter over an edge-case
+"""is_language_defined[s]: fuzz a string parameter over an edge-case
 corpus, and when an ACCIDENTAL exception (a crash the function did not
 guard) fires, shrink the input to a minimal witness and falsify on the
 probe:minimal_example route. A deliberate rejection (a guarded raise, a
@@ -18,7 +18,7 @@ def _load(tmp_path, body, name="m"):
     return mod
 
 
-def _one(fn, law="is_arbitrary_input_safe(s)"):
+def _one(fn, law="is_language_defined(s)"):
     from mathema.conjecture import check_conjectures, claim
     (pr,) = check_conjectures(fn, [claim(law, route="best")])
     return pr
@@ -52,7 +52,7 @@ def test_the_shrunk_witness_states_whether_it_is_inside_the_declared_language(tm
                 """First character."""
                 return s[0]
         ''')
-        pr = _one(mod.first_char, "for s in L[letters], is_arbitrary_input_safe(s)")
+        pr = _one(mod.first_char, "for s in L[letters], is_language_defined(s)")
         assert pr.verdict == "falsified"
         assert "(inside L[letters])" in pr.counterexample
         assert "''" in pr.counterexample and "IndexError" in pr.counterexample
@@ -69,7 +69,7 @@ def test_a_value_the_claim_excludes_is_labelled_outside(tmp_path):
                 """First character."""
                 return s[0]
         ''')
-        pr = _one(mod.first_char, 'for s in L[letters] \\ {""}, is_arbitrary_input_safe(s)')
+        pr = _one(mod.first_char, 'for s in L[letters] \\ {""}, is_language_defined(s)')
         assert pr.verdict == "falsified"
         assert '(outside L[letters] \\ {""})' in pr.counterexample, pr.counterexample
         assert "''" in pr.counterexample and "(inside" not in pr.counterexample
@@ -91,7 +91,7 @@ def test_shrinking_never_crosses_the_language_boundary(tmp_path):
         # inside the language the function is fine; outside it, a
         # non-digit crashes with an unguarded KeyError, and the shrunk
         # witness stays outside the language
-        pr = _one(mod.digit_value, "for s in L[letters], is_arbitrary_input_safe(s)")
+        pr = _one(mod.digit_value, "for s in L[letters], is_language_defined(s)")
         assert pr.verdict == "falsified", (pr.verdict, pr.note)
         assert "(outside L[letters])" in pr.counterexample
         witness = pr.counterexample.split(" = ", 1)[1].split(" (", 1)[0]
@@ -152,7 +152,7 @@ def test_suggested_for_a_bare_string_parameter(tmp_path):
             return int(text)
     ''')
     names = {c.name for c in suggest_claims(mod.parse)}
-    assert "is_arbitrary_input_safe[text]" in names
+    assert "is_language_defined[text]" in names
 
 
 def test_the_minimal_example_is_actually_minimal(tmp_path):
