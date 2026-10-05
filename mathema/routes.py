@@ -53,6 +53,11 @@ SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_number_set_safe",
                                "is_reproducible", "is_defined",
                                # the repeatability roll-up
                                "is_repeatable",
+                               # the definedness tree's roll-ups and
+                               # views beyond the `is_*_safe` shape
+                               "is_numerically_defined",
+                               "is_language_defined",
+                               "is_finite_over_floats",
                                # reserved for a later release
                                "is_order_invariant",
                                "is_representation_consistent"})

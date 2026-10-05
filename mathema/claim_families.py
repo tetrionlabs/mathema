@@ -3353,8 +3353,35 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
     """Empirical half of `is_defined`, for any target whose region
     equivalence (the derive half) declines or does not decide: the
     `_region_probe` with "has a value" (a finite return) as the inside
-    condition."""
-    return _region_probe(fn, facts, cj, domain, rng, trials, "is_defined")
+    condition. The bare `is_defined(f)` is also the parent of
+    is_language_defined and is_numerically_defined: falsified where one
+    of them is, and no stronger than the weakest of them."""
+    own = _region_probe(fn, facts, cj, domain, rng, trials, "is_defined")
+    if cj.relation != "is_defined" or own is None:
+        return own
+    verdict, checked, cx, established, meta = split_probe_result(own)
+    if verdict == "falsified":
+        return own
+    from ._premises import unguarded
+    rolled = _roll_up(unguarded(fn), facts,
+                      _tree_children(unguarded(fn), facts, cj, domain,
+                                     _DEFINED_CHILDREN), trials)
+    if rolled is None:
+        return own
+    c_verdict, c_checked, c_cx, _c_est, c_meta = rolled
+    meta = {**(meta or {}),
+            "mathema.children": c_meta["mathema.children"]}
+    if c_verdict == "falsified":
+        if c_meta.get("mathema.cause"):
+            meta["mathema.cause"] = c_meta["mathema.cause"]
+        return "falsified", checked + c_checked, c_cx, None, meta
+    order = ("unknown", "skipped", "holds", "proven")
+    weakest = min((verdict, c_verdict), key=order.index)
+    if weakest == "proven":
+        return verdict, checked, cx, established, meta
+    if weakest == "skipped":
+        weakest = verdict
+    return weakest, checked, cx, None, meta
 
 
 def _has_axes(value, axes: int) -> bool:
@@ -3957,17 +3984,185 @@ def _reserved_probe(name: str):
 
 
 #: the children of is_computation_safe, in the order the roll-up runs
-#: and reports them: the families that answer "does it run on my
-#: domain" and "is the answer right in float64". Each is relevant to a
-#: function when its own suggestion gate names a target there, except
-#: numerical stability, which always runs. Repeatability is
-#: is_repeatable's question.
+#: and reports them: the facts about one number representation that
+#: answer "does the computation run on my domain". Each runs at every
+#: target its suggestion gate names.
 _COMPUTATION_CHILDREN = (
-    "is_overflow_safe", "is_numerically_stable", "is_representation_safe",
-    "is_extremity_safe", "is_pole_safe", "is_number_set_safe",
-    "is_missing_safe", "is_empty_safe", "is_recursion_safe",
-    "is_language_defined", "is_compendium_safe")
-_ALWAYS_RELEVANT_CHILDREN = frozenset({"is_numerically_stable"})
+    "is_overflow_safe", "is_representation_safe", "is_recursion_safe")
+_ALWAYS_RELEVANT_CHILDREN: frozenset = frozenset()
+
+#: the definedness tree's roll-ups and views, each with its children:
+#: is_numerically_defined (over the claim's number set: no pole, every
+#: call inside its number set, every shape agreeing), is_input_safe
+#: (missing, absent and empty inputs), and the views
+#: is_finite_over_floats (no pole, no overflow)
+_TREE_CHILDREN = {
+    "is_numerically_defined": ("is_pole_safe", "is_number_set_safe",
+                               "is_dimension_safe"),
+    "is_input_safe": ("is_missing_safe", "is_absent_safe",
+                      "is_empty_safe"),
+    "is_finite_over_floats": ("is_pole_safe", "is_overflow_safe"),
+    "is_computation_safe": _COMPUTATION_CHILDREN,
+}
+
+#: the children of a bare is_defined(f): it is also falsified where one
+#: of these is, besides any failing call it sees itself
+_DEFINED_CHILDREN = ("is_language_defined", "is_numerically_defined")
+
+
+def _tree_children(fn, facts, cj, domain: dict, names) -> list:
+    """Intent:
+        The child claims a roll-up runs for this function: each child
+        family at every target its suggestion gate names, and a roll-up
+        child as its own whole-function claim, all over the roll-up's
+        domain, premise and pseudo-infinity.
+    """
+    from . import families as _families
+    from .conjecture import claim
+    registry = _families.families()
+    out: list = []
+    for name in names:
+        if name in ("is_missing_safe", "is_absent_safe"):
+            # the policy gates, one claim over every parameter that
+            # admits the kind
+            from .policy import _admits
+            kind = "absent" if name == "is_absent_safe" else "missing"
+            if any(_admits(fn, p, kind) for p in facts.params):
+                out.append(claim(f"{name}(f)", name=f"{name}[f]",
+                                 route="best"))
+            continue
+        family = registry.get(name)
+        if family is None:
+            continue
+        if name == "is_empty_safe":
+            # every container parameter, guarded or not
+            for target in facts.params:
+                if facts.param_kinds.get(target) in (*SEQUENCE_KINDS,
+                                                     "table"):
+                    out.append(claim(f"{name}({target})",
+                                     name=f"{name}[{target}]",
+                                     route="best"))
+            continue
+        if name in _TREE_CHILDREN:
+            if _tree_children(fn, facts, cj, domain, _TREE_CHILDREN[name]):
+                out.append(claim(f"{name}(f)", name=f"{name}[f]",
+                                 route="best"))
+            continue
+        for target in family.suggest_targets(fn, facts):
+            out.append(claim(f"{name}({target})",
+                             name=f"{name}[{target}]", route="best"))
+    return _over_parent(out, cj, domain)
+
+
+def _tree_probe(names):
+    """The empirical half of a roll-up over the children `names`
+    (`_roll_up` of `_tree_children`)."""
+    def probe(fn, facts, cj, domain: dict, rng: random.Random,
+              trials: int):
+        from ._premises import unguarded
+        fn = unguarded(fn)
+        return _roll_up(fn, facts,
+                        _tree_children(fn, facts, cj, domain, names),
+                        trials)
+    return probe
+
+
+def _tree_derive(fn, facts, lhs_src: str, rhs_src: str, relation: str,
+                 domain: dict | None = None, tolerance: float | None = None):
+    """Structural half of a roll-up: decline; the roll-up reads its
+    children's verdicts (`_tree_probe`)."""
+    return None
+
+
+def _dimension_targets(fn, facts) -> list:
+    """The is_dimension_safe suggestion gate: `f` when a parameter or
+    the result has a shape (a `Vec`/`Mat` marker) or a parameter is a
+    sequence."""
+    from .types import shapes_from_signature
+    try:
+        shaped = shapes_from_signature(fn)
+    except Exception:
+        shaped = {}
+    if shaped or any(k in SEQUENCE_KINDS
+                     for k in (facts.param_kinds or {}).values()):
+        return ["f"]
+    return []
+
+
+#: the words of a numpy (or mathema) error about operand shapes
+_SHAPE_WORDS = ("shape", "broadcast", "aligned", "dimension", "mismatch")
+
+
+def _shape_failure(exc) -> "str | None":
+    """Why an exception is a shape failure, or None: an
+    `enforce_dimensions` exit failure (the result broke its marker), or
+    a ValueError about the operands' shapes. An entry DimensionError is
+    the guard cutting the working domain, not a failure."""
+    from .authoring import DimensionError
+    if isinstance(exc, DimensionError):
+        return f"the result has the wrong shape: {exc}" if exc.at_exit \
+            else None
+    if isinstance(exc, ValueError) and any(
+            word in str(exc).lower() for word in _SHAPE_WORDS):
+        return f"f raised ValueError ({exc})"
+    return None
+
+
+def _dimension_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                     trials: int):
+    """Intent:
+        Empirical half of is_dimension_safe(f): call fn with every
+        shaped parameter drawn in the shape its binding or marker
+        states (each named axis one size per call, shared across the
+        parameters naming it) and report the first call whose operands
+        or result do not fit (`_shape_failure`). Any other raise belongs
+        to another family and passes.
+    """
+    from . import _shapes
+    from .gates import _fmt_point
+    from .types import shapes_from_signature
+    try:
+        markers = shapes_from_signature(fn)
+    except Exception:
+        markers = {}
+    dims = {p: (_shapes.dims_of((domain or {}).get(p))
+                or _shapes.dims_of(markers.get(p)))
+            for p in facts.params}
+    if not any(dims.values()) and not any(
+            facts.param_kinds.get(p) in SEQUENCE_KINDS for p in facts.params):
+        return None
+
+    def trial(args):
+        values = dict(zip(facts.params, args))
+        sizes: dict = {}
+        for p in facts.params:
+            shape = dims.get(p)
+            if not shape:
+                continue
+            fixed = [_shapes.fixed_size(d) or sizes.setdefault(
+                d, rng.randint(1, 4)) for d in shape]
+
+            def build(axis, fixed=fixed):
+                if axis == len(fixed):
+                    return rng.uniform(-10, 10)
+                return [build(axis + 1) for _ in range(fixed[axis])]
+            values[p] = build(0)
+        try:
+            call_args, call_kwargs = call_arguments(fn, facts.params, values)
+            fn(*call_args, **call_kwargs)
+        except Exception as exc:
+            why = _shape_failure(exc)
+            if why is None:
+                return True
+            return f"{_fmt_point(values, list(facts.params))}: {why}"
+        return True
+
+    anchor = facts.params[0] if facts.params else None
+    if anchor is None:
+        return None
+    verdict, checked, cx = _probe_trials(fn, facts, anchor, domain, rng,
+                                         trials, trial)
+    return verdict, checked, cx
 
 
 def _is_computation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -3980,26 +4175,9 @@ def _is_computation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
 
 def _computation_children(fn, facts, cj, domain: dict) -> list:
     """The child claims is_computation_safe runs for this function:
-    numerical stability in its own spelling, and every other child at
-    each target its suggestion gate names, all over the roll-up's
-    domain and pseudo-infinity."""
-    from . import families as _families
-    from .conjecture import claim
-    registry = _families.families()
-    out: list = []
-    for name in _COMPUTATION_CHILDREN:
-        family = registry.get(name)
-        if family is None:
-            continue
-        if name == "is_numerically_stable":
-            out.append(claim(f"g(f, {', '.join(facts.params)}) == 1",
-                             name=name, route="best",
-                             funcs={"g": "mathema.f.finite_no_error"}))
-        else:
-            for target in family.suggest_targets(fn, facts):
-                out.append(claim(f"{name}({target})",
-                                 name=f"{name}[{target}]", route="best"))
-    return _over_parent(out, cj, domain)
+    every child at each target its suggestion gate names, over the
+    roll-up's domain and pseudo-infinity."""
+    return _tree_children(fn, facts, cj, domain, _COMPUTATION_CHILDREN)
 
 
 def _over_parent(children: list, cj, domain: dict) -> list:
@@ -4070,13 +4248,12 @@ def _is_repeatable_derive(fn, facts, lhs_src: str, rhs_src: str,
 def _roll_up(fn, facts, children: list, trials: int):
     """Intent:
         Adjudicate a roll-up's child claims in one nested
-        `check_conjectures` call and roll the verdicts up. Any child
+        `check_conjectures` call and roll the verdicts up: any child
         falsified falsifies the roll-up with that child's name and
-        witness; every child holding or proven makes it hold, never
-        proven (P3, a roll-up of executed facts about one
-        implementation); anything else is unknown. The note lists each
-        child's verdict and `meta["mathema.children"]` carries them as
-        a mapping. None when there are no children.
+        witness; every child proven proves it; otherwise it takes the
+        weakest child's verdict (holds, else unknown). The note lists
+        each child's verdict and `meta["mathema.children"]` carries them
+        as a mapping. None when there are no children.
     """
     from ._premises import unguarded
     from .conjecture import check_conjectures
@@ -4097,6 +4274,9 @@ def _roll_up(fn, facts, children: list, trials: int):
             meta["mathema.cause"] = cause
         return ("falsified", checked,
                 f"{first.name}: {first.counterexample}", None, meta)
+    if all(v == "proven" for v in verdicts.values()):
+        return ("proven", checked, None,
+                "every child is proven: " + ", ".join(verdicts), meta)
     if all(v in ("holds", "proven") for v in verdicts.values()):
         return "holds", checked, None, None, meta
     return "unknown", checked, None, None, meta
@@ -4224,6 +4404,18 @@ def _register_builtin_claim_families() -> None:
     _families.register("is_computation_safe", SafetyFamily(
         "is_computation_safe", derive=_is_computation_safe_derive,
         probe=_computation_probe, whole_function=True))
+    # the definedness tree: is_dimension_safe (operands and result
+    # agree in shape), the roll-ups is_numerically_defined and
+    # is_input_safe, and the view is_finite_over_floats
+    _families.register("is_dimension_safe", SafetyFamily(
+        "is_dimension_safe", derive=_tree_derive, probe=_dimension_probe,
+        suggest_targets=_dimension_targets, whole_function=True))
+    for _tname, _tchildren in _TREE_CHILDREN.items():
+        if _tname == "is_computation_safe":
+            continue
+        _families.register(_tname, SafetyFamily(
+            _tname, derive=_tree_derive, probe=_tree_probe(_tchildren),
+            whole_function=True))
     # is_repeatable is the roll-up for "is it repeatable": the seed
     # decides whether its first child is is_reproducible or
     # is_deterministic, and is_state_safe always joins; declared by the
