@@ -6121,6 +6121,20 @@ def _refill_caller(fn_call, pins: "dict | None" = None):
     return call_at
 
 
+def _nan_filled(value, fill: float):
+    """`value` with every nan in it replaced by `fill`: a float, a list
+    or tuple (nested), or a float numpy array; anything else as it is."""
+    import math
+    if isinstance(value, float):
+        return fill if math.isnan(value) else value
+    if isinstance(value, (list, tuple)):
+        return type(value)(_nan_filled(v, fill) for v in value)
+    if hasattr(value, "dtype") and getattr(value.dtype, "kind", "") == "f":
+        import numpy as np
+        return np.where(np.isnan(value), fill, value)
+    return value
+
+
 def _fill_value(bound):
     """Intent:
         An interior point of a parameter's domain (a container's element
@@ -8761,6 +8775,35 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return v
 
     fn_tagged = f_call.wrap(_tagged(fn_call, "f", inject=call_pins))
+
+    def f_nan_unread(env, lv, rv) -> bool:
+        # whether the claim's sides never read a nan f returned: they
+        # come out the same with every nan in f's output filled by v,
+        # 2v and 0.9v (v = 1)
+        if holds_nan(lv) or holds_nan(rv):
+            return False
+        from ._missing_policy import _same_output
+        flags = (call_raised[0], call_nan[0], call_hole[0], list(call_inf))
+        plain_f = _tagged(fn_call, "f", inject=call_pins)
+        try:
+            for fill in (1.0, 2.0, 0.9):
+                env_filled = {**env, "f": lambda *a, _fill=fill, **k:
+                              _nan_filled(plain_f(*a, **k), _fill)}
+                try:
+                    lf = eval(code_l, {"__builtins__": {}}, env_filled)
+                    rf = (eval(code_r, {"__builtins__": {}}, env_filled)
+                          if code_r is not None else None)
+                except Exception:
+                    return False
+                if as_arrays:
+                    lf = _linalg_eval.scalar(lf)
+                    rf = _linalg_eval.scalar(rf) if code_r is not None else None
+                if not (_same_output(lf, lv) and _same_output(rf, rv)):
+                    return False
+            return True
+        finally:
+            call_raised[0], call_nan[0], call_hole[0] = flags[:3]
+            call_inf[:] = flags[3]
     # a claim that names the function under test (`clamp(rate)`) calls f
     bound_tagged = {name: (f_call.wrap(_tagged(v, name)) if _is_under_test(v, fn)
                            else _tagged(v, name))
@@ -9037,6 +9080,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 lv = _linalg_eval.scalar(lv)
                 rv = _linalg_eval.scalar(rv) if code_r is not None else None
         except Exception as e:
+            if not call_raised[0] and admitted_hole(args):
+                # the claim's own words at a hole or absence it only
+                # admits: classified, the companions judge f there
+                executed_record.classified += 1
+                continue
             if not call_raised[0]:
                 if isinstance(e, (IndexError, ZeroDivisionError)):
                     # the claim's own expression has no value at this
@@ -9233,12 +9281,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             checked += 1
             cx = f"{_point_text(args)}: {call_hole[0][0]} returned {call_hole[0][1]}"
             break
-        if not missing_in and (holds_nan(lv) or holds_nan(rv) or call_nan[0] == "f"):
+        if not missing_in and (holds_nan(lv) or holds_nan(rv) or (
+                call_nan[0] == "f" and not f_nan_unread(env, lv, rv))):
             # a NaN computed from inputs that are not missing is no
             # value, like a raise: every value relation fails at this
             # in-domain point, `!=` included, and the witness names
             # the callee that returned it; f's own nan fails it even
-            # where the claim's words read past it (`sum(f(xs))`)
+            # where the claim's words read past it (`sum(f(xs))`), and
+            # not where the claim never reads that slot (`f(a)[1:]`)
             checked += 1
             cx = (f"{_point_text(args)}: {call_nan[0]} returned nan"
                   if call_nan[0] is not None else

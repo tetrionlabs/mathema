@@ -1438,6 +1438,15 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
         words = _default_words(p, kind, member, sig, container, short=True)
         bracket = f"{words}; f {behaviour} instead: {_entry(call, p, kind)}"
         out = value_shown(call.output)
+        expected_policy = replace(policy, behaviour=expected, source="default")
+        if call.indifferent:
+            # f never read the hole: no fill of it changes the value
+            bracket = (f"{words}; f ignores the hole instead: at {_at(call, None)} "
+                       f"it returns {out}, and no fill of it changes that")
+            nxt = (f"give the calls that ignore {p} a premise on another parameter "
+                   f"that tells them apart, or make f treat a missing {p} one way")
+            return row("falsified", expected, None, "default", bracket, nxt=nxt,
+                       cx=_witness(call), shown=expected_policy)
         slot_member = member or (_members_in(call.point.get(p), kind) or ["nan"])[0]
         if behaviour == "drops":
             if kind == "absent":
@@ -1458,7 +1467,6 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
             nxt = f"if giving None back is intended, write `{accepted}`; if not, make f raise"
         else:
             nxt = f"if that is intended, write `{accepted}`; if not, change f"
-        expected_policy = replace(policy, behaviour=expected, source="default")
         nxt += (f"; or accept it as a discovery: mathema accept {key} "
                 f"{name_of(expected_policy)} --as discovery --corrected \"{accepted}\"")
         return row("falsified", expected, None, "default", bracket, nxt=nxt,

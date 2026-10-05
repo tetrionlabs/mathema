@@ -138,3 +138,16 @@ def test_the_executed_rung_of_equivalence_judges_value_points_only():
     (p,) = check_conjectures(ident, [claim("for x in {0.5, None, nan}, f =:= g",
                                            funcs={"g": g})])
     assert p.verdict == "holds", (p.verdict, p.note)
+
+
+def running_columns(a):
+    import numpy as np
+    return np.cumsum(a, axis=0)
+
+
+def test_the_claims_own_words_at_an_admitted_absence_are_not_judged():
+    # a has no annotation, so it may be None; cumsum(None, axis=0) in the
+    # claim has no value there, and None is the absence companion's case
+    (p,) = check_conjectures(running_columns, [claim(
+        "for a in R^(m,n), f(a) ~= cumsum(a, axis=0)", route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.counterexample, p.note)
