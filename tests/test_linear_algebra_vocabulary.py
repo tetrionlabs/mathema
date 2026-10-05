@@ -91,10 +91,10 @@ _WORDS = [
 ]
 
 
-#: true identities the probe route meets at a magnitude corner
-_AT_A_CORNER = {
-    ("x.T @ (A + A.T) @ x ~= 2 * (x.T @ A @ x)", "probe"): "falsified",
-}
+#: true identities the probe route meets at a magnitude corner; none
+#: since a claim's `@` is the exact product (the form identity's two
+#: sides near 1e600 compare exactly)
+_AT_A_CORNER: dict = {}
 
 
 @pytest.mark.parametrize("route", ["probe", "best"])

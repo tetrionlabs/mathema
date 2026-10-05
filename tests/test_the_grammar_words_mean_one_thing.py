@@ -65,13 +65,16 @@ def _exact(v) -> sympy.Rational:
 
 
 def evaluate(src: str, **values):
-    """`src` through the exact evaluator, each value given as the array
-    a claim evaluates it as. Returns the value, or the exception it
-    raised."""
+    """`src` through the exact evaluator, compiled as a claim is (its
+    `@` the exact product), each value given as the array a claim
+    evaluates it as. Returns the value, or the exception it raised."""
+    from mathema.conjecture import _exact_products
     env = {**ENV, **{k: as_array(v) for k, v in values.items()}}
+    code = compile(_exact_products(ast.parse(src, mode="eval")), "<claim>",
+                   "eval")
     try:
         with np.errstate(all="ignore"):
-            return eval(src, env)  # noqa: S307
+            return eval(code, env)  # noqa: S307
     except Exception as e:
         return e
 
@@ -439,7 +442,7 @@ def _reads(lowering: str, w: G.Word, keyword=None) -> bool:
 
 
 def test_the_table_names_every_word_the_evaluator_reads():
-    evaluator = set(FUNCTIONS) | {"len", "dim"}
+    evaluator = {w for w in FUNCTIONS if not w.startswith("_")} | {"len", "dim"}
     table = {w.name for w in G.WORDS} | set(G.SYNONYMS)
     assert evaluator == table, (
         f"in the evaluator only: {sorted(evaluator - table)}; in the table "
@@ -550,3 +553,21 @@ def test_the_docs_page_shows_the_table():
     page = open(os.path.join(_DOCS, "grammar-words.md"),
                 encoding="utf-8").read()
     assert G.markdown_table() in page
+
+
+@pytest.mark.parametrize("src, values, exact", [
+    ("x @ y", {"x": [1e16, 1, -1e16], "y": [1, 1, 1]}, 1),
+    ("A @ x", {"A": [[1e16, 1, -1e16], [0.1, 0.2, 0.3]], "x": [1, 1, 1]},
+     [1, Fraction(0.1) + Fraction(0.2) + Fraction(0.3)]),
+    ("x @ A @ x", {"A": [[1e300, 1e300], [1e300, 1e300]],
+                   "x": [1e300, -1e300]}, 0),
+])
+def test_a_claims_matrix_product_is_exact(src, values, exact):
+    """`@` in claim text is the exact inner product rounded once, as
+    `dot` is, whatever the platform's float matmul would round to: the
+    claim is compiled and evaluated as every route evaluates it."""
+    from mathema.conjecture import _validate
+    code, _ = _validate(src, set(values))
+    got = eval(code, {**ENV, **{k: as_array(v) for k, v in values.items()}})  # noqa: S307
+    want = exact if isinstance(exact, list) else [exact]
+    assert [float(v) for v in np.ravel(got)] == [float(Fraction(v)) for v in want]

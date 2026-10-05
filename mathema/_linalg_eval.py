@@ -1004,10 +1004,16 @@ def _exact_rows(a):
     """The entries of a matrix (or a vector, as one column) as exact
     rationals, row by row, or None when an entry is not a finite real
     number (a hole, an infinity, a complex number)."""
+    import numbers
     np = _np()
-    if not is_array(a) or a.ndim not in (1, 2) or a.dtype.kind not in "biuf":
+    if not is_array(a) or a.ndim not in (1, 2) or a.dtype.kind not in "biufO":
         return None
     if a.dtype.kind == "f" and not np.isfinite(a).all():
+        return None
+    if a.dtype.kind == "O" and not all(
+            isinstance(v, numbers.Real) and not isinstance(v, bool)
+            and (not isinstance(v, float) or math.isfinite(v))
+            for v in a.ravel()):
         return None
     column = a.reshape(-1, 1) if a.ndim == 1 else a
     return [[_exact(_element(v)) for v in row] for row in column]
@@ -1270,6 +1276,18 @@ def _dot(x, y):
     return out
 
 
+def matmul(a, b):
+    """`a @ b` as a claim reads it: for two vectors or matrices of
+    finite real numbers the exact product, each entry rounded once (an
+    entry beyond float range stays exact), as `dot` computes it;
+    anything else (a hole, an infinity, a complex entry, a value that is
+    not an array) by the operands' own `@`."""
+    if is_array(a) and is_array(b) and a.ndim in (1, 2) and b.ndim in (1, 2) \
+            and _exact_rows(a) is not None and _exact_rows(b) is not None:
+        return _dot(a, b)
+    return a @ b
+
+
 def _outer(x, y):
     return _np().outer(_matrix(x), _matrix(y))
 
@@ -1328,6 +1346,9 @@ def _pinv(A):
     return _np().linalg.pinv(_matrix(A))
 
 
+#: the name a claim's `@` is compiled to (see `conjecture._validate`)
+MATMUL = "_exact_matmul"
+
 #: the claim-level functions a vector or matrix claim evaluates with,
 #: each a number's ordinary function on a number
 FUNCTIONS = {
@@ -1347,4 +1368,6 @@ FUNCTIONS = {
     "dot": _dot, "outer": _outer, "kron": _kron, "diag": _diag,
     "rank": _rank, "eigvals": _eigvals, "eigvalsh": _eigvalsh,
     "cond": _cond, "solve": _solve, "pinv": _pinv,
+    # the product `@` in claim text is compiled to this call
+    MATMUL: matmul,
 }

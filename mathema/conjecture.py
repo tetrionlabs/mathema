@@ -992,6 +992,8 @@ _SAFE_FUNCS = {
     # a value's text, for a round trip through a parser that returns an
     # object: probe-only, the derive route has no reading of it
     "str": str,
+    # the call a claim's `@` is compiled to (`_exact_products`)
+    "_exact_matmul": lambda a, b: _linalg_eval_words().matmul(a, b),
     # sympy's own capitalization, mirroring _math_vocab._SYMPY_FUNCS's
     # Abs/Min/Max synonyms so a claim written that way adjudicates on
     # either route
@@ -3499,10 +3501,29 @@ def _validate(src: str, param_names: set[str],
                 # _MATH_ATTRS rather than being sampled randomly
                 if node.id not in callable_names and node.id not in MATH_CONSTANTS:
                     aux.add(node.id)
-    code = compile(tree, "<conjecture>", "eval")
+    code = compile(_exact_products(tree), "<conjecture>", "eval")
     from ._exact_side import register_source
     register_source(code, src, tree)
     return code, aux
+
+
+def _exact_products(tree):
+    """A copy of a claim's tree with each `a @ b` written as the call
+    `_linalg_eval.matmul(a, b)`, the exact product of finite real
+    arrays."""
+    import copy
+
+    from ._linalg_eval import MATMUL
+
+    class _Products(ast.NodeTransformer):
+        def visit_BinOp(self, node):
+            self.generic_visit(node)
+            if isinstance(node.op, ast.MatMult):
+                return ast.copy_location(ast.Call(
+                    func=ast.Name(id=MATMUL, ctx=ast.Load()),
+                    args=[node.left, node.right], keywords=[]), node)
+            return node
+    return ast.fix_missing_locations(_Products().visit(copy.deepcopy(tree)))
 
 
 
