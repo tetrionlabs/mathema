@@ -1084,6 +1084,17 @@ def analyze_source(fn) -> Facts:
     from .runtime_types import detect_parameters, usage_hints
     param_kinds = _param_kinds(fdef, params)
     detected = detect_parameters(fn)
+    hints = usage_hints(fn, fdef, params, param_kinds, detected)
+    # a parameter the body uses as a numpy array, which a list does not
+    # support, is drawn as one: the hint becomes the runtime type
+    from .runtime_types import Detection
+    for p, hint in list(hints.items()):
+        if hint.get("strong") and hint.get("type") == "numpy.ndarray" \
+                and p not in detected:
+            kind = "mat" if hint.get("usage") == "matrix" else "vec"
+            detected[p] = (Detection("numpy.ndarray", kind,
+                                     "the body uses it as a numpy array"),)
+            hints.pop(p)
     apply_runtime_kinds(param_kinds, detected)
     return Facts(
         name=fdef.name,
@@ -1091,7 +1102,7 @@ def analyze_source(fn) -> Facts:
         params=params,
         param_kinds=param_kinds,
         runtime_types=detected,
-        runtime_hints=usage_hints(fn, fdef, params, param_kinds, detected),
+        runtime_hints=hints,
         finite_domains=finite_annotation_domains(fn),
         doc_concepts=doc_concepts,
         returns_kind=_returns_kind(fdef),
