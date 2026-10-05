@@ -22,6 +22,7 @@ import pytest
 import sympy
 
 import mathema
+from mathema.compendium import _installed_version, _version_in_range
 from mathema.symbolic._seqir import Lowering, normalised
 
 
@@ -75,13 +76,27 @@ def test_a_false_transform_identity_is_never_proven(fn, law):
 @pytest.mark.parametrize("fn, law", [
     (running, _REVERSE + "for x in R^n, s(s(f(x))) == f(x)"),
     (running, _SHIFT + "for x in R^n, g(f(x), c) == f(x) + c"),
-    (squares, _SCALE + "for x in R^n, s(f(x), 2) == f(x) * 2"),
-    (squares, _SCALE + "for x in R^n, f(s(x, 2)) == f(x) * 4"),
     (demean, _SHIFT + "for x in R^n, f(g(x, c)) == f(x)"),
 ])
 def test_the_true_sibling_is_proven(fn, law):
     p = _verdict(fn, law)
     assert p.verdict == "proven", (law, p.verdict, p.sketch)
+
+
+# `numpy.square`'s definition row applies from numpy 2.4; below it the
+# squares are sampled
+_SQUARE_ROW = _version_in_range(_installed_version("numpy") or "0", ">=2.4")
+
+
+@pytest.mark.needs_full_proof_budget
+@pytest.mark.parametrize("law", [
+    _SCALE + "for x in [-1e6, 1e6]^n, s(f(x), 2) == f(x) * 2",
+    _SCALE + "for x in [-1e6, 1e6]^n, f(s(x, 2)) == f(x) * 4",
+])
+def test_the_true_sibling_through_a_numpy_ufunc_is_proven_from_its_row(law):
+    p = _verdict(squares, law)
+    assert p.verdict == ("proven" if _SQUARE_ROW else "holds"), (
+        law, p.verdict, p.sketch)
 
 
 L = sympy.Symbol("L", integer=True, positive=True)

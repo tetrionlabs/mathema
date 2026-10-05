@@ -293,7 +293,7 @@ LEXICON: dict[str, str] = {
         "for scores in [0.1, 10]^n, ||f(scores)||_1 ~= 1",
     # `^2` after the bars is the square, never an order: a squared
     # length is `||x||^2`, and a Manhattan length is not
-    "norm_bars_squared": "for x in R^n, f(x) ~= ||x||^2",
+    "norm_bars_squared": "for x in [-1e6, 1e6]^n, f(x) ~= ||x||^2",
     "norm_bars_squared_trap": "for x in [-1, 1]^n, f(x) ~= ||x||^2",
     # the trap: a Manhattan length claimed as the Euclidean norm is
     # falsified with a witness
