@@ -196,11 +196,16 @@ def test_total_seq_probes_hold():
     r = mathema.check(total)
     verdicts = {p.name: p.verdict for p in r.probes}
     # a plain float sum is order-sensitive at a cancelling pair
-    # ([1e300, -1e300, ...]): a carrier failure, which falsifies the
-    # computation line (rulings of 2026-10-01 and 2026-10-05)
+    # ([1e16, -1e16, ...] or [1e300, -1e300, ...]): a carrier failure,
+    # which falsifies the computation line (rulings of 2026-10-01 and
+    # 2026-10-05); the witness, run again, really breaks the law
     perm = next(p for p in r.probes if p.name == "permutation_invariant")
     assert perm.verdict == "falsified", perm.note
-    assert "1e+300, -1e+300" in perm.counterexample, perm.counterexample
+    (xs,) = perm.meta["mathema.counterexample_args"]
+    forward, backward = total(list(xs)), total(list(reversed(xs)))
+    assert abs(forward - backward) > 1e-9 + 1e-7 * max(abs(forward),
+                                                       abs(backward)), \
+        (perm.counterexample, forward, backward)
     # proven, not holds: the elementwise transform composes through
     # the fold's closed form on the derive route now
     assert verdicts["scale_equivariant"] == "proven"
