@@ -15,7 +15,6 @@ whose version range excludes the installed library.
 """
 from __future__ import annotations
 
-import sys
 import textwrap
 
 import numpy as np
