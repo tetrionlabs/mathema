@@ -122,14 +122,14 @@ note fees.discounted: never_raises_price falsified on first adjudication. A
     spelling first, `mathema check fees.discounted --claim "..."` adjudicates it
     and writes nothing.
 FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no
-    baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- 1 unknown
-    claim(s); compendium:math declares 'log_monotone' for math.log; mathema
-    verify recorded it unknown against the installed library: accept it (mathema
-    accept math.log log_monotone --as trusted) or let mathema verify adjudicate
-    it against the installed library
+    baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- log_monotone
+    unknown: derive route unliftable; compendium:math declares 'log_monotone'
+    for math.log; mathema verify recorded it unknown against the installed
+    library: accept it (mathema accept math.log log_monotone --as trusted) or
+    let mathema verify adjudicate it against the installed library
 FAIL fees.discounted: no baseline record; 1 proven, 0 holds, 1 falsified  <- 1
     falsified claim(s)
-ok   fees.late_fee: no baseline record; 1 proven, 1 holds, 0 falsified
+ok   fees.late_fee: no baseline record; 1 proven, 2 holds, 0 falsified
 0 fresh (form unchanged, skipped), 3 adjudicated, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 exit code 1
@@ -224,15 +224,16 @@ mathema verify --root .; echo "exit code $?"
 <!-- example: gate output -->
 ```text
 ok   math.log: fresh; library claims from mathema/compendium/math.claims.yaml
-ok   fees.discounted: form changed; 2 proven, 1 holds, 0 falsified
+ok   fees.discounted: form changed; 2 proven (1 claim, 1 built-in), 3 holds, 0 falsified
 ok   fees.late_fee: fresh
 2 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 exit code 0
 ```
 
-The claim is now proven, its `[float]` companion holds, and the gate is
-green. Had the claim been the wrong one rather than the code,
+The claim is now proven, the lines under it hold (the floating-point
+computation, and what `discounted` does with a `nan` price or rate), and
+the gate is green. Had the claim been the wrong one rather than the code,
 `mathema accept ... --as discovery` records the corrected claim instead;
 [the CDD loop](tutorial.md) walks that fork.
 

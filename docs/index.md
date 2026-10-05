@@ -161,13 +161,12 @@ print(mathema.check(midpoint, claims=[
 <!-- example: midpoint output -->
 ```text
 mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
-  proven  between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
+  proven    between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
            for a in [0, 100] : int, b in [0, 100] : int
-  FALSIFY between_reals: for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)
-           chained comparison falsified at link 1: min(a, b) <= f(a, b); at a = nan f gave nan back; at b = nan f gave nan back
-           counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
-  holds   missing[a]: missing(f, a) propagates   [default for a float, which may be nan; confirmed on the 51 draws of between_reals. Keep it by writing it (mathema claims mid.midpoint --write), or change the word to raises or drops if f should do otherwise]
-  holds   missing[b]: missing(f, b) propagates   [default for a float, which may be nan; confirmed on the 51 draws of between_reals. Keep it by writing it (mathema claims mid.midpoint --write), or change the word to raises or drops if f should do otherwise]
+  between_reals  for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)   falsified at link 1
+    falsified  mathematics  for a in [0.0, 100.0] ⊂ ℝ, b in [0.0, 100.0] ⊂ ℝ, min(a, b) <= f(a, b) <= max(a, b)   counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
+    holds      policy       f(a=nan)   no missing policy stated; assumed propagates
+    holds      policy       f(b=nan)   no missing policy stated; assumed propagates
 ```
 
 So the test established that the function works at two integer points. mathema
@@ -195,9 +194,13 @@ mathema check mid.py:midpoint --claim "for a in [0, 100], b in [0, 100], min(a, 
 ok   mid.midpoint: source, no side effects; claims 4/4 adjudicated (1 proven, 3 holds, 0 falsified)
 ```
 
-One claim, two rows: the proof, and its `[float]` companion, which runs the
-proven claim through the real code in floating point at the region's corners
-and at sampled points inside it, and holds.
+One claim, four lines under it in the full record. The mathematics line is
+the proof over the real numbers. The computation line runs the same claim
+through the real code in floating point, at the region's corners and at
+sampled points inside it, and holds. The two policy lines cover a value that
+is not there: a float may be `nan`, nothing in the claim says what `midpoint`
+should do with one, so mathema assumes the `nan` passes through to the result
+(it propagates) and checks that it does.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">A whole codebase</span><span class="brk r"></span></span>
 

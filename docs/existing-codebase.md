@@ -198,7 +198,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: codebase output -->
 ```text
-falsified rate=-2.72559 -> -32.66347642639832, rate=4.92258 -> 34.39055087522713 at price = -8.76733 (not decreasing)
+falsified rate = -2.7255878198803085 -> -32.66347642639832, rate = 4.922577492583454 -> 34.39055087522713 at price = -8.767334983247743 (not decreasing)
 ```
 
 The derivative of `price * (1 - rate)` in `rate` is `-price`, which is
@@ -261,9 +261,9 @@ mathema audit billing --root . --filter unclaimed --cols key,claims
 
 <!-- example: codebase output -->
 ```text
-ok   billing.fees.discounted: no baseline record; 2 proven, 0 holds, 0 falsified
+ok   billing.fees.discounted: no baseline record; 2 proven (1 claim, 1 built-in), 0 holds, 0 falsified
 ok   billing.fees.late_fee: no baseline record; 1 proven, 0 holds, 0 falsified
-ok   billing.fees.settle: no baseline record; 2 proven, 1 holds, 0 falsified
+ok   billing.fees.settle: no baseline record; 2 proven (1 claim, 1 built-in), 2 holds, 0 falsified
 0 fresh (form unchanged, skipped), 3 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 {"prefix":"billing.fees.","cols":["key","claims"],"rows":[["late_fee",0]]}

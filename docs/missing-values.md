@@ -583,7 +583,7 @@ $ mathema claims shop.clamp_discount
 shop.clamp_discount: no declared claims (mathema claims --suggest lists candidates)
 shop.clamp_discount: 1 policy row about rate
   contradicted by the code (change the word, the code, or accept it as a discovery; --write writes these with the contradiction in the note):
-    FALSIFY missing[rate]: missing(f, rate) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, 1.0 out]
+    falsified missing[rate]: missing(f, rate) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, 1.0 out]
              if 1.0 is the answer f should give for a missing rate, write `missing(f, rate) drops`; if not, make f raise or give nan back; or accept it as a discovery: mathema accept shop.clamp_discount missing[rate] --as discovery --corrected "missing(f, rate) drops"
 ```
 
