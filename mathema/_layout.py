@@ -105,9 +105,28 @@ def _policy_detail(p) -> str:
     return f"{behaviour}, {source}" if source else behaviour
 
 
+#: the policy a row's next step says to state, as the record words it
+_STATED = re.compile(r'--corrected "([^"]+)"|(?:write|state) `([^`]+)`')
+
+
 def _fixes(p, key: str, word: str) -> str:
-    return (f"possible fixes: (i) mathema claims {key} --adopt '{p.name}'  "
-            f"(ii) exclude {word}  (iii) handle {word} at entry")
+    """The possible fixes under a falsified absence or missing line: the
+    command that records what f does as a stated policy, when the row
+    names one policy to state, then excluding the value, then handling
+    it at entry."""
+    pol = (p.meta or {}).get("mathema.policy") or {}
+    # a row with no single policy needs one claim per case, not one command
+    mixed = (pol.get("sentence") or "").startswith("f has no single policy")
+    found = None if mixed else _STATED.search(pol.get("next") or "")
+    fixes = []
+    if found:
+        stated = found.group(1) or found.group(2)
+        fixes.append(f"mathema accept {key} {p.name} --as discovery "
+                     f"--corrected \"{stated}\"")
+    fixes += [f"exclude {word}", f"handle {word} at entry"]
+    numerals = ("i", "ii", "iii")
+    return "possible fixes: " + "  ".join(
+        f"({n}) {fix}" for n, fix in zip(numerals, fixes))
 
 
 def _row(verdict: str, aspect: str, what: str, detail: str = "") -> str:

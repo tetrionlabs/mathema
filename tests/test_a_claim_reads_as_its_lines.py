@@ -41,8 +41,9 @@ def test_a_claim_with_lines_prints_as_a_block():
     assert block[3].split()[:3] == ["falsified", "policy", "f(None)"], block[3]
     assert "no absent policy stated; raises TypeError" in block[3], block[3]
     assert block[4].strip() == (
-        "possible fixes: (i) mathema claims test_a_claim_reads_as_its_lines.root_opt "
-        "--adopt 'absent[x]'  (ii) exclude None  (iii) handle None at entry"), block[4]
+        "possible fixes: (i) mathema accept test_a_claim_reads_as_its_lines.root_opt "
+        "absent[x] --as discovery --corrected \"absent(f, x) raises(TypeError)\"  "
+        "(ii) exclude None  (iii) handle None at entry"), block[4]
 
 
 def test_the_verdict_words_are_spelled_out():
@@ -105,3 +106,34 @@ def test_a_verdict_from_running_the_code_is_on_the_computation_line():
                    for ln in block), block
     assert block[0].split()[:2] == ["falsified", "computation"], block[0]
     assert "counterexample x = " in block[0], block[0]
+
+
+_MOD = ("import math\nfrom typing import Optional\n\n"
+        "def clamp(x: float) -> float:\n    return max(0.0, min(1.0, x))\n\n"
+        "def root_opt(x: Optional[float]) -> float:\n    return math.sqrt(x)\n")
+_CLAIMS = ("fixmod.clamp:\n  claims:\n    - name: unit\n"
+           "      statement: \"for x in [0, 1], 0 <= f(x) <= 1\"\n"
+           "fixmod.root_opt:\n  claims:\n    - name: nonneg\n"
+           "      statement: \"for x in [0, 4], f(x) >= 0\"\n")
+
+
+def test_the_first_possible_fix_is_a_command_that_settles_the_line(tmp_path, monkeypatch):
+    import shlex
+
+    from mathema.cli import main
+    (tmp_path / "fixmod.py").write_text(_MOD)
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "fix.claims.yaml").write_text(_CLAIMS)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    import fixmod
+    assert main(["verify", "--root", str(tmp_path)]) == 1
+    for fn, text in ((fixmod.clamp, "for x in [0, 1], 0 <= f(x) <= 1"),
+                     (fixmod.root_opt, "for x in [0, 4], f(x) >= 0")):
+        rec = mathema.check(fn, claims=[mathema.claim(text, name="c")])
+        fix = next(line for line in _lines(rec) if "possible fixes:" in line)
+        command = fix.split("(i) ", 1)[1].split("  (ii) ", 1)[0]
+        argv = shlex.split(command)
+        assert argv[:2] == ["mathema", "accept"], command
+        assert main(argv[1:] + ["--yes", "--root", str(tmp_path)]) == 0, command
+    assert main(["verify", "--root", str(tmp_path)]) == 0
