@@ -12,7 +12,8 @@ line as its policy:
 
 The line holds where f does what the policy says and is falsified with
 the witness where it does not. A guard in the code (a raise for an
-empty input, `enforce_dimensions` with n >= 1) counts as deliberate.
+empty input, `enforce_dimensions` with n >= 1) counts as deliberate; a
+raise the body stumbles into at `[]` behind a value guard does not.
 A falsified line offers its fixes with the condition first and the
 claim last, after a colon.
 """
@@ -23,6 +24,7 @@ import statistics
 import pandas as pd
 import pytest
 
+from mathema import enforce_domain
 from mathema.claims import check_conjectures, claim
 
 
@@ -39,6 +41,11 @@ def total(xs: list) -> float:
     for v in xs:
         s += v
     return s
+
+
+@enforce_domain(domain={"xs": (0, 1)})
+def bounded_mean(xs: list) -> float:
+    return sum(xs) / len(xs)
 
 
 def guarded_mean(xs: list) -> float:
@@ -91,6 +98,16 @@ def test_a_guard_in_the_code_is_deliberate():
     _head, line = _line(guarded_mean, ["for xs in R^n, f(xs) <= max(xs)"],
                         "xs")
     assert line.verdict == "holds", (line.verdict, line.note)
+
+
+def test_a_value_guard_does_not_excuse_the_body_s_own_raise_at_empty():
+    # enforce_domain checks each entry against [0, 1]; the empty list
+    # passes it, and the ZeroDivisionError at [] is the body's own
+    _head, line = _line(bounded_mean,
+                        ["for xs in [0, 1]^n, f(xs) <= max(xs)"], "xs")
+    assert line.verdict == "falsified", (line.verdict, line.note)
+    assert line.counterexample == "xs = []", line.counterexample
+    assert "deliberate" not in (line.note or "")
 
 
 def test_the_fixes_put_the_claim_last_after_a_colon():
