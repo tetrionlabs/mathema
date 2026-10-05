@@ -35,7 +35,7 @@ versions: ">=2"
 pandas.Series.sem:
   claims:
     - name: definition
-      statement: "for a in R^n \\\\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1) / sqrt(len(a))"
+      statement: "for a in R^n \\\\ {∅}, assuming dim(a) >= 2, f(a) == std(a, ddof=1) / sqrt(len(a))"
 """
 
 _LEVERAGE = ("for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "

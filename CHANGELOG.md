@@ -4,6 +4,14 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## 0.6.1
 
+- `a ~= b` means `abs(a - b) <= ε`, with `ε` the claim's declared
+  tolerance or else 1e-9: decided exactly on the mathematics line and in
+  float64 on the computation line, where it no longer takes the relative
+  allowance `==` has. The record says how it read the claim ("read as
+  abs(f(x) - x) <= ε, ε = 1e-9 (the default)"), and a premise `assuming
+  a ~= b` reads the same way. Every bundled definition row is an exact
+  equation written with `==` (names kept); the fingerprint of each moves
+  once with this change.
 - `is_library_safe(numpy)` is the view of definedness over a library's
   calls only; `is_compendium_safe` is still read as an accepted
   spelling, and the record says so.
@@ -21,7 +29,7 @@ Notable changes to mathema are recorded here from its first public release onwar
   x in R^n, f(x, alpha=2) == 2 * x[0]`. The `let` form is still accepted
   as input, and a statement that calls f nowhere (an `is_defined` region
   row) keeps it. The bundled pinned rows are written in the call form
-  and keep their names (`definition@axis=1` states `f(a, axis=1) ~=
+  and keep their names (`definition@axis=1` states `f(a, axis=1) ==
   sum(a, axis=1)`). The fingerprint of every claim written with a pin
   moves once with this change.
 - A policy claim states what a function does with a value that is not

@@ -239,9 +239,9 @@ versions: ">=2,<4"
 pandas.Series.std:
   claims:
     - name: definition
-      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) == std(a, ddof=1)"
     - name: definition@ddof=0
-      statement: "let ddof be 0, for a in R^n, f(a) ~= std(a, ddof=0)"
+      statement: "let ddof be 0, for a in R^n, f(a) == std(a, ddof=0)"
 ```
 
 A method's key names its class (`pandas.Series.std`,

@@ -18,7 +18,7 @@ polars.Series:
 polars.Series.mean:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= mean(a)"
+      statement: "for a in R^n, f(a) == mean(a)"
     - name: nan_propagates
       statement: "missing(f, a, nan) propagates"
       note: "polars carries nan through as a float."
@@ -35,10 +35,10 @@ polars.Series.mean:
 polars.Series.std:
   claims:
     - name: definition
-      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) == std(a, ddof=1)"
       note: "The sample standard deviation: ddof defaults to 1; one element gives null."
     - name: definition@ddof=0
-      statement: "for a in R^n, f(a, ddof=0) ~= std(a, ddof=0)"
+      statement: "for a in R^n, f(a, ddof=0) == std(a, ddof=0)"
     - name: empty_is_missing
       statement: "f([]) in {missing}"
       note: "The empty input has no value: null, returned as None."
@@ -46,10 +46,10 @@ polars.Series.std:
 polars.Series.var:
   claims:
     - name: definition
-      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) == var(a, ddof=1)"
       note: "The sample variance: ddof defaults to 1; one element gives null."
     - name: definition@ddof=0
-      statement: "for a in R^n, f(a, ddof=0) ~= var(a, ddof=0)"
+      statement: "for a in R^n, f(a, ddof=0) == var(a, ddof=0)"
     - name: empty_is_missing
       statement: "f([]) in {missing}"
       note: "The empty input has no value: null, returned as None."
@@ -57,22 +57,22 @@ polars.Series.var:
 polars.Series.sum:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= sum(a)"
+      statement: "for a in R^n, f(a) == sum(a)"
 
 polars.Series.product:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= prod(a)"
+      statement: "for a in R^n, f(a) == prod(a)"
 
 polars.Series.cum_sum:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= cumsum(a)"
+      statement: "for a in R^n, f(a) == cumsum(a)"
 
 polars.Series.cum_prod:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= cumprod(a)"
+      statement: "for a in R^n, f(a) == cumprod(a)"
 
 polars.Series.count:
   claims:

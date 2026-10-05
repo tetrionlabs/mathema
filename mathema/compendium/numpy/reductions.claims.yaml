@@ -13,12 +13,12 @@ numpy.mean:
       statement: "dim(a) >= 1"
       note: "Arithmetic mean; the mean of an empty array is nan with a RuntimeWarning, never raises."
     - name: definition
-      statement: "for a in R^n, f(a) ~= mean(a)"
+      statement: "for a in R^n, f(a) == mean(a)"
     - name: definition@axis=0
-      statement: "for a in R^(m,n), f(a, axis=0) ~= mean(a, axis=0)"
+      statement: "for a in R^(m,n), f(a, axis=0) == mean(a, axis=0)"
       note: "The mean of each column of a matrix."
     - name: definition@axis=1
-      statement: "for a in R^(m,n), f(a, axis=1) ~= mean(a, axis=1)"
+      statement: "for a in R^(m,n), f(a, axis=1) == mean(a, axis=1)"
       note: "The mean of each row of a matrix."
     - name: missing_propagates
       statement: "missing(f, a) propagates"
@@ -33,10 +33,10 @@ numpy.std:
       statement: "dim(a) >= 1"
       note: "Standard deviation; the standard deviation of an empty array is nan with a RuntimeWarning."
     - name: definition
-      statement: "for a in R^n, f(a) ~= std(a, ddof=0)"
+      statement: "for a in R^n, f(a) == std(a, ddof=0)"
       note: "The population standard deviation: ddof defaults to 0."
     - name: definition@ddof=1
-      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= std(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) == std(a, ddof=1)"
       note: "The sample standard deviation; one element with ddof=1 gives nan."
     - name: empty_is_missing
       statement: "f([]) in {missing}"
@@ -48,10 +48,10 @@ numpy.var:
       statement: "dim(a) >= 1"
       note: "Variance; the variance of an empty array is nan with a RuntimeWarning."
     - name: definition
-      statement: "for a in R^n, f(a) ~= var(a, ddof=0)"
+      statement: "for a in R^n, f(a) == var(a, ddof=0)"
       note: "The population variance: ddof defaults to 0."
     - name: definition@ddof=1
-      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= var(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) == var(a, ddof=1)"
       note: "The sample variance; one element with ddof=1 gives nan."
     - name: empty_is_missing
       statement: "f([]) in {missing}"
@@ -63,7 +63,7 @@ numpy.average:
       statement: "dim(a) >= 1"
       note: "Weighted average; without weights an empty array returns nan with a RuntimeWarning, like mean. Weights that sum to zero raise ZeroDivisionError."
     - name: definition
-      statement: "for a in R^n, f(a) ~= mean(a)"
+      statement: "for a in R^n, f(a) == mean(a)"
       note: "Without weights, the arithmetic mean."
     - name: weighted
       statement: "for a in R^n, weights in R^n, assuming min(weights) > 0, f(a, None, weights) ~= sum(a * weights) / sum(weights)"

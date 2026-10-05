@@ -437,6 +437,14 @@ LEXICON: dict[str, str] = {
     "tolerance_eps_ascii": "for x in [0, 1], abs(f(x) - x) <= eps",
     "tolerance_epsilon_word": "for x in [0, 1], abs(f(x) - x) <= epsilon",
     "tolerance_epsilon_latex": "for x in [0, 1], abs(f(x) - x) \\leq \\epsilon",
+    # `~=` is `abs(a - b) <= ε`: an offset of 1e-12 is within the 1e-9
+    # default, and exact equality is falsified by it
+    "exact_offset_vs_approx": "for x in [0, 1], f(x) ~= x",
+    "exact_offset_vs_approx_trap": "for x in [0, 1], f(x) == x",
+    # a truncated Taylor series is not the sine, and on a wide enough
+    # range not within ε of it either (the gap at 0.5 is about 2.6e-4)
+    "approx_taylor_sin_exact_fails": "for x in [0, 0.01], f(x) == sin(x)",
+    "approx_too_wide": "for x in [0, 0.5], f(x) ~= sin(x)",
     # derivatives: one primitive, many spellings -------------------
     "derivative_call": "d(f(x), x) >= 0",
     "derivative_prime": "f'(x) >= 0",
@@ -769,6 +777,8 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "domain_natural_numbers", "domain_complex", "relation_approx",
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex",
+        "exact_offset_vs_approx", "exact_offset_vs_approx_trap",
+        "approx_taylor_sin_exact_fails", "approx_too_wide",
         "finite_domain_pinned", "finite_domain_small_range",
         "finite_domain_discrete_set", "real_domain_is_not_finite"),
     "integer_parts": (
@@ -1399,6 +1409,17 @@ def cosine_phase(φ: float) -> float:
     return math.cos(φ)
 
 
+def exact_offset(x: float) -> float:
+    """The identity plus an offset of 1e-12: not exactly the identity,
+    and within the default tolerance of it."""
+    return x + 1e-12
+
+
+def sin3(x: float) -> float:
+    """The sine's Taylor polynomial of degree 3, `x - x**3/6`."""
+    return x - x**3 / 6
+
+
 def nearly_identity(x: float) -> float:
     """The identity plus an offset far below the default tolerance."""
     return x + 1e-10
@@ -2007,6 +2028,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex", "latex_varepsilon",
     ]),
+    "exact_offset": (exact_offset, ["exact_offset_vs_approx",
+                                    "exact_offset_vs_approx_trap"]),
+    "sin3": (sin3, ["approx_taylor_sin_exact_fails", "approx_too_wide"]),
     "celsius_round_trip": (celsius_round_trip, ["relation_eq"]),
     "checked_sqrt": (checked_sqrt, ["raises_typed", "raises_typed_region"]),
     "remember_fx_rate": (remember_fx_rate, ["state_safe_env_write"]),

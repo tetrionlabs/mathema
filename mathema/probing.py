@@ -577,8 +577,9 @@ def _scalar_relation(a, b, relation: str, slack: float,
                      exact_inequality: bool = False,
                      rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """One scalar comparison for the elementwise walk. A strict `<`/`>`
-    gets no tolerance credit; a closed `<=`/`>=` gets the slack; `==`/
-    `~=` go through `_close`, and so does `!=` when the claim declared a
+    gets no tolerance credit; a closed `<=`/`>=` gets the slack; `==`
+    goes through `_close`, `~=` too with no relative allowance (it is
+    `abs(a - b) <= ε`), and so does `!=` when the claim declared a
     tolerance. With `exact_inequality`, `!=` fails only where the two
     values are equal, so a representation tolerance never makes two
     different values a counterexample. Raises TypeError for values that
@@ -587,8 +588,11 @@ def _scalar_relation(a, b, relation: str, slack: float,
     allowance."""
     if holds_nan(a) or holds_nan(b):
         return False
-    if relation in ("==", "~="):
+    if relation == "==":
         return _close(a, b, tolerance=slack, rel_tol=rel_tol)
+    if relation == "~=":
+        # `a ~= b` is `abs(a - b) <= ε`: no relative allowance
+        return _close(a, b, tolerance=slack, rel_tol=0.0)
     if relation == "!=":
         if exact_inequality:
             return not (a == b)
@@ -1263,7 +1267,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
             return False
         exact = relation == "!=" and exact_inequality
         agree = values_agree(lv, rv, 0.0 if exact else slack,
-                             0.0 if exact else rel_tol, broadcast=True)
+                             0.0 if exact or relation == "~=" else rel_tol,
+                             broadcast=True)
         if agree is None:
             # two values of different shapes are unequal outright
             return relation == "!="
