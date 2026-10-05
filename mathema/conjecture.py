@@ -5650,6 +5650,25 @@ def _validate_claim(cj, statement: str, note: str, facts,
                    + ", ".join(repr(v) for v in sorted(vals, key=repr)) + "}"
                    for p, vals in sorted(literal_inferred.items()))
                + " from its own annotation's stated values")
+    # an unannotated parameter whose default is a bool is a flag: its
+    # value set is {False, True}, rendered the same way
+    flag_inferred: dict = {}
+    try:
+        flag_params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        flag_params = {}
+    for p in facts.params:
+        param = flag_params.get(p)
+        if (param is not None and p not in cj_domain and p in read
+                and param.annotation is inspect.Parameter.empty
+                and isinstance(param.default, bool)):
+            flag_inferred[p] = frozenset({False, True})
+    if flag_inferred:
+        cj_domain = {**flag_inferred, **cj_domain}
+        note = (f"{note}; inferred "
+               + ", ".join(f"{p} in {{False, True}} from its default "
+                           f"{flag_params[p].default!r}"
+                           for p in sorted(flag_inferred)))
     # a language inferred from the annotation by a registered adaptor
     # (`str` to the package's unicode language, a schema class to the
     # language of its rows), the same gap-filling rule as the int
