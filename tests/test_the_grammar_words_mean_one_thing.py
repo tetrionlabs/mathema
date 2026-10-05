@@ -510,7 +510,7 @@ def test_each_word_treats_a_hole_as_the_table_says(w, v):
         expected = sum(Fraction(a) * Fraction(b) for a, b in both)
         assert evaluate("dot(x, y)", x=v, y=other) == float(expected)
         apart = [None if e is not None else 1.5 for e in v]
-        assert _no_value(evaluate("dot(x, y)", x=v, y=apart))
+        assert evaluate("dot(x, y)", x=v, y=apart) == 0
         return
     if w.holes == "elementwise":
         got = evaluate(f"{name}(x)", x=v)
@@ -531,7 +531,17 @@ def test_each_word_treats_a_hole_as_the_table_says(w, v):
         name, [f"{name}(x)"])
     for src in spellings:
         assert evaluate(src, x=holed) == evaluate(src, x=_slots(v)), src
-        assert _no_value(evaluate(src, x=[None, None])), src
+        over_none = evaluate(src, x=[None, None])
+        if w.holes == "slots":
+            assert _no_value(over_none), src
+        else:
+            identity = 0 if w.holes == "norm" else int(w.identity)
+            assert over_none == identity, src
+    if w.holes == "norm":
+        matrix = [[1, None], [2, 3]]
+        assert _no_value(evaluate("norm(A, 2)", A=matrix))
+        assert evaluate("norm(A)", A=matrix) == evaluate(
+            "norm(A)", A=[[1, 0], [2, 3]])
 
 
 # --- the docs -----------------------------------------------------------
