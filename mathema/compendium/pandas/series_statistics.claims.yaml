@@ -5,7 +5,7 @@
 # pandas skips a missing element in each. mathema's own test suite
 # verifies each row against the installed pandas.
 compendium: pandas
-versions: ">=2,<4"
+versions: ">=2.2,<4"
 
 pandas.Series.median:
   claims:
