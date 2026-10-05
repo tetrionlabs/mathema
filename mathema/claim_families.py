@@ -562,7 +562,9 @@ def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
         past it is the witness, with its exact and float values. A point
         where the call raises, returns no finite number, or the
         mathematics has no value is no trial (another family's
-        question); with no exact form at all the verdict is unknown.
+        question), and the note counts them by reason; with no exact
+        form at all, or no point that allowed a comparison, the verdict
+        is unknown.
     """
     import inspect
     import itertools
@@ -586,6 +588,7 @@ def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
                    for combo in itertools.product(*[(lo, hi)
                                                     for lo, hi in ends])]
     state = {"i": 0}
+    missed = {"raised": 0, "non-finite": 0, "no exact value": 0}
 
     def trial(args):
         values = dict(zip(names, args))
@@ -605,12 +608,15 @@ def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
             with _pinned_float_env():
                 out = fn(*call_args, **call_kwargs)
         except Exception:
+            missed["raised"] += 1
             return None
         if isinstance(out, bool) or not isinstance(out, (int, float)) \
                 or _is_nonfinite(out):
+            missed["non-finite"] += 1
             return None
         exact = exact_value(body, *point)
         if exact is None:
+            missed["no exact value"] += 1
             return None
         allowed = (cj.tolerance if cj.tolerance is not None
                    else 1e-9 + 1e-7 * abs(float(exact)))
@@ -622,7 +628,17 @@ def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     verdict, checked, cx = _probe_trials(fn, facts, names[0], domain, rng,
                                          max(trials, len(corners)), trial)
-    return verdict, checked, cx
+    said = {"raised": "where f raised", "non-finite":
+            "where f returned a non-finite value",
+            "no exact value": "with no exact value"}
+    counts = ", ".join(f"{n} {said[why]}" for why, n in missed.items() if n)
+    if checked == 0:
+        return ("unknown", 0, "no point allowed a comparison"
+                + (f" ({counts})" if counts else ""))
+    if not counts:
+        return verdict, checked, cx
+    return (verdict, checked, cx,
+            {"mathema.caveat": f"points not compared: {counts}"})
 
 
 def _is_numerically_stable_derive(fn, facts, lhs_src: str, rhs_src: str,
