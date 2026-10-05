@@ -190,3 +190,15 @@ def test_a_falsified_case_says_what_f_did_and_offers_no_partial_command():
     assert [line.strip() for line in lines[at + 1:at + 4]] == [
         "possible fixes:", "(i) exclude missing", "(ii) handle missing at entry"], \
         lines[at + 1:at + 4]
+
+
+def a_hair_over_one(x: float) -> float:
+    return min(1.0, x) + 1e-12
+
+
+def test_a_line_that_passed_within_the_tolerance_prints_the_gap():
+    rec = mathema.check(a_hair_over_one, claims=[mathema.claim(
+        "for x in [0.5, 2], 0 <= f(x) <= 1", name="unit", route="probe")])
+    line = next(ln for ln in _lines(rec)
+                if ln.split()[:2] == ["holds", "computation"])
+    assert "fails by 1e-12 at x = 2, within the default tolerance (1e-09)" in line, line

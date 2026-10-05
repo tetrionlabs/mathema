@@ -5139,6 +5139,12 @@ def _combine_conjunction(probes: list, name: str, statement: str,
         uncorroborated = [lbl for p, lbl in zip(probes, labels)
                           if "UNCORROBORATED" in (p.note or "")]
         note = with_caveats(f"every {unit} of the {what} holds", probes)
+        # a part that passed only within the tolerance says so, with its gap
+        gaps = [f"{lbl}: {clause}" for p, lbl in zip(probes, labels)
+                for clause in (p.note or "").split("; ")
+                if p.verdict == "holds" and _WITHIN.search(clause)]
+        if gaps:
+            note = "; ".join([note, *gaps])
         if uncorroborated:
             note += (f"; derive reported an UNCORROBORATED disproof at "
                      f"{', '.join(uncorroborated)} (probable engine bug, "
@@ -5156,6 +5162,10 @@ def _combine_conjunction(probes: list, name: str, statement: str,
                  note=f"{what} {weakest.verdict} at {label}: "
                       f"{weakest.note}",
                  meta={**corroboration(weakest), **carried, **drawn_by(first_drawn)})
+
+
+#: the clause a probe's note gives a pass within the tolerance, with its gap
+_WITHIN = re.compile(r"within the (?:default tolerance|tolerance \(|round-off)")
 
 
 def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
