@@ -374,8 +374,8 @@ def _norm(x, ord=None):
     or `numpy.linalg.norm`'s `ord` norm (`2` spectral, `1`, `inf`); the
     absolute value of a number. A vector's norm of every order reads
     its value slots, as do a matrix's Frobenius, 1 and inf norms (a
-    hole contributing nothing); over only holes, and for any other
-    matrix norm of a matrix holding one, the norm is a hole."""
+    hole contributing nothing), and each is 0 over no value slot; any
+    other norm of a matrix holding a hole is a hole."""
     if isinstance(x, (int, float, complex)) and not isinstance(x, bool):
         return builtins.abs(x)
     np = _np()
@@ -383,14 +383,16 @@ def _norm(x, ord=None):
     if not is_array(a):
         raise TypeError(f"norm of {type(x).__name__}")
     if a.dtype.kind in "fc" and np.isnan(a).any():
-        if np.isnan(a).all():
+        spectral = a.ndim == 2 and not (ord is None
+                                        or ord in (1, math.inf, "fro"))
+        if spectral:
             return math.nan
+        if np.isnan(a).all():
+            return 0.0
         if a.ndim == 1:
             a = a[~np.isnan(a)]
-        elif ord is None or ord in (1, math.inf, "fro"):
-            a = np.where(np.isnan(a), 0.0, a)
         else:
-            return math.nan
+            a = np.where(np.isnan(a), 0.0, a)
     exact = _exact_norm(a, ord)
     if exact is not None:
         return exact
@@ -437,13 +439,18 @@ def _holes(a) -> bool:
     return bool(a.dtype.kind in "fc" and np.isnan(a).any())
 
 
+#: the reductions with an identity, which they give over no value slot
+_IDENTITY = {"sum": 0.0, "prod": 1.0}
+
+
 def _over_values(numpy_name: str, a, axis=None, **kwargs):
     """A reduction over the value slots of `a`: numpy's NaN-skipping
-    reduction, a hole over no value slot."""
+    reduction. Over no value slot a reduction with an identity gives it
+    (`sum` 0, `prod` 1) and one without gives a hole."""
     np = _np()
     out = getattr(np, "nan" + numpy_name)(a, axis=axis, **kwargs)
     empty = np.all(np.isnan(a), axis=axis)
-    out = np.where(empty, np.nan, out)
+    out = np.where(empty, _IDENTITY.get(numpy_name, np.nan), out)
     return out.item() if getattr(out, "ndim", 1) == 0 else out
 
 
@@ -513,25 +520,27 @@ def _is_hole(v) -> bool:
     return isinstance(v, float) and math.isnan(v)
 
 
-def _over_slots(values: list, of_list):
-    """`of_list` over the value slots of a list: its holes left out. A
-    list holding only holes gives a hole."""
+def _over_slots(values: list, of_list, identity=math.nan):
+    """`of_list` over the value slots of a list: its holes left out.
+    Over no value slot, `identity`: a reduction with an identity gives
+    it, one without gives a hole."""
     if any(_is_hole(v) for v in values):
         values = [v for v in values if not _is_hole(v)]
         if not values:
-            return math.nan
+            return identity
     return of_list(values)
 
 
-def _along(args, axis, of_list):
+def _along(args, axis, of_list, identity=math.nan):
     """`of_list` applied to the value slots of the one vector the
     arguments give, or along `axis` of a matrix (one value per
     remaining index); see `_over_slots`."""
     a = _raw(args)
     if axis is None:
-        return _over_slots([_element(v) for v in a.ravel()], of_list)
+        return _over_slots([_element(v) for v in a.ravel()], of_list,
+                           identity)
     return _np().apply_along_axis(
-        lambda v: _over_slots([_element(x) for x in v], of_list),
+        lambda v: _over_slots([_element(x) for x in v], of_list, identity),
         axis, a)
 
 
@@ -733,7 +742,7 @@ def _sum(*args, axis=None):
     """The sum of a vector's elements, exact and rounded once; along
     `axis` for a matrix."""
     if len(args) == 1 and _is_array_arg(args[0]):
-        return _along(args, axis, _exact_sum)
+        return _along(args, axis, _exact_sum, identity=0.0)
     if axis is not None:
         raise TypeError("sum(..., axis=) needs an array")
     return builtins.sum(*args)
@@ -751,7 +760,7 @@ def _prod(*args, axis=None):
     """The exact product of a vector's elements, rounded once; along
     `axis` for a matrix."""
     if len(args) == 1 and _is_array_arg(args[0]):
-        return _along(args, axis, _product)
+        return _along(args, axis, _product, identity=1.0)
     return math.prod(args[0] if len(args) == 1 else args)
 
 
@@ -1180,11 +1189,11 @@ def _dot(x, y):
     if a.ndim == 1 and b.ndim == 1:
         pairs = [(_element(u), _element(v)) for u, v in zip(a, b)]
         if any(_is_hole(u) or _is_hole(v) for u, v in pairs):
-            # over the value slots both vectors hold; a hole where none is
+            # over the value slots both vectors hold; 0 where none is
             both = [(u, v) for u, v in pairs
                     if not (_is_hole(u) or _is_hole(v))]
             return (_exact_inner([u for u, _ in both], [v for _, v in both])
-                    if both else math.nan)
+                    if both else 0.0)
     a2 = a.reshape(1, -1) if a.ndim == 1 else a
     b2 = b.reshape(-1, 1) if b.ndim == 1 else b
     entries = [[_exact_inner([_element(v) for v in a2[i]],
