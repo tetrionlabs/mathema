@@ -340,10 +340,10 @@ def test_a_problem_after_a_command_starts_its_own_line():
 def test_a_first_falsification_note_puts_each_command_last_on_its_line():
     from types import SimpleNamespace
 
-    from mathema.verify import _born_falsified_hint
+    from mathema.verify import _initially_falsified_hint
     p = SimpleNamespace(name="at_most_the_largest", statement="f(a) <= max(a)",
                         meta={}, verdict="falsified")
-    (note,) = _born_falsified_hint("numpy.ptp", [p], {}, "claims/numpy.claims.yaml")
+    (note,) = _initially_falsified_hint("numpy.ptp", [p], {}, "claims/numpy.claims.yaml")
     lines = note.splitlines()
     assert lines[0] == ("note numpy.ptp: at_most_the_largest falsified on first "
                         "adjudication: the installed library does not do what the "

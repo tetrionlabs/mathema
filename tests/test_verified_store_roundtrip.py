@@ -224,7 +224,7 @@ def _mini(tmp_path, statement):
     return env
 
 
-def test_born_falsified_claim_teaches_the_cheap_experiment(tmp_path):
+def test_initially_falsified_claim_teaches_the_cheap_experiment(tmp_path):
     # a claim that falsifies on its FIRST adjudication is a failed
     # authoring experiment, and it is permanent until a human signs it
     # off (membership never silently shrinks, by design). Nothing

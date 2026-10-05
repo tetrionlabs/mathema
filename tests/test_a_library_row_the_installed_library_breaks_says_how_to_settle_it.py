@@ -6,7 +6,7 @@ code: the note names the row and the two ways to settle it, recording
 the falsification as a discovery or correcting the row in the claims
 file that states it, and never asks the project to fix the library."""
 from mathema.records import Probe
-from mathema.verify import _born_falsified_hint
+from mathema.verify import _initially_falsified_hint
 
 
 def _row(name, surface):
@@ -16,7 +16,7 @@ def _row(name, surface):
 
 
 def test_a_falsified_library_row_names_itself_and_both_exits():
-    (line,) = _born_falsified_hint(
+    (line,) = _initially_falsified_hint(
         "numpy.sqrt", [_row("below_x", "compendium")], {},
         library_source="claims/numpy.claims.yaml")
     assert "below_x" in line
@@ -26,6 +26,6 @@ def test_a_falsified_library_row_names_itself_and_both_exits():
 
 
 def test_a_project_function_keeps_its_note():
-    (line,) = _born_falsified_hint("pkg.f", [_row("below_x", "declared")],
+    (line,) = _initially_falsified_hint("pkg.f", [_row("below_x", "declared")],
                                    {})
     assert "fix the code" in line

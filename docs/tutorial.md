@@ -68,7 +68,7 @@ note funcs.settle: nonneg, symmetric_in_sign falsified on first adjudication. A 
   (i) fix the code
   (ii) to record it as a discovery, run: mathema accept funcs.settle <claim> --as discovery
   (iii) supersede it
-  (iv) to try a spelling first, writing nothing, run: mathema check funcs.settle --claim "..."
+  (iv) to try a spelling first (it writes nothing), run: mathema check funcs.settle --claim "..."
 ok   funcs.midpoint: no baseline record; 2 proven (1 claim, 1 built-in), 3 holds, 0 falsified
 FAIL funcs.settle: no baseline record; 1 proven, 2 holds, 2 falsified  <- 2 falsified claim(s)
 0 fresh (form unchanged, skipped), 2 adjudicated, 1 problem(s)
