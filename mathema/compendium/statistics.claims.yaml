@@ -1,0 +1,9 @@
+# Claims about the standard statistics module's functions.
+compendium: statistics
+versions: "*"
+
+statistics.mean:
+  claims:
+    - name: empty_raises
+      statement: "raises(f([]), StatisticsError)"
+      note: "The empty input is refused with statistics.StatisticsError."

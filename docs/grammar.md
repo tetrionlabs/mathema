@@ -265,6 +265,11 @@ is the square of the norm. A claim written with the bars and one
 written with `norm(...)` are one claim: the claims file keeps the
 spelling you wrote, and the record's statement is the call form.
 
+What each of the grammar's words computes (`sum`, `mean`, `std`,
+`dot`, `norm`, `det`, `cumsum`, `quantile` and the rest), where it has
+a value, its keywords and what it does with a missing slot is listed on
+[the grammar's words](grammar-words.md).
+
 ## Domains: where the claim applies
 
 A claim with no domain is a claim about every input, which is usually

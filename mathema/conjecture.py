@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from ._signatures import module_scope
 import ast
+import contextvars
 import cmath as _cmath
 import inspect
 import math
@@ -117,8 +118,8 @@ def _literal_call_args(text: str, sig_params: list) -> dict:
     literal at a real parameter's position: the call passes that value
     verbatim, so the parameter is FIXED to it, not synthesized. Unlike
     `_inferred_literal_domain` (numeric only, for branch pruning), this
-    keeps every literal kind (a string `"nope"`, a `True`, a number) and
-    its actual value, so both the sample and the counterexample witness
+    keeps every literal kind (a string `"nope"`, a `True`, a number, a
+    list such as the empty `[]`) and its actual value, so both the sample and the counterexample witness
     show what the call really passed rather than a synthesized
     placeholder in a literal's slot."""
     try:
@@ -133,6 +134,13 @@ def _literal_call_args(text: str, sig_params: list) -> dict:
         for p, arg in zip(sig_params, node.args):
             if isinstance(arg, ast.Constant):
                 fixed[p] = arg.value
+            elif isinstance(arg, (ast.List, ast.Tuple)):
+                # a literal container (`f([])`, `f([1.0, 2.0])`) passes
+                # that container verbatim
+                try:
+                    fixed[p] = ast.literal_eval(arg)
+                except (ValueError, SyntaxError):
+                    continue
     return fixed
 
 
@@ -158,13 +166,57 @@ def _yaml_safe_args(args) -> list:
 _MAX_CORNERS = 64
 
 
+def _box_corner_arrays(bound) -> list:
+    """Intent:
+        For a vector or matrix of fixed size whose elements lie in one
+        closed finite interval (`[-0.1, 0.1]^13`, `[-1, 1]^(4,4)`), the
+        array with every element at the lower end and the one with
+        every element at the upper end, as nested lists; [] for any
+        other bound. A linear quantity of the elements, such as their
+        sum, is least and greatest at these two arrays.
+    """
+    import dataclasses
+
+    from .domain import Domain, domain_contains
+    if not isinstance(bound, Domain) or not bound.dims:
+        return []
+    try:
+        sizes = [int(d) for d in bound.dims]
+    except (TypeError, ValueError):
+        return []
+    if len(bound.pieces) != 1 or any(n < 1 for n in sizes):
+        return []
+    piece = bound.pieces[0]
+    if not (isinstance(piece, tuple) and len(piece) == 2) \
+            or getattr(piece, "bare", False):
+        return []
+    lo, hi = piece
+    try:
+        if not (math.isfinite(lo) and math.isfinite(hi)):
+            return []
+    except TypeError:
+        return []
+    element = dataclasses.replace(bound, dims=())
+    ends = [v for v, closed in ((lo, getattr(piece, "closed_lo", True)),
+                                (hi, getattr(piece, "closed_hi", True)))
+            if closed and domain_contains(v, element)]
+
+    def filled(value, axes):
+        if len(axes) == 1:
+            return [value] * axes[0]
+        return [filled(value, axes[1:]) for _ in range(axes[0])]
+    return [filled(v, sizes) for v in dict.fromkeys(ends)]
+
+
 def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
     """Intent:
         The corners of a claim's bounded domain box as argument lists,
         in `kinds` order: every combination of each parameter's included
-        endpoints, with a literal argument held at its literal. Empty
-        unless every parameter is a real or integer scalar with a finite
-        interval domain (or fixed by a literal), and when the box has
+        endpoints, with a literal argument held at its literal, and a
+        fixed-size vector or matrix at its all-lower and all-upper
+        arrays (`_box_corner_arrays`). Empty unless every parameter is a
+        real or integer scalar with a finite interval domain, such a
+        vector or matrix, or fixed by a literal, and when the box has
         more than `_MAX_CORNERS` corners.
 
     Notes:
@@ -183,9 +235,15 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
         if p in literal_args:
             choices.append([literal_args[p]])
             continue
+        bound = domain.get(p)
+        if k in SEQUENCE_KINDS:
+            filled = _box_corner_arrays(bound)
+            if not filled:
+                return []
+            choices.append(filled)
+            continue
         if k not in ("scalar", "float", "int"):
             return []
-        bound = domain.get(p)
         pieces = (bound.pieces if isinstance(bound, Domain) else (bound,))
         ends: list = []
         for piece in pieces:
@@ -1674,13 +1732,19 @@ def _membership_member(value, bound, sizes: "dict | None" = None) -> bool:
         right-hand side: a domain that states nothing about missing
         values admits none (`f(x) in [0, 1]` is false at a NaN), and one
         that lists a sentinel admits what it lists, resolved against the
-        value tested (`nan in {missing}` on a float). A space (`R^(m,n)`)
+        value tested (`nan in {missing}` on a float, and a `None` that
+        f returns where its containers are realised in a runtime whose
+        holes include null). A space (`R^(m,n)`)
         judges a container by its shape, a named axis at the size
         `sizes` binds to the name, then every entry the same way.
     """
     from . import _shapes
-    from .domain import MissingDefaults, complete
+    from .domain import MissingDefaults, complete, domain_contains
     nothing = MissingDefaults(False, (), "value", annotated=False)
+    if value is None and _NULL_IS_A_HOLE.get() \
+            and not getattr(bound, "dims", ()):
+        # the null hole of the runtime f's containers are realised in
+        return domain_contains(value, complete(bound, nothing), slot=True)
     return _shapes.in_space(value, complete(bound, nothing), sizes)
 
 
@@ -3318,7 +3382,9 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
 
     from .compendium import library_key_of
     key = library_key_of(fn)
-    pins = dict(getattr(cj, "param_pins", None) or {})
+    # a pin written in the call (`f(a, axis=1)`) is a pin as `let axis
+    # be 1` is
+    pins = {**_pins_in_calls(cj), **dict(getattr(cj, "param_pins", None) or {})}
     if key is None and not pins and not any(
             _single_point((cj.domain or {}).get(n)) is not None
             for n in (cj.free_vars or ())):
@@ -3368,6 +3434,112 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
             and p not in (cj.domain or {}) and p not in pins
             and p not in named}
     return kept, {p: v for p, v in pins.items() if takes(p)}, problem
+
+
+def _pins_in_calls(cj) -> dict:
+    """The keyword arguments every call to f in the claim passes as the
+    same literal value (`f(a, axis=1)`), `{name: value}`."""
+    seen: dict = {}
+    calls = 0
+    sides = [cj.lhs, cj.rhs, *[t for link in (cj.links or ()) for t in (link[0], link[2])]]
+    for src in sides:
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            continue
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "f"):
+                continue
+            calls += 1
+            for k in n.keywords:
+                if k.arg is None:
+                    continue
+                if isinstance(k.value, ast.Name) and k.value.id == "inf":
+                    value = float("inf")
+                else:
+                    try:
+                        value = ast.literal_eval(k.value)
+                    except ValueError:
+                        continue
+                seen.setdefault(k.arg, []).append(value)
+    return {name: values[0] for name, values in seen.items()
+            if len(values) == calls and all(v == values[0] for v in values)}
+
+
+def pins_into_calls(cj, fn):
+    """Intent:
+        `cj` written with its pins in the call: each `let p be v` that
+        pins a parameter of f (`call_defaults`) and that the claim reads
+        nowhere else becomes the keyword `p=v` on every call to f that
+        leaves `p` out, and its `let` goes. `cj` unchanged when it pins
+        nothing that can move.
+    """
+    import math
+    import re
+    from dataclasses import replace as _replace
+    try:
+        pins = call_defaults(fn, cj)[1]
+        sig = callable_signature(fn)
+    except Exception:
+        return cj
+    if not pins:
+        return cj
+    sides = [cj.lhs, cj.rhs, *[t for link in (cj.links or ()) for t in (link[0], link[2])]]
+    read: set = set()
+    for src in sides:
+        # a keyword in a call names that callee's parameter, not a read
+        stripped = re.sub(r"\b[A-Za-z_]\w*\s*=(?!=)", " ", src or "")
+        read |= set(re.findall(r"\b[A-Za-z_]\w*\b", stripped))
+    movable = {p: v for p, v in pins.items() if p not in read}
+    if not movable:
+        return cj
+
+    def literal(v):
+        if isinstance(v, float) and math.isinf(v):
+            name = ast.Name(id="inf", ctx=ast.Load())
+            return name if v > 0 else ast.UnaryOp(op=ast.USub(), operand=name)
+        return ast.Constant(value=v)
+
+    calls = [0]
+
+    def rewrite(src):
+        if not src:
+            return src
+        try:
+            tree = ast.parse(src, mode="eval")
+        except SyntaxError:
+            return src
+        changed = False
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "f"):
+                continue
+            calls[0] += 1
+            try:
+                bound = sig.bind_partial(*([None] * len(n.args)),
+                                         **{k.arg: None for k in n.keywords
+                                            if k.arg is not None})
+            except TypeError:
+                continue
+            for p, v in movable.items():
+                if p not in bound.arguments:
+                    n.keywords.append(ast.keyword(arg=p, value=literal(v)))
+                    changed = True
+        return ast.unparse(tree) if changed else src
+
+    links = [(rewrite(a), rel, rewrite(b)) for a, rel, b in (cj.links or ())]
+    lhs, rhs = rewrite(cj.lhs), rewrite(cj.rhs)
+    if not calls[0]:
+        # a statement that calls f nowhere (a region row) keeps its let
+        return cj
+    return _replace(cj, lhs=lhs, rhs=rhs,
+                    links=links if cj.links else cj.links,
+                    free_vars=frozenset(cj.free_vars or ()) - set(movable),
+                    domain={k: v for k, v in (cj.domain or {}).items()
+                            if k not in movable},
+                    param_pins={k: v for k, v in (cj.param_pins or {}).items()
+                                if k not in movable})
 
 
 def _some_call_omits(cj, fn, name: str) -> bool:
@@ -3563,7 +3735,7 @@ def _emit_position(probe, conjectures: list, declared_order: dict) -> float:
 
 
 def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
-                            companions: bool):
+                            companions: bool, siblings: list = ()):
     """Intent:
         `(probe, lines)`: the claim's empty-input lines
         (`_empty_input.empty_input_lines`), and the claim itself,
@@ -3572,7 +3744,9 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
         lines.
         Without `companions` (a caller asking for the claim alone, as
         for the float companion) the claim is its mathematics over
-        non-empty inputs and no line is made.
+        non-empty inputs and no line is made. `siblings` are the claims
+        checked beside it, whose literal calls at the empty input
+        (`f([]) in {missing}`) state the empty policy.
     """
     if not companions or probe.verdict.startswith("skipped"):
         return probe, []
@@ -3580,8 +3754,9 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
     try:
         from ._empty_input import empty_input_lines
+        from ._empty_input import STATED
         lines = empty_input_lines(ctx.cj, fn, facts, ctx.cj_domain,
-                                  assumption)
+                                  assumption, [*siblings, *STATED.get()])
     except TimeoutError:
         raise
     except Exception:
@@ -3896,7 +4071,6 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     """
     from .probing import resolve_trials_downscale
     trials_scale = resolve_trials_downscale(trials_downscale, trials_scale)
-    from .grammar import _BAR_MATRICES, bars_over_matrices, matrices_in_view
     from .types import matrix_param_names
     try:
         fn_mats = matrix_param_names(fn)
@@ -3911,7 +4085,6 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     # the signature's matrices read the bars as determinants; those and
     # the matrix runtime types also render as matrices, their products
     # in written order
-    from . import policy as _policy
     # a policy claim is decided on the calls the other claims make, so
     # it is adjudicated after them
     built = [claim(c) if isinstance(c, str) else c for c in conjectures]
@@ -3927,6 +4100,29 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     scalar_empty = [c for c in built if _empty_on_a_scalar(c, fn, facts)]
     values = [c for c in built if getattr(c, "relation", None) != "policy"
               and c not in gates and c not in scalar_empty]
+    from ._empty_input import STATED
+    # the claims checked here state the empty policy their value claims
+    # read; a nested check (a chain's links) keeps the outer ones too
+    stated_token = STATED.set((*STATED.get(), *built))
+    try:
+        return _check_built(fn, built, values, stated, gates, scalar_empty,
+                            fn_mats, runtime_mats, domain, trials,
+                            trials_scale, facts, extensive, known_premises,
+                            float_companions, pseudo_infinity)
+    finally:
+        STATED.reset(stated_token)
+
+
+def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
+                 runtime_mats, domain, trials, trials_scale, facts,
+                 extensive, known_premises, float_companions,
+                 pseudo_infinity):
+    """Intent:
+        `check_conjectures`' adjudication of the built claims: the
+        value claims, then the stated policy rows, then the gates.
+    """
+    from . import policy as _policy
+    from .grammar import _BAR_MATRICES, bars_over_matrices, matrices_in_view
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
             matrices_in_view(fn_mats | runtime_mats), _policy.batch(), \
             _policy.exceptions_of(fn):
@@ -4050,16 +4246,23 @@ def _gate_premise_refusal(cj) -> "str | None":
             continue
         param = next((p for p in (cj.domain or {}) if p.isidentifier()), "x")
         if gate.group(1) == "is_missing_safe":
+            from ._missing_words import options
             return (f"assuming {part.strip()} is not a premise: a value claim is never "
                     f"judged where f returns a missing value, so the premise would "
-                    f"change nothing. State what f does with a missing {param} as its "
-                    f"own claim (`missing(f, {param}) propagates`, `drops` or `raises`), "
-                    f"or write `\\ {{missing}}` in the domain so f is not called with one.")
+                    f"change nothing.\n" + options([
+                        f"to keep f from being called with a missing {param}, write "
+                        f"in the domain: \\ {{missing}}",
+                        f"to state what f does with one as its own claim (propagates, "
+                        f"drops or raises), write, for example: missing(f, {param}) "
+                        f"propagates"]))
+        from ._missing_words import options
         return (f"assuming {part.strip()} is not a premise: a value claim is never "
-                f"judged where f returns None, so the premise would change nothing. "
-                f"State what f does when {param} is None as its own claim "
-                f"(`absent(f, {param}) raises(TypeError)`), or write `\\ {{absent}}` in "
-                f"the domain so f is not called with None.")
+                f"judged where f returns None, so the premise would change nothing."
+                "\n" + options([
+                    "to keep f from being called with None, write in the domain: "
+                    "\\ {absent}",
+                    f"to state what f does when {param} is None as its own claim, "
+                    f"write, for example: absent(f, {param}) raises(TypeError)"]))
     return None
 
 
@@ -4179,7 +4382,9 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         if canonical:
             # the renderer is total over everything claim() accepts, so
             # a failure here is a renderer bug worth a loud crash, never
-            # a claim to quietly record under a different spelling
+            # a claim to quietly record under a different spelling; a
+            # pin is written in the call
+            cj = pins_into_calls(cj, fn)
             probe.statement = canonical_claim_text(cj)
         if cj.domain:
             probe.domain = {p2: domain_bound_to_json(b)
@@ -4662,7 +4867,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     extensive or cj.route in ("best", "examine"))
                 if derived is not None:
                     derived, lines = _with_empty_input_lines(
-                        derived, ctx, fn, facts, float_companions)
+                        derived, ctx, fn, facts, float_companions,
+                        conjectures)
                     out.append(stamp(derived, _cap=verdict_cap))
                     if ctx.companion is not None:
                         _emit_companion(out, _stamped(ctx.companion, cj_record,
@@ -4677,7 +4883,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             probed = _arbitrate_empirical_fallback(
                 _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
             probed, lines = _with_empty_input_lines(probed, ctx, fn, facts,
-                                                    float_companions)
+                                                    float_companions,
+                                                    conjectures)
             out.append(stamp(probed, _cap=verdict_cap))
             if float_companions:
                 out.extend(_stamped(line, cj, canonical=False) for line in lines)
@@ -5195,7 +5402,8 @@ def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set 
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                     and node.func.id == "f":
                 for i, arg in enumerate(node.args):
-                    if isinstance(arg, ast.Constant) and i < len(names):
+                    if isinstance(arg, (ast.Constant, ast.List, ast.Tuple)) \
+                            and i < len(names):
                         shown.add(names[i])
                 for kw in node.keywords:
                     if kw.arg and isinstance(kw.value, ast.Constant):
@@ -5544,7 +5752,8 @@ def _bound_for_arrays(callee):
         library function (numpy, scipy, pandas, polars) receives the
         claim's arrays as they are; any other Python function receives
         plain lists, realised through the runtime types its own
-        signature names. The result is read back as an array.
+        signature names, or else its claims-file entry's
+        `runtime_types:` declares. The result is read back as an array.
     """
     from . import _linalg_eval
     module = (getattr(callee, "__module__", "") or "").split(".", 1)[0]
@@ -5553,9 +5762,14 @@ def _bound_for_arrays(callee):
         return _linalg_eval.law_callable(callee, plain_args=False)
     from types import SimpleNamespace
 
+    from .compendium import declared_runtime_types
     from .runtime_types import calling, detect_parameters
+    key = f"{getattr(callee, '__module__', '')}." \
+          f"{getattr(callee, '__qualname__', '')}"
+    declared = {str(k): str(v)
+                for k, v in declared_runtime_types(key).items()}
     try:
-        detected = detect_parameters(callee)
+        detected = detect_parameters(callee, declared or None)
     except Exception:
         detected = {}
     return _linalg_eval.law_callable(
@@ -7612,8 +7826,15 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             cj, fn, facts, cj_domain, assumption,
             ctx.premise_structures, extensive)
         if dproof is not None and dproof.status == "proven":
-            proven = Probe(cj.name, statement, "proven",
-                           sketch=dproof.sketch, note=note,
+            # trusted definition rows are axioms; a row only verified
+            # by execution is evidence and caps the proof at holds
+            from .definitions import rows_sketch
+            capped, sketch = rows_sketch(
+                (dproof.meta or {}).get("mathema.definitions") or [],
+                dproof.sketch)
+            proven = Probe(cj.name, statement,
+                           "holds" if capped else "proven",
+                           sketch=sketch, note=note,
                            condition=dproof.quantifier, route="derive",
                            meta=_provenance_meta(dproof))
             listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain,
@@ -8404,6 +8625,46 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
 
 def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                  sampling) -> "Probe":
+    """Intent:
+        `_probe_stage_in_slots` under the hole members of f's slot
+        types: a value f returns is read against a `{missing}` bound as
+        a hole of the runtime its containers are realised in (see
+        `_null_is_a_hole`).
+    """
+    token = _NULL_IS_A_HOLE.set(_null_is_a_hole(facts))
+    try:
+        return _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
+    finally:
+        _NULL_IS_A_HOLE.reset(token)
+
+
+#: whether a `None` that f returns is the null hole of the runtime its
+#: containers are realised in, while one claim is probed
+_NULL_IS_A_HOLE: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "mathema_null_is_a_hole", default=False)
+
+
+def _null_is_a_hole(facts) -> bool:
+    """Intent:
+        Whether some container parameter of f is realised in a runtime
+        whose holes include `null` (a pandas or a polars Series): a
+        reduction over it answers no value with that runtime's null,
+        which Python returns as `None`.
+    """
+    from .runtime_types import adapter, realised_parameters
+    try:
+        found = realised_parameters(facts)
+    except Exception:
+        return False
+    for detection in found.values():
+        runtime = adapter(detection.adapter)
+        if "null" in (getattr(runtime, "MISSING_MEMBERS", ()) or ()):
+            return True
+    return False
+
+
+def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
+                          sampling) -> "Probe":
     """Intent:
         The probe stage: relation/exception-type gates, a registered
         family's `probe:algorithmic` technique, then the generic

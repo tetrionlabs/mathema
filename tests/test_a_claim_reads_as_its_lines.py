@@ -31,7 +31,7 @@ def test_a_claim_with_lines_prints_as_a_block():
         "for x in [0, 4], f(x) >= 0", name="nonneg")])
     lines = _lines(rec)
     start = next(i for i, line in enumerate(lines) if line.startswith("  nonneg  "))
-    head, *block = lines[start:start + 6]
+    head, *block = lines[start:start + 9]
     assert head.endswith("falsified at x = None"), head
     assert block[0].split() [:2] == ["proven", "mathematics"], block[0]
     assert "for x in [0.0, 4.0] ⊂ ℝ, f(x) >= 0" in block[0], block[0]
@@ -41,10 +41,13 @@ def test_a_claim_with_lines_prints_as_a_block():
     assert block[2].split()[:3] == ["proven", "policy", "f(nan)"], block[2]
     assert block[3].split()[:3] == ["falsified", "policy", "f(None)"], block[3]
     assert "no absent policy stated; raises TypeError" in block[3], block[3]
-    assert block[4].strip() == (
-        "possible fixes: (i) mathema accept test_a_claim_reads_as_its_lines.root_opt "
-        "absent[x] --as discovery --corrected \"absent(f, x) raises(TypeError)\"  "
-        "(ii) exclude None  (iii) handle None at entry"), block[4]
+    assert [line.strip() for line in block[4:8]] == [
+        "possible fixes:",
+        "(i) if the raise is intended, run: mathema accept "
+        "test_a_claim_reads_as_its_lines.root_opt absent[x] --as discovery --corrected "
+        "\"absent(f, x) raises(TypeError)\"",
+        "(ii) exclude None",
+        "(iii) handle None at entry"], block[4:8]
 
 
 def test_the_verdict_words_are_spelled_out():
@@ -132,8 +135,10 @@ def test_the_first_possible_fix_is_a_command_that_settles_the_line(tmp_path, mon
     for fn, text in ((fixmod.clamp, "for x in [0, 1], 0 <= f(x) <= 1"),
                      (fixmod.root_opt, "for x in [0, 4], f(x) >= 0")):
         rec = mathema.check(fn, claims=[mathema.claim(text, name="c")])
-        fix = next(line for line in _lines(rec) if "possible fixes:" in line)
-        command = fix.split("(i) ", 1)[1].split("  (ii) ", 1)[0]
+        lines = _lines(rec)
+        at = next(i for i, line in enumerate(lines) if "possible fixes:" in line)
+        # the command is the last thing on its line
+        command = lines[at + 1].split(", run: ", 1)[1]
         argv = shlex.split(command)
         assert argv[:2] == ["mathema", "accept"], command
         assert main(argv[1:] + ["--yes", "--root", str(tmp_path)]) == 0, command
@@ -178,5 +183,6 @@ def test_a_falsified_case_says_what_f_did_and_offers_no_partial_command():
               if "assuming count(xs) == 0" in line and line.split()[0] == "falsified")
     assert "raises TypeError, where the word is propagates" in lines[at], lines[at]
     # one claim per member settles it, so no single command is offered
-    assert lines[at + 1].strip() == (
-        "possible fixes: (i) exclude missing  (ii) handle missing at entry"), lines[at + 1]
+    assert [line.strip() for line in lines[at + 1:at + 4]] == [
+        "possible fixes:", "(i) exclude missing", "(ii) handle missing at entry"], \
+        lines[at + 1:at + 4]

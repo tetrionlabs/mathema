@@ -71,9 +71,8 @@ def test_a_default_row_names_itself_and_its_confirmation():
             "propagates") in lines
     assert _policy(rec)["missing[x]"].meta["mathema.policy"]["reason"] == (
         "default for a float, which may be nan; confirmed on the 43 draws of c[float]. "
-        "Keep it by writing it (mathema claims "
-        "test_policy_rows_say_where_they_come_from.lin --write), or change the word to "
-        "raises or drops if f should do otherwise")
+        "Change the word to raises or drops if f should do otherwise; to keep it, run: "
+        "mathema claims test_policy_rows_say_where_they_come_from.lin --write")
 
 
 def test_an_unaccounted_raise_is_a_named_sentence_row():
@@ -86,11 +85,13 @@ def test_an_unaccounted_raise_is_a_named_sentence_row():
             "policy row, which f calls") in lines
     at = lines.index("    falsified  policy       f(None)   no absent policy stated; "
                      "raises TypeError")
-    assert lines[at + 1] == (
-        "                            possible fixes: (i) mathema accept "
+    assert lines[at + 1:at + 5] == [
+        "                            possible fixes:",
+        "                              (i) if the raise is intended, run: mathema accept "
         "test_policy_rows_say_where_they_come_from.root_opt absent[x] --as discovery "
-        "--corrected \"absent(f, x) raises(TypeError)\"  (ii) exclude None  "
-        "(iii) handle None at entry")
+        "--corrected \"absent(f, x) raises(TypeError)\"",
+        "                              (ii) exclude None",
+        "                              (iii) handle None at entry"]
     assert _policy(rec)["absent[x]"].meta["mathema.policy"]["sentence"].startswith(
         "f raised TypeError at x = None, and no claim says it may")
 
@@ -102,16 +103,20 @@ def test_a_silent_drop_keeps_its_remedy_on_the_row_only():
     assert "    holds      computation  for x in R, 0 <= f(x) <= 1   43 draws" in lines
     at = lines.index("    falsified  policy       f(nan)   no missing policy stated; "
                      "returns 1.0")
-    assert lines[at + 1] == (
-        "                            possible fixes: (i) mathema accept "
+    assert lines[at + 1:at + 5] == [
+        "                            possible fixes:",
+        "                              (i) if dropping nan is intended, run: mathema accept "
         "test_policy_rows_say_where_they_come_from.clamp01 missing[x] --as discovery "
-        "--corrected \"missing(f, x) drops\"  (ii) exclude nan  "
-        "(iii) handle nan at entry")
+        "--corrected \"missing(f, x) drops\"",
+        "                              (ii) exclude nan",
+        "                              (iii) handle nan at entry"]
     assert _policy(rec)["missing[x]"].meta["mathema.policy"]["next"] == (
-        "if 1.0 is the answer f should give for a missing x, write "
-        "`missing(f, x) drops`; if not, make f raise or give nan back; or accept it as "
-        "a discovery: mathema accept test_policy_rows_say_where_they_come_from.clamp01 "
-        "missing[x] --as discovery --corrected \"missing(f, x) drops\"")
+        "(i) if 1.0 is the answer f should give for a missing x, state: missing(f, x) "
+        "drops\n"
+        "(ii) if not, make f raise or give nan back\n"
+        "(iii) to accept it as a discovery, run: mathema accept "
+        "test_policy_rows_say_where_they_come_from.clamp01 missing[x] --as discovery "
+        "--corrected \"missing(f, x) drops\"")
 
 
 def test_a_list_slot_row_names_only_its_member():
@@ -124,10 +129,11 @@ def test_a_list_slot_row_names_only_its_member():
         "f raises instead: a null slot in, "
         "TypeError")
     assert null.meta["mathema.policy"]["next"] == (
-        "if the raise is intended, write `missing(f, xs, null) raises(TypeError)`; if "
-        "not, make f skip or fill the null slot; or accept it as a discovery: mathema "
-        "accept test_policy_rows_say_where_they_come_from.total missing[xs, null] --as "
-        "discovery --corrected \"missing(f, xs, null) raises(TypeError)\"")
+        "(i) if the raise is intended, state: missing(f, xs, null) raises(TypeError)\n"
+        "(ii) if not, make f skip or fill the null slot\n"
+        "(iii) to accept it as a discovery, run: mathema accept "
+        "test_policy_rows_say_where_they_come_from.total missing[xs, null] --as discovery "
+        "--corrected \"missing(f, xs, null) raises(TypeError)\"")
     nan = rows["missing[xs, nan]"]
     assert nan.meta["mathema.policy"]["reason"].startswith(
         "default for a list slot that may be nan; confirmed on the ")
@@ -251,10 +257,14 @@ def test_a_clash_says_which_premises_tell_cases_apart():
     from mathema.policy import contradicting_policies
     found = contradicting_policies(["missing(f, x) propagates", "missing(f, x) drops"])
     assert found == (
-        "`missing(f, x) propagates` and `missing(f, x) drops` state two behaviours for "
-        "one case. Keep one (the record shows which f follows), or give each a premise "
-        "on another parameter or on count(...) that tells the cases apart, e.g. "
-        "`assuming count(xs) >= 1, ...` beside `assuming count(xs) == 0, ...`")
+        "two claims state two behaviours for one case:\n"
+        "    (1) missing(f, x) propagates\n"
+        "    (2) missing(f, x) drops\n"
+        "Keep one (the record shows which f follows), or give each a premise on another "
+        "parameter or on count(...) that tells the cases apart, for example, one claim "
+        "for each:\n"
+        "    (1) assuming count(xs) >= 1, ...\n"
+        "    (2) assuming count(xs) == 0, ...")
 
 
 def test_a_premised_library_row_remedy_keeps_its_premise():
@@ -262,14 +272,17 @@ def test_a_premised_library_row_remedy_keeps_its_premise():
 
     def mean_pd(xs: pd.Series) -> float:
         return float(xs.mean())
+    # mean of an empty Series is nan, stated as its empty policy
+    empty = mathema.claim("f([]) in {missing}", name="empty")
     rec = mathema.check(mean_pd, claims=[mathema.claim(
-        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c")])
+        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c"), empty])
     row = _policy(rec)["missing[xs, count == 0]"]
     nxt = row.meta["mathema.policy"]["next"]
-    remedies = re.findall(r"`([^`]+)`", nxt)
+    from mathema._missing_words import remedy_statements
+    remedies = remedy_statements(nxt.split("; or to accept", 1)[0])
     assert remedies and all(r.startswith("assuming count(xs) == 0, ") for r in remedies)
     again = mathema.check(mean_pd, claims=[mathema.claim(
-        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c")] + [
+        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c"), empty] + [
         mathema.claim(r) for r in remedies])
     stated = [p for p in again.probes if p.statement in remedies]
     assert stated and all(p.verdict == "holds" for p in stated), \
@@ -303,7 +316,7 @@ def test_one_switch_makes_mathemas_policy_rows_gate(monkeypatch):
     assert report.falsified == 1
     assert report.problems == [
         "1 policy row to settle: missing[x], f drops a missing x (nan in, 1.0 out) where "
-        "mathema's default says propagates; write `missing(f, x) drops` or change f"]
+        "mathema's default says propagates\n(i) change f\n(ii) write: missing(f, x) drops"]
     monkeypatch.setattr(verify, "POLICY_ROWS_GATE", False)
     assert verify.gate(rec.probes, strict=False).problems == []
 
@@ -341,7 +354,7 @@ def ema(x: list[float], alpha: float) -> float:
 
 def test_an_ignored_hole_is_said_as_ignored_and_no_drop_is_suggested():
     # over a one-element x, ema never reads alpha
-    rec = mathema.check(ema, claims=[mathema.claim("f(x, alpha) <= max(x)")])
+    rec = mathema.check(ema, claims=[mathema.claim("for x in R^1, f(x, alpha) <= max(x)")])
     row = next(p for p in rec.probes if p.name == "missing[alpha]")
     assert row.verdict == "falsified", row.note
     assert "ignores" in row.note and "no fill of it changes" in row.note, row.note

@@ -28,6 +28,9 @@ polars.Series.mean:
     - name: all_null_is_none
       statement: "assuming count(a) == 0, missing(f, a, null) converts"
       note: "A Series of nulls has mean None: the missing slots come back as an absent value."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: null, returned as None."
 
 polars.Series.std:
   claims:
@@ -35,7 +38,10 @@ polars.Series.std:
       statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
       note: "The sample standard deviation: ddof defaults to 1; one element gives null."
     - name: definition@ddof=0
-      statement: "let ddof be 0, for a in R^n, f(a) ~= std(a, ddof=0)"
+      statement: "for a in R^n, f(a, ddof=0) ~= std(a, ddof=0)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: null, returned as None."
 
 polars.Series.var:
   claims:
@@ -43,7 +49,10 @@ polars.Series.var:
       statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
       note: "The sample variance: ddof defaults to 1; one element gives null."
     - name: definition@ddof=0
-      statement: "let ddof be 0, for a in R^n, f(a) ~= var(a, ddof=0)"
+      statement: "for a in R^n, f(a, ddof=0) ~= var(a, ddof=0)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: null, returned as None."
 
 polars.Series.sum:
   claims:
