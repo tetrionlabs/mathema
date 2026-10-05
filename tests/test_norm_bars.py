@@ -472,8 +472,8 @@ def _adjudicate(fn, law):
      "for x in R^n, f(x) ~= norm(x, inf)", "proven", "derive"),
     (largest_magnitude, "for x in R^n, f(x) ~= ||x||_oo",
      "for x in R^n, f(x) ~= norm(x, inf)", "proven", "derive"),
-    (squared_length, "for x in R^n, f(x) ~= ||x||^2",
-     "for x in R^n, f(x) ~= norm(x)**2", *_SQUARED),
+    (squared_length, "for x in [-1e6, 1e6]^n, f(x) ~= ||x||^2",
+     "for x in [-1e6, 1e6]^n, f(x) ~= norm(x)**2", *_SQUARED),
     (distance, "for x in R^n, y in R^n, f(x, y) ~= ||x - y||",
      "for x in R^n, y in R^n, f(x, y) ~= norm(x - y)", "proven", "derive"),
     # a sum over every entry of a matrix, a singular value decomposition
@@ -502,6 +502,26 @@ def test_the_sugar_reaches_the_verdict_of_the_words(fn, sugar, words, verdict, r
     if route == "derive":
         assert "every length" in (a.sketch or ""), a.sketch
 
+
+
+def test_the_squared_length_overflows_at_the_magnitude_corner_on_every_numpy():
+    """Over all of `R^n`, `float(np.dot(x, x))` overflows to inf at a
+    vector of entries near the float maximum, where the exact squared
+    norm is finite: the record's headline is falsified there through
+    the computation line, whether or not the mathematics is proven (it
+    is from numpy 2.4, through `numpy.dot`'s definition row)."""
+    import mathema
+    law = "for x in R^n, f(x) ~= norm(x)**2"
+    record = mathema.check(squared_length, claims=[law])
+    headline = str(record).splitlines()[1]
+    assert "falsified at x = " in headline, headline
+    (computation,) = [p for p in record.probes
+                      if p.name.startswith("f_x_approx_norm_x_2")
+                      and p.verdict == "falsified"]
+    import re
+    entries = [float(v) for v in re.findall(r"-?\d[\d.e+-]*",
+                                           computation.counterexample)]
+    assert max(abs(v) for v in entries) >= 1e300, computation.counterexample
 
 # --- the derive route: what the lowering proves and what it refuses -------
 
