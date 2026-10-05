@@ -1155,6 +1155,13 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         info = library_claims.get(lkey)
         if info is not None and not info.get("bundled"):
             library.setdefault(lkey, info["source"])
+    for lkey in sorted(library):
+        for gone in (library_claims.get(lkey) or {}).get("shadowed") or []:
+            out.lines.append(
+                f"note {lkey}: {library_claims[lkey]['source']} shadows "
+                f"the rows {', '.join(gone['rows'])} of {gone['source']}, "
+                f"which are not used here; restate them in "
+                f"{library_claims[lkey]['source']} to keep them")
     for lkey in library:
         if lkey not in declared:
             info = library_claims[lkey]

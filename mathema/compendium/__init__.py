@@ -373,7 +373,9 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         "bundled"}`, where `entry` is the claims-file entry with its rows
         stamped as compendium testimony, `compendium` the library,
         `versions` the range the file declares, `source` the file it
-        came from, and `bundled` whether that file ships with mathema.
+        came from, `bundled` whether that file ships with mathema, and
+        `shadowed` the rows of earlier files this entry replaces without
+        restating, `[{"source", "rows"}]`.
         `root=None` reads the bundled files only.
 
     Notes:
@@ -416,9 +418,22 @@ def load_library_claims(root: "str | None" = ".") -> dict:
                                                 and not entry.get("claims")):
                 # a key that only defines its runtime's missing values
                 # (`defines:`) has no function claims to register
+                prior = out.get(key)
+                shadowed = list((prior or {}).get("shadowed") or [])
+                if prior is not None:
+                    restated = {r.get("name") for r in entry.get("claims")
+                                or [] if isinstance(r, dict)}
+                    dropped = [r.get("name") for r in
+                               prior["entry"].get("claims") or []
+                               if isinstance(r, dict) and r.get("name")
+                               and r.get("name") not in restated]
+                    if dropped:
+                        shadowed.append({"source": prior["source"],
+                                         "rows": dropped})
                 out[key] = {"entry": entry, "compendium": library,
                             "versions": versions, "source": where,
-                            "bundled": path in shipped}
+                            "bundled": path in shipped,
+                            "shadowed": shadowed}
     return out
 
 
