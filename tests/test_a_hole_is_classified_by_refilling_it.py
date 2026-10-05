@@ -8,7 +8,6 @@ the same leaves f indifferent to the slot; a value the fill changes
 dropped the hole. A container holding two members is filled one member
 at a time."""
 import math
-import re
 
 import pytest
 
