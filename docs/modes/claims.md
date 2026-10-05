@@ -71,8 +71,10 @@ import math
 from typing import Annotated
 from mathema.types import Shape
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Turn a vector of real-valued scores into a probability distribution."""
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
     total = sum(exps)
@@ -84,26 +86,23 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 $ mathema claims functions.softmax
 functions.softmax: no declared claims (mathema claims --suggest lists candidates)
 $ mathema claims functions.softmax --suggest
-functions.softmax: 8 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+functions.softmax: 10 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+ individual claims:
   - is_deterministic: f(scores) == f(scores)  [route best]
   - is_state_safe: f(scores) == f(scores)  [route best]
   - is_numerically_stable: g(f, scores) == 1  [route best]
+  - is_empty_safe[scores]: is_empty_safe(scores)  [route examine]
   - preserves_length: dim(f(scores), 0) == dim(scores, 0)  [route probe]
   - is_permutation_of_input: sorted(f(scores)) == sorted(scores)  [route probe]
   - preserves_type: type(f(scores)) == type(scores)  [route probe]
   - is_sorted_output: is_sorted_output(f(scores))  [route examine]
+  - raises[scores]: raises(f(scores), ValueError)  [route best]
   - is_missing_safe[f]: is_missing_safe(f)  [route examine]
 $ mathema claims functions.softmax --adopt is_deterministic --root .
 adopted is_deterministic into ./claims/adopted.claims.yaml: f(scores) == f(scores)
 $ mathema claims functions.softmax
 functions.softmax: 1 declared claim(s)
   - is_deterministic: f(scores) == f(scores)  [route best]
-functions.softmax: 2 policy rows about scores
-  confirmed by the code (mathema claims functions.softmax --write writes these):
-    holds   missing[scores, nan]: missing(f, scores, nan) propagates   [default for a list slot that may be nan; confirmed on the 155 draws of is_deterministic. Keep it by writing it (mathema claims functions.softmax --write), or change the word to raises or drops if f should do otherwise]
-  contradicted by the code (change the word, the code, or accept it as a discovery; --write writes these with the contradiction in the note):
-    FALSIFY missing[scores, null]: missing(f, scores, null) propagates   [mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError]
-             if the raise is intended, write `missing(f, scores, null) raises(TypeError)`; if not, make f skip or fill the null slot; or accept it as a discovery: mathema accept functions.softmax missing[scores, null] --as discovery --corrected "missing(f, scores, null) raises(TypeError)"
 ```
 
 The adopted stanza is plain declared-claims YAML, so it's yours to
@@ -144,18 +143,37 @@ functions.softmax:
   `mathema.families.CLAIM_ASPECTS`.
 - **Likely to be unknowable.** `is_state_safe`, `is_deterministic` and
   `is_reproducible` are decided by reading the function's source. When
-  that reading already sees a write or a hidden input, or meets
-  something it cannot read (`getattr`, a library function it has no
-  entry for), the suggestion is listed here with that reason on the
-  line below it. It is never adopted unless named.
+  that reading meets something it cannot read (`getattr`, a library
+  function it has no entry for), the suggestion is listed here with that
+  reason on the line below it. It is never adopted unless named.
 
-For example, for a function that stores a rate in the environment:
+When the reading already sees a write or a hidden input, the answer is
+known, so the suggestion is listed with the individual claims, the site
+on the line below it. Adopting it records the falsification, which is
+knowledge about the program rather than a failing test. For a function
+that stores a rate in the environment:
 
-<!-- illustration -->
+<!-- example: env-write file=rates.py -->
+```python
+import os
+
+
+def remember(rate: float) -> float:
+    """Store the rate for later runs and return it."""
+    os.environ["R"] = str(rate)
+    return rate
 ```
- likely to be unknowable (adopted only when named):
+
+<!-- example: env-write run -->
+```bash
+mathema claims rates.remember --suggest --root .
+```
+
+<!-- example: env-write output match=subset -->
+```text
+ individual claims:
   - is_state_safe: f(rate) == f(rate)  [route best]
-      remember changes os.environ (os.environ['R'] = ...)
+      examine finds a write: remember changes os.environ (os.environ['R'] = ...); adopting records it as falsified
 ```
 
 A stronger relation, a genuine contradiction where adopting a second

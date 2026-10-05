@@ -80,12 +80,14 @@ import math
 from typing import Annotated
 from mathema.types import Shape
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Turn a vector of real-valued scores into a probability distribution.
 
     Claims:
         sums_to_one: sum(f(scores)) == 1
     """
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
     total = sum(exps)
@@ -106,8 +108,8 @@ mathema.write_spec(softmax)
 ```
 $ mathema verify --root .
 ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
-FAIL functions.softmax: fresh; 1 policy row to settle: missing[scores, null], f raises TypeError at a null slot of scores where mathema's default says propagates; write `missing(f, scores, null) raises(TypeError)` or change f (mathema claims functions.softmax)
-1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+ok   functions.softmax: fresh
+1 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -126,12 +128,14 @@ import math
 from typing import Annotated
 from mathema.types import Shape
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Turn a vector of real-valued scores into a probability distribution.
 
     Claims:
         sums_to_one: sum(f(scores)) == 1
     """
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
     total = sum(exps)
@@ -144,7 +148,7 @@ and re-run:
 ```
 $ mathema verify --root .
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-FAIL functions.softmax: form changed; 1 proven, 1 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
+FAIL functions.softmax: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -160,12 +164,14 @@ import math
 from typing import Annotated
 from mathema.types import Shape
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Turn a vector of real-valued scores into a probability distribution.
 
     Claims:
         sums_to_one: sum(f(scores)) == 1
     """
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
     total = sum(exps)
@@ -176,8 +182,8 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 ```
 $ mathema verify --root .
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-FAIL functions.softmax: form changed; 1 proven, 3 holds, 1 falsified  <- 1 policy row to settle: missing[scores, null], f raises TypeError at a null slot of scores where mathema's default says propagates; write `missing(f, scores, null) raises(TypeError)` or change f (mathema claims functions.softmax)
-1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+ok   functions.softmax: form changed; 1 proven, 4 holds, 0 falsified
+1 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -268,9 +274,9 @@ which holds. The second proven claim in the count is
 ```
 $ mathema verify --root .
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 3 holds, 1 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total); never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
-FAIL functions.softmax: fresh; 1 policy row to settle: missing[scores, null], f raises TypeError at a null slot of scores where mathema's default says propagates; write `missing(f, scores, null) raises(TypeError)` or change f (mathema claims functions.softmax)
-2 fresh (form unchanged, skipped), 1 adjudicated, 3 problem(s)
+FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 5 holds, 1 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total); never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
+ok   functions.softmax: fresh
+2 fresh (form unchanged, skipped), 1 adjudicated, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -291,7 +297,7 @@ accepting balances.running_total :: never_overshoots_much (verdict unknown) as r
   - reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
 written: reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
 $ mathema verify balances.running_total --root . --lenient
-FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 3 holds, 1 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total)
+FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 5 holds, 1 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total)
 0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -302,7 +308,7 @@ pipeline can choose whether owned gaps block it:
 <!-- example: sweep session -->
 ```
 $ mathema verify balances.running_total --root .
-FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 3 holds, 1 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total); 1 accepted-risk claim(s)
+FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 5 holds, 1 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates; write `missing(f, xs, null) raises(TypeError)` or change f (mathema claims balances.running_total); 1 accepted-risk claim(s)
 0 fresh (form unchanged, skipped), 1 adjudicated, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -344,8 +350,8 @@ $ mathema verify --root .
 FAIL balances.running_total: cannot resolve to a live function (declared in .mathema/verified/balances.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total
 FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-FAIL functions.softmax: fresh; 1 policy row to settle: missing[scores, null], f raises TypeError at a null slot of scores where mathema's default says propagates; write `missing(f, scores, null) raises(TypeError)` or change f (mathema claims functions.softmax)
-2 fresh (form unchanged, skipped), 0 adjudicated, 3 problem(s)
+ok   functions.softmax: fresh
+2 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
