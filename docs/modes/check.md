@@ -81,6 +81,17 @@ value (`0`, `±1`, `±1e-9`, `±1e6`, ...) is actually exercised once.
 `--trials-downscale 0` or a negative value is a clean CLI error, not a
 silent 0-trial `holds`.
 
+The budget above is the probe route's. The `computation` line under a
+proven claim runs on points of its own: every corner of the domain and
+points sampled inside it, with the count in its note
+(`ran at 43 points: every corner and 40 interior points`).
+`--trials-downscale` leaves it as it is. A finite domain small enough
+to run in about a second, an integer range or a small set, is swept
+point by point. A claim can carry its own budget, the `trials:` field
+of a claims-file entry or `mathema.claim(..., trials=N)`; it sets the
+count for that claim, and a finite domain whose points fit within it is
+swept in full.
+
 ## Exit code
 
 1 if any row had a problem; 0 otherwise, suitable for a pre-commit
