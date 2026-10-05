@@ -107,20 +107,22 @@ def _policy_clause(name: str, statement: str, pol: dict) -> "str | None":
     does not hold, from the row's own meta: the row, what f does, whose
     word it contradicts, and the one next step."""
     import re as _re
+    from ._missing_words import options, remedy_statements
     nxt = pol.get("next") or ""
-    first = _re.search(r"`([^`]+)`", nxt)
-    to_write = first.group(1) if first else None
+    named = remedy_statements(nxt)
+    to_write = named[0] if named else None
     if pol.get("sentence"):
         sentence = pol["sentence"]
         if sentence.startswith("f has no single policy"):
-            rows = len(_re.findall(r"`[^`]+`", nxt.split("; or ", 1)[0]))
+            rows = len(named)
             return (f"{name}: {sentence}" + (f", {rows} rows to state" if rows > 1
                                               else ""))
         if "does not declare it" in sentence:
             return (f"{name}: {sentence}; declare the return type Optional, or return a "
                     f"value")
-        tail = (f"; state `{to_write}` or handle None" if pol.get("kind") == "absent"
-                and to_write else f"; state `{to_write}` or change f" if to_write else "")
+        tail = ("\n" + options(["handle None in f", f"state: {to_write}"])
+                if pol.get("kind") == "absent" and to_write else
+                "\n" + options(["change f", f"state: {to_write}"]) if to_write else "")
         return f"{name}: {sentence}{tail}"
     reason = pol.get("reason") or ""
     m = _re.search(r"f (\w+) instead: (.+)$", reason)
@@ -130,7 +132,8 @@ def _policy_clause(name: str, statement: str, pol: dict) -> "str | None":
         return (f"{name}, {lib.group(1)}'s row says {pol.get('behaviour')} "
                 f"{_when_words(pol.get('premise') or '')} and f {lib.group(2)} at "
                 f"{lib.group(3)}".replace("  ", " ")
-                + (f"; state `{to_write}` or change f" if to_write else ""))
+                + ("\n" + options(["change f", f"state: {to_write}"]) if to_write
+                   else ""))
     if not m:
         return None
     did, entry = m.group(1), m.group(2)
@@ -148,7 +151,7 @@ def _policy_clause(name: str, statement: str, pol: dict) -> "str | None":
     else:
         what = (f"f {did} {param} = None ({entry})" if kind == "absent"
                 else f"f {did} a missing {param} ({entry})")
-    remedy = (f"; write `{to_write}` or change f" if to_write
+    remedy = ("\n" + options(["change f", f"write: {to_write}"]) if to_write
               else "; change the word or the code")
     return f"{name}, {what} where {whose} {word}{remedy}"
 
@@ -337,8 +340,9 @@ def gate(claims, *, strict: bool,
         if r.policy_problems and not gate_fails:
             n = len(r.policy_problems)
             r.problems.append(f"{n} policy row{'s' if n != 1 else ''} to settle: "
-                              + "; ".join(r.policy_problems)
-                              + (f" (mathema claims {key})" if key else ""))
+                              + "\n".join(r.policy_problems)
+                              + (f"\nto list them, run: mathema claims {key}" if key
+                                 else ""))
         others = r.falsified - len(r.policy_problems) - len(gate_fails)
         if others > 0:
             r.problems.append(f"{others} falsified claim(s)")
@@ -401,6 +405,30 @@ def _accepted_risk(entry: dict | None) -> frozenset:
         c.get("name") for c in entry.get("claims") or []
         if (c.get("accepted") or {}).get("as") == "risk"
         and not (c.get("accepted") or {}).get("stale"))
+
+
+def _split_unparseable(claims: list, grammar: str, fn,
+                       authored: set) -> tuple:
+    """Intent:
+        `(readable, unreadable)`: the claims kept for adjudication, and
+        `(name, error)` for each claim an authoring surface states
+        (its name in `authored`) whose mathema-grammar statement does
+        not parse, so that claim is reported on its own while the
+        others are adjudicated. A claim only the verified record holds
+        is kept as it is.
+    """
+    from .conjecture import InvalidConjecture
+    from .spec import claims_fingerprint
+    readable, unreadable = [], []
+    for c in claims:
+        if c.get("name") in authored:
+            try:
+                claims_fingerprint([c], grammar, fn)
+            except InvalidConjecture as e:
+                unreadable.append((c.get("name") or c.get("statement"), e))
+                continue
+        readable.append(c)
+    return readable, unreadable
 
 
 @dataclass
@@ -1556,9 +1584,22 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 (declared_info or {}).get("source"))
             out.lines.extend(retired_notes)
             retired_noted = {ln.split("'")[1] for ln in retired_notes}
+            entry_grammar = merged_entry.get("grammar", GRAMMAR)
+            authored = {c.get("name") for c in merged_entry.get("claims")
+                        or []}
+            current_claims, unreadable = _split_unparseable(
+                current_claims, entry_grammar, fn, authored)
+            where = ((declared_info or {}).get("source")
+                     or "its docstring or claims file")
+            for claim_name, error in unreadable:
+                msg = (f"{key}: claim {claim_name!r} declared in {where} "
+                       f"does not parse ({error}); correct it there and "
+                       f"re-run verify")
+                out.authoring_errors.append(msg)
+                out.problems.append(msg)
+                out.lines.append(f"FAIL {msg}")
             merged_entry = dict(merged_entry)
             merged_entry["claims"] = current_claims
-            entry_grammar = merged_entry.get("grammar", GRAMMAR)
             out.grammars_seen.update(c.get("grammar", entry_grammar)
                                      for c in current_claims)
             current_fp = claims_fingerprint(current_claims, entry_grammar, fn)
@@ -1899,7 +1940,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             if standing:
                 line += "; " + "; ".join(standing)
             if report.problems:
-                line += "  <- " + "; ".join(report.problems + hints)
+                # a problem's options sit on their own lines, under it
+                line += "  <- " + "; ".join(report.problems + hints).replace(
+                    "\n", "\n       ")
         out.problems.extend(f"{key}: {p}" for p in report.problems)
         out.lines.append(line)
         out.lines.extend(

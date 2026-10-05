@@ -51,9 +51,12 @@ def stage(n: int):
     return pytest.mark.xfail(strict=True, reason=f"missing values stage {n}")
 
 
-def run(fn, text: str):
-    """The claim's own row and its companions, as `(probe, companions)`."""
-    report = mathema.check(fn, claims=[mathema.claim(text, name="c")])
+def run(fn, text: str, stated: tuple = ()):
+    """The claim's own row and its companions, as `(probe, companions)`;
+    `stated` are claims checked beside it (an empty policy, say)."""
+    report = mathema.check(fn, claims=[mathema.claim(text, name="c")]
+                           + [mathema.claim(t, name=f"s{i}")
+                              for i, t in enumerate(stated)])
     rows = [p for p in report.probes if p.name == "c" or p.name.startswith("c[")]
     main = next(p for p in rows if p.name == "c")
     return main, [p for p in rows if p.name != "c"]
@@ -82,7 +85,7 @@ def behaviour(*probes) -> dict:
 
 def assert_row(fn, text, verdicts, *, member=None, raised=None,
                companion=None, companion_member=None, executed=None,
-               companions_none=False, behaves=None):
+               companions_none=False, behaves=None, stated=()):
     """Intent:
         Adjudicate `text` over `fn` and check the row: the verdict is
         one of `verdicts`, the witness names `member` and the exception
@@ -91,9 +94,10 @@ def assert_row(fn, text, verdicts, *, member=None, raised=None,
         executed each value in `executed` (`{param: [value, ...]}`),
         with `companions_none` no companion was spawned, and with
         `behaves` the behaviour at each missing input the rows executed
-        is the one given (`{param: {member: behaviour}}`).
+        is the one given (`{param: {member: behaviour}}`). `stated` are
+        claims checked beside it.
     """
-    probe, companions = run(fn, text)
+    probe, companions = run(fn, text, stated)
     assert probe.verdict in verdicts, (probe.verdict, probe.note, witness(probe))
     for p, values in (executed or {}).items():
         assert set(values) <= set(tried(probe).get(p, [])), (p, tried(probe))
@@ -271,14 +275,16 @@ def test_l1_a_gate_is_not_a_premise():
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
     assert probe.note == (
         "assuming is_missing_safe(f) is not a premise: a value claim is never judged "
-        "where f returns a missing value, so the premise would change nothing. State "
-        "what f does with a missing x as its own claim (`missing(f, x) propagates`, "
-        "`drops` or `raises`), or write `\\ {missing}` in the domain so f is not "
-        "called with one.")
+        "where f returns a missing value, so the premise would change nothing.\n"
+        "(i) to keep f from being called with a missing x, write in the domain: "
+        "\\ {missing}\n"
+        "(ii) to state what f does with one as its own claim (propagates, drops or "
+        "raises), write, for example: missing(f, x) propagates")
     probe, _ = run(sqrt_guarded, "assuming is_absent_safe(f), for x in [0, 1], f(x) >= 0")
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
     assert probe.note == (
         "assuming is_absent_safe(f) is not a premise: a value claim is never judged "
-        "where f returns None, so the premise would change nothing. State what f does "
-        "when x is None as its own claim (`absent(f, x) raises(TypeError)`), or write "
-        "`\\ {absent}` in the domain so f is not called with None.")
+        "where f returns None, so the premise would change nothing.\n"
+        "(i) to keep f from being called with None, write in the domain: \\ {absent}\n"
+        "(ii) to state what f does when x is None as its own claim, write, for "
+        "example: absent(f, x) raises(TypeError)")

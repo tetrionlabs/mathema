@@ -85,11 +85,10 @@ _SAFETY_SOURCE = {
     "is_reproducible": "is_deterministic",
     "is_numerically_stable": "is_numerically_stable",
     "is_representation_safe": "is_representation_safe",
-    "is_extremity_safe": "is_representation_safe",
     "is_pole_safe": "is_representation_safe",
     "is_missing_safe": "is_missing_safe",
     "is_empty_safe": "is_missing_safe",
-    "is_arbitrary_input_safe": "is_arbitrary_input_safe",
+    "is_language_defined": "is_arbitrary_input_safe",
     # the computation-safety hierarchy's new members credit existing
     # sources: an overflow is a representation hazard, a recursion limit
     # an accidental crash. The roll-ups and the unadjudicated families

@@ -18,7 +18,7 @@ polars.Series.shift:
       statement: "for a in R^n, assuming dim(a) >= 2, f(a)[1:] == a[:-1]"
       note: "n defaults to 1; position 0 is null."
     - name: shifted@n=-1
-      statement: "let n be -1, for a in R^n, assuming dim(a) >= 2, f(a)[:-1] == a[1:]"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, n=-1)[:-1] == a[1:]"
       note: "A negative n shifts the other way; the last position is null."
 
 polars.Series.diff:
@@ -36,23 +36,23 @@ polars.Series.pct_change:
 polars.Series.rolling_mean:
   claims:
     - name: windows@window_size=2
-      statement: "let window_size be 2, for a in R^n, assuming dim(a) >= 2, f(a)[1:] ~= (a[1:] + a[:-1]) / 2"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, window_size=2)[1:] ~= (a[1:] + a[:-1]) / 2"
       note: "The mean of each element and the one before it; position 0 is null."
       versions: ">=1.35.1,<2"
     - name: windows@window_size=3
-      statement: "let window_size be 3, for a in R^n, assuming dim(a) >= 3, f(a)[2:] ~= (a[2:] + a[1:-1] + a[:-2]) / 3"
+      statement: "for a in R^n, assuming dim(a) >= 3, f(a, window_size=3)[2:] ~= (a[2:] + a[1:-1] + a[:-2]) / 3"
       note: "The mean of each element and the two before it; positions 0 and 1 are null."
       versions: ">=1.35.1,<2"
 
 polars.Series.rolling_sum:
   claims:
     - name: windows@window_size=2
-      statement: "let window_size be 2, for a in R^n, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] + a[:-1]"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, window_size=2)[1:] ~= a[1:] + a[:-1]"
       note: "The sum of each element and the one before it; position 0 is null."
       versions: ">=1.35.1,<2"
 
 polars.Series.ewm_mean:
   claims:
     - name: recursion@adjust=False,alpha=0.5
-      statement: "let alpha be 0.5, let adjust be False, for a in R^n, assuming dim(a) >= 2, f(a)[1:] ~= 0.5 * f(a)[:-1] + 0.5 * a[1:]"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, alpha=0.5, adjust=False)[1:] ~= 0.5 * f(a, alpha=0.5, adjust=False)[:-1] + 0.5 * a[1:]"
       note: "Unadjusted, each element is the previous mean moved halfway to the new element; element 0 is a[0]."

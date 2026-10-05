@@ -224,13 +224,25 @@ def _open_pins(row: dict, pins: dict) -> "tuple[dict, str | None]":
 
 
 def _pinned_row(row: dict, pins: dict, site: CallSite) -> dict:
-    """One row copied with the call's arguments pinned in front."""
-    lets = ", ".join(f"let {p} be {_render_value(v)}"
-                     for p, v in sorted(pins.items()))
+    """One row copied with the call's arguments pinned: written in each
+    call to f (`f(a, axis=1)`), or in front as `let axis be 1` when the
+    statement calls f nowhere (a region row)."""
+    import re
     tag = ",".join(f"{p}={_render_value(v)}" for p, v in sorted(pins.items()))
     statement = str(row.get("statement") or row.get("law") or "")
+
+    def add(call):
+        inner = call.group(1)
+        extra = ", ".join(f"{p}={_render_value(v)}" for p, v in sorted(pins.items())
+                          if not re.search(rf"\b{re.escape(p)}\s*=(?!=)", inner))
+        return f"f({inner}, {extra})" if extra else call.group(0)
+    in_calls, count = re.subn(r"\bf\(([^()]*)\)", add, statement)
+    if not count:
+        lets = ", ".join(f"let {p} be {_render_value(v)}"
+                         for p, v in sorted(pins.items()))
+        in_calls = f"{lets}, {statement}"
     return {"name": f"{row.get('name')}@{tag}",
-            "statement": f"{lets}, {statement}",
+            "statement": in_calls,
             "note": (f"pinned for the call in {site.caller} (line "
                      f"{site.line}), which passes {tag}")}
 

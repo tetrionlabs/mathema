@@ -2279,7 +2279,10 @@ def _ordered_real_param_names(cj, excluded: set) -> list:
         else (cj.lhs, cj.rhs)
     for text in sides:
         if isinstance(text, str):
-            for name in _IDENTIFIER.findall(blank_strings(text)):
+            # a keyword in a call (`alpha=2`) names f's parameter, not
+            # a parameter of the claim
+            text = re.sub(r"\b[A-Za-z_]\w*\s*=(?!=)", " ", blank_strings(text))
+            for name in _IDENTIFIER.findall(text):
                 if name not in excluded and name not in seen:
                     seen.append(name)
     for name in cj.domain:
@@ -2749,16 +2752,20 @@ def _render_claim_text(cj, *, unicode: bool | None,
     safe_param_renames = {n: s for n, s in param_renames.items() if _is_safe_rename_symbol(s)}
     unsafe_param_renames = {n: s for n, s in param_renames.items() if not _is_safe_rename_symbol(s)}
 
+    # a name followed by a single `=` is a keyword in a call (`f(x,
+    # alpha=2)`), the function's own parameter name, never renamed
+    not_keyword = r"(?!\s*=(?!=))"
+
     def apply_safe_renames(text: str) -> str:
         for name, symbol in func_renames.items():
             text = sub_outside_strings(rf"\b{re.escape(name)}\b", symbol, text)
         for name, symbol in safe_param_renames.items():
-            text = sub_outside_strings(rf"\b{re.escape(name)}\b", symbol, text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b{not_keyword}", symbol, text)
         return text
 
     def apply_unsafe_backticks(text: str) -> str:
         for name, symbol in unsafe_param_renames.items():
-            text = sub_outside_strings(rf"\b{re.escape(name)}\b",
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b{not_keyword}",
                                        f"`{symbol}`", text)
         return text
 

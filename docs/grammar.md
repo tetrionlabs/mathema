@@ -265,6 +265,11 @@ is the square of the norm. A claim written with the bars and one
 written with `norm(...)` are one claim: the claims file keeps the
 spelling you wrote, and the record's statement is the call form.
 
+What each of the grammar's words computes (`sum`, `mean`, `std`,
+`dot`, `norm`, `det`, `cumsum`, `quantile` and the rest), where it has
+a value, its keywords and what it does with a missing slot is listed on
+[the grammar's words](grammar-words.md).
+
 ## Domains: where the claim applies
 
 A claim with no domain is a claim about every input, which is usually
@@ -353,17 +358,17 @@ that failed, and the fix is usually one of the ones below.
 
 | Spelling | What you learn | Usual fix |
 |---|---|---|
-| `is_builtin_safe(x)` | every restricted builtin the code calls (`sqrt`, `log`, `asin`, `factorial`, ...) gets an argument it accepts: no `math.sqrt` of a negative, no `math.log` of zero | narrow the domain to the builtin's range, or guard the call |
+| `is_number_set_safe(x)` | every restricted builtin the code calls (`sqrt`, `log`, `asin`, `factorial`, ...) gets an argument it accepts: no `math.sqrt` of a negative, no `math.log` of zero | narrow the domain to the builtin's range, or guard the call |
 | `is_pole_safe(x)` | the code never meets a pole, a point where the formula divides by zero or otherwise blows up (`1 / (x - 1)` at `x = 1`), anywhere in the domain | exclude the point from the domain, or guard it with an explicit raise |
 | `is_compendium_safe(numpy)` | every library call a [compendium](claims-transfer.md#in-the-compendium) covers returns a value on the domain | keep the call's argument inside the region the compendium states |
-| `is_overflow_safe(x)` | no result overflows to infinity and nothing raises `OverflowError` from a finite input; the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range | narrow the domain below the overflow point, or rescale (work in logarithms) |
-| `is_extremity_safe(x)` | the function still returns at the extremes of its domain, the largest and smallest magnitudes it admits, out to float64's maximum along an unbounded direction | bound the domain, or declare how far the code has to reach with <code>let &#124;inf&#124; be ...</code> |
+| `is_overflow_safe(x)` | no result overflows to infinity and nothing raises `OverflowError` from a finite input, out to float64's maximum along an unbounded direction (bound it with <code>let &#124;inf&#124; be ...</code>); the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range | narrow the domain below the overflow point, or rescale (work in logarithms) |
 | `is_missing_safe(f)` | every hole a parameter admits (`nan`, `null`, `NA`) has a policy the code follows: it raises, drops it or gives a hole back, on purpose ([missing values](missing-values.md)) | state the policy, or guard the hole at entry |
 | `is_absent_safe(f)` | every parameter, field or key that may be None has a policy the code follows, and a None result is declared by the return type ([missing values](missing-values.md)) | state the policy, or annotate the parameter |
 | `is_empty_safe(xs)` | an empty sequence gets an answer or a deliberate error, not an `IndexError` or a division by a zero length | handle the empty case first |
 | `is_representation_safe(x)` | one number written differently (`1`, `1.0`, `True`) gets one answer | normalize the input type at entry |
-| `is_arbitrary_input_safe(s)` | no string input makes the function crash by accident | validate the input and raise the exception you mean |
+| `is_language_defined(s)` | no string input makes the function crash by accident: every member of the input's language reaches a branch that returns or raises on purpose | validate the input and raise the exception you mean |
 | `is_recursion_safe(f)` | the recursion never runs out of stack (`RecursionError`) over the domain; suggested when the body calls itself | rewrite the recursion as a loop, or narrow the domain |
+| `is_dimension_safe(f)` | every operand and the result have shapes that fit (no `matmul` of mismatched matrices, no result breaking its `Vec`/`Mat` marker) | fix the shapes, or guard them with `@enforce_dimensions` |
 | `is_concurrency_safe(f)` | reserved for a later release: the function runs correctly under concurrent calls | |
 
 **Is the answer right in float64?** The function returns, and the
@@ -392,27 +397,44 @@ JIT compiler, a distributed runtime) is never part of a family name: it
 is named in the bracketed computation descriptor after a claim name
 (`[float]` today), which says which computation was attempted.
 
-Two roll-ups summarise the questions; the children stay individual
-claims. `is_computation_safe(f)` answers the first two: every child
-that applies to the function (a child applies when the battery would
-suggest it for the function) together with `is_numerically_stable`,
-which always applies. `is_repeatable(f)` answers the third, and the
-seed decides how: a function that takes a seed or a generator is held
-to `is_reproducible` (same seed, same answer), any other to
+The families form a tree, and a roll-up summarises its children; the
+children stay individual claims. `is_defined(f)` (a value or a
+deliberate error) has two children, `is_language_defined` and
+`is_numerically_defined`; the second rolls up `is_pole_safe`,
+`is_number_set_safe` and `is_dimension_safe`.
+`is_computation_safe(f)` rolls up `is_overflow_safe`,
+`is_representation_safe` and `is_recursion_safe`, and `is_input_safe(f)`
+rolls up `is_missing_safe`, `is_absent_safe` and `is_empty_safe`.
+`is_finite_over_floats(f)` is a view rather than a node: poles and
+overflow together. Each roll-up runs every child that applies to the
+function and is declared by the author, never suggested; its note
+names each child's verdict. A falsified child falsifies the roll-up with
+that child's name and witness; the roll-up is `proven` when every child
+is, and otherwise takes its weakest child's verdict.
+`is_repeatable(f)` answers the repeatability question, and the seed
+decides how: a function that takes a seed or a generator is held to
+`is_reproducible` (same seed, same answer), any other to
 `is_deterministic` (same input, same answer), and `is_state_safe`
-always joins. Each roll-up is declared by the author, never suggested;
-its note names each child's verdict, and a falsified child falsifies it
-with that child's name and witness. `is_computation_safe` is `holds` at
-best, never `proven`; `is_repeatable` is `proven` when every child is,
-since its children are read from the source and never sampled.
-`is_finite_valued` is a documented roll-up, not a registered family:
-`is_defined` and `is_overflow_safe` over the domain together say the
-function returns a finite value everywhere on it.
+always joins; it is `proven` when every child is, since its children are
+read from the source and never sampled.
 
-`is_defined` is not in these tables. Whether a function is defined at a
-point (a square root of a negative, a logarithm of zero) is a question
-about the mathematics, the same in every language, and the derive
-route reasons about it directly; see
+A function's own guards cut its working domain: a conditional raise,
+`@enforce_domain` (an assert at the top of the body feeds it) and an
+entry check of `@enforce_dimensions` reject a call on purpose, so
+`is_defined(f)` and the families judge only the calls the guards let
+through, and the record names each guard by its condition. A bare
+`assert` is not a guard: a failed assert counts against `is_defined`, and
+so does a `RangeError` from `@enforce_range` (a result outside its
+declared range).
+
+The old family names `is_builtin_safe`, `is_extremity_safe` and
+`is_arbitrary_input_safe` are still read, as `is_number_set_safe`,
+`is_overflow_safe` and `is_language_defined`, and the record says the
+spelling was accepted.
+
+Whether a function is defined at a point (a square root of a negative,
+a logarithm of zero) is a question about the mathematics, the same in
+every language, and the derive route reasons about it directly; see
 [conditional claims](conditional-claims.md).
 
 ## Partiality: claims about raising

@@ -42,7 +42,7 @@ def _names(fn):
 
 def test_a_string_function_is_offered_the_arbitrary_input_family(mod):
     names = _names(mod.label)
-    assert "is_arbitrary_input_safe[s]" in names
+    assert "is_language_defined[s]" in names
     assert {"is_deterministic", "is_state_safe"} <= names
 
 

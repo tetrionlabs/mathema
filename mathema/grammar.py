@@ -154,8 +154,11 @@ def _domain_safety_predicates() -> frozenset:
     # the LIVE examine vocabulary (static tables plus predicates owned
     # by registered claim families), read per parse rather than bound
     # at import so a family registered later is still recognized
+    from .families import RETIRED_FAMILY_NAMES
     from .routes import examine_predicates
-    return examine_predicates()
+    # a retired family spelling is still read, and resolves to its
+    # replacement when the claim is built
+    return examine_predicates() | frozenset(RETIRED_FAMILY_NAMES)
 
 
 # \alpha, \beta, ... as identifier spellings: unlike \pi/\infty (math
@@ -1916,11 +1919,13 @@ _SPACED_PREDICATES = {
     "is defined": "is_defined",
     "is pole safe": "is_pole_safe",
     "is builtin safe": "is_builtin_safe",
+    "is number set safe": "is_number_set_safe",
     "is missing safe": "is_missing_safe",
     "is extremity safe": "is_extremity_safe",
     "is representation safe": "is_representation_safe",
     "is empty safe": "is_empty_safe",
     "is arbitrary input safe": "is_arbitrary_input_safe",
+    "is language defined": "is_language_defined",
     "is compendium safe": "is_compendium_safe",
     "excluded outside domain": "excluded_outside_domain",
 }
@@ -3090,7 +3095,7 @@ def _is_dotted_name(node) -> bool:
 
 
 def parse_domain_safety(law: str) -> tuple[str, str] | None:
-    """Recognize the `is_pole_safe(param)`/`is_builtin_safe(param)`/
+    """Recognize the `is_pole_safe(param)`/`is_number_set_safe(param)`/
     `is_missing_safe(param)` predicate forms: a family-adjudicated fact
     about param's own declared domain, whether it excludes every pole,
     fits a restricted-domain builtin it's passed to, or (for

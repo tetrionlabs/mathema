@@ -821,6 +821,24 @@ def _is_definitional(value) -> bool:
            or isinstance(value, types.ModuleType))
 
 
+def _installed_code(fn) -> bool:
+    """Whether `fn` is defined in the standard library or an installed
+    package (a file under the interpreter's library paths), not in the
+    project being checked."""
+    import inspect
+    import os
+    import sysconfig
+    try:
+        path = os.path.realpath(inspect.getsourcefile(inspect.unwrap(fn)) or "")
+    except (TypeError, OSError):
+        return False
+    if not path:
+        return False
+    roots = {os.path.realpath(p) for name in ("stdlib", "platstdlib", "purelib", "platlib")
+             if (p := sysconfig.get_paths().get(name))}
+    return any(path.startswith(root + os.sep) for root in roots)
+
+
 def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
         list[str], list[str], list[str], list[str]]:
     """Free names the function inherits from outside itself, split four
@@ -904,7 +922,7 @@ def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
                 target = global_funcs if _is_definitional(g[n]) else global_vars
                 if n not in target:
                     target.append(n)
-    if global_vars or unresolved:
+    if (global_vars or unresolved) and not _installed_code(fn):
         # global_funcs deliberately doesn't trigger this, referencing a
         # sibling function/class/module isn't "behavior depends on state
         # outside the function" the way a global variable's current

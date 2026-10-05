@@ -5,7 +5,7 @@
 A derive `proven` is the mathematics; what runs the real code in
 float64 is the computation of the claim, and the record says so in
 those words: the `[float]` companion's note and sketch, the detail of a
-failing point, the chained companion, the extremity probe and the
+failing point, the chained companion, the overflow probe and the
 acceptance plan for a companion. "implementation" stays only in the
 public vocabulary (`blame: implementation`, the `implementation:*`
 causes). The bracket after a companion's name is a computation
@@ -91,13 +91,13 @@ def test_the_chained_companion_names_the_computation():
     assert comp.note.startswith("the float64 computation of law ran link by link")
 
 
-def test_the_extremity_probe_names_the_computation():
-    (probe,) = check_conjectures(exp_of, [claim("is_extremity_safe(x)",
+def test_the_overflow_probe_names_the_computation():
+    (probe,) = check_conjectures(exp_of, [claim("is_overflow_safe(x)",
                                                 route="best")],
                                  domain={"x": (0.0, 1000.0)},
                                  facts=analyze_source(exp_of))
     assert probe.verdict == "falsified"
-    assert "the computation leaves float range there" in _text(probe)
+    assert "OverflowError" in _text(probe)
     assert "the implementation" not in _text(probe)
 
 

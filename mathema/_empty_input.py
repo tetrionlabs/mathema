@@ -29,8 +29,16 @@ line in place.
 from __future__ import annotations
 
 import ast
+import contextvars
 import random
 import re
+
+#: the claims of the check in progress, outermost first, whose literal
+#: calls at the empty input state the empty policy of the value claims
+#: checked beside them (a chained claim checks its links in a nested
+#: check that reads them too)
+STATED: "contextvars.ContextVar[tuple]" = contextvars.ContextVar(
+    "mathema_empty_policies", default=())
 
 #: the claim families whose statement is a comparison of f with itself
 #: or an accuracy check, which ask nothing about the empty input
@@ -45,8 +53,8 @@ def claim_calls(fn, srcs, point: dict, bound_funcs: "dict | None" = None,
     """Intent:
         Every `f(...)` call in the claim text, evaluated at `point` the
         way the claim evaluates (its math functions, keywords, slices)
-        and executed: `[(call text, arguments by parameter, the name of
-        the exception raised or None)]`. A call whose arguments cannot
+        and executed: `[(call text, arguments by parameter, the
+        exception raised or None, the value returned or None)]`. A call whose arguments cannot
         be evaluated, or that does not bind to f's signature, is left
         out; the other calls are still made. `bound_funcs` are the
         claim's own bound functions (`let g = math.fabs`), and `pins`
@@ -86,12 +94,14 @@ def claim_calls(fn, srcs, point: dict, bound_funcs: "dict | None" = None,
                 bound = sig.bind(*args, **kwargs)
             except Exception:
                 continue
+            result = None
             try:
-                fn(*args, **kwargs)
+                result = fn(*args, **kwargs)
                 raised = None
             except Exception as e:
-                raised = type(e).__name__
-            out.append((ast.unparse(n), dict(bound.arguments), raised))
+                raised = e
+            out.append((ast.unparse(n), dict(bound.arguments), raised,
+                        result))
     return out
 
 
@@ -139,7 +149,107 @@ def _reads_length(name: str, assumption) -> bool:
                for lhs, _rel, rhs in assumption or ())
 
 
-def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
+def _no_value(value) -> bool:
+    """Whether a returned value is no value: None, or a nan (a float
+    nan, pandas' NA)."""
+    from .domain import is_missing
+    if value is None:
+        return True
+    try:
+        return bool(is_missing(value))
+    except Exception:
+        return False
+
+
+def _empty_call_args(node: ast.Call, sig) -> "dict | None":
+    """The arguments a literal call binds, by parameter, each as source
+    text; None when it does not bind."""
+    try:
+        bound = sig.bind(*[ast.unparse(a) for a in node.args],
+                         **{k.arg: ast.unparse(k.value) for k in node.keywords
+                            if k.arg is not None})
+    except TypeError:
+        return None
+    return dict(bound.arguments)
+
+
+def stated_policies(fn, siblings, target: str) -> list:
+    """Intent:
+        The claims beside a value claim that state what f does with an
+        empty `target`: a literal call with `[]` there, `f([]) in
+        {missing}`, `raises(f([]), E)`, `f([]) == v`, as
+        `[(kind, operand, text)]` with kind "missing", "raises" or
+        "value"; f may be spelled by its own name.
+    """
+    from ._signatures import callable_signature
+    try:
+        sig = callable_signature(fn)
+    except (TypeError, ValueError):
+        return []
+    names = {"f", getattr(fn, "__name__", "f")}
+    out = []
+    for cj in siblings or ():
+        try:
+            node = ast.parse(cj.lhs or "", mode="eval").body
+        except SyntaxError:
+            continue
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in names):
+            continue
+        args = _empty_call_args(node, sig)
+        if not args or args.get(target) != "[]":
+            continue
+        rhs = (cj.rhs or "").strip()
+        text = f"{cj.lhs} {cj.relation} {cj.rhs}"
+        if cj.relation == "in" and re.search(r"\b(missing|None|null|nan|NA)\b",
+                                             rhs):
+            out.append(("missing", rhs, text))
+        elif cj.relation == "raises" and rhs:
+            out.append(("raises", rhs, f"raises({cj.lhs}, {rhs})"))
+        elif cj.relation in ("==", "~="):
+            out.append(("value", rhs, text))
+    return out
+
+
+def _matches(policy, raised, result) -> bool:
+    """Whether what f did at the empty input is what `policy` states."""
+    kind, operand, _text = policy
+    if kind == "raises":
+        return raised is not None and any(
+            cls.__name__ == operand.split(".")[-1]
+            for cls in type(raised).__mro__)
+    if raised is not None:
+        return False
+    if kind == "missing":
+        return _no_value(result)
+    try:
+        expected = float(ast.literal_eval(operand))
+        return float(result) == expected
+    except (ValueError, SyntaxError, TypeError):
+        return False
+
+
+def _fixes(fn_name: str, call_text: str, target: str, raised,
+           result) -> str:
+    """The possible fixes of a falsified empty-input line: state what f
+    does as its empty policy, the condition first and the claim last,
+    or guard the empty input at entry."""
+    called = re.sub(r"^f\(", f"{fn_name}(", call_text)
+    called = re.sub(rf"(?<![\w.]){re.escape(target)}(?![\w.])", "[]",
+                    called, count=1)
+    if raised is not None:
+        first = (f"if the {type(raised).__name__} is the intended refusal, "
+                 f"state: raises({called}, {type(raised).__name__})")
+    else:
+        word = "None" if result is None else "nan"
+        first = (f"if {word} for no data is intended, state: "
+                 f"{called} in {{missing}}")
+    return (f"possible fixes: (i) {first}  (ii) guard the empty input "
+            f"at entry")
+
+
+def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption,
+                      siblings=()) -> list:
     """Intent:
         The `is_empty_safe[x]` lines of a value claim, one per sequence
         parameter whose empty list the claim does not settle itself, as
@@ -203,6 +313,11 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
         return []
     ties = _length_ties(seqs, cj_domain, assumption, shapes)
     guarded = _emptiness_guard_params(facts)
+    # an enforce_dimensions or enforce_domain wrapper refuses a shape or
+    # a value outside the declared one, an empty input among them
+    enforced = set(getattr(fn, "__mathema_enforced_dimensions__", None)
+                   or ()) | set(getattr(fn, "__mathema_enforced_domain__",
+                                        None) or ())
     from ._linalg_eval import as_array, from_law, law_callable
     from .conjecture import _resolve_func_ref, call_defaults
     bound_funcs = {}
@@ -255,26 +370,50 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
                 note=f"{target} = []: no call to f in {cj.name} could be "
                      f"made there"))
             continue
-        raised = [(text, args, exc) for text, args, exc in made if exc]
-        if not raised:
+        policies = stated_policies(fn, siblings, target)
+        fn_name = getattr(fn, "__name__", "f")
+        verdict, note, witness = "holds", "", None
+        for text, args, raised, result in made:
+            at = ", ".join(f"{p} = {_shown(from_law(v))!r}"
+                           for p, v in args.items())
+            did = (f"raises {type(raised).__name__}" if raised is not None
+                   else f"returns {from_law(result)!r}")
+            if policies:
+                broken = [pol for pol in policies
+                          if not _matches(pol, raised, result)]
+                if broken:
+                    verdict, witness = "falsified", (text, at, raised, result)
+                    note = (f"{text} {did} at {at}, where the stated policy "
+                            f"is {broken[0][2]}")
+                    break
+                note = f"{target} = []: {text} {did}, as {policies[0][2]} states"
+                continue
+            if raised is not None:
+                if target in guarded or target in enforced:
+                    note = (f"{target} = []: {text} {did} behind an explicit "
+                            f"emptiness guard, a deliberate refusal")
+                    continue
+                verdict, witness = "falsified", (text, at, raised, result)
+                note = (f"{text} {did} at {at} with no emptiness guard in "
+                        f"the body: the empty input is stumbled into, not "
+                        f"handled")
+                break
+            if _no_value(result):
+                verdict, witness = "falsified", (text, at, raised, result)
+                note = (f"{text} {did} at {at}: no value for no data, and "
+                        f"no empty policy is stated")
+                break
+            note = f"{target} = []: {text} {did}"
+        if verdict == "holds":
             lines.append(Probe(
-                name, statement, "holds", route="probe:algorithmic", n=len(made),
-                meta=meta,
-                note=f"{target} = []: {made[0][0]} returns a value"))
+                name, statement, "holds", route="probe:algorithmic",
+                n=len(made), meta=meta, note=note))
             continue
-        text, args, exc = raised[0]
-        at = ", ".join(f"{p} = {_shown(from_law(v))!r}" for p, v in args.items())
-        if target in guarded:
-            lines.append(Probe(
-                name, statement, "holds", route="probe:algorithmic", n=len(made),
-                meta=meta,
-                note=f"{target} = []: {text} raises {exc} behind an "
-                     f"explicit emptiness guard, a deliberate refusal"))
-            continue
+        text, at, raised, result = witness
         lines.append(Probe(
-            name, statement, "falsified", route="probe:algorithmic", n=len(made),
-            counterexample=at, meta=meta,
-            note=f"{text} raises {exc} at {at} with no emptiness guard in "
-                 f"the body: the empty input is stumbled into, not "
-                 f"handled"))
+            name, statement, "falsified", route="probe:algorithmic",
+            n=len(made), counterexample=at,
+            meta={**meta, "mathema.empty_fixes": _fixes(
+                fn_name, text, target, raised, result)},
+            note=note))
     return lines

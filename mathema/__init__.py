@@ -57,8 +57,10 @@ from .analysis import Facts, SourceUnavailable, _parse_notes, analyze_source
 # alias below (`mathema.claims.check(...)`, load-bearing in README/tests), so
 # the claims()-decorator is exposed as `claims_decorator` at this level,
 # still directly importable as `from mathema.authoring import claims`.
-from .authoring import (DomainError, MissingValueError, claims as claims_decorator,
+from .authoring import (DomainError, MissingValueError, RangeError,
+                        claims as claims_decorator,
                         declared_from_function, enforce_dimensions, enforce_domain,
+                        enforce_range,
                         enforce_structure,
                         materialize_declared, parse_docstring_claims,
                         reject_missing, resolve_declared, retrieve)
@@ -111,7 +113,7 @@ __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "__version__", "claims_decorator", "declared_from_function",
            "resolve_declared", "materialize_declared",
            "parse_docstring_claims", "enforce_domain", "MissingValueError", "enforce_dimensions", "enforce_structure", "reject_missing",
-           "DomainError", "docstring_report", "DocstringReport", "lift_symbolic",
+           "DomainError", "RangeError", "enforce_range", "docstring_report", "DocstringReport", "lift_symbolic",
            "critical_points", "suggest_claims", "Conjecture",
            "issue", "ReasonCode", "Category", "ClaimReasonCode",
            "get_unicode_output", "set_unicode_output",
@@ -121,6 +123,12 @@ __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "gate", "verify_project", "GateReport", "VerifyResult",
            "executable_forms", "CompiledForm", "compile_form",
            "numeric_check", "form_hash"]
+
+
+def _pad(text: str) -> str:
+    """`text` with each line after its first indented to sit under a
+    record line's detail column."""
+    return text.replace("\n", "\n           ")
 
 
 @dataclass
@@ -189,14 +197,14 @@ class Record:
                 elif p.verdict.startswith(("unknown", "skipped")):
                     line = f"  {mark} {p.name}: {p.statement}"
                     if pol.get("reason") or p.note:
-                        line += f"\n           {pol.get('reason') or p.note}"
+                        line += "\n           " + _pad(str(pol.get('reason') or p.note))
                 else:
                     line = f"  {mark} {p.name}: {p.statement}"
                     if pol.get("reason"):
                         line += f"   [{pol['reason']}]"
                 for extra in (pol.get("said"), pol.get("next")):
                     if extra and p.verdict not in ("holds", "proven"):
-                        line += f"\n           {extra}"
+                        line += "\n           " + _pad(str(extra))
                 lines.append(line)
                 continue
             gate = (p.meta or {}).get("mathema.gate")
@@ -204,11 +212,11 @@ class Record:
                 # a gate names what each parameter's members do and whose
                 # word it is; a falsified one its witness and next step
                 line = f"  {mark} {p.name}: {p.statement}"
-                line += f"\n           {p.sketch}"
+                line += "\n           " + _pad(str(p.sketch))
                 if p.counterexample:
                     line += f"\n           counterexample {p.counterexample}"
                 if gate.get("next") and p.verdict not in ("holds", "proven"):
-                    line += f"\n           {gate['next']}"
+                    line += "\n           " + _pad(str(gate['next']))
                 lines.append(line)
                 continue
             if p.verdict == "proven":
@@ -236,10 +244,10 @@ class Record:
                     or missing.get("said") or missing.get("returned")):
                 # what happened at a missing input, or why the row is
                 # open, said once under the row
-                line += f"\n           {p.note}"
+                line += "\n           " + _pad(str(p.note))
             elif p.verdict == "proven" and (missing.get("said") or missing.get("returned")) \
                     and p.note:
-                line += f"\n           {p.note}"
+                line += "\n           " + _pad(str(p.note))
             if p.counterexample:
                 line += f"\n           counterexample {p.counterexample}"
             for said in (p.meta or {}).get("mathema.let_warning") or ():
@@ -503,6 +511,45 @@ def _domains_from_claims(claims) -> dict:
     return out
 
 
+def _offer_splits(fn, facts, claims: list, probes: list,
+                  written: list) -> None:
+    """Record on each falsified value claim falsified only below some
+    length the split that turns it into two held rows
+    (`_split.split_offer`), as `mathema.split`, with the claim's text
+    as its author wrote it (`written`, the call-site strings), else as
+    the record renders it."""
+    from ._split import split_offer
+    from .conjecture import claim as _parse
+    from .spec import canonical_claim_text
+    texts = {}
+    for c in written:
+        try:
+            texts[_parse(c).name] = c
+        except Exception:
+            continue
+    by_name = {}
+    for c in claims:
+        try:
+            cj = _parse(c) if isinstance(c, str) else c
+            text = texts.get(cj.name) or canonical_claim_text(cj)
+        except Exception:
+            continue
+        by_name[cj.name] = (cj, text)
+    for p in probes:
+        meta = p.meta or {}
+        cj, text = by_name.get(p.name, (None, None))
+        if cj is None or meta.get("mathema.companion_of") \
+                or meta.get("mathema.policy") or p.verdict != "falsified":
+            continue
+        try:
+            offer = split_offer(fn, facts, cj, p, text)
+        except Exception:
+            offer = None
+        if offer is not None:
+            p.meta = {**meta, "mathema.split": offer,
+                      "mathema.split_statement": text}
+
+
 def _matrix_names_of(fn) -> frozenset:
     """The parameters `fn`'s signature declares as matrices, over which
     bars in a claim (`|A|`) read as the determinant."""
@@ -729,6 +776,9 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                                                 known_premises=known_premises,
                                                 float_companions=True,
                                                 pseudo_infinity=pseudo_infinity)
+        if all_claims:
+            _offer_splits(fn, facts, all_claims, probes,
+                          [c for c in (claims or ()) if isinstance(c, str)])
         # what f does with a value that is not there, for every parameter
         # that admits one and no stated policy row covers; a bare check
         # (no claim written, only suggestions) carries none

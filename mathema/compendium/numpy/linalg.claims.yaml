@@ -18,11 +18,11 @@ numpy.linalg.norm:
       statement: "for x in R^(m,n), f(x) ~= norm(x)"
       note: "A matrix with the default `ord=None` has its Frobenius norm."
     - name: definition@ord=1
-      statement: "let ord be 1, for x in R^n, f(x) ~= sum(abs(x))"
+      statement: "for x in R^n, f(x, ord=1) ~= sum(abs(x))"
     - name: definition@ord=2
-      statement: "let ord be 2, for x in R^n, f(x) ~= sqrt(sum(x ** 2))"
+      statement: "for x in R^n, f(x, ord=2) ~= sqrt(sum(x ** 2))"
     - name: definition@ord=inf
-      statement: "let ord be inf, for x in R^n, f(x) == max(abs(x))"
+      statement: "for x in R^n, f(x, ord=inf) == max(abs(x))"
       note: "The largest magnitude among the elements."
 
 numpy.linalg.qr:

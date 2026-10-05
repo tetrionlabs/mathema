@@ -72,11 +72,17 @@ HOLDS = ("holds",)
 HOLE = ("None", "nan")
 
 
-def assert_companion(fn, text, verdict, behaves, members=None):
+#: what an empty vector means for a mean that answers it with nan,
+#: stated as its empty policy
+EMPTY_NAN = ("f([]) in {missing}",)
+
+
+def assert_companion(fn, text, verdict, behaves, members=None, stated=()):
     """The main claim is proven over the reals; a companion comes to
     `verdict` (its witness naming one of `members` when given), and the
     behaviour at each missing input executed is `behaves`."""
-    _, companions = assert_row(fn, text, PROVEN, behaves=behaves)
+    _, companions = assert_row(fn, text, PROVEN, behaves=behaves,
+                               stated=stated)
     assert any(c.verdict == verdict and (members is None or any(
         m in witness(c) for m in members)) for c in companions), \
         [(c.name, c.verdict, witness(c)) for c in companions]
@@ -129,30 +135,33 @@ def test_q4_a_float_list_companion_holds_and_nan_propagates():
 
 @pytest.mark.needs_full_proof_budget
 def test_v1_numpy_mean_is_proven_through_its_definition_row():
-    assert_row(mean_np, "for xs in [0, 1]^n, f(xs) >= 0", PROVEN)
+    assert_row(mean_np, "for xs in [0, 1]^n, f(xs) >= 0", PROVEN,
+               stated=EMPTY_NAN)
 
 
 @pytest.mark.needs_full_proof_budget
 def test_v1_numpy_propagation_is_recorded_and_the_companion_holds():
     assert_companion(mean_np, "for xs in [0, 1]^n, f(xs) >= 0", "holds",
-                     {"xs": {"nan": "propagates"}})
+                     {"xs": {"nan": "propagates"}}, stated=EMPTY_NAN)
 
 
 @pytest.mark.needs_full_proof_budget
 def test_v2_the_written_element_clause_is_proven_over_the_reals():
-    assert_row(mean_np, "for xs in [0, 1]^n | {missing}, f(xs) >= 0", PROVEN)
+    assert_row(mean_np, "for xs in [0, 1]^n | {missing}, f(xs) >= 0", PROVEN,
+               stated=EMPTY_NAN)
 
 
 @pytest.mark.needs_full_proof_budget
 def test_v2_a_nan_slot_propagates_and_the_companion_holds():
     assert_companion(mean_np, "for xs in [0, 1]^n | {missing}, f(xs) >= 0", "holds",
-                     {"xs": {"nan": "propagates"}})
+                     {"xs": {"nan": "propagates"}}, stated=EMPTY_NAN)
 
 
 @pytest.mark.needs_full_proof_budget
 def test_v3_nanmean_drops_some_holes_and_propagates_an_all_hole_vector():
     _, companions = assert_row(nanmean_np, "for xs in [0, 1]^n | {missing}, f(xs) >= 0",
-                               PROVEN, behaves={"xs": {"nan": "mixed"}})
+                               PROVEN, behaves={"xs": {"nan": "mixed"}},
+                               stated=EMPTY_NAN)
     (companion,) = companions
     assert companion.verdict == "holds"
     mixed = companion.meta["mathema.missing"]["mixed"]["xs"]["nan"]
@@ -162,13 +171,15 @@ def test_v3_nanmean_drops_some_holes_and_propagates_an_all_hole_vector():
 
 @pytest.mark.needs_full_proof_budget
 def test_v8_pandas_mean_is_proven_through_its_definition_row():
-    assert_row(mean_pd, "for xs in [0, 1]^n | {missing}, f(xs) >= 0", PROVEN)
+    assert_row(mean_pd, "for xs in [0, 1]^n | {missing}, f(xs) >= 0", PROVEN,
+               stated=EMPTY_NAN)
 
 
 @pytest.mark.needs_full_proof_budget
 def test_v8_the_series_companion_holds_and_each_member_is_mixed():
     assert_companion(mean_pd, "for xs in [0, 1]^n | {missing}, f(xs) >= 0", "holds",
-                     {"xs": {"nan": "mixed", "null": "mixed", "NA": "mixed"}})
+                     {"xs": {"nan": "mixed", "null": "mixed", "NA": "mixed"}},
+                     stated=EMPTY_NAN)
 
 
 @pytest.mark.needs_full_proof_budget

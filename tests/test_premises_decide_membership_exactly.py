@@ -32,8 +32,12 @@ def ratio_loop(xs: pd.Series) -> float:
     return float(total / len(xs) / xs.std(ddof=1))
 
 
-def _probes(fn, text):
-    r = mathema.check(fn, claims=[mathema.claim(text, name="c")])
+def _probes(fn, text, empty_policy=None):
+    claims = [mathema.claim(text, name="c")]
+    if empty_policy:
+        # what f does with the empty input, stated as its policy
+        claims.append(mathema.claim(empty_policy, name="empty"))
+    r = mathema.check(fn, claims=claims)
     return {p.name: p for p in r.probes if p.name.startswith("c")}
 
 
@@ -67,7 +71,8 @@ def test_the_exact_words_fall_back_outside_flat_real_sequences():
 
 def test_a_positive_spread_premise_keeps_constant_corners_out_of_the_companion():
     probes = _probes(ratio, "for xs in [-0.1, 0.1]^n, "
-                            "assuming std(xs, ddof=1) > 0, f(2 * xs) ~= f(xs)")
+                            "assuming std(xs, ddof=1) > 0, f(2 * xs) ~= f(xs)",
+                     empty_policy="f([]) in {missing}")
     assert probes["c"].verdict == "proven"
     companion = probes["c[float, pandas.Series]"]
     assert companion.verdict == "holds", companion.counterexample
@@ -79,7 +84,8 @@ def test_the_companion_reads_vector_arithmetic_as_the_proof_does():
     # `xs + xs` doubles every element, never the list; the ratio of mean
     # to spread is unchanged, so a proven law must not be blamed on the code
     probes = _probes(ratio, "for xs in [-0.1, 0.1]^n, "
-                            "assuming std(xs, ddof=1) > 0, f(xs + xs) ~= f(xs)")
+                            "assuming std(xs, ddof=1) > 0, f(xs + xs) ~= f(xs)",
+                     empty_policy="f([]) in {missing}")
     assert probes["c"].verdict == "proven"
     companion = probes["c[float, pandas.Series]"]
     assert companion.verdict == "holds", companion.sketch
