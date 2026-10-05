@@ -5091,7 +5091,8 @@ def _exactly_holds_at(cj, code_l, code_r, env, fn, bound_funcs) -> bool:
     return _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) is True
 
 
-def _exactly_decided(cj, code_l, code_r, env, callees, slack, ok):
+def _exactly_decided(cj, code_l, code_r, env, callees, slack, ok,
+                     rel_tol=None):
     """Intent:
         The relation at the point `env` holds, re-decided with the claim's
         sides evaluated exactly (`_exact_side.exact_sides`): the function's
@@ -5106,7 +5107,7 @@ def _exactly_decided(cj, code_l, code_r, env, callees, slack, ok):
     held = relation_holds_elementwise(
         exact[0], exact[1], cj.relation, slack,
         exact_inequality=cj.tolerance is None,
-        rel_tol=_declared_rel_tol(cj))
+        rel_tol=_declared_rel_tol(cj) if rel_tol is None else rel_tol)
     return ok if held is None else held
 
 
@@ -8709,6 +8710,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # within a tolerance and could not be evaluated exactly
     relative_absorbed, relative_at = 0.0, None
     inconclusive = 0
+    # the draws where the claim's own side has no value, exact or float
+    undecided, undecided_at = 0, None
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
     # axis that two parameters share, or that spans a matrix, at its
@@ -9252,8 +9255,40 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           f"({e}); narrow the claim's domain to where "
                           f"every side of it is real")
                     break
-                # the law's own plumbing failed, not the function,
-                # a broken sample, never a counterexample
+                # the claim's own side has no float value here: read
+                # exactly when it can be (`_exact_side`), else the draw
+                # is undecided and the claim cannot hold
+                call_raised[0] = call_nan[0] = call_inf[0] = None
+                decided = _exactly_decided(
+                    cj, code_l, code_r, env, {"f": fn_call, **bound_funcs},
+                    cj.tolerance if cj.tolerance is not None
+                    else DEFAULT_TOLERANCE, None)
+                if decided is True and _exactly_decided(
+                        cj, code_l, code_r, env,
+                        {"f": fn_call, **bound_funcs}, 0.0, None,
+                        rel_tol=0.0) is not True:
+                    # it passes only within the tolerance: the
+                    # mathematics at the point decides
+                    decided = _exact_verdict(cj, code_l, code_r, env,
+                                             fn_call, bound_funcs)
+                    if decided is None:
+                        call_raised[0] = call_nan[0] = call_inf[0] = None
+                        call_hole[0] = None
+                        inconclusive += 1
+                        continue
+                call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+                if decided is None:
+                    if undecided_at is None:
+                        undecided_at = (f"{_point_text(args)}: the claim's own "
+                                        f"side raised {type(e).__name__} "
+                                        f"({e})")
+                    undecided += 1
+                    continue
+                checked += 1
+                if decided is False:
+                    cx = (f"{_point_text(args)}: the claim is false here, "
+                          f"its own side read exactly")
+                    break
                 continue
             if ctx.assume_defined and call_raised[0] == "f":
                 # `assuming is_defined(f)`: a sample where F raises is
@@ -9677,6 +9712,13 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           "mathema.confidence": _probe_density(risk, checked),
                           "mathema.counterexample_args": _yaml_safe_args(args),
                           **shrunk_meta, **missing_meta})
+    if undecided:
+        return Probe(cj.name, statement, "unknown", route="probe", n=checked,
+                     note=(f"{note}; the claim's own side could not be "
+                           f"evaluated at {undecided} draw"
+                           f"{'s' if undecided != 1 else ''}, first at "
+                           f"{undecided_at}").lstrip("; "),
+                     meta=dict(missing_meta))
     inconclusive_words = (
         f"{inconclusive} draw{'s' if inconclusive != 1 else ''} passed only "
         f"within the tolerance and could not be evaluated in exact "

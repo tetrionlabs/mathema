@@ -1421,7 +1421,7 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
     import random
 
     from .conjecture import _resolve_bound_ref
-    from .corroboration import INCONCLUSIVE
+    from .corroboration import INCONCLUSIVE, Undecided
     from .gates import _fmt_point, _point_evaluator
     from .symbolic._proof_support import ProofResult
     wheres: list = []
@@ -1474,7 +1474,8 @@ def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,
                         continue
                     if held is False:
                         detail = deps["probe_finite"](point)
-                        if detail is INCONCLUSIVE:
+                        if detail is INCONCLUSIVE \
+                                or isinstance(detail, Undecided):
                             detail = None
                         shown = _fmt_point(point, deps["names"])
                         return ProofResult(

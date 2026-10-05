@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from . import _shapes
 from ._math_vocab import MATH_CONSTANTS
-from .corroboration import INCONCLUSIVE
 from .records import Probe
 from .runtime_types import SEQUENCE_KINDS
 
@@ -72,8 +71,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         `probe_finite(point)` returns a computation-failure detail
         (a raise, a NaN, an inf or a deviation past a magnitude-scaled
         tolerance where the relation fails), None where the code
-        agrees, or `corroboration.INCONCLUSIVE` where the claim's own
-        evaluation failed; `admits(point)` is
+        agrees, or a `corroboration.Undecided` reason where the claim's
+        own side has no value, exact or float; `admits(point)` is
         in-domain-and-assumption membership; `sample(name, rng)` draws
         a value respecting the parameter's declared bound; `exact`
         drops the default allowance, so a claim with no declared
@@ -524,7 +523,27 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                         f"{type(e).__name__} here ({e})")
             if claim_side_has_no_value(e):
                 return f"the claim's own side has no real value here ({e})"
-            return INCONCLUSIVE
+            # the claim's own side read exactly, the code's results as
+            # the values it returned; else the point is undecided
+            from ._exact_side import exact_sides
+            from .corroboration import Undecided
+            _reset()
+            exact = exact_sides(code_l, code_r,
+                                {**base_env, **_typed(point)},
+                                {"f": fn_call, **(bound_funcs or {})})
+            _reset()
+            held = None if exact is None else relation_holds_elementwise(
+                exact[0], exact[1], cj.relation, slack,
+                exact_inequality=cj.tolerance is None,
+                rel_tol=DEFAULT_RELATIVE_TOLERANCE
+                if cj.tolerance is None else 0.0)
+            if held is None:
+                return Undecided(f"the claim's own side raised "
+                                 f"{type(e).__name__} ({e})")
+            if held:
+                return None
+            return ("the relation fails on the executed values, the "
+                    "claim's own side read exactly")
         if _classify(point, False, (lv, rv)):
             return None
         if not inputs_missing(point.values()) \
@@ -1829,6 +1848,15 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      "cause": "implementation:numerical-instability",
                      "representation": representation.tag, "witness": pt},
             meta=tried_meta or None)
+    if sweep.undecided:
+        at = _fmt_point(sweep.undecided_point, deps["names"])
+        return Probe(name, parent.statement, "unknown", route=float_route,
+                     n=numbers,
+                     note=f"{what}; the claim's own side could not be "
+                          f"evaluated at {sweep.undecided} point"
+                          f"{'s' if sweep.undecided != 1 else ''}, first at "
+                          f"{at}: {sweep.undecided_detail}",
+                     meta=tried_meta or None)
     if numbers == 0:
         return Probe(name, parent.statement, "skipped", route=float_route,
                      note=f"{what}; no in-domain point satisfied the "

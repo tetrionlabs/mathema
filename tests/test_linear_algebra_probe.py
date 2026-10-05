@@ -80,13 +80,22 @@ def _holds(p):
     (trace_loop, "f(A) == trace(A @ A)", False),
     (one, "matrix_power(A, 3) ~= A @ A @ A", True),
     (one, "matrix_power(A, 3) ~= A * A * A", False),
-    (one, "inv(A.T) ~= inv(A).T", True),
+    (one, "assuming det(A) != 0, inv(A.T) ~= inv(A).T", True),
     (two, "trace(A @ B) ~= trace(B @ A)", True),
     (two, "trace(A @ B) ~= trace(A) * trace(B)", False),
 ])
 def test_the_plain_probe_evaluates_the_matrix_vocabulary(fn, law, true):
     p = _one(fn, law)
     assert _holds(p) is true, (law, p.verdict, p.note, p.counterexample)
+
+
+def test_a_claim_side_with_no_value_at_a_singular_matrix_is_unknown():
+    # a draw where the claim's own inv has no value is never dropped:
+    # the claim is unknown and names the draw (ruling of 2026-10-01: an
+    # undecided point is never counted toward holds)
+    p = _one(one, "inv(A.T) ~= inv(A).T")
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert "LinAlgError" in p.note
 
 
 @pytest.mark.parametrize("route", ["probe", "best"])
