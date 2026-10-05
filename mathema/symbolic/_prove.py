@@ -20,6 +20,7 @@ import contextvars
 from dataclasses import dataclass, field, replace
 
 import sympy
+from fractions import Fraction
 
 from .._math_vocab import (_BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _PV_FUNC,
                            _SYMPY_FUNCS, _call_name)
@@ -1578,6 +1579,71 @@ def _returns_no_value(out) -> bool:
         return False
 
 
+def _certified_guard(cond, witness: dict, ext_params: dict,
+                     domain: dict) -> "str | None":
+    """Intent:
+        A certificate, in words, that the raise guard `cond` holds
+        somewhere in the declared domain near derive's witness, checked
+        by interval balls (`_exact_witness`) and not by the solver that
+        found the witness; None when it cannot be certified. One free
+        coordinate only: `G < 0` (or `<=`) by a ball strictly below zero
+        at a rational point near the witness; `G == 0` (or `<=`) by
+        certified opposite signs at the ends of a small rational
+        interval inside the domain over which G is continuous (a finite
+        enclosure of G over the whole interval, built from continuous
+        operations only), so G has a root inside it.
+    """
+    from .._exact_witness import (Undecided, ball, certified_sign, in_bound,
+                                  rational_near)
+    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    if not isinstance(cond, (sympy.Eq, sympy.Lt, sympy.Le, sympy.Gt,
+                             sympy.Ge)):
+        return None
+    g = cond.lhs - cond.rhs
+    if isinstance(cond, (sympy.Gt, sympy.Ge)):
+        g = -g
+    free = list(g.free_symbols)
+    if len(free) != 1:
+        return None
+    sym = free[0]
+    name = next((n for n, s in ext_params.items() if s == sym), None)
+    if name is None or sym not in witness:
+        return None
+    bound = (domain or {}).get(name)
+
+    def inside(q) -> bool:
+        return bound is None or in_bound(q, bound)
+
+    def check():
+        r = rational_near(witness[sym])
+        if isinstance(cond, (sympy.Lt, sympy.Le, sympy.Gt, sympy.Ge)):
+            if inside(r) and certified_sign(g, {sym: r}) < 0:
+                return (f"certified by interval arithmetic: "
+                        f"{sympy.sstr(g)} < 0 at {name} = {r}")
+            if isinstance(cond, (sympy.Lt, sympy.Gt)):
+                return None
+        for digits in (30, 15):
+            width = Fraction(1, 10 ** digits)
+            a, b = r - width, r + width
+            if not (inside(a) and inside(b) and inside(r)):
+                continue
+            sa, sb = certified_sign(g, {sym: a}), certified_sign(g, {sym: b})
+            if sa * sb < 0:
+                ball(g, {sym: (a, b)}, 200)
+                return (f"certified by interval arithmetic: "
+                        f"{sympy.sstr(g)} changes sign over {name} in "
+                        f"{sympy.Float(sympy.Rational(r.numerator, r.denominator), digits + 5)}"
+                        f" ± 1e-{digits} and is continuous there, so it is "
+                        f"zero inside")
+        return None
+    try:
+        return _with_timeout(check, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except (Undecided, ArithmeticError, TypeError, ValueError):
+        return None
+
+
 def _witness_corroborated(callable_target, arg_exprs: list,
                           witness: dict, exc: "str | None" = None) -> bool:
     """Intent:
@@ -1733,11 +1799,17 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             # witness the execution refutes is an engine artifact
             # (the false-falsified family), never a counterexample.
             target = (callables or {}).get(target_name)
+            certified = None
             if target is None or not _witness_corroborated(
                     target, arg_exprs, witness, exc):
-                uncorroborated = True
-                undecided = True
-                continue
+                # every float call returns there; the guard is checked at
+                # the exact witness by certified interval balls instead
+                certified = _certified_guard(cond, witness, ext_params,
+                                             domain)
+                if certified is None:
+                    uncorroborated = True
+                    undecided = True
+                    continue
             # a coordinate the claim's evaluation point fixes is named
             # at that value, the one the executed call used
             at_witness = {**witness, **fixed}
@@ -1750,15 +1822,18 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             return ProofResult(
                 "disproven",
                 sketch=f"{call_text} {fails} inside the declared "
-                       f"domain (guard {_cond_text(cond)} holds at {where}), "
-                       "so the claim has no value there, narrow the claim's "
-                       "domain to where every call returns, or state the "
-                       "raising region as its own raises(...) claim",
+                       f"domain (guard {_cond_text(cond)} holds at {where}"
+                       + (f"; {certified}" if certified else "")
+                       + "), so the claim has no value there, narrow the "
+                       "claim's domain to where every call returns, or "
+                       "state the raising region as its own raises(...) "
+                       "claim",
                 counterexample=where,
                 witness=_witness_numbers(
                     {name: at_witness[sym] for name, sym in ext_params.items()
                      if sym in at_witness}),
-                meta={"mathema.witness_executed": True})
+                meta=({"mathema.witness_certified": certified}
+                      if certified else {"mathema.witness_executed": True}))
         undecided = True
     if undecided:
         meta = ({"mathema.engine": "guard-witness-uncorroborated"}

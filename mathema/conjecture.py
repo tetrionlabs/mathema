@@ -3019,7 +3019,10 @@ def _validate(src: str, param_names: set[str],
                 # _MATH_ATTRS rather than being sampled randomly
                 if node.id not in callable_names and node.id not in MATH_CONSTANTS:
                     aux.add(node.id)
-    return compile(tree, "<conjecture>", "eval"), aux
+    code = compile(tree, "<conjecture>", "eval")
+    from ._exact_side import register_source
+    register_source(code, src, tree)
+    return code, aux
 
 
 
