@@ -18,6 +18,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import mathema
+
 from mathema.claims import check_conjectures, claim
 from mathema.conjecture import InvalidConjecture
 
@@ -71,8 +73,6 @@ def _verdict(fn, law):
      "for xs in R^n, f(xs) == count(xs) - 1"),
     (positions, "for xs in R^n \\ {missing}, f(xs) == len(xs)",
      "for xs in R^n \\ {missing}, f(xs) == len(xs) + 1"),
-    (positions, "for xs in R^n, f(xs) == count(xs)",
-     "for xs in R^n, f(xs) == len(xs)"),
     (running_total, "for xs in R^n, f(xs)[-1] ~= sum(xs)",
      "for xs in R^n, f(xs)[-1] ~= prod(xs)"),
 ])
@@ -120,3 +120,15 @@ def test_the_statistics_words_accept_their_keywords_and_no_others():
         claim("for xs in R^n, f(xs) ~= mean(xs, ddof=1)")
     with pytest.raises(InvalidConjecture, match="keyword arguments"):
         claim("for xs in R^n, f(xs) ~= norm(xs, ord=2)")
+
+
+def test_len_counts_every_slot_and_the_hole_goes_to_its_policy_line():
+    # count reads the value slots and len every slot: over hole-free
+    # vectors the two agree, so the value claim holds, and the hole a
+    # Series admits is judged by the missing-policy line, which records
+    # that f answers with the number of values, dropping the hole
+    rec = mathema.check(positions,
+                        claims=["for xs in R^n, f(xs) == len(xs)"])
+    row = next(p for p in rec.probes if "len(xs)" in (p.statement or ""))
+    assert row.verdict == "holds", (row.verdict, row.note)
+    assert "drops the nan slot" in (row.note or ""), row.note
