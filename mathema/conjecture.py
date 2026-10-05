@@ -3681,12 +3681,12 @@ def _receiver_params_bound(fn, facts, conjectures):
 @quiet_while_probing
 def check_conjectures(fn, conjectures: list[Conjecture],
                       domain: dict | None = None, trials: int | None = None,
-                      trials_downscale: "float | None" = None, facts=None,
+                      trials_downscale: float | None = None, facts=None,
                       extensive: bool = False,
                       known_premises: dict | None = None,
                       float_companions: bool = False,
                       pseudo_infinity=None,
-                      trials_scale: "float | None" = None) -> list[Probe]:
+                      trials_scale: float | None = None) -> list[Probe]:
     """Adjudicate proposed claims against the live function.
 
     Throughout, bars around one of the matrices `fn`'s signature
@@ -8138,8 +8138,36 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         verdict and witness are the same in every process.
     """
     from .probing import _pinned_float_env
+    kinds = _kinds_as_bound(fn, kinds, ctx.cj_domain)
     with _pinned_float_env():
         return _probe_stage(ctx, fn, facts, kinds, sampling)
+
+
+def _kinds_as_bound(fn, kinds: dict, cj_domain: dict) -> dict:
+    """Intent:
+        The kinds the probe draws with: an unannotated parameter the
+        body could read as a sequence, but which the claim binds to a
+        scalar real domain (`q in [0, 1]`, no `^n`), is drawn as the
+        scalar the claim states.
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return kinds
+    out = dict(kinds)
+    for p, kind in kinds.items():
+        bound = (cj_domain or {}).get(p)
+        param = params.get(p)
+        if (kind not in SEQUENCE_KINDS or bound is None or param is None
+                or param.annotation is not inspect.Parameter.empty):
+            continue
+        if getattr(bound, "dims", ()) or getattr(bound, "base_type", "R") not in ("R", "Z", "N"):
+            continue
+        scalar = (isinstance(bound, tuple) and not isinstance(bound, frozenset)
+                  and len(bound) == 2) or isinstance(bound, Domain)
+        if scalar:
+            out[p] = "int" if getattr(bound, "base_type", "R") in ("Z", "N") else "scalar"
+    return out
 
 
 def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,

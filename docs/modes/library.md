@@ -18,7 +18,7 @@ mathema.registry.load_specs(root)             # read the whole spec store
 mathema.registry.load_claims(path)            # parse an authoring-shape claims file
 ```
 
-## `check(fn, claims=None, domain=None, trials=None, trials_downscale=None, extensive=False, declared=None, known_premises=None, pseudo_infinity=None, runtime_types=None)`
+## `check(fn, claims=None, domain=None, trials=None, trials_downscale=None, extensive=False, declared=None, known_premises=None, pseudo_infinity=None, runtime_types=None, trials_scale=None)`
 
 Verify a function's claims, each adjudicated against the real
 function: mathema's suggested standard claims when `claims` is

@@ -766,10 +766,10 @@ def _union_verified_membership(current_claims: list,
 
 def verify_project(root: str = ".", *, all: bool = False,
                    strict: bool = True,
-                   trials_downscale: "float | None" = None,
+                   trials_downscale: float | None = None,
                    only: "list | None" = None,
                    files: "list | None" = None,
-                   trials_scale: "float | None" = None) -> VerifyResult:
+                   trials_scale: float | None = None) -> VerifyResult:
     """The test-runner sweep as a library call: for every key the
     declared/verified stores know, re-adjudicate if the function's form
     hash, claims fingerprint, or a dependency changed (`all=True`

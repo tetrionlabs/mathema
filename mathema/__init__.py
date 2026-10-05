@@ -502,11 +502,11 @@ def _matrix_names_of(fn) -> frozenset:
 @_quiet_while_probing
 def check(fn, claims: list | None = None, domain: dict | None = None,
          trials: int | None = None,
-         trials_downscale: "float | None" = None, extensive: bool = False,
+         trials_downscale: float | None = None, extensive: bool = False,
          declared: dict | None = None,
          known_premises: dict | None = None,
          pseudo_infinity=None, runtime_types: dict | None = None,
-         trials_scale: "float | None" = None) -> Record:
+         trials_scale: float | None = None) -> Record:
     """Verify a function's claims, each adjudicated against the real
     function.
 
