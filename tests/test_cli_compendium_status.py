@@ -105,7 +105,10 @@ def test_status_reports_each_library_the_project_calls(project):
     assert "no claims: numpy.linspace" in text
     sqrt = next(ln for ln in text.splitlines() if "numpy.sqrt" in ln)
     assert "2 calls" in sqrt, sqrt
-    assert "1 verified locally" in sqrt and "1 trusted (proven)" in sqrt
+    # the project's is_defined and rising, and the bundled
+    # is_defined_over_complex the project entry merges with
+    assert "3 rows" in sqrt, sqrt
+    assert "2 verified locally" in sqrt and "1 trusted (proven)" in sqrt
     assert "0 falsified" in sqrt and "0 unsettled" in sqrt
     mean = next(ln for ln in text.splitlines() if "numpy.mean" in ln)
     assert "1 call," in mean or "1 call " in mean, mean
@@ -125,7 +128,8 @@ def test_status_as_json_carries_the_same_data(project):
     assert "numpy.linspace" in lib["no_claims"]
     sqrt = lib["functions"]["numpy.sqrt"]
     assert sqrt["calls"] == 2
-    assert sqrt["verified"] == 1 and sqrt["falsified"] == 0
+    assert sqrt["rows"] == 3
+    assert sqrt["verified"] == 2 and sqrt["falsified"] == 0
     assert sqrt["trusted"] == {"proven": 1}
     assert sqrt["unsettled"] == 0
     assert any(f["source"] == "claims/numpy.claims.yaml"

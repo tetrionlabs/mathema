@@ -6,7 +6,7 @@
 # caller's `returns.std(ddof=1)` through these rows, and mathema's own
 # test suite verifies each against the installed pandas.
 compendium: pandas
-versions: ">=2,<4"
+versions: ">=2.2,<4"
 
 # The members a hole in a Series stands for: the built-in nan, null
 # (None in an object column) and NA (a nullable column), with NaT (a

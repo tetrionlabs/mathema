@@ -85,7 +85,9 @@ def test_the_loop_end_to_end(project):
     assert r1.returncode == 1
     assert ("mathema accept math.log log_increasing --as trusted"
             in r1.stdout), r1.stdout
-    assert "adjudicate it against the installed library" in r1.stdout
+    assert ('to decide it, restate the row, then run: mathema check '
+            'math.log --claim "..."') in r1.stdout, r1.stdout
+    assert "let mathema verify adjudicate it" not in r1.stdout
     resting = _rows(project, "spkg.mod.widened")["rests"]
     assert resting["verdict"] == "unknown"
     assert "--as trusted" in (resting["note"] or "")
@@ -102,6 +104,12 @@ def test_the_loop_end_to_end(project):
     row = _rows(project, "math.log")["log_increasing"]
     assert row["verdict"] == "proven"
     assert row["accepted"]["as"] == "trusted"
+    # the project entry merges with the bundled one by row name, so the
+    # bundled log_monotone row applies beside it and is settled the
+    # same way
+    assert _rows(project, "math.log")["log_monotone"]["verdict"] == "unknown"
+    apply_acceptance(plan_acceptance(str(project), "math.log",
+                                     "log_monotone", "trusted", by="test"))
 
     # run 2: the premise resolves; claimed proven passes the
     # conclusion through uncapped: a resolved premise is trusted at

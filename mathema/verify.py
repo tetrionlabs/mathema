@@ -616,7 +616,8 @@ def _drop_retired_declared(key: str, current_claims: list,
 
 
 def _born_falsified_hint(key: str, probes: list,
-                         verified_entry: dict) -> list:
+                         verified_entry: dict,
+                         library_source: "str | None" = None) -> list:
     """Intent:
         The one-time teaching line for a claim that falsified on its
         FIRST adjudication: a failed authoring experiment, which the
@@ -624,7 +625,10 @@ def _born_falsified_hint(key: str, probes: list,
         silently shrinks. Names the exits and the cheap path that
         writes nothing. A claim the record already knew is
         re-falsifying, which is a regression, not an experiment, and
-        gets no line.
+        gets no line. A library key's row (`library_source` names the
+        claims file stating it) is wrong about the installed library:
+        its line names the row, recording it as a discovery, and
+        correcting it in that file.
     """
     from .records import classify_verdict
     known = {c.get("name") for c in (verified_entry.get("claims") or [])
@@ -658,6 +662,14 @@ def _born_falsified_hint(key: str, probes: list,
     if not fresh:
         return lines
     names = ", ".join(sorted(str(p.name) for p in fresh))
+    if library_source is not None:
+        accepts = "; ".join(f"mathema accept {key} {p.name} --as discovery"
+                            for p in sorted(fresh, key=lambda p: str(p.name)))
+        return lines + [
+            f"note {key}: {names} falsified on first adjudication: the "
+            f"installed library does not do what the row states. Record "
+            f"the falsification as a discovery ({accepts}), or correct "
+            f"the row in {library_source}."]
     return lines + [f"note {key}: {names} falsified on first adjudication. A "
             f"declared claim is kept until a human decides it (fix the "
             f"code, `mathema accept {key} <claim> --as discovery`, or "
@@ -872,8 +884,9 @@ def claims_file_entries(path: str, root: str,
         `{"entry", "source"}`, `is_library` whether the file declares
         `compendium:`, and `lines` the one-line notes the sweep prints.
         A compendium file's key takes the entry that applies to it
-        (`load_library_claims`, where a project file shadows a bundled
-        one), else the file's own, stamped as compendium testimony.
+        (`load_library_claims`, where a project file's rows merge with
+        the bundled ones by name), else the file's own, stamped as
+        compendium testimony.
 
     Notes:
         A compendium file whose library is not importable, or is
@@ -904,22 +917,45 @@ def claims_file_entries(path: str, root: str,
             f"note {where}: `compendium: {library}` names this project's "
             f"own package; nothing in it was adjudicated"]
     tag = applicable_tag(library, versions, aliases)
+    lines: list = []
     if tag is None:
         installed = _installed_version(library, aliases)
-        why = (f"{library} is not importable here" if installed is None
-               else f"{library} {installed} is outside the file's range "
-                    f"{versions}")
-        return {}, True, [f"note {where}: {why}; nothing in it was "
-                          f"adjudicated"]
+        if installed is None:
+            return {}, True, [f"note {where}: {library} is not importable "
+                              f"here; nothing in it was adjudicated"]
+        # installed outside the file's range: every row is adjudicated
+        # against the installed version and marked outside its range,
+        # so it is recorded and never used as a fact
+        tag = f"compendium:{library}-{'.'.join(installed.split('.')[:2])}"
+        for entry in data.values():
+            for row in (entry.get("claims") or []
+                        if isinstance(entry, dict) else []):
+                if isinstance(row, dict):
+                    row.setdefault("versions", versions)
+        lines.append(
+            f"note {where}: {library} {installed} is outside the file's "
+            f"range {versions}; its rows are adjudicated against "
+            f"{library} {installed} and never used as facts here (`mathema "
+            f"compendium export {library}` writes the rows that hold into "
+            f"a project compendium for this version)")
     stamp_library_rows(data, tag)
     mark_row_versions(data, library, aliases)
     for key, entry in data.items():
         if not isinstance(entry, dict) or _defines_only(entry):
             continue
         info = library_claims.get(key)
+        if info and lines:
+            # the key's applicable rows stay; this file's rows join them
+            names = {r.get("name") for r in info["entry"].get("claims") or []}
+            merged = dict(info["entry"])
+            merged["claims"] = list(info["entry"].get("claims") or []) + [
+                r for r in entry.get("claims") or []
+                if r.get("name") not in names]
+            entries[key] = {"entry": merged, "source": info["source"]}
+            continue
         entries[key] = ({"entry": info["entry"], "source": info["source"]}
                         if info else {"entry": entry, "source": where})
-    return entries, True, []
+    return entries, True, lines
 
 
 def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
@@ -947,6 +983,30 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
                 if c.get("name") in names
                 and (c.get("meta") or {}).get("mathema.defaults")}
     return now != recorded
+
+
+def _library_version_moved(merged_entry: dict,
+                           verified_entry: dict) -> "tuple | None":
+    """Intent:
+        `(recorded, installed)` when a library key's record was
+        adjudicated against another release of the library than the one
+        installed now: a row applying here carries a `mathema.compendium`
+        tag (`compendium:pandas-3.0`) other than the one its namesake in
+        the record carries (`compendium:pandas-2.2`). Each is shown
+        without its `compendium:` prefix. None when every such pair
+        agrees.
+    """
+    def tags(rows) -> dict:
+        return {c.get("name"): str((c.get("meta") or {})
+                                   .get("mathema.compendium"))
+                for c in rows or [] if isinstance(c, dict) and c.get("name")
+                and (c.get("meta") or {}).get("mathema.compendium")}
+    now = tags((merged_entry or {}).get("claims"))
+    was = tags((verified_entry or {}).get("claims"))
+    for name in sorted(now):
+        if name in was and was[name] != now[name]:
+            return (was[name].split(":", 1)[-1], now[name].split(":", 1)[-1])
+    return None
 
 
 def _pseudo_infinity_moved(fn, facts, merged_entry: dict,
@@ -1012,8 +1072,130 @@ def _unsettled_library_hints(key: str, claims: list) -> list:
     return out
 
 
+def _import_failure(key: str, root: str) -> "str | None":
+    """Intent:
+        Why the module a dotted key lives in does not import, as
+        `importing <module> raises <Error>: <message>`, trying the
+        longest module prefix of the key first; None when a prefix
+        imports or none could be tried.
+    """
+    import importlib
+    import sys
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    parts = key.split(".")
+    for end in range(len(parts) - 1, 0, -1):
+        module = ".".join(parts[:end])
+        try:
+            importlib.import_module(module)
+            return None
+        except ModuleNotFoundError as e:
+            if e.name and module.startswith(e.name):
+                continue
+            return f"importing {module} raises ModuleNotFoundError: {e}"
+        except Exception as e:
+            return f"importing {module} raises {type(e).__name__}: {e}"
+    return None
+
+
+def _unparseable_claim_name(entry: dict) -> "str | None":
+    """The name of the first claim of a declared entry that does not
+    parse as a claim, or None when each one does (or has no name)."""
+    from .conjecture import claim
+    for row in entry.get("claims") or []:
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        text = row.get("statement") or row.get("law")
+        if not text:
+            continue
+        try:
+            claim(str(text), name=row["name"])
+        except Exception:
+            return str(row["name"])
+    return None
+
+
+def _no_applicable_file_note(key: str, entry: dict, root: str) -> str:
+    """Intent:
+        The line for a recorded library key no applicable claims file
+        states rows for: the library and installed version, each claims
+        file about the library with its range, and that the record is
+        kept as it is.
+    """
+    from .compendium import _installed_version
+    from .compendium.status import _library_files
+    from .spec import read_claims_file
+    library = key.split(".")[0]
+    files = _library_files(root).get(library, [])
+    aliases: list = []
+    for f in files:
+        aliases += list(f.get("aliases") or ())
+    installed = _installed_version(library, aliases)
+    have = (f"{library} {installed}" if installed
+            else f"{library}, which is not installed here")
+
+    def states_key(f: dict) -> bool:
+        path = f["source"]
+        if path.startswith(os.path.join("mathema", "compendium") + os.sep):
+            from .compendium import _bundled_dir
+            path = os.path.join(_bundled_dir(),
+                                os.path.relpath(path, os.path.join(
+                                    "mathema", "compendium")))
+        else:
+            path = os.path.join(root, path)
+        try:
+            return key in (read_claims_file(path, f["source"]) or {})
+        except Exception:
+            return False
+    ranges = "; ".join(f"{f['source']} states it for {f['versions']}"
+                       for f in files if states_key(f))
+    return (f"note {key}: no claims file about {key} applies to {have}"
+            + (f" ({ranges})" if ranges else "")
+            + "; its record is kept as it is and not re-adjudicated")
+
+
+def _out_of_range_notes(root: str, heads: set) -> list:
+    """Intent:
+        One line for each library in `heads` (the top-level modules the
+        swept functions call) that is installed outside the range of
+        every claims file about it: its version, each file with its
+        range, and the command that shows more.
+    """
+    from .compendium import _installed_version
+    from .compendium.status import _library_files
+    files = _library_files(root)
+    out: list = []
+    for library in sorted(heads):
+        about = files.get(library) or []
+        if not about or any(f["in_range"] for f in about):
+            continue
+        aliases: list = []
+        for f in about:
+            aliases += list(f.get("aliases") or ())
+        installed = _installed_version(library, aliases)
+        if installed in (None, "*"):
+            continue
+        groups: dict = {}
+        for f in about:
+            groups.setdefault((f["origin"], f["versions"]), []).append(
+                f["source"])
+        ranges = "; ".join(
+            f"{paths[0]} ({versions})" if len(paths) == 1 else
+            f"{len(paths)} {origin} files under "
+            f"{os.path.dirname(os.path.commonprefix(paths)) or '.'}"
+            f" ({versions})"
+            for (origin, versions), paths in groups.items())
+        out.append(f"note {library} {installed} is outside the range of "
+                   f"every claims file about it, so none of their rows is "
+                   f"used here: {ranges}. `mathema compendium status "
+                   f"{library}` shows the calls; verifying a file by path "
+                   f"adjudicates its rows against {library} {installed}")
+    return out
+
+
 def _library_population(root: str, verified: dict, declared: dict,
-                        library_claims: dict) -> dict:
+                        library_claims: dict,
+                        heads: "set | None" = None) -> dict:
     """Intent:
         The library claim keys this sweep adjudicates, mapped to the
         claims file each one's rows come from: every key a swept
@@ -1049,7 +1231,10 @@ def _library_population(root: str, verified: dict, declared: dict,
                 wanted |= library_keys_called(fn, facts,
                                               library_claims=library_claims)
                 from .definitions import called_keys
-                wanted |= called_keys(fn, facts) & set(library_claims)
+                reached = called_keys(fn, facts)
+                wanted |= reached & set(library_claims)
+                if heads is not None:
+                    heads.update(k.split(".")[0] for k in reached)
                 from .authoring import resolve_declared
                 rows += list(resolve_declared(fn, file_entry={})
                              .get("claims") or [])
@@ -1076,7 +1261,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     from .compendium import external_premises as _external_premises
     from .compendium import install as _install_compendium
     from .compendium import load_library_claims
-    _install_compendium(root)
+    from . import compendium as _compendium
+    _compendium._QUIET["on"] = True
+    try:
+        _install_compendium(root)
+    finally:
+        _compendium._QUIET["on"] = False
     library_claims = load_library_claims(root)
     stub_premises = _external_premises(root, library_claims=library_claims)
     from .authoring import resolve_declared
@@ -1089,6 +1279,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        write_yaml)
 
     out = VerifyResult()
+    for lkey, row, where, reason in _compendium.unregistered_project_rows():
+        if not reason.startswith("the statement does not parse"):
+            # a row that does not parse is named by its key's failure
+            out.lines.append(f"note {lkey}: row {row!r} of {where} "
+                             f"registers no region, so it guards no "
+                             f"call: {reason}")
     # claims whose record differs from what is written only because the
     # canonical text moved in one release, reported once for the run
     release_moved: list = []
@@ -1114,7 +1310,26 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # join the population with their library claims, so each is
     # adjudicated against the installed library; project-declared keys
     # keep their own entry
-    library = _library_population(root, verified, declared, library_claims)
+    heads: set = set()
+    library = _library_population(root, verified, declared, library_claims,
+                                  heads)
+    out.lines.extend(_out_of_range_notes(root, heads))
+    # a project's own compendium file is adjudicated in full: each of
+    # its keys is a library key
+    for lkey in declared:
+        info = library_claims.get(lkey)
+        if info is not None and not info.get("bundled"):
+            library.setdefault(lkey, info["source"])
+    for lkey in sorted(library):
+        info = library_claims.get(lkey) or {}
+        by_file: dict = {}
+        for gone in info.get("replaced") or []:
+            by_file.setdefault(gone["source"], []).extend(gone["rows"])
+        for where, rows in by_file.items():
+            out.lines.append(
+                f"note {lkey}: the project replaces the bundled "
+                f"row{'s' if len(rows) != 1 else ''} {', '.join(rows)} of "
+                f"{where}; the other bundled rows still apply")
     for lkey in library:
         if lkey not in declared:
             info = library_claims[lkey]
@@ -1138,6 +1353,19 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         only = list(only or []) + sorted(eager)
         if not only:
             return out
+    # a library key recorded here whose rows no claims file states for
+    # the installed library any more (its file left its range, or is
+    # gone): the record is kept as it is, never re-adjudicated as if the
+    # library function were the project's own
+    from .compendium import is_library_record
+    kept_records = False
+    for key in sorted(set(verified) - set(declared) - set(broken)):
+        entry = (verified[key] or {}).get("entry") or {}
+        if key in library_claims or not is_library_record(entry):
+            continue
+        verified = {k: v for k, v in verified.items() if k != key}
+        out.lines.append(_no_applicable_file_note(key, entry, root))
+        kept_records = True
     # library keys first, so a premise resting on one sees the verdict
     # this run records for it
     keys = sorted(set(verified) | set(declared) | set(broken),
@@ -1150,7 +1378,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         keys = [k for k in keys if k in want]
         lock_only = [k for k in lock_only if k in want]
     if not keys and not lock_only:
-        out.nothing_declared = True
+        out.nothing_declared = not kept_records
         return out
 
     # phase 1: freshness + adjudication + record writes. Gating waits
@@ -1260,6 +1488,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             out.problems.append(msg)
             line = (f"FAIL {key}: cannot resolve to a live function "
                     f"(declared in {source})")
+            failure = _import_failure(key, root)
+            if failure:
+                line += f"; {failure}"
             row = {"key": key, "why": "unresolvable", "passed": False,
                    "problems": ["cannot resolve to a live function"],
                    "counts": {}, "claims": []}
@@ -1396,7 +1627,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             else:
                 where = ((declared_info or {}).get("source")
                          or "its docstring or claims file")
-                msg = (f"{key}: a claim declared in {where} does not "
+                bad = _unparseable_claim_name(
+                    (declared_info or {}).get("entry") or {})
+                which = f"the claim {bad!r}" if bad else "a claim"
+                msg = (f"{key}: {which} declared in {where} does not "
                        f"parse ({e}); correct it there and re-run verify")
                 out.authoring_errors.append(msg)
             out.problems.append(msg)
@@ -1471,8 +1705,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             "mathema.definition_rows") or {})
         pinf_moved = _pseudo_infinity_moved(fn, facts_now, merged_entry,
                                             verified_entry)
+        version_moved = (_library_version_moved(merged_entry, verified_entry)
+                         if key in library else None)
         is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
                     and recorded_fp == current_fp and not defaults_moved
+                    and version_moved is None
                     and not pinf_moved and not definitions_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
@@ -1556,7 +1793,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             key, rec.probes, verified_entry or {}, retired_noted)
         out.lines.extend(late_notes)
         out.lines.extend(_born_falsified_hint(key, rec.probes,
-                                              verified_entry or {}))
+                                              verified_entry or {},
+                                              library.get(key)))
         _apply_declared_extras(rec, merged_entry)
         moved = _grammar_changes(rec.probes, verified_entry or {})
         if moved:
@@ -1564,6 +1802,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         rec.probes.append(dependencies_current_probe(rec.dependencies,
                                                      root=root))
         why = ("dependency changed" if dependency_changed
+               else (f"library version changed ({version_moved[0]} to "
+                     f"{version_moved[1]})") if version_moved is not None
+               and recorded_form
                else "defaults changed" if defaults_moved
                and facts_now.form == recorded_form
                and recorded_fp == current_fp
@@ -1619,6 +1860,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             continue
         if isinstance(stored_dc, dict):
             stored_dc["verdict"] = dc_now.verdict
+            stored_dc["note"] = dc_now.note
             stored_dc["sketch"] = dc_now.sketch
             stored_dc["counterexample"] = dc_now.counterexample
             entry = vinfo["entry"] if vinfo else None
@@ -1634,6 +1876,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                   f"{recorded_form}")
         else:
             stored_dc.verdict = dc_now.verdict
+            stored_dc.note = dc_now.note
             stored_dc.sketch = dc_now.sketch
             stored_dc.counterexample = dc_now.counterexample
             entry = settled.get(key)
@@ -1641,6 +1884,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 for c in entry["entry"].get("claims") or []:
                     if c.get("name") == "dependencies_current":
                         c["verdict"] = dc_now.verdict
+                        c["note"] = dc_now.note
                         c["sketch"] = dc_now.sketch
                         c["counterexample"] = dc_now.counterexample
                 recorded_form = (entry["entry"].get("identity") or {}).get("form")

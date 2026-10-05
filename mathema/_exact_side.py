@@ -50,8 +50,8 @@ def to_exact(value):
     if np is not None and isinstance(value, np.floating):
         return to_exact(float(value))
     if isinstance(value, list) and value and all(isinstance(v, float) for v in value):
-        if np is not None:
-            return to_exact(np.asarray(value, dtype=float))
+        # a list stays a list, so the function receives the type it was
+        # called with (`xs + xs` concatenates)
         return [to_exact(v) for v in value]
     return value
 
@@ -213,25 +213,30 @@ def register_source(code, src: str, tree) -> None:
         return
 
 
-def exact_literals(code):
-    """`code` with every float literal replaced by the exact decimal it
-    was written as (the shortest decimal that reads back as the float),
-    nested code objects included."""
+def exact_literals(code, written: bool = True):
+    """`code` with its literals exact. `written`: each numeric literal
+    is the number written in the claim (its source text, through the
+    registered twin, else the shortest decimal that reads back as the
+    float). Otherwise each float literal is the exact value of the float
+    it parses to, the number representation's own reading. Integer
+    literals divide and take negative powers exactly either way; nested
+    code objects included."""
     import math
     import types
     if code is None:
         return None
-    twin = _EXACT_TWINS.get(code)
-    if twin is not None:
-        return twin
+    if written:
+        twin = _EXACT_TWINS.get(code)
+        if twin is not None:
+            return twin
     consts = []
     for c in code.co_consts:
         if isinstance(c, float) and not isinstance(c, bool) and math.isfinite(c):
-            consts.append(Fraction(repr(c)))
+            consts.append(Fraction(repr(c)) if written else Fraction(c))
         elif type(c) is int:
             consts.append(ExactInt(c))
         elif isinstance(c, types.CodeType):
-            consts.append(exact_literals(c))
+            consts.append(exact_literals(c, written))
         else:
             consts.append(c)
     try:
@@ -248,8 +253,10 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
         claim binds) called with the executed floats and read back
         exactly, or None when either side is not exact. With
         `exact_calls` each callee runs on the exact values themselves
-        (Fractions in place of floats), the mathematics of the point
-        rather than its float computation.
+        (Fractions in place of floats) and the claim's literals are the
+        numbers as written: the mathematics of the point. Without it the
+        literals are the float readings of the computation, the way the
+        number representation reads them.
     """
     from ._math_vocab import MATH_CONSTANTS
     # a named constant (pi, e) keeps its float, which no exact side
@@ -262,8 +269,10 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
         exact_env.setdefault(k, wrap(v, exact_calls))
     exact_env["__exact__"] = _literal
     try:
-        left = eval(exact_literals(code_l), {"__builtins__": {}}, exact_env)
-        right = eval(exact_literals(code_r), {"__builtins__": {}}, exact_env) \
+        left = eval(exact_literals(code_l, exact_calls),
+                    {"__builtins__": {}}, exact_env)
+        right = eval(exact_literals(code_r, exact_calls),
+                     {"__builtins__": {}}, exact_env) \
             if code_r is not None else None
     except Exception:
         return None

@@ -8,6 +8,7 @@ branch where its two sides are equal. On an integer domain they are
 enumerated exactly; on a real interval each is solved for and run with
 its float neighbours."""
 import math
+from fractions import Fraction
 
 import sympy
 
@@ -28,7 +29,7 @@ def stepped(x: float, n: float) -> float:
 
 
 def tenths(x: float) -> float:
-    return math.floor(x / 0.1) / 10
+    return math.floor(10 * x) / 10
 
 
 def _found(fn, law):
@@ -81,14 +82,18 @@ def test_a_long_range_is_capped_and_says_how_many_were_skipped():
 
 
 def test_a_real_domain_computation_falls_at_a_discontinuity():
-    # 0.3 / 0.1 is 2.9999999999999996 in float64, so f(0.3) is 0.2
-    assert tenths(0.3) == 0.2
+    # the float nearest 0.3 lies just below 3/10, so floor(10*x)/10 is
+    # 2/10 there in exact arithmetic, while 10 * x rounds up to 3.0 in
+    # float64 and f returns 0.3 (the claim side is read exactly on the
+    # computation line, ruling of 2026-10-01)
+    assert tenths(0.3) == 0.3
+    assert math.floor(10 * Fraction(0.3)) == 2
     rows = {p.name: p for p in mathema.check(
         tenths, claims=["for x in [0, 1], f(x) == floor(10*x)/10"]).probes}
     (float_row,) = [p for n, p in rows.items() if n.endswith("[float]")]
     assert float_row.verdict == "falsified", float_row.note
     x = float(float_row.counterexample.split(":")[0].split("=")[1])
-    assert tenths(x) != math.floor(10 * x) / 10
+    assert Fraction(tenths(x)) != Fraction(math.floor(10 * Fraction(x)), 10)
     assert float_row.route == "probe:semi_analytical"
     assert " at discontinuities of " in float_row.note
     assert "the domain has" not in float_row.note

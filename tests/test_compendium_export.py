@@ -55,7 +55,7 @@ def test_export_keeps_the_verified_rows_and_their_levels(tmp_path):
 def test_an_installed_library_is_ranged_from_its_installed_version(tmp_path):
     import numpy
     _seed_verified(tmp_path, "numpy.tanh", [
-        {"name": "tanh_bounded",
+        {"name": "tanh_in_unit",
          "statement": "for x in [-1, 1], -1 <= f(x) <= 1",
          "verdict": "holds"}], intent="tanh(x, /, out=None) Hyperbolic "
                                       "tangent.")
@@ -68,9 +68,10 @@ def test_an_installed_library_is_ranged_from_its_installed_version(tmp_path):
     # first line, which is not a statement about it worth exporting
     assert "intent" not in export_compendium("numpy", str(tmp_path))[
         "numpy.tanh"]
-    major_minor = ".".join(numpy.__version__.split(".")[:2])
+    # the installed minor release alone, the one the rows were checked on
+    major, minor = (int(p) for p in numpy.__version__.split(".")[:2])
     assert export_compendium("numpy", str(tmp_path))["versions"] == \
-        f">={major_minor}"
+        f">={major}.{minor},<{major}.{minor + 1}"
 
 
 def test_the_written_file_is_a_claims_file_the_loader_reads(tmp_path):
@@ -79,7 +80,7 @@ def test_the_written_file_is_a_claims_file_the_loader_reads(tmp_path):
     from mathema.compendium import load_library_claims
     from mathema.spec import validate_claims_file
     _seed_verified(tmp_path, "numpy.tanh", [
-        {"name": "tanh_bounded",
+        {"name": "tanh_in_unit",
          "statement": "for x in [-1, 1], -1 <= f(x) <= 1",
          "verdict": "holds"}])
     path = write_compendium("numpy", root=str(tmp_path))
@@ -92,7 +93,8 @@ def test_the_written_file_is_a_claims_file_the_loader_reads(tmp_path):
     validate_claims_file(data, "claims/numpy.claims.yaml")
     info = load_library_claims(str(tmp_path))["numpy.tanh"]
     assert info["source"] == "claims/numpy.claims.yaml"
-    (row,) = info["entry"]["claims"]
+    (row,) = [r for r in info["entry"]["claims"]
+              if r["name"] == "tanh_in_unit"]
     assert row["meta"]["mathema.compendium_claimed"] == "holds"
 
 
@@ -106,7 +108,7 @@ def test_export_writes_where_it_is_told(tmp_path):
 
 
 def test_a_library_key_keeps_its_docstring_intent_and_exports_row_notes(
-        tmp_path):
+        tmp_path, monkeypatch):
     # a library key's record states the function's own intent like any
     # function's; what the compendium file says about the library's
     # behaviour is a row's note, and export writes it on that row
@@ -148,6 +150,13 @@ def test_a_library_key_keeps_its_docstring_intent_and_exports_row_notes(
     assert (entry.get("meta") or {}).get("mathema.intent_provenance") != \
         "compendium"
     assert entry.get("intent") != bundled["note"]
+    # bundled rows export only below the supported floor, where they are
+    # not already shipped for the installed release
+    import mathema.compendium as comp
+    real = comp._installed_version
+    monkeypatch.setattr(comp, "_installed_version",
+                        lambda lib, aliases=(): "1.24.4" if lib == "numpy"
+                        else real(lib, aliases))
     data = export_compendium("numpy", root=str(tmp_path))
     assert "intent" not in data["numpy.arcsin"]
     (row,) = [r for r in data["numpy.arcsin"]["claims"]
