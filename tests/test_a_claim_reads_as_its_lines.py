@@ -59,3 +59,17 @@ def test_the_empty_input_line_sits_in_the_block():
     assert lines[start].endswith("falsified at xs = []"), lines[start]
     empty = next(line for line in lines[start + 1:] if "f([])" in line)
     assert empty.split()[:3] == ["falsified", "policy", "f([])"], empty
+
+
+def test_the_mathematics_line_keeps_its_own_verdict_under_an_empty_input_witness():
+    # min(xs, "a") has no value at any drawn xs, so the mathematics is
+    # undecided; f([]) raises, which falsifies the claim, and the
+    # mathematics line still says unknown
+    rec = mathema.check(first, claims=[mathema.claim(
+        'for xs in [0, 1]^n, f(xs) >= min(xs, "a")', name="lead")])
+    (row,) = [p for p in rec.probes if p.name == "lead"]
+    assert row.verdict == "falsified"
+    assert row.meta["mathema.mathematics"]["verdict"] == "unknown", row.meta
+    lines = _lines(rec)
+    start = next(i for i, line in enumerate(lines) if line.startswith("  lead  "))
+    assert lines[start + 1].split()[:2] == ["unknown", "mathematics"], lines[start + 1]

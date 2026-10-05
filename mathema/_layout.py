@@ -132,9 +132,16 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
         falsified = []
         if meta.get("mathema.empty_input"):
             # the claim was falsified by its empty-input line; the
-            # mathematics over non-empty inputs stands as it was found
-            lines.append(_row("proven" if main.sketch else "holds", "mathematics",
-                              over_the_reals(main.statement)))
+            # mathematics over non-empty inputs is printed as it was found
+            found = meta.get("mathema.mathematics") or {}
+            verdict = (found.get("verdict") or "unknown").split(":", 1)[0]
+            detail = ""
+            if verdict == "holds" and found.get("n"):
+                detail = count_words(found["n"], meta.get("mathema.drawn"))
+            elif verdict in ("unknown", "skipped") and found.get("note"):
+                detail = found["note"]
+            lines.append(_row(verdict, "mathematics", over_the_reals(main.statement),
+                              detail))
         else:
             lines.append(_row(_verdict(main), "mathematics",
                               over_the_reals(main.statement), _detail(main, count_words)))
