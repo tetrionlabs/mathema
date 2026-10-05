@@ -20,6 +20,7 @@ import contextvars
 from dataclasses import dataclass, field, replace
 
 import sympy
+from fractions import Fraction
 
 from .._math_vocab import (_BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _PV_FUNC,
                            _SYMPY_FUNCS, _call_name)
@@ -1578,18 +1579,79 @@ def _returns_no_value(out) -> bool:
         return False
 
 
-def _witness_corroborated(callable_target, arg_exprs: list,
-                          witness: dict, exc: "str | None" = None) -> bool:
+def _certified_guard(cond, witness: dict, ext_params: dict,
+                     domain: dict) -> "str | None":
     """Intent:
-        True only when the real call, executed at the candidate
-        witness point, actually raises, the executed-witness bar a
-        guard disproof must clear; for a `NO_VALUE` guard, a call that
-        returns a nan or an infinity corroborates too. Evaluates each
-        substituted argument expression at the witness numerically;
-        any evaluation failure, or a call that returns a (finite)
-        value, refuses corroboration.
+        A certificate, in words, that the raise guard `cond` holds
+        somewhere in the declared domain near derive's witness, checked
+        by interval balls (`_exact_witness`) and not by the solver that
+        found the witness; None when it cannot be certified. One free
+        coordinate only: `G < 0` (or `<=`) by a ball strictly below zero
+        at a rational point near the witness; `G == 0` (or `<=`) by
+        certified opposite signs at the ends of a small rational
+        interval inside the domain over which G is continuous (a finite
+        enclosure of G over the whole interval, built from continuous
+        operations only), so G has a root inside it.
     """
-    from ._partiality import NO_VALUE
+    from .._exact_witness import (Undecided, ball, certified_sign, in_bound,
+                                  rational_near)
+    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    if not isinstance(cond, (sympy.Eq, sympy.Lt, sympy.Le, sympy.Gt,
+                             sympy.Ge)):
+        return None
+    g = cond.lhs - cond.rhs
+    if isinstance(cond, (sympy.Gt, sympy.Ge)):
+        g = -g
+    free = list(g.free_symbols)
+    if len(free) != 1:
+        return None
+    sym = free[0]
+    name = next((n for n, s in ext_params.items() if s == sym), None)
+    if name is None or sym not in witness:
+        return None
+    bound = (domain or {}).get(name)
+
+    def inside(q) -> bool:
+        return bound is None or in_bound(q, bound)
+
+    def check():
+        r = rational_near(witness[sym])
+        if isinstance(cond, (sympy.Lt, sympy.Le, sympy.Gt, sympy.Ge)):
+            if inside(r) and certified_sign(g, {sym: r}) < 0:
+                return (f"certified by interval arithmetic: "
+                        f"{sympy.sstr(g)} < 0 at {name} = {r}")
+            if isinstance(cond, (sympy.Lt, sympy.Gt)):
+                return None
+        for digits in (30, 15):
+            width = Fraction(1, 10 ** digits)
+            a, b = r - width, r + width
+            if not (inside(a) and inside(b) and inside(r)):
+                continue
+            sa, sb = certified_sign(g, {sym: a}), certified_sign(g, {sym: b})
+            if sa * sb < 0:
+                ball(g, {sym: (a, b)}, 200)
+                return (f"certified by interval arithmetic: "
+                        f"{sympy.sstr(g)} changes sign over {name} in "
+                        f"{sympy.Float(sympy.Rational(r.numerator, r.denominator), digits + 5)}"
+                        f" ± 1e-{digits} and is continuous there, so it is "
+                        f"zero inside")
+        return None
+    try:
+        return _with_timeout(check, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except (Undecided, ArithmeticError, TypeError, ValueError):
+        return None
+
+
+def _call_at_witness(callable_target, arg_exprs: list,
+                     witness: dict) -> "tuple | None":
+    """Intent:
+        The real call executed at the candidate witness point:
+        `("raised", exception)` or `("returned", value)`, or None when
+        an argument has no real numeric value there. Each substituted
+        argument expression is evaluated numerically.
+    """
     try:
         annotations = [prm.annotation for prm in
                        callable_signature(callable_target).parameters.values()]
@@ -1607,9 +1669,9 @@ def _witness_corroborated(callable_target, arg_exprs: list,
         except TimeoutError:
             raise
         except Exception:
-            return False
+            return None
         if abs(v.imag) > 1e-12:
-            return False
+            return None
         # a float-annotated parameter always gets a float; otherwise an
         # integral value is passed as int, since a float where the code
         # expects an int (a range() bound) would raise a TypeError that
@@ -1623,12 +1685,54 @@ def _witness_corroborated(callable_target, arg_exprs: list,
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            out = callable_target(*vals)
+            return ("returned", callable_target(*vals))
     except TimeoutError:
         raise
-    except Exception:
+    except Exception as e:
+        return ("raised", e)
+
+
+def _witness_corroborated(callable_target, arg_exprs: list,
+                          witness: dict, exc: "str | None" = None) -> bool:
+    """Intent:
+        True only when the real call, executed at the candidate
+        witness point, actually raises, the executed-witness bar a
+        guard disproof must clear; for a `NO_VALUE` guard, a call that
+        returns a nan, an infinity or a complex value corroborates too.
+        Any evaluation failure, or a call that returns a (finite) value,
+        refuses corroboration.
+    """
+    from ._partiality import NO_VALUE
+    outcome = _call_at_witness(callable_target, arg_exprs, witness)
+    if outcome is None:
+        return False
+    if outcome[0] == "raised":
         return True
-    return exc == NO_VALUE and _returns_no_value(out)
+    return exc == NO_VALUE and _returns_no_value(outcome[1])
+
+
+def _returned_words(callable_target, arg_exprs: list, witness: dict) -> str:
+    """What the real call did at the witness, for a counterexample: the
+    complex value, nan or infinity it returned, or the exception it
+    raised; empty when it returned an ordinary value."""
+    outcome = _call_at_witness(callable_target, arg_exprs, witness)
+    if outcome is None:
+        return ""
+    kind, value = outcome
+    if kind == "raised":
+        return f"raised {type(value).__name__}"
+    if isinstance(value, complex) or getattr(value, "dtype", None) is not None \
+            and getattr(value.dtype, "kind", "") == "c":
+        return f"returned the complex value {value!r}"
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if f != f:
+        return "returned nan"
+    if f in (float("inf"), float("-inf")):
+        return f"returned {f!r}"
+    return ""
 
 
 def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
@@ -1733,11 +1837,17 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             # witness the execution refutes is an engine artifact
             # (the false-falsified family), never a counterexample.
             target = (callables or {}).get(target_name)
+            certified = None
             if target is None or not _witness_corroborated(
                     target, arg_exprs, witness, exc):
-                uncorroborated = True
-                undecided = True
-                continue
+                # every float call returns there; the guard is checked at
+                # the exact witness by certified interval balls instead
+                certified = _certified_guard(cond, witness, ext_params,
+                                             domain)
+                if certified is None:
+                    uncorroborated = True
+                    undecided = True
+                    continue
             # a coordinate the claim's evaluation point fixes is named
             # at that value, the one the executed call used
             at_witness = {**witness, **fixed}
@@ -1747,18 +1857,24 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             from ._partiality import NO_VALUE
             fails = ("has no value" if exc == NO_VALUE
                      else f"raises {exc or 'an exception'}")
+            shown = (_returned_words(target, arg_exprs, witness)
+                     if exc == NO_VALUE and target is not None else "")
             return ProofResult(
                 "disproven",
                 sketch=f"{call_text} {fails} inside the declared "
-                       f"domain (guard {_cond_text(cond)} holds at {where}), "
-                       "so the claim has no value there, narrow the claim's "
-                       "domain to where every call returns, or state the "
-                       "raising region as its own raises(...) claim",
-                counterexample=where,
+                       f"domain (guard {_cond_text(cond)} holds at {where}"
+                       + (f"; {certified}" if certified else "")
+                       + "), so the claim has no value there, narrow the "
+                       "claim's domain to where every call returns, or "
+                       "state the raising region as its own raises(...) "
+                       "claim",
+                counterexample=(f"{where}: {call_text} {shown}" if shown
+                                else where),
                 witness=_witness_numbers(
                     {name: at_witness[sym] for name, sym in ext_params.items()
                      if sym in at_witness}),
-                meta={"mathema.witness_executed": True})
+                meta=({"mathema.witness_certified": certified}
+                      if certified else {"mathema.witness_executed": True}))
         undecided = True
     if undecided:
         meta = ({"mathema.engine": "guard-witness-uncorroborated"}
@@ -1802,6 +1918,79 @@ _CLAIM_FUNCTION_REGIONS: dict = {
     "loggamma": (_nonpositive_integer_region, False),
     "factorial": (lambda u: _nonpositive_integer_region(u + 1), False),
 }
+
+
+#: the lifted functions with no real value somewhere, by sympy class
+#: name: the region of their argument where they have none
+_REAL_ONLY_REGIONS: dict = {
+    "log": lambda u: sympy.Le(u, 0),
+    "asin": lambda u: sympy.Gt(sympy.Abs(u), 1),
+    "acos": lambda u: sympy.Gt(sympy.Abs(u), 1),
+    "acosh": lambda u: sympy.Lt(u, 1),
+    "atanh": lambda u: sympy.Ge(sympy.Abs(u), 1),
+}
+
+
+def _real_only_guards(expr, domain: dict) -> list:
+    """Intent:
+        The no-value guards `[(region, NO_VALUE)]` of a lifted body over
+        the reals, read from the lifted expression itself: a power with
+        a non-integer exponent has none where its base is negative, and
+        a logarithm, arcsine, arccosine, inverse hyperbolic cosine or
+        tangent none outside their real domains. The lift reads every
+        such call as the function over the reals whether or not a
+        compendium row states its definedness, so the mathematics never
+        takes a complex value for one. Empty when a parameter ranges
+        over C.
+    """
+    from ..probing import _bound_is_complex
+    from ._partiality import NO_VALUE
+    if any(_bound_is_complex(b) for b in domain.values()):
+        return []
+    exprs = expr if isinstance(expr, tuple) else (expr,)
+    out: list = []
+
+    def add(region) -> None:
+        if region not in (sympy.true, sympy.false) \
+                and region not in [r for r, _ in out]:
+            out.append((region, NO_VALUE))
+
+    def walk(node, context) -> None:
+        # `context` is the branch condition under which `node` is
+        # evaluated: a Piecewise evaluates a piece only where its own
+        # condition holds and no earlier one does
+        if isinstance(node, sympy.Piecewise):
+            earlier = sympy.false
+            for piece, cond in node.args:
+                here = sympy.And(context, cond, sympy.Not(earlier))
+                if here is not sympy.false:
+                    walk(piece, here)
+                    if not isinstance(cond, sympy.logic.boolalg.BooleanAtom):
+                        walk(cond, sympy.And(context, sympy.Not(earlier)))
+                earlier = sympy.Or(earlier, cond)
+            return
+        region = None
+        if isinstance(node, sympy.Pow):
+            k = node.exp
+            if k.is_number and k.is_real and k.is_integer is False \
+                    and node.base.free_symbols:
+                region = sympy.Lt(node.base, 0)
+        elif isinstance(node, sympy.Function):
+            build = _REAL_ONLY_REGIONS.get(type(node).__name__.lower())
+            if build is not None and len(node.args) == 1 \
+                    and node.args[0].free_symbols:
+                region = build(node.args[0])
+        if region is not None:
+            add(region if context is sympy.true
+                else sympy.And(context, region))
+        for arg in node.args:
+            if isinstance(arg, sympy.Basic):
+                walk(arg, context)
+
+    for e in exprs:
+        if isinstance(e, sympy.Basic):
+            walk(e, sympy.true)
+    return out
 
 
 def _integer_valued_over(expr, integer_names: set) -> bool:
@@ -3675,6 +3864,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         _walk_notes.setdefault("unread", f"{fn.__name__} {unread}")
     if implicit:
         piecewise_guards = list(piecewise_guards) + implicit
+    if lifted is not None:
+        real_only = _real_only_guards(lifted.expr, domain or {})
+        if real_only:
+            piecewise_guards = list(piecewise_guards) + real_only
 
     # Domain assumptions (e.g. sigma declared nonnegative) must be baked
     # into the symbols *before* the law is parsed, not substituted into

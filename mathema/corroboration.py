@@ -64,13 +64,17 @@ class Corroboration:
 class StabilitySweep:
     """A float sweep's outcome: `fragile_point` is the first in-domain
     point where the computation breaks (else None), `detail` naming
-    the failure, `checked` how many in-domain points were executed, and
+    the failure, `checked` how many in-domain points were executed,
     `in_flight` the point being executed when the sweep was cut short
-    (a wall-clock cap), else None."""
+    (a wall-clock cap), else None, and `undecided` how many points the
+    claim's own side had no value at, the first with its reason."""
     fragile_point: dict | None = field(default=None)
     detail: str = ""
     checked: int = 0
     in_flight: dict | None = None
+    undecided: int = 0
+    undecided_point: dict | None = None
+    undecided_detail: str = ""
 
 
 def _is_number(v) -> bool:
@@ -182,6 +186,12 @@ def corroborate_disproof(evaluate: Callable[[dict], "bool | None"],
 INCONCLUSIVE = "<inconclusive>"
 
 
+class Undecided(str):
+    """What `probe_finite` returns at a point where the claim's own side
+    has no value, exact or float: the reason, as text. Not counted among
+    the executed points, and the line cannot hold while one stands."""
+
+
 def sweep_stability(probe_finite: Callable[[dict], "str | None"],
                     names: list[str], *, sample: Callable, corners: list,
                     admits: Callable[[dict], bool],
@@ -214,6 +224,11 @@ def sweep_stability(probe_finite: Callable[[dict], "str | None"],
         detail = probe_finite(point)
         out.in_flight = None
         if detail is INCONCLUSIVE:
+            continue
+        if isinstance(detail, Undecided):
+            if out.undecided_point is None:
+                out.undecided_point, out.undecided_detail = point, str(detail)
+            out.undecided += 1
             continue
         out.checked += 1
         if detail is not None:

@@ -383,10 +383,11 @@ def _probe_density(risk: dict, n_trials: int, policy: _RiskPolicy = _RISK) -> di
            "n": n_trials, "factors": dict(risk)}
 
 
-# the relative half of the default closeness allowance: with no declared
-# tolerance, two values are equal when they agree within this relative
-# tolerance or the absolute 1e-9, whichever is larger
-DEFAULT_RELATIVE_TOLERANCE = 1e-6
+# the relative half of the default closeness allowance on a computation
+# line: with no declared tolerance, two values are equal when they agree
+# within this tolerance relative to the larger result, or the absolute
+# 1e-9, whichever is larger
+DEFAULT_RELATIVE_TOLERANCE = 1e-7
 
 
 def plain_value(v):
