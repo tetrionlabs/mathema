@@ -15,6 +15,8 @@ compendium row is testimony until then.
 """
 from __future__ import annotations
 
+import os
+
 _SUPPORTED = ("proven", "holds")
 
 #: authoring surfaces whose rows are regenerated on every run rather
@@ -27,29 +29,65 @@ def _installed(library: str) -> "str | None":
     return _installed_version(library)
 
 
-def _stated_notes(library: str, root: str) -> dict:
+def _compendium_file_entries(library: str, root: str) -> list:
     """Intent:
-        `{(key, claim name): note}` for every `<library>.*` row a claims
-        file states a `note:` on: the library claims files that apply
-        (bundled, then the project's), overridden by the project's own
-        claims files.
+        `(key, entry)` for every entry of every compendium file about
+        `library`, bundled first, then the project's, whatever version
+        range each file states: the rows as their files write them.
     """
-    from . import load_library_claims
+    from . import _bundled_dir, pop_library_fields
+    from ..spec import claims_file_paths, read_claims_file
+    bundled = _bundled_dir()
+    paths = claims_file_paths(bundled)
+    paths += claims_file_paths(root, exclude=(bundled,))
+    out: list = []
+    for path in paths:
+        try:
+            data = read_claims_file(path, os.path.relpath(path, root)) or {}
+        except Exception:
+            continue
+        if data.get("compendium") is None:
+            continue
+        data = dict(data)
+        data.pop("grammar", None)
+        fields = pop_library_fields(data)
+        if fields.library != library:
+            continue
+        out.extend((k, e) for k, e in data.items() if isinstance(e, dict))
+    return out
+
+
+def _stated_rows(library: str, root: str) -> dict:
+    """Intent:
+        `{(key, claim name): row}` for every `<library>.*` row a claims
+        file states: the compendium files about the library (bundled,
+        then the project's, in or out of their version range), then the
+        project's own claims files, a later file's row replacing an
+        earlier one of the same name.
+    """
     from ..spec import load_declared
 
-    out: dict = {}
-    entries = [(k, info["entry"])
-               for k, info in load_library_claims(root).items()]
+    entries = _compendium_file_entries(library, root)
     entries += [(k, info.get("entry") or {})
                 for k, info in load_declared(root).items()
                 if isinstance(info, dict)]
+    out: dict = {}
     for key, entry in entries:
         if key.split(".")[0] != library:
             continue
         for c in (entry or {}).get("claims") or []:
-            if isinstance(c, dict) and c.get("name") and c.get("note"):
-                out[(key, c["name"])] = str(c["note"])
+            if isinstance(c, dict) and c.get("name"):
+                out[(key, c["name"])] = c
     return out
+
+
+def _stated_notes(library: str, root: str) -> dict:
+    """Intent:
+        `{(key, claim name): note}` for every `<library>.*` row a claims
+        file states a `note:` on (`_stated_rows`).
+    """
+    return {k: str(c["note"]) for k, c in _stated_rows(library, root).items()
+            if c.get("note")}
 
 
 def export_compendium(library: str, root: str = ".") -> dict:
@@ -70,9 +108,11 @@ def export_compendium(library: str, root: str = ".") -> dict:
         claimed about it. A key with no row to transfer is left out.
         The record's intent travels with the rows, except for a function
         with no Python source, whose recorded intent is only its
-        docstring's first line. A row's note is the one its claims file
-        states (the project's own claims files first, then the library
-        claims files that apply), never the note the adjudication wrote.
+        docstring's first line. A row's statement, route and note are the
+        ones its claims file states (`_stated_rows`), never the record's
+        rendering of the resolved claim, the route that decided it, or
+        the note the adjudication wrote; a row no claims file states
+        keeps the record's statement.
     """
     from ..spec import load_verified
 
@@ -82,7 +122,7 @@ def export_compendium(library: str, root: str = ".") -> dict:
     else:
         versions = "*"
     out: dict = {"compendium": library, "versions": versions}
-    notes = _stated_notes(library, root)
+    stated_rows = _stated_rows(library, root)
     for key, info in sorted(load_verified(root).items()):
         if key.split(".")[0] != library:
             continue
@@ -97,11 +137,17 @@ def export_compendium(library: str, root: str = ".") -> dict:
             meta = c.get("meta") or {}
             if meta.get("mathema.surface") in _GENERATED_SURFACES:
                 continue
-            row = {"name": c.get("name"), "statement": statement}
-            if c.get("route") and c.get("route") != "best":
-                row["route"] = c["route"]
-            if notes.get((key, c.get("name"))):
-                row["note"] = notes[(key, c.get("name"))]
+            stated = stated_rows.get((key, c.get("name"))) or {}
+            stated_text = stated.get("statement") or stated.get("law")
+            row = {"name": c.get("name"),
+                   "statement": str(stated_text) if stated_text
+                   else statement}
+            asked = (stated.get("route") if stated
+                     else (c.get("authored") or {}).get("route", c.get("route")))
+            if asked and asked != "best":
+                row["route"] = asked
+            if stated.get("note"):
+                row["note"] = str(stated["note"])
             row["meta"] = {"mathema.compendium_claimed": c["verdict"]}
             rows.append(row)
         if rows:

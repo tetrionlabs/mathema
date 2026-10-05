@@ -85,7 +85,9 @@ def test_the_loop_end_to_end(project):
     assert r1.returncode == 1
     assert ("mathema accept math.log log_increasing --as trusted"
             in r1.stdout), r1.stdout
-    assert "adjudicate it against the installed library" in r1.stdout
+    assert ('to decide it, restate the row, then run: mathema check '
+            'math.log --claim "..."') in r1.stdout, r1.stdout
+    assert "let mathema verify adjudicate it" not in r1.stdout
     resting = _rows(project, "spkg.mod.widened")["rests"]
     assert resting["verdict"] == "unknown"
     assert "--as trusted" in (resting["note"] or "")
