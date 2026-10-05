@@ -3700,7 +3700,9 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
             f"of {name}, so the pin names nothing to pass"
             if missing else None)
     text = " ".join(str(t) for t in (cj.lhs, cj.rhs, cj.assuming) if t)
-    named = set(re.findall(r"\b[A-Za-z_]\w*\b", text))
+    # a name followed by a single `=` is a keyword argument of a grammar
+    # word (`var(m, ddof=1)`), not a read of that name
+    named = set(re.findall(r"\b([A-Za-z_]\w*)\b(?!\s*=(?!=))", text))
     # a method whose library states no signature takes a pin of any
     # name, passed on as a keyword
     any_keyword = bool(getattr(fn, "__mathema_unstated_signature__", False))
