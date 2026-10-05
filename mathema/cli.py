@@ -2120,6 +2120,45 @@ def _list_policies(key: str, policies: list) -> None:
                 print(_policy_line(p))
 
 
+def _write_split(args) -> int:
+    """Write a split into the declared claims file: the claim narrowed
+    by `--at` (`assuming len(r) >= k`) under the claim's own name, in
+    place of a declared row of that name, and the region row
+    `is_defined` stating the same lengths on f."""
+    import yaml
+
+    from .conjecture import InvalidConjecture, claim as _claim
+    from .spec import atomic_write_text
+    at = (args.at or "").strip()
+    if not re.fullmatch(r"len\(\s*[A-Za-z_]\w*\s*\)\s*>=\s*\d+", at):
+        print("mathema claims --split: --at must be a length premise, "
+              "`len(r) >= k`")
+        return 2
+    try:
+        name = _claim(args.split).name
+        narrowed = f"assuming {at}, {args.split}"
+        _claim(narrowed)
+    except InvalidConjecture as e:
+        print(f"mathema claims --split: {e}")
+        return 2
+    root = args.root or "."
+    path = os.path.join(root, "claims", "adopted.claims.yaml")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    doc: dict = {}
+    if os.path.exists(path):
+        with open(path) as fh:
+            doc = yaml.safe_load(fh) or {}
+    rows = doc.setdefault(args.key, {}).setdefault("claims", [])
+    rows[:] = [c for c in rows if c.get("name") not in (name, "is_defined")]
+    rows += [{"name": name, "statement": narrowed},
+             {"name": "is_defined", "statement": at}]
+    atomic_write_text(path, yaml.safe_dump(doc, sort_keys=False,
+                                           allow_unicode=True))
+    print(f"{args.key}: wrote {name} ({narrowed}) and is_defined ({at}) "
+          f"to {os.path.relpath(path, root)}")
+    return 0
+
+
 def cmd_claims(args) -> int:
     """The claim-authoring surface for one function: bare lists what
     the declared layer already states; `--suggest` renders mathema's
@@ -2134,6 +2173,8 @@ def cmd_claims(args) -> int:
     from .spec import load_declared
     from .suggest import suggest_claims as _suggest
 
+    if getattr(args, "split", None):
+        return _write_split(args)
     _key, fn = resolve_function(args.key, args.root)
     declared = load_declared(args.root)
     entry = (declared.get(args.key) or {}).get("entry") or {}
@@ -3279,6 +3320,14 @@ def main(argv: list[str] | None = None) -> int:
                      help="write the suggested policy claims (what each "
                           "parameter does at a value that is not there) into "
                           "claims/policies.claims.yaml")
+    pcl.add_argument("--split", default=None, metavar="CLAIM",
+                     help="write CLAIM narrowed to the lengths where it "
+                          "holds (with --at) and the region row is_defined "
+                          "for those lengths into the declared claims file "
+                          "(claims/adopted.claims.yaml)")
+    pcl.add_argument("--at", default=None, metavar="PREMISE",
+                     help="the length premise a --split narrows to, "
+                          "`len(r) >= k`")
     pcl.add_argument("--root", default=None, help="project root")
     pcl.add_argument("--format", default="text", choices=["text", "json"],
                      help="report format: json emits --suggest's rows "

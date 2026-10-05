@@ -147,6 +147,22 @@ def _fixes(p, key: str, word: str) -> str:
         f"({n}) {fix}" for n, fix in zip(numerals, fixes))
 
 
+def _split_lines(p, key: str) -> list:
+    """The split a claim falsified only below some length is offered as:
+    what the witnesses share, and the command that writes the claim
+    narrowed to the longer inputs and the region f has a value on."""
+    from ._split import split_command
+    offer = (p.meta or {}).get("mathema.split")
+    if not offer:
+        return []
+    param, at = offer["param"], offer["at"]
+    written = (p.meta or {}).get("mathema.split_statement") or p.statement
+    return [" " * 28 + f"every witness has len({param}) < {at}; it holds "
+                       f"for len({param}) >= {at}, where f is defined",
+            " " * 28 + "possible fixes: (i) "
+            + split_command(key, written, offer)]
+
+
 def _row(verdict: str, aspect: str, what: str, detail: str = "") -> str:
     line = f"    {verdict:<9}  {aspect:<11}  {what}"
     return f"{line}   {detail}" if detail else line
@@ -203,6 +219,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                               _detail(main, count_words)))
             if _verdict(main) == "falsified":
                 falsified.append(main.counterexample)
+                lines += _split_lines(main, key)
         lines += _extras(main)
         for c in under:
             fam = (c.meta or {}).get("mathema.family")
