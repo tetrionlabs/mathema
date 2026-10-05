@@ -40,3 +40,20 @@ def test_a_nan_at_one_present_point_is_found():
 def test_a_nan_that_propagates_a_listed_hole_agrees_with_itself():
     p = run(ident, "for x in {0.25, nan}, f(x) == x", route="best")
     assert p.verdict == "proven", (p.verdict, p.note)
+
+
+def lag(a: list[float]) -> list[float]:
+    return [float("nan")] + list(a[:-1])
+
+
+def test_a_nan_slot_the_claim_never_reads_is_no_witness():
+    # the claim reads f(a) from its second slot on, past the leading nan
+    p = run(lag, "for a in R^n, assuming dim(a) >= 2, f(a)[1:] == a[:-1]")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+
+
+def test_a_nan_slot_a_reduction_reads_past_still_fails():
+    # sum reads the value slots, so the nan changes nothing it shows, yet
+    # the reduction did read the slot f gave no value in
+    p = run(lag, "for a in R^n, assuming dim(a) >= 2, sum(f(a)) == sum(a[:-1])")
+    assert p.verdict == "falsified", (p.verdict, p.note)
