@@ -2455,7 +2455,8 @@ def _collect_definedness_guards(fn, facts) -> list:
     return _definedness_guards(fn, facts)[0]
 
 
-def _definedness_guards(fn, facts) -> "tuple[list, list]":
+def _definedness_guards(fn, facts,
+                        working: bool = False) -> "tuple[list, list]":
     """Intent:
         `(guards, gaps)`: every raise-region guard of fn itself,
         registered partiality lemmas plus explicit raise branches from
@@ -2464,7 +2465,10 @@ def _definedness_guards(fn, facts) -> "tuple[list, list]":
         not lift, a call whose definedness is not known, explicit raises
         the piecewise lift could not read). An explicit raise counts
         whatever its exception type, `raise OverflowError` included,
-        since it is the author defining the function (P2).
+        since it is the author defining the function (P2). With
+        `working`, the explicit raises are the function's own guards
+        cutting its working domain (decision A) and are left out; what
+        remains is every way a call inside the working domain fails.
     """
     from .symbolic._conditioned import lift_piecewise
     from .symbolic._partiality import partiality_walk
@@ -2481,7 +2485,9 @@ def _definedness_guards(fn, facts) -> "tuple[list, list]":
     gaps += opaque
     raises = facts.tree is not None and any(
         isinstance(node, ast.Raise) for node in ast.walk(facts.tree))
-    if facts.branch_count and not facts.loops and not facts.recursion:
+    if working:
+        raises = False
+    elif facts.branch_count and not facts.loops and not facts.recursion:
         try:
             pw = lift_piecewise(fn, facts)
             if pw is not None:
@@ -2491,7 +2497,8 @@ def _definedness_guards(fn, facts) -> "tuple[list, list]":
         except Exception:
             if raises:
                 gaps.append("the explicit raises do not lift")
-    elif raises:
+    if raises and not (facts.branch_count and not facts.loops
+                       and not facts.recursion):
         gaps.append("the explicit raises do not lift")
     enforced = getattr(fn, "__mathema_enforced_range__", None)
     if enforced and (enforced.get("intervals") or enforced.get("checks")):
@@ -2501,6 +2508,76 @@ def _definedness_guards(fn, facts) -> "tuple[list, list]":
         else:
             guards.append((region, "RangeError"))
     return guards, gaps
+
+
+def guard_cut_texts(fn, facts) -> list:
+    """Intent:
+        Each condition under which fn raises deliberately, as claim
+        text (`x < 0`): its own explicit raise branches, the cuts its
+        guards make in the working domain. Empty when there are none or
+        they do not lift.
+    """
+    from .symbolic._base import REL_TEXT
+    from .symbolic._conditioned import lift_piecewise
+    if facts.tree is None or not facts.branch_count or facts.loops \
+            or facts.recursion:
+        return []
+    try:
+        pw = lift_piecewise(fn, facts)
+    except Exception:
+        return []
+    out: list = []
+    for cond, _exc in (getattr(pw, "raise_guards", None) or []):
+        pieces = list(cond.args) if hasattr(cond, "args") and \
+            type(cond).__name__ == "Or" else [cond]
+        for piece in pieces:
+            op = REL_TEXT.get(type(piece))
+            text = (f"{piece.lhs} {op} {piece.rhs}" if op is not None
+                    else str(piece))
+            if text not in out:
+                out.append(text)
+    return out
+
+
+def deliberate_raise(exc: BaseException, fn) -> bool:
+    """Intent:
+        Whether a call's exception is one of fn's own guards rejecting
+        the call (decision A): `@enforce_domain`'s DomainError, an entry
+        DimensionError from `@enforce_dimensions`, or a `raise`
+        statement in fn's own body. A failed assert, an exit check, a
+        RangeError and a raise from anything fn calls are not.
+    """
+    import inspect
+
+    from .authoring import DimensionError, DomainError, MissingValueError
+    if isinstance(exc, MissingValueError):
+        return False
+    if isinstance(exc, DomainError):
+        return True
+    if isinstance(exc, DimensionError):
+        return not exc.at_exit
+    if isinstance(exc, AssertionError):
+        return False
+    body = inspect.unwrap(fn)
+    code = getattr(body, "__code__", None)
+    tb = exc.__traceback__
+    while tb is not None and tb.tb_next is not None:
+        tb = tb.tb_next
+    if tb is None or code is None or tb.tb_frame.f_code is not code:
+        return False
+    return tb.tb_lineno in _raise_lines(body)
+
+
+def _raise_lines(fn) -> frozenset:
+    """The source lines of the `raise` statements in fn's own body."""
+    try:
+        lines, start = inspect.getsourcelines(fn)
+        import textwrap
+        tree = ast.parse(textwrap.dedent("".join(lines)))
+    except (OSError, TypeError, SyntaxError):
+        return frozenset()
+    return frozenset(node.lineno + start - 1 for node in ast.walk(tree)
+                     if isinstance(node, ast.Raise))
 
 
 def _range_violation_region(fn, facts, enforced: dict):
@@ -2569,7 +2646,8 @@ def _negated_guard_texts(cond, negate, op_text) -> list[str]:
 
 
 def _definedness_region_structured(fn, facts,
-                                   gaps: "list | None" = None) -> list:
+                                   gaps: "list | None" = None,
+                                   working: bool = False) -> list:
     """Intent:
         The region where fn itself returns, as sympy relationals over
         fn's OWN parameter symbols; one per raise guard, negated,
@@ -2584,7 +2662,9 @@ def _definedness_region_structured(fn, facts,
         not be the whole region are appended to it: the guard
         collection's own gaps, and each guard whose negation is not a
         conjunction of relations (`x` a non-positive integer, a divisor
-        that is zero everywhere).
+        that is zero everywhere). With `working`, the region is the part
+        of the working domain where fn returns: its own explicit raises
+        are guards and are left out (`_definedness_guards`).
     """
     import sympy
 
@@ -2596,7 +2676,7 @@ def _definedness_region_structured(fn, facts,
             negated_rels.append(rel)
 
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    guards, collection_gaps = _definedness_guards(fn, facts)
+    guards, collection_gaps = _definedness_guards(fn, facts, working)
     dropped: list = []
 
     def drop(cond) -> None:

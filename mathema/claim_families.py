@@ -754,13 +754,58 @@ def _is_number_set_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         # proves the inference wrong. The code is the arbiter: decline
         # here and let the trials at the admitted edge values decide
         # (an unguarded body falsifies there with a real witness; a
-        # guarding body holds).
-        return None
+        # guarding body holds), unless the body's own guard provably
+        # keeps the call inside its number set
+        return _working_number_set_proof(fn, facts, param, names, domain)
     if all(v == "proven" for v in verdicts.values()):
         return ProofResult("proven",
                            sketch=f"{param}'s declared domain is safe for "
                                   f"{', '.join(sorted(names))}")
-    return None
+    return _working_number_set_proof(fn, facts, param, names, domain)
+
+
+def _working_number_set_proof(fn, facts, param: str, names, domain: dict):
+    """Intent:
+        is_number_set_safe[param] over the working domain: proven when
+        the raise-region walk reads the whole body and every region
+        where one of its calls leaves its number set misses the domain,
+        each region conditioned on the path that reaches the call (so a
+        guard raising first cuts it out, decision A). None otherwise.
+    """
+    from .conjecture import guard_cut_texts
+    from .symbolic import ProofResult
+    from .symbolic._partiality import partiality_walk
+    from .symbolic._proof_support import _relational_truth_over_domain
+    if not domain or param not in domain:
+        return None
+    opaque: list = []
+    try:
+        guards, unread = partiality_walk(fn, facts, domain,
+                                         opaque_out=opaque)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    if unread:
+        return None
+    for cond, _exc in guards:
+        symbols = {str(s): s for s in cond.free_symbols}
+        if param not in symbols:
+            continue
+        if not all(name in domain for name in symbols):
+            return None
+        try:
+            if _relational_truth_over_domain(cond, domain, symbols) is not False:
+                return None
+        except Exception:
+            return None
+    cuts = guard_cut_texts(fn, facts)
+    return ProofResult(
+        "proven",
+        sketch=f"every call reading {param} stays inside its number set "
+               f"over the working domain ({', '.join(sorted(names))})"
+               + (f"; f's own guard raises where {' or '.join(cuts)}, "
+                  f"which cuts the working domain" if cuts else ""))
 
 
 def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -806,7 +851,9 @@ def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
         Candidates are already filtered to the declared domain by the
         caller: everything tried here is a point the domain admits, so
         a failure is the claim's own falsification, never an
-        out-of-domain artifact. A non-numeric return (a tuple, a
+        out-of-domain artifact. A call the function's own guard rejects
+        (`deliberate_raise`) is outside its working domain and no trial.
+        A non-numeric return (a tuple, a
         sequence) is out of scope for a numeric-hazard trial and
         passes. Declines (None) when the claim names no real scalar
         parameter or no candidate survives the domain filter;
@@ -828,6 +875,11 @@ def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
             with _pinned_float_env():
                 out = _call_with_target(fn, facts, target, args, value)
         except Exception as exc:
+            from .conjecture import deliberate_raise
+            if deliberate_raise(exc, fn):
+                # the function's own guard rejects the call: the point is
+                # outside its working domain, no trial (decision A)
+                return None
             return describe(value, f"raised {type(exc).__name__}")
         try:
             as_float = float(out)
@@ -2361,7 +2413,8 @@ def _gap_at(gap, point: dict) -> "float | None":
 
 
 def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
-                         premises: list) -> "tuple[dict | None, int]":
+                         premises: list,
+                         working: bool = False) -> "tuple[dict | None, int]":
     """Intent:
         A concrete point where the real `fn` disagrees with a
         definedness claim: it raises where `says_defined(point)` is
@@ -2379,7 +2432,9 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         offset a little each way. A candidate must lie in `domain` and
         satisfy every premise in `premises` (sympy `(gap, relation)`
         pairs). Only scalar parameters are searched, and only a
-        function whose signature binds them. The whole search runs
+        function whose signature binds them. With `working`, a call the
+        function's own guard rejects (`deliberate_raise`) is outside its
+        working domain and no trial. The whole search runs
         under the fast wall-clock cap; a cap that fires ends it.
     """
     import itertools
@@ -2387,6 +2442,7 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
     import sympy as _sympy
 
     from ._timeout import FAST_TIMEOUT_SECONDS as _FAST
+    from .conjecture import deliberate_raise
     from ._timeout import _with_timeout as _capped
     from .domain import domain_contains
 
@@ -2470,6 +2526,10 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
             try:
                 out = fn(**call)
             except Exception as exc:
+                if working and deliberate_raise(exc, fn):
+                    # the function's own guard: outside its working
+                    # domain, no trial
+                    continue
                 returned = False
                 from .authoring import RangeError
                 caught["range"] = isinstance(exc, RangeError)
@@ -2505,8 +2565,52 @@ def _witness_text(point: dict, facts) -> str:
     return text
 
 
+def _working_bounds(fn, domain: "dict | None") -> dict:
+    """Intent:
+        The claim's domain with each parameter `@enforce_domain` guards
+        cut to the guard's interval, where both are plain intervals:
+        the working domain the bare `is_defined` reads.
+    """
+    from .domain import Interval
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    out = dict(domain or {})
+    for p, guard in enforced.items():
+        here = out.get(p)
+        if here is None:
+            out[p] = guard
+            continue
+        if isinstance(here, tuple) and isinstance(guard, tuple) \
+                and len(here) == 2 and len(guard) == 2:
+            lo = max(here[0], guard[0])
+            hi = min(here[1], guard[1])
+            if lo <= hi:
+                out[p] = Interval(lo, hi,
+                                  getattr(here if here[0] >= guard[0]
+                                          else guard, "closed_lo", True),
+                                  getattr(here if here[1] <= guard[1]
+                                          else guard, "closed_hi", True))
+    return out
+
+
+def _every_link_holds(rels: list, domain: dict) -> bool:
+    """Whether every relation holds at every point of the domain box."""
+    from .symbolic._proof_support import _relational_truth_over_domain
+    if not domain:
+        return False
+    for rel in rels:
+        params = {str(sym): sym for sym in rel.free_symbols}
+        if not params or not all(name in domain for name in params):
+            return False
+        try:
+            if _relational_truth_over_domain(rel, domain, params) is not True:
+                return False
+        except Exception:
+            return False
+    return True
+
+
 def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
-                        premises):
+                        premises, working: bool = False):
     """Intent:
         The is_defined disproof as it may be reported: `disproven` with
         the executed witness as its counterexample when one reproduces,
@@ -2516,7 +2620,7 @@ def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
     from .symbolic import ProofResult
 
     point, executed = _definedness_witness(fn, facts, gaps, says_defined,
-                                           domain, premises)
+                                           domain, premises, working)
     if point is not None:
         return ProofResult(
             "disproven", sketch=sketch,
@@ -2579,9 +2683,18 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     from .symbolic._base import NotSymbolic, _expr_to_sympy
 
     region_gaps: list = []
-    from .conjecture import _definedness_region_structured
+    from .conjecture import _definedness_region_structured, guard_cut_texts
     from .symbolic._base import REL_TEXT as rel_of
-    structured = _definedness_region_structured(fn, facts, region_gaps)
+    # the bare predicate reads the working domain: the function's own
+    # guards cut it, and only a failure inside it counts (decision A)
+    bare = relation == "is_defined"
+    structured = _definedness_region_structured(fn, facts, region_gaps,
+                                                working=bare)
+    cuts = guard_cut_texts(fn, facts) if bare else []
+    cut_text = (f" (its own guard raises where {' or '.join(cuts)}, which "
+                f"cuts the working domain)" if cuts else "")
+    if bare:
+        domain = _working_bounds(fn, domain)
     computed = [f"{rel.lhs} {rel_of[type(rel)]} {rel.rhs}"
                 for rel in structured]
 
@@ -2612,14 +2725,14 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 
     def disproof(sketch: str, gaps: list, says_defined):
         return _witnessed_disproof(sketch, fn, facts, gaps, says_defined,
-                                   domain, premises)
+                                   domain, premises, working=bare)
 
     def incomplete(sketch: str, gaps: list, says_defined):
         # the computed region is not the whole definedness region: only
         # an executed disagreement decides
         point, _executed = _definedness_witness(fn, facts, gaps,
                                                 says_defined, domain,
-                                                premises)
+                                                premises, working=bare)
         if point is not None:
             return ProofResult(
                 "disproven", sketch=sketch,
@@ -2649,9 +2762,18 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         if not computed:
             return ProofResult(
                 "proven",
-                sketch="is_defined: the body has no raise region, so "
-                       "every call returns and f is defined on the whole "
-                       "domain")
+                sketch=("is_defined: every call inside the working domain "
+                        "returns, so f is defined on it" + cut_text)
+                if cuts else
+                "is_defined: the body has no raise region, so "
+                "every call returns and f is defined on the whole "
+                "domain")
+        if _every_link_holds(structured, domain):
+            return ProofResult(
+                "proven",
+                sketch=f"is_defined: f returns wherever "
+                       f"{' and '.join(computed)}, which holds over the "
+                       f"whole domain, so f is defined on it{cut_text}")
         return disproof(
             "is_defined: f is not defined everywhere, it returns "
             "only on " + " and ".join(computed)
@@ -3307,7 +3429,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         for _ in range(trials):
             yield draw()
 
-    checked = n_in = n_out = 0
+    from .conjecture import deliberate_raise, guard_cut_texts
+    checked = n_in = n_out = cut = 0
     seen: set = set()
     for point in candidates():
         key = tuple(repr(point[p]) for p in params)
@@ -3326,6 +3449,11 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except _premises.PremiseRejected:
             continue
         except Exception as exc:
+            if kind == "is_defined" and bare and deliberate_raise(exc, fn):
+                # the function's own guard rejects the call: outside its
+                # working domain (decision A), no trial
+                cut += 1
+                continue
             out, raised = None, exc
             what = f"raised {type(exc).__name__}"
         else:
@@ -3363,6 +3491,12 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                                         n_out=n_out)
     if reach_note:
         sampled = f"{sampled}; {reach_note}"
+    if cut:
+        cuts = guard_cut_texts(fn, facts)
+        sampled = (f"{sampled}; {cut} drawn points lie where f's own guard "
+                   f"rejects the call"
+                   + (f" ({' or '.join(cuts)})" if cuts else "")
+                   + ", outside its working domain")
     return "holds", checked, None, None, {"mathema.sampled": sampled}
 
 
