@@ -226,21 +226,30 @@ def _open_pins(row: dict, pins: dict) -> "tuple[dict, str | None]":
 def _pinned_row(row: dict, pins: dict, site: CallSite) -> dict:
     """One row copied with the call's arguments pinned: written in each
     call to f (`f(a, axis=1)`), or in front as `let axis be 1` when the
-    statement calls f nowhere (a region row)."""
+    statement calls f nowhere (a region row) or already passes the
+    parameter to f as a variable (`f(a, a_min, a_max)`)."""
     import re
     tag = ",".join(f"{p}={_render_value(v)}" for p, v in sorted(pins.items()))
     statement = str(row.get("statement") or row.get("law") or "")
+    calls = re.findall(r"\bf\(([^()]*)\)", statement)
+    # a parameter a call to f already passes as a positional argument
+    # is read by the statement as a variable: it is bound to the value
+    # (`let a_min be 0.0`), never passed a second time as a keyword
+    bound = {p for p in pins for inner in calls
+             if p in [a.strip() for a in inner.split(",")]}
 
     def add(call):
         inner = call.group(1)
         extra = ", ".join(f"{p}={_render_value(v)}" for p, v in sorted(pins.items())
-                          if not re.search(rf"\b{re.escape(p)}\s*=(?!=)", inner))
+                          if p not in bound
+                          and not re.search(rf"\b{re.escape(p)}\s*=(?!=)", inner))
         return f"f({inner}, {extra})" if extra else call.group(0)
     in_calls, count = re.subn(r"\bf\(([^()]*)\)", add, statement)
-    if not count:
-        lets = ", ".join(f"let {p} be {_render_value(v)}"
-                         for p, v in sorted(pins.items()))
-        in_calls = f"{lets}, {statement}"
+    lets = ", ".join(f"let {p} be {_render_value(v)}"
+                     for p, v in sorted(pins.items())
+                     if p in bound or not count)
+    if lets:
+        in_calls = f"{lets}, {in_calls}"
     return {"name": f"{row.get('name')}@{tag}",
             "statement": in_calls,
             "note": (f"pinned for the call in {site.caller} (line "
