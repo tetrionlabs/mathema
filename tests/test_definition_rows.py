@@ -69,7 +69,7 @@ def _record_rows(root, key: str) -> dict:
     return {c["name"]: c for c in entry["claims"]}
 
 
-@pytest.mark.library_rows
+@pytest.mark.third_party_compendiums
 @pytest.mark.parametrize("relative", _FILES)
 def test_every_bundled_definition_row_holds_against_the_installed_library(
         tmp_path, relative):

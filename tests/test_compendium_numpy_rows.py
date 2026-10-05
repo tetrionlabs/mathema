@@ -50,7 +50,7 @@ def _rows(relative: str) -> list:
             for row in entry.get("claims") or []]
 
 
-@pytest.mark.library_rows
+@pytest.mark.third_party_compendiums
 @pytest.mark.parametrize("relative", _FILES)
 def test_every_row_holds_against_the_installed_numpy(tmp_path, relative):
     from mathema import compendium

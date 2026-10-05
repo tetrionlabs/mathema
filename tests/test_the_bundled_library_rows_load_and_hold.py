@@ -10,7 +10,7 @@ differences, a QR or singular value factorisation, a DataFrame's
 columns, and polars' extrema, shifts and rolling windows.
 Loading and parsing are checked in every run; adjudicating the rows
 against the installed libraries checks the libraries (or mathema's
-reading of them), so it runs with `--library-rows`.
+reading of them), so it runs with `--third-party-compendiums`.
 """
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ def test_the_commonly_called_functions_state_what_they_compute():
     assert missing == {}, missing
 
 
-@pytest.mark.library_rows
+@pytest.mark.third_party_compendiums
 @pytest.mark.parametrize("relative", _relative_files())
 def test_every_bundled_row_holds_against_the_installed_library(tmp_path,
                                                                relative):

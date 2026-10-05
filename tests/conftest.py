@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Suite-wide pytest wiring: the `--extensive` flag that opts into the
-extensive-ladder proof corpus, the `--library-rows` flag that opts into
-adjudicating the bundled compendium rows against the installed
-libraries, the `needs_full_proof_budget` marker
-for tests whose assertion depends on a proof actually finishing, and
+extensive-ladder proof corpus, the `--third-party-compendiums` flag
+that opts into adjudicating the bundled compendium rows against the
+installed libraries, the `needs_full_proof_budget` marker for tests whose assertion depends on a proof actually finishing, and
 isolation from capability providers installed in the environment.
 
 The extensive-ladder tests each run full adjudication twice (fast
@@ -15,10 +14,12 @@ path and ladder), so they are skipped by default and run on command:
 They parallelize cleanly under pytest-xdist (`-n auto`) when it is
 installed, since every case is a self-contained adjudication.
 
-A test marked `library_rows` checks a library (or mathema's reading of
-it) rather than mathema, so it is skipped by default too:
+A test marked `third_party_compendiums` checks a library (or
+mathema's reading of it) rather than mathema, so it is skipped by
+default too:
 
-    python -m pytest -n 4 -q -m library_rows --library-rows"""
+    python -m pytest -n 4 -q -m third_party_compendiums \
+        --third-party-compendiums"""
 import pytest
 
 
@@ -104,7 +105,8 @@ def _library_claims_isolated():
 def pytest_addoption(parser):
     parser.addoption("--extensive", action="store_true", default=False,
                      help="run the extensive-ladder proof corpus (slower, opt-in)")
-    parser.addoption("--library-rows", action="store_true", default=False,
+    parser.addoption("--third-party-compendiums", action="store_true",
+                     default=False,
                      help="adjudicate the bundled compendium rows against the "
                           "installed libraries (opt-in)")
 
@@ -125,16 +127,18 @@ def pytest_configure(config):
         "a few seconds to run, see tests/test_docs_outputs.py")
     config.addinivalue_line(
         "markers",
-        "library_rows: adjudicates bundled compendium rows against the "
-        "installed library; skipped unless --library-rows is given")
+        "third_party_compendiums: adjudicates bundled compendium rows "
+        "against the installed library; skipped unless "
+        "--third-party-compendiums is given")
 
 
 def pytest_collection_modifyitems(config, items):
     opt_in = {"extensive_proofs": ("--extensive", "extensive-ladder corpus: "
                                    "run with --extensive"),
-              "library_rows": ("--library-rows", "adjudicates library rows "
-                               "against the installed library: run with "
-                               "--library-rows")}
+              "third_party_compendiums": (
+                  "--third-party-compendiums", "adjudicates library rows "
+                  "against the installed library: run with "
+                  "--third-party-compendiums")}
     for marker, (option, reason) in opt_in.items():
         if config.getoption(option):
             continue
