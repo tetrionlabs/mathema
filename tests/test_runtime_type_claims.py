@@ -95,7 +95,7 @@ def test_the_list_sampling_note_states_the_nested_list_cap():
 
 def test_an_undeclared_vector_is_sampled_as_a_list_and_hinted():
     hint = ("returns is used as a vector; this module imports pandas: "
-            "annotate `returns: pd.Series` to sample it as one")
+            "to sample it as one, annotate: returns: pd.Series")
     facts = mathema.analyze(unannotated_mean)
     assert facts.runtime_hints["returns"]["text"] == hint
     p = _verdict(unannotated_mean, "for returns in R^n, f(returns) == "
@@ -109,7 +109,7 @@ def test_the_hint_rides_every_claim_row_of_the_function():
                         claims=["for returns in R^n, f(returns) == "
                                 "f(returns)"])
     row = next(p for p in rec.probes if p.statement.endswith("f(returns)"))
-    assert "annotate `returns: pd.Series`" in row.note
+    assert "annotate: returns: pd.Series" in row.note
 
 
 def test_the_record_identity_names_the_runtime_type_and_its_library():
@@ -179,7 +179,7 @@ def test_the_cli_prints_the_hint_under_the_function(tmp_path, capsys):
           "--claim", "for returns in R^n, f(returns) <= max(returns)"])
     out = capsys.readouterr().out
     assert ("hint: returns is used as a vector; this module imports "
-            "pandas: annotate `returns: pd.Series` to sample it as one") \
+            "pandas: to sample it as one, annotate: returns: pd.Series") \
         in out, out
 
 

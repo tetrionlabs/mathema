@@ -2250,7 +2250,7 @@ def _interpret_assumption(cj, conjectures):
             unmatched = [part for part, v in zip(parts, verdicts) if v is None]
             return skip(f"assuming mixes lemma references with other "
                         f"conditions ({', '.join(repr(u) for u in unmatched)}) "
-                        f"-- state the lemmas in one `assuming` clause and "
+                        f"; state the lemmas in one `assuming` clause and "
                         f"the region conditions in the claim's own domain")
         refs = [(v.group(1), "proven" if " is " in part else "holds")
                 for v, part in zip(verdicts, parts)]

@@ -64,7 +64,7 @@ mathema verify --root .
 
 <!-- example: loop output -->
 ```text
-note funcs.settle: nonneg, symmetric_in_sign falsified on first adjudication. A declared claim is kept until a human decides it:
+note funcs.settle: nonneg, symmetric_in_sign initially falsified. A declared claim is kept until a human decides it:
   (i) fix the code
   (ii) to record it as a discovery, run: mathema accept funcs.settle <claim> --as discovery
   (iii) to replace it with a corrected claim, edit it, then run: mathema accept funcs.settle <claim> --as superseded

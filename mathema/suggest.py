@@ -110,8 +110,8 @@ def bound_annotation_hint(fn, facts=None) -> str | None:
             if bounds is not None:
                 lo, hi = _fmt_num(bounds[0]), _fmt_num(bounds[1])
                 return (f"the return is clamped to [{lo}, {hi}] but is not "
-                        f"annotated; annotate it `-> InRange({lo}, {hi})` "
-                        "so mathema can state and check the output bound")
+                        f"annotated; for mathema to state and check the output "
+                        f"bound, annotate it: -> InRange({lo}, {hi})")
     return None
 
 

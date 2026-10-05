@@ -934,7 +934,7 @@ def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
         if unresolved:
             parts.append(f"UNRESOLVED names: {', '.join(unresolved)}")
         warnings.warn(f"mathema: {fdef.name} " + "; ".join(parts)
-                      + "; behavior depends on state outside the function",
+                      + "; behaviour depends on state outside the function",
                       StateDependenceWarning, stacklevel=4)
     return global_vars, global_funcs, unresolved, mutated_globals
 

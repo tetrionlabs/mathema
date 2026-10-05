@@ -66,8 +66,8 @@ mathema verify claims/numpy.claims.yaml --root .
 
 <!-- example: ptp output wrap=80 -->
 ```text
-note numpy.ptp: at_most_the_largest falsified on first adjudication: the
-    installed library does not do what the row states:
+note numpy.ptp: at_most_the_largest initially falsified: the installed library
+    does not do what the row states:
   (i) to record the falsification as a discovery, run: mathema accept numpy.ptp
       at_most_the_largest --as discovery
   (ii) correct the row in claims/numpy.claims.yaml, then run: mathema accept

@@ -680,7 +680,7 @@ that only a human decision clears (fix the code, accept it
 `--as discovery`, or supersede it). That is deliberate, it is what
 stops an inconvenient result from being quietly deleted, but it means
 the cheap place to be wrong is `check`, not a claims file. `verify`
-says so the first time a claim falsifies on its first adjudication.
+says so when a claim is initially falsified.
 
 ## All four funnel into the same shape
 

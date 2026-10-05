@@ -116,8 +116,8 @@ mathema verify --root .; echo "exit code $?"
 
 <!-- example: gate output wrap=80 -->
 ```text
-note fees.discounted: never_raises_price falsified on first adjudication. A
-    declared claim is kept until a human decides it:
+note fees.discounted: never_raises_price initially falsified. A declared claim
+    is kept until a human decides it:
   (i) fix the code
   (ii) to record it as a discovery, run: mathema accept fees.discounted <claim>
       --as discovery
@@ -145,7 +145,7 @@ exit code 1
 Three keys were adjudicated, and two of them fail the gate.
 
 - `fees.discounted` is falsified: the bug. The `note` above it says what
-  a declared claim does when it fails on first adjudication: it is kept,
+  a declared claim does when it is initially falsified: it is kept,
   with its counterexample, until a person decides whether the code or the
   claim was wrong.
 - `math.log` is a function nobody on the team wrote. `late_fee` calls it,

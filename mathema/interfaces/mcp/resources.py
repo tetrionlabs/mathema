@@ -184,10 +184,10 @@ a human act in the CLI."""
 
 def diagnose_falsification(target: str, claim: str, root: str = ".") -> str:
     """Intent:
-        What to do with a claim that came back refuted, the fork
+        What to do with a claim that came back falsified, the fork
         that decides whether the code or the claim was wrong.
     """
-    return f"""`{claim}` on `{target}` came back refuted. Diagnose it
+    return f"""`{claim}` on `{target}` came back falsified. Diagnose it
 before changing anything.
 
 The counterexample is an executed witness against the real function,

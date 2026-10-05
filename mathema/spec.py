@@ -761,8 +761,8 @@ def integrity_diagnosis(key: str, entry: dict, root: str = ".") -> str:
         cause = ("its contents changed since mathema last stamped it (a "
                  "merge, a rebase, a stash, or an edited declared claim)")
     return (f"WARN {key}: the verified record's checksum no longer matches "
-            f"its contents, {cause}. Re-run `mathema verify {key}` to "
-            f"re-adjudicate and re-stamp it.")
+            f"its contents, {cause}. To re-adjudicate and re-stamp it, "
+            f"run: mathema verify {key}")
 
 
 def _relative_file(path: str, root_abs: str) -> "str | None":

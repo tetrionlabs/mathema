@@ -343,8 +343,8 @@ def project_index(root: str = ".") -> dict:
     import yaml
     path = os.path.join(root, ".mathema", "index.yaml")
     if not os.path.exists(path):
-        return {"error": "no index at .mathema/index.yaml; run "
-                         "`mathema docsync <target>` to generate it"}
+        return {"error": "no index at .mathema/index.yaml; to generate it, "
+                         "run: mathema docsync <target>"}
     try:
         doc = yaml.safe_load(open(path)) or {}
     except Exception as e:

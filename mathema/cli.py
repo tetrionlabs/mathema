@@ -2682,8 +2682,8 @@ def cmd_accept(args) -> int:
         print(f"reconciled {len(done)} record(s): {', '.join(done)}")
         return 0
     if not args.key:
-        print("cannot accept: a key is required "
-              "(or `--as reconciled --all` to clear a whole merge)")
+        print("cannot accept: a key is required (or, to clear a whole "
+              "merge: --as reconciled --all)")
         return 2
     # guide a newcomer who omits --as with a claim: infer the natural kind
     # from the claim's verdict and say why. The confirmation below still
@@ -2852,8 +2852,8 @@ def cmd_coverage(args) -> int:
     if method == "hash":
         print("test report freshness: by content hash (coverage.sources.json)")
     elif method == "mtime":
-        print("test report freshness: by file modification time (run "
-              "`mathema coverage --stamp` after the tests to judge by content)")
+        print("test report freshness: by file modification time (to judge "
+              "by content, after the tests run: mathema coverage --stamp)")
     return 0
 
 

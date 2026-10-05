@@ -103,7 +103,7 @@ annotate:
 
 <!-- illustration -->
 ```text
-returns is used as a vector; this module imports pandas: annotate `returns: pd.Series` to sample it as one
+returns is used as a vector; this module imports pandas: to sample it as one, annotate: returns: pd.Series
 ```
 
 The hint rides the note of every claim on the function when a list

@@ -662,7 +662,7 @@ def _initially_falsified_hint(key: str, probes: list,
         pol = (getattr(p, "meta", None) or {}).get("mathema.policy") or {}
         clause = _policy_clause(p.name, p.statement, pol) if pol else None
         if clause:
-            lines.append(f"note {key}: {p.name} falsified on first adjudication; "
+            lines.append(f"note {key}: {p.name} initially falsified; "
                          + clause[len(str(p.name)):].lstrip(":,").strip().replace(
                              "; change the word or the code",
                              ". Change the word in the claims file, or change f."))
@@ -675,13 +675,13 @@ def _initially_falsified_hint(key: str, probes: list,
                    f"accept {key} {p.name} --as discovery"
                    for p in sorted(fresh, key=lambda p: str(p.name))]
         return lines + [
-            f"note {key}: {names} falsified on first adjudication: the "
+            f"note {key}: {names} initially falsified: the "
             f"installed library does not do what the row states:\n"
             + _indented(options(accepts + [
                 f"correct the row in {library_source}, then run: mathema "
                 f"accept {key} {p.name} --as superseded"
                 for p in sorted(fresh, key=lambda p: str(p.name))]))]
-    return lines + [f"note {key}: {names} falsified on first adjudication. A "
+    return lines + [f"note {key}: {names} initially falsified. A "
             f"declared claim is kept until a human decides it:\n"
             + _indented(options([
                 "fix the code",
@@ -1490,8 +1490,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             _fail(key, f"{key}: the {section} row {name!r} carries no "
                        f"acceptance, and only `mathema accept` retires a "
                        f"claim, so it retires nothing; remove the row, or "
-                       f"accept the claim with `mathema accept {key} "
-                       f"{name} --as ...`")
+                       f"accept the claim: mathema accept {key} "
+                       f"{name} --as ...")
         recorded_form = (verified_entry.get("identity") or {}).get("form")
         declared_info = declared.get(key)
         source = (declared_info or verified_info)["source"]
@@ -1592,14 +1592,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         conflict["authored"]
                     msg = (f"{key}: claim {conflict['claim']!r} was "
                            f"re-authored but is already verified, the "
-                           f"verified version keeps adjudicating; adopt the "
-                           f"change with `mathema accept {key} "
-                           f"{conflict['claim']} --as superseded`")
+                           f"verified version keeps adjudicating; to adopt the "
+                           f"change, run: mathema accept {key} "
+                           f"{conflict['claim']} --as superseded")
                 else:
                     msg = (f"{key}: claim {conflict['claim']!r} differs "
-                           f"between the docstring and the declared file, "
-                           f"run `mathema docsync` to resolve (neither "
-                           f"version is adjudicated until then)")
+                           f"between the docstring and the declared file, and "
+                           f"neither version is adjudicated until it is "
+                           f"resolved; to resolve it, run: mathema docsync")
                 _fail(key, msg)
             # a claim whose two surfaces disagree has no single meaning
             # to record, so neither version is adjudicated or written

@@ -610,8 +610,8 @@ def usage_hints(fn, fdef, params: list, param_kinds: dict,
         out[p] = {"usage": usage, "strong": strong,
                   "type": f"{lib}.{cls}",
                   "text": f"{p} is used as a {usage}; this module imports "
-                          f"{lib}: annotate `{p}: {spelled}` to sample it "
-                          f"as one"}
+                          f"{lib}: to sample it as one, annotate: "
+                          f"{p}: {spelled}"}
     return out
 
 
