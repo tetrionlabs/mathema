@@ -26,5 +26,5 @@ pandas.Series.abs:
 pandas.Series.clip:
   claims:
     - name: definition
-      statement: "for a in R^n \\ {∅}, lower in [-1e6, 1e6], upper in [-1e6, 1e6], assuming lower <= upper, f(a, lower, upper) ~= ((a + lower + abs(a - lower)) / 2 + upper - abs((a + lower + abs(a - lower)) / 2 - upper)) / 2"
+      statement: "for a in R^n, lower in [-1e6, 1e6], upper in [-1e6, 1e6], assuming lower <= upper, f(a, lower, upper) ~= ((a + lower + abs(a - lower)) / 2 + upper - abs((a + lower + abs(a - lower)) / 2 - upper)) / 2"
       note: "Element by element, the larger of each element and lower, then the smaller of that and upper. Stated for bounds in order: pandas clips reversed bounds its own way."

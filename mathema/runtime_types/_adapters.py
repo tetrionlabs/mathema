@@ -409,8 +409,11 @@ class PolarsSeriesAdapter:
         import polars as pl
         if not isinstance(abstract, AbstractVec):
             raise TypeError("polars.Series carries a vector")
-        return pl.Series(options.get("name", ""),
-                         _polars_values(abstract, options), strict=False)
+        values = _polars_values(abstract, options)
+        # a vector of numbers with no value left is still a float column
+        dtype = pl.Float64 if values and all(
+            v is None or (isinstance(v, float) and v != v) for v in values) else None
+        return pl.Series(options.get("name", ""), values, dtype=dtype, strict=False)
 
     def observe(self, obj):
         import polars as pl
