@@ -113,7 +113,8 @@ def export_range(library: str, installed: "str | None",
     """Intent:
         The `versions:` range an export of `library` writes: `"*"` for
         the standard library or a library with no installed version;
-        `">=<major.minor>"` for the project's own package; otherwise the
+        `">=<major.minor>,<<next major>>"` for the project's own package
+        (`">=0.4,<1"`); otherwise the
         installed minor version alone (`">=1.24,<1.25"` on 1.24.4), the
         release its rows were checked against.
     """
@@ -122,7 +123,7 @@ def export_range(library: str, installed: "str | None",
         return "*"
     major, minor = (list(_version_tuple(installed)) + [0, 0])[:2]
     if names_own_package(library, root):
-        return f">={major}.{minor}"
+        return f">={major}.{minor},<{major + 1}"
     return f">={major}.{minor},<{major}.{minor + 1}"
 
 
