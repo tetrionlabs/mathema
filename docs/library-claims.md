@@ -66,7 +66,7 @@ mathema compendium status --root .
     mathema/compendium/numpy/statistics.claims.yaml (bundled, >=1.24,<3, in range)
   numpy.percentile  1 call, 2 rows: 0 verified locally, 0 trusted, 0 falsified, 2 unsettled
   numpy.sqrt        1 call, 2 rows: 0 verified locally, 0 trusted, 0 falsified, 2 unsettled
-  numpy.std         1 call, 3 rows: 0 verified locally, 0 trusted, 0 falsified, 3 unsettled
+  numpy.std         1 call, 4 rows: 0 verified locally, 0 trusted, 0 falsified, 4 unsettled
   no claims: numpy.ediff1d
 ```
 
@@ -97,10 +97,10 @@ mathema verify --root .
 ```text
 ok   numpy.percentile: library claims from mathema/compendium/numpy/statistics.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
 ok   numpy.sqrt: library claims from mathema/compendium/numpy/scalars.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
-ok   numpy.std: library claims from mathema/compendium/numpy/reductions.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
-ok   risk.moves: no baseline record; 1 proven, 3 holds, 0 falsified
+ok   numpy.std: library claims from mathema/compendium/numpy/reductions.claims.yaml; no baseline record; 1 proven, 4 holds, 0 falsified
+ok   risk.moves: no baseline record; 1 proven, 2 holds, 0 falsified
 ok   risk.value_at_risk: no baseline record; 1 proven, 3 holds, 0 falsified
-ok   risk.volatility: no baseline record; 1 proven, 3 holds, 0 falsified
+ok   risk.volatility: no baseline record; 1 proven, 2 holds, 0 falsified
 0 fresh (form unchanged, skipped), 6 adjudicated, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -121,7 +121,7 @@ mathema compendium status --root .
 ```text
   numpy.percentile  1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.sqrt        1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
-  numpy.std         1 call, 3 rows: 3 verified locally, 0 trusted, 0 falsified, 0 unsettled
+  numpy.std         1 call, 4 rows: 4 verified locally, 0 trusted, 0 falsified, 0 unsettled
   no claims: numpy.ediff1d
 ```
 
@@ -183,7 +183,7 @@ mathema compendium status --root .
   numpy.ediff1d     1 call, 1 row: 1 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.percentile  1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
   numpy.sqrt        1 call, 2 rows: 2 verified locally, 0 trusted, 0 falsified, 0 unsettled
-  numpy.std         1 call, 3 rows: 3 verified locally, 0 trusted, 0 falsified, 0 unsettled
+  numpy.std         1 call, 4 rows: 4 verified locally, 0 trusted, 0 falsified, 0 unsettled
 ```
 
 Your file is listed beside the bundled ones as `project`, and `ediff1d` has

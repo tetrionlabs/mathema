@@ -147,7 +147,7 @@ infinity past it). A `raises` row whose type is a machine failure
 proof: `exp(x) >= 0` on a numpy caller is proven over the reals
 whatever the threshold, and the overflow shows on the computation side
 (the `[float]` companion, the probe route). They feed the hazard
-points, `is_compendium_safe`'s diagnosis, the reach of the key's own
+points, `is_library_safe`'s diagnosis, the reach of the key's own
 `is_defined` row and the companion's sketch.
 
 `numpy.exp` carries one row of each kind:
@@ -167,7 +167,7 @@ Consumption paths:
 - Definedness and overflow-safe regions become sampling hazards: their
   boundary values join the probe candidates for every caller, whether
   it spells the call `numpy.sqrt(x)` or `np.sqrt(x)`.
-- `is_compendium_safe(numpy)` asserts a function never silently emits
+- `is_library_safe(numpy)` asserts a function never silently emits
   a non-finite value (nan/inf) through an unguarded call into a covered
   library function; the probe samples the hazard boundaries and the
   empty-sequence case, and falsifies on a nan/inf output. When the
@@ -401,7 +401,7 @@ since the position decides which kind it is.
 
 ### Guarding a numpy hazard, and superseding the finding
 
-`is_compendium_safe(numpy)` catches a silent nan/inf leaking through a
+`is_library_safe(numpy)` catches a silent nan/inf leaking through a
 covered numpy call. On an unguarded body it FALSIFIES, with the input
 that produced the non-finite value:
 
@@ -409,14 +409,14 @@ that produced the non-finite value:
 def to_angle(x):
     return numpy.arcsin(x)          # nan for abs(x) > 1
 
-is_compendium_safe(numpy)   ->   falsified   (-8.76733): output np.float64(nan) is a silent non-finite value from an unguarded numpy call
+is_library_safe(numpy)   ->   falsified   (-8.76733): output np.float64(nan) is a silent non-finite value from an unguarded numpy call
 ```
 
 Two fixes make it hold, and each supersedes the falsification once
 re-verified:
 
 - a **bound** that excludes the nan region as a claim domain,
-  `for x in [-1, 1], is_compendium_safe(numpy)`, so the sampler never
+  `for x in [-1, 1], is_library_safe(numpy)`, so the sampler never
   leaves the safe region;
 - a **guard** that rejects it in the body, `if abs(x) > 1: raise
   ValueError`, so the covered call is never reached out of range.

@@ -169,13 +169,13 @@ pricing.discounted:
       statement: "missing(f, price) propagates"
       verdict: "holds"
       n: 1
-      note: "default for a float, which may be nan; confirmed on the 49 draws of never_raises_price[float]. Keep it by writing it (mathema claims pricing.discounted --write), or change the word to raises or drops if f should do otherwise"
+      note: "default for a float, which may be nan; confirmed on the 49 draws of never_raises_price[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims pricing.discounted --write"
       route: "probe:counterfactual"
     - name: "missing[rate]"
       statement: "missing(f, rate) propagates"
       verdict: "holds"
       n: 1
-      note: "default for a float, which may be nan; confirmed on the 49 draws of never_raises_price[float]. Keep it by writing it (mathema claims pricing.discounted --write), or change the word to raises or drops if f should do otherwise"
+      note: "default for a float, which may be nan; confirmed on the 49 draws of never_raises_price[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims pricing.discounted --write"
       route: "probe:counterfactual"
     - name: "never_raises_price"
       statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"

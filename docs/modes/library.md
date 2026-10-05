@@ -105,42 +105,74 @@ def ema(x: list[float], alpha: float) -> float:
 ```python
 >>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (-10, 10)})
 mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
-  monotonic_increasing[alpha]  d(f(x, alpha), alpha) >= 0   falsified at alpha = -6.1696206845951425 -> 5942.674653897138, alpha = 6.40985769094643 -> -3117.840364949426 at x = [9.714053089717606, -7.7201618735667354, 2.7365981655901717, -5.722321190852131] (not increasing)
-    falsified  mathematics  d(f(x, alpha), alpha) >= 0   counterexample alpha = -6.1696206845951425 -> 5942.674653897138, alpha = 6.40985769094643 -> -3117.840364949426 at x = [9.714053089717606, -7.7201618735667354, 2.7365981655901717, -5.722321190852131] (not increasing)
+  monotonic_increasing[alpha]  d(f(x, alpha), alpha) >= 0   falsified at alpha = 8.459992498903986 -> -4.930559650170467e+304, alpha = 8.70201321389522 -> -5.772547268351122e+304 at x = [1e+300, -1e+300, -2.7255878198803085, 1.4703849054783387, 4.922577492583454, -8.999703650149867] (not increasing)
+    falsified  computation  d(f(x, alpha), alpha) >= 0   counterexample alpha = 8.459992498903986 -> -4.930559650170467e+304, alpha = 8.70201321389522 -> -5.772547268351122e+304 at x = [1e+300, -1e+300, -2.7255878198803085, 1.4703849054783387, 4.922577492583454, -8.999703650149867] (not increasing)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
-  monotonic_decreasing[alpha]  d(f(x, alpha), alpha) <= 0   falsified at alpha = -3.1882651865637612 -> 228.1958792183553, alpha = 10 -> 1486.3661826960981 at x = [6.852397666749294, -9.630119309794798, 6.4611233807873525] (not decreasing)
-    falsified  mathematics  d(f(x, alpha), alpha) <= 0   counterexample alpha = -3.1882651865637612 -> 228.1958792183553, alpha = 10 -> 1486.3661826960981 at x = [6.852397666749294, -9.630119309794798, 6.4611233807873525] (not decreasing)
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  monotonic_decreasing[alpha]  d(f(x, alpha), alpha) <= 0   falsified at alpha = -9.83680626493992 -> -1796.0154991652923, alpha = 0 -> -9.630119309794798 at x = [-9.630119309794798, 6.4611233807873525, -2.4056272554860447] (not decreasing)
+    falsified  computation  d(f(x, alpha), alpha) <= 0   counterexample alpha = -9.83680626493992 -> -1796.0154991652923, alpha = 0 -> -9.630119309794798 at x = [-9.630119309794798, 6.4611233807873525, -2.4056272554860447] (not decreasing)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
-  affine[alpha]  d(f(x, alpha), alpha, alpha) = 0   falsified at alpha = 7.9813271183532235, h = 0.00798
-    falsified  mathematics  d(f(x, alpha), alpha, alpha) = 0   counterexample alpha = 7.9813271183532235, h = 0.00798: curvature estimate 7688.52 does not settle affine
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  affine[alpha]  d(f(x, alpha), alpha, alpha) = 0   falsified at alpha = 0.5942120819077363, h = 0.000594
+    falsified  computation  d(f(x, alpha), alpha, alpha) = 0   counterexample alpha = 0.5942120819077363, h = 0.000594: curvature estimate -4.01335 does not settle affine
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
-  convex[alpha]  d(f(x, alpha), alpha, alpha) >= 0   falsified at alpha = 9.99998, h = 2e-05
-    falsified  mathematics  d(f(x, alpha), alpha, alpha) >= 0   counterexample alpha = 9.99998, h = 2e-05: curvature estimate -537.516 does not settle convex
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  convex[alpha]  d(f(x, alpha), alpha, alpha) >= 0   falsified at alpha = 4.553442718560774, h = 0.00455
+    falsified  computation  d(f(x, alpha), alpha, alpha) >= 0   counterexample alpha = 4.553442718560774, h = 0.00455: curvature estimate -849.761 does not settle convex
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
-  concave[alpha]  d(f(x, alpha), alpha, alpha) <= 0   falsified at alpha = 9.99998, h = 2e-05
-    falsified  mathematics  d(f(x, alpha), alpha, alpha) <= 0   counterexample alpha = 9.99998, h = 2e-05: curvature estimate 1102.62 does not settle concave
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  concave[alpha]  d(f(x, alpha), alpha, alpha) <= 0   falsified at alpha = 4.709760826489109, h = 0.00471
+    falsified  computation  d(f(x, alpha), alpha, alpha) <= 0   counterexample alpha = 4.709760826489109, h = 0.00471: curvature estimate 10716.6 does not settle concave
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
   proven    is_deterministic: f(x, alpha) = f(x, alpha)
   proven    is_state_safe: f(x, alpha) = f(x, alpha)
-  holds     is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (858 entries across 192 draws, sizes (1, 1) to (8, 1))
+  unknown   is_numerically_stable: let g = mathema.f.accurate, g(f, x, alpha) = 1
+           derive route unliftable; probe: unknown (accuracy against the exact value is read for scalar parameters only)
   holds     is_representation_safe[alpha]: is_representation_safe(alpha) (20 draws)
-  bounded_lower  min(x) <= f(x, alpha)   falsified at x = [-654957.5039950067, 653524.6080129032], alpha = -2.0152816440503756
-    falsified  mathematics  min(x) <= f(x, alpha)   counterexample x = [-654957.5039950067, 653524.6080129032], alpha = -2.0152816440503756: -654957.5039950067 vs -3291917.485892815
+  holds     is_dimension_safe[f]: is_dimension_safe(f) (192 draws)
+  bounded_lower  min(x) <= f(x, alpha)   falsified at x = [222791.29884554766, -852156.6094995309, -647122.5636467072, -772598.9379420548, 854595.3224724911, 999998], alpha = 4.542301584683122
+    falsified  computation  min(x) <= f(x, alpha)   counterexample x = [222791.29884554766, -852156.6094995309, -647122.5636467072, -772598.9379420548, 854595.3224724911, 999998], alpha = 4.542301584683122: -852156.6094995309 vs -656298366.2095869
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
-  bounded_upper  f(x, alpha) <= max(x)   falsified at x = [999998, -881262.8792921156, 726608.6732338269], alpha = -3.0856393321809357
-    falsified  mathematics  f(x, alpha) <= max(x)   counterexample x = [999998, -881262.8792921156, 726608.6732338269], alpha = -3.0856393321809357: 25560276.235114045 vs 999998.0
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  bounded_upper  f(x, alpha) <= max(x)   falsified at x = [216941.53207844822, -368274.1184160299, 682330.1826507892], alpha = 1.7838785067417557
+    falsified  computation  f(x, alpha) <= max(x)   counterexample x = [216941.53207844822, -368274.1184160299, 682330.1826507892], alpha = 1.7838785067417557: 1865471.1484383387 vs 682330.1826507892
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
-  permutation_invariant  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   falsified at x = [0, -571583.8558276, -540436.369308935, -223497.27964334848, -975167.3260584788], alpha = -9.494869493457017
-    falsified  mathematics  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   counterexample x = [0, -571583.8558276, -540436.369308935, -223497.27964334848, -975167.3260584788], alpha = -9.494869493457017: 6870069267.105879 vs -8754961179.43428
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  permutation_invariant  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   falsified at x = [850043.9278135903, 905210.656449008, 782687.5954072354], alpha = 6.752137638609439
+    falsified  computation  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   counterexample x = [850043.9278135903, 905210.656449008, 782687.5954072354], alpha = 6.752137638609439: -1747388.2882860936 vs -3521213.9192287754
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
   scale_equivariant  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 5.159088058806049
     proven     mathematics  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   284 entries across 67 draws, sizes (1, 1) to (8, 1)
+    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   285 entries across 67 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
   translation_equivariant  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 5.159088058806049
     proven     mathematics  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
-    holds      computation  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   284 entries across 67 draws, sizes (1, 1) to (8, 1)
+    holds      computation  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   285 entries across 67 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
 ```
 
 Read the falsified claims as facts about `ema`, not as bugs in it. The
@@ -162,11 +194,11 @@ empty list):
 >>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (0, 1)})
   bounded_lower  min(x) <= f(x, alpha)   falsified at x = [], alpha = 0.7579544029403025
     proven     mathematics  min(x) <= f(x, alpha)
-    holds      computation  min(x) <= f(x, alpha)   240 entries across 49 draws, sizes (1, 1) to (8, 1)
+    holds      computation  min(x) <= f(x, alpha)   227 entries across 49 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 0.7579544029403025 with no emptiness guard in the body: the empty input is stumbled into, not handled
   bounded_upper  f(x, alpha) <= max(x)   falsified at x = [], alpha = 0.7579544029403025
     proven     mathematics  f(x, alpha) <= max(x)
-    holds      computation  f(x, alpha) <= max(x)   240 entries across 49 draws, sizes (1, 1) to (8, 1)
+    holds      computation  f(x, alpha) <= max(x)   227 entries across 49 draws, sizes (1, 1) to (8, 1)
 ```
 
 That is the loop in miniature: the suggestion found the assumption the

@@ -720,34 +720,36 @@ def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape
 >>> mathema.write_spec(softmax, root='.')
 mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
   holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
-  is_deterministic  f(scores) = f(scores)   proven
+  is_deterministic  f(scores) = f(scores)   holds
     proven     mathematics  f(scores) = f(scores)
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
-  is_state_safe  f(scores) = f(scores)   proven
+  is_state_safe  f(scores) = f(scores)   holds
     proven     mathematics  f(scores) = f(scores)
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
-  holds     is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (1033 entries across 224 draws, sizes (1, 1) to (8, 1))
+  unknown   is_numerically_stable: let g = mathema.f.accurate, g(f, scores) = 1
+           derive route unliftable; probe: unknown (accuracy against the exact value is read for scalar parameters only)
   proven    is_empty_safe[scores]: is_empty_safe(scores)
+  holds     is_dimension_safe[f]: is_dimension_safe(f) (224 draws)
   preserves_length  len(f(scores)) = len(scores)   holds
-    holds      mathematics  len(f(scores)) = len(scores)   876 entries across 187 draws, sizes (1, 1) to (8, 1)
+    holds      computation  len(f(scores)) = len(scores)   877 entries across 185 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   is_permutation_of_input  sorted(f(scores)) = sorted(scores)   falsified at scores = [0]
-    falsified  mathematics  sorted(f(scores)) = sorted(scores)   counterexample scores = [0]: [1.0] vs [0.0]
+    falsified  computation  sorted(f(scores)) = sorted(scores)   counterexample scores = [0]: [1.0] vs [0.0]
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   preserves_type  type(f(scores)) = type(scores)   holds
-    holds      mathematics  type(f(scores)) = type(scores)   801 entries across 178 draws, sizes (1, 1) to (8, 1)
+    holds      computation  type(f(scores)) = type(scores)   822 entries across 186 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
-  is_sorted_output  is_sorted_output(f(scores))   falsified at scores = [2.537592853314665, 7.217216867849682, 1.7984436307928746, 1.9400981035638782, -6.520226559095592]
-    falsified  mathematics  is_sorted_output(f(scores))   counterexample scores = [2.537592853314665, 7.217216867849682, 1.7984436307928746, 1.9400981035638782, -6.520226559095592]: output [0.009111004242349006, 0.9815244800729237, 0.004350686800624942, 0.005012767664508467, 1.0612195938077462e-06] fails is_sorted_output
+  is_sorted_output  is_sorted_output(f(scores))   falsified at scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]
+    falsified  computation  is_sorted_output(f(scores))   counterexample scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]: output [2.368462735344695e-05, 0.0005776759386833547, 4.21168113708018e-06, 0.00018860842235591329, 0.5698895434078277, 0.42931537291677885, 9.03005863617381e-07] fails is_sorted_output
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   raises[scores]  raises(f(scores), ValueError)   falsified at scores = [0]
-    falsified  mathematics  raises(f(scores), ValueError)   counterexample scores = [0]: returned array([1.]) instead of raising
+    falsified  computation  raises(f(scores), ValueError)   counterexample scores = [0]: returned array([1.]) instead of raising
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   sums_to_one  sum(f(scores)) = 1   holds
-    holds      mathematics  sum(f(scores)) = 1   830 entries across 187 draws, sizes (1, 1) to (8, 1)
+    holds      computation  sum(f(scores)) = 1   875 entries across 186 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 ```

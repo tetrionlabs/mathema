@@ -35,7 +35,7 @@ mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
   proven    between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
            for a in [0, 100] : int, b in [0, 100] : int
   between_reals  for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)   falsified at link 1
-    falsified  mathematics  for a in [0.0, 100.0] ⊂ ℝ, b in [0.0, 100.0] ⊂ ℝ, min(a, b) <= f(a, b) <= max(a, b)   counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
+    falsified  computation  for a in [0.0, 100.0] : float, b in [0.0, 100.0] : float, min(a, b) <= f(a, b) <= max(a, b)   counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
     holds      policy       f(a=nan)   no missing policy stated; assumed propagates
     holds      policy       f(b=nan)   no missing policy stated; assumed propagates
 ```
@@ -107,7 +107,7 @@ odd                        falsified  derive
 idempotent                 falsified  derive
 is_deterministic           proven     examine
 is_state_safe              proven     examine
-is_numerically_stable      falsified  probe:semi_analytical
+is_numerically_stable      holds      probe:algorithmic
 is_defined                 proven     derive
 is_pole_safe[x]            falsified  probe:algorithmic
 is_representation_safe[x]  falsified  probe:algorithmic
@@ -181,21 +181,33 @@ Among the results, all found with no claims written:
 
 <!-- example: finds output match=subset -->
 ```text
-  bounded_lower  min(x) <= f(x, alpha)   falsified at x = [-3.6844746127540535, -7.9150925915778565, 2.0501549542615027, 3.44209191218164, 5.257429006836494, 1.0449934200816653], alpha = 1.9532545200912814
-    falsified  mathematics  min(x) <= f(x, alpha)   counterexample x = [-3.6844746127540535, -7.9150925915778565, 2.0501549542615027, 3.44209191218164, 5.257429006836494, 1.0449934200816653], alpha = 1.9532545200912814: -7.9150925915778565 vs -14.972982263041008
+  bounded_lower  min(x) <= f(x, alpha)   falsified at x = [-9.289026277385481, -6.259440531196718, -5.362151093286329, 8.0426640110414], alpha = -1
+    falsified  computation  min(x) <= f(x, alpha)   counterexample x = [-9.289026277385481, -6.259440531196718, -5.362151093286329, 8.0426640110414], alpha = -1: -9.289026277385481 vs -46.592809918765724
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
-  permutation_invariant  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   falsified at x = [0, -6.919925090473078, -2.1213278929821877, 4.882794355880357, -4.956621274625929, 7.656668890148801, 7.396906999519114, 5.260058670534535], alpha = 5.45472650011251e+207
-    falsified  mathematics  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   counterexample x = [0, -6.919925090473078, -2.1213278929821877, 4.882794355880357, -4.956621274625929, 7.656668890148801, 7.396906999519114, 5.260058670534535], alpha = 5.45472650011251e+207: f returned -inf, and an infinity for a finite input is no value
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  permutation_invariant  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   falsified at x = [1e+16, -1e+16], alpha = -0.5847481298766866
+    falsified  computation  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   counterexample x = [1e+16, -1e+16], alpha = -0.5847481298766866: 2.1694962597533732e+16 vs -2.1694962597533732e+16
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
   scale_equivariant  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   falsified at x = [-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha = -1.7976931348623157e+308, c = -5
     proven     mathematics  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
     falsified  computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   counterexample x = [-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha = -1.7976931348623157e+308, c = -5
                             [mathematics sound, implementation:numerical-instability]
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
   translation_equivariant  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   falsified at x = [0.0, 0.0, 0.0], alpha = -1.7976931348623157e+308, c = -5
     proven     mathematics  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
     falsified  computation  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   counterexample x = [0.0, 0.0, 0.0], alpha = -1.7976931348623157e+308, c = -5
                             [mathematics sound, implementation:numerical-instability]
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
 ```
 
 Scaling or shifting every input scales or shifts the average the same way:

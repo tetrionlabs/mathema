@@ -52,15 +52,26 @@ print(record)
 <!-- example: pandas output wrap=80 -->
 ```text
 mathema.Record(average_return) · source, no side effects · form cb973acd88fd
-  proven    min_returns_le_f_returns_le_max_returns: for returns in [-0.1,
-      0.1]^n : float, min(returns) <= f(returns) <= max(returns)
-           ∀ returns over [-0.1, 0.1] with nothing missing, returns of every
-               length of at least one
+  min_returns_le_f_returns_le_max_returns  for returns in [-0.1, 0.1]^n : float,
+      min(returns) <= f(returns) <= max(returns)   falsified at returns = []
+    proven     mathematics  for returns in [-0.1, 0.1]^n ⊂ ℝ, min(returns) <=
+        f(returns) <= max(returns)
+    holds      computation  for returns in [-0.1, 0.1]^n : float, min(returns)
+        <= f(returns) <= max(returns)   205 entries across 43 draws, sizes (1,
+        1) to (8, 1)
+    falsified  policy       f([])   f(returns) returns nan at returns = []: no
+        value for no data, and no empty policy is stated
+                            possible fixes:
+                              (i) if nan for no data is intended, state:
+                                  average_return([]) in {missing}
+                              (ii) guard the empty input at entry
 ```
 
-The claim is `proven`, and the line under it says over what: every
-series with entries in the range, of every length of at least one, with
-nothing missing. The `: float` after the range is what mathema resolved
+The `mathematics` line is `proven` over every series with entries in
+the range, of every length of at least one, with nothing missing, and
+the `computation` line holds. The headline is falsified by the empty
+series alone: the mean of no returns is `nan`, which counts as no value
+until a policy for the empty input is stated. The `: float` after the range is what mathema resolved
 `[-0.1, 0.1]^n \ {missing}` to: float entries, none of them missing. The
 signature says `returns: pd.Series`, so whenever mathema runs the
 function it first builds a `Series` from the vector it drew; had the
@@ -83,14 +94,14 @@ print(textwrap.fill(record.probes[0].sketch, 78))
 <!-- example: pandas output -->
 ```text
 link 1: min(returns) <= f(returns): taking pandas.Series.mean as mean(a)
-(axiom, bundled with mathema, pandas 2 to 3.x); through the pandas.Series.mean
-definition row, lowered to sums over returns at a symbolic length: the
-relation holds for every length of at least one (min(returns) is at most
-mean(returns)); link 2: f(returns) <= max(returns): taking pandas.Series.mean
-as mean(a) (axiom, bundled with mathema, pandas 2 to 3.x); through the
+(axiom, bundled with mathema, pandas 2.2 to 3.x); through the
 pandas.Series.mean definition row, lowered to sums over returns at a symbolic
-length: the relation holds for every length of at least one (max(returns) is
-at least mean(returns))
+length: the relation holds for every length of at least one (min(returns) is
+at most mean(returns)); link 2: f(returns) <= max(returns): taking
+pandas.Series.mean as mean(a) (axiom, bundled with mathema, pandas 2.2 to
+3.x); through the pandas.Series.mean definition row, lowered to sums over
+returns at a symbolic length: the relation holds for every length of at least
+one (max(returns) is at least mean(returns))
 ```
 
 ## A claim that is wrong, and the witness
@@ -121,12 +132,18 @@ mathema.Record(sharpe) · source, no side effects · form 099872a2a5ee
         for returns in [-0.1, 0.1]^n ⊂ ℝ, f(s(returns, c)) ~= f(returns)
         counterexample returns = [0.0], c = 4.2636586502253655: the computation
         returns NaN here (f returned nan)
-    holds      policy       f([])
+    falsified  policy       f([])   f(returns) returns nan at returns = []: no
+        value for no data, and no empty policy is stated
+                            possible fixes:
+                              (i) if nan for no data is intended, state:
+                                  sharpe([]) in {missing}
+                              (ii) guard the empty input at entry
 ```
 
 The headline carries the witness, and the lines under it say where it
 came from. The `mathematics` line is falsified at that point; the
-`policy` line covers the empty series, tried separately, and holds.
+`policy` line covers the empty series, tried separately, and is
+falsified too: the Sharpe ratio of no returns is `nan`.
 
 Read the witness. `returns = [0.0]` is a series of one day. Its standard
 deviation with `ddof=1` is undefined, pandas returns NaN, and `sharpe`
@@ -156,21 +173,26 @@ print(record)
 mathema.Record(sharpe) · source, no side effects · form 099872a2a5ee
   leverage_invariant  assuming std(returns, ddof=1) > 0, let s =
       mathema.f.scale_seq, let c be [0.1, 10.0], for returns in [-0.1, 0.1]^n :
-      float, f(s(returns, c)) ~= f(returns)   proven
+      float, f(s(returns, c)) ~= f(returns)   falsified at returns =
+      [-0.024056272554860453, -0.02405627255486045, -0.024056272554860453,
+      -0.02405627255486045, -0.024056272554860453], c = 10
     proven     mathematics  assuming std(returns, ddof=1) > 0, let s =
         mathema.f.scale_seq, let c be [0.1, 10.0], for returns in [-0.1, 0.1]^n
         ⊂ ℝ, f(s(returns, c)) ~= f(returns)
-    holds      computation  assuming std(returns, ddof=1) > 0, let s =
+    falsified  computation  assuming std(returns, ddof=1) > 0, let s =
         mathema.f.scale_seq, let c be [0.1, 10.0], for returns in [-0.1, 0.1]^n
-        : float, f(s(returns, c)) ~= f(returns)   166 entries across 34 draws,
-        sizes (2, 1) to (8, 1)
-    holds      policy       f([])
+        : float, f(s(returns, c)) ~= f(returns)   counterexample returns =
+        [-0.024056272554860453, -0.02405627255486045, -0.024056272554860453,
+        -0.02405627255486045, -0.024056272554860453], c = 10
 ```
 
-The `mathematics` line is proven, and the `computation` line runs the
-same claim through the real code in floating point, on 34 seeded
-series of two to eight days, and holds. The premise took the one-day
-series out, and mathema reads it exactly. The standard deviation of equal returns is 0 over the reals, so
+The `mathematics` line is proven. The `computation` line runs the same
+claim through the real code in floating point and is falsified at a
+series of five returns that differ only in their last digit: their
+standard deviation is about `2.5e-18`, the ratio about `-1.6e17`, and
+scaling the series by 10 moves the float result to about `-1.9e17`.
+That is a fact about the computation, not the mathematics. The premise
+took the one-day series out, and mathema reads it exactly. The standard deviation of equal returns is 0 over the reals, so
 a constant series is outside the claim too, on both lines alike: mathema computes the premise's `std` exactly rather than
 through the function's floating point, so a constant series whose float
 standard deviation rounds to `1e-17` is still outside.
@@ -188,9 +210,9 @@ for row in proof.meta["mathema.definitions"]:
 
 <!-- example: pandas output -->
 ```text
-taking pandas.Series.mean as mean(a) (axiom, bundled with mathema, pandas 2 to
-3.x); taking pandas.Series.std as std(a, ddof=1) (axiom, bundled with mathema,
-pandas 2 to 3.x); through the pandas.Series.mean definition and
+taking pandas.Series.mean as mean(a) (axiom, bundled with mathema, pandas 2.2
+to 3.x); taking pandas.Series.std as std(a, ddof=1) (axiom, bundled with
+mathema, pandas 2.2 to 3.x); through the pandas.Series.mean definition and
 pandas.Series.std definition rows, lowered to sums over returns at a symbolic
 length: the relation holds for every length
 pandas.Series.mean mathema/compendium/pandas/series.claims.yaml
@@ -217,11 +239,11 @@ print(record.probes[0].counterexample)
 <!-- example: pandas output -->
 ```text
 falsified
-returns = [-0.04129585799119448, 0.003979158413648126, 0, 0.0423245296012931, 0.02250156794927212, 0.0999998, 0]; c = 6.86: 2471.7681022329703 vs 6.5493395473758484
+returns = [-0.03634407021233441, 0.03649461504266754, 0.029797421768214698, -0.0999998]; c = 4.72: 1164.6923472459507 vs -4.339350392263282
 ```
 
-Seven days of returns, each shifted up by 6.86: a Sharpe ratio of about
-2,472 against the original's 6.5. Sampling is seeded, so the same
+Four days of returns, each shifted up by 4.72: a Sharpe ratio of about
+1,165 against the original's -4.3. Sampling is seeded, so the same
 witness comes back on every run.
 
 ## Where next
