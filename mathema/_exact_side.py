@@ -262,7 +262,7 @@ def _literal(text: str):
         return Fraction(text)
 
 
-def _carrier_literal(text: str):
+def _representation_literal(text: str):
     """A numeric literal as the computation reads it: an integer exact,
     a float literal as the exact value of the float it parses to, and a
     negative zero as the signed float it is."""
@@ -281,7 +281,7 @@ def register_source(code, src: str, tree) -> None:
         Record the exact twins of `code`, compiled from `tree` (parsed
         from `src`): each int or float literal replaced by a call reading
         its source text, as written (`__exact__`) or as the computation
-        reads it (`__carrier__`). A sign written before a literal is
+        reads it (`__representation__`). A sign written before a literal is
         read with it, so `-0.0` keeps its sign.
     """
     import ast
@@ -319,7 +319,7 @@ def register_source(code, src: str, tree) -> None:
     try:
         if len(_EXACT_TWINS) > 4096:
             _EXACT_TWINS.clear()
-        _EXACT_TWINS[code] = (twin_of("__exact__"), twin_of("__carrier__"))
+        _EXACT_TWINS[code] = (twin_of("__exact__"), twin_of("__representation__"))
     except (SyntaxError, ValueError, TypeError):
         return
 
@@ -384,7 +384,7 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
     exact_env.update(exact_words({k: v for k, v in env.items()
                                   if k not in callees}))
     exact_env["__exact__"] = _literal
-    exact_env["__carrier__"] = _carrier_literal
+    exact_env["__representation__"] = _representation_literal
     try:
         left = eval(exact_literals(code_l, exact_calls),
                     {"__builtins__": {}}, exact_env)
@@ -418,7 +418,7 @@ def some_side_is_finite(code_l, code_r, env: dict, callees: dict) -> bool:
     exact_env.update(exact_words({k: v for k, v in env.items()
                                   if k not in callees}))
     exact_env["__exact__"] = _literal
-    exact_env["__carrier__"] = _carrier_literal
+    exact_env["__representation__"] = _representation_literal
     for code in (code_l, code_r):
         if code is None:
             continue
