@@ -185,7 +185,7 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption) -> list:
             continue
         # the premises over this sequence or its length's name (`n` in
         # `xs in R^n`), read at the empty list
-        at_empty = {p: []}
+        at_empty: dict = {p: []}
         names = [p]
         if dims and isinstance(dims[0], str) and dims[0].isidentifier():
             at_empty[dims[0]] = 0
