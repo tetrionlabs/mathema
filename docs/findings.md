@@ -32,19 +32,20 @@ print(mathema.check(midpoint, claims=[
 <!-- example: finds output -->
 ```text
 mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
-  proven  between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
+  proven    between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
            for a in [0, 100] : int, b in [0, 100] : int
-  FALSIFY between_reals: for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)
-           chained comparison falsified at link 1: min(a, b) <= f(a, b); at a = nan f gave nan back; at b = nan f gave nan back
-           counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
-  holds   missing[a]: missing(f, a) propagates   [default for a float, which may be nan; confirmed on the 46 draws of between_reals. Keep it by writing it (mathema claims mid.midpoint --write), or change the word to raises or drops if f should do otherwise]
-  holds   missing[b]: missing(f, b) propagates   [default for a float, which may be nan; confirmed on the 46 draws of between_reals. Keep it by writing it (mathema claims mid.midpoint --write), or change the word to raises or drops if f should do otherwise]
+  between_reals  for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)   falsified at link 1
+    falsified  mathematics  for a in [0.0, 100.0] ⊂ ℝ, b in [0.0, 100.0] ⊂ ℝ, min(a, b) <= f(a, b) <= max(a, b)   counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
+    holds      policy       f(a=nan)   no missing policy stated; assumed propagates
+    holds      policy       f(b=nan)   no missing policy stated; assumed propagates
 ```
 
 Proven for every pair of integers in range, and falsified over the reals,
-where floor division puts the midpoint of 99.9999 and 100 at 99. The two
-rows beneath are the policy rows mathema writes for a float's nan: both
-parameters propagate it, the default for a float. The same
+where floor division puts the midpoint of 99.9999 and 100 at 99. Under
+the falsified claim, the `mathematics` line carries the counterexample,
+and the two `policy` lines say what `midpoint` does with a `nan` in
+either argument: nothing in the claim says, so mathema assumes the `nan`
+propagates to the result, and it does. The same
 claim, two domains, two different and equally definite answers, which is why a
 claim always carries the domain it was checked over.
 
@@ -68,15 +69,16 @@ print(mathema.check(discount_factor))
 <!-- example: finds output match=subset -->
 ```text
 mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
-  FALSIFY monotonic_increasing[x]: d(f(x), x) >= 0
+  falsified monotonic_increasing[x]: d(f(x), x) >= 0
            counterexample x = 1
-  FALSIFY even: f(-x) = f(x)
+  falsified even: f(-x) = f(x)
            counterexample x = -1
-  proven  is_deterministic: f(x) = f(x)
-  proven  is_defined: 1 - x != 0
-  FALSIFY is_pole_safe[x]: is_pole_safe(x)
+  proven    is_deterministic: f(x) = f(x)
+           missing for x (float) means nan
+  proven    is_defined: 1 - x != 0
+  falsified is_pole_safe[x]: is_pole_safe(x)
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
-  FALSIFY is_representation_safe[x]: is_representation_safe(x)
+  falsified is_representation_safe[x]: is_representation_safe(x)
            counterexample x = 1 (the int spelling) is admitted by the declared domain but the call raised ZeroDivisionError
            [implementation:representation]
 ```
@@ -162,7 +164,7 @@ claim, and stating it is what turns this `falsified` into `proven`.
 
 <!-- example: finds run -->
 ```python
-def ema(x: list, alpha: float) -> float:
+def ema(x: list[float], alpha: float) -> float:
     """Exponentially weighted moving average."""
     y = x[0]
     for v in x[1:]:
@@ -179,39 +181,42 @@ Among the results, all found with no claims written:
 
 <!-- example: finds output match=subset -->
 ```text
-  FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           derive could not decide it (claim statement not derivable against the recognized fold: 'x' (a sequence) has no single scalar value outside indexing or an f(...) call); the probe decided it; at alpha = nan f gave nan back; at x = [nan, nan, nan, nan, nan, nan, ...] f gave nan back
-           counterexample x = [-3.43348, 9.70145, 8.91641, -1.43687, 1.9814, 4.51731, -1.35314], alpha = 3.44797: -3.4334815445743576 vs -2504.561159989134
-  FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           at alpha = nan f gave nan back; at x = [null, null, null, null] f raised TypeError; at x = [nan, nan, nan] f gave nan back
-           counterexample x = [-2.27529, 6.42651, -0.139096, -5.26251, 3.96324, -7.51595, 1.70275, -6.09415], alpha = 2.59801: 138.40265582248097 vs 528.7346661352893
-  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ; missing for x (list) means null or nan; missing for alpha (float) means nan
-  FALSIFY scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-           the float64 computation of scale_equivariant ran at 15 points: nan, null, every corner and 0 interior points; unbounded directions (x, alpha) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared); at alpha = nan f gave nan back; at x = [null, null], alpha = -1.8e+308 f raised TypeError; at x = [null], alpha = -1.8e+308 it converts the null slot to an absent result; at x = [nan] f gave nan back
-           counterexample x = [-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha = -1.79769e+308, c = -5
-           [mathematics sound, implementation:numerical-instability]
-  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ ℝ; missing for x (list) means null or nan; missing for alpha (float) means nan
+  bounded_lower  min(x) <= f(x, alpha)   falsified at x = [-3.6844746127540535, -7.9150925915778565, 2.0501549542615027, 3.44209191218164, 5.257429006836494, 1.0449934200816653], alpha = 1.9532545200912814
+    falsified  mathematics  min(x) <= f(x, alpha)   counterexample x = [-3.6844746127540535, -7.9150925915778565, 2.0501549542615027, 3.44209191218164, 5.257429006836494, 1.0449934200816653], alpha = 1.9532545200912814: -7.9150925915778565 vs -14.972982263041008
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+  permutation_invariant  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   falsified at x = [0, -6.919925090473078, -2.1213278929821877, 4.882794355880357, -4.956621274625929, 7.656668890148801, 7.396906999519114, 5.260058670534535], alpha = 5.45472650011251e+207
+    falsified  mathematics  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   counterexample x = [0, -6.919925090473078, -2.1213278929821877, 4.882794355880357, -4.956621274625929, 7.656668890148801, 7.396906999519114, 5.260058670534535], alpha = 5.45472650011251e+207: f returned -inf, and an infinity for a finite input is no value
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+  scale_equivariant  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   falsified at x = [-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha = -1.7976931348623157e+308, c = -5
+    proven     mathematics  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
+    falsified  computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   counterexample x = [-1.7976931348623157e+308, -1.7976931348623157e+308, -1.7976931348623157e+308], alpha = -1.7976931348623157e+308, c = -5
+                            [mathematics sound, implementation:numerical-instability]
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+  translation_equivariant  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   falsified at x = [0.0, 0.0, 0.0], alpha = -1.7976931348623157e+308, c = -5
+    proven     mathematics  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
+    falsified  computation  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   counterexample x = [0.0, 0.0, 0.0], alpha = -1.7976931348623157e+308, c = -5
+                            [mathematics sound, implementation:numerical-instability]
 ```
 
-Scaling or shifting every input scales or shifts the average the same way,
-proven for sequences of any length. The bound fails because nothing restricts
-`alpha` to `[0, 1]`, and outside that range this is not a weighted average at
-all, which is a finding about the missing domain rather than the loop. And
-reversing the input changes the answer, as it should for an average that
-weights recent values more heavily: mathema does not know that is intended, so
-it reports the counterexample and leaves the judgement to a person.
+Scaling or shifting every input scales or shifts the average the same way:
+the `mathematics` line of each equivariance is proven for sequences of any
+length. The bound fails because nothing restricts `alpha` to `[0, 1]`, and
+outside that range this is not a weighted average at all, which is a finding
+about the missing domain rather than the loop. Reversing the input changes
+the answer, as it should for an average that weights recent values more
+heavily: mathema does not know that is intended, so it reports the
+counterexample and leaves the judgement to a person. Every claim over `x`
+also fails at the empty list, on its `policy` line, because `ema` reads
+`x[0]` first.
 
-`scale_equivariant[float]` is the proof's float companion: the same law run
-through the real code in floating point, where nothing bounds the inputs, so
-it reaches elements and an `alpha` at float64's lowest value, about
-`-1.8e+308`. There the loop's arithmetic
-overflows and subtracts one infinity from another, so both sides of the law
-come out NaN, and a NaN is no value: it agrees with nothing, not even the
-other side's NaN. The mathematics is sound and the float code does not
-follow it out there; a domain for `alpha`, or a `let |inf| be ...` binding,
-is the fix.
+The `computation` line under each equivariance runs the proven law through
+the real code in floating point, where nothing bounds the inputs, so it
+reaches elements and an `alpha` at float64's extremes, about `1.8e+308` in
+size. There the loop's arithmetic overflows and subtracts one infinity from
+another, so both sides of the law come out NaN, and a NaN is no value: it
+agrees with nothing, not even the other side's NaN. The mathematics is sound
+and the float code does not follow it out there; a domain for `alpha`, or a
+`let |inf| be ...` binding, is the fix.
 
 [A first look](first-look.md) takes `ema` through domains, both evidence
 routes and the stored record.
