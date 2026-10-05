@@ -65,12 +65,21 @@ def to_float(value):
     return value
 
 
+class _Inexact(Exception):
+    """A callee run on exact values returned a value that is not exact."""
+
+
 def wrap(callee, exact_calls: bool = False):
-    """`callee` called with the executed floats (with the exact values
-    themselves when `exact_calls`), its result read back exactly."""
+    """`callee` called with the executed floats, its result read back
+    exactly; with `exact_calls`, called with the exact values themselves,
+    its result kept only when it is exact (a float result raises
+    `_Inexact`)."""
     def call(*args, **kwargs):
         if exact_calls:
             result = callee(*args, **kwargs)
+            if _exact_value(result) is None:
+                raise _Inexact(type(result).__name__)
+            return result
         else:
             result = callee(*[to_float(a) for a in args],
                             **{k: to_float(v) for k, v in kwargs.items()})

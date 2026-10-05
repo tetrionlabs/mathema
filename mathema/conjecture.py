@@ -5056,13 +5056,14 @@ def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set 
     return tuple(kinds), shown
 
 
-def _exactly_holds_at(cj, code_l, code_r, env, fn, bound_funcs) -> bool:
+def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     """Intent:
-        Whether the claim holds at the point `env` in exact arithmetic:
-        f and the claim's bound functions run on the point's exact values
-        (`_exact_side.exact_sides` with `exact_calls`), under the fast
-        wall-clock cap. False when that evaluation cannot be carried out
-        exactly.
+        The claim at the point `env` in exact arithmetic: f and the
+        claim's bound functions run on the point's exact values
+        (`_exact_side.exact_sides` with `exact_calls`) under the fast
+        wall-clock cap, the sides compared exactly (within the claim's
+        own declared tolerance, when it states one). True or False, or
+        None when the evaluation cannot be carried out exactly.
     """
     from ._exact_side import exact_sides
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
@@ -5073,14 +5074,18 @@ def _exactly_holds_at(cj, code_l, code_r, env, fn, bound_funcs) -> bool:
                                 exact_calls=True),
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
-        return False
+        return None
     if exact is None:
-        return False
+        return None
     return relation_holds_elementwise(
         exact[0], exact[1], cj.relation,
         cj.tolerance if cj.tolerance is not None else 0.0,
-        exact_inequality=cj.tolerance is None,
-        rel_tol=_declared_rel_tol(cj)) is True
+        exact_inequality=cj.tolerance is None, rel_tol=0.0)
+
+
+def _exactly_holds_at(cj, code_l, code_r, env, fn, bound_funcs) -> bool:
+    """Whether `_exact_verdict` finds the claim true at the point."""
+    return _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) is True
 
 
 def _exactly_decided(cj, code_l, code_r, env, callees, slack, ok):
@@ -8696,6 +8701,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     absorbed, absorbed_at = 0.0, None
     # the largest disagreement a draw's own round-off accounted for
     roundoff_absorbed, roundoff_at = 0.0, None
+    # the largest equality gap the relative tolerance absorbed at a draw
+    # that holds in exact arithmetic, and the draws that passed only
+    # within a tolerance and could not be evaluated exactly
+    relative_absorbed, relative_at = 0.0, None
+    inconclusive = 0
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
     # axis that two parameters share, or that spans a matrix, at its
@@ -9545,11 +9555,17 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             ok = _exactly_decided(cj, code_l, code_r, env,
                                   {"f": fn_call, **bound_funcs}, slack, ok)
             call_raised[0] = call_nan[0] = call_inf[0] = None
+        within = (ok is True and cj.tolerance is None
+                  and cj.relation in ("==", "~=")
+                  and relation_holds_elementwise(
+                      lv, rv, cj.relation, slack, exact_inequality=True,
+                      rel_tol=0.0) is not True)
+        roundoff_gap = None
         if ok is False and as_arrays \
                 and cj.relation in ("==", "~=", "<=", ">="):
             # the draw disagrees by no more than the round-off its own
             # magnitudes produce (inputs moved by a few units in the
-            # last place move the sides by as much): no counterexample
+            # last place move the sides by as much)
             allowance = _linalg_eval.roundoff_allowance(
                 lambda jenv: (eval(code_l, {"__builtins__": {}}, jenv),
                               eval(code_r, {"__builtins__": {}}, jenv)),
@@ -9561,10 +9577,31 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     lv, rv, cj.relation, slack + allowance,
                     exact_inequality=cj.tolerance is None,
                     rel_tol=_declared_rel_tol(cj)):
-                ok = True
-                gap = _linalg_eval.largest_gap(lv, rv)
-                if gap > roundoff_absorbed:
-                    roundoff_absorbed, roundoff_at = gap, _point_text(args)
+                ok = within = True
+                roundoff_gap = _linalg_eval.largest_gap(lv, rv)
+        exactly_false = False
+        if within:
+            # a draw that passes only within a tolerance is decided in
+            # exact arithmetic: false there falsifies, true there holds
+            # with the gap printed, and a draw that cannot be evaluated
+            # exactly is inconclusive and not counted
+            exact_ok = _exact_verdict(cj, code_l, code_r, env, fn_call,
+                                      bound_funcs)
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+            if exact_ok is None:
+                checked -= 1
+                inconclusive += 1
+                continue
+            if exact_ok is False:
+                ok, exactly_false = False, True
+            elif roundoff_gap is not None:
+                if roundoff_gap > roundoff_absorbed:
+                    roundoff_absorbed, roundoff_at = roundoff_gap, _point_text(args)
+            else:
+                gap = (_linalg_eval.largest_gap(lv, rv) if as_arrays
+                       else abs(lv - rv))
+                if gap > relative_absorbed:
+                    relative_absorbed, relative_at = gap, _point_text(args)
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex value), or two
@@ -9594,6 +9631,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
+            if exactly_false:
+                cx += (", within the float tolerance but false here in "
+                       "exact arithmetic")
             break
     rng = main_rng
     if computation_cx is not None:
@@ -9634,6 +9674,15 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           "mathema.confidence": _probe_density(risk, checked),
                           "mathema.counterexample_args": _yaml_safe_args(args),
                           **shrunk_meta, **missing_meta})
+    inconclusive_words = (
+        f"{inconclusive} draw{'s' if inconclusive != 1 else ''} passed only "
+        f"within the tolerance and could not be evaluated in exact "
+        f"arithmetic, so {'they are' if inconclusive != 1 else 'it is'} "
+        f"not counted")
+    if checked == 0 and inconclusive:
+        return Probe(cj.name, statement, "unknown", route="probe",
+                     note=f"{note}; {inconclusive_words}".lstrip("; "),
+                     meta=dict(missing_meta))
     if checked == 0 and executed_record.classified and executed_record.first:
         # every point executed was a missing input the code raised at or
         # answered with a missing value: nothing left to compare
@@ -9655,6 +9704,13 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         note = (f"{note}; differs by {roundoff_absorbed:.3g} at "
                 f"{roundoff_at}, within the round-off of that draw's "
                 f"magnitudes").lstrip("; ")
+    if relative_absorbed > 0:
+        note = (f"{note}; differs by {relative_absorbed:.3g} at "
+                f"{relative_at}, within the tolerance ({DEFAULT_TOLERANCE:g} "
+                f"plus {_declared_rel_tol(cj):g} times the larger side), and "
+                f"holds there in exact arithmetic").lstrip("; ")
+    if inconclusive:
+        note = f"{note}; {inconclusive_words}".lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,
                  meta={"mathema.sampling": _sampling_shorthand(
                            sampled_kinds, cj_domain, checked, critical_hints,
