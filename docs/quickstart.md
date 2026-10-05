@@ -165,7 +165,7 @@ pricing.discounted:
       statement: "missing(f, price) propagates"
       verdict: "holds"
       n: 1
-      note: "default for a float, which may be nan; confirmed on the 46 draws of never_raises_price[float]. Keep it by writing it (mathema claims pricing.discounted --write), or change the word to raises or drops if f should do otherwise"
+      note: "default for a float, which may be nan; confirmed on the 51 draws of never_raises_price[float]. Keep it by writing it (mathema claims pricing.discounted --write), or change the word to raises or drops if f should do otherwise"
       route: "probe:counterfactual"
       authored:
         surface: "suggested"
@@ -174,8 +174,8 @@ pricing.discounted:
     - name: "never_raises_price[float]"
       statement: "for price in [0.0, 1000000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
       verdict: "holds"
-      n: 46
-      note: "the float64 computation of never_raises_price ran at 46 points: nan, every corner and 40 interior points; at price = nan f gave nan back; at rate = nan f gave nan back"
+      n: 51
+      note: "the float64 computation of never_raises_price ran at 51 points: nan, every corner and 40 interior points; at price = nan f gave nan back; at rate = nan f gave nan back"
       route: "probe"
 ```
 

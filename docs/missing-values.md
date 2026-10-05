@@ -267,7 +267,7 @@ print(mathema.check(clamp_discount, claims=[mathema.claim(
 mathema.Record(clamp_discount) · source, no side effects · form bc9fa73b5bd1
   proven  in_unit: for rate in R|missing, 0 <= clamp_discount(rate) <= 1
            where x=rate: ∀ x ∈ ℝ; missing for rate (float) means nan
-  holds   in_unit[float]: for rate in R|missing, 0 <= clamp_discount(rate) <= 1 (43 draws)
+  holds   in_unit[float]: for rate in R|missing, 0 <= clamp_discount(rate) <= 1 (44 draws)
            the float64 computation of in_unit ran link by link, and every link holds; at rate = nan f returned 1.0, so it drops the hole
   FALSIFY missing[rate]: missing(f, rate) propagates   [mathema's default word for a float, not a claim of yours; f drops instead: nan in, 1.0 out]
            if 1.0 is the answer f should give for a missing rate, write `missing(f, rate) drops`; if not, make f raise or give nan back; or accept it as a discovery: mathema accept pricing.clamp_discount missing[rate] --as discovery --corrected "missing(f, rate) drops"
@@ -332,7 +332,7 @@ print(mathema.check(in_base_currency, claims=[mathema.claim(
 <!-- example: core output match=subset -->
 ```text
 mathema.Record(volatility) · source, no side effects · form fafd8ee932cd
-  proven  missing[variance]: missing(f, variance) propagates   [from math.sqrt's own policy row, which f calls; confirmed on the 43 draws of nonneg[float]]
+  proven  missing[variance]: missing(f, variance) propagates   [from math.sqrt's own policy row, which f calls; confirmed on the 44 draws of nonneg[float]]
 mathema.Record(log_return) · source, no side effects · form cdfe6bbcc84d
   proven  missing[ratio]: missing(f, ratio) raises(ValueError)   [from the guard on line 3; confirmed on the 43 draws of bounded[float]]
 mathema.Record(in_base_currency) · source, no side effects · form c0f6dfdbe44d
