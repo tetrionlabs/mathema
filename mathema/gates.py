@@ -918,6 +918,22 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 and lo <= 0.0 <= hi and domain_contains(-0.0, cj_domain.get(n))
                 if cj_domain.get(n) is not None else False):
             edges[n] = [*edges[n], -0.0]
+        # a closed infinite end includes the point (ruling E2): the
+        # computation executes x = inf there, unless a declared
+        # operational infinity bounds the computation
+        bound = cj_domain.get(n)
+        if cap is None and bound is not None and not integral:
+            pieces = getattr(bound, "pieces", None) or (
+                (bound,) if isinstance(bound, tuple) else ())
+            for piece in pieces:
+                if not (isinstance(piece, tuple) and not isinstance(piece, frozenset)
+                        and len(piece) == 2):
+                    continue
+                for end, closed in ((piece[0], getattr(piece, "closed_lo", True)),
+                                    (piece[1], getattr(piece, "closed_hi", True))):
+                    if isinstance(end, float) and math.isinf(end) and closed \
+                            and end not in edges[n]:
+                        edges[n] = [*edges[n], end]
     if len(names) <= 6:
         # every corner of the box: 2^k points for k real coordinates
         # (four per complex coordinate)
@@ -1456,7 +1472,7 @@ def _interval_discontinuities(cj, fn, facts, deps, cj_domain, corners):
         `(points, coverage)` for a domain that is not finite: the points
         at a discontinuity of a single-parameter argument over that
         parameter's interval (each with its float neighbours), the
-        other coordinates at the first corner; `(\[], None)` when there
+        other coordinates at the first corner; `([], None)` when there
         are none.
     """
     from . import _discontinuities as D
