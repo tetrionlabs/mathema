@@ -1284,6 +1284,49 @@ def _verified_files(root: str) -> list:
             if name.endswith(".yaml")]
 
 
+def _safe_loader():
+    """PyYAML's safe loader, its libyaml parser when PyYAML was built
+    with it: the same constructor and resolver over a faster parser."""
+    import yaml
+    return getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+_SAFE_LOADER = _safe_loader()
+
+#: parsed YAML files by path, each with the (modification time, size)
+#: it was read at, so a file read again unchanged is not parsed again
+_PARSED: dict = {}
+
+
+def _parsed_yaml(path: str, fh=None):
+    """Intent:
+        The YAML document at `path` (or read from the open `fh`), parsed
+        by `_SAFE_LOADER`; a file unchanged since it was last parsed
+        (same modification time and size) is not parsed again, and every
+        caller gets its own copy.
+
+    Raises:
+        OSError: the file cannot be read.
+        yaml.YAMLError: the file does not parse.
+    """
+    import copy
+
+    import yaml
+    st = os.stat(path)
+    stamp = (st.st_mtime_ns, st.st_size)
+    hit = _PARSED.get(path)
+    if hit is not None and hit[0] == stamp:
+        return copy.deepcopy(hit[1])
+    if fh is None:
+        with open(path, encoding="utf-8") as own:
+            text = own.read()
+    else:
+        text = fh.read()
+    data = yaml.load(text, Loader=_SAFE_LOADER)
+    _PARSED[path] = (stamp, data)
+    return copy.deepcopy(data)
+
+
 def read_verified_file(path: str) -> "tuple[dict | None, str | None]":
     """Intent:
         One verified record file as `(data, None)`, or `(None, reason)`
@@ -1291,16 +1334,26 @@ def read_verified_file(path: str) -> "tuple[dict | None, str | None]":
         (a merge left conflict markers), it is empty, or its top level
         is not a mapping.
     """
+    import copy
+
     import yaml
     try:
+        st = os.stat(path)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
     except OSError as e:
         return None, f"cannot be read ({e.strerror or e})"
     if not text.strip():
         return None, "is empty"
+    stamp = (st.st_mtime_ns, st.st_size)
+    hit = _PARSED.get(path)
     try:
-        data = yaml.safe_load(text)
+        if hit is not None and hit[0] == stamp:
+            data = copy.deepcopy(hit[1])
+        else:
+            data = yaml.load(text, Loader=_SAFE_LOADER)
+            _PARSED[path] = (stamp, data)
+            data = copy.deepcopy(data)
     except yaml.YAMLError as e:
         mark = getattr(e, "problem_mark", None)
         where = f" at line {mark.line + 1}" if mark is not None else ""
@@ -1779,8 +1832,7 @@ def read_claims_file(path: str, rel_path: str) -> "dict | None":
     """
     import yaml
     try:
-        with open(path, encoding="utf-8") as fh:
-            data = yaml.safe_load(fh)
+        data = _parsed_yaml(path)
     except yaml.YAMLError as e:
         mark = getattr(e, "problem_mark", None)
         where = f" at line {mark.line + 1}" if mark is not None else ""
