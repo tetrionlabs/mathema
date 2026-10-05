@@ -992,18 +992,23 @@ def _installed_outside(path: "str | None", root: str) -> bool:
     return not real.startswith(os.path.realpath(root) + os.sep)
 
 
-def _dependency_file(dep: dict) -> "str | None":
-    """The source file of a dependency: the one its entry names, else
-    the file the function its key resolves to was read from; None when
+def _dependency_file(dep: dict, root: str) -> "str | None":
+    """The source file of a dependency: the one its entry names when
+    that file exists (absolute, or relative to `root`), else the file of
+    the module the function its key resolves to belongs to; None when
     neither is known."""
-    if dep.get("file"):
-        return dep["file"]
+    named = dep.get("file")
+    if named and os.path.isfile(os.path.join(root, named)):
+        return named
     import inspect
+    import sys
 
     from .conjecture import _resolve_func_ref
     try:
         obj = _resolve_func_ref(dep.get("key") or "")
-        return inspect.getsourcefile(obj) if obj is not None else None
+        module = sys.modules.get(getattr(obj, "__module__", None) or "")
+        return getattr(module, "__file__", None) or (
+            inspect.getsourcefile(obj) if obj is not None else None)
     except Exception:
         return None
 
@@ -1024,7 +1029,7 @@ def _dependency_state(dep: dict, verified: dict,
         return None
     stored = verified.get(key)
     if stored is None:
-        if root is not None and _installed_outside(_dependency_file(dep),
+        if root is not None and _installed_outside(_dependency_file(dep, root),
                                                    root):
             return None
         return "unverified"

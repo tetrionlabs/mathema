@@ -80,3 +80,10 @@ def test_an_unknown_dependency_rung_names_the_callees(tmp_path):
     probe = dependencies_current_probe([dep], root=str(tmp_path))
     assert probe.verdict == "unknown"
     assert "helpers.h" in probe.note
+
+
+def test_a_callee_whose_file_is_not_on_disk_is_placed_by_its_module(tmp_path):
+    from mathema.spec import _dependency_state
+    dep = {"key": "statistics.fmean", "form": "abc",
+           "file": "<__array_function__ internals>"}
+    assert _dependency_state(dep, {}, root=str(tmp_path)) is None
