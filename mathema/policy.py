@@ -465,7 +465,8 @@ def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
     per hole member; a call whose refill is inconclusive or not repeatable
     is left out, and one indifferent to the slot is filed as a drop marked
     indifferent."""
-    from ._missing_policy import INCONCLUSIVE, INDIFFERENT, NOT_REPEATABLE, refill
+    from ._missing_policy import (INCONCLUSIVE, INDIFFERENT, MISSING, NOT_REPEATABLE,
+                                  keys_of, raise_is_the_absences, refill)
     from .conjecture import _fill_value
     from .probing import _pinned_float_env
     from .runtime_types import calling
@@ -486,6 +487,12 @@ def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
     for point in points:
         value, raised = call_at(point)
         pieces = refill(call_at, point, value, raised, fills) if fills else None
+        if pieces is None and fills and raise_is_the_absences(call_at, point, raised,
+                                                               fills):
+            # the raise is the absence's: filed under it alone
+            out.append(Call(point, value, raised, None,
+                            [k for k in keys_of(point) if k[1] != MISSING]))
+            continue
         if pieces is None:
             out.append(Call(point, value, raised, None))
             continue

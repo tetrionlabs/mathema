@@ -3451,7 +3451,12 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
             f"falsified: {broken.note}")
     # the verdict is the executed call's, so the route is the probe's;
     # a proof over the non-empty inputs stays in the sketch
+    # the claim's own finding over non-empty inputs, kept as it was
+    mathematics = {k: v for k, v in (("verdict", probe.verdict), ("route", probe.route),
+                                     ("note", probe.note), ("n", probe.n))
+                   if v is not None}
     meta = {**(probe.meta or {}), "mathema.empty_input": broken.name,
+            "mathema.mathematics": mathematics,
             "mathema.witness_executed": True}
     return _replace(probe, verdict="falsified", route="probe",
                     counterexample=broken.counterexample, note=note,
@@ -4018,7 +4023,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     merged["origin"] = origin
                 probe.meta = {**(probe.meta or {}), "mathema.missing": merged}
                 told = _missing_told(merged, written, resolution or {}, fn)
-                if told and told not in (probe.note or "") \
+                # the computation line runs the numbers; what f did at a
+                # hole is the policy lines' to say
+                computation = probe.name.startswith(f"{cj.name}[")
+                if told and not computation and told not in (probe.note or "") \
                         and not (probe.meta or {}).get("mathema.missing_unknown"):
                     probe.note = f"{probe.note or ''}; {told}".lstrip("; ")
         if canonical:

@@ -237,12 +237,21 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         f_calls.reset()
         executed.last_classified = False
 
+    from .conjecture import _lists_sentinel
+
+    def _admitted(point) -> bool:
+        # a hole or absence the claim does not list as its own point
+        return any(inputs_missing([v]) and not _lists_sentinel(cj_domain.get(p))
+                   for p, v in point.items())
+
     def _classify(point, raised, sides=()):
         # at a missing input, a raise or a missing output is classified
-        # into the executed missing inputs and not judged; True when it
-        # was. A law that calls no function has its own sides as output
-        at_missing = classified(point.values(), f_calls.outputs() or list(sides),
-                                raised)
+        # into the executed missing inputs and not judged; so is every
+        # call at a hole or absence the claim only admits, which the
+        # policy lines judge. True when it was. A law that calls no
+        # function has its own sides as output
+        at_missing = _admitted(point) or classified(
+            point.values(), f_calls.outputs() or list(sides), raised)
         f_calls.record(executed, point)
         if at_missing:
             executed.classified += 1
@@ -1440,8 +1449,10 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     # the admitted missing inputs run first, so each is executed and
     # recorded whatever a domain corner does
     corners = missing_corners + corners
+    # the admitted missing inputs run beside the budget, which is the
+    # computation line's numbers
     interior = (C._CORROBORATION_BUDGET if budget is None
-                else max(0, int(budget) - len(corners)))
+                else max(0, int(budget) - (len(corners) - len(missing_corners))))
     # a claim over finite sets only is its listed points, each run once
     listed = _listed_points(deps["names"], cj_domain)
     admits = deps["admits"]
@@ -1450,6 +1461,9 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         listed_ids = {id(pt) for pt in listed}
         admits = (lambda pt: id(pt) in listed_ids)  # noqa: E731
     corner_count = sum(1 for c in corners if admits(c))
+    # the admitted missing inputs run for the policy lines, not as points
+    # of the computation line
+    holes_run = sum(1 for c in missing_corners if admits(c)) if listed is None else 0
     progress = C.StabilitySweep()
     try:
         sweep = _with_timeout(
@@ -1484,18 +1498,17 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     drawn = getattr(deps["evaluate"], "drawn", None)
     if drawn is not None and drawn.meta():
         tried_meta = {**tried_meta, "mathema.drawn": drawn.meta()}
+    numbers = max(0, sweep.checked - holes_run)
     if listed is not None:
         what = (f"the {representation_word} computation of {parent.name} ran at "
                 + _listed_words(listed, deps["names"])
                 + (f"; {reach_text}" if reach_text else ""))
     else:
-        firsts = [w for w in dict.fromkeys(w for _p, w, _v in (missing or ()) if w)] \
-            if missing_corners else []
         inner = max(0, sweep.checked - corner_count)
-        listing = firsts + ["every corner",
-                            f"{inner} interior point{'s' if inner != 1 else ''}"]
+        listing = ["every corner",
+                   f"{inner} interior point{'s' if inner != 1 else ''}"]
         what = (f"the {representation_word} computation of {parent.name} ran at "
-                f"{sweep.checked} points: " + _and_words(", ".join(listing))
+                f"{numbers} points: " + _and_words(", ".join(listing))
                 + (f"; {reach_text}" if reach_text else ""))
     if sweep.fragile_point is not None:
         pt = _fmt_point(sweep.fragile_point, deps["names"])
@@ -1515,7 +1528,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             # arithmetic too: the proof, not the computation, failed
             return Probe(
                 name, parent.statement, "falsified", route="probe",
-                n=sweep.checked, counterexample=f"{pt}: {sweep.detail}",
+                n=numbers, counterexample=f"{pt}: {sweep.detail}",
                 note=what,
                 sketch=f"the proof of {parent.name} failed: at {pt} the "
                        f"claim is false in exact arithmetic as well as in "
@@ -1527,7 +1540,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             # the value or the proof is wrong, and nothing here says which
             return Probe(
                 name, parent.statement, "falsified", route="probe",
-                n=sweep.checked, counterexample=pt, note=what,
+                n=numbers, counterexample=pt, note=what,
                 sketch=f"{parent.name} is proven, but its computation "
                        f"fails at {pt}: {sweep.detail}; whether the "
                        f"mathematics holds at that point was not decided, "
@@ -1537,7 +1550,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                        + f"{remedy}")
         return Probe(
             name, parent.statement, "falsified", route="probe",
-            n=sweep.checked, counterexample=pt, note=what,
+            n=numbers, counterexample=pt, note=what,
             sketch=f"{parent.name} is mathematically proven, but its "
                    f"computation fails at {pt}: {sweep.detail}"
                    + (": precision loss" if relation_failed else "")
@@ -1551,9 +1564,9 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      "cause": "implementation:numerical-instability",
                      "representation": representation.tag, "witness": pt},
             meta=tried_meta or None)
-    if sweep.checked == 0:
+    if numbers == 0:
         return Probe(name, parent.statement, "skipped", route="probe",
                      note=f"{what}; no in-domain point satisfied the "
                           f"claim's premises, so nothing was executed")
     return Probe(name, parent.statement, "holds", route="probe",
-                 n=sweep.checked, note=what, meta=tried_meta or None)
+                 n=numbers, note=what, meta=tried_meta or None)

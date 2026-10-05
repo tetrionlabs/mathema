@@ -66,46 +66,47 @@ def test_a_default_row_names_itself_and_its_confirmation():
     rec = mathema.check(lin, claims=[mathema.claim("for x in R, f(x) == 2*x + 1",
                                                    name="c")])
     lines = _lines(rec)
-    assert any(line.startswith("           the float64 computation of c ran at 43 "
-                               "points: nan, every corner and 40 interior points;")
-               and line.endswith("; at x = nan f gave nan back") for line in lines)
-    assert ("  holds   missing[x]: missing(f, x) propagates   [default for a float, "
-            "which may be nan; confirmed on the 43 draws of c[float]. Keep it by "
-            "writing it (mathema claims test_policy_rows_say_where_they_come_from.lin "
-            "--write), or change the word to raises or drops if f should do "
-            "otherwise]") in lines
+    assert "    holds      computation  for x in R, f(x) = 2*x + 1   42 draws" in lines
+    assert ("    holds      policy       f(nan)   no missing policy stated; assumed "
+            "propagates") in lines
+    assert _policy(rec)["missing[x]"].meta["mathema.policy"]["reason"] == (
+        "default for a float, which may be nan; confirmed on the 42 draws of c[float]. "
+        "Keep it by writing it (mathema claims "
+        "test_policy_rows_say_where_they_come_from.lin --write), or change the word to "
+        "raises or drops if f should do otherwise")
 
 
 def test_an_unaccounted_raise_is_a_named_sentence_row():
     rec = mathema.check(root_opt, claims=[mathema.claim("for x in [0, 4], f(x) >= 0",
                                                         name="c")])
     lines = _lines(rec)
-    assert ("           the float64 computation of c ran at 44 points: None, nan, "
-            "every corner and 40 interior points; at x = None f raised TypeError; "
-            "at x = nan f gave nan back") in lines
-    assert ("  proven  missing[x]: missing(f, x) propagates   [from math.sqrt's own "
-            "policy row, which f calls; confirmed on the 44 draws of c[float]]") in lines
-    at = lines.index("  FALSIFY absent[x]: f raised TypeError at x = None, and no claim "
-                     "says it may")
+    assert ("    holds      computation  for x in [0.0, 4.0] : float, f(x) >= 0   "
+            "42 draws") in lines
+    assert ("    proven     policy       f(nan)   propagates, from math.sqrt's own "
+            "policy row, which f calls") in lines
+    at = lines.index("    falsified  policy       f(None)   no absent policy stated; "
+                     "raises TypeError")
     assert lines[at + 1] == (
-        "           x is Optional[float], so f promised to take None. If the raise is "
-        "intended, state `absent(f, x) raises(TypeError)`; otherwise handle None in f, "
-        "or annotate x as float; or accept the raise as a discovery (mathema accept "
-        "test_policy_rows_say_where_they_come_from.root_opt absent[x] --as discovery) "
-        "and state `absent(f, x) raises(TypeError)`")
+        "                            possible fixes: (i) mathema claims "
+        "test_policy_rows_say_where_they_come_from.root_opt --adopt 'absent[x]'  "
+        "(ii) exclude None  (iii) handle None at entry")
+    assert _policy(rec)["absent[x]"].meta["mathema.policy"]["sentence"].startswith(
+        "f raised TypeError at x = None, and no claim says it may")
 
 
 def test_a_silent_drop_keeps_its_remedy_on_the_row_only():
     rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
                                                        name="c")])
     lines = _lines(rec)
-    assert ("           the float64 computation of c ran link by link, and every link "
-            "holds; at x = nan f returned 1.0, so it drops the hole") in lines
-    at = lines.index("  FALSIFY missing[x]: missing(f, x) propagates   [mathema's default "
-                     "word for a float, not a claim of yours; f drops instead: nan in, "
-                     "1.0 out]")
+    assert "    holds      computation  for x in R, 0 <= f(x) <= 1   42 draws" in lines
+    at = lines.index("    falsified  policy       f(nan)   no missing policy stated; "
+                     "returns 1.0")
     assert lines[at + 1] == (
-        "           if 1.0 is the answer f should give for a missing x, write "
+        "                            possible fixes: (i) mathema claims "
+        "test_policy_rows_say_where_they_come_from.clamp01 --adopt 'missing[x]'  "
+        "(ii) exclude nan  (iii) handle nan at entry")
+    assert _policy(rec)["missing[x]"].meta["mathema.policy"]["next"] == (
+        "if 1.0 is the answer f should give for a missing x, write "
         "`missing(f, x) drops`; if not, make f raise or give nan back; or accept it as "
         "a discovery: mathema accept test_policy_rows_say_where_they_come_from.clamp01 "
         "missing[x] --as discovery --corrected \"missing(f, x) drops\"")

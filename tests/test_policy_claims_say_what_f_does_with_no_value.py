@@ -104,7 +104,7 @@ def test_a_stated_policy_is_confirmed_on_the_draws_the_check_made():
     rows = _rows(root, "for x in [0, 1], f(x) >= 0", "missing(f, x) propagates")
     row = rows["missing(f, x) propagates"]
     assert row.verdict == "holds", (row.verdict, row.note)
-    assert row.note == "stated; confirmed on the 43 draws of f_x_ge_0[float]"
+    assert row.note == "stated; confirmed on the 42 draws of f_x_ge_0[float]"
 
 
 def test_a_policy_alone_runs_its_own_floor():
@@ -191,7 +191,7 @@ def test_a_library_row_composed_through_the_body_derives_the_policy():
     assert (row.statement, row.verdict) == ("missing(f, x) propagates", "proven")
     assert row.meta["mathema.policy"]["source"] == "derived"
     assert row.meta["mathema.policy"]["reason"].startswith(
-        "from math.sqrt's own policy row, which f calls; confirmed on the 43 draws of "
+        "from math.sqrt's own policy row, which f calls; confirmed on the 42 draws of "
         "c0[float]")
 
 
@@ -200,7 +200,7 @@ def test_a_float_carries_its_default_propagation_row():
     assert (row.statement, row.verdict) == ("missing(f, x) propagates", "holds")
     assert row.meta["mathema.policy"]["source"] == "default"
     assert row.meta["mathema.policy"]["reason"] == (
-        "default for a float, which may be nan; confirmed on the 43 draws of c0[float]. "
+        "default for a float, which may be nan; confirmed on the 42 draws of c0[float]. "
         "Keep it by writing it (mathema claims "
         "test_policy_claims_say_what_f_does_with_no_value.scaled --write), or change the "
         "word to raises or drops if f should do otherwise")
@@ -226,7 +226,7 @@ def test_an_unannotated_parameter_raises_on_none_by_default():
     assert row.verdict == "holds"
     assert row.meta["mathema.policy"]["reason"] == (
         "default: x has no annotation, so it may be None, and f raises on it; confirmed "
-        "on the 44 draws of c0[float]. Annotate x as float to exclude None, or write "
+        "on the 42 draws of c0[float]. Annotate x as float to exclude None, or write "
         "this row with mathema claims "
         "test_policy_claims_say_what_f_does_with_no_value.double --write")
 
@@ -281,10 +281,10 @@ def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():
     rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
                                                        name="c0")])
     text = repr(rec)
-    assert ("  FALSIFY missing[x]: missing(f, x) propagates   [mathema's default word "
-            "for a float, not a claim of yours; f drops instead: nan in, 1.0 out]\n           if 1.0 is the answer f should "
-            "give for a missing x, write `missing(f, x) drops`; if not, make f raise or "
-            "give nan back") in text
+    assert ("    falsified  policy       f(nan)   no missing policy stated; returns 1.0\n"
+            "                            possible fixes: (i) mathema claims "
+            "test_policy_claims_say_what_f_does_with_no_value.clamp01 --adopt 'missing[x]'"
+            "  (ii) exclude nan  (iii) handle nan at entry") in text, text
 
 
 def test_the_absent_word_parses_without_f():
@@ -326,14 +326,14 @@ def test_the_claims_command_groups_the_policy_rows_by_state(tmp_path, monkeypatc
     at = out.index("  contradicted by the code (change the word, the code, or accept it "
                    "as a discovery; --write writes these with the contradiction in the "
                    "note):")
-    assert out[at + 1] == ("    FALSIFY missing[x]: missing(f, x) propagates   "
+    assert out[at + 1] == ("    falsified missing[x]: missing(f, x) propagates   "
                            "[mathema's default word for a float, not a claim of yours; "
                            "f drops instead: nan in, 1.0 out]")
     assert main(["claims", "pmod.root_opt", "--root", str(tmp_path)]) == 0
     out = capsys.readouterr().out.splitlines()
     assert "  not covered by any claim yet (the line beneath says what to write, or " \
            "what to change; --write leaves these out):" in out
-    assert "    FALSIFY absent[x]: f raised TypeError at x = None, and no claim says it " \
+    assert "    falsified absent[x]: f raised TypeError at x = None, and no claim says it " \
            "may" in out
 
 
@@ -388,7 +388,7 @@ def test_a_bare_claim_draws_the_hole_its_annotation_admits():
     assert [(p.statement, p.verdict) for p in rows] == \
         [("missing(f, x) propagates", "holds")]
     assert rows[0].meta["mathema.policy"]["reason"].startswith("default for a float")
-    assert "           ∀ x ∈ ℝ; missing for x (float) means nan" in repr(rec)
+    assert "    proven     mathematics  f(x) = 2*x + 1" in repr(rec).splitlines(), repr(rec)
 
 
 def test_a_bare_claim_on_a_list_carries_a_row_per_member():
