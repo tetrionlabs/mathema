@@ -3051,8 +3051,8 @@ def _complex_value_region(fn, facts, lhs_src: str, rhs_src: str,
     return None
 
 
-def _first_axis_length(seq, axis):
-    """`dim(seq, 0)` of a plain list, its length."""
+def _first_axis_length(seq, axis=0):
+    """`dim(seq)` and `dim(seq, 0)` of a plain list, its length."""
     if axis != 0:
         raise ValueError("only the first axis of a list has a length")
     return len(seq)
@@ -3130,12 +3130,17 @@ def length_admitted(name: str, k: int, domain, assumption,
 def _premises_hold(assumption, point: dict) -> "bool | None":
     """Whether every `assuming` conjunct holds at `point`: False when one
     fails or has no value there (an index past the end, the maximum of
-    an empty list), None when one cannot be evaluated here."""
+    an empty list, a statistic that is nan), None when one cannot be
+    evaluated here."""
     ops = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
            "<=": lambda a, b: a <= b, ">=": lambda a, b: a >= b,
            "<": lambda a, b: a < b, ">": lambda a, b: a > b}
-    env = {"len": len, "dim": _first_axis_length, "sum": sum, "max": max,
-           "min": min, "abs": abs, **point}
+    from .._exact_premises import premise_functions
+    from .._linalg_eval import FUNCTIONS
+    # the claim's own premise vocabulary (`std(xs, ddof=1) > 0`), with a
+    # list's length read by len and dim
+    env = {**premise_functions(FUNCTIONS), "len": len,
+           "dim": _first_axis_length, **point}
     answer: "bool | None" = True
     for lhs, rel, rhs in assumption or ():
         if rel not in ops:
