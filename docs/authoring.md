@@ -299,6 +299,12 @@ let u = html.unescape, for s in L[unicode], u(f(s)) == s
 let dump = json.dumps, for s in L[json], f(dump(f(s))) == f(s)
 ```
 
+A `let` binding imports the function it names and calls it, the same
+as importing it in your own code. For third-party code whose effects
+mathema cannot establish, the claim's line carries a warning saying so,
+and a binding that reaches the system (`os`, `subprocess` and the
+like) is refused; see [Security and execution](security.md).
+
 A parser of decimal digits is a homomorphism from concatenation to
 arithmetic, which is what `f(s + "0") == 10 * f(s)` says. Where a
 function raises inside the language it was declared over, the claim
