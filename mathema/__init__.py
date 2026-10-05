@@ -154,16 +154,30 @@ class Record:
     # populated automatically by check()/write_spec(), a caller sets it
     # explicitly when it wants the extra work done.
     meta: dict = field(default_factory=dict, repr=False)
+    # the dotted key the function's claims are filed under, which the
+    # printed record's commands name; the function's name when unset
+    key: str | None = field(default=None, repr=False)
 
     def __repr__(self) -> str:
         from .analysis import tier_word
+        from ._layout import blocks
+        from ._missing_words import count_words as _count_words
         lines = [f"mathema.Record({self.facts.name}) · "
                  f"{tier_word(self.facts.tier, self.probes)} "
                 f"· form {self.facts.form}"]
+        # a claim with lines under it prints as a block (see _layout)
+        grouped = blocks(self.probes, list(self.facts.params),
+                         dict(self.facts.param_kinds), self.key or self.facts.name,
+                         _count_words)
         for p in self.probes:
-            mark = {"holds": "holds  ", "falsified": "FALSIFY", "proven": "proven ",
-                    "skipped": "skip   ", "unknown": "unknown",
-                    "invalidated": "INVALID"}.get(p.verdict.split(":", 1)[0], p.verdict)
+            if id(p) in grouped:
+                lines.extend(grouped[id(p)])
+                continue
+            if id(p) in grouped["used"]:
+                continue
+            mark = {"holds": "holds    ", "falsified": "falsified", "proven": "proven   ",
+                    "skipped": "skipped  ", "unknown": "unknown  ",
+                    "invalidated": "invalidated"}.get(p.verdict.split(":", 1)[0], p.verdict)
             missing = (p.meta or {}).get("mathema.missing") or {}
             pol = (p.meta or {}).get("mathema.policy")
             if pol:
@@ -764,8 +778,9 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         lifted = lift_symbolic(fn, facts)
     except Exception:
         lifted = None
+    from .authoring import _fn_key
     return Record(facts=facts, probes=probes, dependencies=deps,
-                  concepts=concept_objs, meta=meta, lifted=lifted)
+                  concepts=concept_objs, meta=meta, lifted=lifted, key=_fn_key(fn))
 
 
 def write_spec(fn, claims: list | None = None, root: str = ".",

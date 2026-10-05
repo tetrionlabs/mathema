@@ -645,11 +645,24 @@ class ExecutedMissing:
         if at_default and any(p not in at_default for p, _k, _m in keys):
             point = {p: v for p, v in point.items() if p not in at_default}
             keys = keys_of(point, self.paths)
-        from ._missing_policy import INCONCLUSIVE, INDIFFERENT, NOT_REPEATABLE, refill
+        from ._missing_policy import (INCONCLUSIVE, INDIFFERENT, MISSING, NOT_REPEATABLE,
+                                      raise_is_the_absences, refill)
         given, refill_at = self.given, self.refill_at
         pieces = (refill(lambda at: refill_at(at, given), point, output, raised,
                          self.fills)
                   if refill_at is not None and not self.paths else None)
+        if pieces is None and refill_at is not None and raise_is_the_absences(
+                lambda at: refill_at(at, given), point, raised, self.fills):
+            # the raise is the absence's: filed under it alone, and the
+            # holes beside it are inconclusive
+            for p, kind, _m in keys:
+                if kind == MISSING:
+                    self.inconclusive[p] = self.inconclusive.get(p, 0) + 1
+            absent_keys = [k for k in keys if k[1] != MISSING]
+            self._file(point, output, raised, absent_keys,
+                       classify_call(point, output, raised,
+                                     unseen_kinds(point, absent_keys)))
+            return
         if pieces is None:
             self._file(point, output, raised, keys,
                        classify_call(point, output, raised, unseen_kinds(point, keys)))

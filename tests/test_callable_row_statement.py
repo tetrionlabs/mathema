@@ -21,7 +21,7 @@ def label(name: str) -> str:
 
 def test_an_unsynthesisable_call_names_the_call_it_tried():
     rec = mathema.check(pick, claims=["for a in [0, 0], raises(f(a, b, c), ValueError)"])
-    assert "  skip    callable: f(a, b, c) can be called\n" in repr(rec) + "\n"
+    assert "  skipped   callable: f(a, b, c) can be called\n" in repr(rec) + "\n"
     (row,) = [p for p in rec.probes if p.name == "callable"]
     assert row.note.startswith("f could not be called with a value mathema built "
                                "from the signature (a, b, c): ")

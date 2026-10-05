@@ -1972,8 +1972,8 @@ def _policy_state(p) -> str:
 def _policy_line(p) -> str:
     """One policy row as the record prints it, indented for a listing."""
     pol = p.meta["mathema.policy"]
-    mark = {"holds": "holds  ", "proven": "proven ",
-            "falsified": "FALSIFY"}.get(p.verdict, p.verdict)
+    mark = {"holds": "holds    ", "proven": "proven   ",
+            "falsified": "falsified"}.get(p.verdict, p.verdict)
     if pol.get("sentence"):
         line = f"    {mark} {p.name}: {pol['sentence']}"
     else:

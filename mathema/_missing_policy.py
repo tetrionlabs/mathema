@@ -659,6 +659,34 @@ def refill(call_at, point: dict, output, raised: "str | None",
     return out
 
 
+def raise_is_the_absences(call_at, point: dict, raised: "str | None",
+                          fills: dict) -> bool:
+    """Intent:
+        Whether a call that raised while holding both a hole and an
+        absence (not along a path) still raises with every hole filled,
+        so the raise comes from the absence and says nothing about the
+        holes. False when the call did not raise, holds no such pair, or
+        a hole has neither a present value nor a fill.
+    """
+    if raised is None:
+        return False
+    keys = keys_of(point)
+    if any(is_path(q) for q, _k, _m in keys):
+        return False
+    holes = [(q, m) for q, k, m in keys if k == MISSING]
+    if not holes or not any(k == ABSENT for _q, k, _m in keys):
+        return False
+    holding = list(dict.fromkeys(q for q, _m in holes))
+    fill_of = {q: (present_value(point[q]) if present_value(point[q]) is not None
+                   else fills.get(q)) for q in holding}
+    if any(v is None for v in fill_of.values()):
+        return False
+    members = list(dict.fromkeys(m for _q, m in holes))
+    at = {q: (filled(v, members, fill_of[q]) if q in holding else v)
+          for q, v in point.items()}
+    return call_at(at)[1] is not None
+
+
 def _scaled(v, scale: float):
     """A fill `v` scaled: `2v` is 1 where `v` is 0."""
     if scale == 1.0:

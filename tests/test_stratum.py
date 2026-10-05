@@ -178,5 +178,5 @@ def test_repr_renders_the_stratum_without_touching_the_verdict(modfile):
     rec = mathema.check(mod.explode, claims=[
         claim("for x in [0, 1e6], f(x) >= 1", route="probe")])
     text = repr(rec)
-    assert "FALSIFY" in text
+    assert "falsified" in text and "FALSIFY" not in text
     assert "implementation:overflow" in text
