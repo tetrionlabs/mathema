@@ -1078,6 +1078,7 @@ def register_library_claims(root: "str | None" = ".") -> list:
     apply_definitions(root)
     rows: list = []
     names: list = []
+    unbuilt: list = []
     defined: set = set()
     from ..conjecture import region_row_kind
     for key, info in sorted(library_claims.items()):
@@ -1089,8 +1090,11 @@ def register_library_claims(root: "str | None" = ".") -> list:
             except _Unbuildable as e:
                 reason = str(e)
                 label = (key, str(row.get("name")), reason)
+                if reason != "shape" and not info.get("bundled"):
+                    unbuilt.append((key, str(row.get("name")),
+                                    info["source"], reason))
                 if (reason != "shape" and not info.get("bundled")
-                        and label not in _REPORTED):
+                        and label not in _REPORTED and not _QUIET["on"]):
                     _REPORTED.add(label)
                     warnings.warn(
                         f"mathema: compendium row {row.get('name')!r} of "
@@ -1119,7 +1123,7 @@ def register_library_claims(root: "str | None" = ".") -> list:
             register_raises_when(key, build, built.label)
             rows.append((key, build))
             names.append((key, str(row.get("name"))))
-    _INSTALLED.update(root=marker, rows=rows, names=names,
+    _INSTALLED.update(root=marker, rows=rows, names=names, unbuilt=unbuilt,
                       keys=frozenset(library_claims), objects=None,
                       defined=frozenset(defined))
     from ..hazards import register_hazard_generator
@@ -1145,6 +1149,22 @@ def defined_keys() -> frozenset:
     `is_defined` row (bare or a region): where each is defined is a
     stated fact."""
     return _INSTALLED.get("defined") or frozenset()
+
+
+#: whether `register_library_claims` keeps its reports of project rows
+#: that register no region to itself (`unregistered_project_rows`)
+#: rather than warning: set while `mathema verify` installs, which
+#: prints them as note lines
+_QUIET: dict = {"on": False}
+
+
+def unregistered_project_rows() -> list:
+    """Intent:
+        The project compendium rows the installed library claims could
+        not register, `(key, row name, source, reason)` each, a row
+        reading an array's shape or a matrix left out.
+    """
+    return list(_INSTALLED.get("unbuilt") or [])
 
 
 def install(root: str = ".") -> None:
@@ -1327,7 +1347,7 @@ def uninstall(root: "str | None" = None) -> None:
         return
     for key, build in _INSTALLED["rows"]:
         unregister_lemmas(key, [build])
-    _INSTALLED.update(root=None, rows=[], names=[], keys=frozenset(),
+    _INSTALLED.update(root=None, rows=[], names=[], unbuilt=[], keys=frozenset(),
                       objects=None, defined=frozenset(), runtime=None)
     _COMPUTATION.clear()
     from ..runtime_types import set_definitions

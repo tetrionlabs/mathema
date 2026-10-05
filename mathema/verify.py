@@ -1260,7 +1260,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     from .compendium import external_premises as _external_premises
     from .compendium import install as _install_compendium
     from .compendium import load_library_claims
-    _install_compendium(root)
+    from . import compendium as _compendium
+    _compendium._QUIET["on"] = True
+    try:
+        _install_compendium(root)
+    finally:
+        _compendium._QUIET["on"] = False
     library_claims = load_library_claims(root)
     stub_premises = _external_premises(root, library_claims=library_claims)
     from .authoring import resolve_declared
@@ -1273,6 +1278,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        write_yaml)
 
     out = VerifyResult()
+    for lkey, row, where, reason in _compendium.unregistered_project_rows():
+        if not reason.startswith("the statement does not parse"):
+            # a row that does not parse is named by its key's failure
+            out.lines.append(f"note {lkey}: row {row!r} of {where} "
+                             f"registers no region, so it guards no "
+                             f"call: {reason}")
     # claims whose record differs from what is written only because the
     # canonical text moved in one release, reported once for the run
     release_moved: list = []
