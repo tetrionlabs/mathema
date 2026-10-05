@@ -343,7 +343,7 @@ def ema(x: list[float], alpha: float) -> float:
 
 def test_an_ignored_hole_is_said_as_ignored_and_no_drop_is_suggested():
     # over a one-element x, ema never reads alpha
-    rec = mathema.check(ema, claims=[mathema.claim("f(x, alpha) <= max(x)")])
+    rec = mathema.check(ema, claims=[mathema.claim("for x in R^1, f(x, alpha) <= max(x)")])
     row = next(p for p in rec.probes if p.name == "missing[alpha]")
     assert row.verdict == "falsified", row.note
     assert "ignores" in row.note and "no fill of it changes" in row.note, row.note

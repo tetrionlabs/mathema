@@ -118,8 +118,8 @@ def _literal_call_args(text: str, sig_params: list) -> dict:
     literal at a real parameter's position: the call passes that value
     verbatim, so the parameter is FIXED to it, not synthesized. Unlike
     `_inferred_literal_domain` (numeric only, for branch pruning), this
-    keeps every literal kind (a string `"nope"`, a `True`, a number) and
-    its actual value, so both the sample and the counterexample witness
+    keeps every literal kind (a string `"nope"`, a `True`, a number, a
+    list such as the empty `[]`) and its actual value, so both the sample and the counterexample witness
     show what the call really passed rather than a synthesized
     placeholder in a literal's slot."""
     try:
@@ -134,6 +134,13 @@ def _literal_call_args(text: str, sig_params: list) -> dict:
         for p, arg in zip(sig_params, node.args):
             if isinstance(arg, ast.Constant):
                 fixed[p] = arg.value
+            elif isinstance(arg, (ast.List, ast.Tuple)):
+                # a literal container (`f([])`, `f([1.0, 2.0])`) passes
+                # that container verbatim
+                try:
+                    fixed[p] = ast.literal_eval(arg)
+                except (ValueError, SyntaxError):
+                    continue
     return fixed
 
 
@@ -5092,7 +5099,8 @@ def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set 
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                     and node.func.id == "f":
                 for i, arg in enumerate(node.args):
-                    if isinstance(arg, ast.Constant) and i < len(names):
+                    if isinstance(arg, (ast.Constant, ast.List, ast.Tuple)) \
+                            and i < len(names):
                         shown.add(names[i])
                 for kw in node.keywords:
                     if kw.arg and isinstance(kw.value, ast.Constant):

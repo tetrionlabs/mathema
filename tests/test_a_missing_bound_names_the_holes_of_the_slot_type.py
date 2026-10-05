@@ -58,3 +58,11 @@ def test_a_numpy_nan_is_missing_and_a_plain_none_is_not():
                                                                 "proven")
     p = _verdict(none_plain, "f(1.0) in {missing}")
     assert p.verdict == "falsified", (p.verdict, p.counterexample)
+
+
+def test_the_witness_of_a_literal_empty_call_is_the_empty_input():
+    def mean_np_plain(xs: np.ndarray) -> float:
+        return 1.0
+    p = _verdict(mean_np_plain, "f([]) in {missing}")
+    assert p.verdict == "falsified", (p.verdict, p.counterexample)
+    assert p.counterexample.startswith("xs = []"), p.counterexample
