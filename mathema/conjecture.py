@@ -4030,14 +4030,15 @@ def _gate_premise_refusal(cj) -> "str | None":
         if gate.group(1) == "is_missing_safe":
             return (f"assuming {part.strip()} is not a premise: a value claim is never "
                     f"judged where f returns a missing value, so the premise would "
-                    f"change nothing. State what f does with a missing {param} as its "
-                    f"own claim (`missing(f, {param}) propagates`, `drops` or `raises`), "
-                    f"or write `\\ {{missing}}` in the domain so f is not called with one.")
+                    f"change nothing. To keep f from being called with a missing "
+                    f"{param}, write in the domain: \\ {{missing}}; or state what f does "
+                    f"with one as its own claim, with the word propagates, drops or "
+                    f"raises, for example: missing(f, {param}) propagates")
         return (f"assuming {part.strip()} is not a premise: a value claim is never "
                 f"judged where f returns None, so the premise would change nothing. "
-                f"State what f does when {param} is None as its own claim "
-                f"(`absent(f, {param}) raises(TypeError)`), or write `\\ {{absent}}` in "
-                f"the domain so f is not called with None.")
+                f"To keep f from being called with None, write in the domain: "
+                f"\\ {{absent}}; or state what f does when {param} is None as its own "
+                f"claim, for example: absent(f, {param}) raises(TypeError)")
     return None
 
 

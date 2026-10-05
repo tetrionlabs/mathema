@@ -121,7 +121,7 @@ def _policy_detail(p) -> str:
 
 
 #: the policy a row's next step says to state, as the record words it
-_STATED = re.compile(r'--corrected "([^"]+)"|(?:write|state|,) `([^`]+)`')
+_CORRECTED = re.compile(r'--corrected "([^"]+)"')
 
 
 def _intended(stated: str, word: str) -> str:
@@ -144,7 +144,10 @@ def _fixes(p, key: str, word: str) -> str:
     pol = (p.meta or {}).get("mathema.policy") or {}
     # a row with no single policy needs one claim per case, not one command
     mixed = (pol.get("sentence") or "").startswith("f has no single policy")
-    stated_all = {a or b for a, b in _STATED.findall(pol.get("next") or "")}
+    from ._missing_words import remedy_statements
+    corrected = _CORRECTED.findall(pol.get("next") or "")
+    stated_all = set(corrected) or set(
+        remedy_statements((pol.get("next") or "").split("; or to accept", 1)[0]))
     # a row whose next step states one claim per member or case has no
     # single command that settles it
     found = None if mixed or len(stated_all) != 1 else stated_all.pop()

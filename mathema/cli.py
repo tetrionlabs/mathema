@@ -2054,25 +2054,26 @@ def _write_policies(args, declared_rows: list, policies: list) -> int:
     for p in contradicted:
         corrected = _corrected_text(p)
         line += (f". The code contradicts {p.name} ({_contradiction_words(p)}): change "
-                 f"the word in the file, change f, or accept it as a discovery "
-                 f"(mathema accept {args.key} {p.name} --as discovery"
-                 + (f" --corrected \"{corrected}\"" if corrected else "") + ")")
+                 f"the word in the file or change f; or to accept it as a discovery, "
+                 f"run: mathema accept {args.key} {p.name} --as discovery"
+                 + (f" --corrected \"{corrected}\"" if corrected else ""))
     for p in policies:
         if _policy_state(p) != "unaccounted":
             continue
         pol = p.meta["mathema.policy"]
         sentence = pol.get("sentence") or ""
-        stated = re.findall(r"`([^`]+)`", (pol.get("next") or "").split("; or ", 1)[0])
+        from ._missing_words import remedy_statements
+        stated = remedy_statements((pol.get("next") or "").split("; or to accept", 1)[0])
         if sentence.startswith("f has no single policy"):
-            line += (f". Not written: {p.name}, {sentence}; mathema claims {args.key} "
-                     f"prints the {len(stated)} rows to state, or change f")
+            line += (f". Not written: {p.name}, {sentence}; change f, or to see the "
+                     f"{len(stated)} rows to state, run: mathema claims {args.key}")
         elif "does not declare it" in sentence:
             line += (f". Not written: {p.name}, f returns None from present inputs and "
-                     f"its return type does not declare it; declare `-> Optional[...]`, "
-                     f"or make f return a value")
+                     f"its return type does not declare it; make f return a value, or "
+                     f"declare: -> Optional[...]")
         else:
             line += (f". Not written: {p.name}, {_unwritten_words(sentence)}"
-                     + (f"; state `{stated[0]}` yourself, or {_alternative(pol)}"
+                     + (f"; {_alternative(pol)}, or state yourself: {stated[0]}"
                         if stated else ""))
     print(line)
     return 0
@@ -2105,8 +2106,8 @@ def _list_policies(key: str, policies: list) -> None:
         (p.meta["mathema.policy"].get("parameter") or "the result") for p in policies))
     n = len(policies)
     print(f"{key}: {n} policy row{'' if n == 1 else 's'} about {', '.join(params)}")
-    groups = (("confirmed", f"confirmed by the code (mathema claims {key} --write "
-                            f"writes these):"),
+    groups = (("confirmed", f"confirmed by the code (to write these, run: mathema "
+                            f"claims {key} --write):"),
               ("contradicted", "contradicted by the code (change the word, the code, "
                                "or accept it as a discovery; --write writes these "
                                "with the contradiction in the note):"),
@@ -2146,7 +2147,7 @@ def cmd_claims(args) -> int:
             return _write_policies(args, declared_rows, policies)
         if not declared_rows:
             print(f"{args.key}: no declared claims "
-                  "(mathema claims --suggest lists candidates)")
+                  f"(to list candidates, run: mathema claims {args.key} --suggest)")
         else:
             print(f"{args.key}: {len(declared_rows)} declared claim(s)")
             for c in declared_rows:
@@ -2880,8 +2881,8 @@ def cmd_compendium(args) -> int:
     from .spec import load_verified
 
     if not args.library:
-        raise TargetError("compendium export needs the library to export "
-                          "(mathema compendium export mylib)")
+        raise TargetError("compendium export needs the library to export, for "
+                          "example: mathema compendium export mylib")
     if not any(k.split(".")[0] == args.library for k in load_verified(root)):
         raise TargetError(f"no verified records for library "
                           f"{args.library!r} under {root}; nothing to export")

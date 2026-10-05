@@ -108,7 +108,7 @@ def test_an_unaccounted_raise_at_a_path_is_its_own_falsified_row():
     row = rows["absent[d.note]"]
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert row.counterexample == "d.note unset: f raised KeyError"
-    assert "state `absent(f, d.note) raises(KeyError)`" in row.note, row.note
+    assert "state: absent(f, d.note) raises(KeyError)" in row.note, row.note
 
 
 def test_members_that_behave_differently_get_a_row_each():
@@ -135,7 +135,7 @@ def test_a_stated_path_row_is_contradicted():
     row = rows["c1"]
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert row.counterexample == "d.note unset: f raised KeyError"
-    assert "state `absent(f, d.note, unset) raises(KeyError)`" in row.note, row.note
+    assert "state: absent(f, d.note, unset) raises(KeyError)" in row.note, row.note
 
 
 def test_a_path_policy_reads_back_in_every_form():

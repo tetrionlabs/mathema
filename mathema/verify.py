@@ -107,20 +107,21 @@ def _policy_clause(name: str, statement: str, pol: dict) -> "str | None":
     does not hold, from the row's own meta: the row, what f does, whose
     word it contradicts, and the one next step."""
     import re as _re
+    from ._missing_words import remedy_statements
     nxt = pol.get("next") or ""
-    first = _re.search(r"`([^`]+)`", nxt)
-    to_write = first.group(1) if first else None
+    named = remedy_statements(nxt.split("; or to accept", 1)[0])
+    to_write = named[0] if named else None
     if pol.get("sentence"):
         sentence = pol["sentence"]
         if sentence.startswith("f has no single policy"):
-            rows = len(_re.findall(r"`[^`]+`", nxt.split("; or ", 1)[0]))
+            rows = len(named)
             return (f"{name}: {sentence}" + (f", {rows} rows to state" if rows > 1
                                               else ""))
         if "does not declare it" in sentence:
             return (f"{name}: {sentence}; declare the return type Optional, or return a "
                     f"value")
-        tail = (f"; state `{to_write}` or handle None" if pol.get("kind") == "absent"
-                and to_write else f"; state `{to_write}` or change f" if to_write else "")
+        tail = (f"; handle None, or state: {to_write}" if pol.get("kind") == "absent"
+                and to_write else f"; change f, or state: {to_write}" if to_write else "")
         return f"{name}: {sentence}{tail}"
     reason = pol.get("reason") or ""
     m = _re.search(r"f (\w+) instead: (.+)$", reason)
@@ -130,7 +131,7 @@ def _policy_clause(name: str, statement: str, pol: dict) -> "str | None":
         return (f"{name}, {lib.group(1)}'s row says {pol.get('behaviour')} "
                 f"{_when_words(pol.get('premise') or '')} and f {lib.group(2)} at "
                 f"{lib.group(3)}".replace("  ", " ")
-                + (f"; state `{to_write}` or change f" if to_write else ""))
+                + (f"; change f, or state: {to_write}" if to_write else ""))
     if not m:
         return None
     did, entry = m.group(1), m.group(2)
@@ -148,7 +149,7 @@ def _policy_clause(name: str, statement: str, pol: dict) -> "str | None":
     else:
         what = (f"f {did} {param} = None ({entry})" if kind == "absent"
                 else f"f {did} a missing {param} ({entry})")
-    remedy = (f"; write `{to_write}` or change f" if to_write
+    remedy = (f"; change f, or write: {to_write}" if to_write
               else "; change the word or the code")
     return f"{name}, {what} where {whose} {word}{remedy}"
 
@@ -338,7 +339,8 @@ def gate(claims, *, strict: bool,
             n = len(r.policy_problems)
             r.problems.append(f"{n} policy row{'s' if n != 1 else ''} to settle: "
                               + "; ".join(r.policy_problems)
-                              + (f" (mathema claims {key})" if key else ""))
+                              + (f"; to list them, run: mathema claims {key}" if key
+                                 else ""))
         others = r.falsified - len(r.policy_problems) - len(gate_fails)
         if others > 0:
             r.problems.append(f"{others} falsified claim(s)")

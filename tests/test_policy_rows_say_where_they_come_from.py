@@ -71,9 +71,8 @@ def test_a_default_row_names_itself_and_its_confirmation():
             "propagates") in lines
     assert _policy(rec)["missing[x]"].meta["mathema.policy"]["reason"] == (
         "default for a float, which may be nan; confirmed on the 43 draws of c[float]. "
-        "Keep it by writing it (mathema claims "
-        "test_policy_rows_say_where_they_come_from.lin --write), or change the word to "
-        "raises or drops if f should do otherwise")
+        "Change the word to raises or drops if f should do otherwise; to keep it, run: "
+        "mathema claims test_policy_rows_say_where_they_come_from.lin --write")
 
 
 def test_an_unaccounted_raise_is_a_named_sentence_row():
@@ -108,10 +107,10 @@ def test_a_silent_drop_keeps_its_remedy_on_the_row_only():
         "--corrected \"missing(f, x) drops\"  (ii) exclude nan  "
         "(iii) handle nan at entry")
     assert _policy(rec)["missing[x]"].meta["mathema.policy"]["next"] == (
-        "if 1.0 is the answer f should give for a missing x, write "
-        "`missing(f, x) drops`; if not, make f raise or give nan back; or accept it as "
-        "a discovery: mathema accept test_policy_rows_say_where_they_come_from.clamp01 "
-        "missing[x] --as discovery --corrected \"missing(f, x) drops\"")
+        "if not, make f raise or give nan back; if 1.0 is the answer f should give for "
+        "a missing x, state: missing(f, x) drops; or to accept it as a discovery, run: "
+        "mathema accept test_policy_rows_say_where_they_come_from.clamp01 missing[x] "
+        "--as discovery --corrected \"missing(f, x) drops\"")
 
 
 def test_a_list_slot_row_names_only_its_member():
@@ -124,10 +123,10 @@ def test_a_list_slot_row_names_only_its_member():
         "f raises instead: a null slot in, "
         "TypeError")
     assert null.meta["mathema.policy"]["next"] == (
-        "if the raise is intended, write `missing(f, xs, null) raises(TypeError)`; if "
-        "not, make f skip or fill the null slot; or accept it as a discovery: mathema "
-        "accept test_policy_rows_say_where_they_come_from.total missing[xs, null] --as "
-        "discovery --corrected \"missing(f, xs, null) raises(TypeError)\"")
+        "if not, make f skip or fill the null slot; if the raise is intended, state: "
+        "missing(f, xs, null) raises(TypeError); or to accept it as a discovery, run: "
+        "mathema accept test_policy_rows_say_where_they_come_from.total missing[xs, null] "
+        "--as discovery --corrected \"missing(f, xs, null) raises(TypeError)\"")
     nan = rows["missing[xs, nan]"]
     assert nan.meta["mathema.policy"]["reason"].startswith(
         "default for a list slot that may be nan; confirmed on the ")
@@ -251,10 +250,11 @@ def test_a_clash_says_which_premises_tell_cases_apart():
     from mathema.policy import contradicting_policies
     found = contradicting_policies(["missing(f, x) propagates", "missing(f, x) drops"])
     assert found == (
-        "`missing(f, x) propagates` and `missing(f, x) drops` state two behaviours for "
-        "one case. Keep one (the record shows which f follows), or give each a premise "
-        "on another parameter or on count(...) that tells the cases apart, e.g. "
-        "`assuming count(xs) >= 1, ...` beside `assuming count(xs) == 0, ...`")
+        "two claims state two behaviours for one case: (1) missing(f, x) propagates "
+        "(2) missing(f, x) drops. Keep one (the record shows which f follows), or give "
+        "each a premise on another parameter or on count(...) that tells the cases "
+        "apart, for example, one claim for each: (1) assuming count(xs) >= 1, ... "
+        "(2) assuming count(xs) == 0, ...")
 
 
 def test_a_premised_library_row_remedy_keeps_its_premise():
@@ -266,7 +266,8 @@ def test_a_premised_library_row_remedy_keeps_its_premise():
         "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c")])
     row = _policy(rec)["missing[xs, count == 0]"]
     nxt = row.meta["mathema.policy"]["next"]
-    remedies = re.findall(r"`([^`]+)`", nxt)
+    from mathema._missing_words import remedy_statements
+    remedies = remedy_statements(nxt.split("; or to accept", 1)[0])
     assert remedies and all(r.startswith("assuming count(xs) == 0, ") for r in remedies)
     again = mathema.check(mean_pd, claims=[mathema.claim(
         "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c")] + [
@@ -303,7 +304,7 @@ def test_one_switch_makes_mathemas_policy_rows_gate(monkeypatch):
     assert report.falsified == 1
     assert report.problems == [
         "1 policy row to settle: missing[x], f drops a missing x (nan in, 1.0 out) where "
-        "mathema's default says propagates; write `missing(f, x) drops` or change f"]
+        "mathema's default says propagates; change f, or write: missing(f, x) drops"]
     monkeypatch.setattr(verify, "POLICY_ROWS_GATE", False)
     assert verify.gate(rec.probes, strict=False).problems == []
 

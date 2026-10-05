@@ -246,7 +246,7 @@ def claim_word(kind: str, param: str, member: "str | None", behaviour: str,
     null) raises(TypeError)`."""
     target = param + (f", {member}" if member else "")
     verb = f"raises({raised})" if behaviour == "raises" and raised else behaviour
-    return f"`{kind}(f, {target}) {verb}`"
+    return f"{kind}(f, {target}) {verb}"
 
 
 def unknown_reason(first: dict, relation: str, listed: set) -> str:
@@ -271,11 +271,41 @@ def unknown_reason(first: dict, relation: str, listed: set) -> str:
         stated = claim_word(kind, p, None, "raises", raised)
         word = "None" if kind == ABSENT else value_shown(value)
         where = (f"remove {word} from the set" if p in listed
-                 else f"write \\ {{{kind}}} in the domain")
-        return f"{text} State {stated} if that is intended, or {where}."
+                 else f"to exclude it, write in the domain: \\ {{{kind}}}")
+        return f"{text} If that is intended, state: {stated}; or {where}"
     stated = claim_word(kind, p, None, behaviour or "propagates")
-    return (f"{text} To state what f does there, write "
-            f"`for {p} in {{{value_shown(value)}}}, f({p}) in {{{kind}}}` or {stated}.")
+    return (f"{text} To state what f does there, write one of these claims: "
+            + numbered([f"for {p} in {{{value_shown(value)}}}, f({p}) in {{{kind}}}",
+                        stated]))
+
+
+def remedy_statements(text: str) -> list:
+    """Intent:
+        The claims a remedy line says to state or write, in order: each
+        clause `..., state: <claim>` or `..., write: <claim>`, and the
+        numbered claims of `..., write these claims: (1) <a> (2) <b>`.
+        A remedy puts the condition first and the claim last, after a
+        colon, so a claim runs to the end of its clause (`; ` or the
+        end of the text).
+    """
+    import re
+    out: list = []
+    for clause in (text or "").split("; "):
+        listed = re.search(r"(?:write|state) these claims: (.+)$", clause)
+        if listed:
+            out += [c.strip() for c in re.split(r"\(\d+\) ", listed.group(1))
+                    if c.strip()]
+            continue
+        single = re.search(r"(?:^|, |\. )(?:[Ss]tate|[Ww]rite)(?: yourself)?: (.+)$",
+                           clause)
+        if single:
+            out.append(single.group(1).strip())
+    return out
+
+
+def numbered(claims: list) -> str:
+    """`(1) a (2) b`: claims listed after a colon, each numbered."""
+    return " ".join(f"({i}) {c}" for i, c in enumerate(claims, start=1))
 
 
 def declared_optional_return(fn) -> "str | None":

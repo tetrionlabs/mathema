@@ -88,7 +88,8 @@ def test_a_policy_claim_round_trips_through_the_store():
 def test_a_remedy_a_row_names_is_a_claim_that_parses():
     rec = mathema.check(clamp01, claims=[claim("for x in R, 0 <= f(x) <= 1", name="c")])
     row = next(p for p in rec.probes if (p.meta or {}).get("mathema.policy"))
-    remedy = row.meta["mathema.policy"]["next"].split("write `", 1)[1].split("`", 1)[0]
+    from mathema._missing_words import remedy_statements
+    (remedy,) = remedy_statements(row.meta["mathema.policy"]["next"].split("; or to accept", 1)[0])
     assert remedy == "missing(f, x) drops"
     assert claim(remedy).relation == "policy"
 
@@ -117,8 +118,8 @@ def test_a_contradicted_policy_carries_the_executed_witness_and_the_claim_to_wri
     row = _rows(clamp01, "missing(f, x) propagates")["missing(f, x) propagates"]
     assert row.verdict == "falsified"
     assert row.counterexample == "x = nan: f returned 1.0"
-    assert row.note == ("stated; f drops instead: nan in, 1.0 out; state "
-                        "`missing(f, x) drops` if that is intended, or change f")
+    assert row.note == ("stated; f drops instead: nan in, 1.0 out; if not, change f; "
+                        "if that is intended, state: missing(f, x) drops")
 
 
 def test_a_named_exception_must_be_the_one_raised():
@@ -201,9 +202,8 @@ def test_a_float_carries_its_default_propagation_row():
     assert row.meta["mathema.policy"]["source"] == "default"
     assert row.meta["mathema.policy"]["reason"] == (
         "default for a float, which may be nan; confirmed on the 43 draws of c0[float]. "
-        "Keep it by writing it (mathema claims "
-        "test_policy_claims_say_what_f_does_with_no_value.scaled --write), or change the "
-        "word to raises or drops if f should do otherwise")
+        "Change the word to raises or drops if f should do otherwise; to keep it, run: "
+        "mathema claims test_policy_claims_say_what_f_does_with_no_value.scaled --write")
     assert row.meta["mathema.surface"] == "mathema"
 
 
@@ -214,8 +214,8 @@ def test_a_silent_drop_contradicts_the_default():
         "mathema's default word for a float, not a claim of yours; f drops instead: nan "
         "in, 1.0 out")
     assert row.meta["mathema.policy"]["next"] == (
-        "if 1.0 is the answer f should give for a missing x, write `missing(f, x) "
-        "drops`; if not, make f raise or give nan back; or accept it as a discovery: "
+        "if not, make f raise or give nan back; if 1.0 is the answer f should give for "
+        "a missing x, state: missing(f, x) drops; or to accept it as a discovery, run: "
         "mathema accept test_policy_claims_say_what_f_does_with_no_value.clamp01 "
         "missing[x] --as discovery --corrected \"missing(f, x) drops\"")
 
@@ -226,8 +226,8 @@ def test_an_unannotated_parameter_raises_on_none_by_default():
     assert row.verdict == "holds"
     assert row.meta["mathema.policy"]["reason"] == (
         "default: x has no annotation, so it may be None, and f raises on it; confirmed "
-        "on the 43 draws of c0[float]. Annotate x as float to exclude None, or write "
-        "this row with mathema claims "
+        "on the 43 draws of c0[float]. Annotate x as float to exclude None; to write "
+        "this row, run: mathema claims "
         "test_policy_claims_say_what_f_does_with_no_value.double --write")
 
 
@@ -239,11 +239,11 @@ def test_an_author_admitted_absence_that_raises_is_unaccounted_for():
     assert row.meta["mathema.policy"]["reason"] == (
         "f raised TypeError at x = None, and no claim says it may")
     assert row.meta["mathema.policy"]["next"] == (
-        "x is Optional[float], so f promised to take None. If the raise is intended, "
-        "state `absent(f, x) raises(TypeError)`; otherwise handle None in f, or annotate "
-        "x as float; or accept the raise as a discovery (mathema accept "
+        "x is Optional[float], so f promised to take None. Otherwise handle None in f, "
+        "or annotate x as float; if the raise is intended, state: absent(f, x) "
+        "raises(TypeError); or to accept the raise as a discovery, run: mathema accept "
         "test_policy_claims_say_what_f_does_with_no_value.opt_root absent[x] --as "
-        "discovery) and state `absent(f, x) raises(TypeError)`")
+        "discovery --corrected \"absent(f, x) raises(TypeError)\"")
 
 
 def test_a_guard_derives_the_row():
@@ -274,7 +274,7 @@ def test_a_contradicted_default_row_gates_verify():
     assert report.falsified == 1
     assert report.problems == [
         "1 policy row to settle: missing[x], f drops a missing x (nan in, 1.0 out) where "
-        "mathema's default says propagates; write `missing(f, x) drops` or change f"]
+        "mathema's default says propagates; change f, or write: missing(f, x) drops"]
 
 
 def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():
@@ -350,8 +350,8 @@ def test_write_writes_every_row_with_a_true_note(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == (
         "pmod.clamp: wrote 1 policy row to claims/policies.claims.yaml: missing[x]. "
         "The code contradicts missing[x] (f drops, nan in, 1.0 out): change the word "
-        "in the file, change f, or accept it as a discovery (mathema accept pmod.clamp "
-        "missing[x] --as discovery --corrected \"missing(f, x) drops\")")
+        "in the file or change f; or to accept it as a discovery, run: mathema accept "
+        "pmod.clamp missing[x] --as discovery --corrected \"missing(f, x) drops\"")
     main(["claims", "pmod.lin", "--root", str(tmp_path), "--write"])
     assert capsys.readouterr().out.strip() == (
         "pmod.lin: wrote 1 policy row to claims/policies.claims.yaml: missing[x]")
@@ -359,7 +359,7 @@ def test_write_writes_every_row_with_a_true_note(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == (
         "pmod.root_opt: wrote 1 policy row to claims/policies.claims.yaml: missing[x]. "
         "Not written: absent[x], f raises TypeError at x = None and no claim says it "
-        "may; state `absent(f, x) raises(TypeError)` yourself, or handle None in f")
+        "may; handle None in f, or state yourself: absent(f, x) raises(TypeError)")
     written = yaml.safe_load((tmp_path / "claims" / "policies.claims.yaml").read_text())
     assert written["pmod.clamp"] == {"claims": [{
         "name": "missing[x]", "statement": "missing(f, x) propagates",
@@ -445,11 +445,14 @@ _BEHAVIOURS = [
 
 def _remedies(rec) -> list:
     import re
+
+    from mathema._missing_words import remedy_statements
     texts = []
     for p in rec.probes:
         pol = (p.meta or {}).get("mathema.policy") or {}
         for said in (p.note or "", pol.get("next") or "", pol.get("reason") or ""):
-            texts += re.findall(r"`([^`]+)`", said)
+            texts += remedy_statements(said.split("; or to accept", 1)[0])
+            texts += re.findall(r'--corrected "([^"]+)"', said)
     out = []
     for t in dict.fromkeys(texts):
         try:
@@ -481,7 +484,7 @@ def test_every_remedy_a_row_prints_holds_once_written(fn, text, observed):
 def test_a_member_row_remedy_names_its_member():
     rows = {p.statement: p for p in _policy_rows(total, "for xs in [0, 1]^n, f(xs) >= 0")}
     nxt = rows["missing(f, xs, null) propagates"].meta["mathema.policy"]["next"]
-    assert "`missing(f, xs, null) raises(TypeError)`" in nxt
+    assert "state: missing(f, xs, null) raises(TypeError)" in nxt
 
 
 def test_an_array_holding_a_drawn_null_counts_it():

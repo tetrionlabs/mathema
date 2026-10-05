@@ -89,10 +89,10 @@ def test_a_listed_raise_is_said_and_its_claim_is_on_the_policy_row():
         "f raised TypeError at x = None, a point the claim lists, and no claim says "
         "it may")
     assert policy.meta["mathema.policy"]["next"] == (
-        "if the raise is intended, state `absent(f, x) raises(TypeError)`; otherwise "
-        "handle None in f, or remove None from the set; or accept the raise as a "
-        "discovery (mathema accept test_the_record_states_what_the_code_did.doubled "
-        "absent[x] --as discovery) and state `absent(f, x) raises(TypeError)`")
+        "otherwise handle None in f, or remove None from the set; if the raise is "
+        "intended, state: absent(f, x) raises(TypeError); or to accept the raise as a "
+        "discovery, run: mathema accept test_the_record_states_what_the_code_did.doubled "
+        "absent[x] --as discovery --corrected \"absent(f, x) raises(TypeError)\"")
 
 
 def test_a_value_returned_at_a_missing_input_is_stated():
