@@ -32,6 +32,8 @@ _STRENGTH = {"skipped": 0, "unknown": 1, "holds": 2, "proven": 3}
 _ADMISSIONS = re.compile(r"(?:\|(?:absent|missing|None|null|nan|NA|NaT|unset))+")
 _WRITTEN = re.compile(r" \| \{(?:missing|absent|None|null|nan|NA|NaT|unset|∅)"
                       r"(?:, (?:missing|absent|None|null|nan|NA|NaT|unset|∅))*\}")
+#: the clause a note gives a pass within the tolerance, with its gap
+_WITHIN = re.compile(r"within the (?:default tolerance|tolerance \(|round-off)")
 _REALS = {" : float": " ⊂ ℝ", " : int": " ⊂ ℤ", " : complex": " ⊂ ℂ"}
 
 
@@ -306,7 +308,10 @@ def _extras(p) -> list:
 def _detail(p, count_words) -> str:
     verdict = _verdict(p)
     if verdict == "holds" and p.n:
-        return count_words(p.n, (p.meta or {}).get("mathema.drawn"))
+        # a pass within the tolerance always prints its gap
+        gaps = [c for c in (p.note or "").split("; ") if _WITHIN.search(c)]
+        return "; ".join([count_words(p.n, (p.meta or {}).get("mathema.drawn")),
+                          *gaps])
     if verdict == "falsified" and p.counterexample:
         return f"counterexample {p.counterexample}"
     if verdict in ("unknown", "skipped") and p.note:
