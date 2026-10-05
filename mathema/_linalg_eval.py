@@ -134,7 +134,8 @@ def to_plain(value):
     if isinstance(value, Table):
         return {k: to_plain(v) for k, v in value.items()}
     if is_array(value):
-        out = value.tolist()
+        out = _floats(value.tolist()) if value.dtype.kind == "O" \
+            else value.tolist()
         for position, hole in (getattr(value, "hole_values", None) or {}).items():
             # the hole value the array was drawn with, back in its slot
             if len(position) == 1 and isinstance(out, list) and position[0] < len(out):
@@ -144,6 +145,20 @@ def to_plain(value):
                     and position[1] < len(out[position[0]]):
                 out[position[0]][position[1]] = hole
         return out
+    return value
+
+
+def _floats(value):
+    """A list (nested) with each exact rational an entry holds as the
+    float nearest it, an infinity beyond float range."""
+    from fractions import Fraction
+    if isinstance(value, list):
+        return [_floats(v) for v in value]
+    if isinstance(value, Fraction):
+        try:
+            return float(value)
+        except OverflowError:
+            return math.inf if value > 0 else -math.inf
     return value
 
 
@@ -430,6 +445,56 @@ def _exact_norm(a, ord):
             return _rounded(builtins.max(builtins.abs(v) for v in flat))
         return _rounded(builtins.max(builtins.sum(builtins.abs(v) for v in row)
                                      for row in rows))
+    return _other_norm(rows, flat, vector, ord)
+
+
+def _other_norm(rows, flat, vector: bool, ord):
+    """`_exact_norm` for the remaining orders: on a matrix `-1` and
+    `-inf` (the least column and row sums, exact), `2`, `-2` and `nuc`
+    (the largest and least singular values and their sum, certified);
+    on a vector `-inf` (the least magnitude), `0` (the number of nonzero
+    entries) and any order `p > 0`, `sum(abs(x)**p) ** (1/p)` to 60
+    digits. None for any other order.
+
+    Raises:
+        _linalg_exact.Untrusted: a singular value could not be
+            certified.
+    """
+    import mpmath
+
+    from ._linalg_exact import from_mp, singular_values
+    if not vector:
+        if ord == -1:
+            return _rounded(builtins.min(builtins.sum(builtins.abs(v) for v in col)
+                                         for col in zip(*rows)))
+        if ord == -math.inf:
+            return _rounded(builtins.min(builtins.sum(builtins.abs(v) for v in row)
+                                         for row in rows))
+        if isinstance(ord, str) and ord != "nuc":
+            return None
+        if ord in (2, -2, "nuc"):
+            values = singular_values(rows)
+            if ord == 2:
+                return from_mp(values[0])
+            if ord == -2:
+                return from_mp(values[-1])
+            with mpmath.workdps(60):
+                return from_mp(mpmath.fsum(values))
+        return None
+    if isinstance(ord, str):
+        return None
+    if ord == -math.inf:
+        return _rounded(builtins.min(builtins.abs(v) for v in flat))
+    if ord == 0:
+        return float(builtins.sum(1 for v in flat if v != 0))
+    if isinstance(ord, (int, float)) and not isinstance(ord, bool) \
+            and 0 < ord < math.inf:
+        with mpmath.workdps(60):
+            p = mpmath.mpf(_exact(ord).numerator) / _exact(ord).denominator
+            total = mpmath.fsum(
+                (mpmath.mpf(abs(v).numerator) / abs(v).denominator) ** p
+                for v in flat)
+            return from_mp(total ** (1 / p))
     return None
 
 
@@ -491,7 +556,8 @@ def _raw(args):
     from .domain import is_missing
     a = args[0] if len(args) == 1 else list(args)
     if is_array(a):
-        return a
+        exact = getattr(a, "exact", None)
+        return exact if exact is not None else a
     if isinstance(a, (list, tuple)):
         def element(v):
             if isinstance(v, (list, tuple)):
@@ -1006,6 +1072,8 @@ def _exact_rows(a):
     number (a hole, an infinity, a complex number)."""
     import numbers
     np = _np()
+    if is_array(a) and getattr(a, "exact", None) is not None:
+        a = a.exact
     if not is_array(a) or a.ndim not in (1, 2) or a.dtype.kind not in "biufO":
         return None
     if a.dtype.kind == "f" and not np.isfinite(a).all():
@@ -1276,24 +1344,181 @@ def _dot(x, y):
     return out
 
 
+_EXACT_ARRAY: list = []
+
+
+def _exact_array_class():
+    """The ndarray subclass whose values are rounded entries and whose
+    `exact` holds the exact values they were rounded from, so a further
+    claim operation reads the exact values; a view or a slice drops
+    them (it reads the rounded values), the transpose keeps them."""
+    if not _EXACT_ARRAY:
+        np = _np()
+
+        class ExactArray(np.ndarray):  # type: ignore[name-defined]
+            """Rounded entries with the exact values behind them."""
+            exact = None
+
+            def __array_finalize__(self, obj):
+                self.exact = None
+
+            @property
+            def T(self):
+                out = self.view(np.ndarray).T.view(type(self))
+                if self.exact is not None:
+                    out.exact = self.exact.T
+                return out
+
+        _EXACT_ARRAY.append(ExactArray)
+    return _EXACT_ARRAY[0]
+
+
+def _finite_real(v) -> bool:
+    import numbers
+    if isinstance(v, bool) or not isinstance(v, numbers.Real):
+        return False
+    return not isinstance(v, float) or math.isfinite(v)
+
+
+def exact_values(a):
+    """Intent:
+        The exact values of a claim value: an array of finite real
+        numbers as an object array of rationals (its own exact values
+        when it carries them), a finite real number as a rational, None
+        for anything else (a hole, an infinity, a complex number, a
+        value that is not a number).
+    """
+    np = _np()
+    if is_array(a):
+        exact = getattr(a, "exact", None)
+        if exact is not None:
+            return exact
+        if a.dtype.kind not in "biufO":
+            return None
+        flat = [_element(v) for v in a.ravel()]
+        if not all(_finite_real(v) for v in flat):
+            return None
+        out = np.empty(a.shape, dtype=object)
+        out.reshape(-1)[:] = [_exact(v) for v in flat]
+        return out
+    v = _element(a)
+    return _exact(v) if _finite_real(v) else None
+
+
+def _from_exact(values):
+    """An array of exact values as a claim value: each entry rounded
+    once, an entry beyond float range kept exact, the exact values
+    carried for the next operation; a single value as a number."""
+    np = _np()
+    if not is_array(values):
+        return _rounded(values)
+    if values.ndim == 0:
+        return _rounded(values.item())
+    rounded = np.frompyfunc(_rounded, 1, 1)(values)
+    finite = all(isinstance(v, float) for v in rounded.ravel())
+    out = (rounded.astype(float) if finite else rounded).view(
+        _exact_array_class())
+    out.exact = values
+    return out
+
+
+#: the operators a claim's elementwise arithmetic is compiled to
+_OPERATORS = {"+": lambda a, b: a + b, "-": lambda a, b: a - b,
+              "*": lambda a, b: a * b, "/": lambda a, b: a / b,
+              "**": lambda a, b: a ** b}
+#: the largest whole exponent computed exactly
+_LARGEST_EXPONENT = 64
+
+
+def arith(op: str, a, b):
+    """Intent:
+        `a <op> b` as a claim reads it (`op` one of `+ - * / **`): when
+        an operand is an array and both are finite real values, each
+        entry exact and rounded once, an entry beyond float range kept
+        exact; otherwise, and for two plain numbers, the operands' own
+        operator. A power is exact for a whole exponent of at most 64
+        in size, a quotient where no divisor entry is 0.
+    """
+    fn = _OPERATORS[op]
+    if not (is_array(a) or is_array(b)):
+        return _scalar_arith(op, fn, a, b)
+    ea, eb = exact_values(a), exact_values(b)
+    if ea is None or eb is None:
+        return fn(a, b)
+    np = _np()
+    divisors = np.ravel(np.asarray(eb, dtype=object))
+    if op == "/" and any(v == 0 for v in divisors):
+        return fn(a, b)
+    if op == "**":
+        if not all(v.denominator == 1 and abs(v) <= _LARGEST_EXPONENT
+                   for v in divisors):
+            return fn(a, b)
+        if any(v < 0 for v in divisors) and any(
+                v == 0 for v in np.ravel(np.asarray(ea, dtype=object))):
+            return fn(a, b)
+        eb = (np.frompyfunc(int, 1, 1)(eb) if is_array(eb) else int(eb))
+    try:
+        values = np.frompyfunc(fn, 2, 1)(ea, eb)
+    except ValueError:
+        return fn(a, b)
+    return _from_exact(values)
+
+
+def _scalar_arith(op: str, fn, a, b):
+    """`a <op> b` between two numbers: the float operation, except
+    exactly (rounded once, beyond float range kept exact) when an operand
+    is already an exact rational or the float operation overflows from
+    finite operands."""
+    from fractions import Fraction
+    exact = isinstance(a, Fraction) or isinstance(b, Fraction)
+    if not exact:
+        try:
+            out = fn(a, b)
+        except OverflowError:
+            out = None
+        if out is not None and not (isinstance(out, float) and math.isinf(out)):
+            return out
+    if not (_finite_real(_element(a)) and _finite_real(_element(b))):
+        return fn(a, b)
+    ea, eb = _exact(_element(a)), _exact(_element(b))
+    if op == "/" and eb == 0:
+        return fn(a, b)
+    if op == "**":
+        if eb.denominator != 1 or abs(eb) > _LARGEST_EXPONENT \
+                or (eb < 0 and ea == 0):
+            return fn(a, b)
+        eb = int(eb)
+    return _rounded(fn(ea, eb))
+
+
 def matmul(a, b):
     """`a @ b` as a claim reads it: for two vectors or matrices of
     finite real numbers the exact product, each entry rounded once (an
     entry beyond float range stays exact), as `dot` computes it;
     anything else (a hole, an infinity, a complex entry, a value that is
     not an array) by the operands' own `@`."""
-    if is_array(a) and is_array(b) and a.ndim in (1, 2) and b.ndim in (1, 2) \
-            and _exact_rows(a) is not None and _exact_rows(b) is not None:
-        return _dot(a, b)
+    if is_array(a) and is_array(b) and a.ndim in (1, 2) and b.ndim in (1, 2):
+        ea, eb = exact_values(a), exact_values(b)
+        if ea is not None and eb is not None:
+            return _from_exact(_np().dot(ea, eb))
     return a @ b
 
 
 def _outer(x, y):
-    return _np().outer(_matrix(x), _matrix(y))
+    """The matrix of products `x[i] * y[j]`, each exact and rounded
+    once."""
+    ex, ey = exact_values(_matrix(x)), exact_values(_matrix(y))
+    if ex is None or ey is None:
+        return _np().outer(_matrix(x), _matrix(y))
+    return _from_exact(_np().multiply.outer(ex.ravel(), ey.ravel()))
 
 
 def _kron(A, B):
-    return _np().kron(_matrix(A), _matrix(B))
+    """The Kronecker product, each entry exact and rounded once."""
+    ea, eb = exact_values(_matrix(A)), exact_values(_matrix(B))
+    if ea is None or eb is None:
+        return _np().kron(_matrix(A), _matrix(B))
+    return _from_exact(_np().kron(ea, eb))
 
 
 def _diag(x):
@@ -1301,27 +1526,79 @@ def _diag(x):
 
 
 def _rank(A):
-    return int(_np().linalg.matrix_rank(_matrix(A)))
+    """The rank of a matrix, exact (elimination over the rationals)."""
+    rows = _exact_rows(_matrix(A))
+    if rows is None or _matrix(A).ndim != 2:
+        return int(_np().linalg.matrix_rank(_matrix(A)))
+    from ._linalg_exact import rank
+    return rank(rows)
+
+
+def _values_array(values: list):
+    """Certified values as an array: float when every one is a float,
+    complex when one is complex, else an object array."""
+    np = _np()
+    if all(isinstance(v, float) for v in values):
+        return np.array(values, dtype=float)
+    if all(isinstance(v, (float, complex)) for v in values):
+        return np.array(values, dtype=complex)
+    out = np.empty(len(values), dtype=object)
+    out[:] = values
+    return out
 
 
 def _eigvals(A):
-    """The eigenvalues of a square matrix, complex in general, sorted
-    by real then imaginary part so two calls list them alike."""
-    np = _np()
-    values = np.linalg.eigvals(_matrix(A))
-    values = values[np.lexsort((values.imag, values.real))]
-    if np.all(values.imag == 0):
-        return values.real
-    return values
+    """Intent:
+        The eigenvalues of a square matrix, complex in general, sorted
+        by real then imaginary part so two calls list them alike, each
+        certified and rounded once (see `_linalg_exact`).
+
+    Raises:
+        _linalg_exact.Untrusted: an eigenvalue could not be certified.
+    """
+    rows = _square_rows(A)
+    if rows is None:
+        np = _np()
+        values = np.linalg.eigvals(_matrix(A))
+        values = values[np.lexsort((values.imag, values.real))]
+        return values.real if np.all(values.imag == 0) else values
+    from ._linalg_exact import eigvals
+    return _values_array(eigvals(rows))
 
 
 def _eigvalsh(A):
-    """The eigenvalues of a symmetric matrix, real and ascending."""
-    return _np().linalg.eigvalsh(_matrix(A))
+    """Intent:
+        The eigenvalues of a symmetric matrix (read from its lower
+        triangle), real and ascending, each certified and rounded once.
+
+    Raises:
+        _linalg_exact.Untrusted: an eigenvalue could not be certified.
+    """
+    rows = _square_rows(A)
+    if rows is None:
+        return _np().linalg.eigvalsh(_matrix(A))
+    from ._linalg_exact import eigvalsh
+    return _values_array(eigvalsh(rows))
 
 
 def _cond(A):
-    return float(_np().linalg.cond(_matrix(A)))
+    """Intent:
+        The 2-norm condition number, the largest singular value over
+        the smallest, certified and rounded once; infinite for a matrix
+        whose smallest singular value is 0.
+
+    Raises:
+        _linalg_exact.Untrusted: a singular value could not be certified.
+    """
+    a = _matrix(A)
+    rows = _exact_rows(a) if a.ndim == 2 else None
+    if rows is None:
+        return float(_np().linalg.cond(a))
+    from ._linalg_exact import from_mp, singular_values
+    values = singular_values(rows)
+    if values[-1] == 0:
+        return math.inf
+    return from_mp(values[0] / values[-1])
 
 
 def _solve(A, b):
@@ -1343,11 +1620,20 @@ def _solve(A, b):
 
 
 def _pinv(A):
-    return _np().linalg.pinv(_matrix(A))
+    """The Moore-Penrose pseudoinverse, each entry exact and rounded
+    once."""
+    a = _matrix(A)
+    rows = _exact_rows(a) if a.ndim == 2 else None
+    if rows is None:
+        return _np().linalg.pinv(a)
+    from ._linalg_exact import pinv
+    return _rounded_array(pinv(rows))
 
 
 #: the name a claim's `@` is compiled to (see `conjecture._validate`)
 MATMUL = "_exact_matmul"
+#: the name a claim's elementwise arithmetic is compiled to
+ARITH = "_exact_arith"
 
 #: the claim-level functions a vector or matrix claim evaluates with,
 #: each a number's ordinary function on a number
@@ -1368,6 +1654,7 @@ FUNCTIONS = {
     "dot": _dot, "outer": _outer, "kron": _kron, "diag": _diag,
     "rank": _rank, "eigvals": _eigvals, "eigvalsh": _eigvalsh,
     "cond": _cond, "solve": _solve, "pinv": _pinv,
-    # the product `@` in claim text is compiled to this call
-    MATMUL: matmul,
+    # the product `@` and the arithmetic in claim text are compiled to
+    # these calls
+    MATMUL: matmul, ARITH: arith,
 }
