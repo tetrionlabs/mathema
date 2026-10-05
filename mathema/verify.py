@@ -1099,8 +1099,48 @@ def _no_applicable_file_note(key: str, entry: dict, root: str) -> str:
             + "; its record is kept as it is and not re-adjudicated")
 
 
+def _out_of_range_notes(root: str, heads: set) -> list:
+    """Intent:
+        One line for each library in `heads` (the top-level modules the
+        swept functions call) that is installed outside the range of
+        every claims file about it: its version, each file with its
+        range, and the command that shows more.
+    """
+    from .compendium import _installed_version
+    from .compendium.status import _library_files
+    files = _library_files(root)
+    out: list = []
+    for library in sorted(heads):
+        about = files.get(library) or []
+        if not about or any(f["in_range"] for f in about):
+            continue
+        aliases: list = []
+        for f in about:
+            aliases += list(f.get("aliases") or ())
+        installed = _installed_version(library, aliases)
+        if installed in (None, "*"):
+            continue
+        groups: dict = {}
+        for f in about:
+            groups.setdefault((f["origin"], f["versions"]), []).append(
+                f["source"])
+        ranges = "; ".join(
+            f"{paths[0]} ({versions})" if len(paths) == 1 else
+            f"{len(paths)} {origin} files under "
+            f"{os.path.dirname(os.path.commonprefix(paths)) or '.'}"
+            f" ({versions})"
+            for (origin, versions), paths in groups.items())
+        out.append(f"note {library} {installed} is outside the range of "
+                   f"every claims file about it, so none of their rows is "
+                   f"used here: {ranges}. `mathema compendium status "
+                   f"{library}` shows the calls; verifying a file by path "
+                   f"adjudicates its rows against {library} {installed}")
+    return out
+
+
 def _library_population(root: str, verified: dict, declared: dict,
-                        library_claims: dict) -> dict:
+                        library_claims: dict,
+                        heads: "set | None" = None) -> dict:
     """Intent:
         The library claim keys this sweep adjudicates, mapped to the
         claims file each one's rows come from: every key a swept
@@ -1136,7 +1176,10 @@ def _library_population(root: str, verified: dict, declared: dict,
                 wanted |= library_keys_called(fn, facts,
                                               library_claims=library_claims)
                 from .definitions import called_keys
-                wanted |= called_keys(fn, facts) & set(library_claims)
+                reached = called_keys(fn, facts)
+                wanted |= reached & set(library_claims)
+                if heads is not None:
+                    heads.update(k.split(".")[0] for k in reached)
                 from .authoring import resolve_declared
                 rows += list(resolve_declared(fn, file_entry={})
                              .get("claims") or [])
@@ -1201,7 +1244,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # join the population with their library claims, so each is
     # adjudicated against the installed library; project-declared keys
     # keep their own entry
-    library = _library_population(root, verified, declared, library_claims)
+    heads: set = set()
+    library = _library_population(root, verified, declared, library_claims,
+                                  heads)
+    out.lines.extend(_out_of_range_notes(root, heads))
     # a project's own compendium file is adjudicated in full: each of
     # its keys is a library key
     for lkey in declared:
