@@ -110,13 +110,40 @@ def _calls_by_library(root: str) -> dict:
                 facts = analyze(fn)
         except Exception:
             continue
-        for called in resolved_calls(fn, facts):
+        for called in resolved_calls(fn, facts) + _method_calls(
+                fn, facts, root, library_keys):
             head = called.split(".")[0]
             if _is_stdlib(head) or _in_project(head, root):
                 continue
             funcs = out.setdefault(head, {})
             funcs[called] = funcs.get(called, 0) + 1
     return out
+
+
+def _method_calls(fn, facts, root: str, library_keys: set) -> list:
+    """Intent:
+        The library keys `fn` reaches through a value with a runtime
+        type (`s.mean()` on a `pandas.Series` is `pandas.Series.mean`,
+        `definitions.called_keys`), beyond its calls through import
+        aliases: each one called as a method, or with claims of its own.
+    """
+    import ast
+
+    from . import _resolve_called_keys
+    from ..definitions import called_keys
+    tree = getattr(facts, "tree", None)
+    if tree is None:
+        return []
+    methods = {node.func.attr for node in ast.walk(tree)
+               if isinstance(node, ast.Call)
+               and isinstance(node.func, ast.Attribute)}
+    aliased = set(_resolve_called_keys(fn, facts))
+    try:
+        typed = called_keys(fn, facts, root) - aliased
+    except Exception:
+        return []
+    return sorted(k for k in typed
+                  if k in library_keys or k.rsplit(".", 1)[-1] in methods)
 
 
 def _row_state(row: "dict | None") -> "tuple[str, str | None]":
