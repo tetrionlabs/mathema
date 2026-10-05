@@ -292,10 +292,27 @@ def _parse_row(key: str, row: dict) -> "tuple | None":
     except SyntaxError:
         return None
 
+    called: dict = {}
+
     def f_params(node):
+        # `f(a, b)`, its pins written in the call as constants
+        # (`f(a, axis=1)`)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-                and node.func.id == "f" and not node.keywords \
+                and node.func.id == "f" \
                 and all(isinstance(a, ast.Name) for a in node.args):
+            values = {}
+            for k in node.keywords:
+                try:
+                    values[k.arg] = ast.literal_eval(k.value)
+                except ValueError:
+                    if isinstance(k.value, ast.Name) and k.value.id == "inf":
+                        values[k.arg] = float("inf")
+                    else:
+                        return None
+            if None in values:
+                return None
+            called.clear()
+            called.update(values)
             return [a.id for a in node.args]
         return None
     params = f_params(lhs)
@@ -303,7 +320,7 @@ def _parse_row(key: str, row: dict) -> "tuple | None":
         params, rhs = f_params(rhs), lhs
     if params is None:
         return None
-    pins = dict(cj.param_pins or {})
+    pins = {**dict(cj.param_pins or {}), **called}
     for name in cj.free_vars or ():
         point = _single_point((cj.domain or {}).get(name))
         if point is not None:

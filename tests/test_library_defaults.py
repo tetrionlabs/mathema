@@ -51,7 +51,8 @@ def test_a_pinned_axis_is_passed_and_shown_pinned():
     assert pinned.verdict == "holds", pinned.note
     assert pinned.meta["mathema.defaults"]["numpy.mean"]["axis"] == \
         "0 (pinned)"
-    assert "let axis be" in pinned.statement
+    # the pin is written in the call (Pins ruling, 2026-10-01)
+    assert "f(a, axis=0)" in pinned.statement and "let axis" not in pinned.statement
     assert _declared(np.mean, law).verdict != "holds"
 
 
@@ -60,8 +61,11 @@ def test_a_literal_pin_survives_the_canonical_text():
     assert p.verdict == "holds", p.note
     assert p.meta["mathema.defaults"]["numpy.mean"]["keepdims"] == \
         "True (pinned)"
-    again = mathema.claim(p.statement)
-    assert again.param_pins == {"keepdims": True}
+    # the pin is written in the call, and reads back as the same pin
+    assert "f(a, keepdims=True)" in p.statement, p.statement
+    again = _declared(np.mean, p.statement)
+    assert again.statement == p.statement
+    assert again.meta["mathema.defaults"]["numpy.mean"]["keepdims"] == "True (pinned)"
 
 
 def test_a_pin_naming_no_parameter_is_misspecified():

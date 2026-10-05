@@ -37,7 +37,7 @@ numpy.median:
       statement: "for a in R^n, f(a) ~= median(a)"
       note: "The middle element, or the mean of the two middle elements for an even length."
     - name: definition@axis=0
-      statement: "let axis be 0, for a in R^(m,n), f(a) ~= median(a, axis=0)"
+      statement: "for a in R^(m,n), f(a, axis=0) ~= median(a, axis=0)"
       note: "The median of each column of a matrix."
 
 numpy.percentile:
@@ -61,7 +61,7 @@ numpy.diff:
     - name: definition
       statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= a[1:] - a[:-1]"
     - name: definition@n=2
-      statement: "let n be 2, for a in R^n, assuming dim(a) >= 3, f(a) ~= a[2:] - 2 * a[1:-1] + a[:-2]"
+      statement: "for a in R^n, assuming dim(a) >= 3, f(a, n=2) ~= a[2:] - 2 * a[1:-1] + a[:-2]"
       note: "The second differences."
 
 numpy.ptp:
@@ -105,14 +105,14 @@ numpy.nanstd:
     - name: definition
       statement: "for a in R^n, f(a) ~= std(a, ddof=0)"
     - name: definition@ddof=1
-      statement: "let ddof be 1, for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= std(a, ddof=1)"
 
 numpy.nanvar:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) ~= var(a, ddof=0)"
     - name: definition@ddof=1
-      statement: "let ddof be 1, for a in R^n, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= var(a, ddof=1)"
 
 numpy.nanmax:
   claims:
@@ -154,4 +154,4 @@ numpy.ndarray.var:
     - name: definition
       statement: "for a in R^n, f(a) ~= var(a, ddof=0)"
     - name: definition@ddof=1
-      statement: "let ddof be 1, for a in R^n, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= var(a, ddof=1)"

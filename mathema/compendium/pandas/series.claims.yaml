@@ -32,7 +32,7 @@ pandas.Series.std:
       statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
       note: "The sample standard deviation: ddof defaults to 1, unlike numpy; one element gives nan."
     - name: definition@ddof=0
-      statement: "let ddof be 0, for a in R^n, f(a) ~= std(a, ddof=0)"
+      statement: "for a in R^n, f(a, ddof=0) ~= std(a, ddof=0)"
 
 pandas.Series.var:
   claims:
@@ -40,7 +40,7 @@ pandas.Series.var:
       statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
       note: "The sample variance: ddof defaults to 1, unlike numpy; one element gives nan."
     - name: definition@ddof=0
-      statement: "let ddof be 0, for a in R^n, f(a) ~= var(a, ddof=0)"
+      statement: "for a in R^n, f(a, ddof=0) ~= var(a, ddof=0)"
 
 pandas.Series.sum:
   claims:
