@@ -956,6 +956,30 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
     return now != recorded
 
 
+def _library_version_moved(merged_entry: dict,
+                           verified_entry: dict) -> "tuple | None":
+    """Intent:
+        `(recorded, installed)` when a library key's record was
+        adjudicated against another release of the library than the one
+        installed now: a row applying here carries a `mathema.compendium`
+        tag (`compendium:pandas-3.0`) other than the one its namesake in
+        the record carries (`compendium:pandas-2.2`). Each is shown
+        without its `compendium:` prefix. None when every such pair
+        agrees.
+    """
+    def tags(rows) -> dict:
+        return {c.get("name"): str((c.get("meta") or {})
+                                   .get("mathema.compendium"))
+                for c in rows or [] if isinstance(c, dict) and c.get("name")
+                and (c.get("meta") or {}).get("mathema.compendium")}
+    now = tags((merged_entry or {}).get("claims"))
+    was = tags((verified_entry or {}).get("claims"))
+    for name in sorted(now):
+        if name in was and was[name] != now[name]:
+            return (was[name].split(":", 1)[-1], now[name].split(":", 1)[-1])
+    return None
+
+
 def _pseudo_infinity_moved(fn, facts, merged_entry: dict,
                            verified_entry: dict) -> bool:
     """Intent:
@@ -1550,8 +1574,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             "mathema.definition_rows") or {})
         pinf_moved = _pseudo_infinity_moved(fn, facts_now, merged_entry,
                                             verified_entry)
+        version_moved = (_library_version_moved(merged_entry, verified_entry)
+                         if key in library else None)
         is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
                     and recorded_fp == current_fp and not defaults_moved
+                    and version_moved is None
                     and not pinf_moved and not definitions_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
@@ -1644,6 +1671,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         rec.probes.append(dependencies_current_probe(rec.dependencies,
                                                      root=root))
         why = ("dependency changed" if dependency_changed
+               else (f"library version changed ({version_moved[0]} to "
+                     f"{version_moved[1]})") if version_moved is not None
+               and recorded_form
                else "defaults changed" if defaults_moved
                and facts_now.form == recorded_form
                and recorded_fp == current_fp
