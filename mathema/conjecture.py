@@ -3238,7 +3238,9 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
 
     from .compendium import library_key_of
     key = library_key_of(fn)
-    pins = dict(getattr(cj, "param_pins", None) or {})
+    # a pin written in the call (`f(a, axis=1)`) is a pin as `let axis
+    # be 1` is
+    pins = {**_pins_in_calls(cj), **dict(getattr(cj, "param_pins", None) or {})}
     if key is None and not pins and not any(
             _single_point((cj.domain or {}).get(n)) is not None
             for n in (cj.free_vars or ())):
@@ -3288,6 +3290,112 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
             and p not in (cj.domain or {}) and p not in pins
             and p not in named}
     return kept, {p: v for p, v in pins.items() if takes(p)}, problem
+
+
+def _pins_in_calls(cj) -> dict:
+    """The keyword arguments every call to f in the claim passes as the
+    same literal value (`f(a, axis=1)`), `{name: value}`."""
+    seen: dict = {}
+    calls = 0
+    sides = [cj.lhs, cj.rhs, *[t for link in (cj.links or ()) for t in (link[0], link[2])]]
+    for src in sides:
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            continue
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "f"):
+                continue
+            calls += 1
+            for k in n.keywords:
+                if k.arg is None:
+                    continue
+                if isinstance(k.value, ast.Name) and k.value.id == "inf":
+                    value = float("inf")
+                else:
+                    try:
+                        value = ast.literal_eval(k.value)
+                    except ValueError:
+                        continue
+                seen.setdefault(k.arg, []).append(value)
+    return {name: values[0] for name, values in seen.items()
+            if len(values) == calls and all(v == values[0] for v in values)}
+
+
+def pins_into_calls(cj, fn):
+    """Intent:
+        `cj` written with its pins in the call: each `let p be v` that
+        pins a parameter of f (`call_defaults`) and that the claim reads
+        nowhere else becomes the keyword `p=v` on every call to f that
+        leaves `p` out, and its `let` goes. `cj` unchanged when it pins
+        nothing that can move.
+    """
+    import math
+    import re
+    from dataclasses import replace as _replace
+    try:
+        pins = call_defaults(fn, cj)[1]
+        sig = callable_signature(fn)
+    except Exception:
+        return cj
+    if not pins:
+        return cj
+    sides = [cj.lhs, cj.rhs, *[t for link in (cj.links or ()) for t in (link[0], link[2])]]
+    read: set = set()
+    for src in sides:
+        # a keyword in a call names that callee's parameter, not a read
+        stripped = re.sub(r"\b[A-Za-z_]\w*\s*=(?!=)", " ", src or "")
+        read |= set(re.findall(r"\b[A-Za-z_]\w*\b", stripped))
+    movable = {p: v for p, v in pins.items() if p not in read}
+    if not movable:
+        return cj
+
+    def literal(v):
+        if isinstance(v, float) and math.isinf(v):
+            name = ast.Name(id="inf", ctx=ast.Load())
+            return name if v > 0 else ast.UnaryOp(op=ast.USub(), operand=name)
+        return ast.Constant(value=v)
+
+    calls = [0]
+
+    def rewrite(src):
+        if not src:
+            return src
+        try:
+            tree = ast.parse(src, mode="eval")
+        except SyntaxError:
+            return src
+        changed = False
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "f"):
+                continue
+            calls[0] += 1
+            try:
+                bound = sig.bind_partial(*([None] * len(n.args)),
+                                         **{k.arg: None for k in n.keywords
+                                            if k.arg is not None})
+            except TypeError:
+                continue
+            for p, v in movable.items():
+                if p not in bound.arguments:
+                    n.keywords.append(ast.keyword(arg=p, value=literal(v)))
+                    changed = True
+        return ast.unparse(tree) if changed else src
+
+    links = [(rewrite(a), rel, rewrite(b)) for a, rel, b in (cj.links or ())]
+    lhs, rhs = rewrite(cj.lhs), rewrite(cj.rhs)
+    if not calls[0]:
+        # a statement that calls f nowhere (a region row) keeps its let
+        return cj
+    return _replace(cj, lhs=lhs, rhs=rhs,
+                    links=links if cj.links else cj.links,
+                    free_vars=frozenset(cj.free_vars or ()) - set(movable),
+                    domain={k: v for k, v in (cj.domain or {}).items()
+                            if k not in movable},
+                    param_pins={k: v for k, v in (cj.param_pins or {}).items()
+                                if k not in movable})
 
 
 def _some_call_omits(cj, fn, name: str) -> bool:
@@ -4099,7 +4207,9 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         if canonical:
             # the renderer is total over everything claim() accepts, so
             # a failure here is a renderer bug worth a loud crash, never
-            # a claim to quietly record under a different spelling
+            # a claim to quietly record under a different spelling; a
+            # pin is written in the call
+            cj = pins_into_calls(cj, fn)
             probe.statement = canonical_claim_text(cj)
         if cj.domain:
             probe.domain = {p2: domain_bound_to_json(b)

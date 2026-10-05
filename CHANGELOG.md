@@ -4,6 +4,15 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## 0.6.1
 
+- A pin is written in the call. `let alpha be 2` naming a parameter of f
+  pins it for every call, and the claim is now written with the pin in
+  the call: `let alpha be 2, for x in R^n, f(x) == 2 * x[0]` reads `for
+  x in R^n, f(x, alpha=2) == 2 * x[0]`. The `let` form is still accepted
+  as input, and a statement that calls f nowhere (an `is_defined` region
+  row) keeps it. The bundled pinned rows are written in the call form
+  and keep their names (`definition@axis=1` states `f(a, axis=1) ~=
+  sum(a, axis=1)`). The fingerprint of every claim written with a pin
+  moves once with this change.
 - A policy claim states what a function does with a value that is not
   there: `missing(f, x) propagates`, `absent(f, x) raises(TypeError)`,
   `missing(f, xs, null) drops`, with an optional premise (`assuming

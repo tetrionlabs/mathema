@@ -42,7 +42,8 @@ def test_a_claim_with_lines_prints_as_a_block():
     assert block[3].split()[:3] == ["falsified", "policy", "f(None)"], block[3]
     assert "no absent policy stated; raises TypeError" in block[3], block[3]
     assert block[4].strip() == (
-        "possible fixes: (i) mathema accept test_a_claim_reads_as_its_lines.root_opt "
+        "possible fixes: (i) if the raise is intended, run: mathema accept "
+        "test_a_claim_reads_as_its_lines.root_opt "
         "absent[x] --as discovery --corrected \"absent(f, x) raises(TypeError)\"  "
         "(ii) exclude None  (iii) handle None at entry"), block[4]
 
@@ -133,7 +134,7 @@ def test_the_first_possible_fix_is_a_command_that_settles_the_line(tmp_path, mon
                      (fixmod.root_opt, "for x in [0, 4], f(x) >= 0")):
         rec = mathema.check(fn, claims=[mathema.claim(text, name="c")])
         fix = next(line for line in _lines(rec) if "possible fixes:" in line)
-        command = fix.split("(i) ", 1)[1].split("  (ii) ", 1)[0]
+        command = fix.split("(i) ", 1)[1].split("  (ii) ", 1)[0].split(", run: ", 1)[1]
         argv = shlex.split(command)
         assert argv[:2] == ["mathema", "accept"], command
         assert main(argv[1:] + ["--yes", "--root", str(tmp_path)]) == 0, command

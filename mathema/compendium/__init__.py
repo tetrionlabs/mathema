@@ -194,7 +194,8 @@ def mark_row_versions(data: dict, library: str,
 def row_pins(row: dict) -> dict:
     """Intent:
         The library parameters a row pins, `{parameter: value}`: each
-        `let p be None/True/False` binding, and each `let p be <number>`
+        keyword every call to f passes as one literal (`f(a, axis=1)`),
+        each `let p be None/True/False` binding, and each `let p be <number>`
         whose name the statement never reads (`let axis be 1, dim(a) >=
         1`); a keyword argument of the same name (`std(a, ddof=1)`) is
         not a read. {} for a row that pins nothing or does not parse.
@@ -207,7 +208,9 @@ def row_pins(row: dict) -> dict:
                    name=row.get("name"))
     except Exception:
         return {}
-    pins = dict(getattr(cj, "param_pins", None) or {})
+    from ..conjecture import _pins_in_calls
+    # a pin written in the call (`f(a, axis=1)`) is a pin
+    pins = {**_pins_in_calls(cj), **dict(getattr(cj, "param_pins", None) or {})}
     text = " ".join(str(t) for t in (cj.lhs, cj.rhs, cj.assuming) if t)
     # a name followed by a single `=` is a keyword argument of a grammar
     # word (`std(a, ddof=1)`), not a read of that name

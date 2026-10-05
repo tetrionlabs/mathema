@@ -19,9 +19,9 @@ pandas.Series.quantile:
       statement: "for a in R^n, f(a) ~= quantile(a, 0.5)"
       note: "q defaults to 0.5, and interpolation to linear, the reading quantile(a, q) takes."
     - name: definition@q=0.25
-      statement: "let q be 0.25, for a in R^n, f(a) ~= quantile(a, 0.25)"
+      statement: "for a in R^n, f(a, q=0.25) ~= quantile(a, 0.25)"
     - name: definition@q=0.75
-      statement: "let q be 0.75, for a in R^n, f(a) ~= quantile(a, 0.75)"
+      statement: "for a in R^n, f(a, q=0.75) ~= quantile(a, 0.75)"
 
 pandas.Series.sem:
   claims:

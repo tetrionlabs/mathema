@@ -124,6 +124,18 @@ def _policy_detail(p) -> str:
 _STATED = re.compile(r'--corrected "([^"]+)"|(?:write|state|,) `([^`]+)`')
 
 
+def _intended(stated: str, word: str) -> str:
+    """What f does, as the condition of the command that states it: `the
+    raise`, `dropping nan`, `giving nan back`, else `that`."""
+    if " raises" in stated:
+        return "the raise"
+    if stated.endswith(" drops"):
+        return f"dropping {word}"
+    if stated.endswith(" propagates"):
+        return f"giving {word} back"
+    return "that"
+
+
 def _fixes(p, key: str, word: str) -> str:
     """The possible fixes under a falsified absence or missing line: the
     command that records what f does as a stated policy, when the row
@@ -138,9 +150,9 @@ def _fixes(p, key: str, word: str) -> str:
     found = None if mixed or len(stated_all) != 1 else stated_all.pop()
     fixes = []
     if found:
-        stated = found
-        fixes.append(f"mathema accept {key} {p.name} --as discovery "
-                     f"--corrected \"{stated}\"")
+        # the condition first, the command last, after a colon
+        fixes.append(f"if {_intended(found, word)} is intended, run: mathema accept "
+                     f"{key} {p.name} --as discovery --corrected \"{found}\"")
     fixes += [f"exclude {word}", f"handle {word} at entry"]
     numerals = ("i", "ii", "iii")
     return "possible fixes: " + "  ".join(

@@ -282,7 +282,8 @@ def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():
                                                        name="c0")])
     text = repr(rec)
     assert ("    falsified  policy       f(nan)   no missing policy stated; returns 1.0\n"
-            "                            possible fixes: (i) mathema accept "
+            "                            possible fixes: (i) if dropping nan is intended, "
+            "run: mathema accept "
             "test_policy_claims_say_what_f_does_with_no_value.clamp01 missing[x] --as "
             "discovery --corrected \"missing(f, x) drops\"  (ii) exclude nan  "
             "(iii) handle nan at entry") in text, text
