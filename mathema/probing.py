@@ -573,14 +573,27 @@ def _synth_dict(key_tree, rng: random.Random, specials=None,
     return out
 
 
+def _within_epsilon(a, b, eps: float, rel_tol: float) -> bool:
+    """`abs(a - b) <= ε` between two executed scalars, judged in float
+    with the computation allowance on top: ε plus `rel_tol` times the
+    larger magnitude, the rounding the subtraction itself carries. A
+    NaN is within nothing; the same infinity is one point."""
+    try:
+        magnitude = max(abs(a), abs(b))
+        if not math.isfinite(magnitude):
+            return _close(a, b, tolerance=eps, rel_tol=0.0)
+        return _close(a, b, tolerance=eps + rel_tol * magnitude, rel_tol=0.0)
+    except (TypeError, OverflowError):
+        return _close(a, b, tolerance=eps, rel_tol=rel_tol)
+
+
 def _scalar_relation(a, b, relation: str, slack: float,
                      exact_inequality: bool = False,
                      rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """One scalar comparison for the elementwise walk. A strict `<`/`>`
     gets no tolerance credit; a closed `<=`/`>=` gets the slack; `==`
-    goes through `_close`, `~=` too with no relative allowance (it is
-    `abs(a - b) <= ε`), and so does `!=` when the claim declared a
-    tolerance. With `exact_inequality`, `!=` fails only where the two
+    goes through `_close`, `~=` through `_within_epsilon`, and so does
+    `!=` when the claim declared a tolerance. With `exact_inequality`, `!=` fails only where the two
     values are equal, so a representation tolerance never makes two
     different values a counterexample. Raises TypeError for values that
     do not order (a complex vs a real), which the caller reads as
@@ -591,8 +604,9 @@ def _scalar_relation(a, b, relation: str, slack: float,
     if relation == "==":
         return _close(a, b, tolerance=slack, rel_tol=rel_tol)
     if relation == "~=":
-        # `a ~= b` is `abs(a - b) <= ε`: no relative allowance
-        return _close(a, b, tolerance=slack, rel_tol=0.0)
+        # `a ~= b` is `abs(a - b) <= ε`, the float subtraction allowed
+        # the same rounding as `==` on top of ε
+        return _within_epsilon(a, b, slack, rel_tol)
     if relation == "!=":
         if exact_inequality:
             return not (a == b)
@@ -1267,8 +1281,7 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
             return False
         exact = relation == "!=" and exact_inequality
         agree = values_agree(lv, rv, 0.0 if exact else slack,
-                             0.0 if exact or relation == "~=" else rel_tol,
-                             broadcast=True)
+                             0.0 if exact else rel_tol, broadcast=True)
         if agree is None:
             # two values of different shapes are unequal outright
             return relation == "!="

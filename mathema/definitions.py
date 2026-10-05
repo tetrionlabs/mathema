@@ -309,13 +309,15 @@ def _parse_premises(text: str) -> "list | None":
 
 def _parse_row(key: str, row: dict) -> "tuple | None":
     """`(params, rhs, pins, premises)` of a definition row, or None
-    when its statement is not `f(p, ...) == <expression>` (or `~=`)."""
+    when its statement is not the equation `f(p, ...) == <expression>`
+    (a row written with `~=` states closeness within ε, not an
+    equation)."""
     from .conjecture import _single_point, claim
     try:
         cj = claim(str(row.get("statement") or ""), name=row.get("name"))
     except Exception:
         return None
-    if cj.relation not in ("==", "~=") or cj.negated or cj.links:
+    if cj.relation != "==" or cj.negated or cj.links:
         return None
     try:
         lhs = ast.parse(cj.lhs, mode="eval").body
@@ -535,6 +537,13 @@ class RowBook:
                 continue
             parsed = _parse_row(key, row)
             if parsed is None:
+                if " ~= " in f" {row.get('statement') or ''} ":
+                    reason = (f"definition rows are equations, and {key}'s row "
+                              f"is written with ~=, so it is not used as one")
+                    self._unusable.setdefault(key, []).append(
+                        f"{row.get('name')}: {reason}")
+                    why = why or f"{row.get('name')}: {reason}"
+                    continue
                 why = why or (f"{row.get('name')}: its statement is not "
                               f"f(...) == <expression>")
                 continue

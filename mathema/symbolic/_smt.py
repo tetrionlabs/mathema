@@ -393,9 +393,12 @@ def nlsat_decide(diff, relation: str, domain: dict, params: dict,
         return None
     witness = ", ".join(f"{p} = {sympy.nsimplify(v)}"
                         for p, v in sorted(point.items(), key=lambda kv: str(kv[0])))
+    # the point by parameter name, for the executed recheck
+    at = {pname: (int(point[sym]) if sym.is_integer else float(point[sym]))
+          for pname, sym in named.items() if sym in point}
     return ProofResult(
         "disproven",
         sketch="nlsat found a point violating the relation, re-confirmed "
                "by exact arithmetic",
-        counterexample=witness,
+        counterexample=witness, witness=at,
         meta={"mathema.derive_route": "smt_nlsat"})

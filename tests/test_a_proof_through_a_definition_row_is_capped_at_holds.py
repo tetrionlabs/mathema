@@ -35,7 +35,7 @@ _MULTIPLY_ROW = textwrap.dedent("""\
     pandas.Series.multiply:
       claims:
         - name: definition
-          statement: "for a in R^n \\\\ {∅}, other in [-1e6, 1e6], f(a, other) ~= a * other"
+          statement: "for a in R^n \\\\ {∅}, other in [-1e6, 1e6], f(a, other) == a * other"
     """)
 
 

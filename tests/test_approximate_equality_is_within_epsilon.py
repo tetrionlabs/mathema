@@ -9,6 +9,7 @@ equation written with `==`."""
 import glob
 import os
 
+import pytest
 import yaml
 
 import mathema
@@ -94,3 +95,37 @@ def test_every_bundled_definition_row_is_an_exact_equation():
     assert len(rows) > 20
     approximate = [(p, k, n) for p, k, n, s in rows if "~=" in s]
     assert approximate == []
+
+
+def tenth_times_ten(x: float) -> float:
+    """`x`, computed as a tenth of it times ten: equal in the
+    mathematics, a rounding away from it in float64."""
+    return x * 0.1 * 10
+
+
+def test_a_rounding_gap_at_large_magnitude_is_within_the_computation_allowance():
+    (p,) = mathema.claims.check(tenth_times_ten, [claim(
+        "for x in [1e8, 1e9], f(x) ~= x", route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.counterexample, p.note)
+
+
+def test_the_probe_reads_a_premise_within_epsilon():
+    """`assuming x ~= 1` admits only the points within ε of 1, so a
+    draw far from 1 is never a counterexample."""
+    from mathema.lexicon import double
+    (p,) = mathema.claims.check(double, [claim(
+        "for x in [0, 2], assuming x ~= 1, f(x) >= 1.99", route="probe")])
+    assert p.verdict != "falsified", (p.verdict, p.counterexample, p.note)
+
+
+@pytest.mark.parametrize("law", [
+    "for x in [0, 2], assuming x ~= 1, f(x) ~= 2",
+    "for x in [0, 2], assuming abs(x - 1) <= 0.5, f(x) <= 1",
+])
+def test_a_derive_disproof_under_a_premise_is_corroborated(law):
+    """Derive's witness (2x is 2e-9 from 2 at x = 1 + 1e-9, past ε) is
+    executed and the violation reproduced, as for any other disproof."""
+    from mathema.lexicon import double
+    (p,) = mathema.claims.check(double, [claim(law)])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "UNCORROBORATED" not in p.note, p.note

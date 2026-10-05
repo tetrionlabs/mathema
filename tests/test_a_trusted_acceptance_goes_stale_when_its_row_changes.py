@@ -26,7 +26,7 @@ from mathema.claims import check_conjectures, claim
 
 _KEY = "pandas.Series.multiply"
 _STATEMENT = ("for a in R^n \\ {∅}, other in [-1e6, 1e6], "
-              "f(a, other) ~= a * other")
+              "f(a, other) == a * other")
 
 
 def _rows_file(statement=_STATEMENT, versions=">=2", note="the product"):
