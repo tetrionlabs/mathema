@@ -182,6 +182,47 @@ def call_sites(root: str, library_claims: dict) -> list:
     return out
 
 
+def _pins_text(pins: dict) -> str:
+    return ",".join(f"{p}={_render_value(v)}" for p, v in sorted(pins.items()))
+
+
+def _open_pins(row: dict, pins: dict) -> "tuple[dict, str | None]":
+    """Intent:
+        The call's `pins` a pinned copy of `row` needs, and why the row
+        takes none when it cannot: `(open pins, None)`, leaving out each
+        argument the row's own domain already ranges over at a value
+        inside that range (the row speaks for it as it stands), or
+        `({}, reason)` for a missing-value policy row (it states no
+        relation a pin can sit in front of) and for a row whose domain
+        excludes the value passed.
+    """
+    from ..conjecture import claim
+    from ..domain import domain_contains
+    from ..policy import parse_policy
+    text = str(row.get("statement") or row.get("law") or "")
+    if parse_policy(text) is not None:
+        return {}, "is a missing-value policy row, which takes no pinned arguments"
+    try:
+        cj = claim(text, name=row.get("name"))
+    except Exception:
+        return dict(pins), None
+    out: dict = {}
+    for p, v in pins.items():
+        bound = (cj.domain or {}).get(p)
+        if bound is None:
+            out[p] = v
+            continue
+        try:
+            inside = isinstance(v, (int, float)) and not isinstance(v, bool) \
+                and domain_contains(v, bound)
+        except (TypeError, ValueError):
+            inside = False
+        if not inside:
+            return {}, (f"ranges over {p} in its own domain, which does not "
+                        f"admit {p}={_render_value(v)}")
+    return out, None
+
+
 def _pinned_row(row: dict, pins: dict, site: CallSite) -> dict:
     """One row copied with the call's arguments pinned in front."""
     lets = ", ".join(f"let {p} be {_render_value(v)}"
@@ -336,8 +377,20 @@ def plan_update(root: str = ".") -> dict:
         What `mathema compendium update` would change, as data:
         `{"files": {path: new file mapping}, "lines": [str]}`, one line
         per change and per argument left unpinned, reading the project
-        and writing nothing.
+        and writing nothing. The state-dependence warnings analysing a
+        library function raises (its own internal names) are not
+        printed: the lines name what concerns the project.
     """
+    import warnings
+
+    from ..analysis import StateDependenceWarning
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", StateDependenceWarning)
+        return _plan_update(root)
+
+
+def _plan_update(root: str) -> dict:
+    """The body of `plan_update`."""
     import yaml
 
     from . import (_installed_version, _version_in_range, install,
@@ -392,9 +445,19 @@ def plan_update(root: str = ".") -> dict:
                    if row_pins(r) == site.pins}
         base = [r for r in unpinned
                 if claim_base_name(str(r.get("name"))) not in covered]
-        if not base:
+        added = []
+        for r in base:
+            open_pins, why = _open_pins(r, site.pins)
+            if why is not None:
+                lines.append(f"{site.key}: {r.get('name')} {why}; the call "
+                             f"in {site.caller} (line {site.line}) passing "
+                             f"{_pins_text(site.pins)} gains no pinned "
+                             f"copy of it")
+                continue
+            if open_pins:
+                added.append(_pinned_row(r, open_pins, site))
+        if not added:
             continue
-        added = [_pinned_row(r, site.pins, site) for r in base]
         settled = _adjudicated(site.key, current, added, root,
                                library_claims)
         kept = []
@@ -505,8 +568,13 @@ def run_update(root: str = ".", dry_run: bool = False) -> list:
         write_yaml(path, data, header=header)
         lines.append(f"wrote {rel}")
     if not dry_run:
-        for key, (current, rows) in sorted(plan["falsified"].items()):
-            _record_falsified(key, current, rows, root)
+        import warnings
+
+        from ..analysis import StateDependenceWarning
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", StateDependenceWarning)
+            for key, (current, rows) in sorted(plan["falsified"].items()):
+                _record_falsified(key, current, rows, root)
     if not plan["files"] and not plan["falsified"]:
         lines.append("nothing to change")
     return lines
