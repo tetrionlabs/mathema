@@ -1886,12 +1886,16 @@ def load_declared(root: str = ".") -> dict:
     library is not importable or its installed version is outside the
     file's `versions` range, or when the library is the project's own
     package (`compendium.names_own_package`), whose claims the project
-    states as its own. The bundled compendium directory is never read
+    states as its own. A library key's entry is the one the library
+    loader reads (`compendium.load_library_claims`: the bundled rows with
+    the project's merged over them by row name), with any row an
+    ordinary claims file states for it beside them. The bundled compendium directory is never read
     as part of a project tree; `compendium.load_library_claims` reads
     it."""
     from .compendium import (applicable_tag, mark_row_versions,
                              names_own_package, pop_library_fields)
     merged: dict = {}
+    library_keys: set = set()
     # shallow first, deep last, so the deeper file wins
     for path in claims_file_paths(root, exclude=(_bundled_compendium_dir(),)):
         rel_path = os.path.relpath(path, root)
@@ -1916,6 +1920,25 @@ def load_declared(root: str = ".") -> dict:
             if prev is not None:
                 entry = merge_entries(prev["entry"], entry)
             merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
+            if library is not None:
+                library_keys.add(key)
+    if library_keys:
+        # a library key reads as the library loader reads it: the
+        # bundled rows with the project's merged over them by name, and
+        # any row an ordinary claims file states for the key beside them
+        from .compendium import load_library_claims
+        library_claims = load_library_claims(root)
+        for key in library_keys:
+            info = library_claims.get(key)
+            if info is None:
+                continue
+            rows = list(info["entry"].get("claims") or [])
+            names = {r.get("name") for r in rows if isinstance(r, dict)}
+            rows += [r for r in merged[key]["entry"].get("claims") or []
+                     if isinstance(r, dict) and r.get("name") not in names]
+            merged[key] = {"entry": {**merged[key]["entry"],
+                                     **info["entry"], "claims": rows},
+                           "source": merged[key]["source"]}
     return merged
 
 

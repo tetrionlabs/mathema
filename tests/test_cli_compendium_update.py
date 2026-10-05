@@ -68,8 +68,15 @@ def test_a_non_default_literal_argument_gains_a_pinned_row(tmp_path):
     assert data["compendium"] == "numpy"
     assert data["versions"] == f">={_minor()}"
     rows = {c["name"]: c for c in data["numpy.mean"]["claims"]}
-    # the key's existing row is kept, and a pinned copy joins it
-    assert rows["is_defined"]["statement"] == "dim(a) >= 1"
+    # the project entry merges with the bundled one by row name, so the
+    # bundled rows are not copied: only the pinned row is written, and
+    # the loader reads it beside the bundled is_defined it copies
+    assert "is_defined" not in rows, rows
+    from mathema.compendium import load_library_claims
+    merged = {c["name"]: c for c in load_library_claims(str(tmp_path))[
+        "numpy.mean"]["entry"]["claims"]}
+    assert merged["is_defined"]["statement"] == "dim(a) >= 1"
+    assert "is_defined@axis=0" in merged
     pinned = rows["is_defined@axis=0"]
     assert pinned["statement"] == "let axis be 0, dim(a) >= 1"
     assert "upd.rows_mean" in pinned["note"]

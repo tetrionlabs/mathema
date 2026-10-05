@@ -120,7 +120,7 @@ def test_a_wrong_definition_row_is_falsified_by_verify_and_never_used(
             - name: definition
               statement: "for a in R^n \\\\ {∅}, f(a) ~= std(a, ddof=0)"
         """))
-    # the project's row shadows the bundled one: unverified, it is not used
+    # the project's row replaces the bundled definition: unverified, it is not used
     p = _check(project, sharpe)
     assert p.verdict != "proven", (p.verdict, p.sketch)
     _verify(project, rows)
