@@ -189,7 +189,10 @@ def test_a_record_is_stale_when_its_definition_rows_change(project,
         "qpkg.quant.doubled_sharpe": {"claims": [
             {"name": "leverage_invariant", "statement": _LEVERAGE},
             # pandas skips a missing return in both the mean and the std
-            {"name": "missing[returns]", "statement": "missing(f, returns) drops"}]}}))
+            {"name": "missing[returns]", "statement": "missing(f, returns) drops"},
+            # no returns give no ratio: the empty input's stated policy
+            {"name": "no_ratio_for_no_data",
+             "statement": "f([]) in {missing}"}]}}))
     monkeypatch.syspath_prepend(str(project))
     sys.modules.pop("qpkg", None)
     sys.modules.pop("qpkg.quant", None)

@@ -7,7 +7,8 @@ entry declares.
 annotation but whose entry declares `runtime_types: {returns:
 pandas.Series}`. The claim passes `g` a pandas Series, as the entry
 says, so `f(returns) ~= 2 * g(returns)` holds instead of falsifying on
-a list that has no `.mean()`.
+a list that has no `.mean()`. The mean of no returns is no value, which
+the entry states as its empty-input policy.
 """
 from __future__ import annotations
 
@@ -50,6 +51,8 @@ def test_a_let_bound_function_is_called_with_its_declared_type(tmp_path,
           claims:
             - name: twice_avg
               statement: "let g = qpkg.stats.avg, for returns in [-1, 1]^n \\\\ {∅}, f(returns) ~= 2 * g(returns)"
+            - name: no_value_for_no_data
+              statement: "f([]) in {missing}"
     """)
     monkeypatch.syspath_prepend(str(tmp_path))
     for name in ("qpkg", "qpkg.stats"):
