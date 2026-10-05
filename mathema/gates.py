@@ -1460,9 +1460,7 @@ def _finite_plan(cj, fn, facts, deps, cj_domain, corners, admits):
     """
     import itertools
     import time
-    from fractions import Fraction
 
-    import sympy
     from ._brute_force import BRUTE_FORCE_POINT_BUDGET, _sweep_grid
     names = list(deps["names"])
     grid = _sweep_grid(names, cj_domain, BRUTE_FORCE_POINT_BUDGET)
@@ -1486,6 +1484,23 @@ def _finite_plan(cj, fn, facts, deps, cj_domain, corners, admits):
     per_call = (time.perf_counter() - started) / max(1, len(trial))
     if per_call * len(points) <= _SWEEP_SECONDS:
         return _FinitePlan(points, 0, len(points), True, False, "")
+    chosen, jumps, jump_words, jump_count = _jump_points(cj, fn, facts,
+                                                         points, corners)
+    sampled = max(0, _PARTIAL_POINTS - len(chosen))
+    return _FinitePlan(chosen, sampled, len(points), False, bool(jumps),
+                       jump_words, jump_count)
+
+
+def _jump_points(cj, fn, facts, points, corners):
+    """Intent:
+        `(points, jumps, words, count)`: `corners` followed by every
+        point of `points` where a rounding step's argument
+        (`_jump_arguments`) hits its jump, exactly, with the arguments,
+        their words and how many points were added.
+    """
+    from fractions import Fraction
+
+    import sympy
     jumps, jump_words = _jump_arguments(cj, fn, facts)
     chosen: list = list(corners)
     jump_count = 0
@@ -1516,9 +1531,7 @@ def _finite_plan(cj, fn, facts, deps, cj_domain, corners, admits):
                     chosen.append(pt)
                     jump_count += 1
                     break
-    sampled = max(0, _PARTIAL_POINTS - len(chosen))
-    return _FinitePlan(chosen, sampled, len(points), False, bool(jumps),
-                       jump_words, jump_count)
+    return chosen, jumps, jump_words, jump_count
 
 
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,

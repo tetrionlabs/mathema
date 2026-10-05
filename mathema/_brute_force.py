@@ -38,6 +38,12 @@ __all__ = ["BRUTE_FORCE_POINT_BUDGET", "brute_force_proof"]
 #: this declines rather than being truncated: the budget bounds the work
 #: mathema will do, never the region a verdict covers.
 BRUTE_FORCE_POINT_BUDGET = 100_000
+#: the wall-clock seconds the sweep may spend, judged from a timed
+#: estimate of one point; past it the sweep runs the rounding jumps and a
+#: seeded sample instead, and says so
+_SWEEP_SECONDS = 8.0
+#: the points a partial sweep executes beyond the jump points
+_PARTIAL_SAMPLE = 2000
 
 
 def _sweep_grid(params: list, cj_domain: dict, budget: int,
@@ -378,11 +384,13 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         return None
     evaluate, admits = deps["evaluate"], deps["admits"]
 
+    plan = _sweep_plan(cj, fn, facts, names, grid, deps)
     checked = 0
     total = 0
     judged: list = []
-    for combo in itertools.product(*(grid[n] for n in names)):
-        point = dict(zip(names, combo))
+    for point in (plan.points if plan is not None else
+                  (dict(zip(names, combo))
+                   for combo in itertools.product(*(grid[n] for n in names)))):
         if not admits(point):
             # outside the region the claim covers (an exclusion, or a
             # premise this point fails), so it is not ours to decide
@@ -402,7 +410,9 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                 "disproven",
                 sketch=f"the claim fails at {_fmt_point(point, names)}"
                        + (f", where the function raised {raised}" if raised else "")
-                       + ", found by checking every point of a finite domain",
+                       + (", found by checking every point of a finite domain"
+                          if plan is None else
+                          f", found as the sweep {plan.words(checked + 1)}"),
                 counterexample=_fmt_point(point, names),
                 witness=dict(point),
                 meta=with_executed(
@@ -420,6 +430,11 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         # clean pass over no points proves nothing while looking like a
         # proof
         return None
+    if plan is not None:
+        # part of the domain ran: no proof, and the record says how much
+        return ProofResult(
+            "undecided", sketch=plan.words(checked),
+            meta={"mathema.sweep_partial": plan.words(checked)})
     if unexamined is not None:
         return ProofResult(
             "undecided",
@@ -460,6 +475,41 @@ def _examination_obstacle(fn):
         if site.text not in fixed:
             return str(site.text)
     return None
+
+
+def _sweep_plan(cj, fn, facts, names, grid, deps):
+    """Intent:
+        None when every point of the grid fits `_SWEEP_SECONDS` by a
+        timed estimate of one point; otherwise the partial plan
+        (`gates._FinitePlan`): every point where a rounding step jumps,
+        then a seeded sample of `_PARTIAL_SAMPLE` admitted points.
+    """
+    import random
+    import time
+
+    from ._sampling import _RNG_SEED
+    from .gates import _FinitePlan, _jump_points
+    admits = deps["admits"]
+    points = [pt for pt in (dict(zip(names, combo)) for combo in
+                            itertools.product(*(grid[n] for n in names)))
+              if admits(pt)]
+    if not points:
+        return None
+    trial = points[::max(1, len(points) // 5)][:5]
+    started = time.perf_counter()
+    for pt in trial:
+        try:
+            deps["evaluate"](pt)
+        except Exception:
+            pass
+    per_point = (time.perf_counter() - started) / max(1, len(trial))
+    if per_point * len(points) <= _SWEEP_SECONDS:
+        return None
+    chosen, jumps, words, count = _jump_points(cj, fn, facts, points, [])
+    rng = random.Random(_RNG_SEED)
+    sample = rng.sample(points, min(_PARTIAL_SAMPLE, len(points)))
+    return _FinitePlan(chosen + sample, len(sample), len(points), False,
+                       bool(jumps), words, count)
 
 
 def _examined_clean(fn) -> bool:
