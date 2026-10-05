@@ -403,6 +403,30 @@ def _accepted_risk(entry: dict | None) -> frozenset:
         and not (c.get("accepted") or {}).get("stale"))
 
 
+def _split_unparseable(claims: list, grammar: str, fn,
+                       authored: set) -> tuple:
+    """Intent:
+        `(readable, unreadable)`: the claims kept for adjudication, and
+        `(name, error)` for each claim an authoring surface states
+        (its name in `authored`) whose mathema-grammar statement does
+        not parse, so that claim is reported on its own while the
+        others are adjudicated. A claim only the verified record holds
+        is kept as it is.
+    """
+    from .conjecture import InvalidConjecture
+    from .spec import claims_fingerprint
+    readable, unreadable = [], []
+    for c in claims:
+        if c.get("name") in authored:
+            try:
+                claims_fingerprint([c], grammar, fn)
+            except InvalidConjecture as e:
+                unreadable.append((c.get("name") or c.get("statement"), e))
+                continue
+        readable.append(c)
+    return readable, unreadable
+
+
 @dataclass
 class VerifyResult:
     """One sweep: the per-key report lines, every problem found (empty
@@ -1340,9 +1364,22 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 (declared_info or {}).get("source"))
             out.lines.extend(retired_notes)
             retired_noted = {ln.split("'")[1] for ln in retired_notes}
+            entry_grammar = merged_entry.get("grammar", GRAMMAR)
+            authored = {c.get("name") for c in merged_entry.get("claims")
+                        or []}
+            current_claims, unreadable = _split_unparseable(
+                current_claims, entry_grammar, fn, authored)
+            where = ((declared_info or {}).get("source")
+                     or "its docstring or claims file")
+            for claim_name, error in unreadable:
+                msg = (f"{key}: claim {claim_name!r} declared in {where} "
+                       f"does not parse ({error}); correct it there and "
+                       f"re-run verify")
+                out.authoring_errors.append(msg)
+                out.problems.append(msg)
+                out.lines.append(f"FAIL {msg}")
             merged_entry = dict(merged_entry)
             merged_entry["claims"] = current_claims
-            entry_grammar = merged_entry.get("grammar", GRAMMAR)
             out.grammars_seen.update(c.get("grammar", entry_grammar)
                                      for c in current_claims)
             current_fp = claims_fingerprint(current_claims, entry_grammar, fn)
