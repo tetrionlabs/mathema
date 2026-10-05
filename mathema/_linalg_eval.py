@@ -722,20 +722,81 @@ def exact_sqrt(x):
     return _exact_sqrt(x)
 
 
+class _Root:
+    """The square root of an exact non-negative rational `radicand`,
+    read as a number: its own value is the root rounded once (a float,
+    or beyond float range a rational to 60 significant digits), and a
+    whole power of it, or its product with another root, is computed
+    from the radicand exactly, so `norm(x)**2` is the exact sum of
+    squares."""
+    radicand = None
+
+    def __pow__(self, k, *rest):
+        if not rest and isinstance(k, int) and not isinstance(k, bool) \
+                and k >= 1:
+            if k % 2 == 0:
+                return _rounded(self.radicand ** (k // 2))
+            return _exact_sqrt(self.radicand ** k)
+        return super().__pow__(k, *rest)  # type: ignore[misc]
+
+    def __mul__(self, other):
+        if isinstance(other, _Root):
+            return _exact_sqrt(self.radicand * other.radicand)
+        return super().__mul__(other)  # type: ignore[misc]
+
+    __rmul__ = __mul__
+
+
+class ExactRoot(_Root, float):
+    """A square root within float range (see `_Root`)."""
+
+    def __new__(cls, value: float, radicand):
+        out = float.__new__(cls, value)
+        out.radicand = radicand
+        return out
+
+    def __reduce__(self):
+        return (ExactRoot, (float(self), self.radicand))
+
+
+def _big_root(value, radicand):
+    """A square root beyond float range (see `_Root`)."""
+    from fractions import Fraction
+    if not _BIG_ROOT:
+        class BigRoot(_Root, Fraction):
+            """A square root beyond float range (see `_Root`)."""
+
+            def __new__(cls, value, radicand):
+                out = Fraction.__new__(cls, value)
+                out.radicand = radicand
+                return out
+
+            def __reduce__(self):
+                return (_big_root, (Fraction(self), self.radicand))
+        _BIG_ROOT.append(BigRoot)
+    return _BIG_ROOT[0](value, radicand)
+
+
+_BIG_ROOT: list = []
+
+
 def _exact_sqrt(x):
-    """The square root of an exact non-negative rational, rounded once;
-    beyond float range it stays exact to 60 significant digits."""
+    """The square root of an exact non-negative rational as a `_Root`:
+    rounded once, beyond float range exact to 60 significant digits,
+    and exact under a whole power. A float argument gives a float."""
     from decimal import Decimal, localcontext
     from fractions import Fraction
     if isinstance(x, float):
         return x if math.isnan(x) else math.sqrt(x)
     if x == 0:
-        return 0.0
+        return ExactRoot(0.0, Fraction(0))
     with localcontext() as ctx:
         ctx.prec = 60
         root = (Decimal(x.numerator) / Decimal(x.denominator)).sqrt()
     value = float(root)
-    return Fraction(root) if math.isinf(value) else value
+    if math.isinf(value):
+        return _big_root(Fraction(root), Fraction(x))
+    return ExactRoot(value, Fraction(x))
 
 
 def _sum(*args, axis=None):
