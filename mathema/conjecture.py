@@ -10410,13 +10410,18 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # the missing and absence companions judge what f does there
             executed_record.classified += 1
             continue
+        from ._exact_side import some_side_is_finite
         float_gave_out = not missing_in and (
             call_hole[0] is not None or holds_nan(lv) or holds_nan(rv)
             or (call_nan[0] == "f" and not f_nan_unread(env, lv, rv))
             or (call_inf[0] is not None and not (
                 same_infinity(lv, rv)
-                and cj.relation in ("==", "~=", "<=", ">="))))
-        if float_gave_out and corner_row and _magnitude_corner(args):
+                and cj.relation in ("==", "~=", "<=", ">=")
+                and not some_side_is_finite(code_l, code_r, env,
+                                            {"f": fn_call, **bound_funcs}))))
+        if corner_row and _magnitude_corner(args) and (
+                float_gave_out or call_inf[0] is not None
+                or call_nan[0] == "f" or holds_nan(lv) or holds_nan(rv)):
             # a definition row's library gave no value at a magnitude
             # corner: a finding about its computation, not a wrong model
             checked += 1
@@ -10465,10 +10470,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   f"{_linalg_eval.shown(lv)!r} vs "
                   f"{_linalg_eval.shown(rv)!r}, and a nan is no value")
             break
-        if call_inf[0] is not None and same_infinity(lv, rv):
+        if call_inf[0] is not None and same_infinity(lv, rv) \
+                and not some_side_is_finite(code_l, code_r, env,
+                                            {"f": fn_call, **bound_funcs}):
             # both sides overflow toward the same infinity: one
             # extended-real point, so the point reads as two equal
-            # values (a NaN never gets here, it agrees with nothing)
+            # values (a NaN never gets here, it agrees with nothing);
+            # where a side read exactly is finite, the code overflowed
+            # and the infinity is no value (below)
             checked += 1
             if cj.relation in ("==", "~=", "<=", ">="):
                 continue

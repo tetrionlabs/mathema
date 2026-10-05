@@ -90,9 +90,12 @@ def line_of(x: float) -> float:
 
 
 def test_the_headline_is_the_weakest_line_when_none_is_falsified():
-    # the mathematics is proven, the computation and the policy hold
+    # the mathematics is proven, the computation and the policy hold;
+    # bounded, since over R 2*x + 1 overflows near the float limit and
+    # falsifies the computation (ruling of 2026-10-01: an infinity from
+    # finite inputs is no value)
     rec = mathema.check(line_of, claims=[mathema.claim(
-        "for x in R, f(x) == 2*x + 1", name="line")])
+        "for x in [-1e6, 1e6], f(x) == 2*x + 1", name="line")])
     lines = _lines(rec)
     head = next(line for line in lines if line.startswith("  line  "))
     assert head.endswith("   holds"), head

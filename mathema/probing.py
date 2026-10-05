@@ -1778,6 +1778,16 @@ def _element_range(bounds) -> "tuple[float, float] | None":
     return None
 
 
+def _ordinary_element(rng: random.Random, lo: float, hi: float) -> float:
+    """An element drawn inside [lo, hi]: from its part within [-10, 10]
+    when it meets that range, else uniformly from the whole range."""
+    from ._sampling import _between
+    a, b = max(lo, -10.0), min(hi, 10.0)
+    if a <= b:
+        return rng.uniform(a, b) if a < b else a
+    return _between(lo, hi, rng.random()) if lo < hi else lo
+
+
 def _sequence_corner(rng: random.Random, n: int, bounds) -> "list | None":
     """Intent:
         One sequence from the corners where float arithmetic breaks, or
@@ -1803,11 +1813,11 @@ def _sequence_corner(rng: random.Random, n: int, bounds) -> "list | None":
         top = min(-lo, hi)
         m = rng.choice([v for v in (1e16, 1e300) if 0 < v <= top]
                        or [top])
-        rest = [rng.uniform(max(lo, -10.0), min(hi, 10.0)) for _ in range(n - 2)]
+        rest = [_ordinary_element(rng, lo, hi) for _ in range(n - 2)]
         return [m, -m] + rest
     if shape == "edges":
         return [rng.choice([lo, hi]) for _ in range(n)]
-    base = rng.uniform(max(lo, -10.0), min(hi, 10.0)) if lo < hi else lo
+    base = _ordinary_element(rng, lo, hi)
     up = math.nextafter(base, math.inf)
     if up > hi:
         up = math.nextafter(base, -math.inf)

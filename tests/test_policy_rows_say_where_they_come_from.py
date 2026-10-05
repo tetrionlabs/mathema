@@ -63,10 +63,14 @@ def _policy(rec) -> dict:
 
 
 def test_a_default_row_names_itself_and_its_confirmation():
-    rec = mathema.check(lin, claims=[mathema.claim("for x in R, f(x) == 2*x + 1",
-                                                   name="c")])
+    # bounded: over R, 2*x + 1 overflows near the float limit, which
+    # falsifies the computation (ruling of 2026-10-01: an infinity from
+    # finite inputs is no value)
+    rec = mathema.check(lin, claims=[mathema.claim(
+        "for x in [-1e6, 1e6], f(x) == 2*x + 1", name="c")])
     lines = _lines(rec)
-    assert "    holds      computation  for x in R, f(x) = 2*x + 1   43 draws" in lines
+    assert ("    holds      computation  for x in [-1000000.0, 1000000.0] : float, "
+            "f(x) = 2*x + 1   43 draws") in lines
     assert ("    holds      policy       f(nan)   no missing policy stated; assumed "
             "propagates") in lines
     assert _policy(rec)["missing[x]"].meta["mathema.policy"]["reason"] == (

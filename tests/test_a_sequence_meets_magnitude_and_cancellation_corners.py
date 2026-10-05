@@ -59,3 +59,15 @@ def test_a_nearly_constant_series_meets_a_std_premise():
         "abs(f(xs)) <= 1e9", route="probe")])
     assert p.verdict != "falsified", (p.verdict, p.counterexample)
     assert "could not be evaluated in exact arithmetic" in p.note, p.note
+
+
+def test_every_corner_entry_lies_in_the_element_range():
+    import random
+
+    from mathema.probing import _sequence_corner
+    bounds = (1e307, 1.7e308)
+    rng = random.Random(0)
+    for _ in range(400):
+        corner = _sequence_corner(rng, 5, bounds)
+        assert corner is not None
+        assert all(1e307 <= v <= 1.7e308 for v in corner), corner
