@@ -90,6 +90,7 @@ plugins:
         Writing claims:
           - authoring.md: The authoring surfaces and their precedence
           - grammar.md: The claim grammar, domains and tolerance
+          - grammar-words.md: What each of the grammar's words computes
           - multi-function-claims.md: Binding functions and the equivalence ladder
           - lemmas.md: Claims that rest on other claims
         Commands:
@@ -137,6 +138,7 @@ nav:
   - Writing claims:
       - Authoring claims: authoring.md
       - The claim grammar: grammar.md
+      - "The grammar's words": grammar-words.md
       - The mathema docstring: mathema-docstring.md
       - Conditional claims: conditional-claims.md
       - Lemmas: lemmas.md

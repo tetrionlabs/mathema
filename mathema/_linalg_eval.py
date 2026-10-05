@@ -383,6 +383,9 @@ def _norm(x, ord=None):
     if a.dtype.kind in "fc" and np.isnan(a).any() and ord is None:
         # over the value slots, a hole contributing nothing; 0 over none
         a = np.where(np.isnan(a), 0.0, a)
+    exact = _exact_norm(a, ord)
+    if exact is not None:
+        return exact
     # every norm is homogeneous, so it is computed on the array scaled
     # to its largest magnitude: squaring an entry near the float
     # maximum overflows where the norm itself does not
@@ -393,6 +396,31 @@ def _norm(x, ord=None):
     unit = a / scale
     return scale * float(np.linalg.norm(unit) if ord is None
                          else np.linalg.norm(unit, ord))
+
+
+def _exact_norm(a, ord):
+    """The Euclidean or Frobenius norm (`ord` None, or 2 on a vector),
+    the 1 norm or the inf norm of an array of finite real numbers,
+    exact and rounded once; None for any other order or array, which
+    numpy computes."""
+    rows = _exact_rows(a)
+    if rows is None or not rows or not rows[0]:
+        return None
+    vector = a.ndim == 1
+    flat = [v for row in rows for v in row]
+    if ord is None or (vector and ord == 2):
+        return _exact_sqrt(builtins.sum(v * v for v in flat))
+    if ord == 1:
+        if vector:
+            return _rounded(builtins.sum(builtins.abs(v) for v in flat))
+        return _rounded(builtins.max(builtins.sum(builtins.abs(v) for v in col)
+                                     for col in zip(*rows)))
+    if ord == math.inf:
+        if vector:
+            return _rounded(builtins.max(builtins.abs(v) for v in flat))
+        return _rounded(builtins.max(builtins.sum(builtins.abs(v) for v in row)
+                                     for row in rows))
+    return None
 
 
 def _holes(a) -> bool:
@@ -901,16 +929,177 @@ def _matrix(x):
     return a
 
 
+def _exact_rows(a):
+    """The entries of a matrix (or a vector, as one column) as exact
+    rationals, row by row, or None when an entry is not a finite real
+    number (a hole, an infinity, a complex number)."""
+    np = _np()
+    if not is_array(a) or a.ndim not in (1, 2) or a.dtype.kind not in "biuf":
+        return None
+    if a.dtype.kind == "f" and not np.isfinite(a).all():
+        return None
+    column = a.reshape(-1, 1) if a.ndim == 1 else a
+    return [[_exact(_element(v)) for v in row] for row in column]
+
+
+def _rounded_array(rows, vector: bool = False):
+    """Exact rational entries, each rounded once (see `_rounded`), as an
+    array: a float array, or an object array when an entry lies beyond
+    float range; `vector` reads a single column as a vector."""
+    np = _np()
+    entries = [[_rounded(v) for v in row] for row in rows]
+    finite = all(isinstance(v, float) for row in entries for v in row)
+    out = np.empty((len(entries), len(entries[0]) if entries else 0),
+                   dtype=float if finite else object)
+    for i, row in enumerate(entries):
+        out[i, :] = row
+    return out[:, 0] if vector else out
+
+
+def _singular():
+    return _np().linalg.LinAlgError("Singular matrix")
+
+
+def _integer_rows(rows):
+    """Rows of exact rationals as `(integer rows, d)`: every entry times
+    `d`, the least common denominator of them all."""
+    d = 1
+    for row in rows:
+        for v in row:
+            d = math.lcm(d, v.denominator)
+    return [[int(v * d) for v in row] for row in rows], d
+
+
+def _fraction_free(m, n: int, every_row: bool) -> int:
+    """Intent:
+        Fraction-free (Bareiss) elimination on the integer rows `m`, in
+        place, over their first `n` columns: below each pivot when
+        `every_row` is False, above and below it when True, every
+        division exact. Returns the sign of the row exchanges, 0 when
+        the first `n` columns are singular. After it the last pivot is
+        the determinant of those columns times that sign, and with
+        `every_row` each diagonal entry equals the last pivot.
+    """
+    sign, previous = 1, 1
+    for k in range(n):
+        pivot_row = next((r for r in range(k, n) if m[r][k] != 0), None)
+        if pivot_row is None:
+            return 0
+        if pivot_row != k:
+            m[k], m[pivot_row] = m[pivot_row], m[k]
+            sign = -sign
+        mk = m[k]
+        pivot = mk[k]
+        for i in (range(n) if every_row else range(k + 1, n)):
+            if i == k:
+                continue
+            mi = m[i]
+            factor = mi[k]
+            m[i] = [(pivot * a - factor * b) // previous
+                    for a, b in zip(mi, mk)]
+        previous = pivot
+    return sign
+
+
+def _exact_det(rows):
+    """The determinant of a square matrix of exact rationals."""
+    from fractions import Fraction
+    n = len(rows)
+    m, d = _integer_rows(rows)
+    sign = _fraction_free(m, n, every_row=False)
+    if sign == 0:
+        return Fraction(0)
+    return Fraction(sign * m[n - 1][n - 1], d ** n)
+
+
+def _exact_solve(rows, rhs):
+    """The rows `X` with `A @ X == rhs` for a square matrix `A` of exact
+    rationals (`rhs` its rows too), by fraction-free Gauss-Jordan
+    elimination; None when `A` is singular."""
+    from fractions import Fraction
+    n = len(rows)
+    m, _ = _integer_rows([list(a) + list(b) for a, b in zip(rows, rhs)])
+    if _fraction_free(m, n, every_row=True) == 0:
+        return None
+    return [[Fraction(v, m[i][i]) for v in m[i][n:]] for i in range(n)]
+
+
+def _exact_identity(n: int):
+    from fractions import Fraction
+    return [[Fraction(int(i == j)) for j in range(n)] for i in range(n)]
+
+
+def _exact_power(rows, k: int):
+    """A square matrix of exact rationals to the whole power `k >= 0`,
+    by repeated squaring over its integer rows."""
+    from fractions import Fraction
+    n = len(rows)
+    base, d = _integer_rows(rows)
+    out = [[int(i == j) for j in range(n)] for i in range(n)]
+    scale = d ** k
+    while k:
+        if k & 1:
+            out = [[builtins.sum(x * y for x, y in zip(row, col))
+                    for col in zip(*base)] for row in out]
+        k >>= 1
+        if k:
+            base = [[builtins.sum(x * y for x, y in zip(row, col))
+                     for col in zip(*base)] for row in base]
+    return [[Fraction(v, scale) for v in row] for row in out]
+
+
+def _square_rows(A):
+    """`A`'s exact rows when it is a square matrix of finite real
+    numbers, else None."""
+    a = _matrix(A)
+    rows = _exact_rows(a) if a.ndim == 2 else None
+    if rows is None or len(rows) != len(rows[0]):
+        return None
+    return rows
+
+
 def _det(A):
-    return float(_np().linalg.det(_matrix(A)))
+    """The determinant of a square matrix, exact and rounded once."""
+    rows = _square_rows(A)
+    if rows is None:
+        return float(_np().linalg.det(_matrix(A)))
+    return _rounded(_exact_det(rows))
+
+
+def _exact_inverse(rows):
+    """Intent:
+        The inverse of a square matrix of exact rationals.
+
+    Raises:
+        numpy.linalg.LinAlgError: the matrix is singular.
+    """
+    out = _exact_solve(rows, _exact_identity(len(rows)))
+    if out is None:
+        raise _singular()
+    return out
 
 
 def _inv(A):
-    return _np().linalg.inv(_matrix(A))
+    """Intent:
+        The inverse of a square matrix, each entry exact and rounded
+        once.
+
+    Raises:
+        numpy.linalg.LinAlgError: the matrix is singular.
+    """
+    rows = _square_rows(A)
+    if rows is None:
+        return _np().linalg.inv(_matrix(A))
+    return _rounded_array(_exact_inverse(rows))
 
 
 def _trace(A):
-    return float(_np().trace(_matrix(A)))
+    """The sum of a matrix's diagonal entries, exact and rounded once."""
+    a = _matrix(A)
+    rows = _exact_rows(a) if a.ndim == 2 else None
+    if rows is None:
+        return float(_np().trace(a))
+    return _exact_sum([rows[i][i] for i in range(min(len(rows), len(rows[0])))])
 
 
 def _transpose(A):
@@ -926,11 +1115,24 @@ def _identity(n):
 
 
 def _matrix_power(A, k):
+    """Intent:
+        `A` multiplied by itself `k` times, the identity at `k = 0` and
+        the power of the inverse for a negative `k`, each entry exact
+        and rounded once.
+
+    Raises:
+        ValueError: `k` is not a whole number.
+        numpy.linalg.LinAlgError: `k` is negative and `A` singular.
+    """
     if isinstance(k, float) and k.is_integer():
         k = int(k)
     if not isinstance(k, int) or isinstance(k, bool):
         raise ValueError(f"matrix_power needs a whole exponent, got {k!r}")
-    return _np().linalg.matrix_power(_matrix(A), k)
+    rows = _square_rows(A)
+    if rows is None:
+        return _np().linalg.matrix_power(_matrix(A), k)
+    base = _exact_inverse(rows) if k < 0 else rows
+    return _rounded_array(_exact_power(base, builtins.abs(k)))
 
 
 def _exact_inner(xs: list, ys: list):
@@ -1025,7 +1227,21 @@ def _cond(A):
 
 
 def _solve(A, b):
-    return _np().linalg.solve(_matrix(A), _matrix(b))
+    """Intent:
+        The `x` with `A @ x == b` for a square `A` and a vector or
+        matrix `b`, each entry exact and rounded once.
+
+    Raises:
+        numpy.linalg.LinAlgError: `A` is singular.
+    """
+    rows = _square_rows(A)
+    rhs = _exact_rows(_matrix(b))
+    if rows is None or rhs is None or len(rhs) != len(rows):
+        return _np().linalg.solve(_matrix(A), _matrix(b))
+    out = _exact_solve(rows, rhs)
+    if out is None:
+        raise _singular()
+    return _rounded_array(out, vector=_matrix(b).ndim == 1)
 
 
 def _pinv(A):
