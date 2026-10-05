@@ -196,6 +196,7 @@ def _check_rows(args) -> list[dict]:
             said for p in rec.probes
             for said in (p.meta or {}).get("mathema.let_warning") or ()))
         rows.append({"name": name, "tier": rec.facts.tier,
+                     "effects": (rec.meta or {}).get("mathema.effects"),
                      "identity": {"form": rec.facts.form, "sig": rec.facts.sigh},
                      "proven": proven, "holds": holds, "refuted": report.refuted,
                      "falsified": report.falsified,
@@ -235,7 +236,8 @@ def _format_check(rows: list[dict], fmt: str) -> str:
                   "verified": sum(r["verified"] for r in rows),
                   "total": sum(r["total"] for r in rows),
                   "failed": sum(1 for r in rows if r["problems"])}
-        slim = [{k: v for k, v in r.items() if k != "claim_rows"}
+        slim = [{k: v for k, v in r.items()
+                 if k not in ("claim_rows", "effects")}
                 for r in rows]
         return json.dumps({"tool": "mathema", "version": __version__,
                            "CDD_spec_version": SPEC_VERSION,
@@ -287,7 +289,7 @@ def _format_check(rows: list[dict], fmt: str) -> str:
     for r in rows:
         state = "FAIL" if r["problems"] else "ok"
         line = (f'{state:4} {r["name"]}: '
-                f'{tier_word(r["tier"], r.get("claim_rows") or ())}; '
+                f'{tier_word(r["tier"], r.get("claim_rows") or (), r.get("effects"))}; '
                 f'claims {r["coverage"]} '
                 f'adjudicated ({summary_counts(r)})')
         if r["problems"]:
@@ -2228,6 +2230,12 @@ def cmd_claims(args) -> int:
         from .suggest import suggestion_sections
         print(f"{args.key}: {len(suggestions)} suggested claim(s) "
               "(adopt with: mathema claims KEY --adopt NAME)")
+        from ._examine import effects_line
+        effects = effects_line(fn)
+        if effects is not None:
+            # what the function does beyond returning a value, always
+            # stated beside its suggestions
+            print(f"  effects: {effects['line']}")
         sections = suggestion_sections(fn, suggestions)
 
         def line(cj) -> str:

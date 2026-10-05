@@ -2473,15 +2473,13 @@ def probe(fn, facts, domain: dict | None = None,
     opt-in cost; default `False` keeps today's cheap, direct-lift-only
     behavior."""
     if facts.is_pure is False:
-        # False is established impurity; None means purity could not
-        # be analysed at all (no source), which is not a statement
-        # that effects exist, so probing proceeds against the live
-        # callable as it always did for doc-only records
-        return [Probe("purity", "", "skipped",
-                      note="function has effects; algebraic probing not "
-                           "meaningful"
-                           + (": " + "; ".join(facts.effects)
-                              if facts.effects else ""))]
+        # False is established impurity: the algebraic battery is not
+        # run, and a check mathema chooses not to run leaves no row (the
+        # effects are stated under the function); None means purity
+        # could not be analysed at all (no source), which is not a
+        # statement that effects exist, so probing proceeds against the
+        # live callable as it always did for doc-only records
+        return []
     kinds = [facts.param_kinds.get(p, "unknown") for p in facts.params]
     if not kinds:
         return []

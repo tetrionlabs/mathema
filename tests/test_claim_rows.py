@@ -82,10 +82,9 @@ def test_check_stamps_battery_and_suggestion_surfaces(tmp_path):
             """Doubles."""
             return 2.0 * x
 
-        def noisy(x: float) -> float:
-            """Prints."""
-            print(x)
-            return x
+        def shout(s: str) -> str:
+            """Upper case."""
+            return s.upper()
         '''))
     sys.path.insert(0, str(tmp_path))
     try:
@@ -97,10 +96,10 @@ def test_check_stamps_battery_and_suggestion_surfaces(tmp_path):
                    for p in rec.probes}
         assert sources.get("affine[x]") == "suggested"
         # a structural gap row from probe() itself is labeled builtin
-        rec = mathema.check(mod.noisy, claims=[])
+        rec = mathema.check(mod.shout, claims=[])
         sources = {p.name: row_source(p.meta, p.note or "")
                    for p in rec.probes}
-        assert sources.get("purity") == "builtin"
+        assert sources.get("callable") == "builtin"
     finally:
         sys.path.remove(str(tmp_path))
         del sys.modules["rowpkg"]

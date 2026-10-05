@@ -185,12 +185,15 @@ def test_the_witness_names_the_function_and_the_change():
         "set_item changes os.environ (os.environ['MATHEMA_T'] = ...)")
 
 
-def test_check_falsifies_a_write_through_the_battery_row(monkeypatch):
-    # other rows of check() run the function; the state row does not
+def test_check_states_the_write_under_the_function(monkeypatch):
+    # other rows of check() run the function; the write is read from
+    # the source, stated under the function, and is_state_safe is not
+    # suggested for a function that writes at its defaults
     monkeypatch.setattr(pricing_log, "level", pricing_log.level)
-    rows = {p.name: p for p in check(quiet_pricing).probes}
-    assert (rows["is_state_safe"].verdict,
-            rows["is_state_safe"].route) == ("falsified", "examine")
+    rec = check(quiet_pricing)
+    assert "is_state_safe" not in {p.name for p in rec.probes}
+    assert rec.meta["mathema.effects"]["writes"], rec.meta
+    assert "  effects: " in repr(rec)
 
 
 @pytest.mark.parametrize("fn", [pure, local_sort])

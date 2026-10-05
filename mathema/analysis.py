@@ -1005,7 +1005,7 @@ _TIER_WORDS = {0: "no source",
                3: "source, side effects"}
 
 
-def tier_word(tier: int, rows=()) -> str:
+def tier_word(tier: int, rows=(), effects: "dict | None" = None) -> str:
     """The word a record shows in place of its tier number.
 
     Intent:
@@ -1018,9 +1018,12 @@ def tier_word(tier: int, rows=()) -> str:
         unrecognised value renders as the bare number rather than
         guessing at a word for it. `rows` (Probes or claim-row dicts)
         can overrule "no side effects": a falsified `is_state_safe` row
-        is an observed side effect.
+        is an observed side effect, and so is a write examining the source
+        finds a default call makes (`effects`, the record's
+        `mathema.effects`).
     """
-    if tier == 2 and any(_state_write_observed(r) for r in rows):
+    if tier == 2 and (any(_state_write_observed(r) for r in rows)
+                      or (effects or {}).get("writes")):
         return _TIER_WORDS[3]
     return _TIER_WORDS.get(tier, f"tier {tier}")
 

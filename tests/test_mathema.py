@@ -203,10 +203,14 @@ def test_total_seq_probes_hold():
     assert verdicts["bounded_upper"] == "falsified"
 
 
-def test_effectful_tier3_probing_skipped():
+def test_effectful_tier3_probing_leaves_no_row_and_states_the_effect():
+    # the algebraic battery is not run on a function with effects, and
+    # a check mathema does not run leaves no row
     r = mathema.check(chatty)
     assert r.facts.tier == 3
-    assert any(p.verdict == "skipped" for p in r.probes)
+    assert not any(p.name == "purity" for p in r.probes)
+    assert r.meta["mathema.effects"]["line"] == (
+        "calls print(), which writes to standard output")
 
 
 def test_parity_probes():

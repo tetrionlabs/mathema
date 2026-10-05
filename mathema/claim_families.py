@@ -1084,9 +1084,11 @@ def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         write nothing outside the call. A draw from a generator passed
         in is the caller's and is not a write.
     """
-    from ._examine import examine
+    from ._examine import examine, writes_at_defaults
     effects = examine(fn, _generator_parameter(fn, facts))
-    return _examined_verdict(effects.writes,
+    # the default call is judged: a write that needs an argument the
+    # caller passes (`out=` left at None) is not one it makes
+    return _examined_verdict(writes_at_defaults(fn, effects),
                              [*effects.unknowns, *effects.unknown_writes],
                              "writes nothing outside the call",
                              effects, domain)

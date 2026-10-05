@@ -118,12 +118,13 @@ def test_the_named_claim_is_examined_too():
     assert (p.verdict, p.route) == ("falsified", "examine"), (p.verdict, p.note)
 
 
-def test_check_reports_the_examined_row(monkeypatch):
-    # other rows of check() run the function; the state row is examined
+def test_check_reports_the_examined_effect(monkeypatch):
+    # other rows of check() run the function; the effect is examined
+    # from the source and stated under the function
     monkeypatch.chdir(os.getcwd())
-    rows = {p.name: p for p in check(ex.chdir).probes}
-    assert (rows["is_state_safe"].verdict,
-            rows["is_state_safe"].route) == ("falsified", "examine")
+    rec = check(ex.chdir)
+    assert "is_state_safe" not in {p.name for p in rec.probes}
+    assert rec.meta["mathema.effects"]["writes"], rec.meta
 
 
 def test_brute_force_never_trusts_a_body_whose_helper_writes_state():
