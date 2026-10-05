@@ -87,8 +87,8 @@ def test_an_unaccounted_raise_is_a_named_sentence_row():
     at = lines.index("    falsified  policy       f(None)   no absent policy stated; "
                      "raises TypeError")
     assert lines[at + 1] == (
-        "                            possible fixes: (i) mathema accept "
-        "test_policy_rows_say_where_they_come_from.root_opt absent[x] --as discovery "
+        "                            possible fixes: (i) if the raise is intended, run: "
+        "mathema accept test_policy_rows_say_where_they_come_from.root_opt absent[x] --as discovery "
         "--corrected \"absent(f, x) raises(TypeError)\"  (ii) exclude None  "
         "(iii) handle None at entry")
     assert _policy(rec)["absent[x]"].meta["mathema.policy"]["sentence"].startswith(
@@ -103,8 +103,8 @@ def test_a_silent_drop_keeps_its_remedy_on_the_row_only():
     at = lines.index("    falsified  policy       f(nan)   no missing policy stated; "
                      "returns 1.0")
     assert lines[at + 1] == (
-        "                            possible fixes: (i) mathema accept "
-        "test_policy_rows_say_where_they_come_from.clamp01 missing[x] --as discovery "
+        "                            possible fixes: (i) if dropping nan is intended, run: "
+        "mathema accept test_policy_rows_say_where_they_come_from.clamp01 missing[x] --as discovery "
         "--corrected \"missing(f, x) drops\"  (ii) exclude nan  "
         "(iii) handle nan at entry")
     assert _policy(rec)["missing[x]"].meta["mathema.policy"]["next"] == (
