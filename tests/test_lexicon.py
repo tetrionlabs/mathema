@@ -71,9 +71,9 @@ PINNED: dict = {
     "infinity_symbol": "proven",
     # two functions demonstrate the same row to opposite ends: numpy.clip
     # never leaks a nan, numpy.arcsin does past 1
-    "is_compendium_safe": {"clipped_ratio": "holds",
+    "is_library_safe": {"clipped_ratio": "holds",
                            "unguarded_arcsin": ("falsified", "output nan")},
-    "is_compendium_safe_scoped": "holds",
+    "is_library_safe_scoped": "holds",
     "latex_command_forall": "proven",
     "latex_equiv": "proven",
     "latex_geqslant": "proven",

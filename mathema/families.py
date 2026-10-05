@@ -163,7 +163,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
                          "is_pole_safe", "is_number_set_safe",
                          "is_missing_safe", "is_empty_safe",
                          "is_recursion_safe", "is_language_defined",
-                         "is_compendium_safe"),
+                         "is_library_safe"),
 }
 
 # terse spellings (and the spaced forms a claim-text reader would
@@ -305,6 +305,7 @@ RETIRED_FAMILY_NAMES: dict[str, str] = {
     "is_builtin_safe": "is_number_set_safe",
     "is_extremity_safe": "is_overflow_safe",
     "is_arbitrary_input_safe": "is_language_defined",
+    "is_compendium_safe": "is_library_safe",
 }
 
 

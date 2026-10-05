@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""is_compendium_safe(<library>): the function never silently produces a
+"""is_library_safe(<library>): the function never silently produces a
 non-finite output (nan/inf) through an unguarded call into a compendium-
 covered library function. Driven by the compendium (numpy's sqrt/log/
 arcsin nan regions), parameterised by library, expandable by adding a
@@ -76,7 +76,7 @@ def test_unguarded_numpy_nan_falsifies_with_a_finite_witness(tmp_path):
             """sqrt with no domain guard."""
             return float(np.sqrt(x))
     ''')
-    pr = _v(mod.risky, "is_compendium_safe(numpy)")
+    pr = _v(mod.risky, "is_library_safe(numpy)")
     assert pr.verdict == "falsified"
     assert "non-finite" in pr.counterexample and "numpy" in pr.counterexample
 
@@ -89,7 +89,7 @@ def test_a_domain_excluding_the_nan_region_holds(tmp_path):
             """sqrt."""
             return float(np.sqrt(x))
     ''')
-    assert _v(mod.risky, "for x in [0, 1e6], is_compendium_safe(numpy)").verdict \
+    assert _v(mod.risky, "for x in [0, 1e6], is_library_safe(numpy)").verdict \
         == "holds"
 
 
@@ -101,7 +101,7 @@ def test_a_guarded_numpy_call_holds(tmp_path):
             """Guards the negative region before sqrt."""
             return float(np.sqrt(max(x, 0.0)))
     ''')
-    assert _v(mod.clamped, "is_compendium_safe(numpy)").verdict == "holds"
+    assert _v(mod.clamped, "is_library_safe(numpy)").verdict == "holds"
 
 
 def test_suggested_only_when_a_covered_numpy_function_is_called(tmp_path):
@@ -120,20 +120,20 @@ def test_suggested_only_when_a_covered_numpy_function_is_called(tmp_path):
     ''')
     assert libraries_called(mod.uses_numpy, analyze_source(mod.uses_numpy)) == {"numpy"}
     assert libraries_called(mod.pure, analyze_source(mod.pure)) == set()
-    assert "is_compendium_safe[numpy]" in {c.name for c in suggest_claims(mod.uses_numpy)}
-    assert "is_compendium_safe[numpy]" not in {c.name for c in suggest_claims(mod.pure)}
+    assert "is_library_safe[numpy]" in {c.name for c in suggest_claims(mod.uses_numpy)}
+    assert "is_library_safe[numpy]" not in {c.name for c in suggest_claims(mod.pure)}
 
 
 def test_a_bound_supersedes_the_compendium_falsification():
     # the falsification -> guard/bound -> holds progression the docs and
-    # lexicon show: unguarded numpy.arcsin falsifies is_compendium_safe,
+    # lexicon show: unguarded numpy.arcsin falsifies is_library_safe,
     # and constraining the input to the safe region makes it hold.
     pytest.importorskip("numpy")
     from mathema.lexicon import unguarded_arcsin
-    unguarded = _v(unguarded_arcsin, "is_compendium_safe(numpy)")
+    unguarded = _v(unguarded_arcsin, "is_library_safe(numpy)")
     assert unguarded.verdict == "falsified"
     bounded = _v(unguarded_arcsin,
-                 "for x in [-1, 1], is_compendium_safe(numpy)")
+                 "for x in [-1, 1], is_library_safe(numpy)")
     assert bounded.verdict == "holds"
 
 
@@ -147,7 +147,7 @@ def test_a_raise_inside_the_library_falsifies(tmp_path):
             """Average of 1 and 2, weighted by x and -x."""
             return float(np.average([1.0, 2.0], weights=[x, -x]))
     ''', name="raising_lib")
-    pr = _v(mod.weighted, "for x in [1, 2], is_compendium_safe(numpy)")
+    pr = _v(mod.weighted, "for x in [1, 2], is_library_safe(numpy)")
     assert pr.verdict == "falsified"
     assert "raised ZeroDivisionError inside numpy" in pr.counterexample
 
@@ -162,4 +162,4 @@ def test_the_callers_own_guard_is_not_a_library_failure(tmp_path):
                 raise ValueError("x must lie in [-1, 1]")
             return float(np.arcsin(x))
     ''', name="guarded_lib")
-    assert _v(mod.to_angle, "is_compendium_safe(numpy)").verdict == "holds"
+    assert _v(mod.to_angle, "is_library_safe(numpy)").verdict == "holds"

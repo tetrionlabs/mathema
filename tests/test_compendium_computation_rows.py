@@ -4,7 +4,7 @@
 mathematics and registers a derive guard; a computation-safety family in
 restriction form (`is_overflow_safe: x <= 709.78`) and a `raises` row
 whose type is a machine failure are computation: they feed the hazard
-points, `is_compendium_safe`'s diagnosis, the reach of the key's own
+points, `is_library_safe`'s diagnosis, the reach of the key's own
 `is_defined` probe and the float companion's sketch, and never a derive
 guard."""
 import textwrap
@@ -157,8 +157,8 @@ def test_the_overflow_boundary_is_still_a_hazard_point_for_a_caller(ex):
                for p in points), points
 
 
-def test_is_compendium_safe_names_the_overflow_safe_region(ex):
-    p = _one(ex, "for x in [0, 1000], is_compendium_safe(numpy)")
+def test_is_library_safe_names_the_overflow_safe_region(ex):
+    p = _one(ex, "for x in [0, 1000], is_library_safe(numpy)")
     assert p.verdict == "falsified", (p.verdict, p.note)
     cx = p.counterexample or ""
     assert "numpy.exp is overflow-safe only for x <= 709.78" in cx, cx

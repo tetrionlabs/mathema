@@ -4060,10 +4060,10 @@ class OutputPredicateFamily:
         return {"probe:algorithmic": self._probe}
 
 
-def _is_compendium_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+def _is_library_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                                relation: str, domain: dict | None = None,
                                tolerance: float | None = None):
-    """Structural half of is_compendium_safe: decline. Whether a covered
+    """Structural half of is_library_safe: decline. Whether a covered
     library call ever reaches its nan region over the declared domain is
     established empirically by the probe (which samples the domain and
     the boundary specials), not proved symbolically here."""
@@ -4098,7 +4098,7 @@ def _raised_by_library(exc: BaseException, library: str) -> bool:
 
 
 def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
-    """Empirical half of is_compendium_safe(<library>): sample the
+    """Empirical half of is_library_safe(<library>): sample the
     function's inputs (respecting a declared domain, and hitting the
     negative / out-of-unit boundary specials that trigger a covered
     library's nan regions), call f, and check the output is FINITE. A
@@ -4674,13 +4674,13 @@ def _register_builtin_claim_families() -> None:
         "is_recursion_safe", derive=_is_recursion_safe_derive,
         probe=_recursion_probe,
         suggest_targets=_recursion_targets, whole_function=True))
-    # is_compendium_safe(<library>): the function never silently produces
+    # is_library_safe(<library>): the function never silently produces
     # a non-finite output (nan/inf) through an unguarded call into a
     # compendium-covered library function. Parameterised by library
-    # (is_compendium_safe[numpy]); expandable by adding a compendium YAML.
+    # (is_library_safe[numpy]); expandable by adding a compendium YAML.
     from .compendium import libraries_called as _libs_called
-    _families.register("is_compendium_safe", SafetyFamily(
-        "is_compendium_safe", derive=_is_compendium_safe_derive,
+    _families.register("is_library_safe", SafetyFamily(
+        "is_library_safe", derive=_is_library_safe_derive,
         probe=_compendium_probe,
         suggest_targets=lambda fn, facts: sorted(_libs_called(fn, facts))))
     # excluded_outside_domain is never battery-suggested (no

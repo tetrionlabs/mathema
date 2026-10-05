@@ -168,9 +168,9 @@ LEXICON: dict[str, str] = {
     "is_representation_safe": "is_representation_safe(x)",
     "is_empty_safe": "is_empty_safe(xs)",
     "is_language_defined": "is_language_defined(s)",
-    "is_compendium_safe": "is_compendium_safe(numpy)",
-    "is_compendium_safe_scoped":
-        "for x in [0, 1e6], is_compendium_safe(numpy)",
+    "is_library_safe": "is_library_safe(numpy)",
+    "is_library_safe_scoped":
+        "for x in [0, 1e6], is_library_safe(numpy)",
     "is_language_defined_postfix": "s is language defined",
     # the function-wide spelling: the predicate over f is the
     # conjunction over every numeric parameter
@@ -705,7 +705,7 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "retired_family_spelling",
         "is_representation_safe", "is_empty_safe",
         "is_language_defined", "is_language_defined_postfix",
-        "is_compendium_safe", "is_compendium_safe_scoped",
+        "is_library_safe", "is_library_safe_scoped",
         "is_sorted_output", "output_never_none",
         "safety_predicate_function_wide", "state_safe_env_write",
         "state_safe_global_rng", "deterministic_trap",
@@ -1613,8 +1613,8 @@ def cubed(x: float) -> float:
 
 def unit_sqrt(x: float) -> float:
     """numpy.sqrt returns nan for x < 0 without raising, so
-    "is_compendium_safe_scoped" holds only because the domain [0, 1e6]
-    excludes that region: is_compendium_safe(numpy) over a guarded
+    "is_library_safe_scoped" holds only because the domain [0, 1e6]
+    excludes that region: is_library_safe(numpy) over a guarded
     domain. numpy is imported lazily so the lexicon stays import-free of
     it."""
     import numpy as np
@@ -1623,7 +1623,7 @@ def unit_sqrt(x: float) -> float:
 
 def clipped_ratio(x: float) -> float:
     """numpy.clip keeps the result finite for every input, so
-    "is_compendium_safe" holds unconditionally: a covered numpy call that
+    "is_library_safe" holds unconditionally: a covered numpy call that
     can never leak a nan/inf."""
     import numpy as np
     return float(np.clip(x, 0.0, 1.0))
@@ -1631,8 +1631,8 @@ def clipped_ratio(x: float) -> float:
 
 def unguarded_arcsin(x: float) -> float:
     """numpy.arcsin returns nan for abs(x) > 1 without raising, so
-    "is_compendium_safe" FALSIFIES here (the unguarded counterpart to
-    unit_sqrt): the bound `for x in [-1, 1], is_compendium_safe(numpy)`,
+    "is_library_safe" FALSIFIES here (the unguarded counterpart to
+    unit_sqrt): the bound `for x in [-1, 1], is_library_safe(numpy)`,
     or a guard, supersedes the finding once re-verified."""
     import numpy as np
     return float(np.arcsin(x))
@@ -2072,9 +2072,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "named_under_test", "let_alias_for_under_test",
     ]),
     "cubed": (cubed, ["odd_function", "membership_interval_reduces_to_chain"]),
-    "unit_sqrt": (unit_sqrt, ["is_compendium_safe_scoped"]),
-    "clipped_ratio": (clipped_ratio, ["is_compendium_safe"]),
-    "unguarded_arcsin": (unguarded_arcsin, ["is_compendium_safe"]),
+    "unit_sqrt": (unit_sqrt, ["is_library_safe_scoped"]),
+    "clipped_ratio": (clipped_ratio, ["is_library_safe"]),
+    "unguarded_arcsin": (unguarded_arcsin, ["is_library_safe"]),
     "divisor_count": (divisor_count, [
         "finite_domain_pinned", "finite_domain_small_range",
         "finite_domain_discrete_set", "real_domain_is_not_finite",

@@ -98,12 +98,12 @@ _SAFETY_SOURCE = {
 }
 # families a claim may state that reduce no source: a call's hazard is
 # read from the callee's own record, not from a check at the call site
-# (is_compendium_safe); a roll-up's children credit their own sources
+# (is_library_safe); a roll-up's children credit their own sources
 # (is_computation_safe, is_repeatable); and a family this release does
 # not adjudicate settles nothing (the reserved families,
 # claim_families.RESERVED_FAMILIES)
 _NO_SOURCE = frozenset({
-    "is_compendium_safe",
+    "is_library_safe",
     "is_computation_safe", "is_repeatable",
     "is_precision_safe", "is_order_invariant", "is_concurrency_safe",
     "is_representation_consistent"})
@@ -412,8 +412,8 @@ def _reductions(verified_claims, pure: bool) -> dict:
             continue
         if st <= 0:
             continue
-        from .families import claim_base_name
-        base = claim_base_name(name)
+        from .families import claim_base_name, current_family_name
+        base = current_family_name(claim_base_name(name))
         if base in _NO_SOURCE:
             continue
         if base in _SAFETY_SOURCE:

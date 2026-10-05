@@ -39,7 +39,7 @@ SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_number_set_safe",
                                "is_missing_safe", "is_absent_safe",
                                "is_representation_safe", "is_empty_safe",
                                "is_language_defined",
-                               "is_compendium_safe",
+                               "is_library_safe",
                                "excluded_outside_domain",
                                # function-wide computation checks.
                                # They were registered claim families and

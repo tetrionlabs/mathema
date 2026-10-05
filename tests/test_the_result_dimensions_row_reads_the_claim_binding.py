@@ -220,9 +220,10 @@ def test_a_guard_at_exit_falsifies_the_result_dimensions_row():
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert "returned length" in (row.counterexample or ""), row.counterexample
     assert "expects length" in (row.counterexample or ""), row.counterexample
-    # the battery's call row reads the exit failure as a result problem
-    (call,) = [p for p in rec.probes if p.name == "callable"]
-    assert call.note.startswith("the call raised after the body returned"), call.note
+    # the battery's call, not run, reads the exit failure as a result
+    # problem in the record meta
+    (call,) = rec.meta["mathema.not_run"]
+    assert call["reason"].startswith("the call raised after the body returned"), call
 
 
 def test_the_enforcement_rows_need_one_in_shape_call_that_returns():

@@ -160,7 +160,9 @@ class Record:
     # diagnostic_report(), opted into per function, is one user:
     # "mathema.diagnostic_report" -> its own dict). check() fills
     # "mathema.effects" (what examining the source finds the function
-    # does, stated under it); anything else a caller sets explicitly
+    # does, stated under it) and "mathema.not_run" (a check of its own
+    # battery mathema could not make: the call, the reason, the gap);
+    # anything else a caller sets explicitly
     # when it wants the extra work done.
     meta: dict = field(default_factory=dict, repr=False)
     # the dotted key the function's claims are filed under, which the
@@ -712,9 +714,15 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
             p.meta = meta
         return ps
 
+    battery = probe(fn, facts, domain=battery_domain or None,
+                    trials=trials, trials_scale=trials_scale, extensive=extensive)
+    # a battery call mathema could not build is a check not run: it
+    # leaves no row, and what it tried and why stays in the record meta
+    not_run = [{"check": p.name, "statement": p.statement, "reason": p.note or "",
+                "gap": (p.meta or {}).get("mathema.probe_gap")}
+               for p in battery if p.name == "callable" and p.verdict == "skipped"]
     probes = _stamp_surface(
-        probe(fn, facts, domain=battery_domain or None,
-              trials=trials, trials_scale=trials_scale, extensive=extensive),
+        [p for p in battery if not (p.name == "callable" and p.verdict == "skipped")],
         "builtin")
 
     type_trials = trials or _TYPE_PROBE_TRIALS
@@ -821,7 +829,7 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                 if k in ("declared", "mechanism") and v}
     concept_objs = [Concept(name, src)
                     for src, names in asserted.items() for name in names]
-    meta = {}
+    meta: dict = {}
     if asserted or sources.get("keyword"):
         # the spec's own interop shape (a flat list under
         # meta.concepts) plus the un-flattened provenance beside it
@@ -838,6 +846,8 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     except Exception:
         lifted = None
     from .authoring import _fn_key
+    if not_run:
+        meta = {**meta, "mathema.not_run": not_run}
     if facts.tree is not None:
         # what examining the source finds the function does beyond
         # returning a value, stated under the function

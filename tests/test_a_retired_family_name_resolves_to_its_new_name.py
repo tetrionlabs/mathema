@@ -2,12 +2,14 @@
 # Copyright 2026 Tetrion Ltd
 """The families decision A renames keep their old spellings as
 accepted input: `is_builtin_safe` is `is_number_set_safe`,
-`is_extremity_safe` is `is_overflow_safe` and `is_arbitrary_input_safe`
-is `is_language_defined`. A claim written with the old spelling is the
+`is_extremity_safe` is `is_overflow_safe`, `is_arbitrary_input_safe`
+is `is_language_defined` and `is_compendium_safe` is `is_library_safe`
+(the view of definedness over a library's calls only). A claim written with the old spelling is the
 claim under the new name, and its record says the spelling was
 accepted and what it resolved to."""
 import math
 
+import numpy as np
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
@@ -21,10 +23,15 @@ def first_word(s: str) -> str:
     return s.split()[0]
 
 
+def np_root(x: float) -> float:
+    return float(np.sqrt(x))
+
+
 @pytest.mark.parametrize("old, new", [
     ("is_builtin_safe", "is_number_set_safe"),
     ("is_extremity_safe", "is_overflow_safe"),
     ("is_arbitrary_input_safe", "is_language_defined"),
+    ("is_compendium_safe", "is_library_safe"),
 ])
 def test_the_old_spelling_parses_as_the_new_family(old, new):
     cj = claim(f"{old}(x)")
@@ -37,6 +44,7 @@ def test_the_old_spelling_parses_as_the_new_family(old, new):
 @pytest.mark.parametrize("fn, old, new, target", [
     (root, "is_builtin_safe", "is_number_set_safe", "x"),
     (first_word, "is_arbitrary_input_safe", "is_language_defined", "s"),
+    (np_root, "is_compendium_safe", "is_library_safe", "numpy"),
 ])
 def test_the_record_says_the_spelling_was_accepted(fn, old, new, target):
     (by_old,) = check_conjectures(fn, [claim(f"{old}({target})")])
