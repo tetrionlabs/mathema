@@ -1578,6 +1578,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             continue
         if isinstance(stored_dc, dict):
             stored_dc["verdict"] = dc_now.verdict
+            stored_dc["note"] = dc_now.note
             stored_dc["sketch"] = dc_now.sketch
             stored_dc["counterexample"] = dc_now.counterexample
             entry = vinfo["entry"] if vinfo else None
@@ -1593,6 +1594,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                   f"{recorded_form}")
         else:
             stored_dc.verdict = dc_now.verdict
+            stored_dc.note = dc_now.note
             stored_dc.sketch = dc_now.sketch
             stored_dc.counterexample = dc_now.counterexample
             entry = settled.get(key)
@@ -1600,6 +1602,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 for c in entry["entry"].get("claims") or []:
                     if c.get("name") == "dependencies_current":
                         c["verdict"] = dc_now.verdict
+                        c["note"] = dc_now.note
                         c["sketch"] = dc_now.sketch
                         c["counterexample"] = dc_now.counterexample
                 recorded_form = (entry["entry"].get("identity") or {}).get("form")
