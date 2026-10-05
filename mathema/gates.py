@@ -1456,7 +1456,7 @@ def _interval_discontinuities(cj, fn, facts, deps, cj_domain, corners):
         `(points, coverage)` for a domain that is not finite: the points
         at a discontinuity of a single-parameter argument over that
         parameter's interval (each with its float neighbours), the
-        other coordinates at the first corner; `(\[], None)` when there
+        other coordinates at the first corner; `([], None)` when there
         are none.
     """
     from . import _discontinuities as D
