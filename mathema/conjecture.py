@@ -2585,8 +2585,16 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
     import sympy
 
     from .domain import bound_to_sympy_set
-    if cj.relation not in routes.examine_predicates() or facts is None:
+    if facts is None:
         return {}
+    if cj.relation not in routes.examine_predicates():
+        # a value claim: only a parameter it binds no domain for
+        unbound = {p: found[1] for p in facts.params
+                   if domain.get(p) is None
+                   and (found := _unbound_working_bound(fn, facts, p))}
+        if unbound and guard_cut_texts(fn, facts):
+            unbound["guards"] = guard_cut_texts(fn, facts)
+        return unbound
     cuts = guard_cut_texts(fn, facts)
     enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
     if not cuts and not enforced:
@@ -2715,6 +2723,46 @@ def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
             continue
         return False
     return True
+
+
+def _unbound_working_bound(fn, facts, p: str):
+    """Intent:
+        The working domain of a real parameter no binding names, as
+        `(Interval, text)`: the real line cut by f's own guards (a
+        conditional raise, `@enforce_domain`). None when the guards
+        leave the whole line, leave something other than one interval,
+        or the parameter is not a real scalar.
+    """
+    import sympy
+
+    from .domain import Interval, bound_to_sympy_set
+    if facts.param_kinds.get(p) != "scalar":
+        return None
+    here = sympy.S.Reals
+    enforced = (getattr(fn, "__mathema_enforced_domain__", None) or {}).get(p)
+    if enforced is not None:
+        try:
+            here = here & bound_to_sympy_set(enforced)
+        except Exception:
+            return None
+    sym = sympy.Symbol(p, real=True)
+    for text in guard_cut_texts(fn, facts):
+        try:
+            cond = sympy.sympify(text, locals={p: sym})
+        except Exception:
+            continue
+        if getattr(cond, "free_symbols", None) != {sym}:
+            continue
+        try:
+            here = here - cond.as_set()
+        except Exception:
+            return None
+    if here == sympy.S.Reals or not isinstance(here, sympy.Interval):
+        return None
+    lo = float(here.start) if here.start.is_finite else float("-inf")
+    hi = float(here.end) if here.end.is_finite else float("inf")
+    return (Interval(lo, hi, not here.left_open, not here.right_open),
+            _set_text(here))
 
 
 def _set_text(found) -> str:
@@ -5496,7 +5544,7 @@ def _stamp_examine_route(probe, cj, fn, facts) -> None:
         return
     root, _, _sub = probe.route.partition(":")
     if (root == "derive" and probe.verdict == "falsified"
-            and region_row_kind(cj.name) == "is_defined"
+            and "is_defined" in (region_row_kind(cj.name), cj.relation)
             and (probe.meta or {}).get("mathema.corroboration")
             == "reproduced"):
         # an is_defined falsification is decided by executing the
@@ -6447,6 +6495,14 @@ def _validate_claim(cj, statement: str, note: str, facts,
                    f"{hint_text} annotation (adaptor {adaptor})"
                    for p, (b, adaptor, hint_text)
                    in sorted(adaptor_inferred.items())))
+    # a real parameter no binding names is read over the working
+    # domain f's own guards leave (decision A); the record states it
+    if cj.relation not in routes.examine_predicates():
+        for p in facts.params:
+            if p in read and p not in cj_domain:
+                found = _unbound_working_bound(fn, facts, p)
+                if found is not None:
+                    cj_domain[p] = found[0]
     # canonical narrowing, at resolve time: the resolved domain IS the
     # canonical set (prover, records, and comparisons all use it); the
     # declared text stays the author's, and the collapse is rendered
