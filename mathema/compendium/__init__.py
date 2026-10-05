@@ -1094,11 +1094,14 @@ def library_key_of(fn) -> "str | None":
         The library claim key `fn` is (`numpy.mean` for `np.mean`),
         among the keys the registered library claims files state, or
         None for any other callable (a project's own function
-        included).
+        included). The wrappers mathema itself calls a function through
+        (a runtime type realiser, a premise guard) are the function
+        they wrap.
     """
     keys = _INSTALLED.get("keys") or frozenset()
     if not keys:
         return None
+    fn = _engine_unwrapped(fn)
     from ..conjecture import _resolve_func_ref
 
     def resolved() -> dict:
@@ -1130,6 +1133,19 @@ def library_key_of(fn) -> "str | None":
         except Exception:
             return None
     return None
+
+
+def _engine_unwrapped(fn):
+    """`fn` without the wrappers mathema calls a function through: a
+    runtime type realiser (`runtime_types._Realising`) and a premise
+    guard (`_premises._Guarded`), at any depth. A wrapper anyone else
+    wrote is left in place."""
+    from .._premises import _Guarded
+    from ..runtime_types import _Realising
+    while isinstance(fn, (_Realising, _Guarded)):
+        fn = (fn.__dict__["_fn"] if isinstance(fn, _Realising)
+              else fn.__wrapped__)
+    return fn
 
 
 def _entry_definitions(key: str, entry: dict, source: str) -> list:
