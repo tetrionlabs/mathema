@@ -1016,6 +1016,7 @@ def _no_applicable_file_note(key: str, entry: dict, root: str) -> str:
     """
     from .compendium import _installed_version
     from .compendium.status import _library_files
+    from .spec import read_claims_file
     library = key.split(".")[0]
     files = _library_files(root).get(library, [])
     aliases: list = []
@@ -1024,8 +1025,22 @@ def _no_applicable_file_note(key: str, entry: dict, root: str) -> str:
     installed = _installed_version(library, aliases)
     have = (f"{library} {installed}" if installed
             else f"{library}, which is not installed here")
-    ranges = "; ".join(f"{f['source']} states {f['versions']}"
-                       for f in files)
+
+    def states_key(f: dict) -> bool:
+        path = f["source"]
+        if path.startswith(os.path.join("mathema", "compendium") + os.sep):
+            from .compendium import _bundled_dir
+            path = os.path.join(_bundled_dir(),
+                                os.path.relpath(path, os.path.join(
+                                    "mathema", "compendium")))
+        else:
+            path = os.path.join(root, path)
+        try:
+            return key in (read_claims_file(path, f["source"]) or {})
+        except Exception:
+            return False
+    ranges = "; ".join(f"{f['source']} states it for {f['versions']}"
+                       for f in files if states_key(f))
     return (f"note {key}: no claims file about {key} applies to {have}"
             + (f" ({ranges})" if ranges else "")
             + "; its record is kept as it is and not re-adjudicated")

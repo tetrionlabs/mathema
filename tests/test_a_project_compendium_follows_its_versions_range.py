@@ -86,4 +86,6 @@ def test_a_record_whose_file_left_its_range_is_kept_and_stated(project):
     assert len(notes) == 1, r.stdout
     assert "no claims file about numpy.round applies" in notes[0]
     assert "kept as it is" in notes[0]
+    assert "claims/numpy.claims.yaml states it for >=99" in notes[0]
+    assert "bounds.claims.yaml" not in notes[0]
     assert yaml.safe_load(path.read_text()) == before
